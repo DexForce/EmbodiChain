@@ -263,27 +263,35 @@ class SoftObject(BatchEntity):
     @property
     def is_declared(self) -> bool:
         """Whether this facade is waiting for its SpawnResult binding."""
-        return self._spawn_result is None and len(self._entities) == 0
+        return self._world is None
 
     @property
     def num_instances(self) -> int:
         return len(self._entities) if self._entities else self._declared_num_instances
 
-    def bind_spawn(self, result: SpawnResult, entities: Sequence[Any]) -> None:
+    def attach_spawn_handles(self, entities: Sequence[Any]) -> None:
+        """Store materialized handles without initializing runtime data.
+
+        ``bind_spawn()`` performs UV setup and result-dependent data binding
+        after Spawn finalization.
+        """
+        self._entities = list(entities)
+
+    def bind_spawn(self, result: SpawnResult) -> None:
         """Bind a declared facade to finalized soft-body handles in place."""
-        if len(entities) != self._declared_num_instances:
-            raise ValueError(
-                f"SoftObject {self.uid!r} expected {self._declared_num_instances} "
-                f"Spawn handles, got {len(entities)}."
-            )
-        bound = SoftObject(
-            self.cfg,
+        entities = list(self._entities)
+        if self.cfg.shape.compute_uv:
+            for entity in entities:
+                entity.compute_uv_mapping()
+        cfg = self.cfg
+        device = self.device
+        type(self).__init__(
+            self,
+            cfg,
             entities,
-            self.device,
+            device,
             spawn_result=result,
         )
-        self.__dict__.clear()
-        self.__dict__.update(bound.__dict__)
 
     def __str__(self) -> str:
         if self.is_declared:

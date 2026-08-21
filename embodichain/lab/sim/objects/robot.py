@@ -118,6 +118,19 @@ class Robot(Articulation):
             + f" | control_parts: {self.control_parts}, solvers: {self._solvers}"
         )
 
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedArticulation],
+    ) -> None:
+        """Store handles and expose robot metadata without creating Batch data.
+
+        Runtime Batch/Data initialization remains the responsibility of
+        ``bind_spawn()`` after Spawn finalization.
+        """
+        super().attach_spawn_handles(entities)
+        if self.cfg.control_parts:
+            self._init_control_parts(self.cfg.control_parts)
+
     @property
     def control_parts(self) -> Dict[str, List[str]] | None:
         """Get the control parts of the robot."""

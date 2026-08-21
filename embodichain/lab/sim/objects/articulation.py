@@ -619,7 +619,12 @@ class Articulation(BatchEntity):
         ):
             self._world.update(0.001)
 
-        super().__init__(cfg, entities, device)
+        super().__init__(
+            cfg,
+            entities,
+            device,
+            auto_reset=spawn_result is None,
+        )
 
         self._initialize_existing_visual_material()
 
@@ -640,7 +645,7 @@ class Articulation(BatchEntity):
     @property
     def is_declared(self) -> bool:
         """Whether this facade is waiting for its SpawnResult binding."""
-        return self._spawn_result is None and len(self._entities) == 0
+        return self._world is None
 
     @property
     def num_instances(self) -> int:
@@ -648,34 +653,39 @@ class Articulation(BatchEntity):
             return len(self._entities)
         return self._declared_num_instances
 
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedArticulation],
+    ) -> None:
+        """Store handles and expose metadata without initializing Batch data.
+
+        This pre-finalize step supports eager Default loading and only reads
+        articulation metadata. ``bind_spawn()`` performs result-dependent
+        Batch/Data initialization after finalization.
+        """
+        self._entities = list(entities)
+        self._mimic_info = self._entities[0].get_mimic_info()
+        self.active_joint_ids = [
+            index for index in range(self.dof) if index not in self.mimic_ids
+        ]
+
     def bind_spawn(
         self,
         result: SpawnResult,
-        entities: Sequence[SpawnedArticulation],
     ) -> None:
         """Initialize this declared facade from Spawn articulation handles."""
-        if self.is_spawn_bound:
-            raise RuntimeError(f"Articulation {self.uid!r} is already Spawn-bound.")
-        if not self.is_declared:
-            raise RuntimeError(
-                f"Articulation {self.uid!r} was not created as a Spawn declaration."
-            )
-        if len(entities) != self._declared_num_instances:
-            raise ValueError(
-                f"Articulation {self.uid!r} expected "
-                f"{self._declared_num_instances} Spawn handles, got {len(entities)}."
-            )
-
         cfg = self.cfg
         device = self.device
+        entities = list(self._entities)
         type(self).__init__(
             self,
             cfg,
-            list(entities),
+            entities,
             device,
             spawn_result=result,
         )
         self._apply_spawn_config()
+        self.reset()
 
     def _apply_spawn_config(self) -> None:
         """Apply config values that require finalized source metadata.
@@ -776,7 +786,9 @@ class Articulation(BatchEntity):
         Returns:
             int: The degree of freedom of the articulation.
         """
-        return self._data.dof
+        if self._data is not None:
+            return self._data.dof
+        return self._entities[0].get_dof()
 
     @cached_property
     def active_dof(self) -> int:
@@ -794,7 +806,9 @@ class Articulation(BatchEntity):
         Returns:
             int: The number of links in the articulation.
         """
-        return self._data.num_links
+        if self._data is not None:
+            return self._data.num_links
+        return len(self._entities[0].get_link_names())
 
     @cached_property
     def link_names(self) -> List[str]:
@@ -803,7 +817,9 @@ class Articulation(BatchEntity):
         Returns:
             List[str]: The names of the links in the articulation.
         """
-        return self._data.link_names
+        if self._data is not None:
+            return self._data.link_names
+        return self._entities[0].get_link_names()
 
     @cached_property
     def user_ids(self) -> torch.Tensor:
@@ -1885,10 +1901,8 @@ class Articulation(BatchEntity):
 
         drive_types: list[list[DriveType]] = []
         for env_idx in local_env_ids:
-            entity_drive_types = self._entities[int(env_idx)].get_drive(
-                local_joint_ids
-            )[-1]
-            drive_types.append(list(entity_drive_types))
+            entity_drive_types = self._entities[int(env_idx)].get_drive()[-1]
+            drive_types.append(list(np.asarray(entity_drive_types)[local_joint_ids]))
         return drive_types
 
     def get_user_ids(

@@ -27,7 +27,11 @@ from dexsim.types import DriveType
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import visualization_cfg_from_args
 
@@ -62,6 +66,7 @@ def create_articulation(sim: SimulationManager) -> Articulation:
 
     # Load one articulation instance into every simulation environment.
     articulation: Articulation = sim.add_articulation(cfg=articulation_cfg)
+    sim.prepare()
 
     # Query the constructed DexSim entities, not only the config object.
     backend_drive_types = articulation.get_joint_drive_type()
@@ -177,6 +182,7 @@ def main() -> None:
         arena_space=2.0,
         physics_dt=1.0 / 100.0,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(sim_cfg)

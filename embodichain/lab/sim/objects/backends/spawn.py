@@ -629,5 +629,4 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
         # only propagates already-authored state, that is equivalent to a row
         # selection and keeps selection details out of EmbodiChain.
         del env_ids
-        if self.batch.compute_kinematics() < 0:
-            raise RuntimeError("DexSim Spawn articulation kinematics update failed.")
+        self.batch.compute_kinematics()

@@ -152,7 +152,7 @@ class RigidObjectGroup(BatchEntity):
     @property
     def is_declared(self) -> bool:
         """Whether this facade is waiting for Spawn materialization."""
-        return self._spawn_result is None and not self._entities
+        return self._spawn_result is None
 
     @property
     def is_spawn_bound(self) -> bool:
@@ -187,32 +187,29 @@ class RigidObjectGroup(BatchEntity):
     def is_non_dynamic(self) -> bool:
         return self.body_type in ("static", "kinematic")
 
-    def bind_spawn(
-        self,
-        result: SpawnResult,
-        entities: Sequence[SpawnedObject],
-    ) -> None:
-        """Bind the declaration facade to env-major Spawn handles in place."""
-        if self.is_spawn_bound:
-            raise RuntimeError(f"RigidObjectGroup {self.uid!r} is already Spawn-bound.")
-        expected = self.num_instances * self.num_objects
-        if len(entities) != expected:
-            raise ValueError(
-                f"RigidObjectGroup {self.uid!r} expected {expected} Spawn handles, "
-                f"got {len(entities)}."
-            )
-        rows = [
-            entities[start : start + self.num_objects]
-            for start in range(0, expected, self.num_objects)
+    def attach_spawn_handles(self, entities: Sequence[SpawnedObject]) -> None:
+        """Store env-major handles without initializing the group's Batch data.
+
+        ``bind_spawn()`` creates the result-dependent runtime view after Spawn
+        finalization.
+        """
+        self._entities = [
+            list(entities[start : start + self.num_objects])
+            for start in range(0, len(entities), self.num_objects)
         ]
-        bound = RigidObjectGroup(
-            self.cfg,
+
+    def bind_spawn(self, result: SpawnResult) -> None:
+        """Bind the declaration facade to env-major Spawn handles in place."""
+        cfg = self.cfg
+        device = self.device
+        rows = self._entities
+        type(self).__init__(
+            self,
+            cfg,
             rows,
-            self.device,
+            device,
             spawn_result=result,
         )
-        self.__dict__.clear()
-        self.__dict__.update(bound.__dict__)
 
     def __str__(self) -> str:
         if self.is_declared:

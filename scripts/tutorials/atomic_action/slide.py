@@ -218,6 +218,7 @@ def main() -> None:
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0], tcp_z=0.15
     )
     drawer = create_drawer(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     motion_gen = create_toppra_motion_generator(robot)
     semantics = create_drawer_semantics(

@@ -19,11 +19,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 __all__ = ["SpawnScene"]
 
-AssetBindCallback = Callable[[Any, tuple[Any, ...]], None]
 _AssetKind = Literal[
     "rigid_object",
     "rigid_object_group",
@@ -37,7 +36,7 @@ _AssetKind = Literal[
 class _AssetDeclaration:
     kind: _AssetKind
     descriptor: Any
-    on_bind: AssetBindCallback | None
+    facade: Any | None
 
 
 class SpawnScene:
@@ -63,7 +62,6 @@ class SpawnScene:
             spacing=spacing,
             name_format="arena_{i}",
         )
-        self.result: Any | None = None
         self._assets: dict[str, _AssetDeclaration] = {}
 
     @property
@@ -80,15 +78,15 @@ class SpawnScene:
         uid: str,
         descriptor: Any,
         *,
-        on_bind: AssetBindCallback | None = None,
+        facade: Any | None = None,
     ) -> None:
-        """Add a descriptor to the Builder and remember its facade binding."""
+        """Add a descriptor and associate it with an EmbodiChain facade."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
         declaration = _AssetDeclaration(
             kind=kind,
             descriptor=descriptor,
-            on_bind=on_bind,
+            facade=facade,
         )
 
         if kind == "rigid_object_group":
@@ -104,6 +102,9 @@ class SpawnScene:
             }[kind]
             declaration.descriptor = getattr(self.builder, add_name)(descriptor)
         self._assets[uid] = declaration
+        handles = self.handles(uid)
+        if facade is not None and handles:
+            facade.attach_spawn_handles(handles)
 
     def track(
         self,
@@ -111,12 +112,16 @@ class SpawnScene:
         uid: str,
         descriptor: Any,
         *,
-        on_bind: AssetBindCallback | None = None,
+        facade: Any | None = None,
     ) -> None:
         """Track a descriptor that was already added to ``SceneBuilder``."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
-        self._assets[uid] = _AssetDeclaration(kind, descriptor, on_bind)
+        declaration = _AssetDeclaration(kind, descriptor, facade)
+        self._assets[uid] = declaration
+        handles = self.handles(uid)
+        if facade is not None and handles:
+            facade.attach_spawn_handles(handles)
 
     def remove(self, uid: str) -> None:
         """Remove a declared asset from its DexSim owner."""
@@ -141,39 +146,61 @@ class SpawnScene:
 
     def commit(self) -> Any:
         """Finalize once or let ``SpawnResult`` consume pending changes."""
-        if self.result is None:
-            self.result = self.builder.finalize()
-        elif self.builder.has_pending_changes or self.result.needs_rebuild:
-            self.result = self.result.rebuild(self.builder)
-        return self.result
+        if not self.builder.is_finalized:
+            return self.builder.finalize()
+        result = self.builder.result
+        assert result is not None
+        if self.builder.has_pending_changes or result.needs_rebuild:
+            self.builder.result = result.rebuild(self.builder)
+        return self.builder.result
 
     def bind(self) -> None:
-        """Resolve current Spawn handles and bind every declared facade."""
-        if self.result is None:
+        """Complete post-finalize runtime binding for declared facades.
+
+        Native entity creation belongs to ``SceneBuilder`` and its backend
+        adapter. This method only attaches handles that were unavailable during
+        declaration, then lets each facade create its result-dependent
+        Batch/Data state through ``bind_spawn()``. Eager Default handles may
+        already be attached; deferred Newton handles are resolved here.
+        """
+        result = self.builder.result
+        if result is None or not self.builder.is_finalized:
             raise RuntimeError("Spawn scene must be materialized before binding.")
 
-        for declaration in self._assets.values():
-            if declaration.on_bind is None:
+        for uid, declaration in self._assets.items():
+            facade = declaration.facade
+            if facade is None or not facade.is_declared:
                 continue
-            paths = self._paths(declaration)
-            handles = tuple(self.result.handles[path] for path in paths)
-            declaration.on_bind(self.result, handles)
+            if not facade._entities:
+                facade.attach_spawn_handles(self.handles(uid))
+            facade.bind_spawn(result)
 
     def close(self) -> None:
-        """Release Spawn resources and facade callback references."""
-        if self.result is not None:
-            self.result.close()
-        self.result = None
+        """Release Spawn resources and facade references."""
+        result = self.builder.result
+        if result is not None:
+            result.close()
+        self.builder.result = None
         self._assets.clear()
 
-    def _paths(self, declaration: _AssetDeclaration) -> tuple[str, ...]:
+    def handles(self, uid: str) -> tuple[Any, ...]:
+        """Return currently materialized handles for one logical asset."""
+        result = self.builder.result
+        if result is None:
+            return ()
+        declaration = self._assets[uid]
         if declaration.kind == "rigid_object_group":
-            return tuple(
+            paths = tuple(
                 f"{arena}/{member.name}"
                 for arena in self.arena_names
                 for member in declaration.descriptor
             )
-        name = declaration.descriptor.name
-        if not declaration.descriptor.per_env:
-            return (name,)
-        return tuple(f"{arena}/{name}" for arena in self.arena_names)
+        elif declaration.descriptor.per_env:
+            paths = tuple(
+                f"{arena}/{declaration.descriptor.name}" for arena in self.arena_names
+            )
+        else:
+            paths = (declaration.descriptor.name,)
+        if any(path not in result.handles for path in paths):
+            return ()
+        return tuple(result.handles[path] for path in paths)

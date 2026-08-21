@@ -515,9 +515,10 @@ class SimulationManager:
 
         self._init_sim_resources()
 
-        # The render material is authored on the descriptor before Spawn
-        # materialization. The plane handle does not exist until prepare.
+        # The plane material and visibility are authored before declaration so
+        # both eager Default loading and deferred Newton loading see them.
         self._spawn_default_plane_visibility = True
+        self._default_plane = None
         self.set_default_background()
         self._declare_spawn_default_plane()
         self.set_default_global_lighting()
@@ -627,9 +628,9 @@ class SimulationManager:
     def spawn_result(self) -> "SpawnResult | None":
         """Return the current SpawnResult, or ``None`` before first prepare."""
         spawn_scene = getattr(self, "_spawn_scene", None)
-        if spawn_scene is None:
+        if spawn_scene is None or not spawn_scene.builder.is_finalized:
             return None
-        return spawn_scene.result
+        return spawn_scene.builder.result
 
     @property
     def is_use_gpu_physics(self) -> bool:
@@ -945,15 +946,23 @@ class SimulationManager:
     def prepare(self) -> None:
         """Materialize physical declarations, then resolve sensor parents."""
         scene = self._spawn_scene
-        result = scene.result
-        if result is None or result.needs_rebuild or scene.builder.has_pending_changes:
+        result = scene.builder.result
+        if (
+            not scene.builder.is_finalized
+            or result is None
+            or result.needs_rebuild
+            or scene.builder.has_pending_changes
+        ):
             result = scene.commit()
             if self.is_newton_backend or self.device.type == "cuda":
                 result.prepare_runtime()
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            scene.bind()
+            if self._default_plane is None:
+                self._bind_default_plane(scene.handles("default_plane")[0])
+
+        scene.bind()
 
         for sensor in self._pending_sensor_attachments:
             sensor.attach_to_parent()
@@ -1259,22 +1268,20 @@ class SimulationManager:
             per_env=False,
         )
 
-        def bind_default_plane(_result, handles) -> None:
-            self._default_plane = handles[0]
-            self._default_plane.get_render_body().repeat_uv(
-                np.asarray(
-                    [default_length / 2.0, default_length / 2.0],
-                    dtype=np.float32,
-                )
-            )
-            self._default_plane.set_visible(self._spawn_default_plane_visibility)
-
         self._spawn_scene.declare(
             "rigid_object",
             "default_plane",
             descriptor,
-            on_bind=bind_default_plane,
         )
+        handles = self._spawn_scene.handles("default_plane")
+        if handles:
+            self._bind_default_plane(handles[0])
+
+    def _bind_default_plane(self, plane: Any) -> None:
+        """Apply EmbodiChain's render settings to the spawned ground plane."""
+        self._default_plane = plane
+        plane.get_render_body().repeat_uv(np.asarray([500.0, 500.0], dtype=np.float32))
+        plane.set_visible(self._spawn_default_plane_visibility)
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -1317,7 +1324,7 @@ class SimulationManager:
             visible (bool): _description_
         """
         self._spawn_default_plane_visibility = bool(visible)
-        if not hasattr(self, "_default_plane"):
+        if self._default_plane is None:
             return
         self._default_plane.set_visible(bool(visible))
 
@@ -1571,15 +1578,11 @@ class SimulationManager:
                     declared_num_instances=self.sim_config.num_envs,
                 )
 
-                def bind_rigid(result, handles, target=facade) -> None:
-                    if target.is_declared:
-                        target.bind_spawn(result, handles)
-
                 self._spawn_scene.track(
                     "rigid_object",
                     descriptor.name,
                     descriptor,
-                    on_bind=bind_rigid,
+                    facade=facade,
                 )
                 self._rigid_objects[descriptor.name] = facade
                 assets[source_path] = facade
@@ -1610,15 +1613,11 @@ class SimulationManager:
                     declared_num_instances=self.sim_config.num_envs,
                 )
 
-                def bind_articulation(result, handles, target=facade) -> None:
-                    if target.is_declared:
-                        target.bind_spawn(result, handles)
-
                 self._spawn_scene.track(
                     "articulation",
                     descriptor.name,
                     descriptor,
-                    on_bind=bind_articulation,
+                    facade=facade,
                 )
                 registry = (
                     self._robots if robot_cfg is not None else self._articulations
@@ -1668,16 +1667,12 @@ class SimulationManager:
             declared_num_instances=self.sim_config.num_envs,
         )
 
-        def bind_rigid_object(result, handles) -> None:
-            if rigid_obj.is_declared:
-                rigid_obj.bind_spawn(result, handles)
-
         was_materialized = self.spawn_result is not None
         self._spawn_scene.declare(
             "rigid_object",
             uid,
             descriptor,
-            on_bind=bind_rigid_object,
+            facade=rigid_obj,
         )
         self._rigid_objects[uid] = rigid_obj
         self.notify_visualization_topology_changed()
@@ -1723,18 +1718,11 @@ class SimulationManager:
             declared_num_instances=self.sim_config.num_envs,
         )
 
-        def bind_soft_object(result, handles) -> None:
-            if soft_object.is_declared:
-                if cfg.shape.compute_uv:
-                    for handle in handles:
-                        handle.compute_uv_mapping()
-                soft_object.bind_spawn(result, handles)
-
         self._spawn_scene.declare(
             "soft_object",
             uid,
             descriptor,
-            on_bind=bind_soft_object,
+            facade=soft_object,
         )
         self._soft_objects[uid] = soft_object
         self.notify_visualization_topology_changed()
@@ -1774,18 +1762,11 @@ class SimulationManager:
             declared_num_instances=self.sim_config.num_envs,
         )
 
-        def bind_cloth_object(result, handles) -> None:
-            if cloth_object.is_declared:
-                if cfg.shape.compute_uv:
-                    for handle in handles:
-                        handle.compute_uv_mapping()
-                cloth_object.bind_spawn(result, handles)
-
         self._spawn_scene.declare(
             "cloth_object",
             uid,
             descriptor,
-            on_bind=bind_cloth_object,
+            facade=cloth_object,
         )
         self._cloth_objects[uid] = cloth_object
         self.notify_visualization_topology_changed()
@@ -2151,16 +2132,12 @@ class SimulationManager:
             declared_num_instances=self.sim_config.num_envs,
         )
 
-        def bind_group(result, handles) -> None:
-            if group.is_declared:
-                group.bind_spawn(result, handles)
-
         was_materialized = self.spawn_result is not None
         self._spawn_scene.declare(
             "rigid_object_group",
             uid,
             tuple(descriptors),
-            on_bind=bind_group,
+            facade=group,
         )
         self._rigid_object_groups[uid] = group
         self.notify_visualization_topology_changed()
@@ -2327,13 +2304,12 @@ class SimulationManager:
         cfg: ArticulationCfg,
         facade_type: type[Articulation],
     ) -> Articulation:
-        """Declare an articulation facade and bind it after Spawn finalize.
+        """Declare an articulation facade and bind its Batch after finalize.
 
-        DexSim remains the sole articulation source loader.  The facade is
-        intentionally metadata-empty during scene declaration; once the
-        adapter has loaded the source exactly once, the bind callback creates
-        its batch view from the resolved link/joint metadata and applies the
-        supported live values directly from its EmbodiChain config.
+        DexSim remains the sole articulation source loader. Default/PhysX may
+        expose native link and joint metadata immediately when Arenas were
+        prepared early; Newton keeps that metadata deferred until finalize.
+        Runtime Batch data is created at the shared prepare boundary.
         """
         if _is_usd_path(cfg.fpath):
             descriptor, materials = articulation_desc_from_usd(
@@ -2365,27 +2341,14 @@ class SimulationManager:
             declared_num_instances=self.sim_config.num_envs,
         )
 
-        def bind_articulation(result, handles) -> None:
-            if facade.is_declared:
-                facade.bind_spawn(result, handles)
-
         self._spawn_scene.declare(
             "articulation",
             descriptor.name,
             descriptor,
-            on_bind=bind_articulation,
+            facade=facade,
         )
         self.notify_visualization_topology_changed()
         return facade
-
-    @staticmethod
-    def _raise_spawn_feature_todo(feature: str, required_api: str) -> None:
-        """Reject topology that is not owned by the active Spawn scene."""
-        raise NotImplementedError(
-            f"Spawn scene construction does not integrate {feature} yet. "
-            f"TODO: route it through {required_api}; falling back to direct "
-            "Arena construction would create a second topology owner."
-        )
 
     def get_robot(self, uid: str) -> Robot | None:
         """Get a Robot by its unique ID.
@@ -2712,11 +2675,7 @@ class SimulationManager:
             )
             if sensor_cfg.extrinsics.parent is not None:
                 scene = self._spawn_scene
-                if (
-                    scene.result is not None
-                    and not scene.result.needs_rebuild
-                    and not scene.builder.has_pending_changes
-                ):
+                if scene.builder.result is not None:
                     sensor.attach_to_parent()
                 else:
                     self._pending_sensor_attachments.append(sensor)
@@ -2755,8 +2714,6 @@ class SimulationManager:
         matches: list[tuple[str, list[object]]] = []
         for uid, asset in assets.items():
             if asset_uid is not None and uid != asset_uid:
-                continue
-            if not getattr(asset, "is_spawn_bound", False):
                 continue
             handles = list(getattr(asset, "_entities", ()))
             if len(handles) != self.num_envs:
@@ -2844,7 +2801,7 @@ class SimulationManager:
         if uid == "default_plane":
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
-        was_materialized = scene.result is not None
+        was_materialized = scene.builder.is_finalized
         scene.remove(uid)
         if was_materialized:
             self.prepare()

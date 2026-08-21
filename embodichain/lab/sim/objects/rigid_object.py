@@ -354,7 +354,7 @@ class RigidObject(BatchEntity):
     @property
     def is_declared(self) -> bool:
         """Whether this facade is waiting for its SpawnResult binding."""
-        return self._spawn_result is None and len(self._entities) == 0
+        return self._world is None
 
     @property
     def num_instances(self) -> int:
@@ -362,34 +362,33 @@ class RigidObject(BatchEntity):
             return len(self._entities)
         return self._declared_num_instances
 
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedObject],
+    ) -> None:
+        """Store materialized handles without initializing runtime Batch data.
+
+        Default may call this before Spawn finalization so native metadata is
+        available early. ``bind_spawn()`` remains responsible for creating
+        result-dependent Batch/Data state after finalization.
+        """
+        self._entities = list(entities)
+
     def bind_spawn(
         self,
         result: SpawnResult,
-        entities: Sequence[SpawnedObject],
     ) -> None:
         """Bind a declared facade to stable Spawn handles in place."""
-        if self.is_spawn_bound:
-            raise RuntimeError(f"RigidObject {self.uid!r} is already Spawn-bound.")
-        if len(entities) != self._declared_num_instances:
-            raise ValueError(
-                f"RigidObject {self.uid!r} expected {self._declared_num_instances} "
-                f"Spawn handles, got {len(entities)}."
-            )
         cfg = self.cfg
         device = self.device
-        # Construct the bound state off to the side. Batch creation may fail
-        # (for example when a backend/device capability is unavailable); the
-        # public declaration facade must remain retryable rather than becoming
-        # half-bound. Replacing the dictionary also drops declaration-time
-        # cached_property values such as the empty user-id cache.
-        bound = RigidObject(
+        entities = list(self._entities)
+        type(self).__init__(
+            self,
             cfg,
-            list(entities),
+            entities,
             device,
             spawn_result=result,
         )
-        self.__dict__.clear()
-        self.__dict__.update(bound.__dict__)
 
     def __str__(self) -> str:
         if self.is_declared:

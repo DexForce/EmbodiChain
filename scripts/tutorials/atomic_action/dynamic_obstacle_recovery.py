@@ -421,6 +421,7 @@ def main() -> None:
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     # Initialize GPU physics before planning or recording so the first visible
     # frame and the initial planning context share the same settled state.
     sim.update(step=10)

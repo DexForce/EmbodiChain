@@ -185,6 +185,7 @@ def main() -> None:
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
     )
     target = create_rigid_button(sim) if args.rigid_object else create_microwave(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.040)
     motion_gen = create_toppra_motion_generator(robot)
     semantics, target_pose = create_button_semantics(target)

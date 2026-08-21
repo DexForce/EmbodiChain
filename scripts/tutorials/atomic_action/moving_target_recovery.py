@@ -243,6 +243,7 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     target = _create_moving_target(sim)
+    sim.prepare()
     sim.update(step=10)
     target_scene = _MovingTargetScene(target, MOVED_TARGET_POSITION)
     sim_runtime = SimulationExecutionAdapter(
