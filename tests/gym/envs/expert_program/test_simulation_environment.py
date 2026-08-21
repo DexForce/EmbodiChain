@@ -1065,8 +1065,17 @@ class _RegisteredParallelSafetyFactory:
         {JointPositionTarget.TRANSPORT_ID}
     )
 
-    def create(self, *, simulation: object, robot: object) -> _RegisteredParallelSafety:
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: object,
+        engine: object,
+    ) -> _RegisteredParallelSafety:
         assert getattr(simulation, "get_robot")(getattr(robot, "uid")) is robot
+        assert scene_registry is not None
+        assert getattr(engine, "robot") is robot
         return _RegisteredParallelSafety()
 
 
@@ -1076,8 +1085,15 @@ class _ReusedParallelSafetyFactory(_RegisteredParallelSafetyFactory):
     validator_id: ClassVar[str] = "test.reused_parallel_safety"
     _validator: ClassVar[_RegisteredParallelSafety] = _RegisteredParallelSafety()
 
-    def create(self, *, simulation: object, robot: object) -> _RegisteredParallelSafety:
-        del simulation, robot
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: object,
+        engine: object,
+    ) -> _RegisteredParallelSafety:
+        del simulation, robot, scene_registry, engine
         return self._validator
 
 
@@ -1091,8 +1107,15 @@ class _AlternatingReusedParallelSafetyFactory(_RegisteredParallelSafetyFactory):
     )
     _next_index: ClassVar[int] = 0
 
-    def create(self, *, simulation: object, robot: object) -> _RegisteredParallelSafety:
-        del simulation, robot
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: object,
+        engine: object,
+    ) -> _RegisteredParallelSafety:
+        del simulation, robot, scene_registry, engine
         validator = self._validators[self._next_index % len(self._validators)]
         type(self)._next_index += 1
         return validator
