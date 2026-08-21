@@ -954,6 +954,25 @@ def test_command_target_authorization_rejects_custom_claim_conflicts() -> None:
         )
 
 
+def test_action_plan_rejects_unknown_scene_dependency_end_segment() -> None:
+    plan = _action_plan(
+        _command_sequence(
+            env_ids=torch.tensor([0, 1], dtype=torch.long),
+            frame_count=2,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="scene_dependency_end_segment must name an ActionPlan segment",
+    ):
+        replace(
+            plan,
+            scene_dependencies=("target",),
+            scene_dependency_end_segment="approach",
+        )
+
+
 def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
     env_ids = torch.tensor([4, 7], dtype=torch.long)
     commands = _command_sequence(env_ids=env_ids, frame_count=2)

@@ -773,11 +773,14 @@ implicit-initial-pose path of coordinated pickup declare that dependency
 automatically. The deprecated live-entity fallback does not trigger
 scene-motion replanning.
 
-`ActionPlan.scene_dependency_monitor_until` may assign each dependency an
-exclusive command-frame cutoff. Omitted dependencies remain monitored for the
-whole action. `PickUp` stops monitoring its semantic object ID after `approach`
-is dispatched so contact-, close-, and lift-induced object movement does not
-trigger a false replan. Joint-tracking and collision-world checks remain active.
+An `ActionPlan.scene_dependency_end_segment` may bound monitoring to the
+reversible portion of a staged action for every dependency.
+`ActionPlan.scene_dependency_monitor_until` may also assign individual
+dependencies exclusive command-frame cutoffs. Omitted dependencies remain
+monitored for the whole action unless the global segment boundary applies.
+`PickUp` stops monitoring its semantic object ID after `approach` is dispatched
+so contact-, close-, and lift-induced object movement does not trigger a false
+replan. Joint-tracking and collision-world checks remain active.
 
 Dynamic collision invalidation is provider-driven. Only registered,
 pose-updatable collision entities are supported; adding/removing obstacles or

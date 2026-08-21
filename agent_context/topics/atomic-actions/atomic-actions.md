@@ -442,12 +442,15 @@ Scene dependencies must match the poses each primitive actually consumes:
 Therefore, a custom action that consumes a snapshot pose through semantic data
 must override `_scene_dependencies()`, union `super()` dependencies, and add the
 consumed semantic ID. Do not declare an ID merely because semantics are present.
+`ActionPlan.scene_dependency_end_segment` can bound dynamic-goal monitoring to
+the reversible part of a staged action for every dependency.
 `ActionPlan.scene_dependency_monitor_until` can assign each dependency an
 exclusive command-frame cutoff. An omitted dependency remains monitored for the
-whole action. `PickUp` stops monitoring its semantic object ID after approach:
-object motion before contact still replans, while contact-, grasp-, and
-lift-induced motion is not misclassified as an external update. Collision-world
-and joint-tracking checks remain independent of these per-entity windows.
+whole action unless the global segment boundary applies. `PickUp` stops
+monitoring its semantic object ID after approach: object motion before contact
+still replans, while contact-, grasp-, and lift-induced motion is not
+misclassified as an external update. Collision-world and joint-tracking checks
+remain independent of these dependency windows.
 
 ## Static compilation
 

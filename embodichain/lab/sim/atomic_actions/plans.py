@@ -466,6 +466,8 @@ class ActionPlan:
             monitored for the action's full execution. Once the bound is reached,
             all pose changes for that entity are ignored, regardless of whether
             they were caused by the action or by an external disturbance.
+        scene_dependency_end_segment: Optional last segment during which scene
+            motion may invalidate and replan the action for every dependency.
     """
 
     skill_id: str
@@ -480,6 +482,7 @@ class ActionPlan:
     segments: tuple[TrajectorySegment, ...] = ()
     scene_dependencies: tuple[str, ...] = ()
     scene_dependency_monitor_until: Mapping[str, int] = field(default_factory=dict)
+    scene_dependency_end_segment: str | None = None
     collision_world_sensitive: bool = False
     replannable: bool = True
     expected_effects: StateDelta = field(default_factory=StateDelta)
@@ -745,6 +748,21 @@ class ActionPlan:
                 "ActionPlan segments must cover the command sequence exactly without "
                 "gaps or overlaps."
             )
+        dependency_end = self.scene_dependency_end_segment
+        if dependency_end is not None:
+            if not isinstance(dependency_end, str) or not dependency_end:
+                raise ValueError(
+                    "scene_dependency_end_segment must be a non-empty segment "
+                    "name or None."
+                )
+            if dependency_end not in names:
+                raise ValueError(
+                    "scene_dependency_end_segment must name an ActionPlan segment."
+                )
+            if not dependencies:
+                raise ValueError(
+                    "scene_dependency_end_segment requires scene_dependencies."
+                )
         object.__setattr__(self, "plan_success", self.plan_success.clone())
         object.__setattr__(self, "commands", self.commands.snapshot())
         object.__setattr__(
@@ -813,6 +831,7 @@ class ActionPlan:
             segments=self.segments,
             scene_dependencies=self.scene_dependencies,
             scene_dependency_monitor_until=self.scene_dependency_monitor_until,
+            scene_dependency_end_segment=self.scene_dependency_end_segment,
             collision_world_sensitive=self.collision_world_sensitive,
             replannable=self.replannable,
             expected_effects=self.expected_effects,

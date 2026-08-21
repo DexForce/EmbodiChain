@@ -170,9 +170,7 @@ class StagedDynamicAction(DynamicAction):
                 TrajectorySegment("approach", 0, 1),
                 TrajectorySegment("manipulate", 1, 2),
             ),
-            scene_dependency_monitor_until={
-                entity_id: 1 for entity_id in plan.scene_dependencies
-            },
+            scene_dependency_end_segment="approach",
         )
 
 

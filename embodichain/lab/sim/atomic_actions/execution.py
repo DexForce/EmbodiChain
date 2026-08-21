@@ -1597,8 +1597,13 @@ class ExecutionSession:
         """Detect and describe material scene-dependency invalidation."""
         dependencies = plan.scene_dependencies
         changed = torch.zeros_like(self._eligible)
+        dependency_end = plan.scene_dependency_end_segment
         if (
             not dependencies
+            or (
+                dependency_end is not None
+                and self._waypoint_index >= plan.segment(dependency_end).stop
+            )
             or self._context.scene.version == self._planned_scene.version
         ):
             return changed, None
