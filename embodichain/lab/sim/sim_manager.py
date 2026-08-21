@@ -954,8 +954,8 @@ class SimulationManager:
             or scene.builder.has_pending_changes
         ):
             result = scene.commit()
-            if self.is_newton_backend or self.device.type == "cuda":
-                result.prepare_runtime()
+            if self.is_default_backend and self.device.type == "cuda":
+                self._world.init_gpu_physics()
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)

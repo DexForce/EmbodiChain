@@ -497,34 +497,37 @@ def test_constructor_only_declares_spawn_scene(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("backend", "device", "expected_prepare_calls"),
+    ("backend", "device", "expected_gpu_init_calls"),
     [
         pytest.param("default", torch.device("cpu"), 0, id="default-host"),
         pytest.param("default", torch.device("cuda"), 1, id="default-accelerator"),
-        pytest.param("newton", torch.device("cpu"), 1, id="newton-host"),
-        pytest.param("newton", torch.device("cuda"), 1, id="newton-accelerator"),
+        pytest.param("newton", torch.device("cpu"), 0, id="newton-host"),
+        pytest.param("newton", torch.device("cuda"), 0, id="newton-accelerator"),
     ],
 )
-def test_prepare_initializes_runtime_for_backend_device_matrix(
+def test_prepare_initializes_default_gpu_runtime(
     backend: str,
     device: torch.device,
-    expected_prepare_calls: int,
+    expected_gpu_init_calls: int,
 ) -> None:
     result = MagicMock()
     spawn_scene = MagicMock()
-    spawn_scene.result = None
+    spawn_scene.builder.is_finalized = False
+    spawn_scene.builder.result = None
     spawn_scene.commit.return_value = result
     spawn_scene.arena_names = ["arena_0"]
 
     sim = object.__new__(SimulationManager)
     sim.physics = SimpleNamespace(name=backend)
     sim.device = device
+    sim._world = MagicMock()
     sim._spawn_scene = spawn_scene
+    sim._default_plane = object()
     sim._pending_sensor_attachments = []
 
     sim.prepare()
 
-    assert result.prepare_runtime.call_count == expected_prepare_calls
+    assert sim._world.init_gpu_physics.call_count == expected_gpu_init_calls
 
 
 def test_remove_asset_marks_visualization_topology_dirty() -> None:

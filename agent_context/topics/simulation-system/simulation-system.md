@@ -69,8 +69,9 @@ the configured Arena layout, and owns a thin Spawn scene coordinator. With the
 Default backend, preparing the Arena layout lets `add_*` materialize native
 entities immediately, so articulation metadata and render nodes are available
 before finalization. Newton still builds its model once at `prepare()`.
-`prepare()` is idempotent and remains the common runtime-readiness boundary for
-both backends.
+`prepare()` is idempotent and remains the common runtime-readiness boundary:
+Default/CUDA calls `World.init_gpu_physics()` directly after Spawn finalization,
+while Newton finalization already produces a ready runtime.
 
 Lights and sensors remain render resources owned directly by EmbodiChain;
 physical scene topology is owned by DexSim Spawn. `SimulationManager.update()`
