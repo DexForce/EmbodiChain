@@ -133,6 +133,19 @@ from .simulation import (
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
 )
+from .catalog import (
+    ExpertProgramIntegrationCatalog,
+    IntegrationFingerprintMismatch,
+    SimulationExpertProgramRegistration,
+)
+from .extensions import (
+    EndpointAdapterDeclaration,
+    ParallelCommandSafetyValidatorFactory,
+    ParallelSafetyDeclaration,
+    RuntimeTransportDeclaration,
+    StandardExtensionDeclarations,
+    VersionedKey,
+)
 from .simulation_environment import (
     ControlCommandStateEvidenceTracker,
     MotionGeneratorFactory,
@@ -142,7 +155,10 @@ from .simulation_environment import (
     SimulationPlanningObservationProvider,
     create_simulation_expert_program_adapter,
 )
-from .simulation_policies import SimulationSegmentPolicyPort
+from .simulation_policies import (
+    SimulationSegmentPolicyPort,
+    default_simulation_settle_presets,
+)
 
 __all__ = [
     "AcceptedRuntimeCommandObserver",
@@ -177,6 +193,7 @@ __all__ = [
     "EXPERT_PROGRAM_SCHEMA_VERSION_V2",
     "EnvironmentStepClock",
     "EnvironmentStepTimingError",
+    "EndpointAdapterDeclaration",
     "ExpertProgramCfg",
     "ExpertProgramCompileError",
     "ExpertProgramCompiler",
@@ -186,6 +203,7 @@ __all__ = [
     "ExpertProgramEnvironmentFactory",
     "ExpertProgramEnvironmentMixin",
     "ExpertProgramIntegrationCfg",
+    "ExpertProgramIntegrationCatalog",
     "ExpertProgramRuntimeAssembly",
     "ExpertProgramSceneResolver",
     "ExpertProgramValidationContext",
@@ -193,6 +211,7 @@ __all__ = [
     "HandOverCfg",
     "GymPlanningObservationProvider",
     "InvokeCfg",
+    "IntegrationFingerprintMismatch",
     "MAX_DECLARATIVE_DEPTH",
     "MAX_DECLARATIVE_NODES",
     "MAX_EXPANDED_CALLS",
@@ -205,6 +224,8 @@ __all__ = [
     "ObjectNearTargetValidatorCfg",
     "OperateArticulationCfg",
     "ParallelCfg",
+    "ParallelCommandSafetyValidatorFactory",
+    "ParallelSafetyDeclaration",
     "PickCfg",
     "PlaceCfg",
     "PlanningObservationPort",
@@ -215,6 +236,7 @@ __all__ = [
     "RepeatCfg",
     "RobotResourceBinding",
     "RuntimeCommandFrameEncoder",
+    "RuntimeTransportDeclaration",
     "RuntimeTransportActionEncoder",
     "SceneReferenceRole",
     "SceneRegistryProgramResolver",
@@ -232,6 +254,7 @@ __all__ = [
     "SimulationArticulationLinkBinding",
     "SimulationExpertProgramEnvironment",
     "SimulationExpertProgramFactory",
+    "SimulationExpertProgramRegistration",
     "SimulationPlanningObservationProvider",
     "SimulationRigidObjectBinding",
     "SimulationResourceEndpointBinding",
@@ -239,13 +262,16 @@ __all__ = [
     "SimulationRobotSkillProfileBinding",
     "SimulationSceneBinding",
     "SimulationSegmentPolicyPort",
+    "StandardExtensionDeclarations",
     "SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS",
     "TargetCfg",
     "TargetRefCfg",
     "UnsupportedRuntimeTransportError",
     "ValidatorCfg",
+    "VersionedKey",
     "WaitStablePostCfg",
     "create_simulation_expert_program_adapter",
+    "default_simulation_settle_presets",
     "decode_expert_program",
     "decode_semantic_call",
     "encode_semantic_call",

@@ -62,7 +62,7 @@ class _SimulationSettleTarget:
     native_entity: Any
 
 
-def _default_settle_presets() -> Mapping[str, DynamicSettleMonitorCfg]:
+def default_simulation_settle_presets() -> Mapping[str, DynamicSettleMonitorCfg]:
     """Return independently owned built-in post-policy presets."""
     return MappingProxyType(
         {
@@ -133,7 +133,9 @@ class SimulationSegmentPolicyPort:
             raise ValueError("env_ids must contain unique values.")
 
         selected_presets = (
-            _default_settle_presets() if settle_presets is None else settle_presets
+            default_simulation_settle_presets()
+            if settle_presets is None
+            else settle_presets
         )
         if not isinstance(selected_presets, Mapping) or not selected_presets:
             raise ValueError("settle_presets must be a non-empty mapping.")
@@ -712,4 +714,4 @@ class SimulationSegmentPolicyPort:
         return pose.clone()
 
 
-__all__ = ["SimulationSegmentPolicyPort"]
+__all__ = ["SimulationSegmentPolicyPort", "default_simulation_settle_presets"]

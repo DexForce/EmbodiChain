@@ -36,6 +36,7 @@ from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramEnvironmentMixin,
     SimulationArticulationBinding,
     SimulationArticulationLinkBinding,
+    SimulationExpertProgramRegistration,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
     create_simulation_expert_program_adapter,
@@ -45,12 +46,14 @@ from embodichain.lab.sim.atomic_actions import (
     CARTESIAN_POSE_CAPABILITY,
     GRASP_CAPABILITY,
     JOINT_POSITION_CAPABILITY,
+    OperateArticulationOptions,
 )
 from embodichain.lab.sim.skills import SceneCollisionRole, SceneDynamics
 from embodichain.lab.sim.skills.profiles import SkillPolicyPreset
 
 __all__ = [
     "OpenDrawerEnv",
+    "OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION",
     "create_open_drawer_robot_profile_binding",
     "create_open_drawer_scene_binding",
 ]
@@ -199,12 +202,29 @@ def create_open_drawer_robot_profile_binding() -> SimulationRobotSkillProfileBin
         defaults={
             "operate_articulation": {"primary": "right_manipulator"},
         },
-        presets=(SkillPolicyPreset("safe"),),
+        presets=(
+            SkillPolicyPreset(
+                "safe",
+                action_option_templates={
+                    "operate_articulation": OperateArticulationOptions(),
+                },
+            ),
+        ),
         default_preset="safe",
     )
 
 
-@register_env("OpenDrawer-v1", max_episode_steps=300)
+OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistration(
+    scene_binding=create_open_drawer_scene_binding(),
+    robot_profile_binding=create_open_drawer_robot_profile_binding(),
+)
+
+
+@register_env(
+    "OpenDrawer-v1",
+    max_episode_steps=300,
+    expert_program_registration=OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION,
+)
 class OpenDrawerEnv(ExpertProgramEnvironmentMixin, EmbodiedEnv):
     """Open a drawer through a configured semantic Expert Program."""
 
@@ -213,8 +233,7 @@ class OpenDrawerEnv(ExpertProgramEnvironmentMixin, EmbodiedEnv):
         super().__init__(cfg, **kwargs)
         self._expert_program_adapter = create_simulation_expert_program_adapter(
             self,
-            scene_binding=create_open_drawer_scene_binding(),
-            robot_profile_binding=create_open_drawer_robot_profile_binding(),
+            registration=OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION,
         )
 
     @property

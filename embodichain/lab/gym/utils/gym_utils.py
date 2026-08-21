@@ -399,6 +399,7 @@ def config_to_cfg(
     manager_modules: list | None = None,
     *,
     source_path: str | os.PathLike[str] | None = None,
+    expert_program_path_override: str | os.PathLike[str] | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -410,6 +411,9 @@ def config_to_cfg(
             relative top-level ``expert_program_path`` is resolved from this
             file's directory. Without it, relative paths use the current
             working directory.
+        expert_program_path_override: Optional explicit program path. This is
+            selected instead of the Gym-config path and resolves from the
+            process working directory.
 
     Returns:
         EmbodiedEnvCfg: A configuration object for initializing the environment.
@@ -456,13 +460,23 @@ def config_to_cfg(
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
-    if "expert_program_path" in config:
-        expert_program_path = config["expert_program_path"]
-        if type(expert_program_path) is not str:
-            raise TypeError("expert_program_path must be an exact string.")
-        if (
-            not expert_program_path
-            or expert_program_path != expert_program_path.strip()
+    configured_expert_program_path = config.get("expert_program_path")
+    if expert_program_path_override is not None or "expert_program_path" in config:
+        if expert_program_path_override is not None:
+            expert_program_path = expert_program_path_override
+            expert_program_base_dir = None
+            if not isinstance(expert_program_path, (str, os.PathLike)):
+                raise TypeError("expert_program_path must be a string or path.")
+        else:
+            expert_program_path = configured_expert_program_path
+            expert_program_base_dir = (
+                None if source_path is None else Path(source_path).expanduser().parent
+            )
+            if type(expert_program_path) is not str:
+                raise TypeError("expert_program_path must be an exact string.")
+        expert_program_path_text = os.fspath(expert_program_path)
+        if not expert_program_path_text or (
+            expert_program_path_text != expert_program_path_text.strip()
         ):
             raise ValueError(
                 "expert_program_path must be a non-empty string without outer "
@@ -471,14 +485,23 @@ def config_to_cfg(
         from embodichain.lab.gym.envs.expert_program.loader import (
             load_expert_program,
         )
+        from embodichain.lab.gym.utils.registration import get_env_spec
 
-        expert_program_base_dir = (
-            None if source_path is None else Path(source_path).expanduser().parent
-        )
-        env_cfg.expert_program = load_expert_program(
-            expert_program_path,
+        env_spec = get_env_spec(config["id"])
+        registration = env_spec.expert_program_registration
+        if registration is None:
+            raise ValueError(
+                f"Environment {config['id']!r} does not register an Expert "
+                "Program integration catalog."
+            )
+        registration.assert_unchanged()
+        expert_program = load_expert_program(
+            expert_program_path_text,
             base_dir=expert_program_base_dir,
+            validation_context=registration.catalog,
         )
+        registration.catalog.preflight(expert_program)
+        env_cfg.expert_program = expert_program
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
@@ -1069,6 +1092,7 @@ def build_env_cfg_from_args(
         gym_config,
         manager_modules=get_manager_modules(),
         source_path=gym_config_source_path,
+        expert_program_path_override=getattr(args, "expert_program", None),
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving

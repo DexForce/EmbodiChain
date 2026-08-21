@@ -20,9 +20,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import ClassVar
+from typing import ClassVar, TypeVar
 from uuid import uuid4
 
 import torch
@@ -40,6 +41,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceGoal,
     PlaceOptions,
     OperateArticulationGoal,
+    OperateArticulationOptions,
     PlanningContext,
     PoseGoalValue,
     SceneArticulationOperationGeometry,
@@ -95,6 +97,8 @@ from .scene import (
     SceneAffordanceRef,
     SceneObjectRef,
 )
+
+OptionT = TypeVar("OptionT", bound=ActionOptions)
 
 
 def _validate_identifier(value: str, *, field_name: str) -> str:
@@ -377,8 +381,15 @@ class RegisteredSemanticLowerer(ABC):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
+        option_template: ActionOptions,
     ) -> SemanticLowering:
-        """Lower one registered value to goal/options without changing policy."""
+        """Lower a registered value with one owned typed option template.
+
+        The lowerer must return :class:`SemanticLowering` with
+        ``skill_options=None``. The supplied template is an owned read-only
+        input for goal grounding; the selected policy preset remains the sole
+        owner of action options.
+        """
 
 
 @dataclass(frozen=True, slots=True)
@@ -1047,6 +1058,10 @@ class SemanticSkillCompiler:
             raise AssertionError(f"Unsupported analyzed call {type(call).__name__}.")
 
         bound = analyzed.bound
+        if lowering.skill_options is None:
+            raise AssertionError(
+                "Semantic lowering must resolve a non-None action-options value."
+            )
         invocation = ActionInvocation(
             skill_id=bound.linked.descriptor.skill_id,
             goal=lowering.goal,
@@ -1278,13 +1293,15 @@ class SemanticSkillCompiler:
             call.object,
             affordance=grasp_ref,
         )
+        option_template = self._action_option_template(analyzed, PickUpOptions)
         return SemanticLowering(
             goal=GraspGoal(semantics=semantics),
-            skill_options=PickUpOptions(
+            skill_options=replace(
+                option_template,
                 downstream_object_target_poses=tuple(
                     self._ground_object_target(target, context)
                     for target in analyzed.downstream_object_targets
-                )
+                ),
             ),
         )
 
@@ -1322,7 +1339,10 @@ class SemanticSkillCompiler:
             xpos = self._compose_object_to_eef(
                 object_target, held.object_to_eef, context
             )
-        return SemanticLowering(goal=PlaceGoal(xpos=xpos), skill_options=PlaceOptions())
+        return SemanticLowering(
+            goal=PlaceGoal(xpos=xpos),
+            skill_options=self._action_option_template(analyzed, PlaceOptions),
+        )
 
     def _lower_handover(
         self,
@@ -1366,9 +1386,11 @@ class SemanticSkillCompiler:
             else targets.final
         )
         final = self._ground_object_target(final_target, context)
+        option_template = self._action_option_template(analyzed, HandOverOptions)
         return SemanticLowering(
             goal=GraspGoal(semantics=semantics),
-            skill_options=HandOverOptions(
+            skill_options=replace(
+                option_template,
                 middle_object_pose=middle,
                 final_object_pose=final,
             ),
@@ -1501,7 +1523,11 @@ class SemanticSkillCompiler:
                 source_position=source_position,
                 target_position=target,
                 target_displacement=displacement,
-            )
+            ),
+            skill_options=self._action_option_template(
+                analyzed,
+                OperateArticulationOptions,
+            ),
         )
 
     def _lower_registered(
@@ -1522,19 +1548,24 @@ class SemanticSkillCompiler:
                 f"No lowerer is installed for {call.call_id!r}.",
                 tuple(self._registered_lowerers),
             )
+        descriptor = analyzed.bound.linked.descriptor
+        target = descriptor.target_descriptor
+        assert target is not None
+        option_template = self._action_option_template(
+            analyzed,
+            target.options_type,
+        )
         lowering = lowerer.lower(
             call,
             context=context,
             bound=analyzed.bound,
+            option_template=deepcopy(option_template),
         )
         if type(lowering) is not SemanticLowering:
             raise TypeError(
                 "RegisteredSemanticLowerer.lower() must return exactly "
                 "SemanticLowering."
             )
-        descriptor = analyzed.bound.linked.descriptor
-        target = descriptor.target_descriptor
-        assert target is not None
         expected_goal_types = (
             target.goal_type
             if isinstance(target.goal_type, tuple)
@@ -1545,13 +1576,32 @@ class SemanticSkillCompiler:
                 f"Lowerer {call.call_id!r} produced {type(lowering.goal).__name__}; "
                 f"target skill {target.skill_id!r} expects {target.goal_type!r}."
             )
-        if lowering.skill_options is not None and (
-            type(lowering.skill_options) is not target.options_type
-        ):
+        if lowering.skill_options is not None:
             raise TypeError(
-                f"Lowerer {call.call_id!r} produced incompatible skill options."
+                f"Lowerer {call.call_id!r} must not return skill_options; "
+                "the selected policy preset owns action options."
             )
-        return lowering
+        return replace(lowering, skill_options=deepcopy(option_template))
+
+    @staticmethod
+    def _action_option_template(
+        analyzed: AnalyzedSemanticCall,
+        expected_type: type[OptionT],
+    ) -> OptionT:
+        """Return one owned exact template selected by semantic call ID."""
+        semantic_id = analyzed.call.semantic_id
+        try:
+            template = analyzed.bound.preset.action_option_template(semantic_id)
+        except KeyError as exc:  # pragma: no cover - static linking owns this check
+            raise AssertionError(
+                f"Linked call {semantic_id!r} has no action-option template."
+            ) from exc
+        if type(template) is not expected_type:
+            raise AssertionError(
+                f"Linked call {semantic_id!r} has {type(template).__name__}; "
+                f"expected exact {expected_type.__name__}."
+            )
+        return template
 
     def _ground_effect_spec(
         self,

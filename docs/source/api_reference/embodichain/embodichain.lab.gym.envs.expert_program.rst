@@ -114,6 +114,16 @@ embodichain.lab.gym.envs.expert_program
       encode_semantic_call
       render_config_path
       validate_expert_program
+      EndpointAdapterDeclaration
+      ExpertProgramIntegrationCatalog
+      IntegrationFingerprintMismatch
+      ParallelCommandSafetyValidatorFactory
+      ParallelSafetyDeclaration
+      RuntimeTransportDeclaration
+      SimulationExpertProgramRegistration
+      StandardExtensionDeclarations
+      VersionedKey
+      default_simulation_settle_presets
 
 .. currentmodule:: embodichain.lab.gym.envs.expert_program
 
@@ -164,6 +174,12 @@ Compilation and environment integration
    :members:
 
 .. autoclass:: SkillRuntimeAssemblyPort
+   :members:
+
+.. autoclass:: ExpertProgramIntegrationCatalog
+   :members:
+
+.. autoclass:: SimulationExpertProgramRegistration
    :members:
 
 Simulation integration

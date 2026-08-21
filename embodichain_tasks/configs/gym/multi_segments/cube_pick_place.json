@@ -50,10 +50,7 @@
                 }
             }
         },
-        "extensions": {
-            "grasp_samples": 10000,
-            "force_reannotate": false
-        }
+        "extensions": {}
     },
     "robot": {
         "class_type": "URRobot",

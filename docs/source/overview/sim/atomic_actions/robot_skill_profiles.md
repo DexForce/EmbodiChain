@@ -77,7 +77,10 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     ControlPartCommandProfile,
+    HandOverOptions,
     MotionPolicy,
+    PickUpOptions,
+    PlaceOptions,
 )
 from embodichain.lab.sim.skills import (
     COMPOSITE_EFFECT_MONITOR_ID,
@@ -140,6 +143,11 @@ profile = RobotSkillProfile(
     presets={
         "default": SkillPolicyPreset(
             preset_id="default",
+            action_option_templates={
+                "pick": PickUpOptions(),
+                "place": PlaceOptions(),
+                "hand_over": HandOverOptions(),
+            },
             motion_policy=MotionPolicy(strategy="ik_interp"),
             effect_monitors={
                 semantic_id: EffectMonitorRef(
@@ -194,6 +202,28 @@ A linked call receives an effective immutable preset snapshot with
 `DynamicCollisionMode.REQUIRED`; the source profile preset is not mutated.
 Other presets, and scenes without dynamic collision entities, retain their
 configured collision mode.
+
+## Configure semantic action behavior with the preset
+
+`SkillPolicyPreset.action_option_templates` is the required, typed action-
+behavior table for semantic calls that can select the preset. Each key is the
+exact semantic call ID (`pick`, `place`, `hand_over`, or
+`operate_articulation`), and each value must be the target action's exact frozen
+`ActionOptions` dataclass. Static linking rejects a missing entry, an unknown
+call ID, or an options value of the wrong exact type before simulation starts.
+
+The preset owns independent snapshots of each template. Pick and HandOver
+grounding only replace their compiler-owned dynamic target fields; distances,
+directions, waypoint counts, and other reusable behavior remain configuration.
+A registered semantic lowerer may build a goal but cannot return replacement
+options. This keeps task extensions from silently moving action parameters back
+into Python code.
+
+Pick's `downstream_object_target_poses` and HandOver's
+`middle_object_pose`/`final_object_pose` are reserved for the semantic compiler
+and must remain empty in a template. Planner choice, sample count, tracking,
+recovery, runner timing, and effect monitors stay in their dedicated preset
+fields rather than `ActionOptions`.
 
 ## Select semantic effect monitors with the preset
 
@@ -357,12 +387,32 @@ profile = SimulationRobotSkillProfileBinding(
 
 adapter = create_simulation_expert_program_adapter(
     env,
-    scene_binding=scene_binding,
-    robot_profile_binding=profile,
-    endpoint_adapters={MobileVelocityEndpoint: MobileVelocityEndpointAdapter()},
-    runtime_transports=(MobileVelocityGymEncoder(),),
+    registration=SimulationExpertProgramRegistration(
+        scene_binding=scene_binding,
+        robot_profile_binding=profile,
+        endpoint_adapters=(MobileVelocityEndpointAdapter(),),
+        runtime_transports=(MobileVelocityGymEncoder(),),
+    ),
 )
 ```
+
+The adapter and encoder publish exact class-level declarations before a live
+robot is created. The adapter declares its endpoint type, runtime target types,
+transport IDs, and versioned tracking/evidence routes. The encoder declares its
+transport ID plus exact target and payload types; each target and payload type
+declares the same `TRANSPORT_ID`. Registration rejects missing, unused,
+duplicate, or conflicting declarations, and runtime profile binding verifies
+that `adapter.resolve()` returns only those declared routes. A stateful adapter,
+transport, grounding provider, or safety factory must be a frozen dataclass whose
+configuration is recursively immutable; mutable leaves such as lists, mappings,
+sets, byte arrays, and tensors are rejected before registration.
+
+The standard factory currently accepts its built-in tracking feedback,
+projector, evaluator, and effect-evidence routes only for
+`ControlPartEndpoint`. In C1, every custom endpoint adapter must declare empty
+route sets and therefore supports timed/open-loop execution only. Custom
+closed-loop mobile or whole-body tracking/evidence needs a registration-owned
+provider factory in C2; task code must not supply a live provider side channel.
 
 `RobotResourceBinding` snapshots arbitrary typed `ResourceEndpoint` values.
 `ControlPartResourceBinding` remains the stricter joint-backed convenience and
