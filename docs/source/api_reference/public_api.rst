@@ -900,6 +900,7 @@ embodichain.lab.sim.skills.calls
 
    DeclarativeValue
    HandOver
+   OperateArticulation
    Pick
    Place
    PlaceRelationTarget
@@ -932,6 +933,86 @@ embodichain.lab.sim.skills.compiler
    SemanticSkillCompiler
    SemanticWorkflow
 
+embodichain.lab.sim.skills.effects
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.effects
+
+.. autosummary::
+
+   ArticulationJointStateExpectation
+   BinaryEffectClause
+   BinaryEffectEvidenceBatch
+   BinaryEvidenceKind
+   COMPOSITE_EFFECT_MONITOR_ID
+   COMPOSITE_EFFECT_MONITOR_REVISION
+   CONSTRAINT_EFFECT_CHANNEL
+   CONTACT_EFFECT_CHANNEL
+   CONTROL_PART_EVIDENCE_PROVIDER_ID
+   CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+   CompositeEffectMonitor
+   CompositeEffectMonitorCfg
+   CompositeEffectMonitorFactory
+   ControlPartEvidenceAddress
+   CoordinatedHeldObjectCleanupExpectation
+   EffectClause
+   EffectEvidenceAddress
+   EffectEvidenceBatch
+   EffectEvidenceSourceRef
+   EffectMonitor
+   EffectMonitorDecision
+   EffectMonitorFactory
+   EffectMonitorParam
+   EffectMonitorRef
+   EffectMonitorRegistry
+   EffectStateExpectation
+   FORCE_EFFECT_CHANNEL
+   HeldObjectRelation
+   HeldObjectStateExpectation
+   JOINT_STATE_EFFECT_CHANNEL
+   JointStateEffectClause
+   JointStateEvidenceBatch
+   POSE_RELATION_EFFECT_CHANNEL
+   PoseRelationClause
+   PoseRelationEvidenceBatch
+   PoseRelationExpectation
+   ScalarEffectClause
+   ScalarEffectEvidenceBatch
+   ScalarEvidenceKind
+   ScalarExpectation
+   SemanticEffectKind
+   SemanticEffectSpec
+   SymbolicStateDomain
+   SymbolicStateKey
+
+embodichain.lab.sim.skills.evidence
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.evidence
+
+.. autosummary::
+
+   ArticulationJointObservationCallback
+   BinaryEffectEvidenceQuery
+   BinaryEffectObservation
+   BinaryObservationCallback
+   ControlPartRobotEvidenceSource
+   ControlPartSimulationEvidenceProvider
+   EffectEvidenceCollectionContext
+   EffectEvidenceCollector
+   EffectEvidenceProvider
+   EffectEvidenceProviderRegistry
+   EffectEvidenceQuery
+   EffectEvidenceQueryValue
+   JointStateEvidenceQuery
+   JointStateObservation
+   PoseRelationEvidenceQuery
+   ScalarEffectEvidenceQuery
+   ScalarEffectObservation
+   ScalarObservationCallback
+   SceneArticulationEvidenceProvider
+   build_effect_evidence_queries
+
 embodichain.lab.sim.skills.integration
 --------------------------------------
 
@@ -947,6 +1028,41 @@ embodichain.lab.sim.skills.integration
    SemanticDiagnostic
    SemanticIntegrationManifest
    SemanticValidationError
+
+embodichain.lab.sim.skills.parallel
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.parallel
+
+.. autosummary::
+
+   ParallelBarrierUpdate
+   ParallelBranchPlan
+   ParallelConflictError
+   ParallelStateConflictError
+   ParallelTimingError
+   ParallelTimingPolicy
+   align_parallel_commands
+   merge_parallel_effects
+   resolve_parallel_barrier
+   validate_parallel_claims
+
+embodichain.lab.sim.skills.parallel_runtime
+-------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.parallel_runtime
+
+.. autosummary::
+
+   ParallelBranchRuntime
+   ParallelBranchStaticAnalysis
+   ParallelCommandSafetyValidator
+   ParallelLaneCommandSink
+   ParallelRuntimeBranch
+   ParallelSafetyError
+   ParallelSkillResult
+   ParallelSkillRuntime
+   analyze_parallel_branches
 
 embodichain.lab.sim.skills.profiles
 -----------------------------------
@@ -980,16 +1096,20 @@ embodichain.lab.sim.skills.runtime
 
 .. autosummary::
 
-   SemanticCallRecord
-   SemanticEffectVerifier
-   SemanticExecution
-   SemanticExecutionStatus
-   SemanticExecutionStep
-   SemanticSegmentResult
-   SemanticSkillRuntime
-   SemanticTask
-   SemanticTaskResult
-   SemanticTaskStatus
+   AtomicSkills
+   EffectEvidenceCollectorPort
+   ResolvedCorePolicyTrace
+   SkillCallTrace
+   SkillEndpointBindingTrace
+   SkillEffectTrace
+   SkillFailure
+   SkillPlanAttemptTrace
+   SkillResult
+   SkillRuntime
+   SkillRuntimeProvider
+   SkillScene
+   SkillStatus
+   task_state_to_metadata
 
 embodichain.lab.sim.skills.scene
 --------------------------------
@@ -998,6 +1118,11 @@ embodichain.lab.sim.skills.scene
 
 .. autosummary::
 
+   ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
+   ArticulationJointEvidenceAddress
+   SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID
+   SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION
+   SceneArticulationJointStateProvider
    RegistrySceneProvider
    SceneAffordanceRef
    SceneArticulationRef
