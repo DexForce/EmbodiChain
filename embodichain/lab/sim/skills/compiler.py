@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from types import MappingProxyType
 from typing import ClassVar
@@ -583,6 +583,9 @@ class SemanticSkillCompiler:
             raise TypeError("calls must contain exact supported semantic call values.")
 
         bound_calls: list[BoundSemanticCall] = []
+        effect_kinds: list[SemanticEffectKind] = []
+        dependencies: list[SemanticEffectDependency] = []
+        latest_holder: dict[str, tuple[int, str]] = {}
         for index, call in enumerate(supplied):
             if type(call) is RegisteredSemanticCall and (
                 call.call_id not in self._registered_lowerers
@@ -594,13 +597,12 @@ class SemanticSkillCompiler:
                     "installed compiler lowerer.",
                     tuple(self._registered_lowerers),
                 )
-            bound_calls.append(
-                self._integration.link_call(
-                    call,
-                    path=(*path, index, "call"),
-                )
+            call = self._inherit_held_resource(call, latest_holder)
+            bound = self._integration.link_call(
+                call,
+                path=(*path, index, "call"),
             )
-        for index, bound in enumerate(bound_calls):
+            bound_calls.append(bound)
             call = bound.linked.call
             if type(call) is HandOver:
                 self._require_handover_pose_provider(
@@ -625,12 +627,6 @@ class SemanticSkillCompiler:
                     target.relation,
                     path=(*path, index, "call", "destination"),
                 )
-
-        dependencies: list[SemanticEffectDependency] = []
-        latest_holder: dict[str, tuple[int, str]] = {}
-        analyzed: list[AnalyzedSemanticCall] = []
-        for index, bound in enumerate(bound_calls):
-            call = bound.linked.call
             if type(call) is Pick:
                 previous = latest_holder.get(call.object.entity_id)
                 if previous is not None:
@@ -693,6 +689,13 @@ class SemanticSkillCompiler:
                 # A registered extension has no declarative state-flow contract
                 # in Version 1. Treat it as an opaque effect boundary.
                 latest_holder.clear()
+            effect_kinds.append(effect_kind)
+
+        analyzed: list[AnalyzedSemanticCall] = []
+        for index, (bound, effect_kind) in enumerate(
+            zip(bound_calls, effect_kinds, strict=True)
+        ):
+            call = bound.linked.call
             downstream_target = (
                 self._downstream_target(index, bound_calls)
                 if type(call) is Pick
@@ -712,6 +715,25 @@ class SemanticSkillCompiler:
             effect_dependencies=tuple(dependencies),
             _compiler_id=self._compiler_id,
         )
+
+    @staticmethod
+    def _inherit_held_resource(
+        call: SemanticCallSpec,
+        latest_holder: Mapping[str, tuple[int, str]],
+    ) -> SemanticCallSpec:
+        """Fill an omitted consumer slot from the workflow's known holder."""
+        if type(call) is Place:
+            slot_id = "primary"
+        elif type(call) is HandOver:
+            slot_id = "source"
+        else:
+            return call
+        holder = latest_holder.get(call.object.entity_id)
+        if holder is None or slot_id in call.resources:
+            return call
+        resources = dict(call.resources)
+        resources[slot_id] = holder[1]
+        return replace(call, resources=resources)
 
     def ground(
         self,

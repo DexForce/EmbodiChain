@@ -414,6 +414,32 @@ def _compiler(
     )
 
 
+def _dual_compiler(
+    registry: SceneRegistry,
+) -> tuple[
+    SemanticSkillCompiler,
+    AtomicActionEngine,
+    _DualCenterHandOverProvider,
+]:
+    profile = _dual_profile()
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=builtin_semantic_call_catalog(),
+    )
+    engine = _engine(profile)
+    provider = _DualCenterHandOverProvider()
+    return (
+        SemanticSkillCompiler(
+            manifest.bind(registry, engine),
+            relation_grounders=(_FrameRelationGrounder(),),
+            handover_pose_providers=(provider,),
+        ),
+        engine,
+        provider,
+    )
+
+
 def _context(
     registry: SceneRegistry,
     *,
@@ -517,6 +543,87 @@ def test_grounded_eligibility_hands_off_to_execution_session() -> None:
     assert grounded.eligible_mask.tolist() == [False, False]
     assert session.status is ExecutionStatus.FAILED
     assert session.eligible_mask.tolist() == [False, False]
+
+
+def test_place_inherits_known_pick_resource_when_primary_is_omitted() -> None:
+    registry, _ = _scene_registry()
+    compiler, _, _ = _dual_compiler(registry)
+    place = Place(
+        object=SceneObjectRef("cube"),
+        at=SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0)),
+    )
+
+    workflow = compiler.analyze(
+        (
+            Pick(
+                object=SceneObjectRef("cube"),
+                resources={"primary": "right"},
+            ),
+            place,
+        )
+    )
+
+    assert place.resources == {}
+    assert workflow.calls[1].call.resources == {"primary": "right"}
+    assert workflow.calls[1].bound.binding.resource_ids == {"primary": "right"}
+
+
+def test_handover_source_inherits_known_pick_resource() -> None:
+    registry, _ = _scene_registry()
+    compiler, _, provider = _dual_compiler(registry)
+    handover = HandOver(
+        object=SceneObjectRef("cube"),
+        resources={"destination": "left"},
+    )
+
+    workflow = compiler.analyze(
+        (
+            Pick(
+                object=SceneObjectRef("cube"),
+                resources={"primary": "right"},
+            ),
+            handover,
+        )
+    )
+
+    assert handover.resources == {"destination": "left"}
+    assert workflow.calls[1].call.resources == {
+        "source": "right",
+        "destination": "left",
+    }
+    assert workflow.calls[1].bound.binding.resource_ids == {
+        "source": "right",
+        "destination": "left",
+    }
+    assert provider.calls == 0
+
+
+def test_explicit_consumer_resource_must_match_known_holder() -> None:
+    registry, _ = _scene_registry()
+    compiler, _, _ = _dual_compiler(registry)
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.analyze(
+            (
+                Pick(
+                    object=SceneObjectRef("cube"),
+                    resources={"primary": "right"},
+                ),
+                Place(
+                    object=SceneObjectRef("cube"),
+                    at=SemanticPose(
+                        (0.4, 0.2, 0.3),
+                        (1.0, 0.0, 0.0, 0.0),
+                    ),
+                    resources={"primary": "left"},
+                ),
+            )
+        )
+
+    assert error.value.diagnostic.code == "held_resource_mismatch"
+    assert error.value.diagnostic.rendered_path == (
+        "workflow[1].call.resources.primary"
+    )
 
 
 def test_pick_relation_lookahead_stays_late_bound_scene_dependency() -> None:
