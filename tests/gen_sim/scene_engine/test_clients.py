@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from embodichain.gen_sim.scene_engine.clients import geometry_generation
+from embodichain.gen_sim.scene_engine.clients import image_generation
 from embodichain.gen_sim.scene_engine.clients import image_segmentation
 from embodichain.gen_sim.scene_engine.llms import load_config
 
@@ -30,9 +31,16 @@ from embodichain.gen_sim.scene_engine.llms import load_config
 class _Response:
     """Minimal successful HTTP response used by client unit tests."""
 
-    def __init__(self, payload: object, *, content: bytes = b"") -> None:
+    def __init__(
+        self,
+        payload: object,
+        *,
+        content: bytes = b"",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self._payload = payload
         self.content = content
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
         return None
@@ -79,7 +87,14 @@ def test_clients_load_their_required_dotenv_values(
         "SCENE_ENGINE_IMAGE_SEGMENTATION_TIMEOUT_S": "30",
         "SCENE_ENGINE_IMAGE_SEGMENTATION_MAX_ATTEMPTS": "2",
         "SCENE_ENGINE_IMAGE_SEGMENTATION_HEALTH_PATH": "/health",
-        "SCENE_ENGINE_IMAGE_SEGMENTATION_SINGLE_OBJECT_PATH": "/predict",
+        "SCENE_ENGINE_IMAGE_SEGMENTATION_BY_PROMPT_PATH": "/segment_by_prompt",
+    }
+    image_generation_values = {
+        "SCENE_ENGINE_IMAGE_GENERATION_BASE_URL": "http://image-generation/",
+        "SCENE_ENGINE_IMAGE_GENERATION_TIMEOUT_S": "120",
+        "SCENE_ENGINE_IMAGE_GENERATION_MAX_ATTEMPTS": "2",
+        "SCENE_ENGINE_IMAGE_GENERATION_HEALTH_PATH": "/health",
+        "SCENE_ENGINE_IMAGE_GENERATION_BY_PROMPT_PATH": "/generate_image_by_prompt",
     }
     llm_values = {
         "OPENAI_API_KEY": "test-key",
@@ -97,17 +112,28 @@ def test_clients_load_their_required_dotenv_values(
         lambda *_: segmentation_values,
     )
     monkeypatch.setattr(
+        image_generation,
+        "read_scene_engine_env_values",
+        lambda *_: image_generation_values,
+    )
+    monkeypatch.setattr(
         load_config, "read_scene_engine_env_values", lambda *_: llm_values
     )
 
     geometry_client = geometry_generation.GeometryGenerationClient.from_dotenv()
     segmentation_client = image_segmentation.ImageSegmentationClient.from_dotenv()
+    image_generation_client = image_generation.ImageGenerationClient.from_dotenv()
     llm_client_config = load_config.load_llm_config()
 
     assert geometry_client._base_url == "http://geometry"
     assert geometry_client._generate_objects_path == "/objects"
     assert segmentation_client._base_url == "http://segment"
-    assert segmentation_client._segment_single_object_path == "/predict"
+    assert segmentation_client._segment_by_prompt_path == "/segment_by_prompt"
+    assert image_generation_client._base_url == "http://image-generation"
+    assert (
+        image_generation_client._generate_image_by_prompt_path
+        == "/generate_image_by_prompt"
+    )
     assert llm_client_config.default_query == {"api-version": "1"}
     assert llm_client_config.base_url == "http://llm/v1"
 
@@ -146,15 +172,97 @@ def test_service_health_checks_use_the_configured_health_path() -> None:
         timeout_s=30,
         max_attempts=1,
         health_path="/health",
-        segment_single_object_path="/predict",
+        segment_by_prompt_path="/segment_by_prompt",
         session=segmentation_session,
+    )
+    image_generation_session = _Session(get_payload={"ok": True})
+    image_generation_client = image_generation.ImageGenerationClient(
+        base_url="http://image-generation",
+        timeout_s=120,
+        max_attempts=1,
+        health_path="/health",
+        generate_image_by_prompt_path="/generate_image_by_prompt",
+        session=image_generation_session,
     )
 
     geometry_client.check_health()
     segmentation_client.check_health()
+    image_generation_client.check_health()
 
     assert geometry_session.get_calls == [("http://geometry/health", 10)]
     assert segmentation_session.get_calls == [("http://segment/health", 30)]
+    assert image_generation_session.get_calls == [
+        ("http://image-generation/health", 10)
+    ]
+
+
+def test_image_generation_client_posts_prompt_and_writes_png(
+    tmp_path: Path,
+) -> None:
+    png_bytes = b"\x89PNG\r\n\x1a\nimage"
+
+    class ImageGenerationSession(_Session):
+        def post(self, url: str, **kwargs: object) -> _Response:
+            self.post_call = {"url": url, **kwargs}
+            return _Response(
+                {},
+                content=png_bytes,
+                headers={"content-type": "image/png", "x-generation-seed": "17"},
+            )
+
+    session = ImageGenerationSession(get_payload={"ok": True})
+    client = image_generation.ImageGenerationClient(
+        base_url="http://image-generation",
+        timeout_s=120,
+        max_attempts=1,
+        health_path="/health",
+        generate_image_by_prompt_path="/generate_image_by_prompt",
+        session=session,
+    )
+
+    output_path = client.generate_image_by_prompt(
+        prompt="a red mug on a wooden table",
+        output_path=tmp_path / "generated.png",
+        seed=17,
+    )
+
+    assert output_path.read_bytes() == png_bytes
+    assert session.post_call is not None
+    assert session.post_call["url"] == (
+        "http://image-generation/generate_image_by_prompt"
+    )
+    assert session.post_call["json"] == {
+        "prompt": "a red mug on a wooden table",
+        "seed": 17,
+    }
+
+
+def test_image_generation_client_rejects_non_png_response(tmp_path: Path) -> None:
+    class ImageGenerationSession(_Session):
+        def post(self, url: str, **kwargs: object) -> _Response:
+            self.post_call = {"url": url, **kwargs}
+            return _Response(
+                {"ok": False, "error": "failed"},
+                content=b'{"ok": false}',
+                headers={"content-type": "application/json"},
+            )
+
+    session = ImageGenerationSession(get_payload={"ok": True})
+    client = image_generation.ImageGenerationClient(
+        base_url="http://image-generation",
+        timeout_s=120,
+        max_attempts=1,
+        health_path="/health",
+        generate_image_by_prompt_path="/generate_image_by_prompt",
+        session=session,
+    )
+
+    with pytest.raises(RuntimeError, match="request failed after 1 attempts") as exc:
+        client.generate_image_by_prompt(
+            prompt="a red mug on a wooden table",
+            output_path=tmp_path / "generated.png",
+        )
+    assert "response is not a PNG image" in str(exc.value.__cause__)
 
 
 def test_segmentation_client_posts_prompt_and_returns_rle_masks(tmp_path: Path) -> None:
@@ -170,7 +278,7 @@ def test_segmentation_client_posts_prompt_and_returns_rle_masks(tmp_path: Path) 
         timeout_s=30,
         max_attempts=1,
         health_path="/health",
-        segment_single_object_path="/predict",
+        segment_by_prompt_path="/segment_by_prompt",
         session=session,
     )
 
@@ -178,7 +286,7 @@ def test_segmentation_client_posts_prompt_and_returns_rle_masks(tmp_path: Path) 
         rle_mask
     ]
     assert session.post_call is not None
-    assert session.post_call["url"] == "http://segment/predict"
+    assert session.post_call["url"] == "http://segment/segment_by_prompt"
     assert session.post_call["data"] == {"prompt": "table"}
 
 
@@ -231,6 +339,7 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
                 {
                     "ok": True,
                     "result": {
+                        "seed": 23,
                         "objects": [
                             {
                                 "name": "cup",
@@ -239,7 +348,7 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
                                 "translation": [0, 0, 0],
                                 "scale": [1, 1, 1],
                             }
-                        ]
+                        ],
                     },
                 }
             )
@@ -266,9 +375,11 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
         image_path=image_path,
         object_masks=[("cup", mask_path)],
         output_root=tmp_path / "output",
+        seed=23,
     )
 
     assert objects[0]["mesh"] == "/results/cup.glb"
     assert session.post_call is not None
     assert session.post_call["url"] == "http://geometry/objects"
+    assert session.post_call["data"] == {"seed": "23"}
     assert (tmp_path / "output/cup.glb").read_bytes() == b"glTF-mesh"

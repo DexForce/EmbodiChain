@@ -32,6 +32,7 @@ EXPECTED_COMMANDS = {
     "preview_lerobot_data",
     "run-env",
     "scene-engine",
+    "task-engine",
     "simready",
     "train-rl",
     "preview-scene",
