@@ -14,13 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the extensible free-space motion-generation benchmark.
+"""Run the extensible planner motion-generation benchmark.
 
 cuRobo is the default primary baseline. IK interpolation and TOPPRA are
 optional diagnostic baselines. NMG remains an explicitly configurable,
 unsupported adapter stub until its production checkpoint contract is ready.
 
-Run: ``embodichain benchmark motion-generation --suite smoke``
+Run: ``python -m scripts.benchmark.motion_generation.run_benchmark --suite
+smoke`` or select the Franka + PGI Atomic Task slice with
+``--suite atomic_franka_pgi_curobo``.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .config import PlannerSpecCfg, SuiteCfg, load_suite
+from .video import VideoRecordCfg, video_cfg_from_args
 
 if TYPE_CHECKING:
     from .runner import BenchmarkRunResult
@@ -43,11 +46,14 @@ __all__ = [
 
 
 def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add free-space benchmark options to an existing argument parser."""
+    """Add planner benchmark options to an existing argument parser."""
     parser.add_argument(
         "--suite",
         default="smoke",
-        help="Suite short name (smoke/coverage) or an explicit YAML path.",
+        help=(
+            "Suite short name (smoke/coverage/atomic_franka_pgi_curobo) "
+            "or an explicit YAML path."
+        ),
     )
     parser.add_argument(
         "--algorithms",
@@ -104,6 +110,36 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--no-headless", action="store_false", dest="headless", help="Open a viewer."
+    )
+    parser.add_argument(
+        "--record-video",
+        action="store_true",
+        help="Record Atomic Task measured physics-replay videos after evaluation.",
+    )
+    parser.add_argument(
+        "--record-failed-video",
+        action="store_true",
+        help="With --record-video, also record failed cases as static debug scenes.",
+    )
+    parser.add_argument(
+        "--video-case-limit",
+        type=int,
+        default=0,
+        help="Maximum recorded videos. Use 0 to record every selected case.",
+    )
+    parser.add_argument(
+        "--video-dir",
+        default=None,
+        help="Override video directory. Default is <run_dir>/videos.",
+    )
+    parser.add_argument("--video-fps", type=int, default=20)
+    parser.add_argument("--video-width", type=int, default=640)
+    parser.add_argument("--video-height", type=int, default=480)
+    parser.add_argument(
+        "--video-max-memory",
+        type=int,
+        default=2048,
+        help="Maximum recorder frame-buffer memory in MB.",
     )
 
 
@@ -213,8 +249,9 @@ def run_all_benchmarks(
     nmg_pos_eps: float | None = None,
     nmg_rot_eps: float | None = None,
     output_root: str | Path = "outputs/benchmarks",
+    video: VideoRecordCfg | None = None,
 ) -> BenchmarkRunResult:
-    """Resolve configuration and run all selected free-space benchmarks."""
+    """Resolve configuration and run all selected benchmark tracks."""
     from .runner import BenchmarkRunner
 
     suite = load_suite(suite_name)
@@ -242,6 +279,7 @@ def run_all_benchmarks(
         device=sim_device,
         headless=headless,
         output_root=output_root,
+        video=video,
     ).run()
 
 
@@ -268,13 +306,14 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
         nmg_pos_eps=args.nmg_pos_eps,
         nmg_rot_eps=args.nmg_rot_eps,
         output_root=args.output_root,
+        video=video_cfg_from_args(args),
     )
 
 
 def _parse_args() -> argparse.Namespace:
     """Parse standalone module arguments using the unified option schema."""
     parser = argparse.ArgumentParser(
-        description="Benchmark motion generation on fixed free-space cases."
+        description="Benchmark planners on fixed motion and Atomic Task cases."
     )
     add_parser_arguments(parser)
     return parser.parse_args()

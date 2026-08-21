@@ -21,22 +21,27 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .config import PlannerSpecCfg
+    from .config import PlannerSpecCfg, RobotSpecCfg
     from .planners.base import PlannerAdapter, PlannerContext
+    from .robots.base import RobotProvider
     from .scenarios.base import ScenarioProvider
 
 __all__ = [
     "create_planner_adapter",
     "create_scenario_provider",
+    "create_robot_provider",
     "planner_adapter_names",
     "register_planner_adapter",
     "register_scenario_provider",
+    "register_robot_provider",
+    "robot_provider_names",
     "scenario_provider_names",
     "unregister_planner_adapter",
 ]
 
 _PLANNER_ADAPTERS: dict[str, type["PlannerAdapter"]] = {}
 _SCENARIO_PROVIDERS: dict[str, type["ScenarioProvider"]] = {}
+_ROBOT_PROVIDERS: dict[str, type["RobotProvider"]] = {}
 
 
 def register_planner_adapter(name: str, adapter_cls: type["PlannerAdapter"]) -> None:
@@ -71,6 +76,33 @@ def create_planner_adapter(
             f"registered adapters: {planner_adapter_names()}."
         ) from exc
     return adapter_cls(spec=spec, context=context)
+
+
+def register_robot_provider(name: str, provider_cls: type["RobotProvider"]) -> None:
+    """Register one robot provider under a stable suite name."""
+    if not name:
+        raise ValueError("Robot provider name must not be empty.")
+    previous = _ROBOT_PROVIDERS.get(name)
+    if previous is not None and previous is not provider_cls:
+        raise ValueError(f"Robot provider {name!r} is already registered.")
+    _ROBOT_PROVIDERS[name] = provider_cls
+
+
+def robot_provider_names() -> tuple[str, ...]:
+    """Return registered robot-provider names in deterministic order."""
+    return tuple(sorted(_ROBOT_PROVIDERS))
+
+
+def create_robot_provider(spec: "RobotSpecCfg") -> "RobotProvider":
+    """Construct the robot provider selected by a suite."""
+    try:
+        provider_cls = _ROBOT_PROVIDERS[spec.provider]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown robot provider {spec.provider!r}; "
+            f"registered providers: {robot_provider_names()}."
+        ) from exc
+    return provider_cls(spec)
 
 
 def register_scenario_provider(
