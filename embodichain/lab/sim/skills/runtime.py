@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from types import MappingProxyType, TracebackType
 from typing import TYPE_CHECKING
@@ -963,13 +963,7 @@ class SemanticTask:
             raise TypeError(
                 "ObservationProvider.observe() must return PlanningContext."
             )
-        context = PlanningContext(
-            robot=observed.robot,
-            task=self._task_state,
-            scene=observed.scene,
-            env_ids=observed.env_ids,
-            control_dt=observed.control_dt,
-        )
+        context = replace(observed, task=self._task_state)
         self.runtime.engine._validate_context(context)
         previous = self._latest_context
         if previous is not None:
