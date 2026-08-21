@@ -23,6 +23,19 @@ execution.
       decode_semantic_task_graph
       task_spec_hash
       semantic_task_graph_hash
+      TaskDraft
+      SemanticCallCandidate
+      SceneRequirements
+      RoleRequirement
+      BoundTaskDraft
+      TaskInterpretationResult
+      TaskInterpretationError
+      TaskDraftCaller
+      decode_task_draft
+      decode_scene_requirements
+      bind_task_draft
+      interpret_task_candidates
+      validate_planner_projection
 
    .. rubric:: Schemas and ontology
 
@@ -37,6 +50,9 @@ execution.
       REASONING_TYPES
       PLANNER_ROUTES
       FORBIDDEN_SEMANTIC_GRAPH_FIELDS
+      TASK_DRAFT_SCHEMA
+      TASK_DRAFT_OUTPUT_SCHEMA
+      SCENE_REQUIREMENTS_SCHEMA
       RELATIONS
       TRANSPORT_DIRECTIONS
       TERMINAL_BEHAVIORS
@@ -72,6 +88,30 @@ embodichain.gen_sim.task_engine.contracts
       decode_semantic_task_graph
       task_spec_hash
       semantic_task_graph_hash
+
+embodichain.gen_sim.task_engine.frontend
+----------------------------------------
+
+.. automodule:: embodichain.gen_sim.task_engine.frontend
+
+   .. autosummary::
+
+      TASK_DRAFT_SCHEMA
+      TASK_DRAFT_OUTPUT_SCHEMA
+      SCENE_REQUIREMENTS_SCHEMA
+      TaskDraft
+      SemanticCallCandidate
+      SceneRequirements
+      RoleRequirement
+      BoundTaskDraft
+      TaskInterpretationResult
+      TaskInterpretationError
+      TaskDraftCaller
+      decode_task_draft
+      decode_scene_requirements
+      bind_task_draft
+      interpret_task_candidates
+      validate_planner_projection
 
 embodichain.gen_sim.task_engine.ontology
 ----------------------------------------
