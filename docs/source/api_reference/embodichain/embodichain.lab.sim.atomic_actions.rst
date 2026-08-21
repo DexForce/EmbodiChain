@@ -76,6 +76,7 @@ embodichain.lab.sim.atomic_actions
       EndEffectorPoseGoal
       JointPositionGoal
       GraspGoal
+      HandOverGoal
       AxisAlignGoal
       AxisAlignOptions
       AxisAlignAffordance

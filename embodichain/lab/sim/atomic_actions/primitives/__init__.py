@@ -30,7 +30,7 @@ from .coordinated_placement import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
 )
-from .hand_over import HandOver, HandOverOptions
+from .hand_over import HandOver, HandOverGoal, HandOverOptions
 from .move_end_effector import (
     EndEffectorPoseGoal,
     MoveEndEffector,
@@ -85,6 +85,7 @@ __all__ = [
     "EndEffectorPoseGoal",
     "GraspGoal",
     "HandOver",
+    "HandOverGoal",
     "HandOverOptions",
     "HeldObjectPoseGoal",
     "JointPositionGoal",

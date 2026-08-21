@@ -159,7 +159,7 @@ The animations below are the focused simulator demos under
 :link: builtin-hand-over
 :link-type: ref
 
-`hand_over` · transfer an attachment between arms
+`hand_over` · pick, transfer, place, and release with two arms
 
 <img src="../../../_static/atomic_actions/hand_over.gif" alt="HandOver demo" width="480" style="max-width: 100%;" />
 :::
@@ -181,7 +181,7 @@ The animations below are the focused simulator demos under
 | `twist` | `TwistGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `TwistAffordance` + target pose | open-loop motion; application verifies joint travel/grasp |
 | `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | one individually held object per arm | optionally detach placing object; preserve support attachment |
-| `hand_over` | `GraspGoal` | manipulator + end effector `source`, `destination` | both: `open`, `grasp` | object held by source arm | transfer attachment to destination arm |
+| `hand_over` | `HandOverGoal` | manipulator + end effector `source`, `destination` | both: `open`, `grasp` | unheld object with `AntipodalAffordance` | open-loop pick, transfer, place, and release |
 
 ### Binding role meanings
 
@@ -194,8 +194,7 @@ it does not make the two maps interchangeable.
 | Role | Used by | Meaning |
 |---|---|---|
 | `primary` | Single-participant skills | Principal participant for this invocation; it has no inherent left/right or default-robot meaning |
-| `source` | `hand_over` | Participant that initially holds and transfers the object |
-| `destination` | `hand_over` | Participant that receives the object |
+| `source`, `destination` | `hand_over` | Two candidate participants; the action assigns the nearer one to pickup and the other one to receive |
 | `left`, `right` | `coordinated_pickment` | Participants on whose sides the affordance samples left/right grasps |
 | `placing` | `coordinated_placement` | Participant that aligns and optionally releases the placing object |
 | `support` | `coordinated_placement` | Participant that keeps holding and positioning the support object |
@@ -241,10 +240,11 @@ entity as a recovery dependency.
 | `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
 | `AxisAlign.grasp_xpos` | yes | yes |
 | `AxisAlign` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `HandOverGoal.target_pose` | yes | yes |
+| `HandOver` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the initial object pose |
 | Coordinated pickup implicit initial pose via `ObjectSemantics.entity_id` | implicit snapshot reference | yes; only when `object_initial_pose` is omitted |
 | `AssembleGoal.base_pose` | yes | yes |
 | Deprecated `ObjectSemantics.entity` / `AssembleAffordance.base_object_entity` fallback | no | no |
-| `HandOver` current held-object pose | no scene lookup | no; derived from observed EEF pose and verified attachment state |
 
 ### Object identity and grounding
 
@@ -259,7 +259,7 @@ create a scene-motion dependency. `collect_scene_dependencies()` intentionally
 does not recurse into `ObjectSemantics`; each primitive declares a semantic ID
 only when its planner actually consumes that object's snapshot pose.
 
-Attachment and handover identity are not based on `label`. The core resolves an
+Attachment identity is not based on `label`. The core resolves an
 explicit `entity_id` only against another explicit ID. If either compared side
 has one, both sides must have the same explicit value; an equal legacy
 `entity.uid` does not match it. When both explicit IDs are absent, two non-empty
@@ -713,9 +713,10 @@ options to partition the object into left/right grasp regions and select the
 lowest-cost grasp on each side. Each derived `object_to_eef` transform is stored
 in the corresponding projected `HeldObjectState`. Later object-centric skills
 can inspect those per-manipulator entries directly; sharing the same
-`ObjectSemantics` instance identifies the common object. Single-arm transport,
-release, and handover skills reject those shared rows rather than moving or
-detaching just one participant.
+`ObjectSemantics` instance identifies the common object. Single-arm transport
+and release skills reject those shared rows rather than moving or detaching
+just one participant. The unified `HandOver` action starts before pickup and
+therefore requires both candidate arms to be unoccupied.
 
 The object target and optional initial pose may use `SceneEntityPose`. Those
 references declare their own scene dependencies. When `object_initial_pose` is
@@ -778,35 +779,44 @@ binding roles. The same cuRobo restriction as coordinated pickment applies to du
 
 ## `HandOver`
 
-Transfers an already held object from one arm to another: **move source to the
-handover pose -> destination approaches and grasps -> source releases and
-retreats -> destination delivers**.
+Runs the full two-arm manipulation as one action: **choose the nearer arm ->
+pick the object's top half -> lift and move to the computed middle point -> the
+other arm grasps the bottom half -> transfer the grasp -> place and release**.
 
 | Contract | Value |
 |---|---|
 | Skill ID | `hand_over` |
-| Goal | `GraspGoal(semantics=...)` |
+| Goal | `HandOverGoal(semantics=..., target_pose=...)` |
 | Binding | manipulator + end effector roles `source` and `destination` |
-| Precondition | source arm exclusively has a verified `HeldObjectState`; goal semantics identify that object and support destination grasp selection |
-| Effect | remove source attachment and create destination `HeldObjectState` |
-| Verification | attachment transfer must be externally verified |
+| Precondition | both candidate arms start unoccupied; object semantics use `AntipodalAffordance` |
+| Effect | none; both grippers are open after placing the object |
+| Verification | open-loop physical pickup, transfer, placement, and release |
 
-Both source and destination end-effector profiles must provide `open` and
-`grasp`. `HandOverOptions` owns the destination grasp region and approach
-direction, middle/final object poses, and segment distances/counts. The
-source/destination arm and hand control parts come exclusively from the
-corresponding `ActionBinding` roles. The destination attachment reuses the
-source relation's canonical `ObjectSemantics` instance.
+Both end-effector profiles must provide `open` and `grasp`. The two binding
+roles are candidate arm/hand pairs rather than a caller-selected transfer
+direction. For every environment, the action compares the observed object
+position with both configured solver root-link positions. The nearer arm picks
+the `top` object part; the other arm receives the `bottom` part. For both arms,
+the approach direction uses the horizontal projection from the acting arm's
+current TCP toward the object and tilts it downward by 45 degrees. Pickup uses
+the observed object position, while receiving uses the predicted middle object
+position because that pose is not observed again during open-loop planning.
 
-The middle and final poses are currently option tensors rather than
-`SceneEntityPose` goal fields. Consequently, handover supports tracking-error
-and timeout recovery, but does not automatically invalidate a moving handover
-point. An application can submit a newer invocation revision with updated
-`HandOverOptions`. The action verifies that the goal and source attachment have
-the same stable object identity, then derives the current object orientation
-from the observed source EEF pose and verified `object_to_eef` relation.
-The reused `GraspGoal.grasp_xpos` field is not consumed by `HandOver` and does
-not create a scene dependency.
+After pickup, the action lifts in world Z and computes the middle object pose
+by finding the root-link separation's largest-magnitude coordinate and setting
+only that object coordinate to the two roots' midpoint. From the first grasp
+through middle transfer, and from the receiving grasp through final lowering,
+EEF waypoint rotations remain fixed; only translations change. The final
+object translation comes from `HandOverGoal.target_pose`, while its execution
+orientation stays consistent with the handover grasp. `HandOverOptions` owns
+only the approach/lift distances and gripper interpolation count. The first
+placement waypoint changes only horizontal coordinates and preserves the
+handover height exactly; the second waypoint lowers to the final target.
+
+Planning failures are reported with semantic waypoint names and affected
+environment IDs. For a failed motion phase, HandOver diagnoses each target
+with IK; if all target waypoints are reachable, the report identifies the
+interval between them as a likely path- or collision-planning failure.
 
 As with the other coordinated primitive, cuRobo does not currently support its
 dual-arm `strategy="motion_gen"` path.

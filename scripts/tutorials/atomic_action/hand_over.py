@@ -14,12 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate a dual-arm handover with a single textured mesh object.
-
-The left arm picks the object up by its top part, hands it to the right arm at a
-middle handover pose, the right arm grasps the bottom part, the left arm
-releases, and the right arm carries the object to the other side.
-"""
+"""Demonstrate the unified dual-arm PickUp-to-HandOver atomic action."""
 
 from __future__ import annotations
 
@@ -37,11 +32,10 @@ from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
-    GraspGoal,
     AtomicActionEngine,
     ControlPartCommandProfile,
+    HandOverGoal,
     HandOverOptions,
-    PickUpOptions,
     MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
@@ -70,7 +64,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 )
 
 OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
-GRIPPER_TCP_Z = 0.155
+GRIPPER_TCP_Z = 0.15
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
 SUPPORT_SURFACE_CENTER = (
@@ -80,27 +74,17 @@ SUPPORT_SURFACE_CENTER = (
 )
 
 # --- Adjustable scene placeholders -----------------------------------------
-# The object starts on the left side, is handed over at a lifted middle pose,
-# and is delivered to the right side. Tweak these to match the mesh geometry
-# and the selected dual-arm robot's reach.
+# The object starts on one side and is delivered to the other. HandOver chooses
+# the nearer arm for pickup and computes the middle handover position itself.
 OBJECT_INIT_XY = (0.0, 0.02)
-MIDDLE_OBJECT_XYZ = (0.0, 0.02, 0.82)
-MIDDLE_OBJECT_YAW_DEG = 0.0
-FINAL_OBJECT_XYZ = (0.22, 0.02, 0.72)
-FINAL_OBJECT_YAW_DEG = 0.0
+FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
 HAND_CLOSE_QPOS = 0.026
-PICKUP_SAMPLE_INTERVAL = 80
-PICKUP_HAND_INTERP_STEPS = 5
-PICKUP_PRE_GRASP_DISTANCE = 0.08
-PICKUP_LIFT_HEIGHT = 0.1
-HANDOVER_SAMPLE_INTERVAL = 140
+HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
-HANDOVER_HOLD_STEPS = 4
-HANDOVER_RETREAT_STEPS = 28
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
-HANDOVER_LIFT_HEIGHT = 0.08
+HANDOVER_LIFT_HEIGHT = 0.10
 TRAJECTORY_SIM_STEPS = 4
 HANDOVER_RECORD_LOOK_AT = (
     (-0.25, 0.02, 2.5),
@@ -179,7 +163,7 @@ def run_handover_demo(
     sim: SimulationManager,
     robot: Robot,
 ) -> None:
-    """Plan and optionally execute a pick-up followed by a handover."""
+    """Plan and optionally execute one unified pick-up and handover."""
     create_support_surface(sim)
     obj = create_handover_object(sim)
     settle_object(sim, obj, step=0)
@@ -198,46 +182,13 @@ def run_handover_demo(
         robot, hand_control_part="right_hand", close_qpos=HAND_CLOSE_QPOS
     )
 
-    middle_pose = torch.as_tensor(
-        [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, -1.0, 0.0],
-            [0.0, 1.0, 0.0, 0.7],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=torch.float32,
-    )
+    final_pose = torch.eye(4, dtype=torch.float32)
+    final_pose[:3, 3] = torch.as_tensor(FINAL_OBJECT_XYZ)
 
-    final_pose = torch.as_tensor(
-        [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, -1.0, -0.2],
-            [0.0, 1.0, 0.0, 0.7],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=torch.float32,
-    )
-
-    # Step 1 - the left arm picks the object up by its top part.
-    pick_up_options = PickUpOptions(
-        pick_object_part="top",
-        pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
-        lift_height=PICKUP_LIFT_HEIGHT,
-        hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
-    )
-    # Step 2 - hand the object from the left arm to the right arm.
     handover_options = HandOverOptions(
-        receive_pick_object_part="bottom",
-        middle_object_pose=middle_pose,
-        final_object_pose=final_pose,
         pre_grasp_distance=HANDOVER_PRE_GRASP_DISTANCE,
         lift_height=HANDOVER_LIFT_HEIGHT,
         hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
-        hold_steps=HANDOVER_HOLD_STEPS,
-        retreat_steps=HANDOVER_RETREAT_STEPS,
-        receive_approach_direction=torch.as_tensor(
-            [0.0, 707106781, -707106781], dtype=torch.float32
-        ),
     )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -261,21 +212,8 @@ def run_handover_demo(
     compiled = engine.compile(
         (
             ActionInvocation(
-                "pick_up",
-                GraspGoal(object_semantics),
-                ActionBinding(
-                    manipulators={"primary": "left_arm"},
-                    end_effectors={"primary": "left_hand"},
-                ),
-                MotionPolicy(
-                    strategy="motion_gen",
-                    sample_count=PICKUP_SAMPLE_INTERVAL,
-                ),
-                skill_options=pick_up_options,
-            ),
-            ActionInvocation(
                 "hand_over",
-                GraspGoal(object_semantics),
+                HandOverGoal(object_semantics, target_pose=final_pose),
                 ActionBinding(
                     manipulators={
                         "source": "left_arm",
@@ -299,7 +237,7 @@ def run_handover_demo(
     traj = compiled.trajectory.positions
 
     if not success.all():
-        logger.log_warning("Failed to plan the full pick-up + handover trajectory.")
+        logger.log_warning("Failed to plan the unified HandOver trajectory.")
         return
 
     if args.diagnose_plan:

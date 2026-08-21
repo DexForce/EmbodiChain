@@ -413,7 +413,7 @@ create a scene dependency.
 Task-state effects
 ------------------
 
-Pick, place, handover, and coordinated skills declare attachment changes as a
+Pick, place, and coordinated skills declare attachment changes as a
 :class:`~embodichain.lab.sim.atomic_actions.StateDelta`. Planning does not commit
 those changes. During closed-loop execution, a non-empty effect requires an
 external per-environment verification mask:

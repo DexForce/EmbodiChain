@@ -42,6 +42,7 @@ full-robot timed trajectory and uncommitted expected effects.
       CoordinatedPlacement
       CoordinatedPlacementOptions
       HandOver
+      HandOverGoal
       HandOverOptions
 
    .. rubric:: Built-in Goal Contracts
@@ -61,6 +62,7 @@ full-robot timed trajectory and uncommitted expected effects.
       TwistGoal
       CoordinatedPickGoal
       CoordinatedPlacementGoal
+      HandOverGoal
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.primitives
 
