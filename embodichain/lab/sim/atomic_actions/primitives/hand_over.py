@@ -597,7 +597,6 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         # rotation and changes translation only.
         receive_above_eef[:, :3, :3] = receive_grasp[:, :3, :3]
         receive_final_eef[:, :3, :3] = receive_grasp[:, :3, :3]
-
         self._report_waypoint_failure(
             context,
             "pickup_grasp",

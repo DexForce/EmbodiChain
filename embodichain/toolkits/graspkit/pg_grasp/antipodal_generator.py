@@ -664,13 +664,19 @@ class GraspGenerator:
                 raise TypeError("is_positive_part must be a bool.")
             axis = axis / axis_norm
             mesh_projection = torch.matmul(mesh_vert_transformed, axis)
-            projection_midpoint = 0.5 * (mesh_projection.min() + mesh_projection.max())
+            mesh_projection_range = mesh_projection.max() - mesh_projection.min()
+            projection_posi_threshold = (
+                mesh_projection.min() + 0.6 * mesh_projection_range
+            )
+            projection_nega_threshold = (
+                mesh_projection.min() + 0.4 * mesh_projection_range
+            )
             pair_centers = 0.5 * (origin_points_ + hit_points_)
             pair_projection = torch.matmul(pair_centers, axis)
             if is_positive_part:
-                part_mask = pair_projection > projection_midpoint
+                part_mask = pair_projection > projection_posi_threshold
             else:
-                part_mask = pair_projection < projection_midpoint
+                part_mask = pair_projection < projection_nega_threshold
             origin_points_masked = origin_points_[part_mask]
             hit_points_masked = hit_points_[part_mask]
         return self._filter_valid_grasp_poses(

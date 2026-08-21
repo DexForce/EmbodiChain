@@ -61,8 +61,13 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     serve_tutorial_scene,
 )
 
-OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
-GRIPPER_TCP_Z = 0.152
+VERTICAL_OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
+HORIZONTAL_OBJECT_MESH_PATH = get_data_path(
+    "CoordinatedPlacementAndPickment/pencil.glb"
+)
+VERTICAL_OBJECT_SCALE = (0.56, 0.56, 0.56)
+HORIZONTAL_OBJECT_SCALE = (2.0, 2.0, 2.0)
+GRIPPER_TCP_Z = 0.155
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
 SUPPORT_SURFACE_CENTER = (
@@ -76,19 +81,19 @@ SUPPORT_SURFACE_CENTER = (
 # the nearer arm for pickup and computes the middle handover position itself.
 OBJECT_INIT_XY = (0.0, 0.02)
 OBJECT_ROT_VERTICAL = (90.0, 0.0, 0.0)
-OBJECT_ROT_HORIZONTAL = (0.0, 0.0, 0.0)
+OBJECT_ROT_HORIZONTAL = (90.0, 0.0, 0.0)
 FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
-HAND_CLOSE_QPOS = 0.026
+HAND_CLOSE_QPOS = 0.04
 HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
-HANDOVER_LIFT_HEIGHT = 0.10
+HANDOVER_LIFT_HEIGHT = 0.15
 TRAJECTORY_SIM_STEPS = 4
 HANDOVER_RECORD_LOOK_AT = (
-    (-0.25, 0.02, 2.5),
-    (0.0, 0.02, 0.75),
+    (-1.0, 0.2, 1.8),
+    (-0.4, 0.0, 0.7),
     (0.0, 0.0, 1.0),
 )
 
@@ -100,6 +105,11 @@ def parse_arguments() -> argparse.Namespace:
         features=("diagnose_plan", "headless_play"),
         default_device="cpu",
         default_renderer="hybrid",
+    )
+    parser.add_argument(
+        "--is_horizontal",
+        action="store_true",
+        help="Use the horizontal WaterBasin object instead of the vertical soda can.",
     )
     return parser.parse_args()
 
@@ -116,9 +126,9 @@ def create_dual_robot(
         urdf_name=f"dual_{robot_type}_hand_over",
         tcp_z=GRIPPER_TCP_Z,
         ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
-        hand_stiffness=1e2,
-        hand_damping=1e1,
-        hand_max_effort=1e3,
+        hand_stiffness=1e3,
+        hand_damping=1e2,
+        hand_max_effort=1e4,
     )
 
 
@@ -131,12 +141,18 @@ def create_support_surface(sim: SimulationManager) -> RigidObject:
     )
 
 
-def create_handover_object(sim: SimulationManager) -> RigidObject:
-    """Create the textured mesh object on the support surface."""
+def create_handover_object(sim: SimulationManager, args) -> RigidObject:
+    """Create the mode-specific mesh object on the support surface."""
+    mesh_path = (
+        HORIZONTAL_OBJECT_MESH_PATH if args.is_horizontal else VERTICAL_OBJECT_MESH_PATH
+    )
+    body_scale = (
+        HORIZONTAL_OBJECT_SCALE if args.is_horizontal else VERTICAL_OBJECT_SCALE
+    )
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="handover_object",
-            shape=MeshCfg(fpath=OBJECT_MESH_PATH, compute_uv=False),
+            shape=MeshCfg(fpath=mesh_path, compute_uv=False),
             attrs=RigidBodyAttributesCfg(
                 mass=0.01,
                 dynamic_friction=0.97,
@@ -150,10 +166,12 @@ def create_handover_object(sim: SimulationManager) -> RigidObject:
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=1,
+            max_convex_hull_num=16,
             init_pos=[OBJECT_INIT_XY[0], OBJECT_INIT_XY[1], SUPPORT_SURFACE_Z + 0.12],
-            init_rot=OBJECT_ROT_HORIZONTAL,
-            body_scale=(0.56, 0.56, 0.56),
+            init_rot=(
+                OBJECT_ROT_VERTICAL if not args.is_horizontal else OBJECT_ROT_HORIZONTAL
+            ),
+            body_scale=body_scale,
         )
     )
 
@@ -165,7 +183,7 @@ def run_handover_demo(
 ) -> None:
     """Plan and optionally execute one unified pick-up and handover."""
     create_support_surface(sim)
-    obj = create_handover_object(sim)
+    obj = create_handover_object(sim, args)
     settle_object(sim, obj, step=0)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
