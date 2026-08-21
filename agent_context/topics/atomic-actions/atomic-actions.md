@@ -354,7 +354,11 @@ look-ahead should account for a downstream Place or HandOver target.
 uses a fresh observation before each call, delegates local recovery and safe
 stop to `ExecutionRunner`, commits only verified effects, then carries the
 session's task state and eligibility into the next grounding boundary. Manual
-execution reports `WAITING_FOR_EFFECT` and resumes through `step(effect_success=...)`;
+execution reports `WAITING_FOR_EFFECT` and resumes through
+`step(effect_success=...)`; an early non-due step leaves the request pending, so
+the caller waits for `runner_step.wait_duration`, re-reads the request, and
+submits the mask again. The facade correlates that mask with the current
+low-level verification ID;
 compatible in-place call changes use `revise_current()`, which reanalyzes the
 workflow and still inherits the runner's same-skill, same-invocation, and
 same-runtime-address restrictions. Runtime failures remain terminal; automatic
@@ -424,7 +428,7 @@ Scene dependencies must match the poses each primitive actually consumes:
 |---|---|
 | `MoveEndEffector` | A `SceneEntityPose` in `xpos`. |
 | `MoveJoints` | None; its target is qpos or a named control-profile command. |
-| `PickUp` | Always its semantic `entity_id`, when present, because the object pose is grounded once and reused; plus any goal-owned `SceneEntityPose`, such as `grasp_xpos`. These dependencies are monitored only through the `approach` segment. |
+| `PickUp` | Always its semantic `entity_id`, when present, because the object pose is grounded once and reused; plus any goal-owned `SceneEntityPose`, such as `grasp_xpos`. The semantic object ID is monitored only through `approach`; other dependencies keep their plan-declared window. |
 | `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` only when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
 | `Place` | A `SceneEntityPose` in ordinary `xpos`; for `AssembleGoal`, `base_pose` when supplied. Omitting `base_pose` uses the deprecated live `AssembleAffordance.base_object_entity` fallback with no dependency. |
 | `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
@@ -439,11 +443,14 @@ Therefore, a custom action that consumes a snapshot pose through semantic data
 must override `_scene_dependencies()`, union `super()` dependencies, and add the
 consumed semantic ID. Do not declare an ID merely because semantics are present.
 `ActionPlan.scene_dependency_end_segment` can bound dynamic-goal monitoring to
-the reversible part of a staged action. `PickUp` stops monitoring after its
-approach is dispatched: target motion before contact still replans, while
-contact-, grasp-, and lift-induced object motion is not misclassified as an
-external target update. Collision-world and joint-tracking checks remain
-independent of this boundary.
+the reversible part of a staged action for every dependency.
+`ActionPlan.scene_dependency_monitor_until` can assign each dependency an
+exclusive command-frame cutoff. An omitted dependency remains monitored for the
+whole action unless the global segment boundary applies. `PickUp` stops
+monitoring its semantic object ID after approach: object motion before contact
+still replans, while contact-, grasp-, and lift-induced motion is not
+misclassified as an external update. Collision-world and joint-tracking checks
+remain independent of these dependency windows.
 
 ## Static compilation
 
@@ -488,7 +495,7 @@ runner = ExecutionRunner(
     command_sink,
     clock=execution_clock,
 )
-result = runner.step(effect_success=None)
+result = runner.step(effect_result=None)
 ```
 
 `ExecutionSession` owns deterministic planning progress and recovery state. It
@@ -520,15 +527,53 @@ never re-enter the cohort. They are excluded from every command, replan, effect
 verification, and later invocation barrier. An all-false cohort creates a
 failed session without invoking any action planner.
 
-It replans from the latest observation within per-environment budgets. The
-budgets and eligibility masks are row-local, while the action waypoint cursor
-is batch-synchronized: one allowed replan regenerates the active cohort and
-restarts its action trajectory without charging unaffected rows. Unknown
-or exhausted failures are reported as structured `ExecutionEvent` objects. A
-non-empty `StateDelta` is not committed until the caller supplies an external
-`effect_success` mask. While verification is outstanding,
-`ExecutionTick.pending_effect` retains a typed `EffectVerificationRequest` on
-every tick; `EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
+It replans from the latest observation within per-environment budgets. Pass an
+owned boolean `eligible_mask` to `engine.start()` when a previous semantic call
+has already deactivated rows. Eligibility can only shrink; use
+`runner.deactivate_rows(mask, reason=...)` while a runner owns scheduling so its
+cached effect request stays correlated. The budgets, verified task state, and
+eligibility masks are row-local, while the action waypoint cursor and call
+barrier are batch-synchronized. One allowed replan regenerates the still-pending
+cohort without charging unaffected rows. Exhausted rows hold and never become
+eligible again.
+
+A non-empty `StateDelta` is not committed until the caller supplies a
+correlated `EffectVerificationResult`. Its disjoint `success_mask` and
+`failure_mask` must be subsets of the current request mask; requested rows in
+neither mask remain unresolved. Partial successes commit immediately while
+unresolved rows keep the barrier pending. `EffectVerificationRequest` carries a
+monotonic `verification_id`, stable `requested_at`/`deadline` values in the
+robot-observation timestamp domain, a session-local `attempt_generation`, and
+an owned effect snapshot. Mask shrinkage creates a new ID without extending the
+deadline or changing the generation; installing a replacement plan increments
+the generation. Results for an old ID are rejected. `RecoveryPolicy.action_timeout`
+covers the trajectory and terminal effect wait together, and only timestamps
+strictly greater than the deadline time out. While verification is outstanding,
+`ExecutionTick.pending_effect` retains the request on every tick;
+`EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
+
+For synchronous verification, pass `effect_verifier(context, request)` to
+`runner.step()` or `run_until_blocked()`. The runner calls it after the fresh
+due-cycle observation and supplies its result to `session.tick()` in that same
+cycle. It does not call the verifier when the observation timestamp is already
+past the request deadline. A verifier must return an exact
+`EffectVerificationResult`; all-false masks mean unresolved. External
+asynchronous integrations instead pass `effect_result` explicitly on a due
+`step()` call.
+
+```python
+request = tick.pending_effect
+effect_result = EffectVerificationResult(
+    verification_id=request.verification_id,
+    success_mask=observed_success,
+    failure_mask=observed_failure,
+)
+result = runner.step(effect_result=effect_result)
+```
+
+Cause events (`ACTION_PLANNING_FAILED`, `EFFECT_VERIFICATION_FAILED`, and
+`EFFECT_VERIFICATION_TIMEOUT`) are distinct from the `ACTION_RETRY` recovery
+event. `SESSION_COMPLETED` and `SESSION_FAILED` are distinct terminal events.
 
 Recovery replans reuse the current immutable `ResolvedActionRequest`, including
 its owned goal snapshot. Mutable goal values are copied, while simulator-backed

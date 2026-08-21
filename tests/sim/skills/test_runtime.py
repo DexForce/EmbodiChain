@@ -381,7 +381,7 @@ def test_task_preserves_verified_state_across_dynamic_segments() -> None:
 
 
 def test_manual_execution_blocks_until_effect_mask_is_submitted() -> None:
-    runtime, _ = _runtime()
+    runtime, ports = _runtime()
     execution = runtime.start(
         (Pick(object=SceneObjectRef("cube")),),
         task_id="manual_pick",
@@ -391,6 +391,12 @@ def test_manual_execution_blocks_until_effect_mask_is_submitted() -> None:
     assert blocked.status is SemanticExecutionStatus.WAITING_FOR_EFFECT
     assert blocked.pending_effect is not None
     assert execution.task_result is None
+
+    deferred = execution.step(effect_success=torch.tensor([True, True]))
+    assert deferred.status is SemanticExecutionStatus.WAITING_FOR_EFFECT
+    assert deferred.pending_effect is not None
+    assert deferred.runner_step is not None
+    ports.sleep(deferred.runner_step.wait_duration)
 
     completed = execution.step(effect_success=torch.tensor([True, True]))
     assert completed.status is SemanticExecutionStatus.COMPLETED

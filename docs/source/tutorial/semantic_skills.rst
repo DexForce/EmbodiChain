@@ -397,7 +397,9 @@ application responsibility.
 For non-blocking integration, replace ``run_segment`` with ``start_segment`` and
 advance the returned ``SemanticExecution`` through ``step``. When its status is
 ``WAITING_FOR_EFFECT``, inspect ``pending_effect`` and submit an
-``effect_success`` boolean mask on a later step.
+``effect_success`` boolean mask on a later step. If that step occurs before the
+runner is due, wait for ``runner_step.wait_duration``, re-read the current
+request, and submit the mask again.
 
 Recovery boundaries
 -------------------

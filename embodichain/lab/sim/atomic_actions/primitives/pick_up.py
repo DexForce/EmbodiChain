@@ -448,11 +448,10 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             # Once the approach is dispatched the object can move because of
             # contact or grasping. That self-induced motion must not look like
             # an external dynamic-goal update.
-            scene_dependency_end_segment=(
-                "approach"
-                if segment_lengths.get("approach", 0) > 0
-                and self._scene_dependencies(request)
-                else None
+            scene_dependency_monitor_until=(
+                {}
+                if sem.entity_id is None
+                else {sem.entity_id: segment_lengths["approach"]}
             ),
         )
 

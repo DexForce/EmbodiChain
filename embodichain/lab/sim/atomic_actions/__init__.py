@@ -56,8 +56,10 @@ from .effects import StateDelta
 from .engine import AtomicActionEngine
 from .execution import (
     EffectVerificationRequest,
+    EffectVerificationResult,
     ExecutionEvent,
     ExecutionEventKind,
+    ExecutionPlanAttempt,
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
@@ -67,6 +69,7 @@ from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
     CompiledTrajectory,
+    EffectVerificationRequirement,
     ExecutionFeedbackMode,
     PlannerDiagnostics,
     TimedTrajectory,
@@ -203,11 +206,14 @@ __all__ = [
     "EndpointCommandTransport",
     "EntityState",
     "EffectVerificationRequest",
+    "EffectVerificationRequirement",
+    "EffectVerificationResult",
     "EffectVerifier",
     "ExecutionClock",
     "ExecutionFeedbackMode",
     "ExecutionEvent",
     "ExecutionEventKind",
+    "ExecutionPlanAttempt",
     "ExecutionRunner",
     "ExecutionRunnerCfg",
     "ExecutionSession",

@@ -219,7 +219,9 @@ result.require_all_succeeded()
 {meth}`SemanticExecution.run_until_blocked` when physical verification arrives
 asynchronously. A pending effect produces
 `SemanticExecutionStatus.WAITING_FOR_EFFECT`; resume it with a boolean
-per-environment `effect_success` mask.
+per-environment `effect_success` mask. A non-blocking step made before the next
+runner cycle is due leaves the request pending; wait for
+`runner_step.wait_duration`, re-read `pending_effect`, and submit the mask again.
 
 ## Dynamic tasks
 

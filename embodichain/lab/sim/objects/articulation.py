@@ -1488,6 +1488,15 @@ class Articulation(BatchEntity):
                 data_type=ArticulationGPUAPIWriteType.JOINT_FORCE,
             )
 
+    def get_qf(self) -> torch.Tensor:
+        """Get the current generalized efforts (qf) of the articulation.
+
+        Returns:
+            torch.Tensor: Joint efforts with shape (N, dof), where N is the
+                number of environments.
+        """
+        return self.body_data.qf
+
     def get_qf_limits(
         self,
         joint_ids: Sequence[int] | torch.Tensor | None = None,

@@ -381,8 +381,10 @@ embodichain.lab.sim.atomic_actions.execution
 .. autosummary::
 
    EffectVerificationRequest
+   EffectVerificationResult
    ExecutionEvent
    ExecutionEventKind
+   ExecutionPlanAttempt
    ExecutionSession
    ExecutionStatus
    ExecutionTick
@@ -424,6 +426,7 @@ embodichain.lab.sim.atomic_actions.plans
 
    ActionPlan
    CompiledTrajectory
+   EffectVerificationRequirement
    ExecutionFeedbackMode
    PlannerDiagnostics
    TimedTrajectory

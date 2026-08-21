@@ -563,6 +563,10 @@ topics:
       - PlanningContext
       - ExecutionSession
       - EffectVerificationRequest
+      - EffectVerificationResult
+      - eligible_mask
+      - deactivate_rows
+      - effect verification deadline
       - ExecutionRunner
       - ObservationProvider
       - CommandSink

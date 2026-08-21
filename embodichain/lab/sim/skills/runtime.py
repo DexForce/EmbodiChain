@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from types import MappingProxyType, TracebackType
 from typing import TYPE_CHECKING
@@ -30,8 +30,8 @@ import torch
 from ..atomic_actions.engine import AtomicActionEngine
 from ..atomic_actions.execution import (
     EffectVerificationRequest,
+    EffectVerificationResult,
     ExecutionEvent,
-    ExecutionTick,
 )
 from ..atomic_actions.runner import (
     CommandSink,
@@ -963,13 +963,7 @@ class SemanticTask:
             raise TypeError(
                 "ObservationProvider.observe() must return PlanningContext."
             )
-        context = PlanningContext(
-            robot=observed.robot,
-            task=self._task_state,
-            scene=observed.scene,
-            env_ids=observed.env_ids,
-            control_dt=observed.control_dt,
-        )
+        context = replace(observed, task=self._task_state)
         self.runtime.engine._validate_context(context)
         previous = self._latest_context
         if previous is not None:
@@ -1079,7 +1073,9 @@ class SemanticExecution:
 
         Args:
             effect_success: Optional per-environment result for a currently
-                pending effect request. Premature submissions are rejected.
+                pending effect request. If the runner is not due yet, the
+                result is not consumed and must be submitted again after
+                ``runner_step.wait_duration``.
 
         Returns:
             Latest semantic status and its underlying runner step.
@@ -1097,7 +1093,16 @@ class SemanticExecution:
                 "effect_success may only be submitted for pending effect "
                 "verification."
             )
-        runner_step = self._runner.step(effect_success=effect_success)
+        effect_result = None
+        if effect_success is not None:
+            pending = self.pending_effect
+            if pending is None:
+                raise RuntimeError(
+                    "effect_success may only be submitted for pending effect "
+                    "verification."
+                )
+            effect_result = self._effect_result_from_success(pending, effect_success)
+        runner_step = self._runner.step(effect_result=effect_result)
         self._record_runner_step(runner_step)
         return self._consume_runner_step(runner_step)
 
@@ -1246,20 +1251,45 @@ class SemanticExecution:
     def _adapt_effect_verifier(
         self,
         verifier: SemanticEffectVerifier,
-    ) -> Callable[[PlanningContext, ExecutionTick], torch.Tensor]:
+    ) -> Callable[
+        [PlanningContext, EffectVerificationRequest],
+        EffectVerificationResult,
+    ]:
         """Adapt the semantic verifier to the low-level runner callback."""
 
-        def verify(context: PlanningContext, tick: ExecutionTick) -> torch.Tensor:
-            pending = tick.pending_effect
-            if not isinstance(pending, EffectVerificationRequest):
-                raise RuntimeError("Effect verifier was called without a request.")
+        def verify(
+            context: PlanningContext,
+            pending: EffectVerificationRequest,
+        ) -> EffectVerificationResult:
             call = self.workflow.calls[self._call_index].call
             result = verifier(call, pending, context)
-            if not isinstance(result, torch.Tensor):
-                raise TypeError("SemanticEffectVerifier must return a torch.Tensor.")
-            return result
+            return self._effect_result_from_success(pending, result)
 
         return verify
+
+    @staticmethod
+    def _effect_result_from_success(
+        request: EffectVerificationRequest,
+        success: torch.Tensor,
+    ) -> EffectVerificationResult:
+        """Correlate a semantic success mask with its low-level request."""
+        if not isinstance(success, torch.Tensor):
+            raise TypeError("SemanticEffectVerifier must return a torch.Tensor.")
+        if success.dtype != torch.bool or success.shape != request.env_mask.shape:
+            raise ValueError(
+                "Semantic effect success must be a bool tensor matching the "
+                "pending request mask."
+            )
+        if success.device != request.env_mask.device:
+            raise ValueError(
+                "Semantic effect success and the pending request must share a device."
+            )
+        verified = request.env_mask & success
+        return EffectVerificationResult(
+            verification_id=request.verification_id,
+            success_mask=verified,
+            failure_mask=request.env_mask & ~verified,
+        )
 
     def _record_runner_step(self, step: RunnerStep) -> None:
         """Retain each structured event exactly once."""
@@ -1275,7 +1305,11 @@ class SemanticExecution:
     def _consume_runner_step(self, runner_step: RunnerStep) -> SemanticExecutionStep:
         """Advance the semantic call barrier from one low-level result."""
         assert self._runner is not None
-        pending = None if runner_step.tick is None else runner_step.tick.pending_effect
+        pending = (
+            self._runner.session.pending_effect
+            if runner_step.tick is None
+            else runner_step.tick.pending_effect
+        )
         if runner_step.status is RunnerStatus.RUNNING:
             self._status = (
                 SemanticExecutionStatus.WAITING_FOR_EFFECT
