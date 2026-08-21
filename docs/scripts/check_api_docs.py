@@ -34,7 +34,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Iterator, Sequence
 
 __all__ = [
     "ApiDocsError",
@@ -136,40 +136,61 @@ DEFAULT_PACKAGE_ROOTS = (
 )
 
 
+def _module_scope_statements(node: ast.AST) -> Iterator[ast.stmt]:
+    """Yield statements reachable without entering a nested Python scope."""
+    scope_boundaries = (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef, ast.Lambda)
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, scope_boundaries):
+            continue
+        if isinstance(child, ast.stmt):
+            yield child
+        yield from _module_scope_statements(child)
+
+
 def _static_all(tree: ast.Module, source: Path) -> tuple[str, ...] | None:
-    value: ast.expr | None = None
-    for node in tree.body:
+    values: list[ast.expr] = []
+    for node in _module_scope_statements(tree):
         if isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id == "__all__"
             for target in node.targets
         ):
-            value = node.value
+            values.append(node.value)
         elif (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
             and node.target.id == "__all__"
+            and node.value is not None
         ):
-            value = node.value
+            values.append(node.value)
 
-    if value is None:
+    if not values:
         return None
 
-    try:
-        exports = ast.literal_eval(value)
-    except (ValueError, TypeError) as exc:
-        raise ApiDocsError(
-            f"{source}: __all__ must be a static list of strings"
-        ) from exc
+    combined_exports: list[str] = []
+    seen_exports: set[str] = set()
+    for value in values:
+        try:
+            exports = ast.literal_eval(value)
+        except (ValueError, TypeError) as exc:
+            raise ApiDocsError(
+                f"{source}: __all__ must be a static list of strings"
+            ) from exc
 
-    if not isinstance(exports, (list, tuple)) or not all(
-        isinstance(name, str) and name.isidentifier() for name in exports
-    ):
-        raise ApiDocsError(
-            f"{source}: __all__ must contain only valid Python identifiers"
-        )
-    if len(exports) != len(set(exports)):
-        raise ApiDocsError(f"{source}: __all__ contains duplicate names")
-    return tuple(exports)
+        if not isinstance(exports, (list, tuple)) or not all(
+            isinstance(name, str) and name.isidentifier() for name in exports
+        ):
+            raise ApiDocsError(
+                f"{source}: __all__ must contain only valid Python identifiers"
+            )
+        if len(exports) != len(set(exports)):
+            raise ApiDocsError(f"{source}: __all__ contains duplicate names")
+
+        for name in exports:
+            if name not in seen_exports:
+                seen_exports.add(name)
+                combined_exports.append(name)
+
+    return tuple(combined_exports)
 
 
 def discover_public_modules(

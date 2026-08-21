@@ -81,6 +81,29 @@ def test_discover_public_modules_uses_static_all(tmp_path: Path) -> None:
     ]
 
 
+def test_discover_public_modules_collects_branch_scoped_static_all(
+    tmp_path: Path,
+) -> None:
+    package_path = tmp_path / "sample"
+    _write(
+        package_path / "__init__.py",
+        """try:
+    __all__ = ["Primary", "Shared"]
+except ImportError:
+    __all__: list[str] = ["Fallback", "Shared"]
+
+def local_scope() -> None:
+    __all__ = ["NotAModuleExport"]
+""",
+    )
+
+    modules = discover_public_modules((PackageRoot("sample", package_path),))
+
+    assert [(module.name, module.exports) for module in modules] == [
+        ("sample", ("Primary", "Shared", "Fallback")),
+    ]
+
+
 def test_discover_public_modules_rejects_dynamic_all(tmp_path: Path) -> None:
     package_path = tmp_path / "sample"
     _write(package_path / "__init__.py", "__all__ = build_exports()\n")

@@ -68,7 +68,6 @@ EmbodiChain/
 │   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
 │   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
 │   │   │   │   │   └── randomization/  # Physics, geometry, spatial, visual randomizers
-│   │   │   │   ├── tasks/        # Deprecated import shim for official tasks
 │   │   │   │   ├── action_bank/  # Configurable action primitives
 │   │   │   │   └── wrapper/      # Env wrappers (e.g. no_fail)
 │   │   │   └── utils/            # Gym registration, misc helpers
