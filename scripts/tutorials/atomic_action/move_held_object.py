@@ -30,8 +30,6 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     EndEffectorPoseGoal,
@@ -148,26 +146,24 @@ def main() -> None:
         sim, args, "Inspect the paper cup, then press Enter to plan..."
     )
 
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
-    )
+    motion_mapping = {"primary": {"motion": "arm"}}
+    manipulation_mapping = {"primary": {"motion": "arm", "grasp": "hand"}}
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "move_end_effector",
                 EndEffectorPoseGoal(move_target),
-                binding,
-                MotionPolicy(
+                control_parts=motion_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=MOVE_SAMPLE_INTERVAL,
                 ),
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(semantics),
-                binding,
-                MotionPolicy(
+                control_parts=manipulation_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICK_SAMPLE_INTERVAL,
                 ),
@@ -177,11 +173,11 @@ def main() -> None:
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "move_held_object",
                 HeldObjectPoseGoal(object_target),
-                binding,
-                MotionPolicy(
+                control_parts=manipulation_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
                 ),

@@ -24,7 +24,9 @@ from typing import ClassVar
 
 import torch
 
+from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.affordance import PressAffordance
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     JointPositionCommand,
@@ -42,10 +44,6 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ResolvedActionRequest,
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
-from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
-    make_manipulation_slot,
-)
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -59,6 +57,9 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     interpolate_hand_qpos,
     resolve_pose_target,
     translate_pose_world,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
 )
 
 
@@ -120,8 +121,6 @@ class Press(AtomicAction[PressGoal, PressOptions]):
     skill_id: ClassVar[str] = "press"
     GoalType: ClassVar[type] = PressGoal
     OptionsType: ClassVar[type] = PressOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -173,13 +172,18 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         affordance = self._require_press_affordance(target.semantics)
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
-        manipulator = request.binding.manipulator()
-        end_effector = request.binding.end_effector()
-        arm_joint_ids = list(manipulator.joint_ids)
-        hand_joint_ids = list(end_effector.joint_ids)
+        binding = request.binding
+        motion_target = binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        grasp = binding.endpoint("primary", "grasp")
+        grasp_target = grasp.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        arm_joint_ids = list(motion_target.joint_ids)
+        hand_joint_ids = list(grasp_target.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
         start_hand_qpos = context.last_qpos[:, hand_joint_ids]
-        hand_grasp_qpos = end_effector.joint_positions(
+        hand_grasp_qpos = grasp.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
@@ -198,7 +202,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         contact_xpos = self._find_symmetric_nearest_xpos(
             contact_xpos,
             reference_xpos=self.robot.compute_fk(
-                qpos=start_arm_qpos, name=manipulator.name, to_matrix=True
+                qpos=start_arm_qpos, name=control_part, to_matrix=True
             ),
         )
         approach_xpos = translate_pose_world(
@@ -221,7 +225,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         approach_success, approach_arm = self._plan_pose_segment(
             approach_xpos,
             start_arm_qpos,
-            manipulator.name,
+            control_part,
             request,
             n_approach,
             interpolation_dt=interpolation_dt,
@@ -235,7 +239,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         contact_success, contact_arm = self._plan_pose_segment(
             contact_keyframes,
             approach_arm[:, -1],
-            manipulator.name,
+            control_part,
             request,
             n_contact,
             interpolation_dt=interpolation_dt,
@@ -250,7 +254,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         press_success, press_arm = self._plan_pose_segment(
             press_keyframes,
             contact_arm[:, -1],
-            manipulator.name,
+            control_part,
             request,
             n_press,
             interpolation_dt=interpolation_dt,
@@ -265,7 +269,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         retract_success, retract_arm = self._plan_pose_segment(
             retract_keyframes,
             press_arm[:, -1],
-            manipulator.name,
+            control_part,
             request,
             n_retract,
             interpolation_dt=interpolation_dt,

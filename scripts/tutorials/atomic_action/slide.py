@@ -32,7 +32,6 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
@@ -168,6 +167,7 @@ def create_drawer_semantics(
 
 
 def create_invocation(
+    engine: AtomicActionEngine,
     semantics: ObjectSemantics,
     *,
     direction: Literal["pull", "push"],
@@ -177,6 +177,7 @@ def create_invocation(
     """Create one pull or push invocation for the shared drawer target.
 
     Args:
+        engine: Engine used to resolve the slide control-part binding.
         semantics: Drawer-handle semantics shared by both operations.
         direction: Whether this invocation pulls open or pushes closed.
         approach_distance: Pre-grasp offset opposite the approach axis.
@@ -185,16 +186,13 @@ def create_invocation(
     Returns:
         A grounded pull/push invocation for the tutorial UR5.
     """
-    return ActionInvocation(
-        skill_id="slide",
-        goal=SlideGoal(
+    return engine.make_invocation(
+        "slide",
+        SlideGoal(
             semantics,
             SceneEntityPose(HANDLE_SCENE_ENTITY_ID),
         ),
-        binding=ActionBinding(
-            manipulators={"primary": "arm"},
-            end_effectors={"primary": "hand"},
-        ),
+        control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
         motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
         skill_options=SlideOptions(
             direction=direction,
@@ -262,6 +260,7 @@ def main() -> None:
         compiled = engine.compile(
             (
                 create_invocation(
+                    engine,
                     semantics,
                     direction=direction,
                     approach_distance=args.approach_distance,

@@ -30,8 +30,6 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     HandOverGoal,
@@ -211,20 +209,20 @@ def run_handover_demo(
         sim.update(step=10)
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "hand_over",
                 HandOverGoal(object_semantics, target_pose=final_pose),
-                ActionBinding(
-                    manipulators={
-                        "source": "left_arm",
-                        "destination": "right_arm",
+                control_parts={
+                    "source": {
+                        "motion": "left_arm",
+                        "grasp": "left_hand",
                     },
-                    end_effectors={
-                        "source": "left_hand",
-                        "destination": "right_hand",
+                    "destination": {
+                        "motion": "right_arm",
+                        "grasp": "right_hand",
                     },
-                ),
-                MotionPolicy(
+                },
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=HANDOVER_SAMPLE_INTERVAL,
                 ),

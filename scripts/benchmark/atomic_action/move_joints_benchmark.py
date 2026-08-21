@@ -106,17 +106,19 @@ def _qpos(values, device):
     return torch.tensor(values, dtype=torch.float32, device=device)
 
 
-def _targets_for_sequence(sequence_case: JointSequenceCase, device):
+def _targets_for_sequence(atomic_engine, sequence_case: JointSequenceCase, device):
     """Build typed MoveJoints targets for a sequence case."""
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         JointPositionGoal,
         MotionPolicy,
     )
 
     targets = []
-    binding = ActionBinding(manipulators={"primary": "arm"})
+    binding = atomic_engine.bind_control_parts(
+        "move_joints",
+        {"primary": {"motion": "arm"}},
+    )
     policy = MotionPolicy(sample_count=MOVE_JOINTS_SAMPLE_INTERVAL)
     for index, name in enumerate(sequence_case.sequence):
         if index == 0 and name == "ready":
@@ -147,7 +149,7 @@ def _run_case(
     """Run one MoveJoints case."""
     torch = ensure_torch()
     reset_robot(robot, initial_qpos)
-    steps = _targets_for_sequence(case, sim.device)
+    steps = _targets_for_sequence(atomic_engine, case, sim.device)
     elapsed, mem_delta, peak_gpu, result = timed_call(
         lambda: atomic_engine.compile(steps)
     )

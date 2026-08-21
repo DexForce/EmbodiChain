@@ -8,8 +8,9 @@ embodichain.lab.sim.atomic_actions
    .. autosummary::
 
       ActionBinding
-      ResolvedActionBinding
-      ResolvedControlPart
+      EndpointBinding
+      RuntimeEndpointTarget
+      JointPositionTarget
       ControlCommand
       JointPositionCommand
       ControlPartCommandProfile
@@ -26,8 +27,14 @@ embodichain.lab.sim.atomic_actions
       PlanningContext
       StateDelta
       TimedTrajectory
+      RuntimeCommandPayload
+      JointPositionPayload
+      EndpointCommand
+      RuntimeCommandFrame
+      TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
+      ExecutionFeedbackMode
       ActionPlan
       CompiledTrajectory
 
@@ -39,7 +46,6 @@ embodichain.lab.sim.atomic_actions
       SkillBindingContract
       SkillResourceSlot
       SkillEndpointRequirement
-      ActionBindingRoute
       DisjointSlotEndpoints
       DisjointResourceSlots
 
@@ -56,6 +62,8 @@ embodichain.lab.sim.atomic_actions
       RunnerStatus
       ObservationProvider
       CommandSink
+      EndpointCommandTransport
+      EndpointCommandRouter
       CommandAcknowledgement
       CommandAckStatus
       CommandDispatch
@@ -64,7 +72,6 @@ embodichain.lab.sim.atomic_actions
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
-      JointCommand
       ExecutionEvent
       ExecutionEventKind
       ExecutionStatus
@@ -133,9 +140,6 @@ Semantic resource contracts
 .. autoclass:: SkillEndpointRequirement
    :members:
 
-.. autoclass:: ActionBindingRoute
-   :members:
-
 .. autoclass:: DisjointSlotEndpoints
    :members:
 
@@ -163,10 +167,13 @@ Planning and state
 .. autoclass:: ActionBinding
    :members:
 
-.. autoclass:: ResolvedActionBinding
+.. autoclass:: EndpointBinding
    :members:
 
-.. autoclass:: ResolvedControlPart
+.. autoclass:: RuntimeEndpointTarget
+   :members:
+
+.. autoclass:: JointPositionTarget
    :members:
 
 .. autoclass:: ControlCommand
@@ -219,6 +226,24 @@ Planning and state
 .. autoclass:: TimedTrajectory
    :members:
 
+.. autoclass:: RuntimeCommandPayload
+   :members:
+
+.. autoclass:: JointPositionPayload
+   :members:
+
+.. autoclass:: EndpointCommand
+   :members:
+
+.. autoclass:: RuntimeCommandFrame
+   :members:
+
+.. autoclass:: TimedCommandSequence
+   :members:
+
+.. autoclass:: ExecutionFeedbackMode
+   :members:
+
 .. autoclass:: ActionPlan
    :members:
 
@@ -245,6 +270,12 @@ Engine and execution
    :members:
 
 .. autoclass:: CommandSink
+   :members:
+
+.. autoclass:: EndpointCommandTransport
+   :members:
+
+.. autoclass:: EndpointCommandRouter
    :members:
 
 .. autoclass:: ExecutionClock
@@ -275,9 +306,6 @@ Engine and execution
    :members:
 
 .. autoclass:: ExecutionTick
-   :members:
-
-.. autoclass:: JointCommand
    :members:
 
 .. autoclass:: ExecutionEvent

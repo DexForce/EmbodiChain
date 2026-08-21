@@ -59,28 +59,16 @@ class TestPlanResultBatched:
             velocities=torch.zeros(2, 10, 7),
             accelerations=torch.zeros(2, 10, 7),
             dt=dt,
-            duration=dt.sum(dim=1),
         )
         assert r.positions.shape == (2, 10, 7)
         assert r.dt.shape == (2, 10)
         assert r.duration.shape == (2,)
+        assert torch.equal(r.duration, dt.sum(dim=1))
 
-    def test_positions_require_complete_matching_timing(self):
+    def test_positions_require_explicit_timing(self):
         positions = torch.zeros(2, 3, 7)
         with pytest.raises(ValueError, match="explicit dt"):
             PlanResult(success=True, positions=positions)
-
-        dt = torch.zeros(2, 3)
-        with pytest.raises(ValueError, match="explicit duration"):
-            PlanResult(success=True, positions=positions, dt=dt)
-
-        with pytest.raises(ValueError, match="equal"):
-            PlanResult(
-                success=True,
-                positions=positions,
-                dt=dt,
-                duration=torch.ones(2),
-            )
 
 
 class TestValidateBatchConsistency:

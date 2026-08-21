@@ -32,7 +32,7 @@ from embodichain.utils.math import (
 )
 
 from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
-from embodichain.lab.sim.atomic_actions.bindings import ResolvedControlPart
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     OPEN_COMMAND,
@@ -185,18 +185,20 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         target = request.goal
         options = request.skill_options
         affordance = self._require_axis_align_affordance(target.semantics)
-        manipulator = request.binding.manipulator()
-        end_effector = request.binding.end_effector()
+        motion_endpoint = request.binding.endpoint("primary", "motion")
+        grasp_endpoint = request.binding.endpoint("primary", "grasp")
+        manipulator = motion_endpoint.require_target(JointPositionTarget)
+        end_effector = grasp_endpoint.require_target(JointPositionTarget)
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
-        hand_open_qpos = end_effector.joint_positions(
+        hand_open_qpos = grasp_endpoint.joint_positions(
             OPEN_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        hand_grasp_qpos = end_effector.joint_positions(
+        hand_grasp_qpos = grasp_endpoint.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
@@ -250,7 +252,9 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         grasp_xpos = self._find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
-                qpos=start_arm_qpos, name=manipulator.name, to_matrix=True
+                qpos=start_arm_qpos,
+                name=manipulator.control_part,
+                to_matrix=True,
             ),
         )
         grasp_success = normalize_success_mask(
@@ -479,7 +483,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         self,
         target_pose: torch.Tensor,
         start_qpos: torch.Tensor,
-        manipulator: ResolvedControlPart,
+        manipulator: JointPositionTarget,
         request: ResolvedActionRequest[AxisAlignGoal, AxisAlignOptions],
         sample_count: int,
         interpolation_dt: float,
@@ -489,7 +493,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             build_pose_plan_states(target_pose),
             options=request.motion_policy.to_motion_gen_options(
                 start_qpos=start_qpos,
-                control_part=manipulator.name,
+                control_part=manipulator.control_part,
                 sample_count=sample_count,
                 interpolation_dt=interpolation_dt,
             ),

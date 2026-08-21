@@ -27,6 +27,7 @@ import torch
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     JointPositionCommand,
@@ -104,9 +105,11 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
         """Plan a held-object rotation followed by the inverse rotation."""
         self.require_goal(request)
         options = request.skill_options
-        manipulator = request.binding.manipulator()
-        end_effector = request.binding.end_effector()
-        control_part = manipulator.name
+        motion_endpoint = request.binding.endpoint("primary", "motion")
+        grasp_endpoint = request.binding.endpoint("primary", "grasp")
+        manipulator = motion_endpoint.require_target(JointPositionTarget)
+        end_effector = grasp_endpoint.require_target(JointPositionTarget)
+        control_part = manipulator.control_part
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
 
@@ -179,7 +182,7 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
         assert result.dt is not None
         success = result.success & eligible
 
-        hand_grasp_qpos = end_effector.joint_positions(
+        hand_grasp_qpos = grasp_endpoint.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,
             device=self.device,

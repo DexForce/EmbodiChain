@@ -22,7 +22,6 @@ from collections.abc import Mapping
 
 from ..control import ControlCommand
 from ..requirements import (
-    ActionBindingRoute,
     DisjointSlotEndpoints,
     GRASP_CAPABILITY,
     SkillEndpointRequirement,
@@ -35,14 +34,13 @@ def make_motion_slot(
     *,
     capabilities: frozenset[str],
 ) -> SkillResourceSlot:
-    """Build one current-core manipulator slot."""
+    """Build one motion-endpoint resource slot."""
     return SkillResourceSlot(
         slot_id=role,
         endpoints=(
             SkillEndpointRequirement(
                 endpoint_id="motion",
                 capabilities=capabilities,
-                route=ActionBindingRoute("manipulator", role),
             ),
         ),
     )
@@ -61,13 +59,11 @@ def make_manipulation_slot(
             SkillEndpointRequirement(
                 endpoint_id="motion",
                 capabilities=motion_capabilities,
-                route=ActionBindingRoute("manipulator", role),
             ),
             SkillEndpointRequirement(
                 endpoint_id="grasp",
                 capabilities=frozenset({GRASP_CAPABILITY}),
                 required_commands=grasp_commands,
-                route=ActionBindingRoute("end_effector", role),
             ),
         ),
         constraints=(DisjointSlotEndpoints(("motion", "grasp")),),

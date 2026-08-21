@@ -29,8 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 from typing import Sequence
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     AxisAlignAffordance,
     AxisAlignGoal,
@@ -181,13 +179,12 @@ def main() -> None:
 
     compiled = engine.compile(
         (
-            ActionInvocation(
-                skill_id="axis_align",
-                goal=AxisAlignGoal(semantics),
-                binding=ActionBinding(
-                    manipulators={"primary": "arm"},
-                    end_effectors={"primary": "hand"},
-                ),
+            engine.make_invocation(
+                "axis_align",
+                AxisAlignGoal(semantics),
+                control_parts={
+                    "primary": {"motion": "arm", "grasp": "hand"},
+                },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=ALIGN_SAMPLE_INTERVAL,

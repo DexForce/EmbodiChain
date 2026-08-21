@@ -255,6 +255,7 @@ class SimulationManager:
         instance = super(SimulationManager, cls).__new__(cls)
         # Store sim_config in the instance for use in __init__ or elsewhere
         instance.sim_config = sim_config
+        instance._is_constructed = False
         cls._instances[n_instance] = instance
         return instance
 
@@ -377,6 +378,8 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
+
+        self._is_constructed = True
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -3116,6 +3119,12 @@ class SimulationManager:
         if self.is_window_recording():
             self.stop_window_record()
         self.wait_window_record_saves()
+
+        # Stop the render loop before releasing scene resources. Vulkan window
+        # presentation may otherwise continue acquiring swapchain images while
+        # Env::Clean tears down render objects used by the in-flight frame.
+        if getattr(self, "is_window_opened", False):
+            self.close_window()
 
         import sys, gc
 

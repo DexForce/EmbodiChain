@@ -36,22 +36,30 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     DynamicCollisionMode,
     EndEffectorPoseGoal,
+    EndpointBinding,
+    EndpointCommand,
     EntityState,
     ExecutionEventKind,
     ExecutionStatus,
     GraspGoal,
     HeldObjectState,
+    JointPositionPayload,
+    JointPositionTarget,
     MotionPolicy,
     ObjectSemantics,
     PlanningContext,
     RecoveryPolicy,
-    ResolvedActionBinding,
     ResolvedActionRequest,
     RobotObservation,
+    RuntimeCommandFrame,
     SceneEntityPose,
     SceneSnapshot,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
     StateDelta,
     TaskState,
+    TimedCommandSequence,
     TimedTrajectory,
 )
 from embodichain.lab.sim.common import BatchEntity
@@ -64,7 +72,14 @@ class DynamicAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
 
     skill_id: ClassVar[str] = "dynamic"
     GoalType: ClassVar[type] = EndEffectorPoseGoal
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(SkillEndpointRequirement(endpoint_id="motion"),),
+            ),
+        )
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -98,6 +113,7 @@ class EffectAction(DynamicAction):
     """Dynamic test action that declares an attachment effect."""
 
     skill_id: ClassVar[str] = "effect"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
 
     def _plan(
         self,
@@ -133,6 +149,7 @@ class FailedEffectAction(EffectAction):
     """Effect-declaring action whose planner fails for every environment."""
 
     skill_id: ClassVar[str] = "failed_effect"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
 
     def _plan(
         self,
@@ -147,6 +164,7 @@ class NonuniformTimingAction(DynamicAction):
     """Test action with explicit nonuniform waypoint arrival intervals."""
 
     skill_id: ClassVar[str] = "nonuniform_timing"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
 
     def _plan(
         self,
@@ -173,6 +191,82 @@ class NonuniformTimingAction(DynamicAction):
             context,
             success=True,
             trajectory=trajectory,
+        )
+
+
+class DestinationSequenceAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
+    """Emit a configured destination sequence across recovery plans."""
+
+    skill_id: ClassVar[str] = "destination_sequence"
+    GoalType: ClassVar[type] = EndEffectorPoseGoal
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(endpoint_id="first"),
+                    SkillEndpointRequirement(endpoint_id="second"),
+                ),
+            ),
+        )
+    )
+
+    def __init__(self, destinations: tuple[str | None, ...]) -> None:
+        super().__init__()
+        self.destinations = destinations
+        self.plan_count = 0
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        self.require_goal(request)
+        index = min(self.plan_count, len(self.destinations) - 1)
+        endpoint_id = self.destinations[index]
+        self.plan_count += 1
+        if endpoint_id is None:
+            commands = TimedCommandSequence(frames=(), env_ids=context.env_ids)
+            return self.build_command_plan(
+                request,
+                context,
+                success=False,
+                commands=commands,
+            )
+
+        target = request.binding.endpoint("primary", endpoint_id).require_target(
+            JointPositionTarget
+        )
+        joint_ids = list(target.joint_ids)
+        frame = RuntimeCommandFrame(
+            commands=(
+                EndpointCommand(
+                    target=target,
+                    payload=JointPositionPayload(
+                        positions=context.robot.qpos[:, joint_ids]
+                    ),
+                ),
+            ),
+            active_mask=torch.ones(
+                context.batch_size,
+                dtype=torch.bool,
+                device=context.robot.qpos.device,
+            ),
+            env_ids=context.env_ids,
+            hold_duration=torch.zeros(
+                context.batch_size,
+                dtype=torch.float32,
+                device=context.robot.qpos.device,
+            ),
+        )
+        return self.build_command_plan(
+            request,
+            context,
+            success=True,
+            commands=TimedCommandSequence(
+                frames=(frame,),
+                env_ids=context.env_ids,
+            ),
         )
 
 
@@ -214,6 +308,30 @@ def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
     generator.supports_dynamic_collision_world = False
     engine = AtomicActionEngine(generator, load_builtins=False)
     action = DynamicAction()
+    engine.register(action)
+    return engine, action
+
+
+def _destination_engine(
+    destinations: tuple[str | None, ...],
+) -> tuple[AtomicActionEngine, DestinationSequenceAction]:
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 2
+    robot.control_parts = {"arm_a": object(), "arm_b": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 2)
+    robot.get_qvel.return_value = torch.zeros(1, 2)
+    robot.get_joint_ids.side_effect = lambda *, name: {
+        "arm_a": [0],
+        "arm_b": [1],
+    }[name]
+    generator = Mock()
+    generator.robot = robot
+    generator.device = torch.device("cpu")
+    generator.planner.cfg.planner_type = "stub"
+    generator.supports_dynamic_collision_world = False
+    engine = AtomicActionEngine(generator, load_builtins=False)
+    action = DestinationSequenceAction(destinations)
     engine.register(action)
     return engine, action
 
@@ -282,6 +400,7 @@ def _collision_context(
 
 
 def _invocation(
+    engine: AtomicActionEngine,
     *,
     skill_id: str = "dynamic",
     max_replans: int = 2,
@@ -293,7 +412,10 @@ def _invocation(
     return ActionInvocation(
         skill_id=skill_id,
         goal=EndEffectorPoseGoal(SceneEntityPose("target")),
-        binding=ActionBinding(manipulators={"primary": "arm"}),
+        binding=engine.planning_services.bind_control_parts(
+            DynamicAction.binding_contract,
+            {"primary": {"motion": "arm"}},
+        ),
         motion_policy=MotionPolicy(
             sample_count=2,
             strategy=strategy,
@@ -310,17 +432,50 @@ def _invocation(
     )
 
 
+def _destination_invocation(
+    engine: AtomicActionEngine,
+) -> ActionInvocation[EndEffectorPoseGoal]:
+    return ActionInvocation(
+        skill_id=DestinationSequenceAction.skill_id,
+        goal=EndEffectorPoseGoal(SceneEntityPose("target")),
+        binding=engine.bind_control_parts(
+            DestinationSequenceAction.skill_id,
+            {
+                "primary": {
+                    "first": "arm_a",
+                    "second": "arm_b",
+                }
+            },
+        ),
+        recovery_policy=RecoveryPolicy(
+            max_replans=2,
+            max_action_retries=1,
+            goal_translation_threshold=0.02,
+        ),
+        invocation_id="destination-call",
+    )
+
+
+def _joint_positions(command: RuntimeCommandFrame | None) -> torch.Tensor:
+    """Return the only joint-position payload emitted by the test action."""
+    assert command is not None
+    assert len(command.commands) == 1
+    payload = command.commands[0].payload
+    assert isinstance(payload, JointPositionPayload)
+    return payload.positions
+
+
 def test_session_completes_incremental_command_sequence() -> None:
     engine, _ = _engine()
-    session = engine.start((_invocation(),), _context(0.0, 0.0, 0.2, 0))
+    session = engine.start((_invocation(engine),), _context(0.0, 0.0, 0.2, 0))
 
     first = session.tick(_context(0.0, 0.0, 0.2, 0))
     second = session.tick(_context(0.1, 0.0, 0.2, 0))
     final = session.tick(_context(0.2, 0.2, 0.2, 0))
 
-    assert first.command is not None and torch.all(first.command.positions == 0.0)
+    assert torch.all(_joint_positions(first.command) == 0.0)
     assert all(event.invocation_id == "dynamic-call" for event in first.events)
-    assert second.command is not None and torch.all(second.command.positions == 0.2)
+    assert torch.all(_joint_positions(second.command) == 0.2)
     assert final.status is ExecutionStatus.COMPLETED
     assert final.eligible_mask.tolist() == [True]
 
@@ -329,7 +484,7 @@ def test_session_commands_schedule_arrivals_and_final_settling() -> None:
     engine, _ = _engine()
     engine.register(NonuniformTimingAction())
     session = engine.start(
-        (_invocation(skill_id="nonuniform_timing"),),
+        (_invocation(engine, skill_id="nonuniform_timing"),),
         _context(0.0, 0.0, 0.2, 0),
     )
 
@@ -367,7 +522,7 @@ def test_request_snapshot_preserves_live_entity_identity() -> None:
     request = ResolvedActionRequest(
         skill_id="pick_up",
         goal=goal,
-        binding=ResolvedActionBinding(),
+        binding=ActionBinding(owner_id="snapshot-test"),
         motion_policy=MotionPolicy(),
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
@@ -387,7 +542,7 @@ def test_request_snapshot_preserves_live_entity_identity() -> None:
 
 def test_scene_motion_replans_late_bound_goal() -> None:
     engine, action = _engine()
-    session = engine.start((_invocation(),), _context(0.0, 0.0, 0.1, 0))
+    session = engine.start((_invocation(engine),), _context(0.0, 0.0, 0.1, 0))
     session.tick(_context(0.0, 0.0, 0.1, 0))
 
     tick = session.tick(_context(0.1, 0.0, 0.3, 1))
@@ -398,6 +553,52 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     assert action.plan_count == 2
     assert action.requests[0] is action.requests[1]
     assert tick.command is not None
+
+
+def test_recovery_replan_rejects_runtime_destination_change() -> None:
+    engine, action = _destination_engine(("first", "second"))
+    invocation = _destination_invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((invocation,), initial)
+
+    activated = session.tick(initial)
+    assert activated.command is not None
+    assert activated.command.commands[0].target.target_id == "arm_a"
+
+    with pytest.raises(
+        ValueError,
+        match="Recovery replans must preserve the active runtime destination set",
+    ) as exc_info:
+        session.tick(_context(0.1, 0.0, 0.3, 1))
+
+    assert "arm_a" in str(exc_info.value)
+    assert "arm_b" in str(exc_info.value)
+    assert action.plan_count == 2
+
+
+def test_empty_failed_replan_preserves_destination_for_same_target_retry() -> None:
+    engine, action = _destination_engine(("first", None, "first"))
+    invocation = _destination_invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((invocation,), initial)
+
+    activated = session.tick(initial)
+    assert activated.command is not None
+    assert activated.command.commands[0].target.target_id == "arm_a"
+
+    recovered = session.tick(_context(0.1, 0.0, 0.3, 1))
+
+    kinds = [event.kind for event in recovered.events]
+    assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED in kinds
+    assert ExecutionEventKind.ACTION_RETRY in kinds
+    assert kinds.count(ExecutionEventKind.REPLANNED) == 2
+    assert action.plan_count == 3
+    assert recovered.command is None
+    assert [target.target_id for target in recovered.hold_targets] == ["arm_a"]
+
+    resumed = session.tick(_context(0.2, 0.0, 0.3, 1))
+    assert resumed.command is not None
+    assert resumed.command.commands[0].target.target_id == "arm_a"
 
 
 def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
@@ -415,7 +616,7 @@ def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
         (0,),
     )
     session = engine.start(
-        (_invocation(strategy="motion_gen"),),
+        (_invocation(engine, strategy="motion_gen"),),
         initial,
     )
     session.tick(initial)
@@ -454,6 +655,7 @@ def test_collision_world_exhaustion_only_disables_changed_environment() -> None:
     session = engine.start(
         (
             _invocation(
+                engine,
                 max_replans=0,
                 strategy="motion_gen",
             ),
@@ -502,6 +704,7 @@ def test_dynamic_collision_off_skips_binding_and_revision_recovery() -> None:
     session = engine.start(
         (
             _invocation(
+                engine,
                 strategy="motion_gen",
                 dynamic_collision_mode=DynamicCollisionMode.OFF,
             ),
@@ -532,6 +735,7 @@ def test_required_dynamic_collision_rejects_incompatible_strategy() -> None:
     with pytest.raises(ValueError, match="strategy='motion_gen'"):
         engine.plan(
             _invocation(
+                engine,
                 dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
             ),
             _collision_context(
@@ -550,6 +754,7 @@ def test_required_dynamic_collision_rejects_missing_scene_entities() -> None:
     with pytest.raises(ValueError, match="scene collision entities"):
         engine.plan(
             _invocation(
+                engine,
                 strategy="motion_gen",
                 dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
             ),
@@ -563,6 +768,7 @@ def test_required_dynamic_collision_rejects_unsupported_planner() -> None:
     with pytest.raises(ValueError, match="dynamic collision-world support"):
         engine.plan(
             _invocation(
+                engine,
                 strategy="motion_gen",
                 dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
             ),
@@ -585,6 +791,7 @@ def test_required_dynamic_collision_binds_supported_scene() -> None:
 
     plan = engine.plan(
         _invocation(
+            engine,
             strategy="motion_gen",
             dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
         ),
@@ -604,7 +811,7 @@ def test_resolved_goal_snapshot_is_reused_during_recovery() -> None:
     engine, action = _engine()
     target = torch.eye(4).unsqueeze(0)
     target[:, 0, 3] = 0.2
-    base = _invocation()
+    base = _invocation(engine)
     invocation = ActionInvocation(
         skill_id=base.skill_id,
         goal=EndEffectorPoseGoal(target),
@@ -629,7 +836,7 @@ def test_resolved_goal_snapshot_is_reused_during_recovery() -> None:
 def test_subset_replan_restarts_synchronized_active_cohort() -> None:
     engine, action = _engine(batch_size=2)
     session = engine.start(
-        (_invocation(),),
+        (_invocation(engine),),
         _context(0.0, (0.0, 0.0), (0.1, 0.2), 0),
     )
     session.tick(_context(0.0, (0.0, 0.0), (0.1, 0.2), 0))
@@ -650,17 +857,18 @@ def test_subset_replan_restarts_synchronized_active_cohort() -> None:
     assert changed.env_mask.tolist() == [True, False]
     assert cohort.env_mask.tolist() == [True, True]
     assert replanned.eligible_mask.tolist() == [True, True]
-    assert replanned.command is not None
-    assert torch.all(replanned.command.positions == 0.0)
-    assert next_command.command is not None
-    assert torch.equal(next_command.command.positions[:, 0], torch.tensor([0.4, 0.2]))
+    assert torch.all(_joint_positions(replanned.command) == 0.0)
+    assert torch.equal(
+        _joint_positions(next_command.command)[:, 0],
+        torch.tensor([0.4, 0.2]),
+    )
     assert action.plan_count == 2
 
 
 def test_replan_exhaustion_disables_only_triggering_row() -> None:
     engine, _ = _engine(batch_size=2)
     session = engine.start(
-        (_invocation(max_replans=1),),
+        (_invocation(engine, max_replans=1),),
         _context(0.0, (0.0, 0.0), (0.1, 0.2), 0),
     )
     session.tick(_context(0.0, (0.0, 0.0), (0.1, 0.2), 0))
@@ -680,9 +888,51 @@ def test_replan_exhaustion_disables_only_triggering_row() -> None:
     assert exhausted.command.active_mask.tolist() == [False, True]
 
 
+def test_action_retry_resets_replan_budget_only_for_allowed_rows() -> None:
+    engine, _ = _engine(batch_size=2)
+    session = engine.start(
+        (
+            _invocation(
+                engine,
+                max_replans=1,
+                max_action_retries=1,
+            ),
+        ),
+        _context(0.0, (0.0, 0.0), (0.1, 0.2), 0),
+    )
+    session.tick(_context(0.0, (0.0, 0.0), (0.1, 0.2), 0))
+
+    row_b_replan = session.tick(_context(0.1, (0.0, 0.0), (0.1, 0.4), 1))
+    changed = next(
+        event
+        for event in row_b_replan.events
+        if event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED
+    )
+    assert changed.env_mask.tolist() == [False, True]
+
+    retry_events = session._attempt_action_retry(
+        torch.tensor([True, False]),
+        ExecutionEventKind.ACTION_TIMEOUT,
+        "Row A starts a new action attempt.",
+    )
+    retried = next(
+        event for event in retry_events if event.kind is ExecutionEventKind.ACTION_RETRY
+    )
+    assert retried.env_mask.tolist() == [True, False]
+
+    row_b_exhausted = session.tick(_context(0.2, (0.0, 0.0), (0.1, 0.6), 2))
+    exhausted = next(
+        event
+        for event in row_b_exhausted.events
+        if event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED
+    )
+    assert exhausted.env_mask.tolist() == [False, True]
+    assert row_b_exhausted.eligible_mask.tolist() == [True, False]
+
+
 def test_session_revision_replans_from_latest_context() -> None:
     engine, action = _engine()
-    original = _invocation()
+    original = _invocation(engine)
     session = engine.start((original,), _context(0.0, 0.0, 0.1, 0))
     revised_pose = torch.eye(4).unsqueeze(0)
     revised_pose[:, 0, 3] = 0.8
@@ -708,13 +958,12 @@ def test_session_revision_replans_from_latest_context() -> None:
         and event.invocation_revision == 1
         for event in first.events
     )
-    assert second.command is not None
-    assert torch.all(second.command.positions == 0.8)
+    assert torch.all(_joint_positions(second.command) == 0.8)
 
 
 def test_session_revision_must_advance_same_invocation() -> None:
     engine, _ = _engine()
-    original = _invocation()
+    original = _invocation(engine)
     session = engine.start((original,), _context(0.0, 0.0, 0.1, 0))
 
     with pytest.raises(ValueError, match="must advance"):
@@ -734,10 +983,84 @@ def test_session_revision_must_advance_same_invocation() -> None:
         )
 
 
+def test_session_revision_rejects_runtime_destination_change() -> None:
+    engine, action = _destination_engine(("first", "second"))
+    invocation = _destination_invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((invocation,), initial)
+
+    with pytest.raises(
+        ValueError,
+        match="Invocation revisions must preserve the active runtime destination set",
+    ) as exc_info:
+        session.revise_current(replace(invocation, revision=1))
+
+    assert "Start a new invocation" in str(exc_info.value)
+    assert "arm_a" in str(exc_info.value)
+    assert "arm_b" in str(exc_info.value)
+    assert action.plan_count == 2
+
+    active = session.tick(initial)
+    assert active.command is not None
+    assert active.command.commands[0].target.target_id == "arm_a"
+
+
+def test_session_revision_rejects_empty_target_plan() -> None:
+    engine, action = _destination_engine(("first", None))
+    invocation = _destination_invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((invocation,), initial)
+
+    with pytest.raises(ValueError, match="empty replacement plan"):
+        session.revise_current(replace(invocation, revision=1))
+
+    assert action.plan_count == 2
+    active = session.tick(initial)
+    assert active.command is not None
+    assert active.command.commands[0].target.target_id == "arm_a"
+
+
+def test_session_revision_rejects_changed_target_address_fingerprint() -> None:
+    engine, action = _engine()
+    invocation = _invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((invocation,), initial)
+    endpoint = invocation.binding.endpoint("primary", "motion")
+    changed_endpoint = EndpointBinding(
+        slot_id=endpoint.slot_id,
+        endpoint_id=endpoint.endpoint_id,
+        resource_id=endpoint.resource_id,
+        adapter_id=endpoint.adapter_id,
+        target=JointPositionTarget(control_part="arm", joint_ids=(0,)),
+        capabilities=endpoint.capabilities,
+        commands=endpoint.commands,
+        claim_tokens=endpoint.claim_tokens,
+        joint_ids=(0,),
+    )
+    revised = replace(
+        invocation,
+        binding=ActionBinding(
+            owner_id=invocation.binding.owner_id,
+            endpoints=(changed_endpoint,),
+        ),
+        revision=1,
+    )
+
+    with pytest.raises(ValueError, match="address fingerprint"):
+        session.revise_current(revised)
+
+    assert action.plan_count == 2
+    active = session.tick(initial)
+    assert active.command is not None
+    target = active.command.commands[0].target
+    assert isinstance(target, JointPositionTarget)
+    assert target.joint_ids == (0, 1)
+
+
 def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
     engine, _ = _engine()
     session = engine.start(
-        (_invocation(max_replans=0),),
+        (_invocation(engine, max_replans=0),),
         _context(0.0, 0.0, 0.2, 0),
     )
     session.tick(_context(0.0, 0.0, 0.2, 0))
@@ -756,6 +1079,7 @@ def test_action_timeout_retry_budget_is_bounded() -> None:
     session = engine.start(
         (
             _invocation(
+                engine,
                 max_action_retries=1,
                 action_timeout=0.05,
             ),
@@ -782,7 +1106,7 @@ def test_action_timeout_retry_budget_is_bounded() -> None:
 def test_session_rejects_changed_environment_identity() -> None:
     engine, _ = _engine()
     initial = _context(0.0, 0.0, 0.2, 0)
-    session = engine.start((_invocation(),), initial)
+    session = engine.start((_invocation(engine),), initial)
     changed = PlanningContext(
         robot=initial.robot,
         task=initial.task,
@@ -796,7 +1120,7 @@ def test_session_rejects_changed_environment_identity() -> None:
 
 def test_session_rejects_regressing_scene_snapshot() -> None:
     engine, _ = _engine()
-    session = engine.start((_invocation(),), _context(1.0, 0.0, 0.2, 2))
+    session = engine.start((_invocation(engine),), _context(1.0, 0.0, 0.2, 2))
 
     with pytest.raises(ValueError, match="versions must be monotonic"):
         session.tick(_context(1.0, 0.0, 0.2, 1))
@@ -807,7 +1131,7 @@ def test_session_rejects_regressing_collision_world_revision() -> None:
     qpos = torch.zeros(1, 2)
     initial = _collision_context(0.0, qpos, torch.tensor([0.4]), (2,))
     session = engine.start(
-        (_invocation(strategy="motion_gen"),),
+        (_invocation(engine, strategy="motion_gen"),),
         initial,
     )
     regressed = _collision_context(0.1, qpos, torch.tensor([0.4]), (1,))
@@ -820,7 +1144,7 @@ def test_nonempty_effect_is_committed_only_after_external_verification() -> None
     engine, _ = _engine()
     effect = EffectAction()
     engine.register(effect)
-    invocation = _invocation()
+    invocation = _invocation(engine)
     invocation = ActionInvocation(
         skill_id="effect",
         goal=invocation.goal,
@@ -864,10 +1188,39 @@ def test_nonempty_effect_is_committed_only_after_external_verification() -> None
     assert completed.task_state.get_held_object("arm") is not None
 
 
+def test_session_revision_cannot_abandon_pending_effect_verification() -> None:
+    engine, _ = _engine()
+    engine.register(EffectAction())
+    base = _invocation(engine)
+    invocation = ActionInvocation(
+        skill_id="effect",
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.1, 0.0, 0.2, 0))
+    waiting = session.tick(_context(0.2, 0.2, 0.2, 0))
+    assert waiting.pending_effect is not None
+
+    with pytest.raises(RuntimeError, match="awaiting verification"):
+        session.revise_current(replace(invocation, revision=1))
+
+    assert session.effect_verification_pending is True
+    completed = session.tick(
+        _context(0.3, 0.2, 0.2, 0),
+        effect_success=torch.tensor([True]),
+    )
+    assert completed.status is ExecutionStatus.COMPLETED
+    assert completed.task_state.get_held_object("arm") is not None
+
+
 def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
     engine, _ = _engine()
     engine.register(EffectAction())
-    base = _invocation(max_action_retries=0)
+    base = _invocation(engine, max_action_retries=0)
     invocation = ActionInvocation(
         skill_id="effect",
         goal=base.goal,
@@ -894,7 +1247,7 @@ def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
 def test_failed_effect_plan_retries_without_requesting_effect_verification() -> None:
     engine, _ = _engine()
     engine.register(FailedEffectAction())
-    base = _invocation(max_action_retries=0)
+    base = _invocation(engine, max_action_retries=0)
     invocation = ActionInvocation(
         skill_id="failed_effect",
         goal=base.goal,

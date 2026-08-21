@@ -26,10 +26,13 @@ from typing import ClassVar
 import torch
 
 from embodichain.utils import logger
-from embodichain.utils.math import pose_inv, get_relative_rotation
+from embodichain.utils.math import get_relative_rotation, pose_inv
 
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
-from embodichain.lab.sim.atomic_actions.bindings import ResolvedControlPart
+from embodichain.lab.sim.atomic_actions.bindings import (
+    EndpointBinding,
+    JointPositionTarget,
+)
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     OPEN_COMMAND,
@@ -115,8 +118,8 @@ class HandOverOptions(ActionOptions):
 class _Participant:
     """One candidate arm, its hand, and resolved semantic hand commands."""
 
-    arm: ResolvedControlPart
-    hand: ResolvedControlPart
+    arm: JointPositionTarget
+    hand: JointPositionTarget
     hand_open_qpos: torch.Tensor
     hand_grasp_qpos: torch.Tensor
 
@@ -208,29 +211,34 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
     ) -> _HandOverResources:
         """Resolve the two bound candidate arm/hand pairs."""
         binding = request.binding
-        first_arm = binding.manipulator("source")
-        second_arm = binding.manipulator("destination")
-        first_hand = binding.end_effector("source")
-        second_hand = binding.end_effector("destination")
-        if first_arm.name == second_arm.name:
+        first_motion = binding.endpoint("source", "motion")
+        second_motion = binding.endpoint("destination", "motion")
+        first_grasp = binding.endpoint("source", "grasp")
+        second_grasp = binding.endpoint("destination", "grasp")
+        first_arm = first_motion.require_target(JointPositionTarget)
+        second_arm = second_motion.require_target(JointPositionTarget)
+        first_hand = first_grasp.require_target(JointPositionTarget)
+        second_hand = second_grasp.require_target(JointPositionTarget)
+        if first_arm.control_part == second_arm.control_part:
             raise ValueError("HandOver requires two different manipulator parts.")
-        if first_hand.name == second_hand.name:
+        if first_hand.control_part == second_hand.control_part:
             raise ValueError("HandOver requires two different end-effector parts.")
 
         def participant(
-            arm: ResolvedControlPart,
-            hand: ResolvedControlPart,
+            arm: JointPositionTarget,
+            hand: JointPositionTarget,
+            grasp_endpoint: EndpointBinding,
         ) -> _Participant:
             return _Participant(
                 arm=arm,
                 hand=hand,
-                hand_open_qpos=hand.joint_positions(
+                hand_open_qpos=grasp_endpoint.joint_positions(
                     OPEN_COMMAND,
                     num_envs=self.num_envs,
                     device=self.device,
                     dtype=torch.float32,
                 ),
-                hand_grasp_qpos=hand.joint_positions(
+                hand_grasp_qpos=grasp_endpoint.joint_positions(
                     GRASP_COMMAND,
                     num_envs=self.num_envs,
                     device=self.device,
@@ -239,8 +247,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
 
         return _HandOverResources(
-            first=participant(first_arm, first_hand),
-            second=participant(second_arm, second_hand),
+            first=participant(first_arm, first_hand, first_grasp),
+            second=participant(second_arm, second_hand, second_grasp),
         )
 
     def _plan(
@@ -291,8 +299,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         # already holds an object are therefore ineligible and remain at the
         # observed robot state.
         eligible = ~context.task.held_object_mask(
-            resources.first.arm.name
-        ) & ~context.task.held_object_mask(resources.second.arm.name)
+            resources.first.arm.control_part
+        ) & ~context.task.held_object_mask(resources.second.arm.control_part)
         self._report_waypoint_failure(
             context,
             "candidate_arms_unoccupied",
@@ -443,13 +451,13 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         handover_start_qpos = start_qpos[:, list(handover.arm.joint_ids)]
         handover_start_eef = self.robot.compute_fk(
             qpos=handover_start_qpos,
-            name=handover.arm.name,
+            name=handover.arm.control_part,
             to_matrix=True,
         )
         receive_start_qpos = start_qpos[:, list(receive.arm.joint_ids)]
         receive_start_eef = self.robot.compute_fk(
             qpos=receive_start_qpos,
-            name=receive.arm.name,
+            name=receive.arm.control_part,
             to_matrix=True,
         )
 
@@ -545,27 +553,29 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             context,
             "pickup_grasp",
             active_mask & ~handover_grasp_success,
-            f"no finite top-half grasp candidate for arm {handover.arm.name!r}",
+            "no finite top-half grasp candidate for arm "
+            f"{handover.arm.control_part!r}",
         )
         self._report_waypoint_failure(
             context,
             "pickup_approach_direction",
             active_mask & ~handover_direction_valid,
             "handover TCP and observed object position have no horizontal "
-            f"separation for arm {handover.arm.name!r}",
+            f"separation for arm {handover.arm.control_part!r}",
         )
         self._report_waypoint_failure(
             context,
             "receive_approach_direction",
             active_mask & ~receive_direction_valid,
             "receive TCP and predicted object position have no horizontal "
-            f"separation for arm {receive.arm.name!r}",
+            f"separation for arm {receive.arm.control_part!r}",
         )
         self._report_waypoint_failure(
             context,
             "receive_grasp",
             active_mask & ~receive_grasp_success,
-            f"no finite bottom-half grasp candidate for arm {receive.arm.name!r}",
+            "no finite bottom-half grasp candidate for arm "
+            f"{receive.arm.control_part!r}",
         )
         self._report_waypoint_failure(
             context,
@@ -586,7 +596,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         phase_success, pickup_approach = plan_named_arm_trajectory(
             self.motion_generator,
-            handover.arm.name,
+            handover.arm.control_part,
             handover_start_qpos,
             pickup_approach_targets,
             segment_lengths["pickup_approach"],
@@ -616,7 +626,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         phase_success, pickup_transport = plan_named_arm_trajectory(
             self.motion_generator,
-            handover.arm.name,
+            handover.arm.control_part,
             handover_grasp_qpos,
             pickup_transport_targets,
             segment_lengths["pickup_transport"],
@@ -646,7 +656,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         phase_success, receive_approach = plan_named_arm_trajectory(
             self.motion_generator,
-            receive.arm.name,
+            receive.arm.control_part,
             receive_start_qpos,
             receive_approach_targets,
             segment_lengths["receive_approach"],
@@ -674,7 +684,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         placement_targets = torch.stack([receive_above_eef, receive_final_eef], dim=1)
         phase_success, receive_place = plan_named_arm_trajectory(
             self.motion_generator,
-            receive.arm.name,
+            receive.arm.control_part,
             receive_grasp_qpos,
             placement_targets,
             segment_lengths["place"],
@@ -845,7 +855,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         waypoint_names: tuple[str, ...],
         target_poses: torch.Tensor,
         start_qpos: torch.Tensor,
-        arm: ResolvedControlPart,
+        arm: JointPositionTarget,
         failed_mask: torch.Tensor,
     ) -> None:
         """Identify failed waypoint IK, or report a path/collision failure."""
@@ -857,7 +867,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             for waypoint_index, waypoint_name in enumerate(waypoint_names):
                 ik_success, waypoint_qpos = self.robot.compute_ik(
                     pose=target_poses[:, waypoint_index],
-                    name=arm.name,
+                    name=arm.control_part,
                     joint_seed=joint_seed,
                 )
                 ik_success = normalize_success_mask(
@@ -882,7 +892,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     context,
                     waypoint_name,
                     waypoint_failed,
-                    f"IK failed for arm {arm.name!r}",
+                    f"IK failed for arm {arm.control_part!r}",
                 )
                 identified |= waypoint_failed
                 joint_seed = torch.where(ik_success[:, None], waypoint_qpos, joint_seed)
@@ -890,7 +900,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             env_ids = context.env_ids.to(failed_mask.device)[failed_mask]
             logger.log_warning(
                 f"HandOver phase '{phase_name}' failed for "
-                f"arm {arm.name!r}, env_ids={env_ids.detach().cpu().tolist()}, "
+                f"arm {arm.control_part!r}, "
+                f"env_ids={env_ids.detach().cpu().tolist()}, "
                 "but waypoint IK "
                 f"diagnostics could not run: {exc}."
             )
@@ -902,7 +913,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             logger.log_warning(
                 f"HandOver phase '{phase_name}' failed between waypoints "
                 f"{list(waypoint_names)} for "
-                f"arm {arm.name!r}, env_ids={env_ids.detach().cpu().tolist()}; "
+                f"arm {arm.control_part!r}, "
+                f"env_ids={env_ids.detach().cpu().tolist()}; "
                 "individual "
                 "waypoint IK succeeded, so the likely cause is path or "
                 "collision planning."
@@ -910,20 +922,20 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
 
     def _root_link_pose(
         self,
-        arm: ResolvedControlPart,
+        arm: JointPositionTarget,
         env_ids: torch.Tensor,
     ) -> torch.Tensor:
         """Read the root-link pose configured for ``arm``."""
         robot_cfg = getattr(self.robot, "cfg", None)
         solver_cfg = getattr(robot_cfg, "solver_cfg", None)
-        if not isinstance(solver_cfg, Mapping) or arm.name not in solver_cfg:
+        if not isinstance(solver_cfg, Mapping) or arm.control_part not in solver_cfg:
             raise ValueError(
-                f"HandOver requires solver_cfg[{arm.name!r}].root_link_name."
+                "HandOver requires " f"solver_cfg[{arm.control_part!r}].root_link_name."
             )
-        root_link_name = getattr(solver_cfg[arm.name], "root_link_name", None)
+        root_link_name = getattr(solver_cfg[arm.control_part], "root_link_name", None)
         if not isinstance(root_link_name, str) or not root_link_name:
             raise ValueError(
-                f"HandOver requires a root_link_name for arm {arm.name!r}."
+                "HandOver requires a root_link_name for arm " f"{arm.control_part!r}."
             )
         pose = self.robot.get_link_pose(
             link_name=root_link_name,
@@ -934,7 +946,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             pose,
             num_envs=self.num_envs,
             device=self.device,
-            name=f"{arm.name} root-link pose",
+            name=f"{arm.control_part} root-link pose",
         )
 
     def _resolve_grasp(

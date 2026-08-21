@@ -38,8 +38,6 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AssembleAffordance,
     AssembleGoal,
     AtomicActionEngine,
@@ -318,27 +316,24 @@ def run_assemble_demo(
         assemble_object_entity=can,
         assemble_to_base_pose=assemble_to_base,
     )
-    binding = ActionBinding(
-        manipulators={"primary": "left_arm"},
-        end_effectors={"primary": "left_hand"},
-    )
+    endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_hand"}}
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(can_semantics),
-                binding,
-                MotionPolicy(
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICKUP_SAMPLE_INTERVAL,
                 ),
                 skill_options=pick_up_options,
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "place",
                 AssembleGoal(affordance=assemble_affordance),
-                binding,
-                MotionPolicy(
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PLACE_SAMPLE_INTERVAL,
                 ),

@@ -175,7 +175,6 @@ def _prepare_held_state(
 ):
     """Run PickUp precondition outside the timed MoveHeldObject block."""
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
         ControlPartCommandProfile,
@@ -212,22 +211,26 @@ def _prepare_held_state(
     move_position = obj_pose[0, :3, 3].clone()
     move_position[2] = 0.36
     move_target = make_pre_pick_eef_pose(robot, move_position)
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
+    move_binding = atomic_engine.bind_control_parts(
+        "move_end_effector",
+        {"primary": {"motion": "arm"}},
+    )
+    pick_binding = atomic_engine.bind_control_parts(
+        "pick_up",
+        {"primary": {"motion": "arm", "grasp": "hand"}},
     )
     result = atomic_engine.compile(
         (
             ActionInvocation(
                 "move_end_effector",
                 EndEffectorPoseGoal(xpos=move_target),
-                binding,
+                move_binding,
                 MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
             ),
             ActionInvocation(
                 "pick_up",
                 GraspGoal(semantics=semantics),
-                binding,
+                pick_binding,
                 MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
                 skill_options=PickUpOptions(
                     approach_direction=resolve_pickup_approach_direction(
@@ -270,7 +273,6 @@ def _run_case(
 ):
     """Run one MoveHeldObject benchmark case."""
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
         ControlPartCommandProfile,
@@ -320,16 +322,17 @@ def _run_case(
             },
         )
         target_pose = _make_object_target_pose(sim.device, case.xyz)
+        binding = atomic_engine.bind_control_parts(
+            "move_held_object",
+            {"primary": {"motion": "arm", "grasp": "hand"}},
+        )
         elapsed, mem_delta, peak_gpu, result = timed_call(
             lambda: atomic_engine.compile(
                 (
                     ActionInvocation(
                         skill_id="move_held_object",
                         goal=HeldObjectPoseGoal(object_target_pose=target_pose),
-                        binding=ActionBinding(
-                            manipulators={"primary": "arm"},
-                            end_effectors={"primary": "hand"},
-                        ),
+                        binding=binding,
                         motion_policy=MotionPolicy(
                             sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL
                         ),

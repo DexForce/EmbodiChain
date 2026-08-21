@@ -174,7 +174,6 @@ def _prepare_held_state(
 ):
     """Run PickUp precondition outside the timed Place block."""
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
         ControlPartCommandProfile,
@@ -212,9 +211,9 @@ def _prepare_held_state(
             ActionInvocation(
                 skill_id="pick_up",
                 goal=GraspGoal(semantics=semantics),
-                binding=ActionBinding(
-                    manipulators={"primary": "arm"},
-                    end_effectors={"primary": "hand"},
+                binding=atomic_engine.bind_control_parts(
+                    "pick_up",
+                    {"primary": {"motion": "arm", "grasp": "hand"}},
                 ),
                 motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
                 skill_options=PickUpOptions(
@@ -256,7 +255,6 @@ def _run_case(
 ):
     """Run one Place benchmark case."""
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
         ControlPartCommandProfile,
@@ -309,16 +307,17 @@ def _run_case(
             },
         )
         place_pose = _make_place_pose(sim.device, case.xyz)
+        binding = atomic_engine.bind_control_parts(
+            "place",
+            {"primary": {"motion": "arm", "grasp": "hand"}},
+        )
         elapsed, mem_delta, peak_gpu, result = timed_call(
             lambda: atomic_engine.compile(
                 (
                     ActionInvocation(
                         skill_id="place",
                         goal=PlaceGoal(xpos=place_pose),
-                        binding=ActionBinding(
-                            manipulators={"primary": "arm"},
-                            end_effectors={"primary": "hand"},
-                        ),
+                        binding=binding,
                         motion_policy=MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
                         skill_options=PlaceOptions(
                             lift_height=PLACE_LIFT_HEIGHT,

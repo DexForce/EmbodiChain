@@ -16,21 +16,39 @@
 
 from __future__ import annotations
 
-import torch
-import pytest
+from typing import Literal
 from unittest.mock import Mock, patch
 
+import pytest
+import torch
+
+from embodichain.lab.sim.planners.base_planner import CollisionWorldInfo, PlanOptions
 from embodichain.lab.sim.planners.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
 )
-from embodichain.lab.sim.planners.base_planner import PlanOptions
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
 
 BATCH_SIZE = 2
 CONTROLLED_DOF = 6
 SAMPLE_COUNT = 8
 STEP_DT = 0.05
+
+
+def _collision_world_info(
+    dynamic_entity_ids: tuple[str, ...] = (),
+    *,
+    entity_ids: tuple[str, ...] | None = None,
+    batch_mode: Literal["shared", "per_env"] | None = "shared",
+    supports_updates: bool = True,
+) -> CollisionWorldInfo:
+    """Build a valid collision-world contract for planner test doubles."""
+    return CollisionWorldInfo(
+        entity_ids=dynamic_entity_ids if entity_ids is None else entity_ids,
+        dynamic_entity_ids=dynamic_entity_ids,
+        batch_mode=batch_mode,
+        supports_updates=supports_updates,
+    )
 
 
 def _timed_result(
@@ -47,7 +65,6 @@ def _timed_result(
         success=success,
         positions=positions,
         dt=dt,
-        duration=dt.sum(dim=1),
     )
 
 
@@ -147,8 +164,7 @@ def test_direct_cartesian_planner_requires_joint_fallback_inputs():
 
 def test_bind_collision_world_copies_caller_options() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ("obstacle",)
+    planner.collision_world_info = _collision_world_info(("obstacle",))
     original = PlanOptions()
     obstacle_pose = torch.eye(4).unsqueeze(0)
 
@@ -190,8 +206,7 @@ def test_bind_collision_world_requires_exact_planner_entity_ids(
     configured_ids, obstacle_poses, expected
 ) -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = configured_ids
+    planner.collision_world_info = _collision_world_info(configured_ids)
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
 
@@ -203,8 +218,7 @@ def test_bind_collision_world_requires_exact_planner_entity_ids(
 
 def test_bind_collision_world_rejects_extra_ids_in_caller_options() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ("cube",)
+    planner.collision_world_info = _collision_world_info(("cube",))
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
     options = PlanOptions()
@@ -221,8 +235,7 @@ def test_bind_collision_world_rejects_extra_ids_in_caller_options() -> None:
 
 def test_bind_collision_world_rejects_ids_injected_by_backend() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ("cube",)
+    planner.collision_world_info = _collision_world_info(("cube",))
 
     def bind(options, *, obstacle_poses):
         options.dynamic_obstacle_poses = {
@@ -244,8 +257,7 @@ def test_bind_collision_world_rejects_ids_injected_by_backend() -> None:
 
 def test_bind_collision_world_allows_none_for_empty_configured_world() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ()
+    planner.collision_world_info = _collision_world_info()
     planner.default_plan_options.return_value = PlanOptions()
 
     def bind(options, *, obstacle_poses):
@@ -264,8 +276,7 @@ def test_bind_collision_world_allows_none_for_empty_configured_world() -> None:
 
 def test_bind_collision_world_rejects_non_string_option_keys() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ()
+    planner.collision_world_info = _collision_world_info()
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
     options = PlanOptions()
@@ -279,39 +290,34 @@ def test_bind_collision_world_rejects_non_string_option_keys() -> None:
 
 def test_motion_generator_exposes_collision_integration_metadata() -> None:
     planner = Mock()
-    planner.dynamic_collision_entity_ids = ("cube", "tray")
-    planner.collision_world_entity_ids = ("cube", "tray", "table")
-    planner.collision_world_batch_mode = "per_env"
+    info = _collision_world_info(
+        ("cube", "tray"),
+        entity_ids=("cube", "tray", "table"),
+        batch_mode="per_env",
+    )
+    planner.collision_world_info = info
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
 
+    assert generator.collision_world_info is info
     assert generator.dynamic_collision_entity_ids == ("cube", "tray")
     assert generator.collision_world_entity_ids == ("cube", "tray", "table")
     assert generator.collision_world_batch_mode == "per_env"
 
 
-@pytest.mark.parametrize(
-    ("entity_ids", "error_type", "match"),
-    [
-        (("cube", "cube"), ValueError, "unique"),
-        ((" cube",), TypeError, "outer whitespace"),
-    ],
-)
-def test_motion_generator_rejects_invalid_collision_entity_metadata(
-    entity_ids, error_type, match
-) -> None:
+def test_motion_generator_rejects_invalid_collision_world_contract() -> None:
     planner = Mock()
-    planner.dynamic_collision_entity_ids = entity_ids
+    planner.collision_world_info = object()
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
 
-    with pytest.raises(error_type, match=match):
-        _ = generator.dynamic_collision_entity_ids
+    with pytest.raises(TypeError, match="CollisionWorldInfo"):
+        _ = generator.collision_world_info
 
 
 def test_bind_collision_world_rejects_unsupported_planner() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = False
+    planner.collision_world_info = None
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
 
@@ -327,8 +333,7 @@ def test_bind_collision_world_rejects_unsupported_planner() -> None:
 
 def test_bind_collision_world_uses_backend_default_options() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ("obstacle",)
+    planner.collision_world_info = _collision_world_info(("obstacle",))
     defaults = PlanOptions()
     planner.default_plan_options.return_value = defaults
     planner.with_collision_world.return_value = defaults

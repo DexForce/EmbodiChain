@@ -23,6 +23,7 @@ from typing import ClassVar
 
 import torch
 
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.core import AtomicAction
 from embodichain.lab.sim.atomic_actions.goals import (
     PoseGoalValue,
@@ -38,14 +39,14 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     SkillBindingContract,
 )
-from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
-    make_motion_slot,
-)
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     resolve_pose_target,
     to_full_robot_trajectory,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_motion_slot,
 )
 
 
@@ -79,7 +80,6 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
         ),
     )
     OptionsType: ClassVar[type] = MoveEndEffectorOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
     def _plan(
         self,
@@ -88,9 +88,11 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
     ) -> ActionPlan:
         """Plan an end-effector pose goal from the observed joint state."""
         goal = request.goal
-        manipulator = request.binding.manipulator("primary")
-        control_part = manipulator.name
-        joint_ids = list(manipulator.joint_ids)
+        motion_target = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        control_part = motion_target.control_part
+        joint_ids = list(motion_target.joint_ids)
         move_xpos = resolve_pose_target(
             resolve_pose_goal(goal.xpos, context, name="xpos"),
             num_envs=context.batch_size,

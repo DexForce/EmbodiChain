@@ -26,7 +26,12 @@ import torch
 
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resolve_object_target,
+)
 from embodichain.lab.sim.atomic_actions.affordance import AssembleAffordance
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     OPEN_COMMAND,
@@ -45,17 +50,10 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ResolvedActionRequest,
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
-from embodichain.lab.sim.atomic_actions.primitives._helpers import (
-    arm_qpos_from_state,
-    resolve_object_target,
-)
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     SkillBindingContract,
-)
-from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
-    make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
@@ -63,6 +61,9 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     interpolate_hand_qpos,
     resolve_pose_target,
     split_three_segments,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
 )
 
 TcpSymmetry = Literal["none", "z_roll_180"]
@@ -173,8 +174,6 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         AssembleGoal,
     )
     OptionsType: ClassVar[type] = PlaceOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_manipulation_slot(
@@ -213,18 +212,21 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         target = request.goal
         options = request.skill_options
         binding = request.binding
-        manipulator = binding.manipulator()
-        end_effector = binding.end_effector()
-        control_part = manipulator.name
-        arm_joint_ids = list(manipulator.joint_ids)
-        hand_joint_ids = list(end_effector.joint_ids)
-        hand_open_qpos = end_effector.joint_positions(
+        motion_target = binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        grasp = binding.endpoint("primary", "grasp")
+        grasp_target = grasp.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        arm_joint_ids = list(motion_target.joint_ids)
+        hand_joint_ids = list(grasp_target.joint_ids)
+        hand_open_qpos = grasp.joint_positions(
             OPEN_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        hand_grasp_qpos = end_effector.joint_positions(
+        hand_grasp_qpos = grasp.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
