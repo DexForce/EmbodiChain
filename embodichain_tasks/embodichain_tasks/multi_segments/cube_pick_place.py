@@ -53,6 +53,7 @@ from embodichain.lab.sim.atomic_actions import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
+    MotionPolicy,
     PickUpOptions,
     PlaceOptions,
     RecoveryPolicy,
@@ -303,6 +304,7 @@ def create_cube_robot_profile_binding() -> SimulationRobotSkillProfileBinding:
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                 },
+                motion_policy=MotionPolicy(sample_count=100),
                 recovery_policy=RecoveryPolicy(),
                 workflow_recovery_policy=WorkflowRecoveryPolicy(
                     max_recovery_attempts=2,
