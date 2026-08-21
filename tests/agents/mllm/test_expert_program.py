@@ -251,7 +251,6 @@ def test_decoder_rejects_registered_semantic_calls() -> None:
         {
             "kind": "hand_over",
             "object": "cube",
-            "receiver": "right",
             "resources": {"destination": "right"},
         },
         {
@@ -284,7 +283,7 @@ def test_decoder_allows_explicit_empty_resources() -> None:
     assert config.program.call.resources == {}  # type: ignore[union-attr]
 
 
-def test_decoder_rejects_handover_receiver_resource_selection() -> None:
+def test_decoder_rejects_removed_handover_receiver_alias() -> None:
     with pytest.raises(ExpertProgramDecodeError) as error:
         decode_mllm_expert_program(
             _model_json(
@@ -297,7 +296,7 @@ def test_decoder_rejects_handover_receiver_resource_selection() -> None:
             integration=_integration(),
         )
 
-    assert error.value.code == "mllm_resource_override_not_allowed"
+    assert error.value.code == "unknown_field"
     assert error.value.path == ("program", "call", "receiver")
 
 
