@@ -89,9 +89,6 @@ from .<name> import <CamelCaseName>Env
 __all__ = [..., "<CamelCaseName>Env"]
 ```
 
-Optional compatibility re-export may also be added in
-`embodichain/lab/gym/envs/tasks/__init__.py`.
-
 ### 4. Create Test Stub
 
 Place at `tests/gym/envs/tasks/test_<name>.py` (or `tests/learning/` for

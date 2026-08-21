@@ -30,7 +30,16 @@ We welcome pull requests for bug fixes, new features, and documentation improvem
     black .
     ```
     > Currently, we use black==26.3.1 for formatting. Make sure to use the same version to avoid inconsistencies.
-4.  **Submit a Pull Request**.
+4.  **Check public API documentation coverage**. The checker is read-only and
+    verifies that exports declared through `__all__` appear in the Sphinx API
+    reference.
+    ```bash
+    python docs/scripts/check_api_docs.py
+    ```
+    If it reports missing exports, update the appropriate API-reference page
+    and public docstrings. Agent users can invoke `/update-api-docs` to generate
+    these changes.
+5.  **Submit a Pull Request**.
     *   Use the [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md).
     *   Keep PRs small and focused.
     *   Include a summary of the changes and link to any relevant issues (e.g., `Fixes #123`).
@@ -83,6 +92,7 @@ Canonical skills live in [`.agents/skills/`](.agents/skills/). Claude Code uses 
 | `/project-dev-context` | Navigate, resolve, or update agent development context |
 | `/add-functor`, `/add-task-env`, `/add-robot`, `/add-solver`, `/add-atomic-action` | Scaffold project components following repository conventions |
 | `/add-test`, `/benchmark` | Add validation or performance benchmarks |
+| `/update-api-docs` | Generate API-reference entries and descriptions for missing public exports |
 | `/pre-commit-check` | Run proportional checks before committing |
 | `/pr`, `/release` | Prepare a pull request or release |
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update API Docs"
+  short_description: "Generate API reference docs for missing exports"
+  default_prompt: "Use $update-api-docs to document every Python API reported missing by the API docs checker."

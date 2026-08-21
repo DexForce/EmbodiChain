@@ -12,7 +12,7 @@
 | `embodichain/lab/gym/envs/base_env.py` | `BaseEnv(gym.Env)` + `EnvCfg` — low-level env loop |
 | `embodichain/lab/gym/envs/embodied_env.py` | `EmbodiedEnv(BaseEnv)` + `EmbodiedEnvCfg` — modular task base class |
 | `embodichain/lab/gym/utils/registration.py` | `@register_env` decorator + `REGISTERED_ENVS` registry + `make()` |
-| `embodichain/lab/gym/envs/tasks/__init__.py` | All concrete task imports (forces registration on import) |
+| `embodichain_tasks/embodichain_tasks/__init__.py` | Recursively imports official tasks to trigger registration |
 | `embodichain/lab/gym/envs/managers/__init__.py` | Manager re-exports: `EventManager`, `ObservationManager`, `RewardManager`, `ActionManager`, `DatasetManager` |
 | `embodichain/lab/gym/envs/wrapper/no_fail.py` | `NoFailWrapper` — forces `is_task_success() → True` |
 | `embodichain/lab/gym/envs/wrapper/replay.py` | `ReplayWrapper` — record-and-replay trajectories (kinematic/dynamic/control) |
@@ -208,11 +208,11 @@ from the event config before the event manager is created.
 
 Use the `/add-task-env` skill. It scaffolds:
 
-1. A new file under `embodichain/lab/gym/envs/tasks/<category>/`.
+1. A new file under `embodichain_tasks/embodichain_tasks/<category>/`.
 2. `@register_env("<GymId>")` decorator on the class.
 3. `EmbodiedEnvCfg` subclass with robot, sensor, object configs.
 4. Stub implementations of `_setup_robot()`, `evaluate()`, `get_reward()`.
-5. Import entry in `tasks/__init__.py`.
+5. Export entry in the category package's `__init__.py`.
 6. Test stub.
 
 ### Minimal manual skeleton
@@ -355,7 +355,7 @@ parent; the first `warmup_steps` samples are discarded.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `KeyError: "Env X not found in registry"` | Task module not imported → `@register_env` never ran | Add import to `tasks/__init__.py` |
+| `KeyError: "Env X not found in registry"` | Task entry-point package not imported → `@register_env` never ran | Check the `embodichain.tasks` entry point and package import |
 | `RuntimeError: non json dumpable kwargs` | Passing class/type objects to `@register_env(…, kwarg=SomeClass)` | Use string keys + lookup mapping instead |
 | `single_action_space is None` | `_setup_robot()` didn't set `self.single_action_space` | Set it before returning the Robot |
 | `_setup_robot()` returns `None` | Forgot to return the Robot instance | Ensure `return robot` |

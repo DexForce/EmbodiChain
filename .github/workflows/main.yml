@@ -44,6 +44,9 @@ jobs:
             exit 1
           fi
 
+      - name: Public API docs check
+        run: python docs/scripts/check_api_docs.py
+
   build:
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     needs: lint

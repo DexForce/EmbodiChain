@@ -21,6 +21,7 @@ needs a different local entry hint.
 | `/add-task-env` | `.agents/skills/add-task-env/SKILL.md` | Scaffold `EmbodiedEnv` task environments. |
 | `/add-functor` | `.agents/skills/add-functor/SKILL.md` | Add observation, reward, event, action, dataset, or randomization functors. |
 | `/add-test` | `.agents/skills/add-test/SKILL.md` | Write tests following project conventions. |
+| `/update-api-docs` | `.agents/skills/update-api-docs/SKILL.md` | Document public exports reported by the API checker. |
 | `/pre-commit-check` | `.agents/skills/pre-commit-check/SKILL.md` | Run local CI-style checks before committing. |
 | `/pr` | `.agents/skills/pr/SKILL.md` | Draft or create pull requests. |
 | `/benchmark` | `.agents/skills/benchmark/SKILL.md` | Write benchmark scripts for EmbodiChain modules. |

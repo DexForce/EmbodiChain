@@ -57,3 +57,26 @@ The core ``embodichain`` framework is split into six top-level packages:
    toolkits
    learning
    utils
+
+Public API Coverage
+-------------------
+
+Public Python APIs are declared through static ``__all__`` values in non-private
+modules. Curated API pages remain the preferred place for explanations and
+examples. The fallback supplement keeps less prominent exports visible through
+their signatures and source docstring summaries.
+
+Run the read-only checker after changing module exports or API docs:
+
+.. code-block:: bash
+
+   python docs/scripts/check_api_docs.py
+
+The checker never edits repository files. If it reports missing exports, use
+the ``/update-api-docs`` agent skill to add the appropriate API entries and
+documentation. CI runs this same checker after style checks and before tests.
+
+.. toctree::
+   :maxdepth: 1
+
+   public_api
