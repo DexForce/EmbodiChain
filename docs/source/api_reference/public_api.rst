@@ -53,6 +53,97 @@ embodichain.data_pipeline.depth_video
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
 
+embodichain.gen_sim.scene_engine.core.scene_edit_plan
+------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.core.scene_edit_plan
+
+.. autosummary::
+
+   SceneEditOperation
+   SceneEditPlan
+
+embodichain.gen_sim.scene_engine.core.scene_graph
+--------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.core.scene_graph
+
+.. autosummary::
+
+   GENERATED_SCENE_GRAPH_SCHEMA
+   GeneratedSceneGraph
+   GeneratedSceneNode
+   GeneratedSceneRelation
+   OrientationState
+   PlanarRelationType
+   SceneConstraintType
+   SupportRelationType
+   TABLE_OBJECT_ID
+   TABLE_REGIONS
+   TableRegion
+
+embodichain.gen_sim.scene_engine.core.scene_object
+---------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.core.scene_object
+
+.. autosummary::
+
+   ObjectPhysics
+   SceneObject
+
+embodichain.gen_sim.scene_engine.errors
+-----------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.errors
+
+.. autosummary::
+
+   SceneServiceError
+
+embodichain.gen_sim.scene_engine.pipeline
+-----------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.api
+---------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.api
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
+-----------------------------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
+
+.. autosummary::
+
+   prepare_scene_edit_assets
+
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------
 

@@ -16,28 +16,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
-from embodichain.gen_sim.scene_engine.pipeline.api import (
-    analyze_image,
-    materialize_blueprint,
-)
+__all__ = ["SceneServiceError"]
 
 
-def generate_scene_from_image(
-    image_path: str | Path,
-    output_root: str | Path,
-) -> Scene:
-    """Generate the initial core scene state from an input image."""
-    resolved_output_root = Path(output_root).expanduser().resolve()
-    vlm_client = OpenAICompatibleVLM.from_dotenv()
-    blueprint = analyze_image(
-        image_path,
-        resolved_output_root,
-        vlm_client=vlm_client,
-    )
-    return materialize_blueprint(blueprint, vlm_client=vlm_client).scene
+class SceneServiceError(RuntimeError):
+    """A transient or remote Scene Engine service failure."""

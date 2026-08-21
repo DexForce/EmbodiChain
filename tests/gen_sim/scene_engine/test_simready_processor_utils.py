@@ -18,26 +18,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
-from embodichain.gen_sim.scene_engine.pipeline.api import (
-    analyze_image,
-    materialize_blueprint,
+import pytest
+import trimesh
+
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
+    compute_uniform_xy_scale_for_target,
 )
 
 
-def generate_scene_from_image(
-    image_path: str | Path,
-    output_root: str | Path,
-) -> Scene:
-    """Generate the initial core scene state from an input image."""
-    resolved_output_root = Path(output_root).expanduser().resolve()
-    vlm_client = OpenAICompatibleVLM.from_dotenv()
-    blueprint = analyze_image(
-        image_path,
-        resolved_output_root,
-        vlm_client=vlm_client,
+def test_uniform_scale_uses_the_z_up_tabletop_footprint(tmp_path: Path) -> None:
+    """Measure y-up GLBs against the VLM's z-up XY target footprint."""
+    glb_path = tmp_path / "flat_fork.glb"
+    # In y-up, the thin vertical axis is y; in z-up it becomes the z axis.
+    trimesh.creation.box(extents=[2.0, 0.01, 0.5]).export(glb_path)
+
+    scale = compute_uniform_xy_scale_for_target(
+        glb_path=glb_path,
+        target_xy_size_cm=[200.0, 50.0],
+        rotate_about_x=False,
     )
-    return materialize_blueprint(blueprint, vlm_client=vlm_client).scene
+
+    assert scale == pytest.approx(1.0)

@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+__all__ = ["ObjectPhysics", "SceneObject"]
+
 
 @dataclass
 class ObjectPhysics:
@@ -28,6 +30,7 @@ class ObjectPhysics:
     body_type: Literal["dynamic", "kinematic"]  # Runtime behaviour in simulation.
     attrs: dict[str, float | int]  # Rigid-body material and contact attributes.
     max_convex_hull_num: int  # Collision-decomposition hull budget.
+    provenance: str = "unspecified"  # Authoring source of the selected profile.
 
     def __post_init__(self) -> None:
         """Validate physics settings before a later stage consumes them."""
@@ -37,6 +40,12 @@ class ObjectPhysics:
             raise ValueError("max_convex_hull_num must be positive.")
         if not self.attrs:
             raise ValueError("attrs must contain at least one physics attribute.")
+        if (
+            not isinstance(self.provenance, str)
+            or not self.provenance
+            or self.provenance != self.provenance.strip()
+        ):
+            raise ValueError("provenance must be a non-empty, trimmed string.")
         if not all(
             isinstance(name, str) and isinstance(value, (float, int))
             for name, value in self.attrs.items()
@@ -49,6 +58,7 @@ class ObjectPhysics:
             "body_type": self.body_type,
             "attrs": self.attrs,
             "max_convex_hull_num": self.max_convex_hull_num,
+            "provenance": self.provenance,
         }
 
 
@@ -66,7 +76,16 @@ class SceneObject:
     rot: list[float] | None = None  # Final y-up Euler XYZ rotation in degrees.
     pos: list[float] | None = None  # Final y-up world position in metres.
     scale: list[float] | None = None  # Final y-up object scale.
+    center_xy: list[float] | None = None  # Z-up table-frame XY AABB center.
+    support_surface_z: float | None = None  # Detected tabletop height in z-up.
+    support_contour_xy: list[list[float]] | None = None  # Outer support contour.
+    support_optimization_rect_xy: list[list[float]] | None = None  # Safe XY rectangle.
     physics: ObjectPhysics | None = None  # Assigned when SimReady processing succeeds.
+
+    def __post_init__(self) -> None:
+        """Keep provider-free object identity stable across authoring exports."""
+        if not isinstance(self.id, str) or not self.id or self.id != self.id.strip():
+            raise ValueError("Scene object id must be a non-empty, trimmed string.")
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this object and its currently available pipeline artifacts."""
@@ -81,5 +100,9 @@ class SceneObject:
             "rot": self.rot,
             "pos": self.pos,
             "scale": self.scale,
+            "center_xy": self.center_xy,
+            "support_surface_z": self.support_surface_z,
+            "support_contour_xy": self.support_contour_xy,
+            "support_optimization_rect_xy": self.support_optimization_rect_xy,
             "physics": self.physics.to_dict() if self.physics is not None else None,
         }
