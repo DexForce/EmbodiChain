@@ -104,6 +104,7 @@ def main():
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
     )
     robot = sim.add_robot(cfg=robot_cfg)
+    sim.prepare()
 
     # Set initial joint positions
     initial_qpos = torch.tensor(

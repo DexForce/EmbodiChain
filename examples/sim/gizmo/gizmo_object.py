@@ -93,6 +93,7 @@ def main():
             init_pos=[0.3, 0.0, 1.0],
         )
     )
+    sim.prepare()
 
     native_window_opened = False
     if not args.headless:
@@ -128,9 +129,6 @@ def main():
 
 def run_simulation(sim: SimulationManager):
     """Run the simulation loop."""
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     step_count = 0
     gizmo_enabled = True
     try:

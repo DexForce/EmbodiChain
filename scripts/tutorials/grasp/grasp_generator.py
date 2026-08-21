@@ -226,6 +226,7 @@ if __name__ == "__main__":
     sim = initialize_simulation(args)
     robot = create_robot(sim, position=[0.0, 0.0, 0.0])
     obj = create_obj(sim)
+    sim.prepare()
 
     # get mug grasp pose
     grasp_cfg = GraspGeneratorCfg(

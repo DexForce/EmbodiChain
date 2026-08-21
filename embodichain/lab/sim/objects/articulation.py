@@ -20,9 +20,10 @@ import torch
 import dexsim
 import numpy as np
 
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import cached_property
-from typing import List, Sequence, Dict, Union, Tuple, Optional
+from typing import TYPE_CHECKING, List, Sequence, Dict, Union, Tuple, Optional
 
 from dexsim.engine import Articulation as _Articulation
 from dexsim.types import (
@@ -55,8 +56,10 @@ from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.objects.backends import (
     DefaultArticulationView,
     NewtonArticulationView,
+    SpawnArticulationView,
     is_newton_scene,
 )
+from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
 from embodichain.utils.math import (
     matrix_from_quat,
     quat_from_matrix,
@@ -69,13 +72,20 @@ from embodichain.lab.sim.utility.solver_utils import (
 )
 from embodichain.utils import logger
 
+if TYPE_CHECKING:
+    from dexsim.spawn import SpawnResult, SpawnedArticulation
+
 
 @dataclass
 class ArticulationData:
     """GPU data manager for articulation."""
 
     def __init__(
-        self, entities: List[_Articulation], ps: PhysicsScene, device: torch.device
+        self,
+        entities: Sequence[_Articulation | SpawnedArticulation],
+        ps: PhysicsScene | None,
+        device: torch.device,
+        articulation_view: ArticulationViewBase | None = None,
     ) -> None:
         """Initialize the ArticulationData.
 
@@ -88,7 +98,9 @@ class ArticulationData:
         self.ps = ps
         self.num_instances = len(entities)
         self.device = device
-        if is_newton_scene(ps):
+        if articulation_view is not None:
+            self.articulation_view = articulation_view
+        elif is_newton_scene(ps):
             self.articulation_view = NewtonArticulationView(
                 entities=entities, scene=ps, device=device
             )
@@ -100,9 +112,14 @@ class ArticulationData:
         # Backward-compatible alias for callers that use GPU/articulation ids.
         self.gpu_indices = self.articulation_view.articulation_ids_tensor
 
-        self.dof = self.entities[0].get_dof()
-        self.num_links = self.entities[0].get_links_num()
-        self.link_names = self.entities[0].get_link_names()
+        if isinstance(self.articulation_view, SpawnArticulationView):
+            self.dof = self.articulation_view.dof
+            self.num_links = self.articulation_view.num_links
+            self.link_names = self.articulation_view.link_names
+        else:
+            self.dof = self.entities[0].get_dof()
+            self.num_links = self.entities[0].get_links_num()
+            self.link_names = self.entities[0].get_link_names()
 
         self._root_pose = torch.zeros(
             (self.num_instances, 7), dtype=torch.float32, device=self.device
@@ -114,11 +131,13 @@ class ArticulationData:
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
 
-        max_num_links = (
-            self.ps.gpu_get_articulation_max_link_count()
-            if self.device.type == "cuda" and not self.is_newton_backend
-            else self.num_links
-        )
+        max_num_links = self.num_links
+        if (
+            articulation_view is None
+            and self.device.type == "cuda"
+            and not self.is_newton_backend
+        ):
+            max_num_links = self.ps.gpu_get_articulation_max_link_count()
         self._body_link_pose = torch.zeros(
             (self.num_instances, max_num_links, 7),
             dtype=torch.float32,
@@ -141,11 +160,13 @@ class ArticulationData:
             device=self.device,
         )
 
-        max_dof = (
-            self.ps.gpu_get_articulation_max_dof()
-            if self.device.type == "cuda" and not self.is_newton_backend
-            else self.dof
-        )
+        max_dof = self.dof
+        if (
+            articulation_view is None
+            and self.device.type == "cuda"
+            and not self.is_newton_backend
+        ):
+            max_dof = self.ps.gpu_get_articulation_max_dof()
         self._target_qpos = torch.zeros(
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
@@ -417,14 +438,45 @@ class Articulation(BatchEntity):
     def __init__(
         self,
         cfg: ArticulationCfg,
-        entities: List[_Articulation] = None,
+        entities: Sequence[_Articulation | SpawnedArticulation] | None = None,
         device: torch.device = torch.device("cpu"),
+        *,
+        spawn_result: SpawnResult | None = None,
+        declared_num_instances: int | None = None,
     ) -> None:
-        # Initialize world and physics scene
-        self._world = dexsim.default_world()
-        from embodichain.lab.sim.sim_manager import get_physics_scene
+        if entities is None:
+            if declared_num_instances is None or declared_num_instances <= 0:
+                raise ValueError(
+                    "A declared Articulation requires declared_num_instances > 0."
+                )
+            self.cfg = deepcopy(cfg)
+            self.uid = self.cfg.uid
+            self.device = device
+            self._entities = []
+            self._declared_num_instances = declared_num_instances
+            self._spawn_result = None
+            self._world = None
+            self._ps = None
+            self._data = None
+            self._all_indices = torch.arange(declared_num_instances, dtype=torch.int32)
+            self._visual_material = [{} for _ in range(declared_num_instances)]
+            self.is_shared_visual_material = False
+            self._has_collision_visible_node_dict = {}
+            return
 
-        self._ps = get_physics_scene()
+        self._declared_num_instances = len(entities)
+        self._spawn_result = spawn_result
+        if spawn_result is None:
+            # Legacy initialization remains temporarily while SimulationManager
+            # migration is in progress. Spawn-bound facades never reach for a
+            # process-global World or raw PhysicsScene.
+            self._world = dexsim.default_world()
+            from embodichain.lab.sim.sim_manager import get_physics_scene
+
+            self._ps = get_physics_scene()
+        else:
+            self._world = spawn_result.world
+            self._ps = None
 
         self.cfg = cfg
         self._entities = entities
@@ -433,10 +485,23 @@ class Articulation(BatchEntity):
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
 
-        if device.type == "cuda" and not is_newton_scene(self._ps):
+        if (
+            spawn_result is None
+            and device.type == "cuda"
+            and not is_newton_scene(self._ps)
+        ):
             self._world.update(0.001)
 
-        self._data = ArticulationData(entities=entities, ps=self._ps, device=device)
+        articulation_view = None
+        if spawn_result is not None:
+            batch = spawn_result.create_articulation_batch(entities)
+            articulation_view = SpawnArticulationView(spawn_result, batch, device)
+        self._data = ArticulationData(
+            entities=entities,
+            ps=self._ps,
+            device=device,
+            articulation_view=articulation_view,
+        )
 
         self.cfg: ArticulationCfg
         if self.cfg.init_qpos is None:
@@ -445,50 +510,7 @@ class Articulation(BatchEntity):
         # Get default masses.
         self.default_link_masses = self.get_mass()
 
-        # Determine if we should use USD properties or cfg properties.
-        if not self.cfg.use_usd_properties:
-            num_entities = len(entities)
-            dof = self._data.dof
-            default_cfg = JointDrivePropertiesCfg()
-            self.default_joint_damping = torch.full(
-                (num_entities, dof),
-                default_cfg.damping,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_stiffness = torch.full(
-                (num_entities, dof),
-                default_cfg.stiffness,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_max_effort = torch.full(
-                (num_entities, dof),
-                default_cfg.max_effort,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_max_velocity = torch.full(
-                (num_entities, dof),
-                default_cfg.max_velocity,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_friction = torch.full(
-                (num_entities, dof),
-                default_cfg.friction,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_armature = torch.full(
-                (num_entities, dof),
-                default_cfg.armature,
-                dtype=torch.float32,
-                device=device,
-            )
-            self._set_default_joint_drive()
-        else:
-            # Read current properties from USD-loaded entities
+        if self.cfg.use_usd_properties:
             self.default_joint_stiffness = self._data.joint_stiffness.clone()
             self.default_joint_damping = self._data.joint_damping.clone()
             self.default_joint_friction = self._data.joint_friction.clone()
@@ -496,26 +518,49 @@ class Articulation(BatchEntity):
             self.default_joint_max_effort = self._data.qf_limits.clone()
             self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
-            # Write the USD properties back to cfg
-            usd_drive_pros = self.cfg.drive_pros
-            usd_drive_pros.stiffness = (
-                self.default_joint_stiffness[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.damping = (
-                self.default_joint_damping[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.friction = (
-                self.default_joint_friction[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.armature = (
-                self.default_joint_armature[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.max_effort = (
-                self.default_joint_max_effort[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.max_velocity = (
-                self.default_joint_max_velocity[0].cpu().numpy().tolist()
-            )
+            if spawn_result is None:
+                usd_drive_pros = self.cfg.drive_pros
+                usd_drive_pros.stiffness = (
+                    self.default_joint_stiffness[0].cpu().numpy().tolist()
+                )
+                usd_drive_pros.damping = (
+                    self.default_joint_damping[0].cpu().numpy().tolist()
+                )
+                usd_drive_pros.friction = (
+                    self.default_joint_friction[0].cpu().numpy().tolist()
+                )
+                usd_drive_pros.armature = (
+                    self.default_joint_armature[0].cpu().numpy().tolist()
+                )
+                usd_drive_pros.max_effort = (
+                    self.default_joint_max_effort[0].cpu().numpy().tolist()
+                )
+                usd_drive_pros.max_velocity = (
+                    self.default_joint_max_velocity[0].cpu().numpy().tolist()
+                )
+        else:
+            default_cfg = JointDrivePropertiesCfg()
+            values = {
+                "default_joint_damping": default_cfg.damping,
+                "default_joint_stiffness": default_cfg.stiffness,
+                "default_joint_max_effort": default_cfg.max_effort,
+                "default_joint_max_velocity": default_cfg.max_velocity,
+                "default_joint_friction": default_cfg.friction,
+                "default_joint_armature": default_cfg.armature,
+            }
+            for name, value in values.items():
+                setattr(
+                    self,
+                    name,
+                    torch.full(
+                        (len(self._entities), self._data.dof),
+                        float(value),
+                        dtype=torch.float32,
+                        device=self.device,
+                    ),
+                )
+            if spawn_result is None:
+                self._set_default_joint_drive()
 
         # Apply configured qpos limits if provided. This replaces the asset
         # limits as the baseline and allows expanding the allowed range.
@@ -543,9 +588,16 @@ class Articulation(BatchEntity):
                 self.set_qpos_limits(qpos_limits)
 
         self.pk_chain = None
-        if self.cfg.build_pk_chain:
+        is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
+        if self.cfg.build_pk_chain and not is_usd_source:
             self.pk_chain = create_pk_chain(
                 urdf_path=self.cfg.fpath, device=self.device
+            )
+        elif self.cfg.build_pk_chain:
+            logger.log_warning(
+                f"Articulation {self.uid!r} uses USD for simulation; skipping "
+                "the URDF-only pk_chain. Configure a solver with its matching "
+                "URDF when kinematics are required."
             )
 
         # For rendering purposes, each articulation can have multiple material instances associated with its links.
@@ -560,22 +612,173 @@ class Articulation(BatchEntity):
         self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
 
         # TODO: very weird that we must call update here to make sure the GPU indices are valid.
-        if device.type == "cuda" and not is_newton_scene(self._ps):
+        if (
+            spawn_result is None
+            and device.type == "cuda"
+            and not is_newton_scene(self._ps)
+        ):
             self._world.update(0.001)
 
-        super().__init__(cfg, entities, device)
+        super().__init__(
+            cfg,
+            entities,
+            device,
+            auto_reset=spawn_result is None,
+        )
 
         self._initialize_existing_visual_material()
 
         # set default collision filter
-        self._set_default_collision_filter()
+        if spawn_result is None:
+            self._set_default_collision_filter()
 
         # flag for collision visible node existence
         self._has_collision_visible_node_dict = dict()
         for link_name in self.link_names:
             self._has_collision_visible_node_dict[link_name] = False
 
+    @property
+    def is_spawn_bound(self) -> bool:
+        """Whether this facade is bound to one finalized SpawnResult."""
+        return self._spawn_result is not None
+
+    @property
+    def is_declared(self) -> bool:
+        """Whether this facade is waiting for its SpawnResult binding."""
+        return self._world is None
+
+    @property
+    def num_instances(self) -> int:
+        if self._entities:
+            return len(self._entities)
+        return self._declared_num_instances
+
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedArticulation],
+    ) -> None:
+        """Store handles and expose metadata without initializing Batch data.
+
+        This pre-finalize step supports eager Default loading and only reads
+        articulation metadata. ``bind_spawn()`` performs result-dependent
+        Batch/Data initialization after finalization.
+        """
+        self._entities = list(entities)
+        self._mimic_info = self._entities[0].get_mimic_info()
+        self.active_joint_ids = [
+            index for index in range(self.dof) if index not in self.mimic_ids
+        ]
+
+    def bind_spawn(
+        self,
+        result: SpawnResult,
+    ) -> None:
+        """Initialize this declared facade from Spawn articulation handles."""
+        cfg = self.cfg
+        device = self.device
+        entities = list(self._entities)
+        type(self).__init__(
+            self,
+            cfg,
+            entities,
+            device,
+            spawn_result=result,
+        )
+        self._apply_spawn_config()
+        self.reset()
+
+    def _apply_spawn_config(self) -> None:
+        """Apply config values that require finalized source metadata.
+
+        The source file is loaded only by the DexSim Spawn adapter.  This
+        method runs after binding, when canonical link and active-joint names
+        are available.
+        """
+        is_usd = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
+        use_source_properties = is_usd and self.cfg.use_usd_properties
+        if use_source_properties:
+            return
+
+        self._set_default_joint_drive()
+        if not self.body_data.is_newton_backend:
+            return
+
+        self._apply_configured_link_masses()
+
+        if self.cfg.compute_uv:
+            for entity in self._entities:
+                for link_name in self.link_names:
+                    render_body = entity.get_render_body(link_name)
+                    if render_body is not None:
+                        render_body.set_projective_uv()
+
+        logger.log_warning(
+            f"Spawn articulation {self.uid!r}: TODO: non-mass link physics "
+            "attributes are not exposed by the Newton Spawn facade."
+        )
+
+    def _apply_configured_link_masses(self) -> None:
+        """Apply configured masses after source link names are available."""
+        base_mass = self.cfg.attrs.mass
+        groups = self.cfg.link_attrs or {}
+        if base_mass is None and not any(
+            group.attrs.mass is not None for group in groups.values()
+        ):
+            return
+        if self.body_data.is_newton_backend:
+            logger.log_warning(
+                f"Spawn articulation {self.uid!r}: Newton link-mass overrides "
+                "require retained-desc support and were not applied."
+            )
+            return
+
+        masses = self.get_mass()
+        mass_changed = False
+        if base_mass is not None:
+            if base_mass == 0:
+                logger.log_warning(
+                    f"Spawn articulation {self.uid!r}: density-derived mass is "
+                    "not exposed by the Spawn facade and was not applied."
+                )
+            else:
+                masses.fill_(float(base_mass))
+                mass_changed = True
+
+        claimed: set[str] = set()
+        for group in groups.values():
+            if group.attrs.mass is None:
+                continue
+            if group.attrs.mass == 0:
+                logger.log_warning(
+                    f"Spawn articulation {self.uid!r}: density-derived per-link "
+                    "mass is not exposed by the Spawn facade and was not applied."
+                )
+                continue
+            matched_indices, matched_names = resolve_matching_names(
+                keys=group.link_names_expr,
+                list_of_strings=self.link_names,
+            )
+            overlap = claimed.intersection(matched_names)
+            if overlap:
+                raise ValueError(
+                    "Articulation link mass override groups overlap for links "
+                    f"{sorted(overlap)}."
+                )
+            claimed.update(matched_names)
+            masses[:, matched_indices] = float(group.attrs.mass)
+            mass_changed = True
+
+        if mass_changed:
+            self.set_mass(masses, self.link_names)
+            self.default_link_masses = self.get_mass()
+
     def __str__(self) -> str:
+        if self.is_declared:
+            parent_str = (
+                f"{self.__class__}: declared {self.num_instances} Spawn "
+                f"articulations | uid: {self.uid} | device: {self.device}"
+            )
+            return parent_str
         parent_str = super().__str__()
         return parent_str + f" | dof: {self.dof} | num_links: {self.num_links}"
 
@@ -586,7 +789,9 @@ class Articulation(BatchEntity):
         Returns:
             int: The degree of freedom of the articulation.
         """
-        return self._data.dof
+        if self._data is not None:
+            return self._data.dof
+        return self._entities[0].get_dof()
 
     @cached_property
     def active_dof(self) -> int:
@@ -604,7 +809,9 @@ class Articulation(BatchEntity):
         Returns:
             int: The number of links in the articulation.
         """
-        return self._data.num_links
+        if self._data is not None:
+            return self._data.num_links
+        return len(self._entities[0].get_link_names())
 
     @cached_property
     def link_names(self) -> List[str]:
@@ -613,7 +820,9 @@ class Articulation(BatchEntity):
         Returns:
             List[str]: The names of the links in the articulation.
         """
-        return self._data.link_names
+        if self._data is not None:
+            return self._data.link_names
+        return self._entities[0].get_link_names()
 
     @cached_property
     def user_ids(self) -> torch.Tensor:
@@ -1315,7 +1524,9 @@ class Articulation(BatchEntity):
 
         for i, env_idx in enumerate(local_env_ids):
             for j, name in enumerate(link_names):
-                if self._data.is_newton_backend:
+                if self.is_spawn_bound:
+                    self._entities[env_idx].set_link_mass(name, mass[i, j].item())
+                elif self._data.is_newton_backend:
                     local_name = self._entity_link_name(env_idx, name)
                     self._entities[env_idx].set_link_mass(local_name, mass[i, j].item())
                 else:
@@ -1353,7 +1564,15 @@ class Articulation(BatchEntity):
         )
         for i, env_idx in enumerate(local_env_ids):
             for j, name in enumerate(link_names):
-                if self._data.is_newton_backend:
+                if self.is_spawn_bound:
+                    status, values = self._entities[env_idx].get_link_mass(name)
+                    if status < 0 or name not in values:
+                        raise RuntimeError(
+                            f"Spawn articulation {self.uid!r} did not expose "
+                            f"mass for link {name!r} in row {env_idx}."
+                        )
+                    mass_tensor[i, j] = values[name]
+                elif self._data.is_newton_backend:
                     local_name = self._entity_link_name(env_idx, name)
                     mass_tensor[i, j] = self._entities[env_idx].get_link_mass(
                         local_name
@@ -1501,6 +1720,34 @@ class Articulation(BatchEntity):
             return result.item() if result.size == 1 else result
 
         for i, env_idx in enumerate(local_env_ids):
+            if self.is_spawn_bound and self.body_data.is_newton_backend:
+                if drive_type == "acceleration":
+                    raise NotImplementedError(
+                        "Newton Spawn does not have an exact equivalent of "
+                        "DexSim's acceleration drive. Use drive_type='force' "
+                        "or provide a Newton-native drive descriptor."
+                    )
+                if drive_type not in {"force", "none"}:
+                    raise ValueError(f"Unsupported joint drive type {drive_type!r}.")
+                drive_args = {
+                    "target_mode": 3 if drive_type == "force" else 0,
+                    "joint_ids": local_joint_ids,
+                }
+                if stiffness is not None:
+                    drive_args["target_ke"] = _drive_arg(stiffness, i)
+                if damping is not None:
+                    drive_args["target_kd"] = _drive_arg(damping, i)
+                if max_effort is not None:
+                    drive_args["effort_limit"] = _drive_arg(max_effort, i)
+                if max_velocity is not None:
+                    drive_args["velocity_limit"] = _drive_arg(max_velocity, i)
+                if friction is not None:
+                    drive_args["friction"] = _drive_arg(friction, i)
+                if armature is not None:
+                    drive_args["armature"] = _drive_arg(armature, i)
+                self._entities[env_idx].set_newton_drive(**drive_args)
+                continue
+
             drive_args = {
                 "drive_type": get_dexsim_drive_type(drive_type),
                 "joint_ids": local_joint_ids,
@@ -1657,10 +1904,8 @@ class Articulation(BatchEntity):
 
         drive_types: list[list[DriveType]] = []
         for env_idx in local_env_ids:
-            entity_drive_types = self._entities[int(env_idx)].get_drive(
-                local_joint_ids
-            )[-1]
-            drive_types.append(list(entity_drive_types))
+            entity_drive_types = self._entities[int(env_idx)].get_drive()[-1]
+            drive_types.append(list(np.asarray(entity_drive_types)[local_joint_ids]))
         return drive_types
 
     def get_user_ids(
@@ -1753,24 +1998,36 @@ class Articulation(BatchEntity):
 
         self.restore_visual_material(env_ids=local_env_ids)
 
-        pos = torch.as_tensor(
-            self.cfg.init_pos, dtype=torch.float32, device=self.device
-        )
-        rot = (
-            torch.as_tensor(self.cfg.init_rot, dtype=torch.float32, device=self.device)
-            * torch.pi
-            / 180.0
-        )
-        pos = pos.unsqueeze(0).repeat(num_instances, 1)
-        rot = rot.unsqueeze(0).repeat(num_instances, 1)
-        mat = matrix_from_euler(rot, "XYZ")
-        pose = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .unsqueeze(0)
-            .repeat(num_instances, 1, 1)
-        )
-        pose[:, :3, 3] = pos
-        pose[:, :3, :3] = mat
+        if self.cfg.init_local_pose is not None:
+            pose = (
+                torch.as_tensor(
+                    self.cfg.init_local_pose,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                .reshape(1, 4, 4)
+                .repeat(num_instances, 1, 1)
+            )
+        else:
+            pos = torch.as_tensor(
+                self.cfg.init_pos, dtype=torch.float32, device=self.device
+            )
+            rot = (
+                torch.as_tensor(
+                    self.cfg.init_rot, dtype=torch.float32, device=self.device
+                )
+                * torch.pi
+                / 180.0
+            )
+            pos = pos.unsqueeze(0).repeat(num_instances, 1)
+            rot = rot.unsqueeze(0).repeat(num_instances, 1)
+            pose = (
+                torch.eye(4, dtype=torch.float32, device=self.device)
+                .unsqueeze(0)
+                .repeat(num_instances, 1, 1)
+            )
+            pose[:, :3, 3] = pos
+            pose[:, :3, :3] = matrix_from_euler(rot, "XYZ")
         self.set_local_pose(pose, env_ids=local_env_ids)
 
         qpos = torch.as_tensor(
@@ -1787,10 +2044,16 @@ class Articulation(BatchEntity):
         if self.device.type == "cpu" and not self._data.is_newton_backend:
             self._world.update(0.001)
 
-    def _set_default_joint_drive(self) -> None:
+    def _set_default_joint_drive(
+        self,
+        drive_pros: JointDrivePropertiesCfg | dict | None = None,
+    ) -> None:
         """Set default joint drive parameters based on the configuration."""
         import numbers
         from embodichain.utils.string import resolve_matching_names_values
+
+        if drive_pros is None:
+            drive_pros = self.cfg.drive_pros
 
         drive_props = [
             ("damping", self.default_joint_damping),
@@ -1802,7 +2065,11 @@ class Articulation(BatchEntity):
         ]
 
         for prop_name, default_array in drive_props:
-            value = getattr(self.cfg.drive_pros, prop_name, None)
+            value = (
+                drive_pros.get(prop_name)
+                if isinstance(drive_pros, dict)
+                else getattr(drive_pros, prop_name, None)
+            )
             if value is None:
                 continue
             if isinstance(value, numbers.Number):
@@ -1818,7 +2085,6 @@ class Articulation(BatchEntity):
                 except Exception as e:
                     logger.log_error(f"Failed to set {prop_name}: {e}")
 
-        drive_pros = self.cfg.drive_pros
         if isinstance(drive_pros, dict):
             drive_type = drive_pros.get("drive_type", "none")
         else:
@@ -2335,6 +2601,9 @@ class Articulation(BatchEntity):
             )
 
     def destroy(self) -> None:
+        if self.is_declared or self.is_spawn_bound:
+            # SpawnResult is the sole owner of native lifetime.
+            return
         env = self._world.get_env()
         arenas = env.get_all_arenas()
         if len(arenas) == 0:

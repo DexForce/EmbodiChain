@@ -60,8 +60,7 @@ def main(args):
         )
     )
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     if not args.headless:
         sim.open_window()
@@ -122,6 +121,8 @@ def main(args):
         plt.savefig(f"camera_data.png")
     else:
         plt.show()
+
+    sim.destroy()
 
 
 if __name__ == "__main__":

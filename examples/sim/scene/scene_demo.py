@@ -78,9 +78,6 @@ def resolve_asset_path(scene_name: str) -> str:
 
 def run_simulation(sim: SimulationManager):
     """Run the simulation loop."""
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     try:
         while True:
             time.sleep(0.01)
@@ -180,6 +177,8 @@ def main():
     except Exception as e:
         logger.log_info(f"Failed to load scene asset: {e}")
         return
+
+    sim.prepare()
 
     logger.log_info(f"Scene '{args.scene}' setup complete!")
     logger.log_info(f"Running simulation with {args.num_envs} environment(s)")

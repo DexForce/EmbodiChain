@@ -64,6 +64,7 @@ def main() -> None:
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
+    sim.prepare()
     engine = AtomicActionEngine(motion_generator=create_toppra_motion_generator(robot))
 
     initial_qpos = robot.get_qpos().clone()

@@ -48,7 +48,7 @@ sim_config = SimulationManagerCfg(
 
 ### Physics Configuration
 
-Use {class}`~cfg.DefaultPhysicsCfg` for the default PhysX backend or {class}`~cfg.NewtonPhysicsCfg` for Newton. GPU memory settings are on {class}`~cfg.DefaultPhysicsCfg` as ``gpu_memory``.
+Use {class}`~cfg.DefaultPhysicsCfg` for the default DexSim backend or {class}`~cfg.NewtonPhysicsCfg` for Newton. GPU memory settings are on {class}`~cfg.DefaultPhysicsCfg` as ``gpu_memory``.
 
 All physics backends inherit these base parameters from {class}`~cfg.PhysicsCfg`:
 

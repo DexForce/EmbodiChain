@@ -93,6 +93,7 @@ def create_pick_object(sim) -> RigidObject:
             body_scale=(0.75, 0.75, 1.0),
         )
     )
+    sim.prepare()
     sim.update(step=10)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()

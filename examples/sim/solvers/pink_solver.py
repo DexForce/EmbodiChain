@@ -76,6 +76,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     }
 
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+    sim.prepare()
 
     # Define a sample target pose as a 1x4x4 homogeneous matrix
     rad = torch.deg2rad(torch.tensor(45.0))

@@ -113,6 +113,7 @@ def main():
     )
 
     # Open window when the scene has been set up
+    sim.prepare()
     if not args.headless:
         sim.open_window()
 
@@ -129,10 +130,6 @@ def run_simulation(sim: SimulationManager):
     Args:
         sim: The SimulationManager instance to run
     """
-
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     step_count = 0
 

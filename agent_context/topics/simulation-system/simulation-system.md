@@ -40,9 +40,14 @@ The environment-owned lifecycle is:
 EnvCfg.sim_cfg
   → BaseEnv._setup_scene()
   → SimulationManager(SimulationManagerCfg)
-  → create World, global environment, defaults, and N arenas
-  → EmbodiedEnv adds robot, objects, lights, and sensors
-  → initialize GPU physics after scene construction when using CUDA
+  → create World, global environment, and N empty arenas
+  → EmbodiedEnv declares robot and physical objects through DexSim Spawn
+       → Default/PhysX materializes native entities immediately
+       → Newton keeps descriptors deferred
+  → SimulationManager.prepare()
+       → finalize the Spawn scene
+       → prepare backend runtime buffers
+       → bind EmbodiChain batch facades
   → BaseEnv.step()
        → preprocess/apply action
        → SimulationManager.update(physics_dt, sim_steps_per_control)
@@ -59,15 +64,19 @@ EnvCfg.sim_cfg
 the scene can be assembled before a native window is opened. It sets
 `SimulationManagerCfg.num_envs` from `EnvCfg.num_envs`.
 
-`SimulationManager` enables physics, selects manual physics updates, creates
-the configured arenas, installs default plane/background/lighting resources,
-and starts configured visualization during initialization. A Viser backend
-forces `headless=True`; Viser and the native DexSim window are mutually
-exclusive.
+`SimulationManager` enables physics, selects manual physics updates, prepares
+the configured Arena layout, and owns a thin Spawn scene coordinator. With the
+Default backend, preparing the Arena layout lets `add_*` materialize native
+entities immediately, so articulation metadata and render nodes are available
+before finalization. Newton still builds its model once at `prepare()`.
+`prepare()` is idempotent and remains the common runtime-readiness boundary:
+Default/CUDA calls `World.init_gpu_physics()` directly after Spawn finalization,
+while Newton finalization already produces a ready runtime.
 
-`SimulationManager.update()` initializes GPU physics lazily if needed and
-then advances the world for the requested number of physics steps. Each
-environment control step normally calls it with
+Lights and sensors remain render resources owned directly by EmbodiChain;
+physical scene topology is owned by DexSim Spawn. `SimulationManager.update()`
+calls `prepare()` lazily if needed and then advances the world for the requested
+number of physics steps. Each environment control step normally calls it with
 `sim_steps_per_control`.
 
 ## Module Boundaries
@@ -124,8 +133,9 @@ corresponding robot/sensor module. Scene composition belongs in
 - Treat resource UIDs as registry identities; retrieve and mutate resources
   through the manager instead of maintaining a parallel scene registry.
 - Keep batched object and sensor state aligned with the manager's arena count.
-- Build scene assets before explicitly initializing GPU physics. The manager
-  will warn and initialize lazily on the first update if this was missed.
+- Add the initial physical scene before `prepare()`. Calls to the legacy
+  `init_gpu_physics()` and `finalize_newton_physics()` aliases are equivalent to
+  `prepare()` and do not cause a second build.
 - Manual update is the default; normal environment stepping must advance
   physics through `SimulationManager.update()`.
 - Reset only the requested environment rows and honor

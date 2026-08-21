@@ -22,7 +22,7 @@ Backend selection is inferred from `SimulationManagerCfg.physics_cfg`:
 - `physics_cfg_for_backend("default" | "newton")` returns the matching config.
 - `physics_backend_from_cfg(...)` maps a config instance to its backend name.
 
-`DefaultPhysicsCfg` owns default-backend PhysX settings and GPU-memory settings.
+`DefaultPhysicsCfg` owns default-backend settings and GPU-memory settings.
 `NewtonPhysicsCfg` owns Newton settings: `physics_dt`, `device`, `num_substeps`,
 `requires_grad`, `use_cuda_graph`, `debug_mode`, `solver_cfg` (mapping or
 `NewtonSolverCfg` selecting `mujoco_warp` / `xpbd` / `semi_implicit` /
@@ -88,7 +88,7 @@ Rigid-body and articulation data access is routed through:
 ```text
 embodichain/lab/sim/objects/backends/
     base.py     # RigidBodyViewBase, ArticulationViewBase (ABCs)
-    default.py  # DefaultRigidBodyView, DefaultArticulationView (PhysX/DexSim-GPU)
+    default.py  # DefaultRigidBodyView, DefaultArticulationView (Default/DexSim GPU)
     newton.py   # NewtonRigidBodyView,  NewtonArticulationView  (Warp)
 ```
 
@@ -113,9 +113,9 @@ use DexSim's per-entity metadata hook when a Newton body ID is not available.
 
 ### Newton-native physics attributes (Phase 3)
 
-`RigidBodyAttributesCfg` previously flattened to the legacy PhysX-oriented
+`RigidBodyAttributesCfg` previously flattened to the legacy default-backend
 `PhysicalAttr` via `.attr()`, so on Newton: Newton-native contact/shape params
-(`ke`/`kd`/`margin`/`gap`/`mu_torsional`/...) were not representable, PhysX-only
+(`ke`/`kd`/`margin`/`gap`/`mu_torsional`/...) were not representable, default-only
 fields were silently ignored, and `density`/`enable_collision` were dropped.
 This is now fixed by adopting dexsim's spawn-descriptor pattern at the EmbodiChain
 config layer.
@@ -136,7 +136,7 @@ config layer.
   `resolve_rigid_body_attributes` (dispatch by backend). Re-exports dexsim's
   `NEWTON_CONTACT_SOLVER_FIELDS` / `NEWTON_CONTACT_FIELDS` and ports
   `warn_ignored_contact_fields` (per-solver) + `warn_backend_mismatched_fields`
-  (PhysX-only fields on Newton).
+  (Default-only fields on Newton).
 - RigidObject spawn (`sim_utils.py`): **opt-in desc-native path** — when
   `is_newton and cfg.attrs.newton is not None`, route box/sphere/CONVEX-mesh
   through `register_mesh_object_to_newton_patch(newton_shape=, newton_body=)`
@@ -162,7 +162,7 @@ config layer.
   registration on Newton and cannot change at runtime without a rebuild.
 
 `set_mass`/`set_friction`/`set_inertia` use the batch view when finalized; their
-not-ready `else` paths mirror the single field to meta on Newton (the PhysX-bound
+not-ready `else` paths mirror the single field to meta on Newton (the default-bound
 `get_physical_body().set_*` are not Newton-patched). `Articulation.set_link_physical_attr`
 pushes per-link **mass** live on Newton via `set_link_mass` (mirroring the
 dedicated `set_mass`); friction/restitution/contact_offset remain rebuild-time-

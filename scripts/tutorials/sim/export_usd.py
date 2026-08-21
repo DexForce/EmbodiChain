@@ -263,7 +263,9 @@ def main():
     caffe = create_caffe(sim)
     cup = create_cup(sim)
 
-    sim.export_usd("w1_coffee_scene.usda")
+    sim.prepare()
+
+    sim.export_usd("w1_coffee_scene.usd")
 
     logger.log_info("Scene exported successfully.")
 

@@ -91,7 +91,6 @@ def main() -> None:
             uid="cube",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
-            body_scale=[0.5, 0.5, 0.5],
             attrs=RigidBodyAttributesCfg(
                 mass=0.1,
                 dynamic_friction=0.5,
@@ -118,6 +117,9 @@ def main() -> None:
             max_convex_hull_num=32,
         )
     )
+
+    # Materialize the complete initial scene before exposing it to the viewer.
+    sim.prepare()
 
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
@@ -156,10 +158,6 @@ def run_simulation(
         sim: The SimulationManager instance to run.
         max_steps: Optional maximum number of simulation steps to execute.
     """
-
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     step_count = 0
 

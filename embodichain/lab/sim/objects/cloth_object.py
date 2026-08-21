@@ -19,10 +19,11 @@ from __future__ import annotations
 import torch
 import dexsim
 import numpy as np
+from copy import deepcopy
 from functools import cached_property
 
 from dataclasses import dataclass
-from typing import List, Sequence, Union
+from typing import Any, List, Sequence, TYPE_CHECKING, Union
 
 from dexsim.models import MeshObject
 from dexsim.engine import ClothBody, PhysicsScene
@@ -46,6 +47,9 @@ from embodichain.lab.sim.cfg import (
     ClothObjectCfg,
 )
 from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+if TYPE_CHECKING:
+    from dexsim.spawn import SpawnResult
 
 __all__ = ["ClothBodyData", "ClothObject", "ClothObjectCfg"]
 
@@ -86,7 +90,7 @@ class ClothBodyData:
             dtype=torch.float32,
         )
         for i, cloth_body in enumerate(self.cloth_bodies):
-            self._rest_position_buffer[i] = cloth_body.get_position_inv_mass_buffer()
+            self._rest_position_buffer[i] = cloth_body.get_rest_position_buffer()
 
         self._vertex_position = torch.zeros(
             (self.num_instances, self.n_vertices, 3),
@@ -126,21 +130,52 @@ class ClothObject(BatchEntity):
     def __init__(
         self,
         cfg: ClothObjectCfg,
-        entities: List[MeshObject] = None,
+        entities: Sequence[Any] | None = None,
         device: torch.device = torch.device("cpu"),
+        *,
+        spawn_result: SpawnResult | None = None,
+        declared_num_instances: int | None = None,
     ) -> None:
-        self._world: dexsim.World = dexsim.default_world()
-        from embodichain.lab.sim.sim_manager import get_physics_scene
+        if entities is None:
+            if declared_num_instances is None or declared_num_instances <= 0:
+                raise ValueError(
+                    "A declared ClothObject requires declared_num_instances > 0."
+                )
+            self.cfg = deepcopy(cfg)
+            self.uid = self.cfg.uid
+            self.device = device
+            self._entities = []
+            self._declared_num_instances = declared_num_instances
+            self._spawn_result = None
+            self._world = None
+            self._ps = None
+            self._data = None
+            self._all_indices = list(range(declared_num_instances))
+            self._visual_material = [None] * declared_num_instances
+            self.is_shared_visual_material = False
+            return
 
-        self._ps = get_physics_scene()
+        entities = list(entities)
+        self._declared_num_instances = len(entities)
+        self._spawn_result = spawn_result
+        if spawn_result is None:
+            self._world = dexsim.default_world()
+            from embodichain.lab.sim.sim_manager import get_physics_scene
+
+            self._ps = get_physics_scene()
+        else:
+            self._world = spawn_result.world
+            self._ps = self._world.get_physics_scene()
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         self._data = ClothBodyData(entities=entities, ps=self._ps, device=device)
 
-        self._world.update(0.001)
+        if spawn_result is None:
+            self._world.update(0.001)
         self._surface_triangles = self._build_surface_triangles(
             entities[0],
             self._data.rest_vertices[0].detach().cpu().numpy(),
+            self._data.cloth_bodies[0].get_initial_transform(),
         )
 
         self._visual_material: List[VisualMaterialInst | None] = [None] * len(entities)
@@ -153,10 +188,57 @@ class ClothObject(BatchEntity):
 
         self._set_default_collision_filter()
 
+    @property
+    def is_spawn_bound(self) -> bool:
+        """Whether this facade is bound to one finalized SpawnResult."""
+        return self._spawn_result is not None
+
+    @property
+    def is_declared(self) -> bool:
+        """Whether this facade is waiting for its SpawnResult binding."""
+        return self._world is None
+
+    @property
+    def num_instances(self) -> int:
+        return len(self._entities) if self._entities else self._declared_num_instances
+
+    def attach_spawn_handles(self, entities: Sequence[Any]) -> None:
+        """Store materialized handles without initializing runtime data.
+
+        ``bind_spawn()`` performs UV setup and result-dependent data binding
+        after Spawn finalization.
+        """
+        self._entities = list(entities)
+
+    def bind_spawn(self, result: SpawnResult) -> None:
+        """Bind a declared facade to finalized cloth handles in place."""
+        entities = list(self._entities)
+        if self.cfg.shape.compute_uv:
+            for entity in entities:
+                entity.compute_uv_mapping()
+        cfg = self.cfg
+        device = self.device
+        type(self).__init__(
+            self,
+            cfg,
+            entities,
+            device,
+            spawn_result=result,
+        )
+
+    def __str__(self) -> str:
+        if self.is_declared:
+            return (
+                f"{self.__class__}: declared {self.num_instances} Spawn cloth "
+                f"objects | uid: {self.uid} | device: {self.device}"
+            )
+        return super().__str__()
+
     @staticmethod
     def _build_surface_triangles(
         entity: MeshObject,
         rest_vertices: np.ndarray,
+        initial_transform: np.ndarray,
     ) -> np.ndarray:
         """Map render triangles onto DexSim's welded cloth vertex buffer."""
         render_body = entity.get_render_body()
@@ -178,6 +260,10 @@ class ClothObject(BatchEntity):
 
         vertices = np.concatenate(render_vertices, axis=0)
         triangles = np.concatenate(render_triangles, axis=0)
+        initial_transform = np.asarray(initial_transform, dtype=np.float32).reshape(
+            4, 4
+        )
+        vertices = vertices @ initial_transform[:3, :3].T + initial_transform[:3, 3]
         distances, cloth_vertex_ids = cKDTree(rest_vertices).query(vertices)
         scale = max(float(np.ptp(rest_vertices, axis=0).max()), 1.0)
         if float(distances.max(initial=0.0)) > scale * 1.0e-5:
@@ -386,20 +472,26 @@ class ClothObject(BatchEntity):
         arena_offsets = sim.arena_offsets
         for i, env_idx in enumerate(local_env_ids):
             # TODO: cloth body cannot directly set by `set_local_pose` currently.
-            rest_vertices = self.body_data.rest_vertices[i]
+            cloth_body: ClothBody = self._entities[env_idx].get_physical_body()
+            rest_vertices = self.body_data.rest_vertices[env_idx]
+            initial_transform = torch.as_tensor(
+                cloth_body.get_initial_transform(),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            rest_vertices_local = (
+                rest_vertices - initial_transform[:3, 3]
+            ) @ initial_transform[:3, :3]
             rotation = pose4x4[i][:3, :3]
             translation = pose4x4[i][:3, 3]
 
-            # apply transformation to local rest vertices and back
-            rest_vertices_local = rest_vertices - arena_offsets[i]
             transformed_vertices = rest_vertices_local @ rotation.T + translation
-            transformed_vertices = transformed_vertices + arena_offsets[i]
+            transformed_vertices = transformed_vertices + arena_offsets[env_idx]
 
-            cloth_body: ClothBody = self._entities[env_idx].get_physical_body()
             position_buffer = cloth_body.get_position_inv_mass_buffer()
             velocity_buffer = cloth_body.get_velocity_buffer()
             position_buffer[:, :3] = transformed_vertices
-            velocity_buffer[:, 3:] = 0.0
+            velocity_buffer[:, :3] = 0.0
 
             cloth_body.mark_dirty(ClothBodyGPUAPIReadWriteType.ALL)
             # TODO: currently cloth body has no wake up interface, use set_wake_counter and pass in a positive value to wake it up
@@ -448,6 +540,8 @@ class ClothObject(BatchEntity):
         self.set_local_pose(pose, env_ids=local_env_ids)
 
     def destroy(self) -> None:
+        if self.is_spawn_bound:
+            return
         # TODO: not tested yet
         env = self._world.get_env()
         arenas = env.get_all_arenas()

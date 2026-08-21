@@ -422,8 +422,9 @@ def test_start_visualization_rejects_open_native_window() -> None:
         sim.start_visualization()
 
 
-def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> None:
+def test_constructor_only_declares_spawn_scene(monkeypatch) -> None:
     lifecycle: list[str] = []
+    spawn_scene = MagicMock()
     world = MagicMock()
     world.get_physics_scene.return_value = MagicMock()
     world.get_env.return_value = MagicMock()
@@ -433,6 +434,11 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
     )
     monkeypatch.setattr(sim_manager_module.wp, "init", lambda: None)
     monkeypatch.setattr(sim_manager_module.dexsim, "World", lambda _cfg: world)
+    monkeypatch.setattr(
+        sim_manager_module,
+        "SpawnScene",
+        lambda *_args, **_kwargs: spawn_scene,
+    )
     monkeypatch.setattr(
         sim_manager_module.dexsim, "set_physics_config", lambda **_kwargs: None
     )
@@ -454,7 +460,7 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
     )
     monkeypatch.setattr(
         SimulationManager,
-        "_create_default_plane",
+        "_declare_spawn_default_plane",
         lambda _self: lifecycle.append("plane"),
     )
     monkeypatch.setattr(
@@ -468,14 +474,9 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
         lambda _self: lifecycle.append("lighting"),
     )
 
-    def build_arenas(sim: SimulationManager, num: int) -> None:
-        lifecycle.append("arenas")
-        sim._arenas.extend([object() for _ in range(num)])
-
     def start_visualization(sim: SimulationManager) -> None:
         lifecycle.append(f"visualization:{sim.num_envs}")
 
-    monkeypatch.setattr(SimulationManager, "_build_multiple_arenas", build_arenas)
     monkeypatch.setattr(
         SimulationManager,
         "start_visualization",
@@ -487,22 +488,67 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
 
     assert lifecycle == [
         "resources",
-        "plane",
         "background",
+        "plane",
         "lighting",
-        "arenas",
-        "visualization:3",
     ]
+    assert sim._spawn_scene is spawn_scene
+    assert sim._arenas == []
+
+
+@pytest.mark.parametrize(
+    ("backend", "device", "expected_gpu_init_calls"),
+    [
+        pytest.param("default", torch.device("cpu"), 0, id="default-host"),
+        pytest.param("default", torch.device("cuda"), 1, id="default-accelerator"),
+        pytest.param("newton", torch.device("cpu"), 0, id="newton-host"),
+        pytest.param("newton", torch.device("cuda"), 0, id="newton-accelerator"),
+    ],
+)
+def test_prepare_initializes_default_gpu_runtime(
+    backend: str,
+    device: torch.device,
+    expected_gpu_init_calls: int,
+) -> None:
+    result = MagicMock()
+    spawn_scene = MagicMock()
+    spawn_scene.builder.is_finalized = False
+    spawn_scene.builder.result = None
+    spawn_scene.commit.return_value = result
+    spawn_scene.arena_names = ["arena_0"]
+
+    sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(name=backend)
+    sim.device = device
+    sim._world = MagicMock()
+    sim._spawn_scene = spawn_scene
+    sim._default_plane = object()
+    sim._pending_sensor_attachments = []
+
+    sim.prepare()
+
+    assert sim._world.init_gpu_physics.call_count == expected_gpu_init_calls
 
 
 def test_remove_asset_marks_visualization_topology_dirty() -> None:
     sim, runtime = _make_visualization_sim_manager()
     rigid_object = MagicMock()
+    spawn_scene = MagicMock()
+    spawn_scene.__contains__.return_value = True
+    spawn_scene.result = object()
+    sim._spawn_scene = spawn_scene
+    sim.prepare = MagicMock()
     sim._rigid_objects = {"cube": rigid_object}
+    sim._articulations = {}
+    sim._robots = {}
+    sim._lights = {}
 
     assert sim.remove_asset("cube")
 
-    rigid_object.destroy.assert_called_once_with()
+    spawn_scene.remove.assert_called_once_with("cube")
+    sim.prepare.assert_called_once_with()
+    rigid_object.destroy.assert_not_called()
+    assert "cube" not in sim._rigid_objects
     assert sim._visualization_topology_revision == 3
     sim.stop_visualization()
     assert runtime.stopped

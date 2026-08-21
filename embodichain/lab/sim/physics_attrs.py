@@ -30,7 +30,7 @@ descriptors dexsim consumes:
   dexsim's desc-native ``register_mesh_object_to_newton_patch`` entry point.
 
 It also emits data-driven warnings (ported from dexsim) when a user sets contact
-fields the active Newton solver ignores, or PhysX-only fields on the Newton
+fields the active Newton solver ignores, or Default-only fields on the Newton
 backend.
 
 .. note::
@@ -72,7 +72,7 @@ __all__ = [
 ]
 
 
-# PhysX-only fields (carried on RigidBodyAttributesCfg) that Newton does not
+# Default-only fields (carried on RigidBodyAttributesCfg) that Newton does not
 # model per body. Setting them on the Newton backend is a no-op; warn so users
 # notice. `static_friction` is folded into Newton's single `mu`; `rest_offset`
 # has no Newton per-shape runtime equivalent (only `contact_offset`/`gap`).
@@ -233,7 +233,7 @@ def warn_backend_mismatched_fields(
 ) -> None:
     """Warn for attribute fields the active backend does not model.
 
-    On the Newton backend, PhysX-only per-body fields (damping, ccd, sleep
+    On the Newton backend, Default-only per-body fields (damping, ccd, sleep
     thresholds, solver iters, rest_offset, static_friction) are not modelled;
     setting them is a no-op. The warning fires only when the user deviated from
     the cfg defaults, so it does not spam the common case.
@@ -248,6 +248,6 @@ def warn_backend_mismatched_fields(
     )
     if ignored:
         logger.log_warning(
-            f"Newton backend does not model PhysX-only field(s) {ignored}; "
+            f"Newton backend does not model Default-only field(s) {ignored}; "
             "they have no runtime effect on Newton."
         )

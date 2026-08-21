@@ -21,7 +21,7 @@ import dexsim
 import open3d as o3d
 
 from dataclasses import MISSING
-from typing import List, Union
+from typing import TYPE_CHECKING, List, Union
 
 from dexsim.types import (
     CloneStrategy,
@@ -49,6 +49,9 @@ from embodichain.lab.sim.shapes import MeshCfg, CubeCfg, SphereCfg
 from embodichain.utils import logger
 from dexsim.kit.meshproc import get_mesh_auto_uv
 import numpy as np
+
+if TYPE_CHECKING:
+    from dexsim.spawn import SpawnedArticulation
 
 
 def _is_newton_backend_active() -> bool:
@@ -454,30 +457,16 @@ def spawn_usd_articulation_entities(
     return entities
 
 
-def set_dexsim_articulation_cfg(art: Articulation, cfg: ArticulationCfg) -> None:
+def set_dexsim_articulation_cfg(
+    art: Articulation | SpawnedArticulation,
+    cfg: ArticulationCfg,
+) -> None:
     """Apply EmbodiChain articulation cfg to a single DexSim articulation entity.
 
     Args:
         art: DexSim articulation (or Newton skeleton carrier) to configure.
         cfg: EmbodiChain articulation configuration.
     """
-
-    def get_drive_type(drive_pros):
-        if isinstance(drive_pros, dict):
-            return drive_pros.get("drive_type", None)
-        return getattr(drive_pros, "drive_type", None)
-
-    drive_pros = getattr(cfg, "drive_pros", None)
-    drive_type = get_drive_type(drive_pros) if drive_pros is not None else None
-
-    if drive_type == "force":
-        drive_type = DriveType.FORCE
-    elif drive_type == "acceleration":
-        drive_type = DriveType.ACCELERATION
-    elif drive_type == "none":
-        drive_type = DriveType.NONE
-    else:
-        logger.log_error(f"Unknow drive type {drive_type}")
 
     is_newton_art = hasattr(art, "dexsim_meta_links")
     lifecycle_state = getattr(getattr(art, "_mgr", None), "_lifecycle_state", None)

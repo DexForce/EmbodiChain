@@ -45,7 +45,7 @@ __all__ = ["DefaultRigidBodyView", "DefaultArticulationView"]
 class DefaultRigidBodyView(RigidBodyViewBase):
     """Default DexSim backend rigid body data adapter.
 
-    Encapsulates both GPU (PhysX) and CPU entity-level data paths.
+    Encapsulates both GPU (DexSim) and CPU entity-level data paths.
     The default GPU API stores pose as ``(qx, qy, qz, qw, x, y, z)``; this
     adapter converts to / from the EmbodiChain convention
     ``(x, y, z, qx, qy, qz, qw)`` transparently.

@@ -241,6 +241,7 @@ def create_pickment_object(
             body_scale=preset.body_scale,
         )
     )
+    sim.prepare()
     obj.cfg.init_pos = compute_supported_init_pos(obj, preset)
     obj.reset()
     return obj

@@ -789,9 +789,9 @@ class EmbodiedEnv(BaseEnv):
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
-        self._setup_lights()
         self._setup_background()
         self._setup_interactive_objects()
+        self._setup_lights()
 
     def _update_sim_state(self, **kwargs) -> None:
         """Perform the simulation step and apply events if configured.
@@ -1657,8 +1657,15 @@ class EmbodiedEnv(BaseEnv):
             return self.action_manager.process_action(action, mode="post")
         return super()._postprocess_action(action)
 
+    def _declare_robot(self, **kwargs) -> Robot:
+        """Declare the configured robot without reading articulation metadata."""
+        del kwargs
+        if self.cfg.robot is None:
+            logger.log_error("Robot configuration is not provided.")
+        return self.sim.add_robot(self.cfg.robot)
+
     def _setup_robot(self, **kwargs) -> Robot:
-        """Setup the robot in the environment.
+        """Configure the finalized robot interface for the environment.
 
         Currently, only joint position control is supported. Would be extended to support joint velocity and torque
             control in the future.
@@ -1666,11 +1673,10 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Robot: The robot instance added to the scene.
         """
-        if self.cfg.robot is None:
-            logger.log_error("Robot configuration is not provided.")
-
-        # Initialize the robot based on the configuration.
-        robot: Robot = self.sim.add_robot(self.cfg.robot)
+        del kwargs
+        robot = self.robot
+        if robot is None:
+            logger.log_error("Robot was not declared before simulation prepare.")
 
         # Setup active joints for robot to control.
         if self.cfg.control_parts:

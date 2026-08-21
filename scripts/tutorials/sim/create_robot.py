@@ -74,9 +74,9 @@ def main():
     # Create robot configuration
     robot = create_robot(sim)
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    # Materialize the declared scene before accessing robot metadata.
+    sim.prepare()
+    print(f"Robot created successfully with {robot.dof} joints")
 
     # Open visualization window if not headless
     if not args.headless:
@@ -137,8 +137,6 @@ def create_robot(sim):
 
     # Add robot to simulation
     robot: Robot = sim.add_robot(cfg=cfg)
-
-    print(f"Robot created successfully with {robot.dof} joints")
 
     return robot
 

@@ -16,249 +16,168 @@
 
 from __future__ import annotations
 
-import torch
-import dexsim
+from copy import deepcopy
+from typing import TYPE_CHECKING, Sequence
+
 import numpy as np
+import torch
 
-from dataclasses import dataclass
-from typing import List, Sequence, Union
+from embodichain.lab.sim import BatchEntity
+from embodichain.lab.sim.cfg import RigidObjectGroupCfg
+from embodichain.lab.sim.material import VisualMaterial
+from embodichain.lab.sim.objects.backends.spawn import SpawnRigidBodyView
+from embodichain.utils.math import (
+    convert_quat,
+    matrix_from_euler,
+    matrix_from_quat,
+    quat_from_matrix,
+)
 
-from dexsim.models import MeshObject
-from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
-from dexsim.engine import CudaArray, PhysicsScene
-from embodichain.lab.sim.cfg import (
-    RigidObjectGroupCfg,
-    RigidBodyAttributesCfg,
-)
-from embodichain.lab.sim import (
-    BatchEntity,
-)
-from embodichain.lab.sim.material import VisualMaterial, VisualMaterialInst
-from ._mesh_utils import (
-    get_combined_triangles,
-    get_combined_vertices,
-)
-from embodichain.utils.math import convert_quat
-from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
-from embodichain.utils import logger
+from ._mesh_utils import get_combined_triangles, get_combined_vertices
+
+if TYPE_CHECKING:
+    from dexsim.spawn import SpawnResult, SpawnedObject
 
 __all__ = ["RigidBodyGroupData", "RigidObjectGroup", "RigidObjectGroupCfg"]
 
 
-@dataclass
 class RigidBodyGroupData:
-    """Data manager for rigid body group with body type of dynamic or kinematic."""
+    """Expose one flat Spawn rigid-body batch as ``[env, object, ...]`` tensors."""
 
     def __init__(
-        self, entities: List[List[MeshObject]], ps: PhysicsScene, device: torch.device
+        self,
+        body_view: SpawnRigidBodyView,
+        *,
+        num_instances: int,
+        num_objects: int,
+        device: torch.device,
     ) -> None:
-        """Initialize the RigidBodyGroupData.
-
-        Args:
-            entities (List[List[MeshObject]]): List of List MeshObjects representing the rigid body group.
-            ps (PhysicsScene): The physics scene.
-            device (torch.device): The device to use for the rigid body group data.
-        """
-        self.entities = entities
-        self.ps = ps
-        self.num_instances = len(entities)
-        self.num_objects = len(entities[0])
+        self.body_view = body_view
+        self.num_instances = num_instances
+        self.num_objects = num_objects
         self.device = device
-
-        # get gpu indices for the rigid bodies with shape of (num_instances, num_objects)
-        self.gpu_indices = (
-            torch.as_tensor(
-                [
-                    [entity.get_gpu_index() for entity in instance]
-                    for instance in entities
-                ],
-                dtype=torch.int32,
-                device=self.device,
-            )
-            if self.device.type == "cuda"
-            else None
+        self._pose = torch.empty(
+            (num_instances, num_objects, 7), dtype=torch.float32, device=device
         )
-
-        # Initialize rigid body group data tensors. Shape of (num_instances, num_objects, data_dim)
-        self._pose = torch.zeros(
-            (self.num_instances, self.num_objects, 7),
-            dtype=torch.float32,
-            device=self.device,
+        self._lin_vel = torch.empty(
+            (num_instances, num_objects, 3), dtype=torch.float32, device=device
         )
-        self._lin_vel = torch.zeros(
-            (self.num_instances, self.num_objects, 3),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        self._ang_vel = torch.zeros(
-            (self.num_instances, self.num_objects, 3),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self._ang_vel = torch.empty_like(self._lin_vel)
 
     @property
     def pose(self) -> torch.Tensor:
-        if self.device.type == "cpu":
-            # Fetch pose from CPU entities
-            xyzs = torch.as_tensor(
-                [
-                    [entity.get_location() for entity in instance]
-                    for instance in self.entities
-                ],
-                device=self.device,
-            )
-            quats = torch.as_tensor(
-                [
-                    [entity.get_rotation_quat() for entity in instance]
-                    for instance in self.entities
-                ],
-                device=self.device,
-            )
-            quats = convert_quat(quats.reshape(-1, 4), to="wxyz").reshape(
-                -1, self.num_objects, 4
-            )
-            return torch.cat((xyzs, quats), dim=-1)
-        else:
-            pose = self._pose.reshape(-1, 7)
-            self.ps.gpu_fetch_rigid_body_data(
-                data=pose,
-                gpu_indices=self.gpu_indices.flatten(),
-                data_type=RigidBodyGPUAPIReadType.POSE,
-            )
-            pose = convert_quat(pose[:, :4], to="wxyz")
-            pose = pose[:, [4, 5, 6, 0, 1, 2, 3]]
-            return self._pose
+        """Local poses in the legacy Group layout ``xyz + wxyz``."""
+        flat = self._pose.reshape(-1, 7)
+        self.body_view.fetch_pose(flat)
+        flat[:, 3:7] = convert_quat(flat[:, 3:7], to="wxyz")
+        return self._pose
 
     @property
     def lin_vel(self) -> torch.Tensor:
-        if self.device.type == "cpu":
-            # Fetch linear velocity from CPU entities
-            self._lin_vel = torch.as_tensor(
-                [
-                    [entity.get_linear_velocity() for entity in instance]
-                    for instance in self.entities
-                ],
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            lin_vel = self._lin_vel.reshape(-1, 3)
-            self.ps.gpu_fetch_rigid_body_data(
-                data=lin_vel,
-                gpu_indices=self.gpu_indices.flatten(),
-                data_type=RigidBodyGPUAPIReadType.LINEAR_VELOCITY,
-            )
+        self.body_view.fetch_linear_velocity(self._lin_vel.reshape(-1, 3))
         return self._lin_vel
 
     @property
     def ang_vel(self) -> torch.Tensor:
-        if self.device.type == "cpu":
-            # Fetch angular velocity from CPU entities
-            self._ang_vel = torch.as_tensor(
-                [
-                    [entity.get_angular_velocity() for entity in instance]
-                    for instance in self.entities
-                ],
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            ang_vel = self._ang_vel.reshape(-1, 3)
-            self.ps.gpu_fetch_rigid_body_data(
-                data=ang_vel,
-                gpu_indices=self.gpu_indices.flatten(),
-                data_type=RigidBodyGPUAPIReadType.ANGULAR_VELOCITY,
-            )
+        self.body_view.fetch_angular_velocity(self._ang_vel.reshape(-1, 3))
         return self._ang_vel
 
     @property
     def vel(self) -> torch.Tensor:
-        """Get the linear and angular velocities of the rigid bodies.
-
-        Returns:
-            torch.Tensor: The linear and angular velocities concatenated, with shape (num_instances, num_objects, 6).
-        """
+        """Linear and angular velocities with shape ``[env, object, 6]``."""
         return torch.cat((self.lin_vel, self.ang_vel), dim=-1)
 
 
 class RigidObjectGroup(BatchEntity):
-    """RigidObjectGroup represents a batch of rigid bodies in the simulation."""
+    """A two-dimensional view over rigid objects owned by DexSim Spawn."""
 
     def __init__(
         self,
         cfg: RigidObjectGroupCfg,
-        entities: List[List[MeshObject]] = None,
+        entities: Sequence[Sequence[SpawnedObject]] | None = None,
         device: torch.device = torch.device("cpu"),
+        *,
+        spawn_result: SpawnResult | None = None,
+        declared_num_instances: int | None = None,
     ) -> None:
         self.body_type = cfg.body_type
+        self._declared_num_objects = len(cfg.rigid_objects)
 
-        self._world = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        if entities is None:
+            if declared_num_instances is None or declared_num_instances <= 0:
+                raise ValueError(
+                    "A declared RigidObjectGroup requires declared_num_instances > 0."
+                )
+            self.cfg = deepcopy(cfg)
+            self.uid = self.cfg.uid
+            self.device = device
+            self._entities: list[list[SpawnedObject]] = []
+            self._declared_num_instances = declared_num_instances
+            self._spawn_result = None
+            self._data = None
+            self._all_indices = list(range(declared_num_instances))
+            self._all_obj_indices = list(range(self._declared_num_objects))
+            return
 
-        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
-        self._all_obj_indices = torch.arange(
-            len(entities[0]), dtype=torch.int32
-        ).tolist()
+        rows = [list(instance) for instance in entities]
+        if not rows or any(
+            len(instance) != self._declared_num_objects for instance in rows
+        ):
+            raise ValueError(
+                "RigidObjectGroup Spawn handles must have shape "
+                "[num_instances, num_objects]."
+            )
+        if spawn_result is None:
+            raise ValueError(
+                "RigidObjectGroup entities must be owned by a SpawnResult."
+            )
 
-        # data for managing body data (only for dynamic and kinematic bodies) on GPU.
-        self._data = RigidBodyGroupData(entities=entities, ps=self._ps, device=device)
-
-        body_cfgs = list(cfg.rigid_objects.values())
-        for instance in entities:
-            for i, body in enumerate(instance):
-                body.set_body_scale(*body_cfgs[i].body_scale)
-                body.set_physical_attr(body_cfgs[i].attrs.attr())
-
-        if device.type == "cuda":
-            self._world.update(0.001)
-
-        super().__init__(cfg, entities, device)
-
-        # set default collision filter
-        self._set_default_collision_filter()
-
-        # reserve flag for collision visible node existence
-        n_instances = len(self._entities[0])
-        self._has_collision_visible_node_list = [False] * n_instances
-
-    def __str__(self) -> str:
-        parent_str = super().__str__()
-        return (
-            parent_str
-            + f" | body type: {self.body_type} | num_objects: {self.num_objects}"
+        self._declared_num_instances = len(rows)
+        self._spawn_result = spawn_result
+        self._all_indices = list(range(len(rows)))
+        self._all_obj_indices = list(range(self._declared_num_objects))
+        flat_entities = [entity for instance in rows for entity in instance]
+        batch = spawn_result.create_rigid_body_batch(flat_entities)
+        body_view = SpawnRigidBodyView(spawn_result, batch, device)
+        self._data = RigidBodyGroupData(
+            body_view,
+            num_instances=len(rows),
+            num_objects=self._declared_num_objects,
+            device=device,
         )
+
+        super().__init__(cfg, rows, device, auto_reset=False)
+        self.reset()
+
+    @property
+    def is_declared(self) -> bool:
+        """Whether this facade is waiting for Spawn materialization."""
+        return self._spawn_result is None
+
+    @property
+    def is_spawn_bound(self) -> bool:
+        """Whether this facade is bound to a SpawnResult."""
+        return self._spawn_result is not None
+
+    @property
+    def num_instances(self) -> int:
+        return len(self._entities) if self._entities else self._declared_num_instances
 
     @property
     def num_objects(self) -> int:
-        """Get the number of objects in each rigid body instance.
-
-        Returns:
-            int: The number of objects in each rigid body instance.
-        """
-        return self._data.num_objects
+        return self._declared_num_objects
 
     @property
     def body_data(self) -> RigidBodyGroupData:
-        """Get the rigid body data manager for this rigid object.
-
-        Returns:
-            RigidBodyGroupData: The rigid body data manager.
-        """
+        if self._data is None:
+            raise RuntimeError(
+                f"RigidObjectGroup {self.uid!r} is not bound; call SimulationManager.prepare()."
+            )
         return self._data
 
     @property
     def body_state(self) -> torch.Tensor:
-        """Get the body state of the rigid object.
-
-        The body state of a rigid object is represented as a tensor with the following format:
-        [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]
-
-        If the rigid object is static, linear and angular velocities will be zero.
-
-        Returns:
-            torch.Tensor: The body state of the rigid object with shape (num_instances, num_objects, 13),
-                where N is the number of instances.
-        """
+        """Pose and velocity with shape ``[env, object, 13]``."""
         return torch.cat(
             (self.body_data.pose, self.body_data.lin_vel, self.body_data.ang_vel),
             dim=-1,
@@ -266,46 +185,88 @@ class RigidObjectGroup(BatchEntity):
 
     @property
     def is_non_dynamic(self) -> bool:
-        """Check if the rigid object is non-dynamic (static or kinematic).
-
-        Returns:
-            bool: True if the rigid object is non-dynamic, False otherwise.
-        """
         return self.body_type in ("static", "kinematic")
 
-    def _set_default_collision_filter(self) -> None:
-        collision_filter_data = torch.zeros(
-            size=(self.num_instances, 4), dtype=torch.int32
+    def attach_spawn_handles(self, entities: Sequence[SpawnedObject]) -> None:
+        """Store env-major handles without initializing the group's Batch data.
+
+        ``bind_spawn()`` creates the result-dependent runtime view after Spawn
+        finalization.
+        """
+        self._entities = [
+            list(entities[start : start + self.num_objects])
+            for start in range(0, len(entities), self.num_objects)
+        ]
+
+    def bind_spawn(self, result: SpawnResult) -> None:
+        """Bind the declaration facade to env-major Spawn handles in place."""
+        cfg = self.cfg
+        device = self.device
+        rows = self._entities
+        type(self).__init__(
+            self,
+            cfg,
+            rows,
+            device,
+            spawn_result=result,
         )
-        for i in range(self.num_instances):
-            collision_filter_data[i, 0] = i
-            collision_filter_data[i, 1] = 1
-        self.set_collision_filter(collision_filter_data)
+
+    def __str__(self) -> str:
+        if self.is_declared:
+            return (
+                f"{self.__class__}: declared {self.num_instances}x{self.num_objects} "
+                f"Spawn objects | uid: {self.uid} | device: {self.device}"
+            )
+        return (
+            super().__str__()
+            + f" | body type: {self.body_type} | num_objects: {self.num_objects}"
+        )
+
+    def _selected_indices(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        obj_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> tuple[list[int], list[int], torch.Tensor]:
+        env = (
+            self._all_indices
+            if env_ids is None
+            else torch.as_tensor(env_ids).reshape(-1).cpu().tolist()
+        )
+        objects = (
+            self._all_obj_indices
+            if obj_ids is None
+            else torch.as_tensor(obj_ids).reshape(-1).cpu().tolist()
+        )
+        if any(index < 0 or index >= self.num_instances for index in env):
+            raise IndexError("RigidObjectGroup environment index is out of range.")
+        if any(index < 0 or index >= self.num_objects for index in objects):
+            raise IndexError("RigidObjectGroup object index is out of range.")
+        rows = torch.as_tensor(
+            [
+                env_id * self.num_objects + obj_id
+                for env_id in env
+                for obj_id in objects
+            ],
+            dtype=torch.long,
+            device=self.device,
+        )
+        return env, objects, rows
 
     def set_collision_filter(
-        self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
+        self,
+        filter_data: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
-        """set collision filter data for the rigid object group.
-
-        Args:
-            filter_data (torch.Tensor): [N, 4] of int.
-                First element of each object is arena id.
-                If 2nd element is 0, the object will collision with all other objects in world.
-                3rd and 4th elements are not used currently.
-
-            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used. Defaults to None.
-        """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-
-        if len(local_env_ids) != len(filter_data):
-            logger.log_error(
-                f"Length of env_ids {len(local_env_ids)} does not match pose length {len(filter_data)}."
+        """Set one Default-backend collision filter value for every member in each env."""
+        env, _, _ = self._selected_indices(env_ids)
+        values = np.asarray(filter_data.detach().cpu(), dtype=np.uint32).reshape(-1, 4)
+        if len(values) != len(env):
+            raise ValueError(
+                f"Expected {len(env)} collision filters, got {len(values)}."
             )
-
-        filter_data_np = filter_data.cpu().numpy().astype(np.uint32)
-        for i, env_idx in enumerate(local_env_ids):
-            for entity in self._entities[env_idx]:
-                entity.get_physical_body().set_collision_filter_data(filter_data_np[i])
+        for row, env_id in enumerate(env):
+            for entity in self._entities[env_id]:
+                entity.get_physical_body().set_collision_filter_data(values[row])
 
     def set_local_pose(
         self,
@@ -313,96 +274,43 @@ class RigidObjectGroup(BatchEntity):
         env_ids: Sequence[int] | None = None,
         obj_ids: Sequence[int] | None = None,
     ) -> None:
-        """Set local pose of the rigid object group.
-
-        Args:
-            pose (torch.Tensor): The local pose of the rigid object group with shape (num_instances, num_objects, 7) or
-                (num_instances, num_objects, 4, 4).
-            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
-            obj_ids (Sequence[int] | None, optional): Object indices within the group. If None, all objects are set. Defaults to None.
-        """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-        local_obj_ids = self._all_obj_indices if obj_ids is None else obj_ids
-
-        if len(local_env_ids) != len(pose):
-            logger.log_error(
-                f"Length of env_ids {len(local_env_ids)} does not match pose length {len(pose)}."
+        """Set Group poses in ``xyz+wxyz`` or homogeneous-matrix form."""
+        env, objects, rows = self._selected_indices(env_ids, obj_ids)
+        expected_prefix = (len(env), len(objects))
+        pose = pose.to(device=self.device, dtype=torch.float32)
+        if tuple(pose.shape) == (*expected_prefix, 7):
+            flat = pose.reshape(-1, 7)
+            target = torch.cat(
+                (flat[:, :3], convert_quat(flat[:, 3:7], to="xyzw")), dim=-1
             )
-
-        if self.device.type == "cpu":
-            pose = pose.cpu()
-            if pose.dim() == 3 and pose.shape[2] == 7:
-                reshape_pose = pose.reshape(-1, 7)
-                pose_matrix = (
-                    torch.eye(4).unsqueeze(0).repeat(reshape_pose.shape[0], 1, 1)
-                )
-                pose_matrix[:, :3, 3] = reshape_pose[:, :3]
-                pose_matrix[:, :3, :3] = matrix_from_quat(reshape_pose[:, 3:7])
-                pose = pose_matrix.reshape(-1, len(local_obj_ids), 4, 4)
-            elif pose.dim() == 4 and pose.shape[2:] == (4, 4):
-                pass
-            else:
-                logger.log_error(
-                    f"Invalid pose shape {pose.shape}. Expected (num_instances, num_objects, 7) or (num_instances, num_objects, 4, 4)."
-                )
-
-            for i, env_idx in enumerate(local_env_ids):
-                for j, obj_idx in enumerate(local_obj_ids):
-                    self._entities[env_idx][obj_idx].set_local_pose(pose[i, j])
-
+        elif tuple(pose.shape) == (*expected_prefix, 4, 4):
+            flat = pose.reshape(-1, 4, 4)
+            target = torch.cat(
+                (
+                    flat[:, :3, 3],
+                    convert_quat(quat_from_matrix(flat[:, :3, :3]), to="xyzw"),
+                ),
+                dim=-1,
+            )
         else:
-            if pose.dim() == 3 and pose.shape[2] == 7:
-                xyz = pose[..., :3].reshape(-1, 3)
-                quat = pose[..., 3:7].reshape(-1, 4)
-                quat = convert_quat(quat, to="xyzw")
-            elif pose.dim() == 4 and pose.shape[2:] == (4, 4):
-                xyz = pose[..., :3, 3].reshape(-1, 3)
-                mat = pose[..., :3, :3].reshape(-1, 3, 3)
-                quat = quat_from_matrix(mat)
-                quat = convert_quat(quat, to="xyzw")
-            else:
-                logger.log_error(
-                    f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
-                )
-
-            # we should keep `pose_` life cycle to the end of the function.
-            pose = torch.cat((quat, xyz), dim=-1)
-            indices = self.body_data.gpu_indices[local_env_ids][
-                :, local_obj_ids
-            ].flatten()
-            torch.cuda.synchronize(self.device)
-            self._ps.gpu_apply_rigid_body_data(
-                data=pose.clone(),
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.POSE,
+            raise ValueError(
+                f"Expected pose shape {(*expected_prefix, 7)} or "
+                f"{(*expected_prefix, 4, 4)}, got {tuple(pose.shape)}."
             )
-            self._world.sync_poses_gpu_to_cpu(
-                rigid_pose=CudaArray(pose), rigid_gpu_indices=CudaArray(indices)
-            )
+        self.body_data.body_view.apply_pose(target, rows)
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
-        """Get local pose of the rigid object group.
-
-        Args:
-            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
-
-        Returns:
-            torch.Tensor: The local pose of the rigid object with shape (num_instances, num_objects, 7) or (num_instances, num_objects, 4, 4) depending on `to_matrix`.
-        """
+        """Return all Group poses as ``xyz+wxyz`` or homogeneous matrices."""
         pose = self.body_data.pose
-        if to_matrix:
-            pose = pose.reshape(-1, 7)
-            xyz = pose[:, :3]
-            mat = matrix_from_quat(pose[:, 3:7])
-            pose = (
-                torch.eye(4, dtype=torch.float32, device=self.device)
-                .unsqueeze(0)
-                .repeat(self.num_instances * self.num_objects, 1, 1)
-            )
-            pose[:, :3, 3] = xyz
-            pose[:, :3, :3] = mat
-            pose = pose.reshape(self.num_instances, self.num_objects, 4, 4)
-        return pose
+        if not to_matrix:
+            return pose
+        flat = pose.reshape(-1, 7)
+        result = torch.eye(4, dtype=torch.float32, device=self.device).repeat(
+            len(flat), 1, 1
+        )
+        result[:, :3, 3] = flat[:, :3]
+        result[:, :3, :3] = matrix_from_quat(flat[:, 3:7])
+        return result.reshape(self.num_instances, self.num_objects, 4, 4)
 
     def get_object_vertices(
         self,
@@ -410,34 +318,19 @@ class RigidObjectGroup(BatchEntity):
         env_ids: Sequence[int] | None = None,
         scale: bool = False,
     ) -> torch.Tensor:
-        """Get one constituent object's vertices across selected environments.
-
-        Args:
-            object_id: Constituent object index within the group.
-            env_ids: Environment indices. If ``None``, returns all instances.
-            scale: Whether to apply each object's body scale.
-
-        Returns:
-            Vertices with shape ``(N, num_vertices, 3)``.
-        """
-        if not 0 <= object_id < self.num_objects:
-            raise IndexError(
-                f"object_id {object_id} is outside [0, {self.num_objects - 1}]."
-            )
-        ids = self._all_indices if env_ids is None else env_ids
+        """Return one member's render vertices across selected environments."""
+        env, objects, _ = self._selected_indices(env_ids, [object_id])
+        object_id = objects[0]
         vertices = np.asarray(
-            [
-                get_combined_vertices(self._entities[env_id][object_id])
-                for env_id in ids
-            ],
+            [get_combined_vertices(self._entities[index][object_id]) for index in env],
             dtype=np.float32,
         )
         if scale:
             scales = np.asarray(
-                [self._entities[env_id][object_id].get_body_scale() for env_id in ids],
+                [self._entities[index][object_id].get_body_scale() for index in env],
                 dtype=np.float32,
             )
-            vertices = vertices * scales[:, None, :]
+            vertices *= scales[:, None, :]
         return torch.as_tensor(vertices, dtype=torch.float32, device=self.device)
 
     def get_object_triangles(
@@ -445,35 +338,17 @@ class RigidObjectGroup(BatchEntity):
         object_id: int,
         env_ids: Sequence[int] | None = None,
     ) -> torch.Tensor:
-        """Get one constituent object's triangle indices.
-
-        Args:
-            object_id: Constituent object index within the group.
-            env_ids: Environment indices. If ``None``, returns all instances.
-
-        Returns:
-            Triangle indices with shape ``(N, num_triangles, 3)``.
-        """
-        if not 0 <= object_id < self.num_objects:
-            raise IndexError(
-                f"object_id {object_id} is outside [0, {self.num_objects - 1}]."
-            )
-        ids = self._all_indices if env_ids is None else env_ids
+        """Return one member's render triangles across selected environments."""
+        env, objects, _ = self._selected_indices(env_ids, [object_id])
+        object_id = objects[0]
         triangles = np.asarray(
-            [
-                get_combined_triangles(self._entities[env_id][object_id])
-                for env_id in ids
-            ],
+            [get_combined_triangles(self._entities[index][object_id]) for index in env],
             dtype=np.int32,
         )
         return torch.as_tensor(triangles, dtype=torch.int32, device=self.device)
 
     def get_user_ids(self) -> torch.Tensor:
-        """Get the user ids of the rigid body group.
-
-        Returns:
-            torch.Tensor: A tensor of shape (num_envs, num_objects) representing the user ids of the rigid body group.
-        """
+        """Return render user ids with shape ``[env, object]``."""
         return torch.as_tensor(
             [
                 [entity.get_user_id() for entity in instance]
@@ -484,164 +359,78 @@ class RigidObjectGroup(BatchEntity):
         )
 
     def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
-        """Clear the dynamics of the rigid bodies by resetting velocities and applying zero forces and torques.
-
-        Args:
-            env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
-        """
+        """Clear velocity and one-step wrench buffers for selected envs."""
         if self.is_non_dynamic:
             return
-
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-
-        if self.device.type == "cpu":
-            for env_idx in local_env_ids:
-                for entity in self._entities[env_idx]:
-                    entity.clear_dynamics()
-        else:
-            # Apply zero force and torque to the rigid bodies.
-            zeros = torch.zeros(
-                (len(local_env_ids) * self.num_objects, 3),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            indices = self.body_data.gpu_indices[local_env_ids].flatten()
-            torch.cuda.synchronize(self.device)
-            self._ps.gpu_apply_rigid_body_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.LINEAR_VELOCITY,
-            )
-            self._ps.gpu_apply_rigid_body_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.ANGULAR_VELOCITY,
-            )
-            self._ps.gpu_apply_rigid_body_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.FORCE,
-            )
-            self._ps.gpu_apply_rigid_body_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=RigidBodyGPUAPIWriteType.TORQUE,
-            )
+        _, _, rows = self._selected_indices(env_ids)
+        zeros = torch.zeros((len(rows), 3), dtype=torch.float32, device=self.device)
+        view = self.body_data.body_view
+        view.apply_linear_velocity(zeros, rows)
+        view.apply_angular_velocity(zeros, rows)
+        view.apply_force(zeros, rows)
+        view.apply_torque(zeros, rows)
 
     def set_visual_material(
-        self, mat: VisualMaterial, env_ids: Sequence[int] | None = None
+        self,
+        mat: VisualMaterial,
+        env_ids: Sequence[int] | None = None,
     ) -> None:
-        """Set visual material for the rigid object group.
-
-        Note:
-            For each entity in the rigid object group, a unique material instance will be created and shared
-            among all objects in that entity.
-
-        Args:
-            mat (VisualMaterial): The material to set.
-            env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
-        """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-
-        for i, env_idx in enumerate(local_env_ids):
-            mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{env_idx}")
-            for j, entity in enumerate(self._entities[env_idx]):
-                entity.set_material(mat_inst.mat)
-
-        # Note: The rigid object group is not supported to change the visual material once created.
-        # If needed, we should create a visual material dict to store the material instances, and
-        # implement a get_visual_material method to retrieve the material instances.
+        """Assign one material instance to all members in each selected env."""
+        env, _, _ = self._selected_indices(env_ids)
+        for env_id in env:
+            material = mat.create_instance(f"{mat.uid}_{self.uid}_{env_id}")
+            for entity in self._entities[env_id]:
+                entity.set_material(material.mat)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-        num_instances = len(local_env_ids)
-
-        self.cfg: RigidObjectGroupCfg
-        body_cfgs = list(self.cfg.rigid_objects.values())
-
-        init_pos = []
-        init_rot = []
-        for cfg in body_cfgs:
-            init_pos.append(cfg.init_pos)
-            init_rot.append(cfg.init_rot)
-
-        # (num_objects, 3)
-        pos = torch.as_tensor(init_pos, dtype=torch.float32, device=self.device)
-        rot = (
-            torch.as_tensor(init_rot, dtype=torch.float32, device=self.device)
-            * torch.pi
-            / 180.0
-        )
-        # Convert pos and rot to shape (num_instances, num_objects, dim)
-        pos = pos.unsqueeze_(0).repeat(num_instances, 1, 1)
-        rot = rot.unsqueeze_(0).repeat(num_instances, 1, 1)
-
-        mat = matrix_from_euler(rot.reshape(-1, 3), "XYZ")
-        # Init pose with shape (num_instances, num_objects, 4, 4)
-        pose = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .unsqueeze_(0)
-            .repeat(num_instances * self.num_objects, 1, 1)
-        )
-        pose[:, :3, 3] = pos.reshape(-1, 3)
-        pose[:, :3, :3] = mat
-        pose = pose.reshape(num_instances, self.num_objects, 4, 4)
-        self.set_local_pose(pose, env_ids=local_env_ids)
-
-        self.clear_dynamics(env_ids=local_env_ids)
+        env, _, _ = self._selected_indices(env_ids)
+        member_poses = []
+        for cfg in self.cfg.rigid_objects.values():
+            if cfg.init_local_pose is not None:
+                member_poses.append(
+                    torch.as_tensor(
+                        cfg.init_local_pose,
+                        dtype=torch.float32,
+                        device=self.device,
+                    ).reshape(4, 4)
+                )
+                continue
+            pose = torch.eye(4, dtype=torch.float32, device=self.device)
+            pose[:3, 3] = torch.as_tensor(
+                cfg.init_pos, dtype=torch.float32, device=self.device
+            )
+            rotation = torch.as_tensor(
+                cfg.init_rot, dtype=torch.float32, device=self.device
+            )
+            pose[:3, :3] = matrix_from_euler(
+                (rotation * torch.pi / 180.0).reshape(1, 3), "XYZ"
+            )[0]
+            member_poses.append(pose)
+        pose = torch.stack(member_poses).repeat(len(env), 1, 1)
+        self.set_local_pose(pose.reshape(len(env), self.num_objects, 4, 4), env_ids=env)
+        self.clear_dynamics(env_ids=env)
 
     def set_physical_visible(
         self,
         visible: bool = True,
         rgba: Sequence[float] | None = None,
-    ):
-        """set collion render visibility
-
-        Args:
-            visible (bool, optional): is collision body visible. Defaults to True.
-            rgba (Sequence[float] | None, optional): collision body visible rgba. It will be defined at the first time the function is called. Defaults to None.
-        """
-        rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
-        if len(rgba) != 4:
-            logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
-
-        # create collision visible node if not exist
-        if visible:
-            for i, env_idx in enumerate(self._all_indices):
-                for intance_id, entity in enumerate(self._entities[env_idx]):
-                    if not self._has_collision_visible_node_list[intance_id]:
-                        entity.create_physical_visible_node(
-                            np.array(
-                                [
-                                    rgba[0],
-                                    rgba[1],
-                                    rgba[2],
-                                    rgba[3],
-                                ]
-                            )
-                        )
-                        self._has_collision_visible_node_list[intance_id] = True
-
-        # create collision visible node if not exist
-        for i, env_idx in enumerate(self._all_indices):
-            for entity in self._entities[env_idx]:
-                entity.set_physical_visible(visible)
+    ) -> None:
+        """Set collision-geometry visibility for every Group member."""
+        color = np.asarray(
+            (0.8, 0.2, 0.2, 0.7) if rgba is None else rgba,
+            dtype=np.float32,
+        )
+        if color.shape != (4,):
+            raise ValueError("Collision visualization color must contain four values.")
+        for instance in self._entities:
+            for entity in instance:
+                self._spawn_result.set_physical_visible(entity, color, visible)
 
     def set_visible(self, visible: bool = True) -> None:
-        """Set the visibility of the rigid object group.
-
-        Args:
-            visible (bool, optional): Whether the rigid object group is visible. Defaults to True.
-        """
-        for i, env_idx in enumerate(self._all_indices):
-            for entity in self._entities[env_idx]:
+        """Set render visibility for every Group member."""
+        for instance in self._entities:
+            for entity in instance:
                 entity.set_visible(visible)
 
     def destroy(self) -> None:
-        env = self._world.get_env()
-        arenas = env.get_all_arenas()
-        if len(arenas) == 0:
-            arenas = [env]
-        for i, instance in enumerate(self._entities):
-            for entity in instance:
-                arenas[i].remove_actor(entity)
+        """Leave topology destruction to SimulationManager and SpawnResult."""

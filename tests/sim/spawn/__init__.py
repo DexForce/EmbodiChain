@@ -14,27 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .base import ArticulationViewBase, RigidBodyViewBase
-from .default import DefaultArticulationView, DefaultRigidBodyView
-from .newton import (
-    NewtonArticulationView,
-    NewtonRigidBodyView,
-    apply_collision_filter_for_entities,
-    apply_collision_filter_for_envs,
-    is_newton_scene,
-)
-from .spawn import SpawnArticulationView, SpawnRigidBodyView
+"""Tests for EmbodiChain Spawn descriptor translation."""
 
-__all__ = [
-    "ArticulationViewBase",
-    "RigidBodyViewBase",
-    "DefaultArticulationView",
-    "DefaultRigidBodyView",
-    "NewtonArticulationView",
-    "NewtonRigidBodyView",
-    "apply_collision_filter_for_entities",
-    "apply_collision_filter_for_envs",
-    "is_newton_scene",
-    "SpawnArticulationView",
-    "SpawnRigidBodyView",
-]
+from __future__ import annotations

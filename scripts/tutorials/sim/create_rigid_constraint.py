@@ -101,8 +101,7 @@ def main():
         )
     )
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     print("[INFO]: Scene setup complete with two cubes (cube_a, cube_b).")
 
