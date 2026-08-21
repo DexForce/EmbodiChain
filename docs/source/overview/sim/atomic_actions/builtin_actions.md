@@ -74,6 +74,9 @@ The animations below are the focused simulator demos under
 :link-type: ref
 
 `axis_align` · grasp, lift, align an object-local axis, and release
+
+<img src="../../../_static/atomic_actions/axis_align_horizontal.gif" alt="Axis align horizontal demo" width="480" style="max-width: 100%;" />
+<img src="../../../_static/atomic_actions/axis_align_upright.gif" alt="Axis align upright demo" width="480" style="max-width: 100%;" />
 :::
 
 :::{grid-item-card} `MoveHeldObject`
@@ -90,6 +93,8 @@ The animations below are the focused simulator demos under
 :link-type: ref
 
 `pour` · rotate an already-held object about its local internal axis
+
+<img src="../../../_static/atomic_actions/pour.gif" alt="Pour demo" width="480" style="max-width: 100%;" />
 :::
 
 :::{grid-item-card} `Place`
@@ -162,7 +167,8 @@ The animations below are the focused simulator demos under
 
 `hand_over` · pick, transfer, place, and release with two arms
 
-<img src="../../../_static/atomic_actions/hand_over.gif" alt="HandOver demo" width="480" style="max-width: 100%;" />
+<img src="../../../_static/atomic_actions/handover_horizontal.gif" alt="Handover horizontal demo" width="640" style="max-width: 100%;" />
+<img src="../../../_static/atomic_actions/handover_vertical.gif" alt="Handover horizontal demo" width="640" style="max-width: 100%;" />
 :::
 
 ::::

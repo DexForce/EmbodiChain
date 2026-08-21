@@ -31,6 +31,7 @@ from typing import Any, cast
 
 from embodichain.utils import logger
 from embodichain.utils import configclass
+from embodichain.utils.nms import pose_nms
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
@@ -666,10 +667,10 @@ class GraspGenerator:
             mesh_projection = torch.matmul(mesh_vert_transformed, axis)
             mesh_projection_range = mesh_projection.max() - mesh_projection.min()
             projection_posi_threshold = (
-                mesh_projection.min() + 0.6 * mesh_projection_range
+                mesh_projection.min() + 0.65 * mesh_projection_range
             )
             projection_nega_threshold = (
-                mesh_projection.min() + 0.4 * mesh_projection_range
+                mesh_projection.min() + 0.35 * mesh_projection_range
             )
             pair_centers = 0.5 * (origin_points_ + hit_points_)
             pair_projection = torch.matmul(pair_centers, axis)
@@ -834,16 +835,15 @@ class GraspGenerator:
             self.cfg.n_deviated_approach_directions
         )
 
-        # TODO: too slow
-        # # remove near grasp poses using non-maximum suppression
-        # nms_indices = pose_nms_indices(
-        #     valid_grasp_poses,
-        #     angle_th=np.pi / 18,
-        #     dist_th=0.01,
-        # )
-        # valid_grasp_poses = valid_grasp_poses[nms_indices]
-        # valid_open_lengths = valid_open_lengths[nms_indices]
-        # valid_centers = valid_centers[nms_indices]
+        # Compress near-identical candidates before the more expensive
+        # collision query. Keep the per-pose metadata aligned with NMS output.
+        valid_grasp_poses, nms_indices = pose_nms(
+            valid_grasp_poses,
+            angle_th=np.pi / 36,
+            dist_th=0.005,
+        )
+        valid_open_lengths = valid_open_lengths[nms_indices]
+        valid_centers = valid_centers[nms_indices]
 
         is_colliding, max_penetration = self._collision_checker.query(
             object_pose,
@@ -876,7 +876,7 @@ class GraspGenerator:
         center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
-        total_cost = 0.2 * angle_cost + 0.2 * length_cost + 0.6 * center_cost
+        total_cost = 0.25 * angle_cost + 0.25 * length_cost + 0.5 * center_cost
 
         n_valid = valid_grasp_poses.shape[0]
         if n_valid == 0:

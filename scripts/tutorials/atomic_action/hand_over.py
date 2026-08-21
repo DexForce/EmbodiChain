@@ -225,7 +225,7 @@ def run_handover_demo(
         sim, args, "Inspect the scene, then press Enter to plan the handover..."
     )
     # wait for object to drop
-    for _ in range(20):
+    for _ in range(50):
         sim.update(step=10)
     compiled = engine.compile(
         (
