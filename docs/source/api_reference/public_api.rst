@@ -278,13 +278,19 @@ embodichain.lab.sim.atomic_actions
    ActionPlanningServices
    Affordance
    AntipodalAffordance
+   ArticulationJointState
+   ArticulationOperationAffordance
+   ArticulationOperationTarget
    AssembleAffordance
    BUILTIN_ACTION_TYPES
    CoordinatedPickmentOptions
    CoordinatedPlacementOptions
    DynamicCollisionMode
    EntityState
+   EffectVerificationRequirement
+   EffectVerificationResult
    EffectVerifier
+   ExecutionPlanAttempt
    GRASP_COMMAND
    HandOverOptions
    InteractionPoints
@@ -292,7 +298,11 @@ embodichain.lab.sim.atomic_actions
    MoveHeldObjectOptions
    MoveJointsOptions
    ObjectActionGoal
+   ObservedArticulationJointState
    OPEN_COMMAND
+   OperateArticulation
+   OperateArticulationGoal
+   OperateArticulationOptions
    PickUpOptions
    PlaceOptions
    PoseGoalValue
@@ -300,6 +310,7 @@ embodichain.lab.sim.atomic_actions
    RigidObjectSceneProviderCfg
    RunnerStepCallback
    SceneProvider
+   SceneArticulationOperationGeometry
    SceneSnapshotSupplier
 
 embodichain.lab.sim.atomic_actions.affordance
@@ -311,6 +322,8 @@ embodichain.lab.sim.atomic_actions.affordance
 
    Affordance
    AntipodalAffordance
+   ArticulationOperationAffordance
+   ArticulationOperationTarget
    SlideAffordance
    PressAffordance
    TwistAffordance
@@ -381,8 +394,10 @@ embodichain.lab.sim.atomic_actions.execution
 .. autosummary::
 
    EffectVerificationRequest
+   EffectVerificationResult
    ExecutionEvent
    ExecutionEventKind
+   ExecutionPlanAttempt
    ExecutionSession
    ExecutionStatus
    ExecutionTick
@@ -394,8 +409,10 @@ embodichain.lab.sim.atomic_actions.goals
 
 .. autosummary::
 
+   ActionGoal
    ObjectActionGoal
    PoseGoalValue
+   SceneArticulationOperationGeometry
    SceneEntityPose
    collect_scene_dependencies
    resolve_pose_goal
@@ -424,6 +441,7 @@ embodichain.lab.sim.atomic_actions.plans
 
    ActionPlan
    CompiledTrajectory
+   EffectVerificationRequirement
    ExecutionFeedbackMode
    PlannerDiagnostics
    TimedTrajectory
@@ -449,6 +467,20 @@ embodichain.lab.sim.atomic_actions.primitives
 .. autosummary::
 
    BUILTIN_ACTION_TYPES
+   OperateArticulation
+   OperateArticulationGoal
+   OperateArticulationOptions
+
+embodichain.lab.sim.atomic_actions.primitives.operate_articulation
+-----------------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives.operate_articulation
+
+.. autosummary::
+
+   OperateArticulation
+   OperateArticulationGoal
+   OperateArticulationOptions
 
 embodichain.lab.sim.atomic_actions.requirements
 -----------------------------------------------
@@ -542,7 +574,10 @@ embodichain.lab.sim.atomic_actions.state
 .. autosummary::
 
    EntityState
+   ArticulationJointState
+   CoordinatedHeldObjectState
    HeldObjectState
+   ObservedArticulationJointState
    PlanningContext
    RobotObservation
    SceneSnapshot

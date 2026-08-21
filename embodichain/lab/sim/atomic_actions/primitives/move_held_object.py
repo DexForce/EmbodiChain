@@ -29,36 +29,29 @@ from embodichain.utils.math import (
     pose_inv,
 )
 
-from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+from ._helpers import (
     arm_qpos_from_state,
+    require_shared_task_state_key,
     resolve_object_target,
 )
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
-from embodichain.lab.sim.atomic_actions.control import (
-    GRASP_COMMAND,
-    JointPositionCommand,
-)
-from embodichain.lab.sim.atomic_actions.core import AtomicAction
-from embodichain.lab.sim.atomic_actions.goals import (
-    PoseGoalValue,
-    resolve_pose_goal,
-    validate_pose_goal,
-)
-from embodichain.lab.sim.atomic_actions.invocation import (
-    ActionOptions,
-    ResolvedActionRequest,
-)
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
-from embodichain.lab.sim.atomic_actions.requirements import (
+from ._binding_contracts import make_manipulation_slot
+from ..bindings import JointPositionTarget
+from ..control import GRASP_COMMAND, JointPositionCommand
+from ..core import AtomicAction
+from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
+from ..invocation import ActionOptions, ResolvedActionRequest
+from ..plans import ActionPlan, TimedTrajectory
+from ..requirements import (
     CARTESIAN_POSE_CAPABILITY,
+    DisjointSlotEndpoints,
     FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
     SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext
-from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
-from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
-    make_manipulation_slot,
-)
+from ..state import PlanningContext
+from ..trajectory_ops import build_pose_plan_states
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -134,6 +127,11 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         grasp = binding.endpoint("primary", "grasp")
         motion_target = motion.require_target(JointPositionTarget)
         grasp_target = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="MoveHeldObject primary participant",
+        )
         control_part = motion_target.control_part
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
@@ -144,18 +142,18 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             dtype=context.robot.qpos.dtype,
         )
         state = context
-        held_object = state.get_held_object(control_part)
+        held_object = state.get_held_object(task_state_key)
         if held_object is None:
             raise ValueError(
-                "MoveHeldObject requires an object held by control part "
-                f"{control_part!r} - run PickUp first."
+                "MoveHeldObject requires an object held by task-state resource "
+                f"{task_state_key!r} - run PickUp first."
             )
-        eligible = context.task.exclusive_held_object_mask(control_part)
+        eligible = context.task.exclusive_held_object_mask(task_state_key)
         if not eligible.any():
             return self.failed_plan(
                 request,
                 context,
-                message="Held object is not exclusive to the control part.",
+                message="Held object is not exclusive to the task-state resource.",
             )
         object_target_pose = resolve_object_target(
             resolve_pose_goal(

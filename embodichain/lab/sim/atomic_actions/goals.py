@@ -21,13 +21,20 @@ from __future__ import annotations
 import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
-from typing import Any, TYPE_CHECKING
+import math
+from typing import Any, ClassVar, Protocol, TYPE_CHECKING
 
 import torch
 
 if TYPE_CHECKING:
     from .core import ObjectSemantics
     from .state import PlanningContext
+
+
+class ActionGoal(Protocol):
+    """Structural protocol implemented by atomic-action goal value objects."""
+
+    goal_kind: ClassVar[str]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -71,6 +78,126 @@ class SceneEntityPose:
             self.entity_id,
             relative_pose=self.relative_pose,
             minimum_confidence=self.minimum_confidence,
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class SceneArticulationOperationGeometry:
+    """Late-bound handle geometry for an articulation operation.
+
+    The offsets and operation axis are immutable grounded affordance data. The
+    handle itself remains a :class:`SceneEntityPose`, so every atomic plan or
+    recovery replan resolves it from the latest :class:`SceneSnapshot`.
+    """
+
+    handle_pose: SceneEntityPose
+    approach_offset: torch.Tensor
+    contact_offset: torch.Tensor
+    operation_offset: torch.Tensor
+    retract_offset: torch.Tensor
+    operation_axis: torch.Tensor
+    position_scale: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.handle_pose, SceneEntityPose):
+            raise TypeError("handle_pose must be a SceneEntityPose.")
+        object.__setattr__(self, "handle_pose", self.handle_pose.snapshot())
+        for field_name in (
+            "approach_offset",
+            "contact_offset",
+            "operation_offset",
+            "retract_offset",
+        ):
+            offset = getattr(self, field_name)
+            validate_pose_tensor(offset, field_name, allow_waypoints=False)
+            if offset.shape != (4, 4):
+                raise ValueError(f"{field_name} must have shape (4, 4).")
+            if not offset.is_floating_point() or not torch.isfinite(offset).all():
+                raise ValueError(f"{field_name} must be a finite floating tensor.")
+            object.__setattr__(self, field_name, offset.clone())
+        axis = self.operation_axis
+        if (
+            not isinstance(axis, torch.Tensor)
+            or axis.shape != (3,)
+            or not axis.is_floating_point()
+        ):
+            raise ValueError("operation_axis must be a floating tensor of shape (3,).")
+        if not torch.isfinite(axis).all():
+            raise ValueError("operation_axis must contain only finite values.")
+        norm = torch.linalg.vector_norm(axis)
+        if float(norm) <= torch.finfo(axis.dtype).eps:
+            raise ValueError("operation_axis must be non-zero.")
+        object.__setattr__(self, "operation_axis", (axis / norm).clone())
+        scale = self.position_scale
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)):
+            raise TypeError("position_scale must be a finite positive scalar.")
+        scale = float(scale)
+        if not math.isfinite(scale) or scale <= 0.0:
+            raise ValueError("position_scale must be a finite positive scalar.")
+        object.__setattr__(self, "position_scale", scale)
+
+    def resolve(
+        self,
+        context: PlanningContext,
+        *,
+        displacement: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Resolve four poses using a fresh handle and row-local displacement.
+
+        Args:
+            context: Latest immutable planning observation.
+            displacement: Remaining signed handle displacement, shape ``(B,)``.
+
+        Returns:
+            Approach, contact, operation, and retract pose batches.
+        """
+        if not isinstance(displacement, torch.Tensor):
+            raise TypeError("displacement must be a torch.Tensor.")
+        if displacement.shape != (context.batch_size,):
+            raise ValueError("displacement must have one scalar for each planning row.")
+        if (
+            not displacement.is_floating_point()
+            or not torch.isfinite(displacement).all()
+        ):
+            raise ValueError("displacement must be a finite floating tensor.")
+        handle = resolve_pose_goal(
+            self.handle_pose,
+            context,
+            name="handle_pose",
+        )
+        offsets = tuple(
+            getattr(self, field_name)
+            .to(device=handle.device, dtype=handle.dtype)
+            .unsqueeze(0)
+            .expand(context.batch_size, -1, -1)
+            for field_name in (
+                "approach_offset",
+                "contact_offset",
+                "operation_offset",
+                "retract_offset",
+            )
+        )
+        translation = (
+            torch.eye(
+                4,
+                dtype=handle.dtype,
+                device=handle.device,
+            )
+            .unsqueeze(0)
+            .repeat(context.batch_size, 1, 1)
+        )
+        axis = self.operation_axis.to(device=handle.device, dtype=handle.dtype)
+        translation[:, :3, 3] = (
+            axis.unsqueeze(0)
+            * displacement.to(device=handle.device, dtype=handle.dtype).unsqueeze(1)
+            * self.position_scale
+        )
+        moved_handle = torch.bmm(handle, translation)
+        return (
+            torch.bmm(handle, offsets[0]),
+            torch.bmm(handle, offsets[1]),
+            torch.bmm(moved_handle, offsets[2]),
+            torch.bmm(moved_handle, offsets[3]),
         )
 
 
@@ -246,8 +373,10 @@ class ObjectActionGoal:
 
 
 __all__ = [
+    "ActionGoal",
     "ObjectActionGoal",
     "PoseGoalValue",
+    "SceneArticulationOperationGeometry",
     "SceneEntityPose",
     "collect_scene_dependencies",
     "resolve_pose_goal",

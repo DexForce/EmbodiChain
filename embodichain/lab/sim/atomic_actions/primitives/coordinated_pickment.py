@@ -56,18 +56,14 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     INVERSE_KINEMATICS_CAPABILITY,
     SkillBindingContract,
 )
-from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
-from embodichain.lab.sim.atomic_actions.trajectory_ops import (
-    interpolate_joint_trajectory,
-    translate_pose_world,
-)
-from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+from ..state import CoordinatedHeldObjectState, HeldObjectState, PlanningContext
+from ..trajectory_ops import interpolate_joint_trajectory, translate_pose_world
+from ._binding_contracts import make_manipulation_slot
+from ._helpers import (
     assemble_full_robot_trajectory,
     repeat_qpos,
+    require_shared_task_state_key,
     resolve_batched_pose,
-)
-from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
-    make_manipulation_slot,
 )
 
 
@@ -174,6 +170,8 @@ class CoordinatedPickmentOptions(ActionOptions):
 class _CoordinatedPickResources:
     """Invocation-bound control parts and compatible hand commands."""
 
+    left_task_state_key: str
+    right_task_state_key: str
     left_arm: JointPositionTarget
     right_arm: JointPositionTarget
     left_hand: JointPositionTarget
@@ -407,6 +405,21 @@ class CoordinatedPickment(
         right_arm = right_motion.require_target(JointPositionTarget)
         left_hand = left_grasp.require_target(JointPositionTarget)
         right_hand = right_grasp.require_target(JointPositionTarget)
+        left_task_state_key = require_shared_task_state_key(
+            left_motion,
+            left_grasp,
+            participant="CoordinatedPickment left participant",
+        )
+        right_task_state_key = require_shared_task_state_key(
+            right_motion,
+            right_grasp,
+            participant="CoordinatedPickment right participant",
+        )
+        if left_task_state_key == right_task_state_key:
+            raise ValueError(
+                "CoordinatedPickment left and right participants must use "
+                "different task_state_key values."
+            )
         if left_arm.control_part == right_arm.control_part:
             raise ValueError(
                 "CoordinatedPickment left and right roles must use different "
@@ -418,6 +431,8 @@ class CoordinatedPickment(
                 "end-effector control parts."
             )
         return _CoordinatedPickResources(
+            left_task_state_key=left_task_state_key,
+            right_task_state_key=right_task_state_key,
             left_arm=left_arm,
             right_arm=right_arm,
             left_hand=left_hand,
@@ -999,15 +1014,12 @@ class CoordinatedPickment(
             ],
             dim=1,
         )
-        left_held_object = HeldObjectState(
+        coordinated_held_object = CoordinatedHeldObjectState(
             semantics=left_held_state.semantics,
-            object_to_eef=left_held_state.object_to_eef,
-            grasp_xpos=left_target_xpos,
-        )
-        right_held_object = HeldObjectState(
-            semantics=right_held_state.semantics,
-            object_to_eef=right_held_state.object_to_eef,
-            grasp_xpos=right_target_xpos,
+            left_object_to_eef=left_held_state.object_to_eef,
+            right_object_to_eef=right_held_state.object_to_eef,
+            left_grasp_xpos=left_target_xpos,
+            right_grasp_xpos=right_target_xpos,
         )
         return self.build_plan(
             request,
@@ -1020,8 +1032,14 @@ class CoordinatedPickment(
             ),
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.left_arm.control_part: left_held_object,
-                    resources.right_arm.control_part: right_held_object,
+                    resources.left_task_state_key: None,
+                    resources.right_task_state_key: None,
+                },
+                coordinated_held_object_updates={
+                    (
+                        resources.left_task_state_key,
+                        resources.right_task_state_key,
+                    ): coordinated_held_object,
                 },
             ),
             segment_lengths={

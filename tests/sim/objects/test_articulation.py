@@ -17,8 +17,10 @@
 from __future__ import annotations
 
 import os
-import torch
+from types import SimpleNamespace
+
 import pytest
+import torch
 
 from embodichain.lab.sim import (
     SimulationManager,
@@ -39,6 +41,16 @@ from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
+
+
+def test_get_qf_returns_all_articulation_joint_efforts():
+    expected_qf = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
+    articulation = object.__new__(Articulation)
+    articulation._data = SimpleNamespace(qf=expected_qf)
+
+    actual_qf = articulation.get_qf()
+
+    assert torch.equal(actual_qf, expected_qf)
 
 
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:

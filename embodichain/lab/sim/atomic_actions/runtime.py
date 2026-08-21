@@ -98,12 +98,25 @@ class ActionPlanningServices:
         self,
         contract: SkillBindingContract,
         endpoints: Mapping[str, Mapping[str, str]],
+        *,
+        task_state_keys: Mapping[str, str] | None = None,
     ) -> ActionBinding:
         """Build a generic binding from explicit robot control-part names.
 
         This is the advanced direct-core construction path. Profile-backed
         callers obtain the same :class:`ActionBinding` from
         ``BoundRobotSkillProfile.resolve()``.
+
+        Args:
+            contract: Typed endpoint contract for the bound skill.
+            endpoints: Nested ``slot_id -> endpoint_id -> control_part`` mapping.
+            task_state_keys: Optional explicit stable task-state key for each
+                resource slot. When omitted, a slot inherits its ``motion``
+                endpoint's control part. A slot without ``motion`` can be
+                inferred only when all of its endpoints use one control part.
+
+        Returns:
+            Engine-owned generic endpoint binding.
         """
         if not isinstance(contract, SkillBindingContract):
             raise TypeError("contract must be a SkillBindingContract.")
@@ -138,6 +151,36 @@ class ActionPlanningServices:
                 "Direct binding must cover the skill contract exactly: "
                 f"missing={missing}, extra={extra}."
             )
+        slot_ids = {slot.slot_id for slot in contract.slots}
+        if task_state_keys is not None:
+            if not isinstance(task_state_keys, Mapping):
+                raise TypeError("task_state_keys must be a slot-to-key mapping.")
+            for slot_id, task_state_key in task_state_keys.items():
+                if (
+                    not isinstance(slot_id, str)
+                    or not slot_id
+                    or slot_id != slot_id.strip()
+                ):
+                    raise ValueError(
+                        "task_state_keys slot IDs must be non-empty strings "
+                        "without outer whitespace."
+                    )
+                if not isinstance(task_state_key, str) or not task_state_key.strip():
+                    raise ValueError(
+                        "task_state_keys values must be non-empty strings."
+                    )
+                if task_state_key != task_state_key.strip():
+                    raise ValueError(
+                        "task_state_keys values must not contain outer whitespace."
+                    )
+            supplied_task_slots = set(task_state_keys)
+            if supplied_task_slots != slot_ids:
+                missing = sorted(slot_ids - supplied_task_slots)
+                extra = sorted(supplied_task_slots - slot_ids)
+                raise ValueError(
+                    "task_state_keys must cover the binding slots exactly: "
+                    f"missing={missing}, extra={extra}."
+                )
         if not expected:
             binding = ActionBinding(owner_id=self.binding_owner_id)
             self.validate_binding(binding, contract)
@@ -147,6 +190,27 @@ class ActionPlanningServices:
         if not isinstance(control_parts, Mapping):
             raise TypeError("Direct control-part binding requires Robot.control_parts.")
         available = sorted(str(name) for name in control_parts)
+        resolved_task_state_keys: dict[str, str]
+        if task_state_keys is not None:
+            resolved_task_state_keys = dict(task_state_keys)
+        else:
+            resolved_task_state_keys = {}
+            for slot in contract.slots:
+                motion_key = (slot.slot_id, "motion")
+                if motion_key in supplied:
+                    resolved_task_state_keys[slot.slot_id] = supplied[motion_key]
+                    continue
+                slot_control_parts = {
+                    supplied[(slot.slot_id, endpoint.endpoint_id)]
+                    for endpoint in slot.endpoints
+                }
+                if len(slot_control_parts) != 1:
+                    raise ValueError(
+                        f"Direct binding slot {slot.slot_id!r} has no 'motion' "
+                        "endpoint and spans multiple control parts; provide an "
+                        "explicit task_state_keys entry for this slot."
+                    )
+                resolved_task_state_keys[slot.slot_id] = next(iter(slot_control_parts))
         resolved: list[EndpointBinding] = []
         for key, requirement in expected.items():
             slot_id, endpoint_id = key
@@ -175,6 +239,7 @@ class ActionPlanningServices:
                     resource_id=f"direct.{slot_id}",
                     adapter_id="control_part",
                     target=JointPositionTarget(control_part, joint_ids),
+                    task_state_key=resolved_task_state_keys[slot_id],
                     capabilities=requirement.capabilities,
                     commands=commands,
                     claim_tokens=frozenset({f"robot.control_part:{control_part}"}),

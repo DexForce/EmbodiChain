@@ -1282,18 +1282,11 @@ class SemanticSkillCompiler:
         slot_id: str,
         path: tuple[PathPart, ...],
     ) -> tuple[str, HeldObjectState]:
-        """Resolve the motion control part and verify its held-object identity."""
+        """Resolve the logical participant key and verify held-object identity."""
         endpoint = analyzed.bound.binding.action_binding.endpoint(slot_id, "motion")
-        try:
-            target = endpoint.require_target(JointPositionTarget)
-        except TypeError as exc:
-            raise _diagnostic(
-                "unsupported_builtin_endpoint",
-                (*path, "resources", slot_id, "motion"),
-                "The current built-in semantic lowerer requires a joint-position "
-                "motion endpoint.",
-            ) from exc
-        held = context.task.get_held_object(target.control_part)
+        task_state_key = endpoint.task_state_key
+        assert isinstance(task_state_key, str)
+        held = context.task.get_held_object(task_state_key)
         call_object = getattr(analyzed.call, "object", None)
         assert type(call_object) is SceneObjectRef
         if held is None or held.semantics.entity_id != call_object.entity_id:
@@ -1301,7 +1294,7 @@ class SemanticSkillCompiler:
                 "verified_held_object_required",
                 (*path, "object"),
                 f"Call requires verified object {call_object.entity_id!r} held by "
-                f"{target.control_part!r}.",
+                f"logical state key {task_state_key!r}.",
             )
         assert held.env_mask is not None
         missing = eligible & ~held.env_mask
@@ -1317,7 +1310,7 @@ class SemanticSkillCompiler:
                 "every eligible environment.",
                 missing_env_ids,
             )
-        return target.control_part, held
+        return task_state_key, held
 
     @staticmethod
     def _broadcast_pose(

@@ -470,7 +470,7 @@ def _held_context(
     object_to_eef: torch.Tensor,
     *,
     env_mask: torch.Tensor | None = None,
-    control_part: str = "arm",
+    control_part: str = "manipulator",
     robot_dof: int = 2,
 ) -> PlanningContext:
     held = HeldObjectState(
@@ -751,7 +751,7 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
         registry,
         pick.invocation.goal.semantics,
         torch.eye(4).repeat(2, 1, 1),
-        control_part="left_arm",
+        control_part="left",
         robot_dof=4,
     )
     handover = compiler.ground(workflow, 1, held_context)
@@ -786,7 +786,7 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
         registry,
         pick.invocation.goal.semantics,
         torch.eye(4).repeat(2, 1, 1),
-        control_part="left_arm",
+        control_part="left",
         robot_dof=4,
     )
     with pytest.raises(RuntimeError, match="captured target"):
