@@ -45,7 +45,7 @@ from scripts.tutorials.atomic_action.axis_align import (
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
-    create_curobo_motion_generator,
+    create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -64,6 +64,11 @@ POUR_SAMPLE_INTERVAL = 80
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
 OBJ_POSITION = (-0.5, 0.0, 0.0)
+RECORD_LOOK_AT = (
+    (-1.5, 0.2, 1.2),
+    (-0.4, 0.0, 0.4),
+    (0.0, 0.0, 1.0),
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -92,7 +97,7 @@ def main() -> None:
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(robot)
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -162,6 +167,7 @@ def main() -> None:
         video_prefix="pour_cube_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,
         on_trajectory_step=make_clear_dynamics_callback(obj, clear_after_step),
+        look_at=RECORD_LOOK_AT,
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")
