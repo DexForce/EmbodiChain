@@ -77,6 +77,7 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     ControlPartCommandProfile,
+    ExecutionRunnerCfg,
     MotionPolicy,
 )
 from embodichain.lab.sim.skills import (
@@ -138,11 +139,62 @@ profile = RobotSkillProfile(
         "default": SkillPolicyPreset(
             preset_id="default",
             motion_policy=MotionPolicy(strategy="ik_interp"),
+            runner_cfg=ExecutionRunnerCfg(command_timeout=2.0),
         ),
     },
     default_preset="default",
 )
 ```
+
+Set `SkillPolicyPreset.required_planner` only when a preset depends on one
+planner backend, typically because it carries backend-specific typed planning
+options. Profile binding checks that requirement against the engine's configured
+backend and fails early on a mismatch. Leave it as `None` for portable presets.
+
+A {class}`SkillPolicyPreset` owns three independently snapshotted policy layers:
+`motion_policy`, `recovery_policy`, and `runner_cfg`. Semantic integration
+selects a preset in this order: an integration-wide `runtime_preset`, the
+profile's `skill_presets[atomic_skill_id]`, then `default_preset`. At execution
+time, an explicit `runner_cfg` supplied when constructing a `SkillRuntime` or
+`SemanticSkillRuntime` overrides the selected preset's runner configuration for
+every call; otherwise each call keeps its selected preset's transport timeouts,
+minimum cycle time, and completion-hold behavior.
+
+## Select semantic grounding providers
+
+Some semantic calls require embodiment knowledge that does not belong in the
+agent-facing call or the atomic action. The built-in semantic HandOver is the
+canonical example: the robot profile selects a named provider that supplies a
+safe middle and default final object target for that embodiment. An explicit
+semantic `HandOver.final_target` overrides the provider's final target.
+
+```python
+profile = RobotSkillProfile(
+    profile_id="dual_arm_robot",
+    resources=dual_arm_resources,
+    command_profiles=hand_command_profiles,
+    defaults=dual_arm_skill_defaults,
+    presets={"default": default_preset},
+    default_preset="default",
+    grounding_providers={"hand_over": "center_workspace_handover"},
+)
+
+runtime = SemanticSkillRuntime.from_simulation(
+    simulation=sim,
+    robot=robot,
+    motion_generator=motion_generator,
+    scene_registry=scene_registry,
+    robot_profile=profile,
+    handover_pose_providers=(CenterWorkspaceHandOverProvider(),),
+)
+```
+
+`grounding_providers` maps a **semantic call ID** to a provider ID. The selected
+ID must match one explicitly installed {class}`HandOverPoseProvider`; missing or
+unknown providers fail during workflow analysis, before observation, planning,
+or controller work. The provider is executable integration code and therefore
+is passed to the runtime/compiler rather than stored inside the declarative
+profile.
 
 Every `ControlPartEndpoint.control_part` must be a key in
 `robot.control_parts`. A composite endpoint may reuse a member's control part,
@@ -256,6 +308,13 @@ and `bound.skills` is the profile-supported catalog. Registering or replacing an
 action invalidates the bound profile; bind it again before discovery or
 resolution.
 
+{attr}`BoundRobotSkillProfile.source_profile` identifies the exact immutable
+profile used for the binding. The bound view also snapshots the engine's
+monotonic semantic skill-catalog revision. A later agent-visible action
+registration or replacement makes discovery, preset selection, and resolution
+fail until the profile and semantic integration are rebound; an equal public
+descriptor does not make a different implementation owner safe to reuse.
+
 ## Extend the graph beyond manipulation
 
 Resource and capability identifiers are open strings. A joint-driven mobile
@@ -332,5 +391,6 @@ may retain a full-robot trajectory for feedback and offline compilation, but
 runtime dispatch is scoped to the endpoints in each command frame.
 ```
 
-See {doc}`index` for the direct atomic-action core and
+See {doc}`index` for the direct atomic-action core,
+{doc}`../semantic_skills` for compiler/runtime integration, and
 {doc}`../scene_registry` for canonical scene identity and snapshots.

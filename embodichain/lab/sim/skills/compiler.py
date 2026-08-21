@@ -396,9 +396,6 @@ class SemanticLowering:
     )
 
     def __post_init__(self) -> None:
-        goal_kind = getattr(type(self.goal), "goal_kind", None)
-        if type(goal_kind) is not str or not goal_kind:
-            raise TypeError("goal must implement the typed ActionGoal protocol.")
         if self.skill_options is not None and not isinstance(
             self.skill_options, ActionOptions
         ):

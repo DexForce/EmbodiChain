@@ -110,10 +110,11 @@ class ActionPlanningServices:
         Args:
             contract: Typed endpoint contract for the bound skill.
             endpoints: Nested ``slot_id -> endpoint_id -> control_part`` mapping.
-            task_state_keys: Optional explicit stable task-state key for each
-                resource slot. When omitted, a slot inherits its ``motion``
-                endpoint's control part. A slot without ``motion`` can be
-                inferred only when all of its endpoints use one control part.
+            task_state_keys: Optional stable task-state key for each resource
+                slot. If omitted, a slot inherits the control part of its
+                ``motion`` endpoint. A slot without ``motion`` can be inferred
+                from its sole control part, or otherwise uses its stable direct
+                binding resource ID.
 
         Returns:
             Engine-owned generic endpoint binding.
@@ -205,11 +206,8 @@ class ActionPlanningServices:
                     for endpoint in slot.endpoints
                 }
                 if len(slot_control_parts) != 1:
-                    raise ValueError(
-                        f"Direct binding slot {slot.slot_id!r} has no 'motion' "
-                        "endpoint and spans multiple control parts; provide an "
-                        "explicit task_state_keys entry for this slot."
-                    )
+                    resolved_task_state_keys[slot.slot_id] = f"direct.{slot.slot_id}"
+                    continue
                 resolved_task_state_keys[slot.slot_id] = next(iter(slot_control_parts))
         resolved: list[EndpointBinding] = []
         for key, requirement in expected.items():

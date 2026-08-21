@@ -72,5 +72,3 @@ class RolloutBuffer:
 - The rollout buffer stores flattened RL observations; structured observations should be flattened or encoded before entering this buffer.
 - `value[:, -1]` stores the bootstrap value of the final observation. The final slot of transition-only fields is padding and should be ignored during optimization.
 - Use `transition_view()` plus `iterate_minibatches()` instead of duplicating rollout slicing logic in each algorithm.
-
----

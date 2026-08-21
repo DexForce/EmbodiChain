@@ -650,6 +650,8 @@ class SkillPolicyPreset:
 
     preset_id: str
     schema_version: int
+    required_planner: str | None
+    """Optional planner backend required by this preset."""
     _motion_policy: MotionPolicy
     _recovery_policy: RecoveryPolicy
     _runner_cfg: ExecutionRunnerCfg
@@ -663,6 +665,7 @@ class SkillPolicyPreset:
         recovery_policy: RecoveryPolicy | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         effect_monitors: Mapping[str, EffectMonitorRef] | None = None,
+        required_planner: str | None = None,
     ) -> None:
         """Own one policy bundle without exposing mutable nested configuration."""
         _validate_identifier(preset_id, field_name="SkillPolicyPreset.preset_id")
@@ -672,6 +675,11 @@ class SkillPolicyPreset:
             raise ValueError(
                 "Unsupported SkillPolicyPreset.schema_version "
                 f"{schema_version}; supported versions are [1]."
+            )
+        if required_planner is not None:
+            _validate_identifier(
+                required_planner,
+                field_name="SkillPolicyPreset.required_planner",
             )
         selected_motion = MotionPolicy() if motion_policy is None else motion_policy
         selected_recovery = (
@@ -715,6 +723,7 @@ class SkillPolicyPreset:
             normalized_effect_monitors[semantic_id] = monitor_ref.snapshot()
         object.__setattr__(self, "preset_id", preset_id)
         object.__setattr__(self, "schema_version", schema_version)
+        object.__setattr__(self, "required_planner", required_planner)
         object.__setattr__(self, "_motion_policy", deepcopy(selected_motion))
         object.__setattr__(self, "_recovery_policy", deepcopy(selected_recovery))
         object.__setattr__(self, "_runner_cfg", deepcopy(selected_runner))
@@ -758,6 +767,7 @@ class SkillPolicyPreset:
             recovery_policy=self.recovery_policy,
             runner_cfg=self.runner_cfg,
             effect_monitors=self.effect_monitors,
+            required_planner=self.required_planner,
         )
 
 
@@ -1477,7 +1487,7 @@ class BoundRobotSkillProfile:
         """Validate planner-pinned presets against the selected engine backend."""
         configured = self._engine.planning_services.planner_name
         for preset in self._profile.presets.values():
-            required = preset.motion_policy.planner
+            required = preset.required_planner
             if required is not None and required != configured:
                 raise ProfileValidationError(
                     f"Preset {preset.preset_id!r} requires planner {required!r}, "

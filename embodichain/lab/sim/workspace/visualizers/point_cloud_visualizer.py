@@ -54,13 +54,14 @@ class PointCloudVisualizer(BaseVisualizer):
 
         Args:
             backend: Visualization backend ('sim_manager', 'viser', 'open3d',
-                'matplotlib', or 'data').
-                    Defaults to 'sim_manager'. 'data' backend returns raw data without visualization.
-                    'sim_manager' backend uses simulation environment for visualization.
+                'matplotlib', or 'data'). Defaults to 'sim_manager'. The 'data'
+                backend returns raw data without visualization.
             point_size: Size of points in visualization. Defaults to 2.0.
             config: Optional configuration dictionary. Defaults to None.
-                sim_manager: SimulationManager instance for 'sim_manager' backend. Defaults to None.
-                control_part_name: Control part name for naming the point cloud. Defaults to None.
+            sim_manager: SimulationManager instance for the 'sim_manager' or
+                'viser' backend. Defaults to None.
+            control_part_name: Control part name used to name the point cloud.
+                Defaults to None.
         """
         super().__init__(backend, config)
         self.point_size = point_size

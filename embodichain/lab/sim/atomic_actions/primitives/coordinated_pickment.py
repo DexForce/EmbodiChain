@@ -26,32 +26,50 @@ import torch
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
-from ..affordance import AntipodalAffordance
-from ..bindings import JointPositionTarget
-from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
-from ..core import AtomicAction, ObjectSemantics
-from ..effects import StateDelta
-from ..goals import (
+from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
     ObjectActionGoal,
     PoseGoalValue,
     _resolve_object_pose,
     resolve_pose_goal,
     validate_pose_goal,
 )
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
-from ..requirements import (
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
+from embodichain.lab.sim.atomic_actions.requirements import (
     DisjointResourceSlots,
-    DisjointSlotEndpoints,
-    GRASP_CAPABILITY,
     INVERSE_KINEMATICS_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
-from ..state import CoordinatedHeldObjectState, PlanningContext
-from ..trajectory_ops import interpolate_joint_trajectory, translate_pose_world
-from ._helpers import require_shared_task_state_key
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    interpolate_joint_trajectory,
+    translate_pose_world,
+)
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    assemble_full_robot_trajectory,
+    require_shared_task_state_key,
+    repeat_qpos,
+    resolve_batched_pose,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -64,10 +82,8 @@ class CoordinatedPickGoal(ObjectActionGoal):
     :class:`CoordinatedPickmentOptions`.
     """
 
-    goal_kind: ClassVar[str] = "coordinated_pick"
-
     object_target_pose: PoseGoalValue
-    """Target pose for the shared object, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+    """Target pose for the shared object, shape ``(4, 4)`` or ``(num_envs, 4, 4)``."""
 
     object_initial_pose: PoseGoalValue | None = None
     """Optional initial object pose.
@@ -177,27 +193,21 @@ class _DualArmHelpers:
     def _expand_qpos(self, qpos: torch.Tensor, dof: int, name: str) -> torch.Tensor:
         qpos = qpos.to(device=self.device, dtype=torch.float32)
         if qpos.shape == (dof,):
-            return qpos.unsqueeze(0).repeat(self.n_envs, 1)
-        if qpos.shape == (self.n_envs, dof):
+            return qpos.unsqueeze(0).repeat(self.num_envs, 1)
+        if qpos.shape == (self.num_envs, dof):
             return qpos
-        logger.log_error(
+        raise ValueError(
             f"{name} must have shape ({dof},) or "
-            f"({self.n_envs}, {dof}), but got {qpos.shape}",
-            ValueError,
+            f"({self.num_envs}, {dof}), but got {qpos.shape}"
         )
-        raise AssertionError("unreachable")
 
     def _resolve_pose(self, pose: torch.Tensor, name: str) -> torch.Tensor:
-        pose = pose.to(device=self.device, dtype=torch.float32)
-        if pose.shape == (4, 4):
-            pose = pose.unsqueeze(0).repeat(self.n_envs, 1, 1)
-        if pose.shape != (self.n_envs, 4, 4):
-            logger.log_error(
-                f"{name} must have shape (4, 4) or "
-                f"({self.n_envs}, 4, 4), but got {pose.shape}",
-                ValueError,
-            )
-        return pose
+        return resolve_batched_pose(
+            pose,
+            num_envs=self.num_envs,
+            device=self.device,
+            name=name,
+        )
 
     def _resolve_dual_arm_start(
         self,
@@ -220,22 +230,15 @@ class _DualArmHelpers:
         *,
         resources: _CoordinatedPickResources,
     ) -> torch.Tensor:
-        n_waypoints = first_arm_traj.shape[1]
-        full = torch.empty(
-            (self.n_envs, n_waypoints, self.robot_dof),
-            dtype=torch.float32,
-            device=self.device,
+        return assemble_full_robot_trajectory(
+            state.last_qpos,
+            (
+                (resources.left_arm.joint_ids, first_arm_traj),
+                (resources.right_arm.joint_ids, second_arm_traj),
+                (resources.left_hand.joint_ids, first_hand_traj),
+                (resources.right_hand.joint_ids, second_hand_traj),
+            ),
         )
-        full[:, :, :] = state.last_qpos.to(self.device).unsqueeze(1)
-        full[:, :, list(resources.left_arm.joint_ids)] = first_arm_traj
-        full[:, :, list(resources.right_arm.joint_ids)] = second_arm_traj
-        full[:, :, list(resources.left_hand.joint_ids)] = first_hand_traj
-        full[:, :, list(resources.right_hand.joint_ids)] = second_hand_traj
-        return full
-
-    @staticmethod
-    def _repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
-        return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
 
     def _interpolate_qpos(
         self,
@@ -281,7 +284,7 @@ class _DualArmHelpers:
         n_waypoints: int,
     ) -> torch.Tensor:
         trajectory = torch.zeros(
-            (self.n_envs, n_waypoints, keyframe_qpos.shape[-1]),
+            (self.num_envs, n_waypoints, keyframe_qpos.shape[-1]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -339,7 +342,7 @@ class _DualArmHelpers:
         )
         quat = quat / torch.linalg.norm(quat, dim=-1, keepdim=True).clamp_min(1e-8)
         poses[:, :, :3, :3] = matrix_from_quat(quat.reshape(-1, 4)).reshape(
-            self.n_envs, n_waypoints, 3, 3
+            self.num_envs, n_waypoints, 3, 3
         )
         return poses
 
@@ -354,23 +357,13 @@ class CoordinatedPickment(
     OptionsType: ClassVar[type] = CoordinatedPickmentOptions
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=tuple(
-            SkillResourceSlot(
-                slot_id=role,
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                    ),
-                ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            make_manipulation_slot(
+                role,
+                motion_capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             )
             for role in ("left", "right")
         ),
@@ -383,20 +376,9 @@ class CoordinatedPickment(
     _interpolate_object_pose = _DualArmHelpers._interpolate_object_pose
     _interpolate_qpos = _DualArmHelpers._interpolate_qpos
     _interpolate_qpos_keyframes = _DualArmHelpers._interpolate_qpos_keyframes
-    _repeat_qpos = staticmethod(_DualArmHelpers._repeat_qpos)
+    _repeat_qpos = staticmethod(repeat_qpos)
     _resolve_dual_arm_start = _DualArmHelpers._resolve_dual_arm_start
     _resolve_pose = _DualArmHelpers._resolve_pose
-
-    def __init__(
-        self,
-        default_options: CoordinatedPickmentOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
-    def _on_bind(self) -> None:
-        """Resolve engine-wide resources from the owning engine."""
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.robot_dof = self.robot.dof
 
     def _scene_dependencies(
         self,
@@ -462,25 +444,25 @@ class CoordinatedPickment(
             right_hand=right_hand,
             left_hand_open_qpos=left_grasp.joint_positions(
                 OPEN_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
             left_hand_close_qpos=left_grasp.joint_positions(
                 GRASP_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
             right_hand_open_qpos=right_grasp.joint_positions(
                 OPEN_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
             right_hand_close_qpos=right_grasp.joint_positions(
                 GRASP_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
@@ -521,7 +503,7 @@ class CoordinatedPickment(
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
-        CoordinatedHeldObjectState,
+        tuple[HeldObjectState, HeldObjectState],
         torch.Tensor,
     ]:
         object_initial_pose = self._resolve_object_initial_pose(target, context)
@@ -542,12 +524,17 @@ class CoordinatedPickment(
         right_object_to_eef = torch.bmm(pose_inv(object_initial_pose), right_grasp_xpos)
         left_target_xpos = torch.bmm(object_target_pose, left_object_to_eef)
         right_target_xpos = torch.bmm(object_target_pose, right_object_to_eef)
-        held_state = CoordinatedHeldObjectState(
-            semantics=target.semantics,
-            left_object_to_eef=left_object_to_eef,
-            right_object_to_eef=right_object_to_eef,
-            left_grasp_xpos=left_grasp_xpos,
-            right_grasp_xpos=right_grasp_xpos,
+        held_states = (
+            HeldObjectState(
+                semantics=target.semantics,
+                object_to_eef=left_object_to_eef,
+                grasp_xpos=left_grasp_xpos,
+            ),
+            HeldObjectState(
+                semantics=target.semantics,
+                object_to_eef=right_object_to_eef,
+                grasp_xpos=right_grasp_xpos,
+            ),
         )
         return (
             object_initial_pose,
@@ -556,7 +543,7 @@ class CoordinatedPickment(
             right_grasp_xpos,
             left_target_xpos,
             right_target_xpos,
-            held_state,
+            held_states,
             grasp_success,
         )
 
@@ -570,27 +557,26 @@ class CoordinatedPickment(
 
         Args:
             semantics: Object semantics carrying an :class:`AntipodalAffordance`.
-            object_poses: Object poses with shape ``(n_envs, 4, 4)``.
+            object_poses: Object poses with shape ``(num_envs, 4, 4)``.
             options: Coordinated pickment options carrying the dual-arm and
                 approach directions used by the affordance sampler.
 
         Returns:
             ``(left_grasp_xpos, right_grasp_xpos, success_mask)``. The grasp poses
-            have shape ``(n_envs, 4, 4)`` and the success mask has shape
-            ``(n_envs,)``. Environments without a valid left or right grasp hold
+            have shape ``(num_envs, 4, 4)`` and the success mask has shape
+            ``(num_envs,)``. Environments without a valid left or right grasp hold
             the identity pose and are marked ``False``.
         """
         if not isinstance(semantics.affordance, AntipodalAffordance):
-            logger.log_error(
+            raise ValueError(
                 "CoordinatedPickment requires an AntipodalAffordance to sample "
-                "dual-arm grasps.",
-                ValueError,
+                "dual-arm grasps."
             )
-        n_envs = object_poses.shape[0]
+        num_envs = object_poses.shape[0]
         identity = torch.eye(4, dtype=torch.float32, device=self.device)
-        left_grasp_xpos = identity.unsqueeze(0).repeat(n_envs, 1, 1)
-        right_grasp_xpos = identity.unsqueeze(0).repeat(n_envs, 1, 1)
-        success_mask = torch.zeros(n_envs, dtype=torch.bool, device=self.device)
+        left_grasp_xpos = identity.unsqueeze(0).repeat(num_envs, 1, 1)
+        right_grasp_xpos = identity.unsqueeze(0).repeat(num_envs, 1, 1)
+        success_mask = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         approach_direction = options.approach_direction.to(
             device=self.device, dtype=torch.float32
         )
@@ -667,10 +653,9 @@ class CoordinatedPickment(
         n_lift = n_motion // 3
         n_move = n_motion - n_approach - n_lift
         if min(n_approach, n_lift, n_move) < 2:
-            logger.log_error(
+            raise ValueError(
                 "Not enough waypoints for coordinated pickment. Please increase "
-                "sample_count or decrease hand_interp_steps/hold_steps.",
-                ValueError,
+                "sample_count or decrease hand_interp_steps/hold_steps."
             )
         return {
             "approach": n_approach,
@@ -724,7 +709,7 @@ class CoordinatedPickment(
     ) -> tuple[torch.Tensor, torch.Tensor]:
         n_state = target_poses.shape[1]
         keyframe_qpos = torch.zeros(
-            (self.n_envs, n_state, start_qpos.shape[-1]),
+            (self.num_envs, n_state, start_qpos.shape[-1]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -738,7 +723,7 @@ class CoordinatedPickment(
             )
             ik_success = normalize_success_mask(
                 ik_success,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 name=f"IK success for {control_part} target state {target_idx}",
             )
@@ -775,12 +760,12 @@ class CoordinatedPickment(
         n_waypoints = object_pose_traj.shape[1]
         keyframe_indices = self._select_motion_keyframe_indices(n_waypoints, options)
         left_traj = torch.zeros(
-            (self.n_envs, len(keyframe_indices), left_start_qpos.shape[-1]),
+            (self.num_envs, len(keyframe_indices), left_start_qpos.shape[-1]),
             dtype=torch.float32,
             device=self.device,
         )
         right_traj = torch.zeros(
-            (self.n_envs, len(keyframe_indices), right_start_qpos.shape[-1]),
+            (self.num_envs, len(keyframe_indices), right_start_qpos.shape[-1]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -804,7 +789,7 @@ class CoordinatedPickment(
             )
             left_success = normalize_success_mask(
                 left_success,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 name=(
                     f"IK success for {resources.left_arm.control_part} object waypoint "
@@ -813,7 +798,7 @@ class CoordinatedPickment(
             )
             right_success = normalize_success_mask(
                 right_success,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 name=(
                     f"IK success for {resources.right_arm.control_part} object waypoint "
@@ -858,7 +843,7 @@ class CoordinatedPickment(
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan a coordinated pick without committing the dual attachment."""
-        target = self.require_goal(request)
+        target = request.goal
         options = request.skill_options
         resources = self._resolve_resources(request)
         if (
@@ -876,9 +861,10 @@ class CoordinatedPickment(
             right_grasp_xpos,
             left_target_xpos,
             right_target_xpos,
-            held_state,
+            held_states,
             grasp_success,
         ) = self._resolve_target(target, context, options)
+        left_held_state, right_held_state = held_states
         if not grasp_success.any():
             logger.log_warning("CoordinatedPickment failed to resolve dual-arm grasps.")
             return self.failed_plan(
@@ -959,8 +945,8 @@ class CoordinatedPickment(
                 left_grasp_qpos,
                 right_grasp_qpos,
                 lift_object_traj,
-                held_state.left_object_to_eef,
-                held_state.right_object_to_eef,
+                left_held_state.object_to_eef,
+                right_held_state.object_to_eef,
                 success_mask,
                 resources,
                 options,
@@ -989,8 +975,8 @@ class CoordinatedPickment(
                 left_lift_qpos,
                 right_lift_qpos,
                 move_object_traj,
-                held_state.left_object_to_eef,
-                held_state.right_object_to_eef,
+                left_held_state.object_to_eef,
+                right_held_state.object_to_eef,
                 success_mask,
                 resources,
                 options,
@@ -1009,7 +995,9 @@ class CoordinatedPickment(
         )
 
         hold_trajectory = torch.empty(
-            (self.n_envs, 0, self.robot_dof), dtype=torch.float32, device=self.device
+            (self.num_envs, 0, self.robot_dof),
+            dtype=torch.float32,
+            device=self.device,
         )
         if segments["hold"] > 0:
             hold_trajectory = self._assemble_segment(
@@ -1031,28 +1019,29 @@ class CoordinatedPickment(
             ],
             dim=1,
         )
-        coordinated_held_object = CoordinatedHeldObjectState(
-            semantics=held_state.semantics,
-            left_object_to_eef=held_state.left_object_to_eef,
-            right_object_to_eef=held_state.right_object_to_eef,
-            left_grasp_xpos=left_target_xpos,
-            right_grasp_xpos=right_target_xpos,
+        left_held_object = HeldObjectState(
+            semantics=left_held_state.semantics,
+            object_to_eef=left_held_state.object_to_eef,
+            grasp_xpos=left_target_xpos,
+        )
+        right_held_object = HeldObjectState(
+            semantics=right_held_state.semantics,
+            object_to_eef=right_held_state.object_to_eef,
+            grasp_xpos=right_target_xpos,
         )
         return self.build_plan(
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.left_task_state_key: None,
-                    resources.right_task_state_key: None,
-                },
-                coordinated_held_object_updates={
-                    (
-                        resources.left_task_state_key,
-                        resources.right_task_state_key,
-                    ): coordinated_held_object,
+                    resources.left_task_state_key: left_held_object,
+                    resources.right_task_state_key: right_held_object,
                 },
             ),
             segment_lengths={

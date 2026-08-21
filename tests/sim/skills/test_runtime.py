@@ -67,6 +67,7 @@ from embodichain.lab.sim.skills.effects import (
 )
 from embodichain.lab.sim.skills.runtime import (
     AtomicSkills,
+    SemanticSkillRuntime,
     SkillEndpointBindingTrace,
     SkillRuntime,
     SkillStatus,
@@ -339,11 +340,7 @@ class _Compiler(SemanticSkillCompiler):
                 {},
             ),
             motion_policy=MotionPolicy(
-                planner="runtime_test",
                 sample_count=7,
-                control_dt=0.02,
-                velocity_limit=0.4,
-                acceleration_limit=0.8,
             ),
             recovery_policy=RecoveryPolicy(
                 max_replans=0,
@@ -386,6 +383,7 @@ class _Compiler(SemanticSkillCompiler):
         self.invocations.append(invocation)
         self.monitors.append(monitor)
         analyzed = SimpleNamespace(
+            call=call,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
                 binding=SimpleNamespace(action_binding=invocation.binding),
@@ -398,7 +396,7 @@ class _Compiler(SemanticSkillCompiler):
                     motion_policy=invocation.motion_policy,
                     recovery_policy=invocation.recovery_policy,
                 ),
-            )
+            ),
         )
         return _Grounded(
             analyzed,
@@ -596,6 +594,43 @@ def test_nonblocking_step_routes_effect_feedback_through_collector() -> None:
     assert system.compiler.monitors[0].requests[0].verification_id == 0
 
 
+def test_compatibility_runtime_combines_legacy_effect_verifier_and_step_observer() -> (
+    None
+):
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    verifier_calls: list[tuple[str, int]] = []
+    observed_steps = []
+
+    def verify(
+        call: RegisteredSemanticCall,
+        request: EffectVerificationRequest,
+        context: PlanningContext,
+    ) -> torch.Tensor:
+        del context
+        verifier_calls.append((call.semantic_id, request.verification_id))
+        return request.env_mask.clone()
+
+    runtime = SemanticSkillRuntime(
+        system.compiler,
+        system.observation,
+        system.sink,
+        system.collector,
+        task_state=TaskState.empty(BATCH_SIZE, "cpu"),
+        clock=system.clock,
+    )
+
+    result = runtime.run(
+        (_call("compatibility"),),
+        task_id="compatibility",
+        effect_verifier=verify,
+        on_step=observed_steps.append,
+    )
+
+    assert result.status is SkillStatus.COMPLETED
+    assert verifier_calls == [("test.compatibility", 0)]
+    assert observed_steps
+
+
 def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None:
     system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
 
@@ -615,6 +650,7 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     assert attempt["planned_collision_world_revision"] == [0, 0]
     assert attempt["scene_dependencies"] == ["fixture"]
     assert attempt["scene_dependency_monitor_until"] == {"fixture": 0}
+    assert attempt["planner_diagnostics"]["backend"] == "runtime_test"
     typed_attempt = result.calls[0].plan_attempts[0]
     assert typed_attempt.scene_dependency_monitor_until == {"fixture": 0}
     assert typed_attempt.snapshot().scene_dependency_monitor_until == {"fixture": 0}
@@ -625,7 +661,6 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
         "schema_version": 1,
     }
     assert resolved["motion_policy"]["strategy"] == "ik_interp"
-    assert resolved["motion_policy"]["planner"] == "runtime_test"
     assert resolved["motion_policy"]["sample_count"] == 7
     assert resolved["recovery_policy"]["max_replans"] == 0
     assert resolved["endpoints"] == []
@@ -715,8 +750,8 @@ def test_preparation_failure_keeps_resolved_policy_without_plan_attempt(
     assert result.calls[0].resolved_core_policy.preset_id == "runtime_test_preset"
     assert metadata["calls"][0]["active_plan_attempt_generation"] is None
     assert (
-        metadata["calls"][0]["resolved_core_policy"]["motion_policy"]["planner"]
-        == "runtime_test"
+        metadata["calls"][0]["resolved_core_policy"]["motion_policy"]["sample_count"]
+        == 7
     )
 
 

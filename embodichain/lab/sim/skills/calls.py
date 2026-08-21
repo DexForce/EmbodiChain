@@ -713,16 +713,13 @@ class SemanticCallDescriptor:
 
     call_id: str
     spec_type: type[SemanticCallSpec]
-    skill_id: str
-    binding_contract: SkillBindingContract
+    skill_id: str | None = None
+    binding_contract: SkillBindingContract | None = None
     schema_version: int = 1
     target_descriptor: SkillDescriptor | None = None
 
     def __post_init__(self) -> None:
         _validate_identifier(self.call_id, field_name="SemanticCallDescriptor.call_id")
-        _validate_identifier(
-            self.skill_id, field_name="SemanticCallDescriptor.skill_id"
-        )
         if self.spec_type not in (
             Pick,
             Place,
@@ -736,10 +733,16 @@ class SemanticCallDescriptor:
                 "the registered payload contract rather than executable call "
                 "subclasses."
             )
-        _validate_static_binding_contract(
-            self.binding_contract,
-            field_name="SemanticCallDescriptor.binding_contract",
-        )
+        if self.skill_id is not None:
+            _validate_identifier(
+                self.skill_id,
+                field_name="SemanticCallDescriptor.skill_id",
+            )
+        if self.binding_contract is not None:
+            _validate_static_binding_contract(
+                self.binding_contract,
+                field_name="SemanticCallDescriptor.binding_contract",
+            )
         if not isinstance(self.schema_version, int) or isinstance(
             self.schema_version, bool
         ):
@@ -760,8 +763,11 @@ class SemanticCallDescriptor:
         if self.spec_type is not RegisteredSemanticCall:
             expected = _builtin_call_target(self.spec_type)
             if (
-                self.skill_id != expected.skill_id
-                or (self.binding_contract != expected.binding_contract)
+                (self.skill_id is not None and self.skill_id != expected.skill_id)
+                or (
+                    self.binding_contract is not None
+                    and self.binding_contract != expected.binding_contract
+                )
                 or (
                     self.target_descriptor is not None
                     and self.target_descriptor != expected
@@ -773,6 +779,8 @@ class SemanticCallDescriptor:
                     "Use RegisteredSemanticCall for extensions."
                 )
             object.__setattr__(self, "target_descriptor", expected)
+            object.__setattr__(self, "skill_id", expected.skill_id)
+            object.__setattr__(self, "binding_contract", expected.binding_contract)
         else:
             if self.target_descriptor is None:
                 raise TypeError(
@@ -783,15 +791,30 @@ class SemanticCallDescriptor:
                 field_name="SemanticCallDescriptor.target_descriptor",
             )
             if (
-                self.target_descriptor.skill_id != self.skill_id
-                or self.target_descriptor.binding_contract != self.binding_contract
-                or not self.target_descriptor.agent_visible
+                not self.target_descriptor.agent_visible
                 or self.target_descriptor.binding_contract is None
             ):
                 raise ValueError(
-                    "Registered target_descriptor must be agent-visible and match "
-                    "skill_id plus binding_contract exactly."
+                    "Registered target_descriptor must be agent-visible and declare "
+                    "a binding contract."
                 )
+            if (
+                self.skill_id is not None
+                and self.target_descriptor.skill_id != self.skill_id
+            ) or (
+                self.binding_contract is not None
+                and self.target_descriptor.binding_contract != self.binding_contract
+            ):
+                raise ValueError(
+                    "Registered target_descriptor must match an explicitly supplied "
+                    "skill_id and binding_contract."
+                )
+            object.__setattr__(self, "skill_id", self.target_descriptor.skill_id)
+            object.__setattr__(
+                self,
+                "binding_contract",
+                self.target_descriptor.binding_contract,
+            )
         if self.spec_type is RegisteredSemanticCall and self.call_id in {
             Pick.call_kind,
             Place.call_kind,

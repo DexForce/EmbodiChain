@@ -18,29 +18,17 @@
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
-import math
-from typing import Any, ClassVar, Protocol, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 
 if TYPE_CHECKING:
     from .core import ObjectSemantics
     from .state import PlanningContext
-
-
-class ActionGoal(Protocol):
-    """Structural protocol implemented by atomic-action goal value objects.
-
-    Goals are action-owned dataclasses. They do not have to inherit from a
-    marker base class; the owning action declares its concrete ``GoalType``.
-    ``goal_kind`` supplies the stable semantic discriminator needed by skill
-    catalogs and agent-facing schemas.
-    """
-
-    goal_kind: ClassVar[str]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -232,9 +220,9 @@ def validate_pose_tensor(
         raise TypeError(f"{name} must be a torch.Tensor, got {type(value).__name__}.")
     valid_dims = {2, 3, 4} if allow_waypoints else {2, 3}
     if value.dim() not in valid_dims or value.shape[-2:] != (4, 4):
-        supported = "(4, 4), (n_envs, 4, 4)"
+        supported = "(4, 4), (num_envs, 4, 4)"
         if allow_waypoints:
-            supported += ", or (n_envs, n_waypoint, 4, 4)"
+            supported += ", or (num_envs, n_waypoint, 4, 4)"
         raise ValueError(
             f"{name} must have shape {supported}, got {tuple(value.shape)}."
         )
@@ -368,8 +356,6 @@ def collect_scene_dependencies(value: Any) -> tuple[str, ...]:
 class ObjectActionGoal:
     """Shared semantic-object goal contract for object-centric skills."""
 
-    goal_kind: ClassVar[str] = "semantic_object"
-
     semantics: ObjectSemantics
     """Semantic and geometric description of the object."""
 
@@ -381,7 +367,6 @@ class ObjectActionGoal:
 
 
 __all__ = [
-    "ActionGoal",
     "ObjectActionGoal",
     "PoseGoalValue",
     "SceneArticulationOperationGeometry",

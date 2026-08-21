@@ -24,14 +24,28 @@ from typing import ClassVar
 
 import torch
 
-from ..bindings import JointPositionTarget
-from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
-from ..core import AtomicAction
-from ..effects import StateDelta
-from ..goals import SceneArticulationOperationGeometry
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, EffectVerificationRequirement, PlannerDiagnostics
-from ..requirements import (
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
+    SceneArticulationOperationGeometry,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    EffectVerificationRequirement,
+    PlannerDiagnostics,
+    TimedTrajectory,
+)
+from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     DisjointSlotEndpoints,
     GRASP_CAPABILITY,
@@ -40,8 +54,11 @@ from ..requirements import (
     SkillEndpointRequirement,
     SkillResourceSlot,
 )
-from ..state import ArticulationJointState, PlanningContext
-from ..trajectory_ops import (
+from embodichain.lab.sim.atomic_actions.state import (
+    ArticulationJointState,
+    PlanningContext,
+)
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
@@ -170,7 +187,7 @@ class OperateArticulation(
 
     def _on_bind(self) -> None:
         """Capture immutable robot dimensions from engine-owned services."""
-        self.n_envs = int(self.robot.get_qpos().shape[0])
+        self.num_envs = int(self.robot.get_qpos().shape[0])
         self.robot_dof = int(self.robot.dof)
 
     def _plan(
@@ -196,7 +213,7 @@ class OperateArticulation(
         poses = tuple(
             resolve_pose_target(
                 pose,
-                n_envs=context.batch_size,
+                num_envs=context.batch_size,
                 device=self.device,
             )
             for pose in goal.geometry.resolve(
@@ -229,6 +246,7 @@ class OperateArticulation(
                     start_qpos=arm_start,
                     control_part=motion.control_part,
                     sample_count=sample_count,
+                    interpolation_dt=context.require_control_dt(),
                 ),
             )
             if result.positions is None or not isinstance(result.success, torch.Tensor):
@@ -258,13 +276,13 @@ class OperateArticulation(
 
         grasp_qpos = interaction.joint_positions(
             GRASP_COMMAND,
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
         open_qpos = interaction.joint_positions(
             OPEN_COMMAND,
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
@@ -347,7 +365,11 @@ class OperateArticulation(
             request,
             context,
             success=success,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=expected,
             effect_verification=EffectVerificationRequirement(
                 kind="articulation.joint_progress"
