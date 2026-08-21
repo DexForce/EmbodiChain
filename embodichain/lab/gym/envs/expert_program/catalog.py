@@ -56,6 +56,7 @@ from embodichain.lab.sim.skills import (
     PLACE_ON_AFFORDANCE_CAPABILITY,
     POSE_RELATION_EFFECT_CHANNEL,
     BoundRobotSkillProfile,
+    ContainerRelationTargetGrounder,
     HandOverPoseProvider,
     OperateArticulation,
     Place,
@@ -77,6 +78,7 @@ from embodichain.lab.sim.skills import (
     SemanticIntegrationManifest,
     SemanticValidationError,
     SkillPolicyPreset,
+    SupportSurfaceRelationTargetGrounder,
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.skills.effects import (
@@ -301,6 +303,18 @@ def _snapshot_relation_grounders(
         if key in seen:
             raise ValueError(f"Duplicate relation grounder key {key!r}.")
         seen.add(key)
+    return tuple(values)
+
+
+def _builtin_relation_grounders(
+    scene_binding: SimulationSceneBinding,
+) -> tuple[RelationTargetGrounder, ...]:
+    """Install standard grounders for declared production relation bindings."""
+    values: list[RelationTargetGrounder] = []
+    if scene_binding.support_surfaces:
+        values.append(SupportSurfaceRelationTargetGrounder())
+    if scene_binding.containers:
+        values.append(ContainerRelationTargetGrounder())
     return tuple(values)
 
 
@@ -1440,7 +1454,15 @@ class SimulationExpertProgramRegistration:
         _validate_standard_call_catalog(self.call_catalog)
         settle_presets = _snapshot_settle_presets(self.settle_presets)
         object.__setattr__(self, "settle_presets", settle_presets)
-        relation_grounders = _snapshot_relation_grounders(self.relation_grounders)
+        configured_relation_grounders = _snapshot_relation_grounders(
+            self.relation_grounders
+        )
+        relation_grounders = _snapshot_relation_grounders(
+            (
+                *_builtin_relation_grounders(self.scene_binding),
+                *configured_relation_grounders,
+            )
+        )
         object.__setattr__(self, "relation_grounders", relation_grounders)
         relation_grounder_keys = frozenset(
             _relation_grounder_key(grounder) for grounder in relation_grounders

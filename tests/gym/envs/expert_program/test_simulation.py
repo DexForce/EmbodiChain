@@ -27,6 +27,7 @@ from embodichain.lab.gym.envs.expert_program.simulation import (
     AntipodalGraspAffordanceBinding,
     ArticulationOperationAffordanceBinding,
     ArticulationOperationTargetBinding,
+    ContainerAffordanceBinding,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
@@ -38,6 +39,7 @@ from embodichain.lab.gym.envs.expert_program.simulation import (
     SimulationRobotResourceBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
+    SupportSurfaceAffordanceBinding,
 )
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
@@ -48,13 +50,17 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.skills import (
     ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
+    ContainerAffordance,
     GRASP_AFFORDANCE_CAPABILITY,
+    PLACE_IN_AFFORDANCE_CAPABILITY,
+    PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneDynamics,
     SceneLinkRef,
     SceneObjectRef,
     SkillPolicyPreset,
+    SupportSurfaceAffordance,
 )
 from embodichain.lab.sim.skills.profiles import ResourceEndpoint
 
@@ -212,6 +218,60 @@ def _scene_binding() -> SimulationSceneBinding:
                 },
             ),
         ),
+        support_surfaces=(
+            SupportSurfaceAffordanceBinding(
+                entity_id="cube_support_target",
+                parent_id="cube",
+                native_name="support_target",
+                object_target_pose=(
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.25,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ),
+                minimum_confidence=0.7,
+                is_default=True,
+            ),
+        ),
+        containers=(
+            ContainerAffordanceBinding(
+                entity_id="drawer_inside_target",
+                parent_id="drawer_handle_link",
+                native_name="inside_target",
+                object_target_pose=(
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.1,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ),
+                minimum_confidence=0.8,
+                is_default=True,
+            ),
+        ),
     )
 
 
@@ -292,6 +352,28 @@ def test_scene_binding_builds_existing_registry_contracts() -> None:
     assert torch.equal(
         snapshot.entities["drawer_handle_operation"].pose,
         simulation.articulation.link_pose,
+    )
+    support_ref = registry.resolve_affordance(
+        "cube",
+        capability=PLACE_ON_AFFORDANCE_CAPABILITY,
+    )
+    support = registry.lookup(support_ref).affordance
+    assert type(support) is SupportSurfaceAffordance
+    assert support.minimum_confidence == pytest.approx(0.7)
+    assert torch.equal(
+        snapshot.entities[support_ref.entity_id].pose[:, 2, 3],
+        torch.full((_BATCH_SIZE,), 0.25),
+    )
+    container_ref = registry.resolve_affordance(
+        "drawer_handle_link",
+        capability=PLACE_IN_AFFORDANCE_CAPABILITY,
+    )
+    container = registry.lookup(container_ref).affordance
+    assert type(container) is ContainerAffordance
+    assert container.minimum_confidence == pytest.approx(0.8)
+    assert torch.allclose(
+        snapshot.entities[container_ref.entity_id].pose[:, 0, 3],
+        torch.tensor((0.4, 0.5)),
     )
 
 

@@ -121,6 +121,7 @@ from .simulation import (
     AntipodalGraspAffordanceBinding,
     ArticulationOperationAffordanceBinding,
     ArticulationOperationTargetBinding,
+    ContainerAffordanceBinding,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
@@ -132,6 +133,7 @@ from .simulation import (
     SimulationRobotResourceBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
+    SupportSurfaceAffordanceBinding,
 )
 from .catalog import (
     ExpertProgramIntegrationCatalog,
@@ -183,6 +185,7 @@ __all__ = [
     "CompiledProgramValidator",
     "CompiledRepeatFrame",
     "CompiledTargetSelection",
+    "ContainerAffordanceBinding",
     "ControlCommandStateEvidenceTracker",
     "ControlPartCommandPreset",
     "ControlPartEndpointBinding",
@@ -265,6 +268,7 @@ __all__ = [
     "SimulationSceneBinding",
     "SimulationSegmentPolicyPort",
     "StandardExtensionDeclarations",
+    "SupportSurfaceAffordanceBinding",
     "SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS",
     "TargetCfg",
     "TargetRefCfg",

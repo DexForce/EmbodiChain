@@ -67,6 +67,8 @@ from embodichain.lab.sim.skills.calls import (
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.skills.compiler import (
+    ContainerRelationTargetGrounder,
+    GroundedSemanticCall,
     HandOverPoseProvider,
     HandOverPoseTargets,
     HeldObjectGuardBaseline,
@@ -76,6 +78,8 @@ from embodichain.lab.sim.skills.compiler import (
     SemanticObjectTarget,
     SemanticRelationTarget,
     SemanticSkillCompiler,
+    SemanticWorkflow,
+    SupportSurfaceRelationTargetGrounder,
 )
 from embodichain.lab.sim.skills.effects import (
     BinaryEffectClause,
@@ -109,7 +113,10 @@ from embodichain.lab.sim.skills.profiles import (
     SkillPolicyPreset,
 )
 from embodichain.lab.sim.skills.scene import (
+    ContainerAffordance,
     GRASP_AFFORDANCE_CAPABILITY,
+    PLACEMENT_TARGET_AFFORDANCE_REVISION,
+    PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneCollisionRole,
@@ -117,6 +124,7 @@ from embodichain.lab.sim.skills.scene import (
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
+    SupportSurfaceAffordance,
 )
 
 _MOTION_CAPABILITIES = frozenset(
@@ -624,6 +632,47 @@ def _held_context(
         ),
         robot_dof=robot_dof,
     )
+
+
+@pytest.mark.parametrize(
+    ("grounder", "capability", "affordance_type"),
+    (
+        (
+            SupportSurfaceRelationTargetGrounder(),
+            PLACE_ON_AFFORDANCE_CAPABILITY,
+            SupportSurfaceAffordance,
+        ),
+        (
+            ContainerRelationTargetGrounder(),
+            PLACE_IN_AFFORDANCE_CAPABILITY,
+            ContainerAffordance,
+        ),
+    ),
+)
+def test_builtin_relation_grounders_preserve_late_pose_and_confidence(
+    grounder: RelationTargetGrounder,
+    capability: str,
+    affordance_type: type[Affordance],
+) -> None:
+    """Production relation grounders keep target frames live and typed."""
+    registry, _ = _scene_registry()
+    relation = SemanticRelationTarget(
+        capability=capability,
+        affordance=SceneAffordanceRef("declared_target"),
+        payload_type=affordance_type,
+        payload_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
+    )
+
+    target = grounder.ground(
+        relation,
+        affordance=affordance_type(minimum_confidence=0.65),
+        context=_context(registry),
+    )
+
+    assert type(target) is SceneEntityPose
+    assert target.entity_id == "declared_target"
+    assert target.relative_pose is None
+    assert target.minimum_confidence == pytest.approx(0.65)
 
 
 def test_curated_analysis_selects_exact_preset_monitor_without_creating_it() -> None:
