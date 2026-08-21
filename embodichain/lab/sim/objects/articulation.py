@@ -724,12 +724,78 @@ class Articulation(BatchEntity):
         if use_source_properties:
             return
 
+        self._set_default_joint_drive()
+        if not self.body_data.is_newton_backend:
+            return
+
+        self._apply_configured_link_masses()
+
         if self.cfg.compute_uv:
             for entity in self._entities:
                 for link_name in self.link_names:
                     render_body = entity.get_render_body(link_name)
                     if render_body is not None:
                         render_body.set_projective_uv()
+
+        logger.log_warning(
+            f"Spawn articulation {self.uid!r}: TODO: non-mass link physics "
+            "attributes are not exposed by the Newton Spawn facade."
+        )
+
+    def _apply_configured_link_masses(self) -> None:
+        """Apply configured masses after source link names are available."""
+        base_mass = self.cfg.attrs.mass
+        groups = self.cfg.link_attrs or {}
+        if base_mass is None and not any(
+            group.attrs.mass is not None for group in groups.values()
+        ):
+            return
+        if self.body_data.is_newton_backend:
+            logger.log_warning(
+                f"Spawn articulation {self.uid!r}: Newton link-mass overrides "
+                "require retained-desc support and were not applied."
+            )
+            return
+
+        masses = self.get_mass()
+        mass_changed = False
+        if base_mass is not None:
+            if base_mass == 0:
+                logger.log_warning(
+                    f"Spawn articulation {self.uid!r}: density-derived mass is "
+                    "not exposed by the Spawn facade and was not applied."
+                )
+            else:
+                masses.fill_(float(base_mass))
+                mass_changed = True
+
+        claimed: set[str] = set()
+        for group in groups.values():
+            if group.attrs.mass is None:
+                continue
+            if group.attrs.mass == 0:
+                logger.log_warning(
+                    f"Spawn articulation {self.uid!r}: density-derived per-link "
+                    "mass is not exposed by the Spawn facade and was not applied."
+                )
+                continue
+            matched_indices, matched_names = resolve_matching_names(
+                keys=group.link_names_expr,
+                list_of_strings=self.link_names,
+            )
+            overlap = claimed.intersection(matched_names)
+            if overlap:
+                raise ValueError(
+                    "Articulation link mass override groups overlap for links "
+                    f"{sorted(overlap)}."
+                )
+            claimed.update(matched_names)
+            masses[:, matched_indices] = float(group.attrs.mass)
+            mass_changed = True
+
+        if mass_changed:
+            self.set_mass(masses, self.link_names)
+            self.default_link_masses = self.get_mass()
 
     def __str__(self) -> str:
         if self.is_declared:

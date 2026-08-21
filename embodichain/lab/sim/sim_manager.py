@@ -2351,6 +2351,21 @@ class SimulationManager:
             descriptor,
             facade=facade,
         )
+        if self.is_default_backend and not (
+            _is_usd_path(cfg.fpath) and cfg.use_usd_properties
+        ):
+            from embodichain.lab.sim.utility.sim_utils import (
+                set_dexsim_articulation_cfg,
+            )
+
+            handles = self._spawn_scene.handles(descriptor.name)
+            if not handles:
+                raise RuntimeError(
+                    "Default Spawn must materialize articulation handles before "
+                    "applying their physical configuration."
+                )
+            for handle in handles:
+                set_dexsim_articulation_cfg(handle, cfg)
         self.notify_visualization_topology_changed()
         return facade
 
