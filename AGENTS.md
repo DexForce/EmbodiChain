@@ -68,7 +68,6 @@ EmbodiChain/
 │   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
 │   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
 │   │   │   │   │   └── randomization/  # Physics, geometry, spatial, visual randomizers
-│   │   │   │   ├── tasks/        # Deprecated import shim for official tasks
 │   │   │   │   ├── action_bank/  # Configurable action primitives
 │   │   │   │   └── wrapper/      # Env wrappers (e.g. no_fail)
 │   │   │   └── utils/            # Gym registration, misc helpers
@@ -208,6 +207,12 @@ __all__ = ["MyClass", "my_function"]
 ### Documentation
 
 - Docs are built with **Sphinx** using **Markdown** source files (`docs/source/`).
+- Check public API coverage without modifying files:
+  ```bash
+  python docs/scripts/check_api_docs.py
+  ```
+- Use the `/update-api-docs` skill to generate or update documentation for
+  missing public exports; the checker itself never writes documentation.
 - Build locally:
   ```bash
   pip install -r docs/requirements.txt
@@ -287,6 +292,7 @@ Tool-specific adapter files should stay thin and point back to the canonical ski
 | Add Task Env | `/add-task-env` | Scaffold a new `EmbodiedEnv` task |
 | Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
 | Add Test | `/add-test` | Scaffold tests following project conventions |
+| Update API Docs | `/update-api-docs` | Document public exports reported by the read-only API checker |
 | Pre-Commit Check | `/pre-commit-check` | Run all local CI checks before committing |
 | Create PR | `/pr` | Create a PR following the project template |
 | Benchmark | `/benchmark` | Write benchmark scripts for EmbodiChain modules |
