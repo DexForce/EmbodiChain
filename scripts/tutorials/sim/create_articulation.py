@@ -116,9 +116,6 @@ def run_simulation(
         articulation: Drawer articulation whose joints are updated.
         max_steps: Optional number of steps to run before returning.
     """
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     qpos_limits = articulation.get_qpos_limits()
     closed_qpos = qpos_limits[..., 0]
     open_qpos = qpos_limits[..., 1]
@@ -181,6 +178,7 @@ def main() -> None:
         num_envs=args.num_envs,
         arena_space=2.0,
         physics_dt=1.0 / 100.0,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),

@@ -688,6 +688,7 @@ def _make_cobotmagic_sim(tmp_path):
         },
     }
     robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+    sim.prepare()
     return sim, robot
 
 

@@ -205,9 +205,10 @@ if __name__ == "__main__":
 
     cfg = CobotMagicCfg.from_dict(config)
     robot = sim.add_robot(cfg=cfg)
-    # sim.open_window()
+    sim.prepare()
+    sim.open_window()
+    from IPython import embed
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    embed()  # noqa: E702
 
     print("CobotMagic added to the simulation.")

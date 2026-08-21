@@ -341,6 +341,7 @@ def main(args: argparse.Namespace) -> None:
             sim.set_indirect_lighting(args.env_map)
 
         assets = load_assets(sim, args)
+        sim.prepare()
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
         joint_controller = _setup_viser_joint_control(sim, assets, args)
         _publish_loaded_assets(sim, args)

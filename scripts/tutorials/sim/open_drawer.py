@@ -29,8 +29,10 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
+    NewtonPhysicsCfg,
     RenderCfg,
     RigidBodyAttributesCfg,
+    physics_cfg_for_backend,
 )
 from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.lab.sim.planners import (
@@ -63,9 +65,13 @@ DRAWER_ASSET = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 APPROACH_DISTANCE = 0.10
 PULL_DISTANCE = 0.16
+NEWTON_PULL_DISTANCE = 0.20
+NEWTON_PUSH_DISTANCE_SCALE = 0.4
 DRAWER_SUCCESS_THRESHOLD = 0.10
+NEWTON_DRAWER_SUCCESS_THRESHOLD = 0.04
 HALF_OPEN_FRACTION = 0.5
 HALF_OPEN_TOLERANCE = 0.02
+NEWTON_HALF_OPEN_TOLERANCE = 0.04
 RECORD_WIDTH = 1280
 RECORD_HEIGHT = 720
 RECORD_LOOK_AT = (
@@ -99,6 +105,8 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
             },
         }
     )
+    if sim.is_newton_backend:
+        robot_cfg.drive_pros.damping["fr3_finger_joint[1-2]"] = 10.0
     robot = sim.add_robot(cfg=robot_cfg)
     if robot is None:
         raise RuntimeError("Failed to add the Franka Panda robot.")
@@ -340,13 +348,14 @@ def open_drawer(
 
     # Close around the handle, then allow contacts to settle before pulling.
     move_gripper(sim, robot, hand_closed_qpos)
-    sim.update(step=10)
+    sim.update(step=100 if sim.is_newton_backend else 10)
 
     # Re-read the live handle frame after grasping. Pulling along its -Z axis
     # follows the drawer's prismatic joint toward Franka.
     grasped_handle_pose = get_handle_grasp_pose(drawer)
     pull_pose = grasped_handle_pose.clone()
-    pull_pose[:, :3, 3] -= grasped_handle_pose[:, :3, 2] * PULL_DISTANCE
+    pull_distance = NEWTON_PULL_DISTANCE if sim.is_newton_backend else PULL_DISTANCE
+    pull_pose[:, :3, 3] -= grasped_handle_pose[:, :3, 2] * pull_distance
 
     pull_start_qpos = robot.get_qpos(name=ARM_NAME)
     pull_waypoints = solve_ik_waypoints(
@@ -374,16 +383,23 @@ def open_drawer(
         f"{pulled_opening.detach().cpu().tolist()}",
         flush=True,
     )
-    if not torch.all(pulled_opening >= DRAWER_SUCCESS_THRESHOLD).item():
+    success_threshold = (
+        NEWTON_DRAWER_SUCCESS_THRESHOLD
+        if sim.is_newton_backend
+        else DRAWER_SUCCESS_THRESHOLD
+    )
+    if not torch.all(pulled_opening >= success_threshold).item():
         raise RuntimeError(
             "The drawer did not open far enough through gripper contact. "
-            f"Expected at least {DRAWER_SUCCESS_THRESHOLD:.2f} m."
+            f"Expected at least {success_threshold:.2f} m."
         )
 
     # Push the drawer back by half of its measured opening. Moving along the
     # handle frame's +Z axis reverses the pull while the gripper stays closed.
     half_open_target = pulled_opening * HALF_OPEN_FRACTION
     push_distance = pulled_opening - half_open_target
+    if sim.is_newton_backend:
+        push_distance *= NEWTON_PUSH_DISTANCE_SCALE
     pushed_handle_pose = get_handle_grasp_pose(drawer)
     push_pose = pushed_handle_pose.clone()
     push_pose[:, :3, 3] += pushed_handle_pose[:, :3, 2] * push_distance.unsqueeze(-1)
@@ -415,12 +431,15 @@ def open_drawer(
         f"{final_opening.detach().cpu().tolist()}",
         flush=True,
     )
+    half_open_tolerance = (
+        NEWTON_HALF_OPEN_TOLERANCE if sim.is_newton_backend else HALF_OPEN_TOLERANCE
+    )
     if not torch.all(
-        torch.abs(final_opening - half_open_target) <= HALF_OPEN_TOLERANCE
+        torch.abs(final_opening - half_open_target) <= half_open_tolerance
     ).item():
         raise RuntimeError(
             "The drawer did not return to half of its pulled opening. "
-            f"Expected an error no greater than {HALF_OPEN_TOLERANCE:.2f} m."
+            f"Expected an error no greater than {half_open_tolerance:.2f} m."
         )
     return drawer_qpos
 
@@ -464,6 +483,20 @@ def main() -> None:
     if args.record_save_path is not None and not args.headless:
         parser.error("--record-save-path requires --headless")
 
+    # PytorchSolver samples multiple IK seeds; make the tutorial trajectory
+    # reproducible across repeated runs of the same backend.
+    torch.manual_seed(0)
+
+    physics_cfg = physics_cfg_for_backend(args.physics)
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        # The Franka, drawer, and their contacts need larger MuJoCo-Warp
+        # constraint buffers than the lightweight scene defaults.
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "njmax": 8192,
+            "nconmax": 8192,
+        }
+
     sim = SimulationManager(
         SimulationManagerCfg(
             width=RECORD_WIDTH,
@@ -473,6 +506,7 @@ def main() -> None:
             num_envs=args.num_envs,
             arena_space=args.arena_space,
             physics_dt=1.0 / 100.0,
+            physics_cfg=physics_cfg,
             render_cfg=RenderCfg(renderer=args.renderer),
             visualization=visualization_cfg_from_args(args),
         )
@@ -481,8 +515,7 @@ def main() -> None:
     try:
         robot, drawer = create_scene(sim)
 
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
+        sim.prepare()
         if not args.headless and not args.viser:
             sim.open_window()
 

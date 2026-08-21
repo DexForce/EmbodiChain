@@ -79,8 +79,6 @@ def preview_scene_export(
         )
     )
     try:
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
         _add_lights(sim)
         _add_objects(
             sim=sim,
@@ -94,6 +92,7 @@ def preview_scene_export(
             config_dir=config_path.parent,
             label="asset",
         )
+        sim.prepare()
 
         is_viser = sim.sim_config.visualization.backend == "viser"
         if headless and not is_viser:

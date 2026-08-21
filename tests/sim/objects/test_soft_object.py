@@ -88,9 +88,9 @@ class BaseSoftObjectTest:
                 ),
             ),
         )
+        self.sim.prepare()
 
     def test_run_simulation(self):
-        self.sim.init_gpu_physics()
         for _ in range(100):
             self.sim.update(step=1)
         self.cow.reset()
@@ -99,7 +99,6 @@ class BaseSoftObjectTest:
 
     def test_get_deformable_mesh_geometry(self):
         """Test current collision vertices and matching surface triangles."""
-        self.sim.init_gpu_physics()
         vertices = self.cow.get_current_collision_vertices()
         triangles = self.cow.get_collision_surface_triangles(env_ids=[0])
 

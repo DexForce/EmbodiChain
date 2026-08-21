@@ -510,7 +510,7 @@ class Articulation(BatchEntity):
         # Get default masses.
         self.default_link_masses = self.get_mass()
 
-        if self.cfg.use_usd_properties:
+        if self.cfg.use_usd_properties or spawn_result is not None:
             self.default_joint_stiffness = self._data.joint_stiffness.clone()
             self.default_joint_damping = self._data.joint_damping.clone()
             self.default_joint_friction = self._data.joint_friction.clone()
@@ -619,6 +619,8 @@ class Articulation(BatchEntity):
         ):
             self._world.update(0.001)
 
+        # Spawn-bound articulations receive post-load configuration before
+        # their initial reset. Legacy construction keeps its historical reset.
         super().__init__(
             cfg,
             entities,
@@ -663,7 +665,13 @@ class Articulation(BatchEntity):
         articulation metadata. ``bind_spawn()`` performs result-dependent
         Batch/Data initialization after finalization.
         """
-        self._entities = list(entities)
+        handles = list(entities)
+        if len(handles) != self._declared_num_instances:
+            raise ValueError(
+                f"Articulation {self.uid!r} expected "
+                f"{self._declared_num_instances} Spawn handles, got {len(handles)}."
+            )
+        self._entities = handles
         self._mimic_info = self._entities[0].get_mimic_info()
         self.active_joint_ids = [
             index for index in range(self.dof) if index not in self.mimic_ids
@@ -674,33 +682,47 @@ class Articulation(BatchEntity):
         result: SpawnResult,
     ) -> None:
         """Initialize this declared facade from Spawn articulation handles."""
+        if self.is_spawn_bound:
+            raise RuntimeError(f"Articulation {self.uid!r} is already Spawn-bound.")
+        if not self.is_declared:
+            raise RuntimeError(
+                f"Articulation {self.uid!r} was not created as a Spawn declaration."
+            )
+
         cfg = self.cfg
         device = self.device
         entities = list(self._entities)
-        type(self).__init__(
-            self,
+        if len(entities) != self._declared_num_instances:
+            raise ValueError(
+                f"Articulation {self.uid!r} expected "
+                f"{self._declared_num_instances} Spawn handles, got {len(entities)}."
+            )
+
+        # Build and configure the bound state off to the side. If batch
+        # creation or post-load configuration fails, the public facade remains
+        # declared and can be retried by SimulationManager.prepare().
+        bound = type(self)(
             cfg,
             entities,
             device,
             spawn_result=result,
         )
-        self._apply_spawn_config()
-        self.reset()
+        bound._apply_spawn_config()
+        bound.reset()
+        self.__dict__.clear()
+        self.__dict__.update(bound.__dict__)
 
     def _apply_spawn_config(self) -> None:
-        """Apply config values that require finalized source metadata.
+        """Apply render configuration that requires finalized source metadata.
 
-        The source file is loaded only by the DexSim Spawn adapter.  This
-        method runs after binding, when canonical link and active-joint names
-        are available.
+        Link physics and joint-drive regex overlays are part of the typed
+        :class:`dexsim.spawn.ArticulationDesc` and are applied by DexSim while
+        loading the source, before either physics backend is finalized.
         """
         is_usd = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
         use_source_properties = is_usd and self.cfg.use_usd_properties
         if use_source_properties:
             return
-
-        self._set_default_joint_drive()
-        self._apply_configured_link_masses()
 
         if self.cfg.compute_uv:
             for entity in self._entities:
@@ -708,66 +730,6 @@ class Articulation(BatchEntity):
                     render_body = entity.get_render_body(link_name)
                     if render_body is not None:
                         render_body.set_projective_uv()
-
-        logger.log_warning(
-            f"Spawn articulation {self.uid!r}: TODO: non-mass link physics "
-            "attributes are not exposed by DexSim SpawnedArticulation."
-        )
-
-    def _apply_configured_link_masses(self) -> None:
-        """Apply configured masses after source link names are available."""
-        base_mass = self.cfg.attrs.mass
-        groups = self.cfg.link_attrs or {}
-        if base_mass is None and not any(
-            group.attrs.mass is not None for group in groups.values()
-        ):
-            return
-        if self.body_data.is_newton_backend:
-            logger.log_warning(
-                f"Spawn articulation {self.uid!r}: Newton link-mass overrides "
-                "require retained-desc support and were not applied."
-            )
-            return
-
-        masses = self.get_mass()
-        mass_changed = False
-        if base_mass is not None:
-            if base_mass == 0:
-                logger.log_warning(
-                    f"Spawn articulation {self.uid!r}: density-derived mass is "
-                    "not exposed by the Spawn facade and was not applied."
-                )
-            else:
-                masses.fill_(float(base_mass))
-                mass_changed = True
-
-        claimed: set[str] = set()
-        for group in groups.values():
-            if group.attrs.mass is None:
-                continue
-            if group.attrs.mass == 0:
-                logger.log_warning(
-                    f"Spawn articulation {self.uid!r}: density-derived per-link "
-                    "mass is not exposed by the Spawn facade and was not applied."
-                )
-                continue
-            matched_indices, matched_names = resolve_matching_names(
-                keys=group.link_names_expr,
-                list_of_strings=self.link_names,
-            )
-            overlap = claimed.intersection(matched_names)
-            if overlap:
-                raise ValueError(
-                    "Articulation link mass override groups overlap for links "
-                    f"{sorted(overlap)}."
-                )
-            claimed.update(matched_names)
-            masses[:, matched_indices] = float(group.attrs.mass)
-            mass_changed = True
-
-        if mass_changed:
-            self.set_mass(masses, self.link_names)
-            self.default_link_masses = self.get_mass()
 
     def __str__(self) -> str:
         if self.is_declared:
@@ -1636,12 +1598,10 @@ class Articulation(BatchEntity):
             replace_inertial: Recompute inertia when mass changes.
 
         .. attention::
-            On the Newton backend, ``set_physical_attr`` only mirrors attributes
-            onto link metadata (consumed at the next scene rebuild). Mass is
-            additionally pushed live via ``set_link_mass`` so runtime per-link
-            mass overrides take effect immediately (mirroring the dedicated
-            :meth:`set_mass`). Friction/restitution/contact_offset have no live
-            per-link API on Newton articulations and are rebuild-time only.
+            On the Newton backend, link properties are retained on the Spawn
+            descriptor because the finalized model is immutable. Call
+            :meth:`SimulationManager.prepare` after this method to rebuild once
+            and apply all accumulated per-link changes.
         """
         if link_names is None:
             matched_link_names = self.link_names
@@ -1675,9 +1635,7 @@ class Articulation(BatchEntity):
                     local_name,
                     is_replace_inertial=replace_inertial,
                 )
-                # On Newton, set_physical_attr is metadata-only; push mass live
-                # so runtime per-link mass overrides take effect immediately.
-                if is_newton:
+                if is_newton and not self.is_spawn_bound:
                     self._entities[env_idx].set_link_mass(
                         local_name, physical_attr.mass
                     )
@@ -2305,7 +2263,12 @@ class Articulation(BatchEntity):
             for link_name in link_names:
                 mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{link_name}")
                 for i, env_idx in enumerate(local_env_ids):
-                    self._entities[env_idx].set_material(link_name, mat_inst.mat)
+                    if self.is_spawn_bound:
+                        self._entities[env_idx].set_material_inst(
+                            link_name, mat_inst.mat
+                        )
+                    else:
+                        self._entities[env_idx].set_material(link_name, mat_inst.mat)
                     self._visual_material[env_idx][link_name] = mat_inst
                     if update_default:
                         self._original_visual_material[env_idx][link_name] = (
@@ -2323,7 +2286,12 @@ class Articulation(BatchEntity):
                     mat_inst = mat.create_instance(
                         f"{mat.uid}_{self.uid}_{link_name}_{env_idx}"
                     )
-                    self._entities[env_idx].set_material(link_name, mat_inst.mat)
+                    if self.is_spawn_bound:
+                        self._entities[env_idx].set_material_inst(
+                            link_name, mat_inst.mat
+                        )
+                    else:
+                        self._entities[env_idx].set_material(link_name, mat_inst.mat)
                     self._visual_material[env_idx][link_name] = mat_inst
                     if update_default:
                         self._original_visual_material[env_idx][link_name] = (
@@ -2547,6 +2515,17 @@ class Articulation(BatchEntity):
             ]
         )
         link_names = self.link_names if link_names is None else link_names
+
+        if self.is_spawn_bound:
+            for env_idx in self._all_indices:
+                entity = self._entities[env_idx]
+                for link_name in link_names:
+                    self._spawn_result.set_physical_visible(
+                        (entity, link_name), rgba, visible
+                    )
+            for link_name in link_names:
+                self._has_collision_visible_node_dict[link_name] = True
+            return
 
         # create collision visible node if not exist
         if visible:

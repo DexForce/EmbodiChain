@@ -69,8 +69,10 @@ class ContactTest:
         contact_filter_cfg.articulation_cfg_list = [contact_filter_art_cfg]
         contact_filter_cfg.filter_need_both_actor = True
 
+        self.sim.prepare()
         self.to_grasp_pose(cube2)
         self.contact_sensor = self.sim.add_sensor(sensor_cfg=contact_filter_cfg)
+        self.sim.prepare()
 
     def create_cube(self, uid: str, position: list = (0.0, 0.0, 0)) -> RigidObject:
         """create cube

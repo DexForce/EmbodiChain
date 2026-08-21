@@ -68,10 +68,7 @@ class BaseRobotTest:
         )
 
         cls.robot: Robot = cls.sim.add_robot(cfg=cfg)
-
-        # Initialize GPU physics if needed
-        if device == "cuda" and getattr(cls.sim, "is_use_gpu_physics", False):
-            cls.sim.init_gpu_physics()
+        cls.sim.prepare()
 
     def test_get_joint_ids(self):
         left_joint_ids = self.robot.get_joint_ids("left_arm")
@@ -511,11 +508,11 @@ def _teardown_newton_physics() -> None:
 
 
 class TestRobotNewton:
-    """Focused Robot-on-Newton coverage (spawn, finalize, control surface).
+    """Focused Robot-on-Newton coverage (spawn, prepare, control surface).
 
     A robot is a URDF articulation; the Newton ``load_urdf`` patch builds a
-    NewtonArticulation. This exercises the add_robot -> finalize_newton_physics
-    -> control-part / qpos path end-to-end on Newton. It does NOT inherit the
+    NewtonArticulation. This exercises the add_robot -> prepare -> control-part
+    / qpos path end-to-end on Newton. It does NOT inherit the
     full BaseRobotTest suite because rebuilding the (complex, mimic-jointed)
     dexforce_w1 Newton model per test method is prohibitively slow; the
     default/CUDA classes already cover the shared control-part/FK/IK logic.
@@ -532,11 +529,9 @@ class TestRobotNewton:
             headless=True, device="cuda", num_envs=1, physics_cfg=physics_cfg
         )
         self.sim = SimulationManager(config)
-        cfg = DexforceW1Cfg.from_dict(
-            {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
-        )
+        cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
         self.robot: Robot = self.sim.add_robot(cfg=cfg)
-        self.sim.finalize_newton_physics()
+        self.sim.prepare()
 
     def teardown_method(self):
         self.sim.destroy()
@@ -549,9 +544,9 @@ class TestRobotNewton:
         gc.collect()
 
     def test_newton_robot_spawn_and_control(self):
-        """Robot spawns on Newton, finalizes, and exposes a working control surface."""
+        """Robot spawns on Newton, prepares, and exposes a working control surface."""
         assert self.sim.is_newton_backend
-        assert self.sim.physics._lifecycle_state() == "READY"
+        assert self.robot.body_data.is_ready
         assert self.robot.dof > 0
 
         left_ids = self.robot.get_joint_ids("left_arm")

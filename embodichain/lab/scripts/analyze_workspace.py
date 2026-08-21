@@ -652,6 +652,7 @@ def main(args: argparse.Namespace) -> None:
         if robot is None:
             log_error("Failed to load robot into the simulation.")
             return
+        sim.prepare()
         control_part = _resolve_control_part(robot, control_part)
         joints_desc = (
             robot.control_parts.get(control_part) if control_part else "all joints"

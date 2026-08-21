@@ -37,6 +37,7 @@ class TestLight:
             "uid": "point_light",
         }
         self.light = self.sim.add_light(cfg=LightCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     def test_set_color_with_env_ids(self):
         """Test set_color with and without env_ids."""

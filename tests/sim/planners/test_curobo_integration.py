@@ -75,11 +75,12 @@ def _make_sim_robot(num_envs: int = 1):
             uid="demo_block",
             shape=CubeCfg(size=DEMO_BLOCK_DIMS),
             attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
+            body_type="static",
             init_pos=DEMO_BLOCK_POS,
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     return sim, robot, block
 
 

@@ -216,6 +216,32 @@ class RigidBodyViewBase(ABC):
         """Apply contact offsets from ``(N, 1)`` tensor."""
         ...
 
+    def fetch_damping(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        """Fetch linear/angular damping into ``data`` as ``(N, 2)``."""
+        raise NotImplementedError("This backend view does not expose damping.")
+
+    def apply_damping(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        """Apply linear/angular damping from an ``(N, 2)`` tensor."""
+        raise NotImplementedError("This backend view does not expose damping.")
+
+    def fetch_collision_filter(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        """Fetch collision-filter rows into ``data`` as ``(N, 4)``."""
+        raise NotImplementedError(
+            "This backend view does not expose collision filters."
+        )
+
+    def apply_collision_filter(
+        self, data: torch.Tensor, body_ids: torch.Tensor
+    ) -> None:
+        """Apply collision-filter rows from an ``(N, 4)`` tensor."""
+        raise NotImplementedError(
+            "This backend view does not expose collision filters."
+        )
+
 
 class ArticulationViewBase(ABC):
     """Abstract interface for physics-backend articulation data access.

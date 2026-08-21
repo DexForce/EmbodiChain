@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import Mock
+
 import torch
 import pytest
 
@@ -36,24 +38,23 @@ Z_TRANSLATION = 2.0
 @pytest.mark.no_sim
 def test_cpu_body_data_reads_angular_velocity_from_angular_api():
     """CPU rigid-object groups must not report linear velocity as angular."""
-
-    class VelocityEntity:
-        def get_linear_velocity(self):
-            return [1.0, 2.0, 3.0]
-
-        def get_angular_velocity(self):
-            return [4.0, 5.0, 6.0]
-
-    body_data = object.__new__(RigidBodyGroupData)
-    body_data.entities = [[VelocityEntity(), VelocityEntity()]]
-    body_data.device = torch.device("cpu")
+    expected = torch.tensor([[[4.0, 5.0, 6.0], [4.0, 5.0, 6.0]]])
+    body_view = Mock()
+    body_view.fetch_angular_velocity.side_effect = lambda out: out.copy_(
+        expected.reshape(-1, 3)
+    )
+    body_data = RigidBodyGroupData(
+        body_view,
+        num_instances=1,
+        num_objects=2,
+        device=torch.device("cpu"),
+    )
 
     angular_velocity = body_data.ang_vel
 
-    assert torch.equal(
-        angular_velocity,
-        torch.tensor([[[4.0, 5.0, 6.0], [4.0, 5.0, 6.0]]]),
-    )
+    assert torch.equal(angular_velocity, expected)
+    body_view.fetch_angular_velocity.assert_called_once()
+    body_view.fetch_linear_velocity.assert_not_called()
 
 
 class BaseRigidObjectGroupTest:
@@ -89,8 +90,7 @@ class BaseRigidObjectGroupTest:
             cfg=RigidObjectGroupCfg.from_dict(cfg_dict)
         )
 
-        if device == "cuda" and self.sim.is_use_gpu_physics:
-            self.sim.init_gpu_physics()
+        self.sim.prepare()
 
         self.sim.enable_physics(True)
 

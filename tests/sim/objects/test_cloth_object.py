@@ -108,9 +108,9 @@ class BaseSoftObjectTest:
                 ),
             )
         )
+        self.sim.prepare()
 
     def test_run_simulation(self):
-        self.sim.init_gpu_physics()
         for _ in range(100):
             self.sim.update(step=1)
         self.cloth.reset()
@@ -133,7 +133,7 @@ class BaseSoftObjectTest:
 
     def test_get_deformable_mesh_geometry(self):
         """Test current cloth vertices and matching surface triangles."""
-        self.sim.init_gpu_physics()
+        self.sim.prepare()
         vertices = self.cloth.get_current_vertex_position()
         triangles = self.cloth.get_triangles(env_ids=[0])
 

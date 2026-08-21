@@ -94,6 +94,14 @@ def test_newton_physics_cfg_uses_mujoco_warp_solver_by_default() -> None:
     assert dexsim_cfg.solver_cfg.solver_type == "mujoco_warp"
 
 
+def test_newton_physics_cfg_passes_warp_log_suppression() -> None:
+    cfg = NewtonPhysicsCfg(suppress_warp_kernel_logs=False)
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.suppress_warp_kernel_logs is False
+
+
 def test_newton_backend_exposes_resolved_solver_type() -> None:
     backend = NewtonPhysicsBackend(SimpleNamespace())
     world_config = SimpleNamespace(newton_cfg=None)

@@ -48,9 +48,6 @@ class BaseUsdTest:
         )
         self.sim = SimulationManager(config)
 
-        if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
-
     def test_import_rigid(self):
         default_attr = RigidBodyAttributesCfg()
         sugar_box_path = get_data_path("SugarBox/sugar_box_usd/sugar_box.usda")
@@ -64,6 +61,7 @@ class BaseUsdTest:
                 attrs=default_attr,
             )
         )
+        self.sim.prepare()
         body0 = sugar_box._entities[0].get_physical_body()
         print(sugar_box._entities[0].get_physical_attr())
         assert pytest.approx(body0.get_mass()) == default_attr.mass
@@ -92,6 +90,7 @@ class BaseUsdTest:
                 drive_pros=default_drive,
             )
         )
+        self.sim.prepare()
 
         stiffness = h1.body_data.joint_stiffness
         damping = h1.body_data.joint_damping
@@ -120,6 +119,7 @@ class BaseUsdTest:
                 init_pos=[1.0, 0.0, 1.2],
             )
         )
+        self.sim.prepare()
 
         stiffness = h1.body_data.joint_stiffness
         damping = h1.body_data.joint_damping

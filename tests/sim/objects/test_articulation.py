@@ -49,7 +49,9 @@ def _teardown_newton_physics() -> None:
 
 
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:
-    return art._entities[env_idx].get_physical_attr(link_name).static_friction
+    return art.get_link_physical_attr(link_names=[link_name], env_ids=[env_idx])[
+        0
+    ].static_friction
 
 
 class _EntityMethodOverride:
@@ -125,10 +127,7 @@ class BaseArticulationTest:
             cfg=ArticulationCfg.from_dict(cfg_dict)
         )
 
-        if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
-        if physics == "newton":
-            self.sim.finalize_newton_physics()
+        self.sim.prepare()
 
     def test_local_pose_behavior(self):
         """Test set_local_pose and get_local_pose:
@@ -865,6 +864,7 @@ class BaseArticulationLinkPhysicsTest:
             attrs=RigidBodyAttributesCfg(static_friction=global_friction),
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
+        self.sim.prepare()
         for link_name in art.link_names:
             assert abs(_link_static_friction(art, link_name) - global_friction) < 1e-3
 
@@ -887,6 +887,7 @@ class BaseArticulationLinkPhysicsTest:
             },
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
+        self.sim.prepare()
         assert abs(_link_static_friction(art, "handle_xpos") - handle_friction) < 1e-3
         for link_name in art.link_names:
             if link_name == "handle_xpos":
@@ -910,6 +911,7 @@ class BaseArticulationLinkPhysicsTest:
             }
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
+        self.sim.prepare()
         assert abs(_link_static_friction(art, "handle_xpos") - 0.77) < 1e-3
         assert abs(_link_static_friction(art, "outer_box") - 0.4) < 1e-3
 
@@ -921,11 +923,13 @@ class BaseArticulationLinkPhysicsTest:
             drive_pros=JointDrivePropertiesCfg(drive_type="force"),
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
+        self.sim.prepare()
         handle_friction = 0.66
         art.set_link_physical_attr(
             RigidBodyAttributesOverrideCfg(static_friction=handle_friction),
             link_names=["handle_xpos"],
         )
+        self.sim.prepare()
         assert abs(_link_static_friction(art, "handle_xpos") - handle_friction) < 1e-3
         for link_name in art.link_names:
             if link_name == "handle_xpos":
@@ -1015,13 +1019,8 @@ class TestArticulationNewton(BaseArticulationTest):
     def test_set_physical_visible(self):
         super().test_set_physical_visible()
 
-    def test_set_link_physical_attr_mass_live_on_newton(self):
-        """Per-link mass set via set_link_physical_attr takes effect live on Newton.
-
-        On Newton, ``set_physical_attr`` is metadata-only; the fix pushes mass
-        live via ``set_link_mass`` (mirroring the dedicated set_mass). Verify a
-        runtime per-link mass override round-trips through get_mass.
-        """
+    def test_set_link_physical_attr_rebuilds_mass_on_newton(self):
+        """A retained Newton per-link mass takes effect at prepare()."""
         link_name = self.art.link_names[0]
         original = self.art.get_mass(link_names=[link_name])[0, 0].item()
         new_mass = original + 1.5
@@ -1029,10 +1028,11 @@ class TestArticulationNewton(BaseArticulationTest):
             RigidBodyAttributesOverrideCfg(mass=new_mass),
             link_names=[link_name],
         )
+        self.sim.prepare()
         live_mass = self.art.get_mass(link_names=[link_name])[0, 0].item()
         assert (
             abs(live_mass - new_mass) < 1e-3
-        ), f"per-link mass {new_mass} not applied live on Newton (got {live_mass})"
+        ), f"per-link mass {new_mass} not applied after Newton rebuild (got {live_mass})"
 
 
 if __name__ == "__main__":

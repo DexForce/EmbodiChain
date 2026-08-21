@@ -200,10 +200,8 @@ if __name__ == "__main__":
         {"robot_type": "ur10e", "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0]}
     )
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     from IPython import embed
 

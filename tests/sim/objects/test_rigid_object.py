@@ -15,8 +15,6 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
-from __future__ import annotations
-
 import os
 
 import pytest
@@ -32,7 +30,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg, physics_cfg_for_backend
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.cfg import NewtonCollisionAttributesCfg
 from embodichain.lab.sim.objects import RigidObject
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
@@ -99,22 +97,22 @@ class BaseRigidObjectTest:
             ),
         )
 
+        self.direct_gpu_kinematic_unsupported = (
+            physics == "default" and device == "cuda"
+        )
         self.chair: RigidObject = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
-                uid="chair", shape=MeshCfg(fpath=chair_path), body_type="kinematic"
+                uid="chair",
+                shape=MeshCfg(fpath=chair_path),
+                body_type=(
+                    "dynamic" if self.direct_gpu_kinematic_unsupported else "kinematic"
+                ),
             ),
         )
 
-        if (
-            physics == "default"
-            and device == "cuda"
-            and getattr(self.sim, "is_use_gpu_physics", False)
-        ):
-            self.sim.init_gpu_physics()
+        self.sim.prepare()
 
         self.sim.enable_physics(True)
-        if physics == "newton":
-            self.sim.finalize_newton_physics()
 
     def test_is_static(self):
         """Test the is_static() method of duck, table, and chair objects."""
@@ -129,8 +127,8 @@ class BaseRigidObjectTest:
         assert len(self.duck._entities) == NUM_ARENAS
         handles = {entity.get_native_handle() for entity in self.duck._entities}
         assert len(handles) == NUM_ARENAS, "Each arena clone must be a distinct actor"
-        assert self.duck._entities[0].get_name() == "duck_0"
-        assert self.duck._entities[1].get_name() == "duck_1"
+        assert {entity.get_name() for entity in self.duck._entities} == {"duck"}
+        assert len({entity.path for entity in self.duck._entities}) == NUM_ARENAS
 
     def test_local_pose_behavior(self):
         """Test set_local_pose and get_local_pose:
@@ -197,7 +195,7 @@ class BaseRigidObjectTest:
         assert all(
             abs(x) < 1e-5 for x in table_xyz_after
         ), f"FAIL: Table moved unexpectedly: {table_xyz_after}"
-        if self.physics != "newton":
+        if self.chair.body_type == "kinematic" and self.physics != "newton":
             assert torch.allclose(
                 chair_xyz_after, expected_chair_pos, atol=1e-5
             ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
@@ -442,7 +440,7 @@ class BaseRigidObjectTest:
         # 2. is_non_dynamic
         assert not self.duck.is_non_dynamic, "Dynamic duck should not be is_non_dynamic"
         assert self.table.is_non_dynamic, "Static table should be is_non_dynamic"
-        assert self.chair.is_non_dynamic, "Kinematic chair should be is_non_dynamic"
+        assert self.chair.is_non_dynamic == (self.chair.body_type == "kinematic")
 
         if self.physics == "newton":
             expected_mass = torch.ones(NUM_ARENAS, device=self.sim.device)
@@ -484,9 +482,9 @@ class BaseRigidObjectTest:
                 atol=1e-5,
             ), "Newton set_attrs(dynamic_friction) did not apply via batch API"
 
-            # set_body_type is a runtime no-op on Newton (body type is fixed at
-            # registration); the call must not change body_type.
-            self.duck.set_body_type("kinematic")
+            # Actor type is topology, not a runtime batch property.
+            with pytest.raises(NotImplementedError, match="descriptor mutation"):
+                self.duck.set_body_type("kinematic")
             assert self.duck.body_type == "dynamic"
 
             # Mass: set and verify round-trip
@@ -518,24 +516,50 @@ class BaseRigidObjectTest:
                 self.duck.get_damping(), new_damping, atol=1e-5
             ), "Newton set_damping should mirror onto metadata for get_damping"
 
-            self.table.get_mass()
-            self.table.get_friction()
-            self.table.get_damping()
-            self.table.get_inertia()
+            # Static Spawn actors do not have dynamic body ids. Their getters
+            # remain readable from authored metadata, with zero finite inertia.
+            assert torch.allclose(
+                self.table.get_mass(),
+                torch.full(
+                    (NUM_ARENAS,),
+                    self.table.cfg.attrs.mass,
+                    device=self.sim.device,
+                ),
+            )
+            assert torch.allclose(
+                self.table.get_friction(),
+                torch.full(
+                    (NUM_ARENAS,),
+                    self.table.cfg.attrs.dynamic_friction,
+                    device=self.sim.device,
+                ),
+            )
+            assert torch.allclose(
+                self.table.get_damping(),
+                torch.tensor(
+                    [
+                        self.table.cfg.attrs.linear_damping,
+                        self.table.cfg.attrs.angular_damping,
+                    ],
+                    device=self.sim.device,
+                ).repeat(NUM_ARENAS, 1),
+            )
+            assert torch.equal(
+                self.table.get_inertia(),
+                torch.zeros((NUM_ARENAS, 3), device=self.sim.device),
+            )
             return
 
         # 3. body_type
         assert self.duck.body_type == "dynamic"
-        self.duck.set_body_type("kinematic")
-        assert self.duck.body_type == "kinematic"
-        self.duck.set_body_type("dynamic")
+        with pytest.raises(NotImplementedError, match="descriptor mutation"):
+            self.duck.set_body_type("kinematic")
         assert self.duck.body_type == "dynamic"
 
-        assert self.chair.body_type == "kinematic"
-        self.chair.set_body_type("dynamic")
-        assert self.chair.body_type == "dynamic"
-        self.chair.set_body_type("kinematic")
-        assert self.chair.body_type == "kinematic"
+        if self.chair.body_type == "kinematic":
+            with pytest.raises(NotImplementedError, match="descriptor mutation"):
+                self.chair.set_body_type("dynamic")
+            assert self.chair.body_type == "kinematic"
 
         # 4. attrs
         new_attrs = RigidBodyAttributesCfg(mass=2.5, density=1000.0)
@@ -646,9 +670,14 @@ class BaseRigidObjectTest:
         assert self.chair.body_data is not None
         chair_com_pose_before = self.chair.body_data.com_pose.clone()
         self.chair.set_com_pose(com_pose)
-        assert torch.allclose(
-            self.chair.body_data.com_pose, chair_com_pose_before, atol=1e-5
-        ), "Kinematic rigid object COM pose should not change"
+        if self.chair.body_type == "kinematic":
+            assert torch.allclose(
+                self.chair.body_data.com_pose, chair_com_pose_before, atol=1e-5
+            ), "Kinematic rigid object COM pose should not change"
+        else:
+            assert torch.allclose(
+                self.chair.body_data.com_pose, com_pose, atol=1e-5
+            ), "Dynamic rigid object COM pose should change"
 
         # Static object should not be able to set COM pose.
         self.table.set_com_pose(com_pose)
@@ -990,6 +1019,16 @@ class TestRigidObjectCUDA(BaseRigidObjectTest):
     def setup_method(self):
         self.setup_simulation("cuda")
 
+    def test_kinematic_binding_fails_fast(self):
+        with pytest.raises(NotImplementedError, match="kinematic bodies"):
+            self.sim.add_rigid_object(
+                cfg=RigidObjectCfg(
+                    uid="unsupported_kinematic",
+                    shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+                    body_type="kinematic",
+                )
+            )
+
 
 class TestRigidObjectNewton(BaseRigidObjectTest):
     """Full rigid-object coverage on the DexSim Newton physics backend."""
@@ -1006,12 +1045,10 @@ class TestRigidObjectNewton(BaseRigidObjectTest):
         super().test_physical_attributes()
 
     def test_newton_native_attrs_desc_native_spawn(self):
-        """RigidObject with attrs.newton spawns via the desc-native path on Newton.
+        """Typed Newton attributes register through the public Spawn result.
 
-        Setting ``attrs.newton`` routes spawn through
-        ``register_mesh_object_to_newton_patch`` (bypassing legacy PhysicalAttr),
-        so Newton-native contact/shape params reach the model. Verifies the
-        body is registered with the Newton manager after finalize.
+        Newton-native contact/shape parameters are consumed by the descriptor
+        adapter without an independently owned manager or legacy patch path.
         """
         duck_path = get_data_path(DUCK_PATH)
         cfg = RigidObjectCfg(
@@ -1026,14 +1063,17 @@ class TestRigidObjectNewton(BaseRigidObjectTest):
             ),
         )
         obj: RigidObject = self.sim.add_rigid_object(cfg=cfg)
-        self.sim.finalize_newton_physics()
+        self.sim.prepare()
 
         assert obj.num_instances == NUM_ARENAS
         assert obj.body_type == "dynamic"
-        # The body must be registered with the Newton manager post-finalize.
-        mgr = self.sim.newton_manager
-        assert mgr is not None
-        assert mgr.registered_body_count() > 0
+        result = self.sim.spawn_result
+        handles = [
+            result.get_object(f"{arena_name}/{obj.uid}")
+            for arena_name in result.arenas.names[1:]
+        ]
+        assert len(result.create_rigid_body_batch(handles)) == NUM_ARENAS
+        assert all(handle.physics_body is not None for handle in handles)
         # Common fields round-trip via the batch view (mass applied live).
         assert torch.allclose(
             obj.get_mass(),

@@ -75,6 +75,7 @@ class TestNeuralIKSolver:
         )
 
         self.robot = self.sim.add_robot(cfg=cfg)
+        self.sim.prepare()
         self.sim.update(step=100)
 
     def teardown_method(self):

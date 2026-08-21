@@ -24,8 +24,8 @@ a solver that cannot consume them.
 
 Articulation joint and link names are resolved by the normal DexSim adapter
 finalization, not by a second source parser in EmbodiChain. Configuration that
-depends on those names is applied directly from the EmbodiChain config after
-the facade binds to the finalized result.
+depends on those names is compiled into typed regex overlays and applied by
+DexSim before the selected physics backend is finalized.
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import MISSING, fields
 import math
+import numbers
 import os
 from typing import TYPE_CHECKING
 
@@ -43,8 +44,11 @@ from dexsim.spawn import (
     CollisionApproximation,
     CollisionDesc,
     DexsimCollisionDesc,
+    DexsimJointDesc,
     DexsimPhysicsDesc,
     GeometryDesc,
+    JointOverrideDesc,
+    LinkOverrideDesc,
     MaterialDesc,
     NewtonCollisionDesc,
     NewtonJointDesc,
@@ -54,7 +58,7 @@ from dexsim.spawn import (
     SoftObjectDesc,
 )
 from dexsim.spawn.descs import NEWTON_CONTACT_SOLVER_FIELDS
-from dexsim.types import ActorType
+from dexsim.types import ActorType, DriveType, LoadOption as DexsimLoadOption
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -116,7 +120,13 @@ def rigid_desc_from_cfg(
     descriptor = ObjectDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
-        renders=[RenderDesc.from_geometry(geometry, material_ref=material_ref)],
+        renders=[
+            RenderDesc.from_geometry(
+                geometry,
+                load_option=_compile_load_option(cfg.shape),
+                material_ref=material_ref,
+            )
+        ],
         collisions=[collision],
         physics=_compile_rigid_physics(cfg.attrs, cfg.body_type),
         per_env=per_env,
@@ -142,7 +152,13 @@ def soft_desc_from_cfg(
     descriptor = SoftObjectDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
-        renders=[RenderDesc.from_geometry(geometry, material_ref=material_ref)],
+        renders=[
+            RenderDesc.from_geometry(
+                geometry,
+                load_option=_compile_load_option(cfg.shape),
+                material_ref=material_ref,
+            )
+        ],
         voxel_config=cfg.voxel_attr.attr(),
         body_attr=cfg.physical_attr.attr(),
         per_env=per_env,
@@ -167,7 +183,13 @@ def cloth_desc_from_cfg(
     descriptor = ClothObjectDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
-        renders=[RenderDesc.from_geometry(geometry, material_ref=material_ref)],
+        renders=[
+            RenderDesc.from_geometry(
+                geometry,
+                load_option=_compile_load_option(cfg.shape),
+                material_ref=material_ref,
+            )
+        ],
         body_attr=cfg.physical_attr.attr(),
         per_env=per_env,
     )
@@ -204,8 +226,14 @@ def articulation_desc_from_cfg(
             "Per-articulation solver iteration counts are not exposed by the "
             "backend-neutral Spawn facade and were not applied."
         )
+    if newton_solver_type is not None and cfg.drive_pros.drive_type == "acceleration":
+        raise NotImplementedError(
+            "Newton Spawn does not have an exact acceleration-drive mode; "
+            "use drive_type='force' or drive_type='none'."
+        )
 
     target_mode = {"force": 3, "none": 0}.get(cfg.drive_pros.drive_type)
+    joint_defaults, joint_overrides = _compile_joint_overrides(cfg)
     return ArticulationDesc(
         name=_articulation_uid(cfg.uid, str(path)),
         pose=_pose_from_cfg(cfg),
@@ -223,7 +251,157 @@ def articulation_desc_from_cfg(
             cfg.attrs,
             newton_solver_type=newton_solver_type,
         ),
+        link_defaults=_compile_link_override(
+            name="link_defaults",
+            patterns=(),
+            attrs=cfg.attrs,
+            replace_inertial=False,
+            newton_solver_type=newton_solver_type,
+        ),
+        link_overrides=[
+            _compile_link_override(
+                name=group_name,
+                patterns=tuple(group.link_names_expr),
+                attrs=group.attrs.merged_cfg(cfg.attrs),
+                replace_inertial=group.replace_inertial,
+                newton_solver_type=newton_solver_type,
+            )
+            for group_name, group in (cfg.link_attrs or {}).items()
+        ],
+        joint_defaults=joint_defaults,
+        joint_overrides=joint_overrides,
     )
+
+
+def _compile_link_override(
+    *,
+    name: str,
+    patterns: tuple[str, ...],
+    attrs: RigidBodyAttributesCfg,
+    replace_inertial: bool,
+    newton_solver_type: str | None,
+) -> LinkOverrideDesc:
+    collision = CollisionDesc(
+        enable_collision=bool(attrs.enable_collision),
+        dexsim=_compile_dexsim_collision(attrs),
+        newton=_compile_newton_collision(
+            attrs,
+            newton_solver_type=newton_solver_type,
+        ),
+    )
+    return LinkOverrideDesc(
+        name=name,
+        patterns=patterns,
+        rigid_body=_compile_rigid_physics(attrs, "dynamic"),
+        collision=collision,
+        replace_inertial=replace_inertial,
+    )
+
+
+def _compile_joint_overrides(
+    cfg: ArticulationCfg,
+) -> tuple[JointOverrideDesc, list[JointOverrideDesc]]:
+    defaults = JointOverrideDesc(
+        name="joint_defaults",
+        dexsim=DexsimJointDesc(),
+        newton=NewtonJointDesc(target_mode=None),
+    )
+    rules: dict[str, JointOverrideDesc] = {}
+
+    drive_type = cfg.drive_pros.drive_type
+    defaults.dexsim.drive_mode = {
+        "force": DriveType.FORCE,
+        "acceleration": DriveType.ACCELERATION,
+        "none": DriveType.NONE,
+    }[drive_type]
+    defaults.newton.target_mode = {"force": 3, "none": 0}.get(drive_type)
+
+    for property_name in (
+        "stiffness",
+        "damping",
+        "max_effort",
+        "max_velocity",
+        "friction",
+        "armature",
+    ):
+        configured = getattr(cfg.drive_pros, property_name)
+        if isinstance(configured, numbers.Number):
+            _set_joint_override_property(defaults, property_name, configured)
+            continue
+        if not isinstance(configured, dict):
+            raise TypeError(
+                f"Articulation drive property {property_name!r} must be a "
+                "number or regex-to-number mapping."
+            )
+        for pattern, value in configured.items():
+            if not isinstance(value, numbers.Number):
+                raise TypeError(
+                    f"Articulation drive rule {pattern!r} for "
+                    f"{property_name!r} must contain a numeric value."
+                )
+            rule = rules.setdefault(
+                str(pattern),
+                JointOverrideDesc(
+                    name=f"joint:{pattern}",
+                    patterns=(str(pattern),),
+                    dexsim=DexsimJointDesc(),
+                    newton=NewtonJointDesc(target_mode=None),
+                ),
+            )
+            _set_joint_override_property(rule, property_name, value)
+
+    if isinstance(cfg.qpos_limits, dict):
+        for pattern, limits in cfg.qpos_limits.items():
+            values = np.asarray(limits, dtype=np.float32).reshape(-1)
+            if values.size != 2:
+                raise ValueError(
+                    f"qpos_limits rule {pattern!r} must contain [lower, upper]."
+                )
+            rule = rules.setdefault(
+                str(pattern),
+                JointOverrideDesc(
+                    name=f"joint:{pattern}",
+                    patterns=(str(pattern),),
+                    dexsim=DexsimJointDesc(),
+                    newton=NewtonJointDesc(target_mode=None),
+                ),
+            )
+            rule.lower_limit = float(values[0])
+            rule.upper_limit = float(values[1])
+
+    return defaults, list(rules.values())
+
+
+def _set_joint_override_property(
+    target: JointOverrideDesc,
+    property_name: str,
+    value: numbers.Number,
+) -> None:
+    scalar = float(value)
+    dexsim_drive = target.dexsim
+    newton_drive = target.newton
+    if dexsim_drive is None or newton_drive is None:
+        raise RuntimeError("Joint override backend descriptors are unavailable.")
+    if property_name == "stiffness":
+        dexsim_drive.stiffness = scalar
+        newton_drive.target_ke = scalar
+    elif property_name == "damping":
+        dexsim_drive.damping = scalar
+        newton_drive.target_kd = scalar
+    elif property_name == "max_effort":
+        dexsim_drive.max_force = scalar
+        newton_drive.effort_limit = scalar
+    elif property_name == "max_velocity":
+        dexsim_drive.max_velocity = scalar
+        newton_drive.velocity_limit = scalar
+    elif property_name == "friction":
+        dexsim_drive.joint_friction = scalar
+        newton_drive.friction = scalar
+    elif property_name == "armature":
+        target.armature = scalar
+        newton_drive.armature = scalar
+    else:
+        raise ValueError(f"Unsupported joint override property {property_name!r}.")
 
 
 def _compile_rigid_physics(
@@ -248,12 +426,18 @@ def _compile_rigid_physics(
     if attrs.mass == 0 and (attrs.density is None or attrs.density <= 0):
         raise ValueError("Rigid-body density must be positive when mass is zero.")
 
-    mass = float(attrs.mass) if attrs.mass is not None and attrs.mass > 0 else None
-    density = (
-        float(attrs.density)
-        if mass is None and attrs.density is not None and attrs.density > 0
-        else None
-    )
+    if body_type == "dynamic":
+        mass = float(attrs.mass) if attrs.mass is not None and attrs.mass > 0 else None
+        density = (
+            float(attrs.density)
+            if mass is None and attrs.density is not None and attrs.density > 0
+            else None
+        )
+    else:
+        # Both backends ignore mass properties on static/kinematic actors;
+        # authoring them only produces Newton warnings and ambiguous metadata.
+        mass = None
+        density = None
     return RigidBodyPhysicsDesc(
         actor_type=actor_type,
         mass=mass,
@@ -328,20 +512,6 @@ def _compile_geometry(
         else:
             approximation = CollisionApproximation.CONVEX_HULL
 
-        option = shape.load_option
-        if any(
-            (
-                option.rebuild_normals,
-                option.rebuild_tangent,
-                option.rebuild_3rdnormal,
-                option.rebuild_3rdtangent,
-                option.smooth != -1.0,
-            )
-        ):
-            logger.log_warning(
-                "Mesh LoadOption is not represented by ObjectDesc; the Spawn "
-                "adapter will use its default mesh loading policy."
-            )
         if shape.compute_uv:
             logger.log_warning(
                 "Mesh UV projection is not represented by GeometryDesc and was "
@@ -385,6 +555,20 @@ def _compile_geometry(
         f"RigidObjectCfg shape {type(shape).__name__!r} is not supported by "
         "the Spawn converter; supported shapes are MeshCfg, CubeCfg, and SphereCfg."
     )
+
+
+def _compile_load_option(shape: object) -> DexsimLoadOption | None:
+    """Translate mesh import options without leaking EmbodiChain config types."""
+    if not isinstance(shape, MeshCfg):
+        return None
+    source = shape.load_option
+    option = DexsimLoadOption()
+    option.rebuild_normals = bool(source.rebuild_normals)
+    option.rebuild_tangent = bool(source.rebuild_tangent)
+    option.rebuild_3rdnormal = bool(source.rebuild_3rdnormal)
+    option.rebuild_3rdtangent = bool(source.rebuild_3rdtangent)
+    option.smooth = float(source.smooth)
+    return option
 
 
 def _compile_visual_material(

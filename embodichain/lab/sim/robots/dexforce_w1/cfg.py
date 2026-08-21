@@ -21,6 +21,15 @@ import typing
 import numpy as np
 import torch
 
+if __name__ == "__main__" and not __package__:
+    # Support running this example by file path from an uninstalled source tree.
+    import sys
+    from pathlib import Path
+
+    # Replace the script directory so its ``types.py`` cannot shadow the
+    # standard-library ``types`` module in compiler subprocesses.
+    sys.path[0] = str(Path(__file__).resolve().parents[5])
+
 from typing import TYPE_CHECKING, Dict
 
 from embodichain.lab.sim.robots.dexforce_w1.types import (
@@ -334,12 +343,17 @@ if __name__ == "__main__":
 
     np.set_printoptions(precision=5, suppress=True)
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
-    config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
+    config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4, physics_cfg=NewtonPhysicsCfg())
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
 
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.update(step=1)
-    print("DexforceW1 robot added to the simulation.")
+    print("DexforceW1 robot added to the simulation.", flush=True)
+    sim.open_window()
+    from IPython import embed; embed()  # noqa: E702
+    sim.destroy()

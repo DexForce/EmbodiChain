@@ -954,19 +954,23 @@ class SimulationManager:
             or scene.builder.has_pending_changes
         ):
             result = scene.commit()
-            if self.is_default_backend and self.device.type == "cuda":
-                self._world.init_gpu_physics()
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
             if self._default_plane is None:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
-        scene.bind()
+        # ``prepare_runtime`` is idempotent and internally skips backends that
+        # need no extra readiness work. Keep it and facade binding outside the
+        # topology-change branch so a failed attempt remains retryable.
+        with result.runtime_initialization_scope():
+            result.prepare_runtime()
+            scene.bind()
 
-        for sensor in self._pending_sensor_attachments:
-            sensor.attach_to_parent()
-        self._pending_sensor_attachments.clear()
+            while self._pending_sensor_attachments:
+                sensor = self._pending_sensor_attachments[0]
+                sensor.attach_to_parent()
+                self._pending_sensor_attachments.pop(0)
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -1245,6 +1249,20 @@ class SimulationManager:
 
         default_length = 1000.0
         geometry = GeometryDesc.plane(default_length)
+        repeat_uv_size = default_length / 2.0
+        render = RenderDesc.from_geometry(
+            geometry,
+            material=self._spawn_default_plane_material,
+        )
+        render.uv_coords = np.asarray(
+            [
+                [0.0, 0.0],
+                [repeat_uv_size, 0.0],
+                [repeat_uv_size, repeat_uv_size],
+                [0.0, repeat_uv_size],
+            ],
+            dtype=np.float32,
+        )
         collision = CollisionDesc.from_geometry(
             geometry,
             approximation=CollisionApproximation.NONE,
@@ -1257,12 +1275,7 @@ class SimulationManager:
         collision.render_source_index = 0
         descriptor = ObjectDesc(
             name="default_plane",
-            renders=[
-                RenderDesc.from_geometry(
-                    geometry,
-                    material=self._spawn_default_plane_material,
-                )
-            ],
+            renders=[render],
             collisions=[collision],
             physics=RigidBodyPhysicsDesc.static(),
             per_env=False,
@@ -1278,9 +1291,8 @@ class SimulationManager:
             self._bind_default_plane(handles[0])
 
     def _bind_default_plane(self, plane: Any) -> None:
-        """Apply EmbodiChain's render settings to the spawned ground plane."""
+        """Retain the spawned ground plane and apply its visibility."""
         self._default_plane = plane
-        plane.get_render_body().repeat_uv(np.asarray([500.0, 500.0], dtype=np.float32))
         plane.set_visible(self._spawn_default_plane_visibility)
 
     def set_default_global_lighting(self) -> None:
@@ -2322,14 +2334,6 @@ class SimulationManager:
                 cfg,
                 per_env=True,
                 newton_solver_type=self._active_newton_solver_type,
-            )
-        if self.is_newton_backend and cfg.qpos_limits is not None:
-            # Reject before mutating SceneBuilder. Applying this after bind
-            # would immediately make Newton's immutable model stale.
-            raise NotImplementedError(
-                "Newton articulation qpos_limits are not yet supported by the "
-                "metadata-after-finalize binding path. TODO: add a retained-desc "
-                "configuration phase that runs before Newton model finalize."
             )
         if cfg.uid is None:
             cfg.uid = descriptor.name

@@ -70,12 +70,12 @@ class RandomReachEnv(BaseEnv):
             **kwargs,
         )
 
-    def _setup_robot(self, **kwargs) -> Robot:
+    def _declare_robot(self, **kwargs) -> Robot:
         from embodichain.data import get_data_path
 
         file_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
 
-        robot: Robot = self.sim.add_robot(
+        return self.sim.add_robot(
             cfg=RobotCfg(
                 uid="ur10",
                 fpath=file_path,
@@ -83,6 +83,11 @@ class RandomReachEnv(BaseEnv):
                 init_qpos=self.robot_init_qpos,
             )
         )
+
+    def _setup_robot(self, **kwargs) -> Robot:
+        robot = self.robot
+        if robot is None:
+            raise RuntimeError("UR10 was not declared before simulation prepare.")
 
         qpos_limits = robot.body_data.qpos_limits[0].cpu().numpy()
         self.single_action_space = gym.spaces.Box(

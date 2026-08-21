@@ -193,23 +193,45 @@ class RigidObjectGroup(BatchEntity):
         ``bind_spawn()`` creates the result-dependent runtime view after Spawn
         finalization.
         """
+        expected = self._declared_num_instances * self.num_objects
+        if len(entities) != expected:
+            raise ValueError(
+                f"RigidObjectGroup {self.uid!r} expected {expected} Spawn handles, "
+                f"got {len(entities)}."
+            )
         self._entities = [
             list(entities[start : start + self.num_objects])
             for start in range(0, len(entities), self.num_objects)
         ]
 
     def bind_spawn(self, result: SpawnResult) -> None:
-        """Bind the declaration facade to env-major Spawn handles in place."""
+        """Atomically bind the declaration facade to env-major Spawn handles."""
+        if self.is_spawn_bound:
+            raise RuntimeError(f"RigidObjectGroup {self.uid!r} is already Spawn-bound.")
+        if not self.is_declared:
+            raise RuntimeError(
+                f"RigidObjectGroup {self.uid!r} was not created as a Spawn declaration."
+            )
+
         cfg = self.cfg
         device = self.device
-        rows = self._entities
-        type(self).__init__(
-            self,
+        rows = [list(row) for row in self._entities]
+        if len(rows) != self._declared_num_instances or any(
+            len(row) != self.num_objects for row in rows
+        ):
+            raise ValueError(
+                f"RigidObjectGroup {self.uid!r} expected "
+                f"{self._declared_num_instances}x{self.num_objects} Spawn handles."
+            )
+
+        bound = type(self)(
             cfg,
             rows,
             device,
             spawn_result=result,
         )
+        self.__dict__.clear()
+        self.__dict__.update(bound.__dict__)
 
     def __str__(self) -> str:
         if self.is_declared:
@@ -257,16 +279,15 @@ class RigidObjectGroup(BatchEntity):
         filter_data: torch.Tensor,
         env_ids: Sequence[int] | None = None,
     ) -> None:
-        """Set one Default-backend collision filter value for every member in each env."""
-        env, _, _ = self._selected_indices(env_ids)
-        values = np.asarray(filter_data.detach().cpu(), dtype=np.uint32).reshape(-1, 4)
+        """Set one collision filter value for every selected member in each env."""
+        env, objects, rows = self._selected_indices(env_ids)
+        values = filter_data.to(device=self.device, dtype=torch.int32).reshape(-1, 4)
         if len(values) != len(env):
             raise ValueError(
                 f"Expected {len(env)} collision filters, got {len(values)}."
             )
-        for row, env_id in enumerate(env):
-            for entity in self._entities[env_id]:
-                entity.get_physical_body().set_collision_filter_data(values[row])
+        expanded = values[:, None, :].expand(-1, len(objects), -1).reshape(-1, 4)
+        self.body_data.body_view.apply_collision_filter(expanded, rows)
 
     def set_local_pose(
         self,

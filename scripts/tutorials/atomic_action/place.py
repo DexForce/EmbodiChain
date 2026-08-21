@@ -125,6 +125,7 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
+    sim.prepare()
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)

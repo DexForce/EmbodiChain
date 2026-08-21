@@ -77,6 +77,7 @@ class BaseWorkspaceAnalyzeTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     def teardown_method(self):
         """Clean up resources after each test method."""

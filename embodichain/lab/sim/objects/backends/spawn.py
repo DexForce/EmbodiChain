@@ -21,14 +21,13 @@ revision tracking remain owned by DexSim's ``SpawnResult`` and batch classes.
 EmbodiChain only adapts logical row selections and its public pose convention
 ``(x, y, z, qx, qy, qz, qw)``.
 
-DexSim does not yet expose lightweight row/DOF/link selections on its public
-batches. Until that API lands, partial writes use a correctness-first
-read/modify/write fallback. The fallback is kept here, at the boundary, so it
-can be deleted without changing object or environment APIs.
+Row and DOF selection is delegated to DexSim's public batches. This adapter is
+therefore limited to EmbodiChain naming and tensor-layout conversion.
 """
 
 from __future__ import annotations
 
+from numbers import Integral
 from typing import TYPE_CHECKING, Any, Sequence
 
 import torch
@@ -39,6 +38,23 @@ if TYPE_CHECKING:
     from dexsim.spawn import ArticulationBatch, RigidBodyBatch, SpawnResult
 
 __all__ = ["SpawnArticulationView", "SpawnRigidBodyView"]
+
+
+def _checked_batch_call(
+    batch: Any,
+    method_name: str,
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Call one Spawn batch operation and reject native failure statuses."""
+    status = getattr(batch, method_name)(*args, **kwargs)
+    if isinstance(status, Integral) and status < 0:
+        raise RuntimeError(
+            f"DexSim Spawn batch operation {method_name!r} failed with "
+            f"status {status}."
+        )
+    return status
 
 
 def _rows(
@@ -89,7 +105,7 @@ def _embodichain_articulation_pose(data: torch.Tensor) -> torch.Tensor:
 
 
 class _SpawnSelectionAdapter:
-    """Shared correctness-first selection support for fixed-size Spawn batches."""
+    """Shared row-selection support for fixed-size Spawn batches."""
 
     def __init__(self, batch: Any, device: torch.device, row_count: int) -> None:
         self._batch = batch
@@ -104,13 +120,13 @@ class _SpawnSelectionAdapter:
         tail_shape: tuple[int, ...],
     ) -> torch.Tensor:
         rows = _rows(selection, self._row_count, self.device)
-        full = torch.empty(
-            (self._row_count, *tail_shape),
+        selected = torch.empty(
+            (len(rows), *tail_shape),
             dtype=torch.float32,
             device=self.device,
         )
-        getattr(self._batch, method_name)(full)
-        selected = full.index_select(0, rows)
+        if len(rows):
+            _checked_batch_call(self._batch.select(rows), method_name, selected)
         out.copy_(selected.to(device=out.device, dtype=out.dtype))
         return out
 
@@ -120,8 +136,6 @@ class _SpawnSelectionAdapter:
         values: torch.Tensor,
         selection: Sequence[int] | torch.Tensor,
         tail_shape: tuple[int, ...],
-        *,
-        fetch_method_name: str | None,
     ) -> None:
         rows = _rows(selection, self._row_count, self.device)
         values = values.to(device=self.device, dtype=torch.float32)
@@ -131,22 +145,8 @@ class _SpawnSelectionAdapter:
                 f"Expected selected data shape {expected_shape}, got "
                 f"{tuple(values.shape)}."
             )
-
-        if fetch_method_name is None:
-            full = torch.zeros(
-                (self._row_count, *tail_shape),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            full = torch.empty(
-                (self._row_count, *tail_shape),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            getattr(self._batch, fetch_method_name)(full)
-        full.index_copy_(0, rows, values)
-        getattr(self._batch, method_name)(full)
+        if len(rows):
+            _checked_batch_call(self._batch.select(rows), method_name, values)
 
 
 class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
@@ -197,7 +197,6 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             _spawn_pose(pose.to(self.device, torch.float32)),
             body_ids,
             (7,),
-            fetch_method_name="fetch_pose",
         )
 
     def fetch_com_local_pose(
@@ -213,7 +212,6 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             _spawn_pose(data.to(self.device, torch.float32)),
             body_ids,
             (7,),
-            fetch_method_name="fetch_com_local_pose",
         )
 
     def fetch_linear_velocity(
@@ -232,7 +230,6 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             data,
             body_ids,
             (3,),
-            fetch_method_name="fetch_linear_velocity",
         )
 
     def apply_angular_velocity(
@@ -243,7 +240,6 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             data,
             body_ids,
             (3,),
-            fetch_method_name="fetch_angular_velocity",
         )
 
     def fetch_linear_acceleration(
@@ -257,10 +253,10 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
         self._fetch_rows("fetch_angular_acceleration", data, body_ids, (3,))
 
     def apply_force(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
-        self._apply_rows("apply_force", data, body_ids, (3,), fetch_method_name=None)
+        self._apply_rows("apply_force", data, body_ids, (3,))
 
     def apply_torque(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
-        self._apply_rows("apply_torque", data, body_ids, (3,), fetch_method_name=None)
+        self._apply_rows("apply_torque", data, body_ids, (3,))
 
     def fetch_mass(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
@@ -268,9 +264,7 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
         self._fetch_rows("fetch_mass", data, body_ids, (1,))
 
     def apply_mass(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
-        self._apply_rows(
-            "apply_mass", data, body_ids, (1,), fetch_method_name="fetch_mass"
-        )
+        self._apply_rows("apply_mass", data, body_ids, (1,))
 
     def fetch_inertia_diagonal(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
@@ -285,45 +279,77 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             data,
             body_ids,
             (3,),
-            fetch_method_name="fetch_inertia_diagonal",
-        )
-
-    @staticmethod
-    def _unsupported_property(name: str) -> None:
-        raise NotImplementedError(
-            f"DexSim Spawn RigidBodyBatch does not expose the {name} property yet. "
-            "Extend the public Spawn batch instead of accessing backend internals."
         )
 
     def fetch_friction(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
-        del data, body_ids
-        self._unsupported_property("friction")
+        self._fetch_rows("fetch_friction", data, body_ids, (1,))
 
     def apply_friction(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
-        del data, body_ids
-        self._unsupported_property("friction")
+        self._apply_rows("apply_friction", data, body_ids, (1,))
 
     def fetch_restitution(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
-        del data, body_ids
-        self._unsupported_property("restitution")
+        self._fetch_rows("fetch_restitution", data, body_ids, (1,))
 
     def apply_restitution(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
-        del data, body_ids
-        self._unsupported_property("restitution")
+        self._apply_rows("apply_restitution", data, body_ids, (1,))
 
     def fetch_contact_offset(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
-        del data, body_ids
-        self._unsupported_property("contact_offset")
+        self._fetch_rows("fetch_contact_offset", data, body_ids, (1,))
 
     def apply_contact_offset(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
-        del data, body_ids
-        self._unsupported_property("contact_offset")
+        self._apply_rows("apply_contact_offset", data, body_ids, (1,))
+
+    def fetch_damping(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_rows("fetch_damping", data, body_ids, (2,))
+
+    def apply_damping(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        self._apply_rows("apply_damping", data, body_ids, (2,))
+
+    def fetch_collision_filter(
+        self,
+        data: torch.Tensor,
+        body_ids: torch.Tensor | None = None,
+    ) -> None:
+        rows = _rows(body_ids, self._row_count, self.device)
+        selected = torch.empty(
+            (len(rows), 4),
+            dtype=data.dtype,
+            device=self.device,
+        )
+        if len(rows):
+            _checked_batch_call(
+                self.batch.select(rows),
+                "fetch_collision_filter",
+                selected,
+            )
+        data.copy_(selected.to(device=data.device, dtype=data.dtype))
+
+    def apply_collision_filter(
+        self,
+        data: torch.Tensor,
+        body_ids: torch.Tensor,
+    ) -> None:
+        rows = _rows(body_ids, self._row_count, self.device)
+        expected_shape = (len(rows), 4)
+        if tuple(data.shape) != expected_shape:
+            raise ValueError(
+                f"Expected selected data shape {expected_shape}, got "
+                f"{tuple(data.shape)}."
+            )
+        if len(rows):
+            _checked_batch_call(
+                self.batch.select(rows),
+                "apply_collision_filter",
+                data,
+            )
 
 
 class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
@@ -424,45 +450,45 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
 
     def fetch_root_pose(self, data: torch.Tensor) -> torch.Tensor:
         spawn = torch.empty_like(data, dtype=torch.float32, device=self.device)
-        self.batch.fetch_root_pose(spawn)
+        _checked_batch_call(self.batch, "fetch_root_pose", spawn)
         data.copy_(_embodichain_articulation_pose(spawn).to(data.device, data.dtype))
         return data
 
     def fetch_root_linear_velocity(self, data: torch.Tensor) -> torch.Tensor:
-        self.batch.fetch_root_linear_velocity(data)
+        _checked_batch_call(self.batch, "fetch_root_linear_velocity", data)
         return data
 
     def fetch_root_angular_velocity(self, data: torch.Tensor) -> torch.Tensor:
-        self.batch.fetch_root_angular_velocity(data)
+        _checked_batch_call(self.batch, "fetch_root_angular_velocity", data)
         return data
 
     def fetch_qpos(self, data: torch.Tensor) -> torch.Tensor:
-        self.batch.fetch_joint_position(data)
+        _checked_batch_call(self.batch, "fetch_joint_position", data)
         return data
 
     def fetch_target_qpos(self, data: torch.Tensor) -> torch.Tensor:
-        self.batch.fetch_joint_target_position(data)
+        _checked_batch_call(self.batch, "fetch_joint_target_position", data)
         return data
 
     def fetch_qvel(self, data: torch.Tensor) -> torch.Tensor:
-        self.batch.fetch_joint_velocity(data)
+        _checked_batch_call(self.batch, "fetch_joint_velocity", data)
         return data
 
     def fetch_target_qvel(self, data: torch.Tensor) -> torch.Tensor:
-        self.batch.fetch_joint_target_velocity(data)
+        _checked_batch_call(self.batch, "fetch_joint_target_velocity", data)
         return data
 
     def fetch_qacc(self, data: torch.Tensor) -> torch.Tensor:
-        self.batch.fetch_joint_acceleration(data)
+        _checked_batch_call(self.batch, "fetch_joint_acceleration", data)
         return data
 
     def fetch_qf(self, data: torch.Tensor) -> torch.Tensor:
-        self.batch.fetch_joint_force(data)
+        _checked_batch_call(self.batch, "fetch_joint_force", data)
         return data
 
     def fetch_link_pose(self, data: torch.Tensor) -> torch.Tensor:
         spawn = torch.empty_like(data, dtype=torch.float32, device=self.device)
-        self.batch.fetch_link_pose(spawn)
+        _checked_batch_call(self.batch, "fetch_link_pose", spawn)
         data.copy_(_embodichain_articulation_pose(spawn).to(data.device, data.dtype))
         return data
 
@@ -472,8 +498,8 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
         linear_data: torch.Tensor,
         angular_data: torch.Tensor,
     ) -> torch.Tensor:
-        self.batch.fetch_link_linear_velocity(linear_data)
-        self.batch.fetch_link_angular_velocity(angular_data)
+        _checked_batch_call(self.batch, "fetch_link_linear_velocity", linear_data)
+        _checked_batch_call(self.batch, "fetch_link_angular_velocity", angular_data)
         data[..., 0:3] = linear_data
         data[..., 3:6] = angular_data
         return data
@@ -486,7 +512,6 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
             _spawn_articulation_pose(pose.to(self.device, torch.float32)),
             env_ids,
             (7,),
-            fetch_method_name="fetch_root_pose",
         )
 
     def _joint_columns(self, joint_ids: Sequence[int] | torch.Tensor) -> torch.Tensor:
@@ -513,7 +538,6 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
         joint_ids: Sequence[int] | torch.Tensor,
         *,
         apply_method: str,
-        fetch_method: str | None,
     ) -> None:
         rows = _rows(env_ids, self._row_count, self.device)
         columns = self._joint_columns(joint_ids)
@@ -524,22 +548,13 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
                 f"Expected selected joint data shape {expected}, got "
                 f"{tuple(values.shape)}."
             )
-        width = self.batch.dof_width
-        if fetch_method is None:
-            full = torch.zeros(
-                (self._row_count, width),
-                dtype=torch.float32,
-                device=self.device,
+        if len(rows):
+            _checked_batch_call(
+                self.batch.select(rows),
+                apply_method,
+                values,
+                dof_ids=columns,
             )
-        else:
-            full = torch.empty(
-                (self._row_count, width),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            getattr(self.batch, fetch_method)(full)
-        full[rows[:, None], columns] = values
-        getattr(self.batch, apply_method)(full)
 
     def apply_qpos(
         self,
@@ -555,9 +570,6 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
             joint_ids,
             apply_method=(
                 "apply_joint_target_position" if target else "apply_joint_position"
-            ),
-            fetch_method=(
-                "fetch_joint_target_position" if target else "fetch_joint_position"
             ),
         )
 
@@ -576,9 +588,6 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
             apply_method=(
                 "apply_joint_target_velocity" if target else "apply_joint_velocity"
             ),
-            fetch_method=(
-                "fetch_joint_target_velocity" if target else "fetch_joint_velocity"
-            ),
         )
 
     def apply_qf(
@@ -592,41 +601,24 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
             env_ids,
             joint_ids,
             apply_method="apply_joint_force",
-            fetch_method=None,
         )
 
     def clear_dynamics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
         rows = _rows(env_ids, self._row_count, self.device)
+        if not len(rows):
+            return
         zeros = torch.zeros(
             (len(rows), self.batch.dof_width),
             dtype=torch.float32,
             device=self.device,
         )
-        self._apply_rows(
-            "apply_joint_velocity",
-            zeros,
-            rows,
-            (self.batch.dof_width,),
-            fetch_method_name="fetch_joint_velocity",
-        )
-        self._apply_rows(
-            "apply_joint_target_velocity",
-            zeros,
-            rows,
-            (self.batch.dof_width,),
-            fetch_method_name="fetch_joint_target_velocity",
-        )
-        self._apply_rows(
-            "apply_joint_force",
-            zeros,
-            rows,
-            (self.batch.dof_width,),
-            fetch_method_name=None,
-        )
+        selected = self.batch.select(rows)
+        _checked_batch_call(selected, "apply_joint_velocity", zeros)
+        _checked_batch_call(selected, "apply_joint_target_velocity", zeros)
+        _checked_batch_call(selected, "apply_joint_force", zeros)
 
     def compute_kinematics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
-        # DexSim currently refreshes the complete batch. Since this operation
-        # only propagates already-authored state, that is equivalent to a row
-        # selection and keeps selection details out of EmbodiChain.
-        del env_ids
-        self.batch.compute_kinematics()
+        rows = _rows(env_ids, self._row_count, self.device)
+        if not len(rows):
+            return
+        _checked_batch_call(self.batch.select(rows), "compute_kinematics")
