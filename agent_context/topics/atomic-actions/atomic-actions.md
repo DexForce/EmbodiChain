@@ -297,6 +297,13 @@ Registered calls require an explicit agent-visible target plus an installed
 
 `SemanticSkillCompiler.analyze()` performs provider-free linking, resource and
 affordance validation, held-object flow analysis, and first-release look-ahead.
+A `Place` with no explicit `primary` resource inherits the workflow's known
+holder resource, and a `HandOver` with no explicit `source` does the same. The
+inferred selection is snapshotted onto the canonical linked call before
+binding; an explicit conflicting selection still fails with
+`held_resource_mismatch`. Inference never crosses a registered-call boundary.
+`HandOver` selects participants only through the `source` and `destination`
+resource slots; there is no separate receiver alias.
 A pick therefore owns zero or one downstream object target rather than an
 arbitrary target tuple. Relation targets retain affordance payload type and
 revision metadata and stay late-bound through an explicitly installed

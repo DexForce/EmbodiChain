@@ -414,6 +414,32 @@ def _compiler(
     )
 
 
+def _dual_compiler(
+    registry: SceneRegistry,
+) -> tuple[
+    SemanticSkillCompiler,
+    AtomicActionEngine,
+    _DualCenterHandOverProvider,
+]:
+    profile = _dual_profile()
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=builtin_semantic_call_catalog(),
+    )
+    engine = _engine(profile)
+    provider = _DualCenterHandOverProvider()
+    return (
+        SemanticSkillCompiler(
+            manifest.bind(registry, engine),
+            relation_grounders=(_FrameRelationGrounder(),),
+            handover_pose_providers=(provider,),
+        ),
+        engine,
+        provider,
+    )
+
+
 def _context(
     registry: SceneRegistry,
     *,
@@ -492,6 +518,87 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
         drop.to_matrix(),
     )
     engine.resolve(grounded.invocation)
+
+
+def test_place_inherits_known_pick_resource_when_primary_is_omitted() -> None:
+    registry, _ = _scene_registry()
+    compiler, _, _ = _dual_compiler(registry)
+    place = Place(
+        object=SceneObjectRef("cube"),
+        at=SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0)),
+    )
+
+    workflow = compiler.analyze(
+        (
+            Pick(
+                object=SceneObjectRef("cube"),
+                resources={"primary": "right"},
+            ),
+            place,
+        )
+    )
+
+    assert place.resources == {}
+    assert workflow.calls[1].call.resources == {"primary": "right"}
+    assert workflow.calls[1].bound.binding.resource_ids == {"primary": "right"}
+
+
+def test_handover_source_inherits_known_pick_resource() -> None:
+    registry, _ = _scene_registry()
+    compiler, _, provider = _dual_compiler(registry)
+    handover = HandOver(
+        object=SceneObjectRef("cube"),
+        resources={"destination": "left"},
+    )
+
+    workflow = compiler.analyze(
+        (
+            Pick(
+                object=SceneObjectRef("cube"),
+                resources={"primary": "right"},
+            ),
+            handover,
+        )
+    )
+
+    assert handover.resources == {"destination": "left"}
+    assert workflow.calls[1].call.resources == {
+        "source": "right",
+        "destination": "left",
+    }
+    assert workflow.calls[1].bound.binding.resource_ids == {
+        "source": "right",
+        "destination": "left",
+    }
+    assert provider.calls == 0
+
+
+def test_explicit_consumer_resource_must_match_known_holder() -> None:
+    registry, _ = _scene_registry()
+    compiler, _, _ = _dual_compiler(registry)
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.analyze(
+            (
+                Pick(
+                    object=SceneObjectRef("cube"),
+                    resources={"primary": "right"},
+                ),
+                Place(
+                    object=SceneObjectRef("cube"),
+                    at=SemanticPose(
+                        (0.4, 0.2, 0.3),
+                        (1.0, 0.0, 0.0, 0.0),
+                    ),
+                    resources={"primary": "left"},
+                ),
+            )
+        )
+
+    assert error.value.diagnostic.code == "held_resource_mismatch"
+    assert error.value.diagnostic.rendered_path == (
+        "workflow[1].call.resources.primary"
+    )
 
 
 def test_grounded_eligibility_hands_off_to_execution_session() -> None:
@@ -625,7 +732,6 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
             Place(
                 object=SceneObjectRef("cube"),
                 on=SceneObjectRef("table"),
-                resources={"primary": "right"},
             ),
         )
     )
@@ -633,6 +739,7 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
     assert provider.calls == 0
     assert [scene_provider.calls for scene_provider in providers] == [0, 0]
     assert workflow.calls[0].downstream_object_target is not None
+    assert workflow.calls[2].call.resources == {"primary": "right"}
     pick = compiler.ground(workflow, 0, _context(registry, robot_dof=4))
     assert provider.calls == 1
     pick_options = pick.invocation.skill_options

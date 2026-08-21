@@ -192,20 +192,13 @@ def test_place_snapshots_absolute_destination_pose() -> None:
     torch.testing.assert_close(call.at.to_matrix(), destination.to_matrix())
 
 
-def test_handover_normalizes_receiver_as_destination_resource() -> None:
-    call = HandOver(object=SceneObjectRef("cube"), receiver="right_actor")
+def test_handover_uses_destination_resource_selection() -> None:
+    call = HandOver(
+        object=SceneObjectRef("cube"),
+        resources={"destination": "right_actor"},
+    )
 
-    assert call.receiver == "right_actor"
     assert call.resources == {"destination": "right_actor"}
-
-
-def test_handover_rejects_conflicting_receiver_resource() -> None:
-    with pytest.raises(ValueError, match="conflicts"):
-        HandOver(
-            object=SceneObjectRef("cube"),
-            receiver="right_actor",
-            resources={"destination": "left_actor"},
-        )
 
 
 def test_handover_snapshots_optional_final_target() -> None:
