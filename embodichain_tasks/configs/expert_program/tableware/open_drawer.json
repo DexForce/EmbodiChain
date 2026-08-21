@@ -1,0 +1,23 @@
+{
+    "schema_version": 1,
+    "program_id": "open_drawer",
+    "integration": {
+        "robot_profile": "cobot_magic_right_manipulator_v1",
+        "scene_registry": "open_drawer_v1",
+        "runtime_preset": "safe"
+    },
+    "targets": {},
+    "program": {
+        "kind": "segment",
+        "name": "open_drawer",
+        "steps": {
+            "kind": "invoke",
+            "call": {
+                "kind": "operate_articulation",
+                "articulation": "drawer",
+                "handle": "drawer_handle",
+                "target": "open"
+            }
+        }
+    }
+}

@@ -80,7 +80,10 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
 )
 from embodichain.lab.sim.skills import (
+    COMPOSITE_EFFECT_MONITOR_ID,
+    COMPOSITE_EFFECT_MONITOR_REVISION,
     ControlPartEndpoint,
+    EffectMonitorRef,
     ResourceBinding,
     RobotResource,
     RobotSkillProfile,
@@ -138,11 +141,31 @@ profile = RobotSkillProfile(
         "default": SkillPolicyPreset(
             preset_id="default",
             motion_policy=MotionPolicy(strategy="ik_interp"),
+            effect_monitors={
+                semantic_id: EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                    {
+                        "attached_translation_threshold": 0.02,
+                        "detached_translation_threshold": 0.05,
+                        "consecutive_samples": 2,
+                    },
+                )
+                for semantic_id in ("pick", "place", "hand_over")
+            },
         ),
     },
     default_preset="default",
 )
 ```
+
+During binding, each resolved endpoint also receives a logical
+`task_state_key` and immutable, channel-keyed `effect_sources`. By default the
+logical key is the selected resource ID, so the `motion` and `grasp` endpoints
+of `left_participant` share one symbolic held-object state even though they use
+different control parts. An effect source contains an `EffectEvidenceAddress`;
+it is intentionally separate from the endpoint's command-only
+`RuntimeEndpointTarget`.
 
 Every `ControlPartEndpoint.control_part` must be a key in
 `robot.control_parts`. A composite endpoint may reuse a member's control part,
@@ -311,6 +334,56 @@ endpoint subtype and adapter when controller semantics differ. An adapter may
 set `requires_command_profile=True` when a missing generic command-profile ID
 must make profile binding fail immediately.
 
+The standard Expert Program simulation declaration accepts these endpoints
+directly for robots that expose the normal full-state/qpos action base; a task
+does not need a custom runtime factory solely to register the endpoint and Gym
+transport:
+
+```python
+profile = SimulationRobotSkillProfileBinding(
+    profile_id="mobile_v1",
+    resources=(
+        RobotResourceBinding(
+            resource_id="mobile_base",
+            endpoints={
+                "motion": MobileVelocityEndpoint(
+                    controller_id="base_controller",
+                    capabilities=frozenset({"motion.base.velocity"}),
+                )
+            },
+        ),
+    ),
+)
+
+adapter = create_simulation_expert_program_adapter(
+    env,
+    scene_binding=scene_binding,
+    robot_profile_binding=profile,
+    endpoint_adapters={MobileVelocityEndpoint: MobileVelocityEndpointAdapter()},
+    runtime_transports=(MobileVelocityGymEncoder(),),
+)
+```
+
+`RobotResourceBinding` snapshots arbitrary typed `ResourceEndpoint` values.
+`ControlPartResourceBinding` remains the stricter joint-backed convenience and
+continues to validate native control parts, joint IDs, and command-preset
+widths.
+
+Endpoint registration is not a navigation or whole-body planner. Existing
+built-in semantic skills do not consume the example base/whole-body
+capabilities. A reusable capability must also install its semantic descriptor
+and lowerer, atomic planner, command payload, safe-state transport behavior, and
+effect integration as applicable. The current standard Gym encoder composes
+custom transports over a full-qpos hold and the standard simulation factory
+owns a `MotionGenerator`; a truly jointless or natively structured controller
+therefore needs a reusable base-action composition/provider integration. This
+does not require base- or whole-body-specific fields in the generic profile or
+runtime core.
+
+Task vertical slices may declare a typed profile binding locally while the API
+stabilizes. Repeated use should move that binding into an embodiment-owned
+profile catalog so new tasks select it instead of redefining robot data.
+
 A resolved action binding is keyed only by the skill-local
 `(slot_id, endpoint_id)` pair. A reusable non-joint capability supplies a
 matching {class}`~embodichain.lab.sim.atomic_actions.RuntimeCommandPayload`, a
@@ -325,11 +398,13 @@ code.
 
 ```{important}
 `ResourceClaim` combines leaf IDs, concrete joint IDs, and adapter claim tokens.
-It and explicit disjoint constraints detect physical overlap for binding and
-future scheduling work. They do not enable parallel action execution. The
-runtime does not merge concurrent endpoint-command streams. Joint-backed plans
-may retain a full-robot trajectory for feedback and offline compilation, but
-runtime dispatch is scoped to the endpoints in each command frame.
+It and explicit disjoint constraints detect physical overlap for binding. A
+claim alone does not enable or prove safe parallel action execution. The
+separate explicit `ParallelSkillRuntime` can coordinate disjoint branch lanes,
+but it merges command frames only through an authoritative
+`ParallelCommandSafetyValidator`. Joint-backed plans may retain a full-robot
+trajectory for feedback and offline compilation, while runtime dispatch remains
+scoped to the endpoints in each command frame.
 ```
 
 See {doc}`index` for the direct atomic-action core and

@@ -1,5 +1,6 @@
 {
     "id": "MultiSegmentsCubePickPlace-v1",
+    "expert_program_path": "../../expert_program/multi_segments/repeated_cube_pick_place.yaml",
     "max_episodes": 1,
     "max_episode_steps": 1200,
     "num_envs": 1,
@@ -9,6 +10,24 @@
     },
     "env": {
         "sim_steps_per_control": 4,
+        "events": {
+            "settle_cube_on_reset": {
+                "func": "wait_for_dynamic_objects_to_settle",
+                "mode": "reset",
+                "params": {
+                    "entity_cfgs": [
+                        {
+                            "uid": "cube"
+                        }
+                    ],
+                    "min_steps": 10,
+                    "max_steps": 120,
+                    "check_interval_steps": 2,
+                    "required_stable_checks": 3,
+                    "timeout_behavior": "raise"
+                }
+            }
+        },
         "dataset": {
             "lerobot": {
                 "func": "LeRobotRecorder",
@@ -32,20 +51,8 @@
             }
         },
         "extensions": {
-            "num_cycles": 3,
-            "place_positions": [
-                [-0.40, 0.48, 0.10],
-                [-0.42, -0.08, 0.10]
-            ],
             "grasp_samples": 10000,
-            "force_reannotate": false,
-            "grasp_hold_steps": 45,
-            "settle_min_steps": 15,
-            "settle_max_steps": 80,
-            "settle_stable_steps": 5,
-            "linear_velocity_threshold": 0.03,
-            "angular_velocity_threshold": 0.20,
-            "place_position_tolerance": 0.12
+            "force_reannotate": false
         }
     },
     "robot": {

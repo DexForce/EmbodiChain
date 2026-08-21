@@ -1,9 +1,14 @@
 # Declarative Expert Programs and Unified Semantic Skill Runtime
 
-- Status: implementation in progress; Phase 0, PR1, PR2A, and PR2B are
-  complete on `main`, and PR2C is implemented on this feature branch
-- Baseline: `main@dbc6553f11d23a5ab738282fbcde1a7214fca783`
-- Last updated: 2026-08-19
+- Status: core contracts are implemented through Phase 7 on stacked feature
+  branches. A real CUDA/cuRobo dynamic-obstacle recovery gate is landed and
+  runs conditionally when cuRobo is installed, CUDA is available, and GPU/slow
+  tests are explicitly enabled. Open Drawer has completed its
+  supported-simulation physical run; repeated cube pick/place has completed one
+  Pick/Place/settle/validator cycle, while the full three-cycle run remains in
+  threshold calibration.
+- Baseline: `main@bcccb787e8f9165e9c8acf6f39f165ba6ac752a4`
+- Last updated: 2026-08-11
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
 - Related implementation:
@@ -47,11 +52,13 @@ same layer and run through one runtime built on `ExecutionRunner`.
 
 The target authoring cost is:
 
-- a new task that uses existing semantic capabilities: scene configuration,
-  Expert Program configuration, and optionally a declarative validator;
+- a new task that uses existing semantic capabilities: Expert Program
+  configuration plus typed scene/profile integration declarations, and
+  optionally a declarative validator, with no task-specific motion code;
 - a new robot: one reusable `RobotSkillProfile`, not task-specific motion code;
-- a genuinely new physical interaction: one reusable semantic skill/compiler/
-  monitor implementation, after which tasks use it from configuration.
+- a genuinely new physical interaction: one reusable capability bundle
+  containing its semantic skill/compiler/monitor and controller integration as
+  applicable, after which tasks select it through program and integration data.
 
 This design preserves the core direction of #471. Issue #474 changes the
 middle of the architecture: ordinary configuration must describe semantic
@@ -93,12 +100,12 @@ sessions, or verifiers.
 
 ## 4. Baseline on current `main`
 
-This plan is updated against committed `main@dbc6553f`. PR #517 simplified the
-atomic-action core, PR #487 landed the complete Phase 1 foundation, and PR #523
-simplified that foundation without changing its contracts. The scene registry
-and robot skill profile APIs are available, but official task environments have
-not adopted them yet; that rollout starts only after the semantic compiler and
-runtime exist.
+This plan is updated against committed `main@bcccb787` after PRs #475 and #476. The
+implementation series is stacked from that baseline: PR1 is complete on
+`refactor/atomic-actions-phase0`, PR2A is implemented by
+`feat/atomic-action-pr2a-scene-registry`, and PR2B is implemented by
+`feat/atomic-action-pr2b-robot-skill-profile`. These status statements do not
+imply that the stacked changes have landed on `main`.
 
 | Capability | Current main | Design consequence |
 |---|---|---|
@@ -886,7 +893,7 @@ PR2A SceneRegistry      PR2B RobotSkillProfile
         |                       |
         |                       v
         |              PR2C Runtime Endpoints
-        |                    (in progress)
+        |                    (implemented)
         +-----------+-----------+
                     v
 Semantic calls/compiler --> SkillRuntime/effect monitors
@@ -1041,10 +1048,28 @@ Deliverables:
   same-slot endpoint disjointness for future conflict analysis, without
   claiming safe parallel execution.
 
-The profile API can represent mobile-base and whole-body resources today. A
-new endpoint kind still needs one shared adapter and a compatible shared atomic
-skill before the current core can execute it; adding tasks that reuse that
-capability then remains configuration-only.
+The profile and endpoint-runtime APIs can represent mobile-base and whole-body
+resources today, and the generic paths are covered by whole-body joint and
+custom planar-velocity tests. They are extension seams, not built-in navigation
+or whole-body behavior: no current curated semantic skill consumes the example
+`motion.base.*` or `motion.whole_body` capabilities. A production shared
+capability still needs its semantic descriptor/lowerer, atomic skill, payload,
+endpoint adapter, transport, and effect integration as applicable. Once that
+reusable bundle exists, another task supplies an Expert Program plus typed
+scene/profile integration declarations without task-specific motion code.
+
+The standard Gym bridge currently composes every custom transport action over
+a full-qpos hold and the standard simulation factory owns a
+`MotionGenerator`. This supports robots without named control parts, but a
+truly jointless or natively structured mobile controller still needs a reusable
+base-action composition/provider integration. That extension must not add
+base- or whole-body-shaped fields to the generic resource, binding, runner, or
+router contracts.
+
+The current task vertical slices still construct their typed profile bindings
+from task modules. Promoting stable bindings into an embodiment-owned profile
+catalog is rollout packaging needed for cross-task reuse; it does not require a
+new resource or runtime contract.
 
 PR2A and PR2B landed together through PR #487. That foundation does not migrate
 official tasks; the repeated-cube vertical slice opts in only after the
@@ -1106,7 +1131,23 @@ diagnostic, robot capabilities resolve bindings/presets without task-owned
 motion code, and generic resolved endpoints can reach their registered runtime
 transports without adding arm/tool-specific core paths.
 
+Implementation status: when `safe` is reachable and the registry declares
+dynamic collision entities, binding rejects an unsupported active planner
+before observation or planning. Linking produces an effective
+`DynamicCollisionMode.REQUIRED` preset snapshot without mutating the profile's
+source preset. A real-simulation gate now covers semantic lowering, CUDA/cuRobo
+planning, a post-plan dynamic-obstacle world change, collision-revision-aware
+replanning, and successful completion. This is a conditional GPU gate: the
+module skips when cuRobo is unavailable or CUDA is unavailable, and pytest runs
+it only when GPU and slow tests are explicitly selected.
+
 ### Phase 2: semantic facade and compiler
+
+Implementation status: the semantic facade, provider-free linking, canonical
+compiler, bounded program preflight, and cross-segment sequential look-ahead are
+implemented. Relation placement remains an exact typed integration capability;
+a reusable production support-surface/container affordance and grounder are
+follow-up work rather than inferred behavior.
 
 Deliverables:
 
@@ -1124,6 +1165,16 @@ effect verifier.
 
 ### Phase 3: canonical runtime and effects
 
+Implementation status: core contracts are implemented in the current stack.
+The backend-neutral typed state expectations, evidence addresses and sources,
+pose/binary/scalar/joint evidence clauses, versioned monitor registry,
+profile-owned monitor selection, grounded Pick/Place/HandOver/articulation
+effects, row-local composite hysteresis kernel, canonical `SkillRuntime`, and
+production simulation evidence ports are wired end to end. Physical simulation
+acceptance is partial: Open Drawer and one cube Pick/Place/settle/validator
+cycle have completed, while the full repeated-cube run and embodiment-owned
+HandOver pose integration remain validation work.
+
 Deliverables:
 
 - `SkillRuntime` wrapping `ExecutionRunner` for sync and step-wise use;
@@ -1139,6 +1190,12 @@ Exit criteria: Python calls and a programmatic `SemanticCallSpec` use identical
 compiler/runtime code and produce equivalent results.
 
 ### Phase 4: demo integration primitives
+
+Implementation status: implemented. The bridge uses buffered runtime commands and
+an environment-step clock, dynamic settling is shared with reset behavior, and
+JSON-safe lifecycle metadata covers every installed plan attempt, named
+trajectory segment, effect decision/evidence, recovery event, scene/collision
+revision, post-policy outcome, and validator result.
 
 Deliverables:
 
@@ -1156,13 +1213,23 @@ effect, or trace integration contains a hard-coded trajectory index.
 
 ### Phase 5: Expert Program version 1 and repeated-cube vertical slice
 
+Implementation status: configuration and task migration are implemented. The
+strict decoder/loader, lazy compiler, environment/CLI integration, shared
+simulation factory, and three-segment cube program are implemented. The task
+combines declarative program configuration with typed scene/profile integration
+declarations and installs the shared adapter without overriding task motion
+generation. A supported-simulation run has completed the first physical
+Pick/Place/settle/validator cycle; completing all three cycles remains an
+acceptance item while thresholds are calibrated.
+
 Deliverables:
 
 - strict `@configclass` schema and versioned decoder;
 - `Sequence`, bounded `Repeat`, `Segment`, and `Invoke`;
 - registered targets, post-policies, and validators;
 - `EmbodiedEnvCfg` and CLI integration with legacy fallback;
-- configuration-only migration of repeated cube pick/place.
+- motion-code-free migration of repeated cube pick/place using a declarative
+  program and typed scene/profile integration declarations.
 
 Exit criteria:
 
@@ -1176,6 +1243,13 @@ Exit criteria:
 - the task contains no task-specific motion-generation code.
 
 ### Phase 6: sequential skill coverage and articulated interaction
+
+Implementation status: the articulation path and task migration are
+implemented. Articulation/link/operation-affordance registration,
+`OperateArticulation`, typed joint-state effects/evidence, and the declarative
+Open Drawer program with typed integration declarations use the same
+compiler/runtime path as pick/place. Its supported-simulation physical run now
+completes and reaches the configured drawer joint target.
 
 Deliverables:
 
@@ -1191,11 +1265,22 @@ trajectories in task code.
 
 ### Phase 7: parallel execution and PourWater
 
+Implementation status: the schema/runtime contracts and fail-closed safety
+boundary are implemented. Schema
+version 2 provides explicit parallel branches and barriers; static resource
+conflict analysis, shared-clock lane coordination, deterministic hold padding,
+transport/safety validation, row-local failure and cancellation, timeouts, and
+deterministic state merge are covered by tests. A production simulation safety
+validator and parallel physical integration remain pending. The PourWater task
+migration is outside the current scope because it would require modifying
+Action Bank code.
+
 Deliverables:
 
 - `Parallel` and explicit `Barrier` nodes in a new schema version;
 - robot-resource conflict analysis;
-- deterministic trajectory alignment/resampling policy;
+- deterministic strict-step-grid alignment with hold padding; fractional frame
+  durations are rejected rather than implicitly resampled;
 - synchronization and timeout behavior;
 - deterministic per-environment `StateDelta` merge rules;
 - PourWater migration from its Action Bank subclass.
@@ -1204,6 +1289,18 @@ Exit criteria: conflict, timing, cancellation, partial failure, and state-merge
 tests pass before the legacy task is switched.
 
 ### Phase 8: rollout, documentation, and deprecation
+
+The deterministic framework/integration capability matrix and migration-size
+snapshot are maintained in
+[`expert_program_rollout_report.md`](expert_program_rollout_report.md). Demo
+success collection uses the no-retry benchmark harness; real success-rate
+claims and gates remain deferred until the repeated Cube threshold contract and
+three-cycle physical acceptance are settled.
+
+Implementation status: partial. The canonical semantic/Expert Program documentation,
+project-development context, task vertical slices, and public integration
+guidance are included in this stack. Metrics, migrations that touch Action
+Bank, and any deprecation proposal remain explicitly separate follow-up work.
 
 Deliverables:
 
@@ -1260,18 +1357,27 @@ independent of adoption of the new path.
 - grasp/release/handover effect monitors;
 - settling success and timeout metadata;
 - Open Drawer articulation effect;
-- GPU-backed dynamic cuRobo coverage where supported;
+- conditionally executed real CUDA/cuRobo dynamic-obstacle recovery coverage
+  where cuRobo and CUDA are available and GPU/slow tests are enabled;
 - parallel PourWater only after Phase 7 contracts land.
 
 ## 14. Acceptance criteria
 
 The design is complete when all of the following hold:
 
-- [ ] A versioned Expert Program is fully validated before execution and cannot
+- [x] A reachable `safe` preset in a dynamic-collision scene resolves to
+      `DynamicCollisionMode.REQUIRED` and rejects an unsupported active planner
+      before observation, planning, or command emission without mutating the
+      profile configuration.
+- [x] On supported CUDA/cuRobo installations, a conditional real-simulation
+      gate moves a dynamic obstacle after the initial plan, observes the
+      collision-world change and replan, and reaches the target successfully;
+      environments without cuRobo or CUDA skip this GPU/slow gate.
+- [x] A versioned Expert Program is fully validated before execution and cannot
       evaluate arbitrary code or traverse environment attributes by string.
-- [ ] Python, configuration, and future MLLM calls share one semantic compiler,
+- [x] Python, configuration, and MLLM calls share one semantic compiler,
       typed atomic-action core, and runtime.
-- [ ] A common new task using existing semantic skills needs no task-specific
+- [x] A common new task using existing semantic skills needs no task-specific
       motion-generation code.
 - [x] Robot capability binding is expressed through generic participant
       resources and endpoints, so mobile-base and whole-body skills do not
@@ -1279,14 +1385,14 @@ The design is complete when all of the following hold:
 - [x] Runtime binding, command framing, routing, and safe stop are endpoint
       generic; joint trajectories remain an optional planning/feedback artifact
       rather than the only runtime carrier.
-- [ ] Each scene entity is registered once under an authoritative registry ID
+- [x] Each scene entity is registered once under an authoritative registry ID
       across semantics, observation, affordance, and collision handling;
       simulation `uid` values are legacy aliases only.
-- [ ] The default pick/place path does not expose raw qpos, grasp/EEF matrix
+- [x] The default pick/place path does not expose raw qpos, grasp/EEF matrix
       math, planner construction, session plumbing, or custom verification.
-- [ ] Automatic grasping tracks target revisions and receives downstream object
+- [x] Automatic grasping tracks target revisions and receives downstream object
       goals without caller duplication.
-- [ ] `Place` is object-centric and consumes verified held-object state.
+- [x] `Place` is object-centric and consumes verified held-object state.
 - [ ] Built-in grasp, release, handover, and supported articulation effect
       monitors work in simulation.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
@@ -1294,20 +1400,20 @@ The design is complete when all of the following hold:
 - [x] Custom actions have a documented and tested intentional hard-break
       migration from overriding `plan()` to implementing `_plan()`; no
       compatibility adapter is required.
-- [ ] Version 1 creates exactly one one-invocation `ExecutionSession` for each
+- [x] Version 1 creates exactly one one-invocation `ExecutionSession` for each
       semantic call and re-observes before lowering the next call.
-- [ ] Demonstration timing is derived from `BaseEnv.step_dt` and commands pass
+- [x] Demonstration timing is derived from `BaseEnv.step_dt` and commands pass
       through `env.step()`.
-- [ ] No program post-policy, effect, or tracing integration depends on
+- [x] No program post-policy, effect, or tracing integration depends on
       hard-coded waypoint indices.
 - [ ] Repeated cube pick/place completes at least three lazy, independently
       observed program/demo segments with settle/effect/validation metadata.
-- [ ] Version 1 uses one shared program/call barrier while per-environment task
+- [x] Version 1 uses one shared program/call barrier while per-environment task
       state, effects, recovery, eligibility, success, and failure remain
       independent.
-- [ ] Advanced users retain typed goals, invocations, policies, providers,
+- [x] Advanced users retain typed goals, invocations, policies, providers,
       sessions, and planners as escape hatches.
-- [ ] Parallel resource conflicts, synchronization, timing, cancellation, and
+- [x] Parallel resource conflicts, synchronization, timing, cancellation, and
       state merging are tested before PourWater migration.
 - [ ] Action Bank remains usable until feature parity and a deprecation window
       are documented.

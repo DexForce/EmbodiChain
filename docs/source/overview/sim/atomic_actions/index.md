@@ -7,6 +7,7 @@
 
 builtin_actions
 robot_skill_profiles
+expert_programs
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions
@@ -88,7 +89,8 @@ The boundary is deliberate:
 | Scene observation | Registry-derived `SceneProvider` | Captures canonical ordered entities plus monotonic global or per-environment collision-world revisions |
 | Scheduling and controller lifecycle | `ExecutionRunner` | Observes only when due, dispatches timed commands, records acknowledgements, and performs safe stop |
 | Robot/simulator I/O | `ObservationProvider`, `EndpointCommandRouter`, `EndpointCommandTransport`, and `ExecutionClock` adapters | Isolates observation, per-controller command transport, and time/physics advancement from planning and session state |
-| Physical-effect verification | Application observer | Verifies grasp, release, handover, and other symbolic effects |
+| Physical-effect evidence | Backend provider or application adapter | Acquires typed pose/contact/controller evidence without applying policy thresholds |
+| Effect decision and correlation | `EffectMonitor` plus the semantic runtime adapter, or an application verifier on the direct-core path | Interprets evidence, attaches the current request ID, and reports grasp, release, handover, or other symbolic effects |
 
 `ExecutionRunner.step()` is non-blocking. Its convenience
 `run_until_blocked()` loop waits or advances simulation through an injected
@@ -831,6 +833,26 @@ terminal effect wait; a retry invalidates the old request ID. With
 its `effect_result`: schedule another call using `wait_duration`, re-read the
 current request, and submit a result for that current ID. Partial resolution and
 row deactivation can also replace the request before the delayed result arrives.
+
+The semantic layer provides a reusable verifier kernel for the curated
+`Pick`, `Place`, and `HandOver` calls. A
+{class}`~embodichain.lab.sim.skills.SemanticEffectSpec` binds the canonical
+object and expected attach/detach relations to concrete runtime endpoints. Its
+fresh per-call {class}`~embodichain.lab.sim.skills.EffectMonitor` consumes
+backend-neutral {class}`~embodichain.lab.sim.skills.PoseRelationEvidenceBatch`
+values and returns an uncorrelated
+{class}`~embodichain.lab.sim.skills.EffectMonitorDecision`. The semantic runtime
+must validate that decision, attach the *current* request ID, and pass the
+result to the runner in the same due observation cycle.
+
+This split is deliberate: the evidence provider owns physical observation,
+the monitor owns thresholds and hysteresis, and `ExecutionSession` remains the
+only owner of deadlines, retries, partial-row commits, and verified
+`TaskState`. A request-mask shrink keeps monitor history for remaining rows via
+`attempt_generation`; a replacement plan or retry increments that generation
+and resets the history. Evidence exactly at the deadline is valid, while a due
+observation after the deadline is handled by session timeout without invoking
+the verifier.
 
 ## Action Agent integration
 
