@@ -700,6 +700,9 @@ class Articulation(BatchEntity):
             return
 
         self._set_default_joint_drive()
+        if not self.body_data.is_newton_backend:
+            return
+
         self._apply_configured_link_masses()
 
         if self.cfg.compute_uv:
@@ -711,7 +714,7 @@ class Articulation(BatchEntity):
 
         logger.log_warning(
             f"Spawn articulation {self.uid!r}: TODO: non-mass link physics "
-            "attributes are not exposed by DexSim SpawnedArticulation."
+            "attributes are not exposed by the Newton Spawn facade."
         )
 
     def _apply_configured_link_masses(self) -> None:

@@ -199,10 +199,12 @@ def articulation_desc_from_cfg(
             "ArticulationCfg.use_usd_properties only applies to USD sources and "
             "is ignored for URDF articulations."
         )
-    if cfg.min_position_iters != 4 or cfg.min_velocity_iters != 1:
+    if newton_solver_type is not None and (
+        cfg.min_position_iters != 4 or cfg.min_velocity_iters != 1
+    ):
         logger.log_warning(
             "Per-articulation solver iteration counts are not exposed by the "
-            "backend-neutral Spawn facade and were not applied."
+            "Newton Spawn facade and were not applied."
         )
 
     target_mode = {"force": 3, "none": 0}.get(cfg.drive_pros.drive_type)
