@@ -23,8 +23,12 @@ full-robot timed trajectory and uncommitted expected effects.
       MoveJointsOptions
       PickUp
       PickUpOptions
+      AxisAlign
+      AxisAlignOptions
       MoveHeldObject
       MoveHeldObjectOptions
+      Pour
+      PourOptions
       Place
       PlaceOptions
       Press
@@ -38,6 +42,7 @@ full-robot timed trajectory and uncommitted expected effects.
       CoordinatedPlacement
       CoordinatedPlacementOptions
       HandOver
+      HandOverGoal
       HandOverOptions
 
    .. rubric:: Built-in Goal Contracts
@@ -47,7 +52,9 @@ full-robot timed trajectory and uncommitted expected effects.
       EndEffectorPoseGoal
       JointPositionGoal
       GraspGoal
+      AxisAlignGoal
       HeldObjectPoseGoal
+      PourGoal
       PlaceGoal
       AssembleGoal
       PressGoal
@@ -55,6 +62,7 @@ full-robot timed trajectory and uncommitted expected effects.
       TwistGoal
       CoordinatedPickGoal
       CoordinatedPlacementGoal
+      HandOverGoal
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.primitives
 
@@ -82,10 +90,26 @@ PickUp
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
 
+AxisAlign
+---------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.axis_align
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
 MoveHeldObject
 --------------
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.move_held_object
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+Pour
+----
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.pour
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict

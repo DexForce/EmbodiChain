@@ -576,10 +576,14 @@ def _make_benchmark_antipodal_affordance_class():
             self,
             obj_poses,
             approach_direction,
+            obj_longest_axis=None,
+            is_positive_part=True,
         ):
             results = super().get_valid_grasp_poses(
                 obj_poses=obj_poses,
                 approach_direction=approach_direction,
+                obj_longest_axis=obj_longest_axis,
+                is_positive_part=is_positive_part,
             )
             if not _is_horizontal_approach_direction(approach_direction):
                 return results

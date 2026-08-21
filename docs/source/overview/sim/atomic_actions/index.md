@@ -753,10 +753,10 @@ should pass their fresh context explicitly.
 ```{attention}
 Automatic dynamic-goal invalidation is dependency-driven. A goal must contain a
 `SceneEntityPose`, or an object-centric primitive must explicitly declare the
-`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp` and the
-implicit-initial-pose path of coordinated pickup declare that dependency
-automatically. The deprecated live-entity fallback does not trigger
-scene-motion replanning.
+`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp`,
+`HandOver`, and the implicit-initial-pose path of coordinated pickup declare
+that dependency automatically. The deprecated live-entity fallback does not
+trigger scene-motion replanning.
 
 Dynamic collision invalidation is provider-driven. Only registered,
 pose-updatable collision entities are supported; adding/removing obstacles or
@@ -766,7 +766,7 @@ changing their geometry requires rebuilding the planner world.
 ## Planning success versus physical success
 
 `ActionPlan.plan_success` only means a valid command plan was produced for an
-environment row. Pick, place, handover, and coordinated skills also return an
+environment row. Pick, place, and coordinated skills also return an
 uncommitted `StateDelta` describing the attachment state expected after
 execution.
 
@@ -774,8 +774,9 @@ execution.
 Multi-arm grasps use multiple entries that share the same `ObjectSemantics`;
 there is no parallel coordinated-attachment representation to synchronize.
 Consumers query per-environment active and exclusive-hold masks from that one
-map. A single-arm transport, release, or handover row fails safely while a
-second manipulator still holds the same semantic object or live entity.
+map. A single-arm transport or release row fails safely while a second
+manipulator still holds the same semantic object or live entity. The unified
+`HandOver` action instead requires both candidate arms to start unoccupied.
 
 At the terminal waypoint, an `ExecutionSession` requests an external
 per-environment verification mask before committing a non-empty effect:
@@ -788,7 +789,7 @@ if tick.pending_effect is not None:
 ```
 
 This prevents a collision-free or well-tracked command plan from being
-misreported as a successful grasp, release, or handover. The typed
+misreported as a successful grasp or release. The typed
 `EffectVerificationRequest` persists on subsequent ticks while waiting;
 `EFFECT_VERIFICATION_REQUIRED` remains a one-time observability event.
 

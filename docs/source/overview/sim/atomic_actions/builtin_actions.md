@@ -5,7 +5,7 @@
 ```{currentmodule} embodichain.lab.sim.atomic_actions
 ```
 
-EmbodiChain ships eleven built-in action implementations with stable skill IDs;
+EmbodiChain ships thirteen built-in action implementations with stable skill IDs;
 `AtomicActionEngine` creates and registers a fresh instance of every built-in by
 default. Applications select them by stable skill ID rather than registering
 routine instances themselves.
@@ -69,6 +69,16 @@ The animations below are the focused simulator demos under
 <img src="../../../_static/atomic_actions/pickup.gif" alt="PickUp demo" width="480" style="max-width: 100%;" />
 :::
 
+:::{grid-item-card} `AxisAlign`
+:link: builtin-axis-align
+:link-type: ref
+
+`axis_align` · grasp, lift, align an object-local axis, and release
+
+<img src="../../../_static/atomic_actions/axis_align_horizontal.gif" alt="Axis align horizontal demo" width="480" style="max-width: 100%;" />
+<img src="../../../_static/atomic_actions/axis_align_upright.gif" alt="Axis align upright demo" width="480" style="max-width: 100%;" />
+:::
+
 :::{grid-item-card} `MoveHeldObject`
 :link: builtin-move-held-object
 :link-type: ref
@@ -76,6 +86,15 @@ The animations below are the focused simulator demos under
 `move_held_object` · object-centric transport
 
 <img src="../../../_static/atomic_actions/move_held_object.gif" alt="MoveHeldObject demo" width="480" style="max-width: 100%;" />
+:::
+
+:::{grid-item-card} `Pour`
+:link: builtin-pour
+:link-type: ref
+
+`pour` · rotate an already-held object about its local internal axis
+
+<img src="../../../_static/atomic_actions/pour.gif" alt="Pour demo" width="480" style="max-width: 100%;" />
 :::
 
 :::{grid-item-card} `Place`
@@ -146,9 +165,10 @@ The animations below are the focused simulator demos under
 :link: builtin-hand-over
 :link-type: ref
 
-`hand_over` · transfer an attachment between arms
+`hand_over` · pick, transfer, place, and release with two arms
 
-<img src="../../../_static/atomic_actions/hand_over.gif" alt="HandOver demo" width="480" style="max-width: 100%;" />
+<img src="../../../_static/atomic_actions/handover_horizontal.gif" alt="Handover horizontal demo" width="640" style="max-width: 100%;" />
+<img src="../../../_static/atomic_actions/handover_vertical.gif" alt="Handover horizontal demo" width="640" style="max-width: 100%;" />
 :::
 
 ::::
@@ -160,14 +180,16 @@ The animations below are the focused simulator demos under
 | `move_end_effector` | `EndEffectorPoseGoal` | `primary.motion` | none | none | none |
 | `move_joints` | `JointPositionGoal` | `primary.motion` | named target only: command matching `target` on `primary.motion` | none | none |
 | `pick_up` | `GraspGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | semantic object/entity | attach object to the `primary.motion` target |
+| `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | unheld object with `AxisAlignAffordance` | open-loop pick, align, lower, and release |
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | object held exclusively by the `primary.motion` target | preserve attachment |
+| `pour` | `PourGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | exclusively held object with `AxisAlignAffordance` | preserve attachment; open-loop rotate and return |
 | `place` | `PlaceGoal`, `AssembleGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | any active attachment must be exclusive to `primary.motion`; `AssembleGoal` requires one | detach object |
 | `press` | `PressGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
 | `slide` | `SlideGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `SlideAffordance` + link pose | open-loop motion; application verifies joint travel/grasp |
 | `twist` | `TwistGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `TwistAffordance` + target pose | open-loop motion; application verifies joint travel/grasp |
 | `coordinated_pickment` | `CoordinatedPickGoal` | `left.motion`, `left.grasp`, `right.motion`, `right.grasp` | both grasp endpoints: `open`, `grasp` | semantic object/entity | attach the shared object to both motion targets |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing.motion`, `placing.grasp`, `support.motion`, `support.grasp` | `placing.grasp`: `open`, `grasp`; `support.grasp`: `grasp` | two distinct objects, each held exclusively by its motion target | optionally detach placing object; preserve support attachment |
-| `hand_over` | `GraspGoal` | `source.motion`, `source.grasp`, `destination.motion`, `destination.grasp` | both grasp endpoints: `open`, `grasp` | object held exclusively by the source motion target | transfer attachment to the destination motion target |
+| `hand_over` | `HandOverGoal` | `source.motion`, `source.grasp`, `destination.motion`, `destination.grasp` | both grasp endpoints: `open`, `grasp` | both candidate motion targets unoccupied; unheld object with `AntipodalAffordance` | open-loop pick, transfer, place, and release |
 
 ### Participant slot meanings
 
@@ -180,8 +202,7 @@ commands to a robot resource, then adapters produce the generic
 | Slot | Used by | Meaning |
 |---|---|---|
 | `primary` | Single-participant skills | Principal participant for this invocation; it has no inherent left/right or default-robot meaning |
-| `source` | `hand_over` | Participant that initially holds and transfers the object |
-| `destination` | `hand_over` | Participant that receives the object |
+| `source`, `destination` | `hand_over` | Two candidate participants; the action assigns the nearer one to pickup and the other one to receive |
 | `left`, `right` | `coordinated_pickment` | Participants on whose sides the affordance samples left/right grasps |
 | `placing` | `coordinated_placement` | Participant that aligns and optionally releases the placing object |
 | `support` | `coordinated_placement` | Participant that keeps holding and positioning the support object |
@@ -227,10 +248,13 @@ entity as a recovery dependency.
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
 | `PickUp.grasp_xpos` | yes | yes |
 | `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `AxisAlign.grasp_xpos` | yes | yes |
+| `AxisAlign` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `HandOverGoal.target_pose` | yes | yes |
+| `HandOver` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the initial object pose |
 | Coordinated pickup implicit initial pose via `ObjectSemantics.entity_id` | implicit snapshot reference | yes; only when `object_initial_pose` is omitted |
 | `AssembleGoal.base_pose` | yes | yes |
 | Deprecated `ObjectSemantics.entity` / `AssembleAffordance.base_object_entity` fallback | no | no |
-| `HandOver` current held-object pose | no scene lookup | no; derived from observed EEF pose and verified attachment state |
 
 ### Object identity and grounding
 
@@ -245,7 +269,7 @@ create a scene-motion dependency. `collect_scene_dependencies()` intentionally
 does not recurse into `ObjectSemantics`; each primitive declares a semantic ID
 only when its planner actually consumes that object's snapshot pose.
 
-Attachment and handover identity are not based on `label`. The core resolves an
+Attachment identity is not based on `label`. The core resolves an
 explicit `entity_id` only against another explicit ID. If either compared side
 has one, both sides must have the same explicit value; an equal legacy
 `entity.uid` does not match it. When both explicit IDs are absent, two non-empty
@@ -406,6 +430,49 @@ deprecated entity-only fallback. For canonical snapshot grounding and moving
 target recovery, see
 `scripts/tutorials/atomic_action/moving_target_recovery.py`.
 
+(builtin-axis-align)=
+
+## `AxisAlign`
+
+Executes **approach -> reach -> close -> lift -> align -> lower -> open** while
+grouping arm motion into two planner calls: the open-gripper `approach` phase
+contains the pre-grasp and grasp targets, and the closed-gripper `manipulate`
+phase contains lift, alignment, and lowering targets. The `close` and `open`
+segments are local hand interpolation and do not call the motion generator.
+Only the final aligned pose is sent to the planner; the alignment sample budget
+controls trajectory resolution without expanding the rotation into one CuRobo
+`plan_pose` call per intermediate orientation.
+The object's `AxisAlignAffordance.internal_axis` is expressed in the
+object-local frame, while `AxisAlignOptions.target_axis` is expressed in the
+world frame. The final alignment target applies the shortest rotation about
+the lifted object's origin so that
+`aligned_object_rotation @ internal_axis == normalized_target_axis`, then
+derives every end-effector keyframe through the fixed grasp transform.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `axis_align` |
+| Goal | `AxisAlignGoal(semantics=..., grasp_xpos=None)` |
+| Binding | manipulator + end effector role `primary` |
+| Precondition | an `AxisAlignAffordance`; the object pose resolves from `ObjectSemantics.entity_id` or the deprecated live entity fallback |
+| Motion | approach, grasp, lift, rotate in place, lower, release |
+| Effect | explicitly open-loop; no final object-pose success is claimed |
+
+An explicit `grasp_xpos` accepts the same pose forms as `GraspGoal`; omitting it
+prefers valid antipodal grasps whose TCP y-axis is perpendicular to the object
+rotation axis, using grasp cost as the tie-breaker. When a currently horizontal
+object axis is aligned to world-up, the initial grasp orientation is pre-rotated
+45 degrees opposite the alignment rotation. This reduces the arm's table-side
+sweep during upright manipulation. `AxisAlignOptions` extends `PickUpOptions`
+with `target_axis` and `lower_distance`. Shared and per-environment target axes
+use shapes `(3,)` and `(B, 3)` respectively. Zero or non-finite axes are
+rejected, and exactly opposite axes use a deterministic 180-degree rotation
+rather than an unstable cross-product direction.
+
+**Example:** `scripts/tutorials/atomic_action/axis_align.py` provides
+`--alignment upright` (align object-local X to world Z) and
+`--alignment horizontal_align` (align object-local X to world Y).
+
 (builtin-move-held-object)=
 
 ## `MoveHeldObject`
@@ -436,6 +503,38 @@ where another manipulator holds the same semantic object or live entity are
 marked unsuccessful and held in place.
 
 **Example:** `scripts/tutorials/atomic_action/move_held_object.py`
+
+(builtin-pour)=
+
+## `Pour`
+
+Rotates the object already held by the bound `primary` manipulator. `PourGoal`
+contains no object pose because the action consumes the verified
+`HeldObjectState` created by `PickUp`. `PourOptions` contains only the signed
+`rotate_angle` in radians.
+
+The held object's semantics must use `AxisAlignAffordance`. The action obtains
+the current EEF pose from FK at the observed starting arm qpos, reconstructs
+the current object pose using `eef_pose @ inverse(object_to_eef)`, transforms
+the affordance's object-local `internal_axis` into world space, and applies the
+requested rotation while keeping the object origin fixed. The resulting EEF
+target is `target_object_pose @ object_to_eef`. A second target then returns to
+the EEF pose observed by FK, thereby reversing the rotation by the same angle.
+Both targets are submitted in one motion-generation call so a collision-aware
+planner can chain the outbound and return legs.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `pour` |
+| Goal | `PourGoal()` |
+| Options | `PourOptions(rotate_angle=...)` |
+| Binding | manipulator + end effector role `primary` |
+| Precondition | an exclusive `HeldObjectState` whose semantics use `AxisAlignAffordance` |
+| Motion | rotate by `rotate_angle`, then reverse by the same angle, with the hand held at `grasp` |
+| Effect | none; the existing attachment is preserved |
+
+**Example:** `scripts/tutorials/atomic_action/pour.py` compiles a horizontal
+`PickUp` followed by `Pour`.
 
 (builtin-place)=
 
@@ -633,9 +732,10 @@ options to partition the object into left/right grasp regions and select the
 lowest-cost grasp on each side. Each derived `object_to_eef` transform is stored
 in the corresponding projected `HeldObjectState`. Later object-centric skills
 can inspect those per-manipulator entries directly; sharing the same
-`ObjectSemantics` instance identifies the common object. Single-arm transport,
-release, and handover skills reject those shared rows rather than moving or
-detaching just one participant.
+`ObjectSemantics` instance identifies the common object. Single-arm transport
+and release skills reject those shared rows rather than moving or detaching
+just one participant. The unified `HandOver` action starts before pickup and
+therefore requires both candidate arms to be unoccupied.
 
 The object target and optional initial pose may use `SceneEntityPose`. Those
 references declare their own scene dependencies. When `object_initial_pose` is
@@ -699,35 +799,56 @@ pickment applies to dual-arm `strategy="motion_gen"` planning.
 
 ## `HandOver`
 
-Transfers an already held object from one arm to another: **move source to the
-handover pose -> destination approaches and grasps -> source releases and
-retreats -> destination delivers**.
+Runs the full two-arm manipulation as one action: **choose the nearer arm ->
+pick the object's top half -> lift and move to the computed middle point -> the
+other arm grasps the bottom half -> transfer the grasp -> place and release**.
 
 | Contract | Value |
 |---|---|
 | Skill ID | `hand_over` |
-| Goal | `GraspGoal(semantics=...)` |
+| Goal | `HandOverGoal(semantics=..., target_pose=...)` |
 | Binding contract | disjoint `source` and `destination` slots, each with disjoint `motion` and `grasp` endpoints |
-| Precondition | source motion target exclusively has a verified `HeldObjectState`; goal semantics identify that object and support destination grasp selection |
-| Effect | remove source attachment and create destination `HeldObjectState` |
-| Verification | attachment transfer must be externally verified |
+| Precondition | both candidate arms start unoccupied; object semantics use `AntipodalAffordance` |
+| Effect | none; both grippers are open after placing the object |
+| Verification | open-loop physical pickup, transfer, placement, and release |
 
-Both source and destination grasp endpoints must provide `open` and `grasp`.
-`HandOverOptions` owns the destination grasp region and approach
-direction, middle/final object poses, and segment distances/counts. The
-source/destination motion and grasp endpoints come exclusively from the
-corresponding generic `ActionBinding` slots. The destination attachment reuses
-the source relation's canonical `ObjectSemantics` instance.
+Both grasp endpoints must provide `open` and `grasp`. The two binding slots
+are candidate motion/grasp pairs rather than a caller-selected transfer
+direction. For every environment, the action compares the observed object
+position with both configured solver root-link positions. The nearer arm picks
+up the object; the other arm receives it.
 
-The middle and final poses are currently option tensors rather than
-`SceneEntityPose` goal fields. Consequently, handover supports tracking-error
-and timeout recovery, but does not automatically invalidate a moving handover
-point. An application can submit a newer invocation revision with updated
-`HandOverOptions`. The action verifies that the goal and source attachment have
-the same stable object identity, then derives the current object orientation
-from the observed source EEF pose and verified `object_to_eef` relation.
-The reused `GraspGoal.grasp_xpos` field is not consumed by `HandOver` and does
-not create a scene dependency.
+To keep both grasps spatially separated, HandOver deterministically samples at
+most 1000 points from the object's triangle-mesh surface, transforms them by
+the current object pose, and uses SVD to find the widest distribution direction
+(`obj_longest_axis`). The handover arm selects the projected end nearest its
+current TCP, and the receiving arm selects the opposite end. Grasp generation
+receives this world-frame axis plus `is_positive_part`; a `None` axis retains
+the ordinary unpartitioned center behavior for other callers.
+
+When the longest axis is within 45 degrees of world Z, HandOver uses vertical
+mode: each approach's horizontal projection points from the acting arm's
+current TCP toward the corresponding object position and is tilted downward
+by 45 degrees. Otherwise it uses horizontal mode and both approaches are
+world-Z downward. Pickup uses the observed object position, while receiving
+uses the predicted middle object position because that pose is not observed
+again during open-loop planning.
+
+After pickup, the action lifts in world Z and computes the middle object pose
+by finding the root-link separation's largest-magnitude coordinate and setting
+only that object coordinate to the two roots' midpoint. From the first grasp
+through middle transfer, and from the receiving grasp through final lowering,
+EEF waypoint rotations remain fixed; only translations change. The final
+object translation comes from `HandOverGoal.target_pose`, while its execution
+orientation stays consistent with the handover grasp. `HandOverOptions` owns
+only the approach/lift distances and gripper interpolation count. The first
+placement waypoint changes only horizontal coordinates and preserves the
+handover height exactly; the second waypoint lowers to the final target.
+
+Planning failures are reported with semantic waypoint names and affected
+environment IDs. For a failed motion phase, HandOver diagnoses each target
+with IK; if all target waypoints are reachable, the report identifies the
+interval between them as a likely path- or collision-planning failure.
 
 As with the other coordinated primitive, cuRobo does not currently support its
 dual-arm `strategy="motion_gen"` path.

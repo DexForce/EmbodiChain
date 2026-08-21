@@ -123,6 +123,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``control_dt.py``
 * ``pickup.py``
 * ``move_held_object.py``
+* ``pour.py``
 * ``place.py``
 * ``assemble.py``
 * ``press.py``
@@ -143,6 +144,7 @@ video under ``outputs/videos``:
    python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/control_dt.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/pour.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/assemble.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
 
@@ -465,7 +467,7 @@ create a scene dependency.
 Task-state effects
 ------------------
 
-Pick, place, handover, and coordinated skills declare attachment changes as a
+Pick, place, and coordinated skills declare attachment changes as a
 :class:`~embodichain.lab.sim.atomic_actions.StateDelta`. Planning does not commit
 those changes. During closed-loop execution, a non-empty effect requires an
 external per-environment verification mask:

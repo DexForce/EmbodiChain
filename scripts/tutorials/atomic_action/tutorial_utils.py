@@ -426,6 +426,7 @@ def create_antipodal_semantics(
                     n_sample=n_sample,
                     max_length=GRIPPER_MAX_OPEN_WIDTH,
                     min_length=GRIPPER_MIN_OPEN_WIDTH,
+                    max_angle=torch.pi / 18,
                 ),
                 is_partial_annotate=False,
                 is_filter_ground_collision=False,
