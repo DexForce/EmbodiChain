@@ -251,8 +251,11 @@ class SceneGraph:
 
         # Resolve chained planar parent inheritance before adding final relations.
         self._resolve_planar_parent_updates(planar_relation_updates)
-        for source_id, relation, target_id in planar_relation_updates:
+        # Clear stale relations before appending this batch so chained updates
+        # cannot remove a relation that an earlier update just requested.
+        for source_id in {source_id for source_id, _, _ in planar_relation_updates}:
             self._clear_incident_planar_relations(source_id)
+        for source_id, relation, target_id in planar_relation_updates:
             self.relations.append(
                 SceneGraphRelation(
                     source_id=source_id,

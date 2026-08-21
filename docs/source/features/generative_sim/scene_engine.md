@@ -44,6 +44,16 @@ overwrites its `scene_config.json`, `scene_graph.json`, `scene.json`, and final
 `mesh_assets`; intermediate generation and edit artifacts remain available for
 debugging.
 
+### Edit Flow
+
+- **Import and understanding**: reads and validates the existing export, then
+  resolves the instruction into `add`, `move`, and `delete` operations and an
+  updated scene graph.
+- **Asset preparation**: only `add` operations generate an image, segmentation,
+  geometry, and SimReady asset. Move-only and delete-only edits skip this stage.
+- **Layout and export**: refines the edited layout using the updated scene graph
+  and writes the resulting scene back to `scene_export`.
+
 ## Configuration
 
 Scene Engine reads the LLM, segmentation, image-generation, and
@@ -89,7 +99,7 @@ The important final outputs are:
 scene_output/
 |-- scene_understanding/     # Object analysis, masks, and stage JSON
 |-- scene_generation/        # Generated, SimReady, and layout-debug artifacts
-|-- scene_editing/           # Present after edits; generated asset/debug artifacts
+|-- scene_editing/           # Present after edits; asset-preparation and layout-optimization artifacts
 `-- scene_export/
     |-- mesh_assets/         # Final GLBs
     |-- scene_config.json    # Exported z-up scene description

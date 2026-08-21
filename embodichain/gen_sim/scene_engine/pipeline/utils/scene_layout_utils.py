@@ -129,6 +129,16 @@ def y_up_to_z_up_matrix() -> np.ndarray:
     return matrix
 
 
+def scene_object_y_up_layout(scene_object: SceneObject) -> dict[str, object]:
+    """Adapt one persisted SceneObject pose to a complete y-up layout object."""
+    return {
+        "id": scene_object.id,
+        "rot": scene_object.rot,
+        "pos": scene_object.pos,
+        "scale": scene_object.scale,
+    }
+
+
 def two_floats(value: object, *, field_name: str) -> list[float]:
     """Validate and return one finite two-value vector."""
     if not isinstance(value, (list, tuple)) or len(value) != 2:

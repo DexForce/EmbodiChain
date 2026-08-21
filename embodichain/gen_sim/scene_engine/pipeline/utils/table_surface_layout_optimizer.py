@@ -186,13 +186,17 @@ class TableSurfaceLayoutOptimizer:
         )
 
 
+class _LayoutInfeasibleError(ValueError):
+    """Internal marker for an SLSQP failure while testing one collision direction."""
+
+
 def _build_constraints(
     *,
     problem: TableSurfaceLayoutProblem,
     root_half_extents_xy: dict[str, np.ndarray],
     config: TableSurfaceLayoutOptimizerConfig,
 ) -> tuple[list[tuple[np.ndarray, float]], list[tuple[np.ndarray, float]]]:
-    """Build hard table-region, planar-relation, and fixed-root constraints."""
+    """Build variable table-region, planar-relation, and fixed-root constraints."""
     # Objects which need to be optimized.
     root_index = {root_id: index for index, root_id in enumerate(problem.root_ids)}
     table_bounds = _bounds_from_points(problem.table_optimization_rect_xy)
@@ -200,12 +204,21 @@ def _build_constraints(
     inequality_constraints: list[tuple[np.ndarray, float]] = []
     equality_constraints: list[tuple[np.ndarray, float]] = []
     for root_id in problem.root_ids:
-        # Get the table region bound for this root asset.
+        fixed_xy = problem.fixed_root_xy_by_id[root_id]
+        if fixed_xy is not None:
+            # Imported, unedited roots retain their pose even when partly off-table.
+            _append_fixed_root_constraints(
+                constraints=equality_constraints,
+                root_index=root_index,
+                root_id=root_id,
+                fixed_xy=fixed_xy,
+            )
+            continue
+        # Only layout variables must keep their complete AABB inside the table region.
         region_bounds = _table_region_bounds(
             table_bounds=table_bounds,
             table_region=problem.root_table_regions_by_id[root_id],
         )
-        # Add AABB constraints for each root's center inside the table region.
         _append_aabb_center_bounds(
             constraints=inequality_constraints,
             root_index=root_index,
@@ -213,15 +226,6 @@ def _build_constraints(
             bounds=region_bounds,
             half_extents_xy=root_half_extents_xy[root_id],
         )
-        fixed_xy = problem.fixed_root_xy_by_id[root_id]
-        if fixed_xy is not None:
-            # Add fixed-root constraints for each root with a fixed XY center.
-            _append_fixed_root_constraints(
-                constraints=equality_constraints,
-                root_index=root_index,
-                root_id=root_id,
-                fixed_xy=fixed_xy,
-            )
     for relation in problem.root_relations:
         # Add planar-relation constraints for each sibling relation in this group.
         _append_planar_relation_constraint(
@@ -424,7 +428,9 @@ def _solve_root_xy(
         },
     )
     if not result.success:
-        raise ValueError(f"Table layout optimization failed: {result.message}")
+        raise _LayoutInfeasibleError(
+            f"Table layout optimization failed: {result.message}"
+        )
     return {
         root_id: [float(result.x[2 * index]), float(result.x[2 * index + 1])]
         for index, root_id in enumerate(root_ids)
@@ -463,29 +469,51 @@ def _refine_root_collisions(
             key = tuple(sorted((first_id, second_id)))
             if key in seen:
                 continue
-            # Add a new SLSQP constraint to separate this overlapping pair.
-            inequality_constraints.append(
-                _aabb_separation_constraint(
+            # Earlier pair updates may already have separated this stale overlap.
+            if key not in {
+                tuple(sorted((first, second)))
+                for _, first, second in _root_aabb_overlaps(
                     root_ids=root_ids,
-                    first_id=first_id,
-                    second_id=second_id,
                     half_extents=root_half_extents_xy,
                     xy_by_id=current,
-                    margin=config.collision_margin_m,
                 )
-            )
-            seen.add(key)
-            added += 1
+            }:
+                continue
+            for separation_constraint in _aabb_separation_constraints(
+                root_ids=root_ids,
+                first_id=first_id,
+                second_id=second_id,
+                half_extents=root_half_extents_xy,
+                xy_by_id=current,
+                margin=config.collision_margin_m,
+            ):
+                # Keep a candidate only when it is compatible with all hard constraints.
+                try:
+                    solved_xy_by_id = _solve_root_xy(
+                        root_ids=root_ids,
+                        root_seed_xy_by_id=current,
+                        imported_root_ids=imported_root_ids,
+                        inequality_constraints=[
+                            *inequality_constraints,
+                            separation_constraint,
+                        ],
+                        equality_constraints=equality_constraints,
+                        config=config,
+                    )
+                except _LayoutInfeasibleError:
+                    continue
+                inequality_constraints.append(separation_constraint)
+                current = solved_xy_by_id
+                seen.add(key)
+                added += 1
+                break
+            else:
+                raise ValueError(
+                    "Table-root AABB pair has no feasible separation direction: "
+                    f"{first_id!r}, {second_id!r}."
+                )
         if not added:
             break
-        current = _solve_root_xy(
-            root_ids=root_ids,
-            root_seed_xy_by_id=current,
-            imported_root_ids=imported_root_ids,
-            inequality_constraints=inequality_constraints,
-            equality_constraints=equality_constraints,
-            config=config,
-        )
     raise ValueError("Table-root AABB collisions remain after layout refinement.")
 
 
@@ -511,7 +539,7 @@ def _root_aabb_overlaps(
     return sorted(result, reverse=True)
 
 
-def _aabb_separation_constraint(
+def _aabb_separation_constraints(
     *,
     root_ids: list[str],
     first_id: str,
@@ -519,22 +547,50 @@ def _aabb_separation_constraint(
     half_extents: dict[str, np.ndarray],
     xy_by_id: dict[str, list[float]],
     margin: float,
-) -> tuple[np.ndarray, float]:
+) -> list[tuple[np.ndarray, float]]:
+    """Return ordered feasible-direction candidates for one overlapping AABB pair."""
     first, second = np.asarray(xy_by_id[first_id]), np.asarray(xy_by_id[second_id])
     # Positive overlap on both axes means these two center-based AABBs intersect.
     overlap = np.minimum(
         first + half_extents[first_id], second + half_extents[second_id]
     ) - np.maximum(first - half_extents[first_id], second - half_extents[second_id])
-    # Separate along the least-penetrating axis to require the smallest local shift.
-    axis = int(np.argmin(overlap))
-    # Preserve the current order on that axis; object IDs break an exact tie deterministically.
-    lower = first[axis] < second[axis] or (
-        first[axis] == second[axis] and first_id < second_id
-    )
+    # Try the least-penetrating axis first, but permit order reversal if required.
+    axes = np.argsort(overlap)
+    constraints = []
+    for axis in axes:
+        current_order = first[axis] < second[axis] or (
+            first[axis] == second[axis] and first_id < second_id
+        )
+        for first_is_lower in (current_order, not current_order):
+            constraints.append(
+                _aabb_separation_constraint_for_direction(
+                    root_ids=root_ids,
+                    first_id=first_id,
+                    second_id=second_id,
+                    half_extents=half_extents,
+                    axis=int(axis),
+                    first_is_lower=first_is_lower,
+                    margin=margin,
+                )
+            )
+    return constraints
+
+
+def _aabb_separation_constraint_for_direction(
+    *,
+    root_ids: list[str],
+    first_id: str,
+    second_id: str,
+    half_extents: dict[str, np.ndarray],
+    axis: int,
+    first_is_lower: bool,
+    margin: float,
+) -> tuple[np.ndarray, float]:
+    """Return one directed AABB separation inequality on a selected axis."""
     index = {root_id: i for i, root_id in enumerate(root_ids)}
     # One row addresses the x/y variable pair of each root in the flattened solver vector.
     row = np.zeros(2 * len(root_ids))
-    sign = 1.0 if lower else -1.0
+    sign = 1.0 if first_is_lower else -1.0
     row[2 * index[first_id] + axis], row[2 * index[second_id] + axis] = sign, -sign
     # row @ values <= bound keeps the selected AABB faces apart by the requested margin.
     return row, -float(

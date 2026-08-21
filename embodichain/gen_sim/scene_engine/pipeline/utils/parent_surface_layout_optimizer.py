@@ -25,9 +25,14 @@ from scipy.optimize import minimize
 
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraphRelation
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
+    GravitySettleBody,
+    GravitySettler,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
     load_scene_object_z_up_mesh,
     measure_scene_object_z_up_world_aabb,
+    scene_object_y_up_layout,
 )
 
 if TYPE_CHECKING:
@@ -184,6 +189,50 @@ class ParentSurfaceLayoutOptimizer:
             solved_root_xy_by_id=solved_child_xy_by_id,
             config=self.config,
         )
+
+    def settle_dynamic_children(
+        self,
+        *,
+        table: SceneObject,
+        parent: SceneObject,
+        problem: ParentSurfaceLayoutProblem,
+        dynamic_child_ids: set[str],
+    ) -> dict[str, dict[str, list[float]]]:
+        """Settle variable children against their parent and fixed siblings.
+
+        Children must already have been placed 2cm above ``parent`` by the
+        caller. The physical table remains mandatory, while the parent and
+        unedited siblings become kinematic collision bodies for this pass.
+        """
+        child_ids = set(problem.child_ids)
+        if not dynamic_child_ids.issubset(child_ids):
+            raise ValueError("Only parent-surface children may be dynamic.")
+        if not dynamic_child_ids:
+            return {}
+        participant_ids = {parent.id, *child_ids}
+        if parent.id in child_ids:
+            raise ValueError("A parent-surface group cannot contain its parent.")
+        return GravitySettler(
+            table_body=GravitySettleBody(
+                scene_object=table,
+                y_up_layout=scene_object_y_up_layout(table),
+            ),
+            participant_bodies=[
+                GravitySettleBody(
+                    scene_object=problem.assets_by_id[object_id],
+                    y_up_layout=scene_object_y_up_layout(
+                        problem.assets_by_id[object_id]
+                    ),
+                )
+                for object_id in participant_ids
+            ],
+            dynamic_asset_ids=dynamic_child_ids,
+            static_asset_ids=participant_ids - dynamic_child_ids,
+        ).settle()
+
+
+class _LayoutInfeasibleError(ValueError):
+    """Internal marker for an SLSQP failure while testing one collision direction."""
 
 
 def _build_constraints(
@@ -377,7 +426,9 @@ def _solve_root_xy(
         },
     )
     if not result.success:
-        raise ValueError(f"Parent layout optimization failed: {result.message}")
+        raise _LayoutInfeasibleError(
+            f"Parent layout optimization failed: {result.message}"
+        )
     return {
         root_id: [float(result.x[2 * index]), float(result.x[2 * index + 1])]
         for index, root_id in enumerate(root_ids)
@@ -415,28 +466,51 @@ def _refine_root_collisions(
             key = tuple(sorted((first_id, second_id)))
             if key in seen:
                 continue
-            inequality_constraints.append(
-                _aabb_separation_constraint(
+            # Earlier pair updates may already have separated this stale overlap.
+            if key not in {
+                tuple(sorted((first, second)))
+                for _, first, second in _root_aabb_overlaps(
                     root_ids=root_ids,
-                    first_id=first_id,
-                    second_id=second_id,
                     half_extents=root_half_extents_xy,
                     xy_by_id=current,
-                    margin=config.collision_margin_m,
                 )
-            )
-            seen.add(key)
-            added += 1
+            }:
+                continue
+            for separation_constraint in _aabb_separation_constraints(
+                root_ids=root_ids,
+                first_id=first_id,
+                second_id=second_id,
+                half_extents=root_half_extents_xy,
+                xy_by_id=current,
+                margin=config.collision_margin_m,
+            ):
+                # Keep a candidate only when it is compatible with all hard constraints.
+                try:
+                    solved_xy_by_id = _solve_root_xy(
+                        root_ids=root_ids,
+                        root_seed_xy_by_id=current,
+                        imported_root_ids=imported_root_ids,
+                        inequality_constraints=[
+                            *inequality_constraints,
+                            separation_constraint,
+                        ],
+                        equality_constraints=equality_constraints,
+                        config=config,
+                    )
+                except _LayoutInfeasibleError:
+                    continue
+                inequality_constraints.append(separation_constraint)
+                current = solved_xy_by_id
+                seen.add(key)
+                added += 1
+                break
+            else:
+                raise ValueError(
+                    "Parent-child AABB pair has no feasible separation direction: "
+                    f"{first_id!r}, {second_id!r}."
+                )
         if not added:
             break
-        current = _solve_root_xy(
-            root_ids=root_ids,
-            root_seed_xy_by_id=current,
-            imported_root_ids=imported_root_ids,
-            inequality_constraints=inequality_constraints,
-            equality_constraints=equality_constraints,
-            config=config,
-        )
     raise ValueError("Parent-child AABB collisions remain after layout refinement.")
 
 
@@ -462,7 +536,7 @@ def _root_aabb_overlaps(
     return sorted(result, reverse=True)
 
 
-def _aabb_separation_constraint(
+def _aabb_separation_constraints(
     *,
     root_ids: list[str],
     first_id: str,
@@ -470,19 +544,47 @@ def _aabb_separation_constraint(
     half_extents: dict[str, np.ndarray],
     xy_by_id: dict[str, list[float]],
     margin: float,
-) -> tuple[np.ndarray, float]:
-    """Return one least-penetration AABB separation inequality."""
+) -> list[tuple[np.ndarray, float]]:
+    """Return ordered feasible-direction candidates for one overlapping AABB pair."""
     first, second = np.asarray(xy_by_id[first_id]), np.asarray(xy_by_id[second_id])
     overlap = np.minimum(
         first + half_extents[first_id], second + half_extents[second_id]
     ) - np.maximum(first - half_extents[first_id], second - half_extents[second_id])
-    axis = int(np.argmin(overlap))
-    lower = first[axis] < second[axis] or (
-        first[axis] == second[axis] and first_id < second_id
-    )
+    axes = np.argsort(overlap)
+    constraints = []
+    for axis in axes:
+        current_order = first[axis] < second[axis] or (
+            first[axis] == second[axis] and first_id < second_id
+        )
+        for first_is_lower in (current_order, not current_order):
+            constraints.append(
+                _aabb_separation_constraint_for_direction(
+                    root_ids=root_ids,
+                    first_id=first_id,
+                    second_id=second_id,
+                    half_extents=half_extents,
+                    axis=int(axis),
+                    first_is_lower=first_is_lower,
+                    margin=margin,
+                )
+            )
+    return constraints
+
+
+def _aabb_separation_constraint_for_direction(
+    *,
+    root_ids: list[str],
+    first_id: str,
+    second_id: str,
+    half_extents: dict[str, np.ndarray],
+    axis: int,
+    first_is_lower: bool,
+    margin: float,
+) -> tuple[np.ndarray, float]:
+    """Return one directed AABB separation inequality on a selected axis."""
     index = {root_id: i for i, root_id in enumerate(root_ids)}
     row = np.zeros(2 * len(root_ids))
-    sign = 1.0 if lower else -1.0
+    sign = 1.0 if first_is_lower else -1.0
     row[2 * index[first_id] + axis], row[2 * index[second_id] + axis] = sign, -sign
     return row, -float(
         half_extents[first_id][axis] + half_extents[second_id][axis] + margin
