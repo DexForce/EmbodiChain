@@ -1103,8 +1103,7 @@ def test_runtime_retries_directly_when_verified_source_relation_remains() -> Non
     result = system.runtime.run(
         HandOver(
             object=SceneObjectRef("cube"),
-            receiver="right_actor",
-            resources={"source": "left_actor"},
+            resources={"source": "left_actor", "destination": "right_actor"},
         )
     )
 
@@ -1162,8 +1161,7 @@ def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> No
     result = system.runtime.run(
         HandOver(
             object=SceneObjectRef("cube"),
-            receiver="right_actor",
-            resources={"source": "left_actor"},
+            resources={"source": "left_actor", "destination": "right_actor"},
         )
     )
 
