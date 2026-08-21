@@ -39,6 +39,8 @@ from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
     EndpointBinding,
     EndpointCommand,
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
     EntityState,
     ExecutionEventKind,
     ExecutionSession,
@@ -66,8 +68,13 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TaskState,
     TimedCommandSequence,
+    TimedTrackingSequence,
     TimedTrajectory,
-    TrajectorySegment,
+    TrackingFeedbackSourceRef,
+    TrackingFrame,
+    TrackingPolicy,
+    TrackingProjectorRef,
+    TrackingSetpoint,
 )
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
@@ -323,9 +330,14 @@ class DestinationSequenceAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]
         )
     )
 
-    def __init__(self, destinations: tuple[str | None, ...]) -> None:
+    def __init__(
+        self,
+        destinations: tuple[str | None, ...],
+        tracking_provider_revisions: tuple[str | None, ...] | None = None,
+    ) -> None:
         super().__init__()
         self.destinations = destinations
+        self.tracking_provider_revisions = tracking_provider_revisions
         self.plan_count = 0
 
     def _plan(
@@ -371,13 +383,42 @@ class DestinationSequenceAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]
                 device=context.robot.qpos.device,
             ),
         )
-        return self.build_command_plan(
+        plan = self.build_command_plan(
             request,
             context,
             success=True,
             commands=TimedCommandSequence(
                 frames=(frame,),
                 env_ids=context.env_ids,
+            ),
+        )
+        if self.tracking_provider_revisions is None:
+            return plan
+        provider_revision = self.tracking_provider_revisions[index]
+        if provider_revision is None or plan.tracking is None:
+            return plan
+        original = plan.tracking.frames[0].setpoints[0]
+        changed = TrackingSetpoint(
+            endpoint_key=original.endpoint_key,
+            binding=EndpointTrackingChannelBinding(
+                channel_id=original.binding.channel_id,
+                source=TrackingFeedbackSourceRef(
+                    provider_id=original.binding.source.provider_id,
+                    revision=provider_revision,
+                    address=original.binding.source.address,
+                ),
+                projector=TrackingProjectorRef(
+                    projector_id=original.binding.projector.projector_id,
+                    revision=original.binding.projector.revision,
+                ),
+            ),
+            desired=original.desired,
+        )
+        return replace(
+            plan,
+            tracking=TimedTrackingSequence(
+                plan.tracking.env_ids,
+                (TrackingFrame((changed,)),),
             ),
         )
 
@@ -426,6 +467,7 @@ def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
 
 def _destination_engine(
     destinations: tuple[str | None, ...],
+    tracking_provider_revisions: tuple[str | None, ...] | None = None,
 ) -> tuple[AtomicActionEngine, DestinationSequenceAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -443,7 +485,7 @@ def _destination_engine(
     generator.planner.cfg.planner_type = "stub"
     generator.supports_dynamic_collision_world = False
     engine = AtomicActionEngine(generator, load_builtins=False)
-    action = DestinationSequenceAction(destinations)
+    action = DestinationSequenceAction(destinations, tracking_provider_revisions)
     engine.register(action)
     return engine, action
 
@@ -571,7 +613,6 @@ def _invocation(
         recovery_policy=RecoveryPolicy(
             max_replans=max_replans,
             max_action_retries=max_action_retries,
-            tracking_error_threshold=0.05,
             goal_translation_threshold=0.02,
             action_timeout=action_timeout,
         ),
@@ -919,6 +960,7 @@ def test_request_snapshot_preserves_live_entity_identity() -> None:
         goal=goal,
         binding=ActionBinding(owner_id="snapshot-test"),
         motion_policy=MotionPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
     )
@@ -1085,6 +1127,23 @@ def test_empty_failed_replan_preserves_destination_for_same_target_retry() -> No
     resumed = session.tick(_context(0.2, 0.0, 0.3, 1))
     assert resumed.command is not None
     assert resumed.command.commands[0].target.target_id == "arm_a"
+
+
+def test_empty_failed_replan_does_not_erase_active_tracking_route() -> None:
+    engine, action = _destination_engine(
+        ("first", None, "first"),
+        tracking_provider_revisions=("1", None, "alternate"),
+    )
+    invocation = _destination_invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((invocation,), initial)
+
+    session.tick(initial)
+
+    with pytest.raises(ValueError, match="tracking source fingerprints"):
+        session.tick(_context(0.1, 0.0, 0.3, 1))
+
+    assert action.plan_count == 3
 
 
 def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
@@ -1546,6 +1605,7 @@ def test_session_revision_rejects_changed_target_address_fingerprint() -> None:
             owner_id=invocation.binding.owner_id,
             endpoints=(changed_endpoint,),
         ),
+        tracking_policy=TrackingPolicy.timed(),
         revision=1,
     )
 
@@ -1560,6 +1620,36 @@ def test_session_revision_rejects_changed_target_address_fingerprint() -> None:
     assert target.joint_ids == (0, 1)
 
 
+def test_tracking_continuity_rejection_leaves_revision_state_transactional(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = _engine()
+    invocation = _invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    replacement_context = _context(0.5, 0.2, 0.1, 0)
+    session = engine.start((invocation,), initial)
+    revised = replace(invocation, revision=1)
+    attempt_count = len(session.plan_attempts)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            session,
+            "_validate_tracking_continuity",
+            Mock(side_effect=ValueError("tracking route changed")),
+        )
+        with pytest.raises(ValueError, match="tracking route changed"):
+            session.revise_current(revised, context=replacement_context)
+
+    assert len(session.plan_attempts) == attempt_count
+    assert session.active_plan.invocation_revision == 0
+    assert session.latest_context.robot.timestamp == pytest.approx(0.0)
+
+    session.revise_current(revised, context=replacement_context)
+
+    assert session.active_plan.invocation_revision == 1
+    assert session.latest_context.robot.timestamp == pytest.approx(0.5)
+
+
 def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
     engine, _ = _engine()
     session = engine.start(
@@ -1571,7 +1661,7 @@ def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
     tick = session.tick(_context(0.1, 1.0, 0.2, 0))
 
     kinds = {event.kind for event in tick.events}
-    assert ExecutionEventKind.TRACKING_ERROR in kinds
+    assert ExecutionEventKind.TRACKING_DIVERGED in kinds
     assert ExecutionEventKind.RECOVERY_EXHAUSTED in kinds
     assert tick.status is ExecutionStatus.FAILED
     assert tick.eligible_mask.tolist() == [False]

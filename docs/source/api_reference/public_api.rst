@@ -491,16 +491,26 @@ embodichain.lab.sim.atomic_actions
    ArticulationOperationAffordance
    ArticulationOperationTarget
    AssembleAffordance
+   BASE_POSE_CHANNEL
    BUILTIN_ACTION_TYPES
    CoordinatedPickmentOptions
    CoordinatedPlacementOptions
    DynamicCollisionMode
+   EndpointTrackingChannelBinding
+   EndpointTrackingFeedbackAddress
    EntityState
    EffectVerificationRequirement
    EffectVerificationResult
    EffectVerifier
    ExecutionPlanAttempt
+   FeedbackTerminalAcceptance
    GRASP_COMMAND
+   InFlightTrackingPolicy
+   JOINT_POSITION_CHANNEL
+   JointPositionTrackingEvaluator
+   JointPositionTrackingMetric
+   JointPositionTrackingProjector
+   JointPositionTrackingState
    HandOverOptions
    InteractionPoints
    MoveEndEffectorOptions
@@ -514,6 +524,10 @@ embodichain.lab.sim.atomic_actions
    OperateArticulationOptions
    PickUpOptions
    PlaceOptions
+   PlanningContextTrackingFeedbackProvider
+   PoseTrackingEvaluator
+   PoseTrackingMetric
+   PoseTrackingState
    PoseGoalValue
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
@@ -521,6 +535,33 @@ embodichain.lab.sim.atomic_actions
    SceneProvider
    SceneArticulationOperationGeometry
    SceneSnapshotSupplier
+   TimedTerminalAcceptance
+   TimedTrackingSequence
+   TerminalAcceptance
+   TrackingCommandProjector
+   TrackingEvaluation
+   TrackingEvaluatorRegistry
+   TrackingFeedbackAddress
+   TrackingFeedbackBatch
+   TrackingFeedbackProvider
+   TrackingFeedbackProviderRegistry
+   TrackingFeedbackSourceRef
+   TrackingFrame
+   TrackingMetricCfg
+   TrackingMetricEvaluator
+   TrackingPolicy
+   TrackingProjectorRef
+   TrackingProjectorRegistry
+   TrackingRuntime
+   TrackingSetpoint
+   TrackingState
+   WHOLE_BODY_POSE_CHANNEL
+   WholeBodyPoseTrackingEvaluator
+   WholeBodyPoseTrackingMetric
+   WholeBodyPoseTrackingState
+   get_registered_actions
+   register_action
+   unregister_action
 
 embodichain.lab.sim.atomic_actions.affordance
 ---------------------------------------------
@@ -791,6 +832,53 @@ embodichain.lab.sim.atomic_actions.state
    RobotObservation
    SceneSnapshot
    TaskState
+
+embodichain.lab.sim.atomic_actions.tracking
+-------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.tracking
+
+.. autosummary::
+
+   BASE_POSE_CHANNEL
+   FeedbackTerminalAcceptance
+   InFlightTrackingPolicy
+   JOINT_POSITION_CHANNEL
+   JointPositionTrackingEvaluator
+   JointPositionTrackingMetric
+   JointPositionTrackingProjector
+   JointPositionTrackingState
+   EndpointTrackingChannelBinding
+   EndpointTrackingFeedbackAddress
+   PlanningContextTrackingFeedbackProvider
+   PoseTrackingEvaluator
+   PoseTrackingMetric
+   PoseTrackingState
+   TerminalAcceptance
+   TimedTerminalAcceptance
+   TimedTrackingSequence
+   TrackingChannelId
+   TrackingCommandProjector
+   TrackingEvaluation
+   TrackingEvaluatorRegistry
+   TrackingFeedbackAddress
+   TrackingFeedbackBatch
+   TrackingFeedbackProvider
+   TrackingFeedbackProviderRegistry
+   TrackingFeedbackSourceRef
+   TrackingFrame
+   TrackingMetricCfg
+   TrackingMetricEvaluator
+   TrackingPolicy
+   TrackingProjectorRef
+   TrackingProjectorRegistry
+   TrackingRuntime
+   TrackingSetpoint
+   TrackingState
+   WHOLE_BODY_POSE_CHANNEL
+   WholeBodyPoseTrackingEvaluator
+   WholeBodyPoseTrackingMetric
+   WholeBodyPoseTrackingState
 
 embodichain.lab.sim.atomic_actions.trajectory_ops
 -------------------------------------------------
@@ -1310,6 +1398,7 @@ embodichain.lab.sim.skills.runtime
    ResolvedCorePolicyTrace
    SkillCallTrace
    SkillEndpointBindingTrace
+   SkillEndpointTrackingChannelTrace
    SkillEffectTrace
    SkillFailure
    SkillPlanAttemptTrace

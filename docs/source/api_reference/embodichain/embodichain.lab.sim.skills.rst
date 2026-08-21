@@ -184,6 +184,7 @@ embodichain.lab.sim.skills
       SemanticValidationError
       SemanticWorkflow
       SkillEndpointBindingTrace
+      SkillEndpointTrackingChannelTrace
       SkillFailure
       SkillRuntimeProvider
       SkillScene

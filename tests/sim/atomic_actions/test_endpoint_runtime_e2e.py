@@ -52,6 +52,7 @@ from embodichain.lab.sim.atomic_actions import (
     SkillResourceSlot,
     TaskState,
     TimedCommandSequence,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.atomic_actions.invocation import ResolvedActionRequest
 from embodichain.lab.sim.planners import PlanResult
@@ -484,6 +485,7 @@ def test_custom_planar_velocity_endpoint_runs_from_profile_through_router() -> N
         skill_id="drive_velocity",
         goal=_DriveGoal(goal_twist),
         binding=binding,
+        tracking_policy=TrackingPolicy.timed(),
     )
     clock = _Clock()
     provider = _Provider(robot, clock)
