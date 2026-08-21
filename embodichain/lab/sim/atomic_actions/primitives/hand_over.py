@@ -38,6 +38,12 @@ from embodichain.lab.sim.atomic_actions.core import (
     _same_object_identity,
 )
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    collect_scene_dependencies,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
 from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
@@ -78,13 +84,15 @@ class HandOverOptions(ActionOptions):
     """Object part the receiving arm grasps during the handover
     (see :meth:`AntipodalAffordance.get_valid_grasp_poses`)."""
 
-    middle_object_pose: torch.Tensor | None = None
+    middle_object_pose: PoseGoalValue | None = None
     """Object pose at the handover point where the receiving arm grasps it,
-    shape ``(4, 4)`` or ``(num_envs, 4, 4)``. Must be set by the caller."""
+    either a scene-relative pose or a tensor with shape ``(4, 4)`` or
+    ``(n_envs, 4, 4)``. Must be set by the caller."""
 
-    final_object_pose: torch.Tensor | None = None
-    """Object pose the receiving arm delivers the object to, shape ``(4, 4)``
-    or ``(num_envs, 4, 4)``. Must be set by the caller."""
+    final_object_pose: PoseGoalValue | None = None
+    """Object pose the receiving arm delivers the object to, either a
+    scene-relative pose or a tensor with shape ``(4, 4)`` or
+    ``(n_envs, 4, 4)``. Must be set by the caller."""
 
     receive_approach_direction: torch.Tensor = torch.tensor(
         [0.0, 0.0, -1.0], dtype=torch.float32
@@ -134,7 +142,16 @@ class HandOverOptions(ActionOptions):
         for name in ("middle_object_pose", "final_object_pose"):
             value = getattr(self, name)
             if value is not None:
-                object.__setattr__(self, name, value.clone())
+                validate_pose_goal(value, name, allow_waypoints=False)
+                object.__setattr__(
+                    self,
+                    name,
+                    (
+                        value.clone()
+                        if isinstance(value, torch.Tensor)
+                        else value.snapshot()
+                    ),
+                )
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -195,9 +212,17 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         self,
         request: ResolvedActionRequest[GraspGoal, HandOverOptions],
     ) -> tuple[str, ...]:
-        """Return no goal-pose dependency because handover ignores grasp_xpos."""
-        del request
-        return ()
+        """Return scene entities referenced by late-bound handover targets."""
+        return collect_scene_dependencies(
+            tuple(
+                target
+                for target in (
+                    request.skill_options.middle_object_pose,
+                    request.skill_options.final_object_pose,
+                )
+                if target is not None
+            )
+        )
 
     def _resolve_resources(
         self,
@@ -303,10 +328,20 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         assert options.middle_object_pose is not None
         assert options.final_object_pose is not None
         middle_object_pose = self._resolve_matrix(
-            options.middle_object_pose, "middle_object_pose"
+            resolve_pose_goal(
+                options.middle_object_pose,
+                context,
+                name="middle_object_pose",
+            ),
+            "middle_object_pose",
         )
         final_object_pose = self._resolve_matrix(
-            options.final_object_pose, "final_object_pose"
+            resolve_pose_goal(
+                options.final_object_pose,
+                context,
+                name="final_object_pose",
+            ),
+            "final_object_pose",
         )
         receive_approach_direction = options.receive_approach_direction.to(
             device=self.device, dtype=torch.float32

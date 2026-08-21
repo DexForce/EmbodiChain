@@ -57,8 +57,21 @@ class SceneEntityPose:
                 "relative_pose",
                 allow_waypoints=False,
             )
+            object.__setattr__(self, "relative_pose", self.relative_pose.clone())
         if not 0.0 <= self.minimum_confidence <= 1.0:
             raise ValueError("minimum_confidence must be in [0, 1].")
+
+    def snapshot(self) -> SceneEntityPose:
+        """Return an independently owned late-bound pose value.
+
+        Returns:
+            Exact scene reference with an owned relative-pose tensor.
+        """
+        return SceneEntityPose(
+            self.entity_id,
+            relative_pose=self.relative_pose,
+            minimum_confidence=self.minimum_confidence,
+        )
 
 
 PoseGoalValue = torch.Tensor | SceneEntityPose

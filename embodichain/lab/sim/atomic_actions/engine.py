@@ -91,6 +91,7 @@ class AtomicActionEngine:
             control_profiles=control_profiles,
         )
         self._actions: dict[str, AtomicAction] = {}
+        self._skill_catalog_revision = 0
         self._skill_profile: BoundRobotSkillProfile | None = None
         if load_builtins:
             self._load_builtin_actions()
@@ -153,6 +154,16 @@ class AtomicActionEngine:
                 and descriptor.binding_contract is not None
             }
         )
+
+    @property
+    def skill_catalog_revision(self) -> int:
+        """Return the monotonic installed semantic-skill catalog revision.
+
+        Replacing an agent-visible implementation advances the revision even
+        when its public descriptor is equal. Bound profiles and semantic
+        compilers can therefore reject stale implementation ownership.
+        """
+        return self._skill_catalog_revision
 
     @property
     def skill_profile(self) -> BoundRobotSkillProfile | None:
@@ -330,6 +341,13 @@ class AtomicActionEngine:
             )
         action._bind(self._planning_services)
         self._actions[descriptor.skill_id] = action
+        existing_descriptor = None if existing is None else existing.descriptor()
+        if (descriptor.agent_visible and descriptor.binding_contract is not None) or (
+            existing_descriptor is not None
+            and existing_descriptor.agent_visible
+            and existing_descriptor.binding_contract is not None
+        ):
+            self._skill_catalog_revision += 1
         self._skill_profile = None
 
     def _load_builtin_actions(self) -> None:
@@ -577,6 +595,8 @@ class AtomicActionEngine:
         self,
         invocations: Iterable[ActionInvocation],
         context: PlanningContext | None = None,
+        *,
+        eligible_mask: torch.Tensor | None = None,
     ) -> ExecutionSession:
         """Start closed-loop execution for a grounded invocation sequence.
 
@@ -584,6 +604,9 @@ class AtomicActionEngine:
             invocations: Grounded action requests in execution order.
             context: Initial measured state and scene snapshot. The engine
                 captures one when omitted.
+            eligible_mask: Optional per-environment cohort allowed to execute.
+                Ineligible rows remain excluded for the whole session. All rows
+                are eligible when omitted.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -591,7 +614,12 @@ class AtomicActionEngine:
         from .execution import ExecutionSession
 
         initial = self.initial_context() if context is None else context
-        return ExecutionSession(self, tuple(invocations), initial)
+        return ExecutionSession(
+            self,
+            tuple(invocations),
+            initial,
+            eligible_mask=eligible_mask,
+        )
 
     def _validate_context(self, context: PlanningContext) -> None:
         """Validate an externally supplied planning context."""

@@ -3,6 +3,54 @@ embodichain.lab.sim.skills
 
 .. automodule:: embodichain.lab.sim.skills
 
+   .. rubric:: Semantic calls and catalog
+
+   .. autosummary::
+
+      SemanticPose
+      Pick
+      Place
+      HandOver
+      RegisteredSemanticCall
+      SemanticCallDescriptor
+      SemanticCallCatalog
+      builtin_semantic_call_catalog
+
+   .. rubric:: Semantic compilation and grounding
+
+   .. autosummary::
+
+      SemanticWorkflow
+      SemanticLowering
+      GroundedSemanticCall
+      SemanticObjectTarget
+      SemanticRelationTarget
+      RegisteredSemanticLowerer
+      RelationTargetGrounder
+      HandOverPoseTargets
+      HandOverPoseProvider
+      SemanticSkillCompiler
+
+   .. rubric:: Semantic integration and execution
+
+   .. autosummary::
+
+      SceneEntityManifest
+      SceneManifest
+      SemanticIntegrationManifest
+      SemanticDiagnostic
+      SemanticValidationError
+      SemanticEffectVerifier
+      SemanticSkillRuntime
+      SemanticTask
+      SemanticExecution
+      SemanticExecutionStatus
+      SemanticTaskStatus
+      SemanticExecutionStep
+      SemanticCallRecord
+      SemanticSegmentResult
+      SemanticTaskResult
+
    .. rubric:: Scene integration contracts
 
    .. autosummary::
@@ -10,6 +58,7 @@ embodichain.lab.sim.skills
       SceneRegistry
       RegistrySceneProvider
       SceneEntityRegistration
+      SceneEntityMetadata
       SceneEntityRef
       SceneObjectRef
       SceneArticulationRef
@@ -20,6 +69,11 @@ embodichain.lab.sim.skills
       SceneDynamics
       SceneCollisionRole
       SceneCollisionWorldMode
+      GRASP_AFFORDANCE_CAPABILITY
+      PLACE_ON_AFFORDANCE_CAPABILITY
+      PLACE_IN_AFFORDANCE_CAPABILITY
+      UnsupportedSceneAffordanceError
+      AmbiguousSceneAffordanceError
 
    .. rubric:: Robot skill profiles
 
@@ -44,6 +98,115 @@ embodichain.lab.sim.skills
       AmbiguousSkillBindingError
 
 .. currentmodule:: embodichain.lab.sim.skills
+
+Semantic calls and catalog
+--------------------------
+
+.. autoclass:: SemanticPose
+   :members:
+
+.. autoclass:: Pick
+   :members:
+
+.. autoclass:: Place
+   :members:
+
+.. autoclass:: HandOver
+   :members:
+
+.. autoclass:: RegisteredSemanticCall
+   :members:
+
+.. autoclass:: SemanticCallDescriptor
+   :members:
+
+.. autoclass:: SemanticCallCatalog
+   :members:
+
+.. autofunction:: builtin_semantic_call_catalog
+
+Semantic compilation and grounding
+-----------------------------------
+
+.. autoclass:: SemanticWorkflow
+   :members:
+
+.. autoclass:: SemanticLowering
+   :members:
+
+.. autoclass:: GroundedSemanticCall
+   :members:
+
+.. autoclass:: SemanticObjectTarget
+   :members:
+
+.. autoclass:: SemanticRelationTarget
+   :members:
+
+.. autoclass:: RegisteredSemanticLowerer
+   :members:
+
+.. autoclass:: RelationTargetGrounder
+   :members:
+
+.. autoclass:: HandOverPoseTargets
+   :members:
+
+.. autoclass:: HandOverPoseProvider
+   :members:
+
+.. autoclass:: SemanticSkillCompiler
+   :members:
+
+Semantic integration
+--------------------
+
+.. autoclass:: SceneEntityManifest
+   :members:
+
+.. autoclass:: SceneManifest
+   :members:
+
+.. autoclass:: SemanticIntegrationManifest
+   :members:
+
+.. autoclass:: SemanticDiagnostic
+   :members:
+
+.. autoclass:: SemanticValidationError
+   :members:
+
+Semantic runtime
+----------------
+
+.. autodata:: SemanticEffectVerifier
+
+.. autoclass:: SemanticSkillRuntime
+   :members:
+
+.. autoclass:: SemanticTask
+   :members:
+
+.. autoclass:: SemanticExecution
+   :members:
+
+.. autoclass:: SemanticExecutionStatus
+   :members:
+
+.. autoclass:: SemanticTaskStatus
+   :members:
+
+.. autoclass:: SemanticExecutionStep
+   :members:
+
+.. autoclass:: SemanticCallRecord
+   :members:
+
+.. autoclass:: SemanticSegmentResult
+   :members:
+
+.. autoclass:: SemanticTaskResult
+   :members:
 
 Robot resources and profiles
 ----------------------------
@@ -114,6 +277,9 @@ Registration contracts
 .. autoclass:: SceneEntityRegistration
    :members:
 
+.. autoclass:: SceneEntityMetadata
+   :members:
+
 .. autoclass:: SceneEntityStateProvider
    :members:
 
@@ -146,3 +312,16 @@ References and enums
 
 .. autoclass:: SceneCollisionWorldMode
    :members:
+
+Affordance capabilities and errors
+----------------------------------
+
+.. autodata:: GRASP_AFFORDANCE_CAPABILITY
+
+.. autodata:: PLACE_ON_AFFORDANCE_CAPABILITY
+
+.. autodata:: PLACE_IN_AFFORDANCE_CAPABILITY
+
+.. autoclass:: UnsupportedSceneAffordanceError
+
+.. autoclass:: AmbiguousSceneAffordanceError

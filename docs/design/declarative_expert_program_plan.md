@@ -481,14 +481,17 @@ Version 1 should provide first-class calls for:
 
 - `Pick(object, grasp?, resources?)`;
 - `Place(object, pose?|on?|in?, resources?)`;
-- `HandOver(object, receiver?, final_target?, resources?)`;
+- `HandOver(object, final_target?, resources?)`;
 - a registered semantic call for shared extensions.
 
 `resources`, when present, is a mapping from the selected skill's local slot
 IDs to profile resource IDs (for example, `{"primary": "left_actor"}` or
 `{"body": "mobile_base"}`). It is an explicit ambiguity override, not a
 fixed arm/tool field. Ordinary calls omit it and use unique or profile-default
-resolution.
+resolution. Within one analyzed workflow, an omitted `Place.primary` or
+`HandOver.source` inherits the known resource holding that object. Explicit
+consumer selections remain authoritative constraints and fail if they conflict
+with the known holder; inference never crosses a registered-call boundary.
 
 `Place` consumes verified held-object state. The compiler computes the release
 EEF pose from the requested object-space target and the verified

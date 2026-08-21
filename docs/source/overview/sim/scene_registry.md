@@ -90,6 +90,101 @@ For perception or hardware, construct registrations with an implementation of
 a {class}`SceneGeometryProvider`; the geometry belongs to the catalog even
 though the snapshot contains only its current pose and confidence.
 
+## Semantic affordance capabilities
+
+An affordance is a registered direct child of an object, articulation, or link.
+Its {class}`SceneAffordanceRef` has its own canonical ID, while `parent` and
+`native_name` describe topology and the backend-local member. Semantic calls
+select affordances by open, namespaced capabilities rather than by payload class
+or declaration order. The built-in capabilities are:
+
+- {data}`GRASP_AFFORDANCE_CAPABILITY` (`affordance.grasp`);
+- {data}`PLACE_ON_AFFORDANCE_CAPABILITY` (`affordance.place.on`);
+- {data}`PLACE_IN_AFFORDANCE_CAPABILITY` (`affordance.place.in`).
+
+Register a capability-bearing grasp affordance and a scoped parent default as
+follows. `antipodal_affordance` is an existing
+`AntipodalAffordance` value, for example one produced by the grasp annotation
+pipeline:
+
+```python
+from dataclasses import replace
+
+import torch
+
+from embodichain.lab.sim.skills import (
+    GRASP_AFFORDANCE_CAPABILITY,
+    SceneAffordanceRef,
+    SceneEntityRegistration,
+    SceneObjectRef,
+    SceneRegistry,
+)
+
+object_ref = SceneObjectRef("workpiece")
+grasp_ref = SceneAffordanceRef("workpiece.grasp.antipodal")
+
+simulation_registry = SceneRegistry.from_simulation(
+    sim,
+    rigid_objects={"workpiece": "cube"},
+)
+object_registration = replace(
+    simulation_registry.lookup(object_ref),
+    semantic_type="cube",
+    default_affordances={GRASP_AFFORDANCE_CAPABILITY: grasp_ref},
+)
+registry = SceneRegistry(
+    (
+        object_registration,
+        SceneEntityRegistration(
+            ref=grasp_ref,
+            parent=object_ref,
+            native_name="antipodal_grasp",
+            affordance=antipodal_affordance,
+            affordance_capabilities=frozenset(
+                {GRASP_AFFORDANCE_CAPABILITY}
+            ),
+            affordance_revision="antipodal-v1",
+            relative_pose=torch.eye(4),
+        ),
+    )
+)
+```
+
+The registry enforces these rules:
+
+- capabilities belong only to an affordance registration;
+- a capability-bearing affordance declares an explicit
+  `affordance_revision`;
+- `affordance.grasp` requires an `AntipodalAffordance` payload;
+- `default_affordances` belongs to the parent and maps each capability to one
+  compatible direct child;
+- an affordance has either a live `state_provider` or a parent-relative
+  `relative_pose`, never neither.
+
+{meth}`SceneRegistry.affordances` lists compatible direct children in canonical
+ID order without selecting one. {meth}`SceneRegistry.resolve_affordance` applies
+one strict selection rule:
+
+1. validate and use the explicit affordance, when supplied;
+2. otherwise use the only compatible child;
+3. otherwise use the parent's capability-scoped default;
+4. otherwise raise {class}`AmbiguousSceneAffordanceError`.
+
+No compatible child, a parent mismatch, or a capability mismatch raises
+{class}`UnsupportedSceneAffordanceError`. There is no declaration-order
+fallback. Once selected, {meth}`SceneRegistry.object_semantics` creates an owned
+atomic-action `ObjectSemantics` value using the canonical object ID and a copied
+affordance payload.
+
+{attr}`SceneRegistry.entity_metadata` projects provider-free
+{class}`SceneEntityMetadata` values. {class}`SceneManifest` uses the same value
+model, so semantic integration can validate IDs, aliases, topology, capability
+sets, payload types and revisions, relative affordance poses, and collision mode
+before observing the scene. Changing any of that metadata requires rebuilding
+and rebinding the semantic integration. Relation grounders dispatch by the exact
+capability, payload type, and revision tuple; revisions therefore form part of
+the integration contract rather than runtime pose state.
+
 ## Publish canonical snapshots
 
 For an atomic-action planning runtime, create the provider through
@@ -239,6 +334,6 @@ core by hand. The list form derives obstacle names from each object's `uid` (or
 an `obstacle_<index>` fallback). It is not the registry-backed path and does not
 provide alias normalization or registry/provider/planner construction checks.
 
-See {doc}`atomic_actions/index` for snapshot grounding and recovery semantics,
-and {doc}`planners/curobo_planner` for cuRobo world representation and frame
-details.
+See {doc}`semantic_skills` for manifest and semantic-call integration,
+{doc}`atomic_actions/index` for snapshot grounding and recovery semantics, and
+{doc}`planners/curobo_planner` for cuRobo world representation and frame details.

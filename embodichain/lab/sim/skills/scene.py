@@ -31,7 +31,9 @@ import torch
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
+    AntipodalAffordance,
     EntityState,
+    ObjectSemantics,
     SceneProvider,
     SceneSnapshot,
 )
@@ -43,11 +45,64 @@ if TYPE_CHECKING:
 
 RefT = TypeVar("RefT", bound="SceneEntityRef")
 
+GRASP_AFFORDANCE_CAPABILITY = "affordance.grasp"
+"""Capability for an affordance usable by object pickup or handover."""
+
+PLACE_ON_AFFORDANCE_CAPABILITY = "affordance.place.on"
+"""Capability for an affordance that defines an ``on`` placement relation."""
+
+PLACE_IN_AFFORDANCE_CAPABILITY = "affordance.place.in"
+"""Capability for an affordance that defines an ``inside`` placement relation."""
+
+
+class UnsupportedSceneAffordanceError(ValueError):
+    """Raised when a parent has no affordance for a required capability."""
+
+
+class AmbiguousSceneAffordanceError(ValueError):
+    """Raised when compatible affordances lack one explicitly scoped default."""
+
 
 def _validate_identifier(value: str, name: str) -> None:
     """Validate an exact, non-empty identifier without normalizing it."""
-    if not isinstance(value, str) or not value or value != value.strip():
+    if type(value) is not str or not value or value != value.strip():
         raise ValueError(f"{name} must be a non-empty string without outer whitespace.")
+
+
+def _normalize_affordance_capabilities(
+    values: Iterable[str],
+) -> frozenset[str]:
+    """Validate one open set of namespaced affordance capabilities."""
+    if isinstance(values, (str, bytes)):
+        raise TypeError(
+            "affordance_capabilities must be an iterable of strings, not a string."
+        )
+    try:
+        capabilities = frozenset(values)
+    except TypeError as exc:
+        raise TypeError(
+            "affordance_capabilities must be an iterable of strings."
+        ) from exc
+    for capability in capabilities:
+        _validate_identifier(capability, "affordance capability")
+    return capabilities
+
+
+def _normalize_default_affordances(
+    values: Mapping[str, SceneAffordanceRef],
+) -> Mapping[str, SceneAffordanceRef]:
+    """Validate and own a capability-scoped default-affordance mapping."""
+    if not isinstance(values, Mapping):
+        raise TypeError("default_affordances must be a mapping.")
+    defaults: dict[str, SceneAffordanceRef] = {}
+    for capability, affordance_ref in values.items():
+        _validate_identifier(capability, "default affordance capability")
+        if type(affordance_ref) is not SceneAffordanceRef:
+            raise TypeError(
+                "default_affordances values must be SceneAffordanceRef instances."
+            )
+        defaults[capability] = affordance_ref
+    return MappingProxyType(defaults)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +164,458 @@ class SceneCollisionWorldMode(str, Enum):
     PER_ENV = "per_env"
 
 
+@dataclass(frozen=True, slots=True)
+class SceneEntityMetadata:
+    """Provider-free semantic metadata projected from one registration.
+
+    Args:
+        ref: Canonical typed entity reference.
+        aliases: Boundary aliases, compared as an order-independent set.
+        parent: Canonical parent for links and affordances.
+        native_name: Backend-local child name.
+        dynamics: Physical mobility classification.
+        collision_role: Planner collision classification.
+        semantic_type: Optional application semantic type.
+        affordance_capabilities: Open capabilities of an affordance.
+        default_affordances: Capability-scoped direct-child defaults.
+        affordance_payload_type: Exact registered affordance value type.
+        affordance_revision: Integrator-owned payload revision or fingerprint.
+        relative_pose: Flattened parent-relative 4x4 pose, when declared.
+    """
+
+    ref: SceneEntityRef
+    aliases: tuple[str, ...] = ()
+    parent: SceneEntityRef | None = None
+    native_name: str | None = None
+    dynamics: SceneDynamics = SceneDynamics.UNKNOWN
+    collision_role: SceneCollisionRole = SceneCollisionRole.NONE
+    semantic_type: str | None = None
+    affordance_capabilities: frozenset[str] = frozenset()
+    default_affordances: Mapping[str, SceneAffordanceRef] = field(default_factory=dict)
+    affordance_payload_type: type[Affordance] | None = None
+    affordance_revision: str | None = None
+    relative_pose: tuple[float, ...] | None = None
+
+    def __post_init__(self) -> None:
+        allowed_ref_types = {
+            SceneEntityRef,
+            SceneObjectRef,
+            SceneArticulationRef,
+            SceneLinkRef,
+            SceneAffordanceRef,
+        }
+        if type(self.ref) not in allowed_ref_types:
+            raise TypeError("SceneEntityMetadata.ref must be a SceneEntityRef.")
+        if isinstance(self.aliases, (str, bytes)):
+            raise TypeError("SceneEntityMetadata.aliases must be an iterable.")
+        aliases = tuple(sorted(set(self.aliases)))
+        for alias in aliases:
+            _validate_identifier(alias, "scene alias")
+        object.__setattr__(self, "aliases", aliases)
+        if self.parent is not None and type(self.parent) not in allowed_ref_types:
+            raise TypeError("SceneEntityMetadata.parent must be a SceneEntityRef.")
+        if self.native_name is not None:
+            _validate_identifier(self.native_name, "native_name")
+        if not isinstance(self.dynamics, SceneDynamics):
+            raise TypeError("SceneEntityMetadata.dynamics must be SceneDynamics.")
+        if not isinstance(self.collision_role, SceneCollisionRole):
+            raise TypeError(
+                "SceneEntityMetadata.collision_role must be SceneCollisionRole."
+            )
+        if self.semantic_type is not None:
+            _validate_identifier(self.semantic_type, "semantic_type")
+        object.__setattr__(
+            self,
+            "affordance_capabilities",
+            _normalize_affordance_capabilities(self.affordance_capabilities),
+        )
+        object.__setattr__(
+            self,
+            "default_affordances",
+            _normalize_default_affordances(self.default_affordances),
+        )
+        if self.affordance_payload_type is not None and (
+            not isinstance(self.affordance_payload_type, type)
+            or not issubclass(self.affordance_payload_type, Affordance)
+        ):
+            raise TypeError(
+                "affordance_payload_type must be an Affordance subclass or None."
+            )
+        if self.affordance_revision is not None:
+            _validate_identifier(self.affordance_revision, "affordance_revision")
+        if self.relative_pose is not None:
+            relative_pose = tuple(float(value) for value in self.relative_pose)
+            if len(relative_pose) != 16 or not all(
+                math.isfinite(value) for value in relative_pose
+            ):
+                raise ValueError(
+                    "SceneEntityMetadata.relative_pose must contain 16 finite values."
+                )
+            object.__setattr__(self, "relative_pose", relative_pose)
+        self._validate_topology()
+
+    def _validate_topology(self) -> None:
+        """Apply the typed topology contract without requiring live providers."""
+        if isinstance(self.ref, (SceneObjectRef, SceneArticulationRef)):
+            if self.parent is not None or self.native_name is not None:
+                raise ValueError(
+                    "Object and articulation metadata cannot declare a parent "
+                    "or native_name."
+                )
+            if self.affordance_capabilities or self.affordance_payload_type is not None:
+                raise ValueError(
+                    "Object and articulation metadata cannot declare affordance "
+                    "payload capabilities."
+                )
+            if self.affordance_revision is not None or self.relative_pose is not None:
+                raise ValueError(
+                    "Object and articulation metadata cannot declare affordance "
+                    "revision or relative_pose."
+                )
+            return
+        if isinstance(self.ref, SceneLinkRef):
+            if not isinstance(self.parent, SceneArticulationRef) or (
+                self.native_name is None
+            ):
+                raise ValueError(
+                    "Link metadata requires an articulation parent and native_name."
+                )
+            if self.affordance_capabilities or self.affordance_payload_type is not None:
+                raise ValueError(
+                    "Link metadata cannot declare affordance payload capabilities."
+                )
+            if self.affordance_revision is not None or self.relative_pose is not None:
+                raise ValueError(
+                    "Link metadata cannot declare affordance revision or relative_pose."
+                )
+            return
+        if isinstance(self.ref, SceneAffordanceRef):
+            if (
+                not isinstance(
+                    self.parent,
+                    (SceneObjectRef, SceneArticulationRef, SceneLinkRef),
+                )
+                or self.native_name is None
+            ):
+                raise ValueError(
+                    "Affordance metadata requires an object, articulation, or link "
+                    "parent and native_name."
+                )
+            if self.affordance_payload_type is None:
+                raise ValueError(
+                    "Affordance metadata requires affordance_payload_type."
+                )
+            if self.default_affordances:
+                raise ValueError(
+                    "Affordance metadata cannot declare default_affordances."
+                )
+            if self.affordance_capabilities and self.affordance_revision is None:
+                raise ValueError(
+                    "Capability-bearing affordance metadata requires an explicit "
+                    "affordance_revision."
+                )
+            if (
+                GRASP_AFFORDANCE_CAPABILITY in self.affordance_capabilities
+                and not issubclass(self.affordance_payload_type, AntipodalAffordance)
+            ):
+                raise TypeError(
+                    f"{GRASP_AFFORDANCE_CAPABILITY!r} requires an "
+                    "AntipodalAffordance payload."
+                )
+            return
+        if self.parent is not None or self.native_name is not None:
+            raise ValueError("Generic scene metadata cannot declare a parent.")
+        if self.affordance_capabilities or self.affordance_payload_type is not None:
+            raise ValueError(
+                "Generic scene metadata cannot declare affordance capabilities."
+            )
+        if self.default_affordances:
+            raise ValueError(
+                "Generic scene metadata cannot declare default_affordances."
+            )
+        if self.affordance_revision is not None or self.relative_pose is not None:
+            raise ValueError(
+                "Generic scene metadata cannot declare affordance revision or pose."
+            )
+
+    @classmethod
+    def from_registration(
+        cls,
+        registration: SceneEntityRegistration,
+    ) -> SceneEntityMetadata:
+        """Project semantic metadata without copying a live payload/provider."""
+        relative_pose = registration.relative_pose
+        return cls(
+            ref=registration.ref,
+            aliases=registration.aliases,
+            parent=registration.parent,
+            native_name=registration.native_name,
+            dynamics=registration.dynamics,
+            collision_role=registration.collision_role,
+            semantic_type=registration.semantic_type,
+            affordance_capabilities=registration.affordance_capabilities,
+            default_affordances=registration.default_affordances,
+            affordance_payload_type=(
+                None
+                if registration.affordance is None
+                else type(registration.affordance)
+            ),
+            affordance_revision=registration.affordance_revision,
+            relative_pose=(
+                None
+                if relative_pose is None
+                else tuple(relative_pose.detach().cpu().reshape(-1).tolist())
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class _SceneMetadataIndex:
+    """Shared identity and affordance index for static and live scene catalogs."""
+
+    entries: tuple[SceneEntityMetadata, ...]
+    by_id: Mapping[str, SceneEntityMetadata]
+    aliases: Mapping[str, str]
+    affordances_by_parent_capability: Mapping[
+        tuple[str, str], tuple[SceneAffordanceRef, ...]
+    ]
+
+    def __init__(self, entries: Iterable[SceneEntityMetadata] = ()) -> None:
+        try:
+            supplied = tuple(entries)
+        except TypeError as exc:
+            raise TypeError("entries must be an iterable of scene metadata.") from exc
+        if not all(isinstance(entry, SceneEntityMetadata) for entry in supplied):
+            raise TypeError("entries must contain SceneEntityMetadata values.")
+
+        by_id: dict[str, SceneEntityMetadata] = {}
+        for entry in supplied:
+            entity_id = entry.ref.entity_id
+            if entity_id in by_id:
+                raise ValueError(f"Duplicate canonical scene entity ID {entity_id!r}.")
+            by_id[entity_id] = entry
+
+        aliases: dict[str, str] = {}
+        canonical_ids = set(by_id)
+        for entry in supplied:
+            canonical_id = entry.ref.entity_id
+            for alias in entry.aliases:
+                if alias in canonical_ids:
+                    raise ValueError(
+                        f"Scene alias {alias!r} collides with canonical entity ID "
+                        f"{alias!r}."
+                    )
+                previous = aliases.get(alias)
+                if previous is not None:
+                    raise ValueError(
+                        f"Scene alias {alias!r} is ambiguous between canonical "
+                        f"IDs {previous!r} and {canonical_id!r}."
+                    )
+                aliases[alias] = canonical_id
+
+        self._validate_relationships(supplied, by_id)
+        affordances = self._index_affordances(supplied)
+        object.__setattr__(self, "entries", supplied)
+        object.__setattr__(self, "by_id", MappingProxyType(by_id))
+        object.__setattr__(self, "aliases", MappingProxyType(aliases))
+        object.__setattr__(
+            self,
+            "affordances_by_parent_capability",
+            MappingProxyType(affordances),
+        )
+
+    @staticmethod
+    def _validate_relationships(
+        entries: tuple[SceneEntityMetadata, ...],
+        by_id: Mapping[str, SceneEntityMetadata],
+    ) -> None:
+        """Validate canonical parents, native members, and scoped defaults."""
+        native_members: dict[tuple[type[SceneEntityRef], str, str], str] = {}
+        for entry in entries:
+            parent = entry.parent
+            if parent is None:
+                continue
+            if parent.entity_id == entry.ref.entity_id:
+                raise ValueError(
+                    f"Scene entity {entry.ref.entity_id!r} cannot parent itself."
+                )
+            parent_entry = by_id.get(parent.entity_id)
+            if parent_entry is None:
+                raise ValueError(
+                    f"Scene entity {entry.ref.entity_id!r} references "
+                    f"unregistered parent {parent.entity_id!r}."
+                )
+            if type(parent_entry.ref) is not type(parent):
+                raise TypeError(
+                    f"Parent {parent.entity_id!r} is registered as "
+                    f"{type(parent_entry.ref).__name__}, not "
+                    f"{type(parent).__name__}."
+                )
+            if isinstance(entry.ref, (SceneLinkRef, SceneAffordanceRef)):
+                assert entry.native_name is not None
+                member_key = (
+                    type(entry.ref),
+                    parent.entity_id,
+                    entry.native_name,
+                )
+                previous = native_members.get(member_key)
+                if previous is not None:
+                    raise ValueError(
+                        f"{type(entry.ref).__name__} parent {parent.entity_id!r} "
+                        f"and native_name {entry.native_name!r} are already "
+                        f"registered as canonical ID {previous!r}."
+                    )
+                native_members[member_key] = entry.ref.entity_id
+
+        for entry in entries:
+            for capability, default_ref in entry.default_affordances.items():
+                default_entry = by_id.get(default_ref.entity_id)
+                if default_entry is None:
+                    raise ValueError(
+                        f"Scene entity {entry.ref.entity_id!r} declares unknown "
+                        f"default affordance {default_ref.entity_id!r} for "
+                        f"capability {capability!r}."
+                    )
+                if not isinstance(default_entry.ref, SceneAffordanceRef):
+                    raise TypeError(
+                        f"Default affordance {default_ref.entity_id!r} is "
+                        f"registered as {type(default_entry.ref).__name__}, not "
+                        "SceneAffordanceRef."
+                    )
+                if default_entry.parent != entry.ref:
+                    actual_parent = default_entry.parent
+                    raise ValueError(
+                        f"Default affordance {default_ref.entity_id!r} is not a "
+                        f"direct child of {entry.ref.entity_id!r}; its parent is "
+                        f"{None if actual_parent is None else actual_parent.entity_id!r}."
+                    )
+                if capability not in default_entry.affordance_capabilities:
+                    raise ValueError(
+                        f"Default affordance {default_ref.entity_id!r} does not "
+                        f"declare capability {capability!r}."
+                    )
+
+    @staticmethod
+    def _index_affordances(
+        entries: tuple[SceneEntityMetadata, ...],
+    ) -> dict[tuple[str, str], tuple[SceneAffordanceRef, ...]]:
+        """Build deterministic parent/capability reverse lookup entries."""
+        mutable: dict[tuple[str, str], list[SceneAffordanceRef]] = {}
+        for entry in entries:
+            if not isinstance(entry.ref, SceneAffordanceRef):
+                continue
+            assert entry.parent is not None
+            for capability in entry.affordance_capabilities:
+                mutable.setdefault((entry.parent.entity_id, capability), []).append(
+                    entry.ref
+                )
+        return {
+            key: tuple(sorted(refs, key=lambda ref: ref.entity_id))
+            for key, refs in mutable.items()
+        }
+
+    def resolve(
+        self,
+        identifier: str | SceneEntityRef,
+        *,
+        expected_type: type[RefT] = SceneEntityRef,
+    ) -> RefT:
+        """Resolve one canonical ID, alias, or typed reference."""
+        if not isinstance(expected_type, type) or not issubclass(
+            expected_type,
+            SceneEntityRef,
+        ):
+            raise TypeError("expected_type must be a SceneEntityRef subclass.")
+        if isinstance(identifier, SceneEntityRef):
+            canonical_id = identifier.entity_id
+            supplied_ref: SceneEntityRef | None = identifier
+        elif isinstance(identifier, str):
+            _validate_identifier(identifier, "identifier")
+            canonical_id = self.aliases.get(identifier, identifier)
+            supplied_ref = None
+        else:
+            raise TypeError("identifier must be a string or SceneEntityRef.")
+
+        entry = self.by_id.get(canonical_id)
+        if entry is None:
+            raise KeyError(f"Unknown scene entity {identifier!r}.")
+        canonical_ref = entry.ref
+        if supplied_ref is not None and type(supplied_ref) is not type(canonical_ref):
+            raise TypeError(
+                f"Scene entity {canonical_id!r} is registered as "
+                f"{type(canonical_ref).__name__}, not "
+                f"{type(supplied_ref).__name__}."
+            )
+        if not isinstance(canonical_ref, expected_type):
+            raise TypeError(
+                f"Scene entity {canonical_id!r} is "
+                f"{type(canonical_ref).__name__}, not {expected_type.__name__}."
+            )
+        return canonical_ref  # type: ignore[return-value]
+
+    def affordances(
+        self,
+        parent: str | SceneEntityRef,
+        *,
+        capability: str,
+    ) -> tuple[SceneAffordanceRef, ...]:
+        """Return compatible direct-child affordances without selecting one."""
+        parent_ref = self.resolve(parent)
+        _validate_identifier(capability, "affordance capability")
+        return self.affordances_by_parent_capability.get(
+            (parent_ref.entity_id, capability),
+            (),
+        )
+
+    def resolve_affordance(
+        self,
+        parent: str | SceneEntityRef,
+        *,
+        capability: str,
+        explicit: str | SceneAffordanceRef | None = None,
+    ) -> SceneAffordanceRef:
+        """Select one compatible affordance using strict scoped defaults."""
+        parent_ref = self.resolve(parent)
+        candidates = self.affordances(parent_ref, capability=capability)
+        if explicit is not None:
+            try:
+                selected = self.resolve(explicit, expected_type=SceneAffordanceRef)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise UnsupportedSceneAffordanceError(
+                    f"Explicit affordance {explicit!r} is not a registered "
+                    "SceneAffordanceRef."
+                ) from exc
+            entry = self.by_id[selected.entity_id]
+            if entry.parent != parent_ref:
+                raise UnsupportedSceneAffordanceError(
+                    f"Affordance {selected.entity_id!r} is not a direct child of "
+                    f"{parent_ref.entity_id!r}."
+                )
+            if capability not in entry.affordance_capabilities:
+                raise UnsupportedSceneAffordanceError(
+                    f"Affordance {selected.entity_id!r} does not support "
+                    f"capability {capability!r}."
+                )
+            return selected
+        if not candidates:
+            raise UnsupportedSceneAffordanceError(
+                f"Scene entity {parent_ref.entity_id!r} has no affordance for "
+                f"capability {capability!r}."
+            )
+        if len(candidates) == 1:
+            return candidates[0]
+        default = self.by_id[parent_ref.entity_id].default_affordances.get(capability)
+        if default is not None:
+            return self.resolve(default, expected_type=SceneAffordanceRef)
+        raise AmbiguousSceneAffordanceError(
+            f"Scene entity {parent_ref.entity_id!r} has multiple affordances for "
+            f"capability {capability!r}: "
+            f"{[candidate.entity_id for candidate in candidates]}. Configure "
+            "default_affordances for this parent and capability or select one "
+            "explicitly."
+        )
+
+
 @runtime_checkable
 class SceneEntityStateProvider(Protocol):
     """Observe one registered entity for an ordered environment batch."""
@@ -161,6 +668,12 @@ class SceneEntityRegistration:
         collision_role: Static, dynamic, or no planner collision role.
         semantic_type: Optional application semantic type.
         affordance: Affordance value for an affordance registration.
+        affordance_capabilities: Open semantic operations supported by an
+            affordance registration.
+        default_affordances: Capability-to-child mapping owned by a parent
+            object, articulation, or link registration.
+        affordance_revision: Stable integrator-owned revision or fingerprint for
+            capability-bearing affordance payload data.
         relative_pose: Optional parent-relative affordance transform.
     """
 
@@ -194,11 +707,26 @@ class SceneEntityRegistration:
     affordance: Affordance | None = None
     """Affordance value owned by a :class:`SceneAffordanceRef` registration."""
 
+    affordance_capabilities: frozenset[str] = frozenset()
+    """Open semantic capabilities declared by an affordance registration."""
+
+    default_affordances: Mapping[str, SceneAffordanceRef] = field(default_factory=dict)
+    """Capability-scoped child affordances selected when multiple are valid."""
+
+    affordance_revision: str | None = None
+    """Stable payload revision required by capability-bearing affordances."""
+
     relative_pose: torch.Tensor | None = None
     """Optional parent-relative pose when no explicit state provider exists."""
 
     def __post_init__(self) -> None:
-        if not isinstance(self.ref, SceneEntityRef):
+        if type(self.ref) not in {
+            SceneEntityRef,
+            SceneObjectRef,
+            SceneArticulationRef,
+            SceneLinkRef,
+            SceneAffordanceRef,
+        }:
             raise TypeError("ref must be a SceneEntityRef.")
         if self.state_provider is not None and not isinstance(
             self.state_provider,
@@ -219,7 +747,13 @@ class SceneEntityRegistration:
             raise ValueError("aliases must be unique.")
         object.__setattr__(self, "aliases", aliases)
 
-        if self.parent is not None and not isinstance(self.parent, SceneEntityRef):
+        if self.parent is not None and type(self.parent) not in {
+            SceneEntityRef,
+            SceneObjectRef,
+            SceneArticulationRef,
+            SceneLinkRef,
+            SceneAffordanceRef,
+        }:
             raise TypeError("parent must be a SceneEntityRef or None.")
         if self.native_name is not None:
             _validate_identifier(self.native_name, "native_name")
@@ -236,6 +770,18 @@ class SceneEntityRegistration:
             _validate_identifier(self.semantic_type, "semantic_type")
         if self.affordance is not None and not isinstance(self.affordance, Affordance):
             raise TypeError("affordance must be an Affordance or None.")
+        object.__setattr__(
+            self,
+            "affordance_capabilities",
+            _normalize_affordance_capabilities(self.affordance_capabilities),
+        )
+        object.__setattr__(
+            self,
+            "default_affordances",
+            _normalize_default_affordances(self.default_affordances),
+        )
+        if self.affordance_revision is not None:
+            _validate_identifier(self.affordance_revision, "affordance_revision")
         if self.relative_pose is not None:
             if not isinstance(self.relative_pose, torch.Tensor):
                 raise TypeError("relative_pose must be a torch.Tensor or None.")
@@ -248,6 +794,7 @@ class SceneEntityRegistration:
             )
 
         self._validate_reference_contract()
+        SceneEntityMetadata.from_registration(self)
         if (
             self.collision_role is not SceneCollisionRole.NONE
             and self.geometry_provider is None
@@ -279,6 +826,11 @@ class SceneEntityRegistration:
                 raise ValueError(
                     "Affordance values require a SceneAffordanceRef registration."
                 )
+            if self.affordance_capabilities:
+                raise ValueError(
+                    "affordance_capabilities require a SceneAffordanceRef "
+                    "registration."
+                )
             return
 
         if isinstance(self.ref, SceneLinkRef):
@@ -294,6 +846,11 @@ class SceneEntityRegistration:
             if self.affordance is not None:
                 raise ValueError(
                     "Affordance values require a SceneAffordanceRef registration."
+                )
+            if self.affordance_capabilities:
+                raise ValueError(
+                    "affordance_capabilities require a SceneAffordanceRef "
+                    "registration."
                 )
             return
 
@@ -314,12 +871,25 @@ class SceneEntityRegistration:
                 raise ValueError(
                     "Affordance registrations require state_provider or relative_pose."
                 )
+            if self.default_affordances:
+                raise ValueError(
+                    "An affordance registration cannot declare default_affordances."
+                )
             return
 
         if self.parent is not None or self.native_name is not None:
             raise ValueError("Generic entity registrations cannot declare a parent.")
         if self.state_provider is None:
             raise ValueError("Generic entity registrations require state_provider.")
+        if self.affordance_capabilities:
+            raise ValueError(
+                "affordance_capabilities require a SceneAffordanceRef registration."
+            )
+        if self.default_affordances:
+            raise ValueError(
+                "Only object, articulation, or link registrations may declare "
+                "default_affordances."
+            )
 
 
 def _copy_registration(
@@ -368,12 +938,18 @@ def _copy_affordance(affordance: Affordance | None) -> Affordance | None:
 
     visit(affordance)
     try:
-        return deepcopy(affordance, memo)
+        copied = deepcopy(affordance, memo)
     except Exception as exc:  # noqa: BLE001 - normalize opaque metadata failures
         raise TypeError(
             f"Affordance {type(affordance).__name__} must contain copyable "
             "registry metadata."
         ) from exc
+    if copied is affordance or type(copied) is not type(affordance):
+        raise TypeError(
+            f"Affordance {type(affordance).__name__} must deepcopy to a distinct "
+            "value of the exact same type."
+        )
+    return copied
 
 
 @dataclass(frozen=True, slots=True, eq=False, init=False)
@@ -394,7 +970,7 @@ class SceneRegistry:
 
     _registrations: tuple[SceneEntityRegistration, ...] = field(repr=False)
     _registrations_by_id: Mapping[str, SceneEntityRegistration] = field(repr=False)
-    _aliases: Mapping[str, str] = field(repr=False)
+    _metadata_index: _SceneMetadataIndex = field(repr=False)
     _collision_world_entity_ids: tuple[str, ...] = field(repr=False)
     _dynamic_collision_entity_ids: tuple[str, ...] = field(repr=False)
     _static_collision_entity_ids: tuple[str, ...] = field(repr=False)
@@ -422,39 +998,18 @@ class SceneRegistry:
                 "registrations must contain SceneEntityRegistration values."
             )
         owned = tuple(_copy_registration(item) for item in supplied)
-        by_id: dict[str, SceneEntityRegistration] = {}
-        for registration in owned:
-            entity_id = registration.ref.entity_id
-            if entity_id in by_id:
-                raise ValueError(f"Duplicate canonical scene entity ID {entity_id!r}.")
-            by_id[entity_id] = registration
-
-        aliases: dict[str, str] = {}
-        canonical_ids = set(by_id)
-        for registration in owned:
-            canonical_id = registration.ref.entity_id
-            for alias in registration.aliases:
-                if alias in canonical_ids:
-                    raise ValueError(
-                        f"Scene alias {alias!r} collides with canonical entity ID "
-                        f"{alias!r}."
-                    )
-                previous = aliases.get(alias)
-                if previous is not None:
-                    raise ValueError(
-                        f"Scene alias {alias!r} is ambiguous between canonical "
-                        f"IDs {previous!r} and {canonical_id!r}."
-                    )
-                aliases[alias] = canonical_id
-
-        self._validate_relationships(owned, by_id)
+        entity_metadata = tuple(
+            SceneEntityMetadata.from_registration(item) for item in owned
+        )
+        metadata_index = _SceneMetadataIndex(entity_metadata)
+        by_id = {registration.ref.entity_id: registration for registration in owned}
         object.__setattr__(self, "_registrations", owned)
         object.__setattr__(
             self,
             "_registrations_by_id",
             MappingProxyType(by_id),
         )
-        object.__setattr__(self, "_aliases", MappingProxyType(aliases))
+        object.__setattr__(self, "_metadata_index", metadata_index)
         object.__setattr__(
             self,
             "_collision_world_entity_ids",
@@ -484,54 +1039,15 @@ class SceneRegistry:
         )
         object.__setattr__(self, "collision_world_mode", collision_world_mode)
 
-    @staticmethod
-    def _validate_relationships(
-        registrations: tuple[SceneEntityRegistration, ...],
-        by_id: Mapping[str, SceneEntityRegistration],
-    ) -> None:
-        """Require every parent to be a canonical, correctly typed ref."""
-        native_members: dict[tuple[type[SceneEntityRef], str, str], str] = {}
-        for registration in registrations:
-            parent = registration.parent
-            if parent is None:
-                continue
-            if parent.entity_id == registration.ref.entity_id:
-                raise ValueError(
-                    f"Scene entity {registration.ref.entity_id!r} cannot parent itself."
-                )
-            parent_registration = by_id.get(parent.entity_id)
-            if parent_registration is None:
-                raise ValueError(
-                    f"Scene entity {registration.ref.entity_id!r} references "
-                    f"unregistered parent {parent.entity_id!r}."
-                )
-            if type(parent_registration.ref) is not type(parent):
-                raise TypeError(
-                    f"Parent {parent.entity_id!r} is registered as "
-                    f"{type(parent_registration.ref).__name__}, not "
-                    f"{type(parent).__name__}."
-                )
-            if isinstance(registration.ref, (SceneLinkRef, SceneAffordanceRef)):
-                assert registration.native_name is not None
-                member_key = (
-                    type(registration.ref),
-                    parent.entity_id,
-                    registration.native_name,
-                )
-                previous = native_members.get(member_key)
-                if previous is not None:
-                    raise ValueError(
-                        f"{type(registration.ref).__name__} parent "
-                        f"{parent.entity_id!r} and native_name "
-                        f"{registration.native_name!r} are already registered as "
-                        f"canonical ID {previous!r}."
-                    )
-                native_members[member_key] = registration.ref.entity_id
-
     @property
     def registrations(self) -> tuple[SceneEntityRegistration, ...]:
         """Return structurally independent registration values."""
         return tuple(_copy_registration(item) for item in self._registrations)
+
+    @property
+    def entity_metadata(self) -> tuple[SceneEntityMetadata, ...]:
+        """Return provider-free metadata without copying affordance payloads."""
+        return self._metadata_index.entries
 
     @property
     def entity_refs(self) -> tuple[SceneEntityRef, ...]:
@@ -541,7 +1057,7 @@ class SceneRegistry:
     @property
     def aliases(self) -> Mapping[str, str]:
         """Return the immutable alias-to-canonical-ID index."""
-        return self._aliases
+        return self._metadata_index.aliases
 
     @property
     def collision_world_entity_ids(self) -> tuple[str, ...]:
@@ -589,38 +1105,10 @@ class SceneRegistry:
             KeyError: If the canonical ID or alias is unknown.
             TypeError: If the supplied or resolved reference has the wrong type.
         """
-        if not isinstance(expected_type, type) or not issubclass(
-            expected_type,
-            SceneEntityRef,
-        ):
-            raise TypeError("expected_type must be a SceneEntityRef subclass.")
-        supplied_ref: SceneEntityRef | None
-        if isinstance(identifier, SceneEntityRef):
-            canonical_id = identifier.entity_id
-            supplied_ref = identifier
-        elif isinstance(identifier, str):
-            _validate_identifier(identifier, "identifier")
-            canonical_id = self._aliases.get(identifier, identifier)
-            supplied_ref = None
-        else:
-            raise TypeError("identifier must be a string or SceneEntityRef.")
-
-        registration = self._registrations_by_id.get(canonical_id)
-        if registration is None:
-            raise KeyError(f"Unknown scene entity {identifier!r}.")
-        canonical_ref = registration.ref
-        if supplied_ref is not None and type(supplied_ref) is not type(canonical_ref):
-            raise TypeError(
-                f"Scene entity {canonical_id!r} is registered as "
-                f"{type(canonical_ref).__name__}, not "
-                f"{type(supplied_ref).__name__}."
-            )
-        if not isinstance(canonical_ref, expected_type):
-            raise TypeError(
-                f"Scene entity {canonical_id!r} is "
-                f"{type(canonical_ref).__name__}, not {expected_type.__name__}."
-            )
-        return canonical_ref  # type: ignore[return-value]
+        return self._metadata_index.resolve(
+            identifier,
+            expected_type=expected_type,
+        )
 
     def lookup(
         self,
@@ -639,6 +1127,98 @@ class SceneRegistry:
         """
         ref = self.resolve(identifier, expected_type=expected_type)
         return _copy_registration(self._registrations_by_id[ref.entity_id])
+
+    def affordances(
+        self,
+        parent: str | SceneEntityRef,
+        *,
+        capability: str,
+    ) -> tuple[SceneAffordanceRef, ...]:
+        """Return compatible direct-child affordances without selecting one.
+
+        Args:
+            parent: Canonical ID, alias, or typed parent reference.
+            capability: Required open affordance capability.
+
+        Returns:
+            Compatible canonical references sorted by canonical ID.
+        """
+        return self._metadata_index.affordances(
+            parent,
+            capability=capability,
+        )
+
+    def resolve_affordance(
+        self,
+        parent: str | SceneEntityRef,
+        *,
+        capability: str,
+        explicit: str | SceneAffordanceRef | None = None,
+    ) -> SceneAffordanceRef:
+        """Select one compatible affordance with strict scoped-default rules.
+
+        Args:
+            parent: Entity that directly owns the affordance.
+            capability: Required semantic affordance capability.
+            explicit: Optional explicit affordance ID or typed reference.
+
+        Returns:
+            One canonical compatible affordance reference.
+
+        Raises:
+            UnsupportedSceneAffordanceError: If no compatible affordance exists
+                or an explicit affordance has the wrong parent/capability.
+            AmbiguousSceneAffordanceError: If multiple candidates exist without
+                a scoped default.
+        """
+        return self._metadata_index.resolve_affordance(
+            parent,
+            capability=capability,
+            explicit=explicit,
+        )
+
+    def object_semantics(
+        self,
+        object_ref: str | SceneObjectRef,
+        *,
+        affordance: str | SceneAffordanceRef,
+    ) -> ObjectSemantics:
+        """Build one owned atomic-action semantic snapshot.
+
+        Args:
+            object_ref: Canonical object ID, alias, or typed reference.
+            affordance: Registered direct-child affordance for the object.
+
+        Returns:
+            Object semantics with an owned affordance payload and canonical ID.
+
+        Raises:
+            ValueError: If the affordance does not belong to the object.
+        """
+        canonical_object = self.resolve(
+            object_ref,
+            expected_type=SceneObjectRef,
+        )
+        object_registration = self._registrations_by_id[canonical_object.entity_id]
+        affordance_registration = self.lookup(
+            affordance,
+            expected_type=SceneAffordanceRef,
+        )
+        if affordance_registration.parent != canonical_object:
+            raise ValueError(
+                f"Affordance {affordance_registration.ref.entity_id!r} is not a "
+                f"direct child of object {canonical_object.entity_id!r}."
+            )
+        payload = affordance_registration.affordance
+        if payload is None:
+            raise AssertionError("Affordance registration lost its payload.")
+        return ObjectSemantics(
+            affordance=payload,
+            geometry={},
+            properties={},
+            label=object_registration.semantic_type or "none",
+            entity_id=canonical_object.entity_id,
+        )
 
     def make_scene_provider(
         self,
@@ -1333,6 +1913,10 @@ class RegistrySceneProvider(SceneProvider):
 
 
 __all__ = [
+    "AmbiguousSceneAffordanceError",
+    "GRASP_AFFORDANCE_CAPABILITY",
+    "PLACE_IN_AFFORDANCE_CAPABILITY",
+    "PLACE_ON_AFFORDANCE_CAPABILITY",
     "RegistrySceneProvider",
     "SceneAffordanceRef",
     "SceneArticulationRef",
@@ -1340,10 +1924,12 @@ __all__ = [
     "SceneCollisionWorldMode",
     "SceneDynamics",
     "SceneEntityRef",
+    "SceneEntityMetadata",
     "SceneEntityRegistration",
     "SceneEntityStateProvider",
     "SceneGeometryProvider",
     "SceneLinkRef",
     "SceneObjectRef",
     "SceneRegistry",
+    "UnsupportedSceneAffordanceError",
 ]
