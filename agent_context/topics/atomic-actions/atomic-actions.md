@@ -221,15 +221,14 @@ match the engine's configured planner.
 `ResourceClaim` contains transitive leaf-resource IDs, sorted concrete joint
 IDs, and adapter-defined `claim_tokens`. Claims conflict when any category
 overlaps, so a `whole_body` composite conflicts with a contained arm even when
-their endpoint or control-part names differ. This is deterministic conflict
-metadata only: there is no resource lease manager, parallel scheduler,
-or concurrency guarantee yet. Dynamic execution can dispatch multiple
-endpoint commands in one synchronized frame, but that does not imply resource
-scheduling or safe parallelism. A custom mobile/base or whole-body endpoint is
-executable only when its adapter supplies a target, the action emits a matching
-runtime payload, and the target's transport is registered with the
-`EndpointCommandRouter`. Successful binding or a non-conflicting claim alone is
-not proof that a planner/controller path or safe concurrent execution exists.
+their endpoint or control-part names differ. `ParallelSkillRuntime` uses these
+claims for deterministic preflight and rejects overlapping branches, but there
+is no general resource lease manager outside that coordinator. Non-conflicting
+claims are not proof of collision safety: the parallel coordinator requires a
+`ParallelCommandSafetyValidator` before merged command frames can leave it. A
+custom mobile/base or whole-body endpoint is executable only when its adapter
+supplies a target, the action emits a matching runtime payload, and the target's
+transport is registered with the `EndpointCommandRouter`.
 
 ## Object identity and pose grounding
 
@@ -328,43 +327,43 @@ The compiler identity prevents a workflow from crossing lowerer/grounder
 registries. Engine/profile staleness is checked through the bound integration;
 the workflow does not duplicate engine-owner or catalog-revision fields.
 
-## Semantic runtime facade
+## Semantic skill runtime
 
-`embodichain.lab.sim.skills.SemanticSkillRuntime` is the application-facing
-orchestration layer. `bind()` connects an explicit manifest, registry, engine,
-observation provider, command sink, and clock; `from_simulation()` assembles the
-standard joint-position simulation ports while still requiring an explicit
-registry, robot profile, and motion generator. Its optional `control_dt`
-selects a command cadence independently of the simulation physics period. A
-runtime-level `runner_cfg` overrides all calls; when omitted, each grounded
-call uses the `ExecutionRunnerCfg` owned by its selected `SkillPolicyPreset`.
-The runtime exposes only calls supported by both the semantic catalog and the
-currently bound robot profile, and allows exactly one active `SemanticTask`
-because no resource scheduler or lease manager exists.
+`embodichain.lab.sim.skills.SkillRuntime` is the canonical execution service.
+`start()` analyzes the complete semantic-call window once, then JIT-grounds and
+starts exactly one invocation, `ExecutionSession`, and `ExecutionRunner` per
+executed call. Before every call it obtains a fresh `PlanningContext`; only
+verified `TaskState` and the shrinking eligible cohort cross call barriers.
+`execution_prefix_length` lets a selected future suffix participate in static
+look-ahead without grounding or executing that suffix. A runtime owns at most
+one active workflow, while `fork()` creates an independent lane sharing the
+compiler, observation/evidence providers, clock, and optional runner override.
 
-`SemanticSkillRuntime.run()` is the blocking one-segment convenience path and
-requires a `SemanticEffectVerifier`. Use `start()` when effect verification is
-asynchronous. A `SemanticTask` retains externally verified `TaskState`, stable
-environment IDs, and the sticky eligible cohort across several independently
-analyzed segments. `run_segment()` supports dynamic application decisions at
-safe semantic-call boundaries; submit all known calls in one segment when Pick
-look-ahead should account for a downstream Place or HandOver target.
+The selected `SkillPolicyPreset` owns the default `ExecutionRunnerCfg` for each
+call. A runtime-level `runner_cfg` is an explicit all-call override; omitting it
+does not synthesize a second default. Motion and recovery policy continue to be
+lowered by `SemanticSkillCompiler` into the invocation.
 
-`SemanticExecution` always JIT-grounds and starts one invocation at a time. It
-uses a fresh observation before each call, delegates local recovery and safe
-stop to `ExecutionRunner`, commits only verified effects, then carries the
-session's task state and eligibility into the next grounding boundary. Manual
-execution reports `WAITING_FOR_EFFECT` and resumes through
-`step(effect_success=...)`; an early non-due step leaves the request pending, so
-the caller waits for `runner_step.wait_duration`, re-reads the request, and
-submits the mask again. The facade correlates that mask with the current
-low-level verification ID;
-compatible in-place call changes use `revise_current()`, which reanalyzes the
-workflow and still inherits the runner's same-skill, same-invocation, and
-same-runtime-address restrictions. Runtime failures remain terminal; automatic
-task-level skill replacement or symbolic-state reconciliation is not provided.
-A failed or cancelled segment closes its task and releases runtime ownership;
-successful dynamic segments retain ownership until `finish()` or cancellation.
+Physical verification flows through `EffectEvidenceCollectorPort`, the
+grounded `SemanticEffectSpec`, and its selected `EffectMonitor`. `SkillResult`
+contains tensor-owning row masks, verified task state, call/plan/effect traces,
+and JSON-safe metadata. `SkillFailure` exposes a stable `code` and `phase`;
+post-analysis preparation failures preserve an original `SemanticDiagnostic`
+when available, while low-level execution events remain in the call trace.
+Failures are terminal in the current runtime; workflow-level replacement,
+reacquisition, and symbolic-state reconciliation are not yet provided.
+
+`SemanticSkillRuntime` is only the compatibility subclass retaining the
+simulation-oriented `from_simulation()` factory and legacy verifier callback.
+New integrations depend on `SkillRuntime` and typed evidence collectors.
+`AtomicSkills` is a small application facade over that same runtime; it does
+not own a second compiler or execution loop.
+
+`ParallelSkillRuntime` coordinates two or more forked semantic lanes on one
+clock. It rejects overlapping `ResourceClaim` values and symbolic writes,
+requires a `ParallelCommandSafetyValidator`, merges at most one synchronized
+command action per coordinator step, and currently supports fail-fast recovery
+only. Parallel success adopts verified branch state at the shared barrier.
 
 `registry.make_planning_scene_provider(motion_generator, batch_size=...)`
 returns a fresh `RegistrySceneProvider` with independent baselines and revision
@@ -686,8 +685,9 @@ structured invalidation/replan events, and requires terminal completion.
 Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
 Both examples separate `create_*_application()` (scene/profile/runtime and
 default verifier wiring), `create_*_task()` (robot-independent semantic calls),
-and the application-facing `app.run(task, ...)` entry. `app` remains a
-`SemanticSkillRuntime`; there is no tutorial-specific facade. `place.py`
+and the application-facing `app.run(task, ...)` entry. The examples retain the
+compatibility `SemanticSkillRuntime` simulation factory; there is no
+tutorial-specific execution loop. `place.py`
 executes `Pick -> Place`, verifying the observed lift, planned object-to-EEF
 relation, release pose, and open hand. `hand_over.py` demonstrates disjoint
 dual-arm resources plus an explicit `RegisteredSemanticLowerer`, then verifies

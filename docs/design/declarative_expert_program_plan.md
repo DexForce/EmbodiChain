@@ -1,15 +1,27 @@
 # Declarative Expert Programs and Unified Semantic Skill Runtime
 
-- Status: implementation in progress; Phase 0, PR1, PR2A, and PR2B are
-  complete on `main`, and PR2C is implemented on this feature branch
-- Baseline: `main@dbc6553f11d23a5ab738282fbcde1a7214fca783`
-- Last updated: 2026-08-19
+- Status: implementation in progress; the integration foundation, generic
+  runtime endpoints, semantic compiler, and verified atomic-action runtime are
+  on `main`; the canonical semantic runtime, physical evidence layer, and
+  parallel-runtime foundation are implemented in open PR #496
+- Baseline: `main@ba1afb773fb7fff40dfe0fe5aad054fb27b40a50`
+- Current local branch: `feat/semantic-skill-runtime@e702b51e7244f98ab88d30d1502d8a3247b891fe`
+  ([PR #496](https://github.com/DexForce/EmbodiChain/pull/496))
+- Last updated: 2026-08-22
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
 - Related implementation:
   [#475](https://github.com/DexForce/EmbodiChain/pull/475),
   [#517](https://github.com/DexForce/EmbodiChain/pull/517),
-  [#487](https://github.com/DexForce/EmbodiChain/pull/487)
+  [#487](https://github.com/DexForce/EmbodiChain/pull/487),
+  [#523](https://github.com/DexForce/EmbodiChain/pull/523),
+  [#488](https://github.com/DexForce/EmbodiChain/pull/488),
+  [#492](https://github.com/DexForce/EmbodiChain/pull/492),
+  [#495](https://github.com/DexForce/EmbodiChain/pull/495),
+  [#496](https://github.com/DexForce/EmbodiChain/pull/496),
+  [#497](https://github.com/DexForce/EmbodiChain/pull/497),
+  [#498](https://github.com/DexForce/EmbodiChain/pull/498), and
+  [#500](https://github.com/DexForce/EmbodiChain/pull/500)
 
 ## 1. Executive summary
 
@@ -85,20 +97,39 @@ sessions, or verifiers.
 - Exposing raw joint commands, planner protocols, EEF/object transform math, or
   arbitrary Python expressions in the normal Expert Program schema.
 - Building a general DAG/OR-Tools scheduler in the first version.
-- Supporting `Parallel`, `If`, and `Retry` before sequential observed execution
-  is stable.
+- Exposing user-facing `Parallel`, `If`, or `Retry` semantics before sequential
+  observed execution is stable. Lower-level parallel contracts may land earlier
+  for fail-closed validation and testing.
 - Claiming that every new physical interaction can be expressed without any
   shared skill implementation.
 - Removing Action Bank before feature parity and a documented migration window.
 
-## 4. Baseline on current `main`
+## 4. Baseline and current implementation snapshot
 
-This plan is updated against committed `main@dbc6553f`. PR #517 simplified the
-atomic-action core, PR #487 landed the complete Phase 1 foundation, and PR #523
-simplified that foundation without changing its contracts. The scene registry
-and robot skill profile APIs are available, but official task environments have
-not adopted them yet; that rollout starts only after the semantic compiler and
-runtime exist.
+This plan was audited against `main@ba1afb77` and the current local
+`feat/semantic-skill-runtime@e702b51e` tree after resolving the merge from
+`origin/main`. Status is attributed conservatively: "on `main`" means merged
+into the baseline above, "current branch" means present in PR #496 but not
+merged, and "stacked" means implemented only in a later open PR and therefore
+unavailable from either the baseline or the current branch.
+
+| Scope | Repository status | Implemented boundary |
+|---|---|---|
+| Phase 0 and integration foundation | Merged through #475, #517, #487, and #523 | Correct planning contracts, authoritative scene identity, robot skill profiles, and snapshot-backed grounding. |
+| Generic runtime endpoints | Merged in #488 | Typed endpoint targets and payloads, command frames, exact-ID routing, acknowledgements, cancellation, and transport-owned safe holds. |
+| Semantic IR and compiler | Merged in #492 | `SemanticCallSpec`, object-centric built-ins, static workflow analysis, provider/resource preflight, and lazy lowering to `ActionInvocation`. |
+| Verified atomic-action runtime | Merged in #495 | Row-local lifecycle, physical-effect requests, effect-aware plans, and verified `TaskState` updates. This is the core verification seam, not the application-facing semantic runtime. |
+| Canonical semantic runtime and parallel foundation | Implemented in current open PR #496 | `SkillRuntime`, `AtomicSkills`, typed evidence providers, composite monitors, structured traces, and fail-closed `ParallelSkillRuntime`. |
+| Expert Program and Gym/demo bridge | Implemented only in stacked open PR #497 | Strict versioned configuration, decoder/preflight, lazy program segments, `env.step()` bridge, settling, validators, and completion metadata. |
+| MLLM frontend and task rollout | Implemented only in stacked open PRs #498 and #500 | Catalog-constrained model output plus declarative task slices and deterministic rollout reporting. These are not current-branch capabilities. |
+
+PR #496 is open and non-draft. The local branch reconciles current `main` in
+merge commit `e702b51e`; GitHub mergeability must be re-evaluated after that
+commit is pushed. Greptile review on the previous remote head was successful.
+The PR records stack-tip validation of 1215 passed, 2 skipped, and 8 deselected;
+the local merge resolution additionally passes all 303 `tests/sim/skills`
+tests, Black for all 702 Python files, and public API documentation coverage for
+1324/1324 exports.
 
 | Capability | Current main | Design consequence |
 |---|---|---|
@@ -109,10 +140,13 @@ runtime exist.
 | Refined planning architecture (#475) | `MotionGenerator.generate()` is the single planning facade; each `ActionPlan` owns one trajectory and one recovery boundary; named `TrajectorySegment`s are metadata | Do not reintroduce `TrajectoryBuilder`, `MotionPlanningAdapter`, or trajectory-segment recovery. |
 | Environment cadence through `BaseEnv.step_dt` (#472) | Available; planner and action trajectories now require explicit timing | Expert configuration, `MotionPolicy`, and the engine do not own a fallback period. Environment integrations put `BaseEnv.step_dt` on `PlanningContext` only for action-owned interpolation. |
 | Adaptive dynamic-object settling (#470) | Reset/event implementation exists | Extract a reusable monitor; demo post-policies must advance through `env.step()`. |
-| Authoritative scene registry (#487) | Foundation available; official environments not migrated | Reuse it from the semantic compiler and opt in task scenes explicitly. |
-| Declarative robot skill profiles (#487) | Foundation available; official profiles not yet installed | Bind reusable embodiment profiles through the semantic integration layer; put optional backend compatibility in `SkillPolicyPreset.required_planner`, not `MotionPolicy`. |
+| Authoritative scene registry (#487, #523) | Available and consumed by the semantic compiler; official task adoption remains selective | Keep registry IDs authoritative and install an explicit environment adapter rather than scanning simulation attributes. |
+| Declarative robot skill profiles (#487, #523) | Available and consumed by semantic binding; official profiles remain an integration task | Keep embodiment choices in reusable profiles and named presets, not task-owned motion code. |
+| Generic runtime endpoints (#488) | Available end to end | New endpoint kinds extend through an adapter, payload, transport, and shared skill without restoring arm/tool-shaped runner paths. |
+| Semantic call IR and compiler (#492) | Available for `Pick`, `Place`, `HandOver`, and registered extensions | Python and later configuration/MLLM frontends must converge before binding and lowering. Do not add a frontend-specific compiler. |
+| Verified atomic runtime (#495) | Available with row-local effect requirements and state application | Semantic monitors must supply physical evidence to the existing verification boundary; they must not fabricate attachments or task success. |
 | Repeated cube pick/place demo | Manually constructs invocations and transform math | First configuration-only vertical slice. |
-| Open Drawer task (#473) | Manually builds approach, grasp, pull, and command trajectories | Evidence that the semantic layer needs articulation/link/affordance references and a reusable articulation skill. |
+| Open Drawer task (#473, #513) | Still uses task/tutorial-owned drawer motion | Reuse `Slide` semantic integration plus application-level articulation verification; do not introduce a competing drawer-only primitive. |
 | Action Bank | Configuration plus task-specific Python node/edge functions | Keep only as a compatibility path while semantic coverage is built. |
 
 PR #475 resolved cumulative translation/rotation publication, removed the dead
@@ -123,16 +157,21 @@ hard break: the project will not provide a compatibility adapter or deprecation
 window for that former extension contract. Custom actions must migrate to
 `_plan()` so framework-owned scene binding cannot be bypassed.
 
-Phase 1 closes the core identity, registry-backed collision integration, and
-embodiment-owned capability/profile prerequisites. The remaining #474 work is
-adoption and semantic orchestration:
+The compiler and verified atomic-action seam now close the original semantic
+orchestration gap on `main`. The remaining #474 work is integration, frontend,
+and task adoption:
 
-- ordinary callers still see a large low-level public surface and must perform
-  semantic transform and verifier plumbing;
-- official environments do not yet provide authoritative registry population;
-- official robot configurations do not yet install reusable skill profiles;
-- named presets are not yet selected by a semantic facade/runtime; and
-- effect monitoring and the configuration/demo path remain later-phase work.
+- merge PR #496 after reconciling it with current `main`, preserving
+  `SkillRuntime` as the canonical application runtime and
+  `SemanticSkillRuntime` only as a compatibility facade;
+- install explicit `SkillRuntimeProvider` adapters, authoritative scene
+  population, and reusable robot profiles in supported environments;
+- land the strict Expert Program and Gym/demo path from #497, then the
+  catalog-constrained MLLM frontend and measured task slices from #498/#500;
+- implement `Slide` semantic lowering and application-level articulation
+  verification before migrating Open Drawer; and
+- qualify a production physical-safety validator before enabling parallel task
+  migrations such as PourWater.
 
 One #474 finding has changed since its review branch: the ambiguous
 `collision_check` switch has been replaced by `DynamicCollisionMode.OFF`,
@@ -243,12 +282,16 @@ kept separate:
 
 ```text
 embodichain/lab/sim/skills/
-  calls.py              # semantic call specs and public facade
+  calls.py              # semantic call specs and versioned call catalog
   scene.py              # entity references and SceneRegistry
   profiles.py           # RobotSkillProfile and named presets
+  integration.py        # immutable manifest and live integration binding
   compiler.py           # workflow analysis, grounding, invocation lowering
   runtime.py            # SkillRuntime built on ExecutionRunner
-  effects.py            # built-in EffectMonitor contracts/implementations
+  effects.py            # typed semantic effects and composite monitors
+  evidence.py           # backend-neutral evidence queries/providers/collector
+  parallel.py           # deterministic claim, timing, barrier, and merge rules
+  parallel_runtime.py   # fail-closed shared-clock parallel coordinator
 
 embodichain/lab/sim/atomic_actions/
   runtime_commands.py   # transport-neutral endpoint payloads and timed frames
@@ -556,6 +599,22 @@ boundaries.
 - uniform `SkillResult`, cancellation, timeout, and safe-stop behavior;
 - semantic action events and optional trajectory-segment trace metadata.
 
+PR #496 implements this boundary. Workflow analysis runs once, but every
+semantic call captures a fresh observation, grounds exactly one invocation,
+and creates exactly one fresh `ExecutionSession` and `ExecutionRunner`. Verified
+task state and row eligibility cross call barriers; sessions and runners do
+not. `AtomicSkills` is the small Python facade, while
+`AtomicSkills.from_env()` accepts only an explicit `SkillRuntimeProvider` and
+never discovers robots, registries, controllers, or managers by attribute
+scanning. The former `SemanticSkillRuntime` name remains as a simulation-facing
+compatibility facade that delegates to the canonical runtime.
+
+Runtime results are owned, JSON-safe snapshots. They include stable endpoint
+binding choices, resolved presets and core policies, planning attempts, scene
+revisions/dependencies, physical-effect evidence, per-row masks, failures, and
+cancel/safe-stop outcomes. This trace is the shared observability contract for
+the later Expert Program and demo bridge.
+
 Catalog discovery and runtime installation should have distinct names. For
 example, a catalog can `discover` a descriptor while an engine explicitly
 `install`s an implementation. The final naming is an API-review item, but one
@@ -571,10 +630,20 @@ These responsibilities remain separate:
 | Segment post-policy | Between motion completion and segment validation | Advances environment behavior such as settling; does not duplicate atomic-action recovery. |
 | Segment validator | Dataset/task boundary | Decides whether the completed segment is acceptable and records task metrics. |
 
-Simulation integrations should provide standard monitors for grasp, release,
-handover, and articulation-joint progress. Hardware can implement the same
-contract with perception, force, or controller feedback. Custom monitors stay
-an advanced extension point.
+PR #496 implements typed `SemanticEffectSpec` and versioned `EffectMonitorRef`
+contracts, a registry-backed `CompositeEffectMonitor` with consecutive-sample
+hysteresis, and typed pose/binary/scalar/joint evidence channels. Simulation
+providers read control-part/FK state and explicitly registered articulation
+joint observations; missing backend channels produce invalid evidence instead
+of fabricated success. Hardware can implement the same query/provider contract
+with perception, force, or controller feedback. Custom monitors stay an
+advanced extension point.
+
+The built-in compiler currently constructs grasp, release, and handover effect
+specifications. Generic articulation-joint state, clauses, and evidence are
+available as reusable infrastructure, but PR #496 deliberately does not add a
+dedicated `OperateArticulation` call or primitive. `Slide` semantic lowering
+and its application-level articulation verifier remain Phase 6 work.
 
 ## 8. Expert Program configuration
 
@@ -764,8 +833,8 @@ backend returns a different sample count. Effect monitors run at the action
 effect boundary and may use `EffectVerificationRequest.terminal_segment` for
 correlation. Program post-policies and validators subscribe to program/demo
 segment boundaries, not trajectory segments. Articulation segment names should
-be stabilized with the reusable articulation skill rather than predeclared in
-the configuration schema.
+be stabilized with the reusable `Slide` semantic integration rather than
+predeclared in the configuration schema.
 
 ### 9.4 Dynamic settling
 
@@ -805,6 +874,38 @@ Within the shared barrier, task state, effects, recovery budgets, eligibility,
 success, and failure remain independent per environment. Completed, failed, or
 otherwise inactive rows emit hold behavior and cannot overwrite another row's
 state while the active cohort catches up.
+
+### 9.6 Parallel runtime boundary
+
+PR #496 implements the runtime-side Phase 7 foundation without making
+parallelism a default-safe operation:
+
+1. Each branch is statically analyzed from semantic calls and owns an
+   independent fork of `SkillRuntime`; compiler integration, observation and
+   evidence providers, and the environment clock are shared, while runner,
+   masks, verified state, and buffered commands are lane-local.
+2. Overlapping `ResourceClaim`s fail before execution. Claims establish
+   controller/resource exclusivity only; they are not proof that two physical
+   trajectories are collision-free.
+3. Every frame must occupy exactly one declared environment step. Branches use
+   one shared clock and shorter branches are padded with explicit holds; the
+   coordinator neither silently resamples fractional timing nor lets a branch
+   advance its own simulator clock.
+4. The coordinator merges only disjoint command destinations and verified
+   row-local state deltas. Without an explicit row-partition contract, two
+   branches writing the same symbolic key conflict even if observed masks look
+   disjoint.
+5. The current runtime contract supports fail-fast barriers, bounded step
+   timeouts, deterministic cancellation, and acknowledgement-checked safe
+   stop.
+6. Construction requires a `ParallelCommandSafetyValidator`, and every merged
+   outbound command is validated. Missing or inconclusive physical safety
+   evidence fails closed.
+
+This current-branch foundation does not by itself add public Expert Program
+`Parallel`/`Barrier` nodes, certify an environment-specific safety validator,
+or migrate PourWater. Those remain explicit schema, integration, and task
+acceptance steps rather than implied consequences of disjoint resource claims.
 
 ## 10. Action Bank migration
 
@@ -883,28 +984,36 @@ PR1 snapshot/identity bridge (complete)
         +-----------------------+
         v                       v
 PR2A SceneRegistry      PR2B RobotSkillProfile
-   (implemented)          (implemented)
+   (#487, main)             (#487, main)
         |                       |
         |                       v
         |              PR2C Runtime Endpoints
-        |                    (in progress)
+        |                    (#488, main)
         +-----------+-----------+
                     v
-Semantic calls/compiler --> SkillRuntime/effect monitors
-        |                              |
-        +---------------+--------------+
-                        v
-            Expert Program + demo bridge
-                        |
-                        v
-              repeated-cube vertical slice
-                        |
-             +----------+-----------+
-             v                      v
-    articulation/Open Drawer   Parallel/PourWater
-             +----------+-----------+
-                        v
-              Action Bank deprecation
+        Semantic calls/compiler (#492, main)
+                    |
+                    v
+       Verified atomic runtime (#495, main)
+                    |
+                    v
+ SkillRuntime/evidence/parallel foundation (#496, current open PR)
+                    |
+                    v
+       Expert Program + demo bridge (#497, stacked open PR)
+                    |
+                    v
+          MLLM frontend (#498, stacked open PR)
+                    |
+                    v
+ Task slices + rollout validation (#500, stacked open PR)
+                    |
+          +---------+----------+
+          v                    v
+ Slide/Open Drawer      safety qualification/PourWater
+          +---------+----------+
+                    v
+          Action Bank deprecation
 ```
 
 ### Phase 0: correctness and core-contract decisions (complete)
@@ -978,9 +1087,9 @@ documented deprecated fallbacks.
 
 ### Phase 1: unified integration data
 
-Phase 1 is implemented as three focused follow-up PRs. PR2A and PR2B branch
-from the PR1 foundation; PR2C follows PR2B and joins PR2A before the semantic
-facade/compiler work.
+Phase 1 was delivered as three focused follow-up layers. PR2A and PR2B landed
+with the PR1 foundation in #487 (and were simplified by #523); PR2C then landed
+in #488 before the semantic compiler work.
 
 #### PR2A: SceneRegistry (landed in PR #487)
 
@@ -1051,7 +1160,7 @@ PR2A and PR2B landed together through PR #487. That foundation does not migrate
 official tasks; the repeated-cube vertical slice opts in only after the
 compiler, runtime, and demo bridge are available.
 
-#### PR2C: generic runtime endpoints (implemented on the feature branch)
+#### PR2C: generic runtime endpoints (landed in PR #488)
 
 PR2C removes the temporary arm/tool lowering seam and makes the profile's
 generic endpoint model executable end to end:
@@ -1094,11 +1203,11 @@ PR2C does not add parallel scheduling, claim merging, transport rollback, or a
 generic endpoint-feedback evaluator. It also does not add cross-destination
 hot revision. Those require separate contracts.
 
-PR2C exit criteria: an installed custom endpoint kind needs one reusable
-endpoint declaration/adapter, payload, transport, and shared atomic skill, but
-no core binding or runner changes; whole-body joint endpoints use the same
-path; unknown transports and incompatible payloads fail before dispatch; and
-cancel/hold behavior remains transport-owned and auditable.
+PR2C exit criteria are met on `main`: an installed custom endpoint kind needs
+one reusable endpoint declaration/adapter, payload, transport, and shared atomic
+skill, but no core binding or runner changes; whole-body joint endpoints use the
+same path; unknown transports and incompatible payloads fail before dispatch;
+and cancel/hold behavior remains transport-owned and auditable.
 
 Combined Phase 1 exit criteria: an object is registered once under an
 authoritative ID, aliases cannot introduce ambiguity, dynamic-object
@@ -1107,7 +1216,11 @@ diagnostic, robot capabilities resolve bindings/presets without task-owned
 motion code, and generic resolved endpoints can reach their registered runtime
 transports without adding arm/tool-specific core paths.
 
-### Phase 2: semantic facade and compiler
+### Phase 2: semantic facade and compiler (compiler on `main`; facade in PR #496)
+
+The semantic IR, catalog, static analysis, provider/resource preflight, and JIT
+lowering landed in PR #492. The small `AtomicSkills` facade and canonical
+application-runtime entry point are implemented in current PR #496.
 
 Deliverables:
 
@@ -1119,11 +1232,17 @@ Deliverables:
   excluding scene construction;
 - curated semantic exports while retaining advanced contracts.
 
-Exit criteria: the quickstart performs pick/place without raw qpos, 4x4
-transform math, planner selection, context/session construction, or a custom
-effect verifier.
+Compiler-level exit criteria are met and the current branch exposes the target
+facade. End-to-end quickstart acceptance remains open until a supported
+environment installs the explicit `SkillRuntimeProvider`, scene registry, robot
+profile, and evidence integration used by that facade.
 
-### Phase 3: canonical runtime and effects
+### Phase 3: canonical runtime and effects (implemented in open PR #496)
+
+PR #495 landed the verified atomic-action seam on `main`. PR #496 builds the
+canonical application runtime and physical evidence/monitor layer on top of
+that seam; these additions are implemented and tested on the current branch but
+are not yet merged.
 
 Deliverables:
 
@@ -1136,10 +1255,17 @@ Deliverables:
   effect, recovery, eligibility, and result state;
 - safe cancellation, timeout, and hold behavior inherited from the runner.
 
-Exit criteria: Python calls and a programmatic `SemanticCallSpec` use identical
-compiler/runtime code and produce equivalent results.
+Runtime-level exit criteria are met on the current branch: `AtomicSkills`
+varargs and programmatic `SemanticCallSpec` iterables use the same compiler and
+runtime path, and each call receives a fresh observation/session/runner. Full
+configuration equivalence remains downstream of PR #497.
 
-### Phase 4: demo integration primitives
+### Phase 4: demo integration primitives (implemented only in stacked PR #497)
+
+The current branch deliberately stops at reusable runtime ports. PR #497 owns
+the Gym clock/command adapters, lazy `DemoSegment` bridge, settling and
+validation lifecycle, and serialized completion metadata. None of those
+frontend types should be imported back into `embodichain.lab.sim.skills`.
 
 Deliverables:
 
@@ -1156,6 +1282,12 @@ Exit criteria: no demo command bypasses `env.step()`, and no post-policy,
 effect, or trace integration contains a hard-coded trajectory index.
 
 ### Phase 5: Expert Program version 1 and repeated-cube vertical slice
+
+The strict schema, decoder, loader, preflight compiler, and program runtime are
+implemented only in stacked PR #497. Declarative task slices and deterministic
+rollout measurement are implemented only in stacked PR #500. Merge status and
+supported-simulation acceptance remain open, so Phase 5 is not complete on the
+current branch or `main`.
 
 Deliverables:
 
@@ -1176,7 +1308,15 @@ Exit criteria:
   failure, effect, recovery, and eligibility masks remain independent;
 - the task contains no task-specific motion-generation code.
 
-### Phase 6: sequential skill coverage and articulated interaction
+### Phase 6: sequential skill coverage and articulated interaction (pending)
+
+The registry can represent articulations, links, and affordances, and the
+verified core/current branch can carry typed articulation-joint state and
+physical evidence. That infrastructure is intentionally not counted as a
+drawer semantic skill. The latest PR #496 tree removes the branch-local
+`OperateArticulation` experiment and keeps the design aligned with the existing
+motion-centric `Slide` primitive plus application-level completion
+verification.
 
 Deliverables:
 
@@ -1190,13 +1330,20 @@ Deliverables:
 Exit criteria: Open Drawer task variants no longer assemble approach/pull
 trajectories in task code.
 
-### Phase 7: parallel execution and PourWater
+### Phase 7: parallel execution and PourWater (runtime foundation in PR #496)
+
+PR #496 implements resource-conflict analysis, exact step-grid alignment,
+shared-clock lane coordination, row-local fail-fast barriers, deterministic
+state merging, cancellation, timeout, and mandatory physical-safety validation.
+It does not complete the Expert Program schema exposure, environment-specific
+safety qualification, or PourWater migration.
 
 Deliverables:
 
 - `Parallel` and explicit `Barrier` nodes in a new schema version;
 - robot-resource conflict analysis;
-- deterministic trajectory alignment/resampling policy;
+- deterministic environment-step alignment and explicit hold-padding policy,
+  with off-grid frame timing rejected rather than silently resampled;
 - synchronization and timeout behavior;
 - deterministic per-environment `StateDelta` merge rules;
 - PourWater migration from its Action Bank subclass.
@@ -1204,7 +1351,11 @@ Deliverables:
 Exit criteria: conflict, timing, cancellation, partial failure, and state-merge
 tests pass before the legacy task is switched.
 
-### Phase 8: rollout, documentation, and deprecation
+### Phase 8: rollout, documentation, and deprecation (partially stacked)
+
+PR #500 adds deterministic rollout artifacts and migration-size checks in the
+later stack. Canonical end-user documentation, capability-parity evidence, and
+the formal Action Bank deprecation decision remain pending.
 
 Deliverables:
 
@@ -1219,6 +1370,15 @@ Exit criteria: there is one documented canonical workflow and legacy removal is
 independent of adoption of the new path.
 
 ## 13. Validation strategy
+
+At this snapshot, current-branch focused coverage exists for semantic calls and
+lowering, one-fresh-session-per-call runtime behavior, row-local barriers,
+effect specifications and hysteresis, evidence provider routing, JSON-safe
+traces, resource/timing conflicts, parallel state merge, fail-fast partial
+failure, timeout, cancellation, and fail-closed safety validation. The PR stack
+records 1215 passed, 2 skipped, and 8 deselected. Supported-simulation task
+success, Open Drawer, and PourWater remain acceptance gates rather than inferred
+success from unit/fake-port coverage.
 
 ### Unit tests
 
@@ -1238,7 +1398,12 @@ independent of adoption of the new path.
 - downstream target propagation for grasp selection;
 - object-centric place conversion from one immutable snapshot and verified
   held state;
-- effect monitor state transitions and timeout/recovery feedback;
+- effect monitor state transitions, consecutive-sample hysteresis, invalid
+  evidence, and timeout/recovery feedback;
+- exact-version evidence provider routing, snapshot ownership, and explicit
+  invalid rows for missing backend channels;
+- parallel claim conflicts, exact environment-step timing, hold padding,
+  same-key state conflicts, and row-local barrier resolution;
 - trajectory-segment coverage/name validation and exact step-duration
   conversion;
 - Action Bank compatibility adapters where introduced.
@@ -1249,6 +1414,9 @@ independent of adoption of the new path.
 - runner scheduling, acknowledgement, safe stop, and cancellation are reused;
 - the Version 1 shared call barrier holds active rows together while completed,
   recovering, and failed rows retain independent masks and state;
+- parallel lanes share one clock, require an authoritative physical-safety
+  validator, and safe-stop on validation, transport, timeout, or caller
+  cancellation failures;
 - command buffering advances only through the environment clock;
 - program/demo-segment and trajectory-segment metadata are deterministic and
   serializable.
@@ -1266,7 +1434,10 @@ independent of adoption of the new path.
 
 ## 14. Acceptance criteria
 
-The design is complete when all of the following hold:
+The design is complete when all of the following hold. A checked item is
+verified on the stated `main` baseline or current PR #496 tree; implementation
+that exists only in a later stacked PR is not checked here. End-to-end criteria
+remain unchecked when only the reusable framework contract is present.
 
 - [ ] A versioned Expert Program is fully validated before execution and cannot
       evaluate arbitrary code or traverse environment attributes by string.
@@ -1285,17 +1456,19 @@ The design is complete when all of the following hold:
       simulation `uid` values are legacy aliases only.
 - [ ] The default pick/place path does not expose raw qpos, grasp/EEF matrix
       math, planner construction, session plumbing, or custom verification.
-- [ ] Automatic grasping tracks target revisions and receives downstream object
+- [x] Automatic grasping tracks target revisions and receives downstream object
       goals without caller duplication.
-- [ ] `Place` is object-centric and consumes verified held-object state.
-- [ ] Built-in grasp, release, handover, and supported articulation effect
-      monitors work in simulation.
+- [x] `Place` is object-centric and consumes verified held-object state.
+- [ ] Built-in grasp, release, and handover effect monitors work end to end in
+      at least one supported simulation integration.
+- [ ] `Slide` semantic integration verifies application-level articulation
+      completion without a drawer-specific competing primitive.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
 - [x] Custom actions have a documented and tested intentional hard-break
       migration from overriding `plan()` to implementing `_plan()`; no
       compatibility adapter is required.
-- [ ] Version 1 creates exactly one one-invocation `ExecutionSession` for each
+- [x] Version 1 creates exactly one one-invocation `ExecutionSession` for each
       semantic call and re-observes before lowering the next call.
 - [ ] Demonstration timing is derived from `BaseEnv.step_dt` and commands pass
       through `env.step()`.
@@ -1303,13 +1476,14 @@ The design is complete when all of the following hold:
       hard-coded waypoint indices.
 - [ ] Repeated cube pick/place completes at least three lazy, independently
       observed program/demo segments with settle/effect/validation metadata.
-- [ ] Version 1 uses one shared program/call barrier while per-environment task
+- [x] Version 1 uses one shared program/call barrier while per-environment task
       state, effects, recovery, eligibility, success, and failure remain
       independent.
-- [ ] Advanced users retain typed goals, invocations, policies, providers,
+- [x] Advanced users retain typed goals, invocations, policies, providers,
       sessions, and planners as escape hatches.
-- [ ] Parallel resource conflicts, synchronization, timing, cancellation, and
-      state merging are tested before PourWater migration.
+- [x] Parallel resource conflicts, synchronization, timing, cancellation, and
+      state merging are tested before PourWater migration; production dispatch
+      still fails closed without an authoritative physical-safety validator.
 - [ ] Action Bank remains usable until feature parity and a deprecation window
       are documented.
 

@@ -39,6 +39,7 @@ from embodichain.lab.sim.atomic_actions import (
     EffectVerificationRequirement,
     EffectVerificationRequest,
     EndpointBinding,
+    ExecutionRunnerCfg,
     JointPositionTarget,
     MotionPolicy,
     PlanningContext,
@@ -64,6 +65,10 @@ from embodichain.lab.sim.skills.effects import (
     JointStateEffectClause,
     SemanticEffectKind,
     SemanticEffectSpec,
+)
+from embodichain.lab.sim.skills.integration import (
+    SemanticDiagnostic,
+    SemanticValidationError,
 )
 from embodichain.lab.sim.skills.runtime import (
     AtomicSkills,
@@ -286,10 +291,12 @@ class _Compiler(SemanticSkillCompiler):
         engine: AtomicActionEngine,
         decisions: tuple[EffectMonitorDecision, ...],
         plan_success: tuple[torch.Tensor, ...],
+        runner_cfg: ExecutionRunnerCfg,
     ) -> None:
         self._test_integration = _Integration(engine, SceneRegistry())
         self._decisions = decisions
         self._plan_success = plan_success
+        self._runner_cfg = runner_cfg
         self.analyze_count = 0
         self.ground_count = 0
         self.ground_timestamps: list[float] = []
@@ -395,6 +402,7 @@ class _Compiler(SemanticSkillCompiler):
                     schema_version=1,
                     motion_policy=invocation.motion_policy,
                     recovery_policy=invocation.recovery_policy,
+                    runner_cfg=self._runner_cfg,
                 ),
             ),
         )
@@ -431,6 +439,8 @@ def _system(
     decisions: tuple[EffectMonitorDecision, ...],
     *,
     plan_success: tuple[torch.Tensor, ...] | None = None,
+    preset_runner_cfg: ExecutionRunnerCfg | None = None,
+    runtime_runner_cfg: ExecutionRunnerCfg | None = None,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -446,7 +456,15 @@ def _system(
     action = _EffectAction()
     engine.register(action)
     selected_plan_success = plan_success or tuple(_mask(True, True) for _ in decisions)
-    compiler = _Compiler(engine, decisions, selected_plan_success)
+    selected_runner_cfg = (
+        ExecutionRunnerCfg() if preset_runner_cfg is None else preset_runner_cfg
+    )
+    compiler = _Compiler(
+        engine,
+        decisions,
+        selected_plan_success,
+        selected_runner_cfg,
+    )
     observation = _ObservationProvider()
     sink = _CommandSink()
     collector = _Collector()
@@ -458,6 +476,7 @@ def _system(
         collector,
         task_state=TaskState.empty(BATCH_SIZE, "cpu"),
         clock=clock,
+        runner_cfg=runtime_runner_cfg,
     )
     return _System(
         runtime,
@@ -511,6 +530,58 @@ def test_runtime_analyzes_once_and_uses_one_fresh_session_per_call(
     assert len(system.collector.calls) == 2
     assert system.compiler.ground_timestamps[1] > system.compiler.ground_timestamps[0]
     assert system.observation.calls == 4
+
+
+def test_runtime_uses_selected_preset_runner_cfg_without_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preset_runner_cfg = ExecutionRunnerCfg(command_timeout=3.0)
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        preset_runner_cfg=preset_runner_cfg,
+    )
+    captured_cfgs: list[ExecutionRunnerCfg] = []
+    original_runner = runtime_module.ExecutionRunner
+
+    def capture_runner(*args: object, **kwargs: object):
+        cfg = kwargs["cfg"]
+        assert isinstance(cfg, ExecutionRunnerCfg)
+        captured_cfgs.append(cfg)
+        return original_runner(*args, **kwargs)
+
+    monkeypatch.setattr(runtime_module, "ExecutionRunner", capture_runner)
+
+    result = system.runtime.run(_call("preset_runner"))
+
+    assert result.status is SkillStatus.COMPLETED
+    assert len(captured_cfgs) == 1
+    assert captured_cfgs[0].command_timeout == 3.0
+
+
+def test_runtime_runner_cfg_override_wins_over_selected_preset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        preset_runner_cfg=ExecutionRunnerCfg(command_timeout=3.0),
+        runtime_runner_cfg=ExecutionRunnerCfg(command_timeout=5.0),
+    )
+    captured_cfgs: list[ExecutionRunnerCfg] = []
+    original_runner = runtime_module.ExecutionRunner
+
+    def capture_runner(*args: object, **kwargs: object):
+        cfg = kwargs["cfg"]
+        assert isinstance(cfg, ExecutionRunnerCfg)
+        captured_cfgs.append(cfg)
+        return original_runner(*args, **kwargs)
+
+    monkeypatch.setattr(runtime_module, "ExecutionRunner", capture_runner)
+
+    result = system.runtime.run(_call("runner_override"))
+
+    assert result.status is SkillStatus.COMPLETED
+    assert len(captured_cfgs) == 1
+    assert captured_cfgs[0].command_timeout == 5.0
 
 
 def test_runtime_analyzes_downstream_calls_but_executes_only_requested_prefix() -> None:
@@ -753,6 +824,45 @@ def test_preparation_failure_keeps_resolved_policy_without_plan_attempt(
         metadata["calls"][0]["resolved_core_policy"]["motion_policy"]["sample_count"]
         == 7
     )
+    assert result.failures[0].code == "semantic_call_preparation_failed"
+    assert result.failures[0].phase == "preparation"
+    assert result.failures[0].diagnostic is None
+    assert metadata["failures"][0]["code"] == "semantic_call_preparation_failed"
+    assert metadata["failures"][0]["phase"] == "preparation"
+    assert metadata["failures"][0]["diagnostic"] is None
+
+
+def test_preparation_failure_preserves_structured_semantic_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    diagnostic = SemanticDiagnostic(
+        "unknown_entity",
+        ("workflow", 0, "object"),
+        "The referenced object is unavailable.",
+        ("cube",),
+    )
+    monkeypatch.setattr(
+        system.compiler,
+        "ground",
+        Mock(side_effect=SemanticValidationError(diagnostic)),
+    )
+
+    result = system.runtime.start(_call("invalid_reference"))
+    metadata = result.to_metadata()
+
+    assert result.status is SkillStatus.FAILED
+    assert len(result.failures) == 1
+    assert result.failures[0].code == "unknown_entity"
+    assert result.failures[0].phase == "preparation"
+    assert result.failures[0].diagnostic == diagnostic
+    assert metadata["failures"][0]["diagnostic"] == {
+        "code": "unknown_entity",
+        "path": ["workflow", 0, "object"],
+        "rendered_path": "workflow[0].object",
+        "message": "The referenced object is unavailable.",
+        "candidates": ["cube"],
+    }
 
 
 def test_cancel_inherits_runner_cancel_then_hold_safe_stop() -> None:

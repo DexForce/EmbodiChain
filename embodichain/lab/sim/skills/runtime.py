@@ -61,6 +61,7 @@ from .effects import (
     ScalarEffectEvidenceBatch,
     SemanticEffectSpec,
 )
+from .integration import SemanticDiagnostic, SemanticValidationError
 from .scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
@@ -849,6 +850,9 @@ class SkillFailure:
     semantic_id: str
     env_mask: torch.Tensor
     message: str
+    code: str = "semantic_call_failed"
+    phase: str = "execution"
+    diagnostic: SemanticDiagnostic | None = None
 
     def __post_init__(self) -> None:
         if type(self.call_index) is not int or self.call_index < 0:
@@ -861,6 +865,25 @@ class SkillFailure:
             raise ValueError("env_mask must be a one-dimensional bool tensor.")
         if type(self.message) is not str or not self.message:
             raise ValueError("message must be a non-empty string.")
+        if (
+            type(self.code) is not str
+            or not self.code
+            or self.code != self.code.strip()
+        ):
+            raise ValueError(
+                "code must be a non-empty string without outer whitespace."
+            )
+        if type(self.phase) is not str:
+            raise TypeError("phase must be a string.")
+        if self.phase not in {"preparation", "execution", "runtime"}:
+            raise ValueError(
+                "phase must be one of 'preparation', 'execution', or 'runtime'."
+            )
+        if self.diagnostic is not None and not isinstance(
+            self.diagnostic,
+            SemanticDiagnostic,
+        ):
+            raise TypeError("diagnostic must be a SemanticDiagnostic or None.")
         object.__setattr__(self, "env_mask", self.env_mask.clone())
 
     def snapshot(self) -> SkillFailure:
@@ -870,6 +893,9 @@ class SkillFailure:
             semantic_id=self.semantic_id,
             env_mask=self.env_mask,
             message=self.message,
+            code=self.code,
+            phase=self.phase,
+            diagnostic=self.diagnostic,
         )
 
     def to_metadata(self) -> dict[str, object]:
@@ -879,6 +905,19 @@ class SkillFailure:
             "semantic_id": self.semantic_id,
             "env_mask": _metadata_value(self.env_mask),
             "message": self.message,
+            "code": self.code,
+            "phase": self.phase,
+            "diagnostic": (
+                None
+                if self.diagnostic is None
+                else {
+                    "code": self.diagnostic.code,
+                    "path": _metadata_value(self.diagnostic.path),
+                    "rendered_path": self.diagnostic.rendered_path,
+                    "message": self.diagnostic.message,
+                    "candidates": _metadata_value(self.diagnostic.candidates),
+                }
+            ),
         }
 
 
@@ -1312,7 +1351,7 @@ class SkillRuntime:
         self._command_sink = command_sink
         self._evidence_collector = evidence_collector
         self._clock = clock or MonotonicExecutionClock()
-        self._runner_cfg = runner_cfg or ExecutionRunnerCfg()
+        self._runner_cfg_override = runner_cfg
         self._legacy_effect_verifier = legacy_effect_verifier
         self._step_observer: Callable[[RunnerStep], None] | None = None
         self._task_state = _snapshot_task_state(initial_task)
@@ -1432,7 +1471,7 @@ class SkillRuntime:
             self._evidence_collector,
             task_state=initial_state,
             clock=self._clock,
-            runner_cfg=self._runner_cfg,
+            runner_cfg=self._runner_cfg_override,
             legacy_effect_verifier=self._legacy_effect_verifier,
         )
 
@@ -1855,6 +1894,16 @@ class SkillRuntime:
                 raise ValueError("Grounded effect env_ids must match the call context.")
 
         self._grounded = grounded
+        runner_cfg = self._runner_cfg_override
+        if runner_cfg is None:
+            analyzed = getattr(grounded, "analyzed", None)
+            bound = getattr(analyzed, "bound", None)
+            preset = getattr(bound, "preset", None)
+            runner_cfg = getattr(preset, "runner_cfg", None)
+            if not isinstance(runner_cfg, ExecutionRunnerCfg):
+                raise TypeError(
+                    "Grounded semantic call preset must own an ExecutionRunnerCfg."
+                )
         session = self._engine.start(
             (invocation,),
             context,
@@ -1866,7 +1915,7 @@ class SkillRuntime:
             primed,
             self._command_sink,
             clock=self._clock,
-            cfg=self._runner_cfg,
+            cfg=runner_cfg,
         )
         self._current_call_index = call_index
         self._runner = runner
@@ -2011,6 +2060,8 @@ class SkillRuntime:
                     semantic_id=self._calls[call_index].semantic_id,
                     env_mask=failed,
                     message=message,
+                    code="semantic_call_execution_failed",
+                    phase="execution",
                 )
             )
         plan_attempts = tuple(
@@ -2054,7 +2105,24 @@ class SkillRuntime:
             f"Could not prepare semantic call {call_index} ({semantic_id!r}): "
             f"{type(exc).__name__}: {exc}"
         )
-        self._failures.append(SkillFailure(call_index, semantic_id, failed, message))
+        diagnostic = (
+            exc.diagnostic if isinstance(exc, SemanticValidationError) else None
+        )
+        self._failures.append(
+            SkillFailure(
+                call_index=call_index,
+                semantic_id=semantic_id,
+                env_mask=failed,
+                message=message,
+                code=(
+                    "semantic_call_preparation_failed"
+                    if diagnostic is None
+                    else diagnostic.code
+                ),
+                phase="preparation",
+                diagnostic=diagnostic,
+            )
+        )
         self._append_preparation_failure_trace(call_index, failed)
         self._message = message
         self._status = SkillStatus.FAILED
@@ -2147,10 +2215,12 @@ class SkillRuntime:
             )
             self._failures.append(
                 SkillFailure(
-                    call_index,
-                    self._calls[call_index].semantic_id,
-                    failed,
-                    reason,
+                    call_index=call_index,
+                    semantic_id=self._calls[call_index].semantic_id,
+                    env_mask=failed,
+                    message=reason,
+                    code="semantic_runtime_aborted",
+                    phase="runtime",
                 )
             )
         self._message = reason
