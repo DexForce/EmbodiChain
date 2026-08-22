@@ -39,6 +39,7 @@ import numpy as np
 from PIL import Image
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import VisualizationCfg
 from embodichain.utils import logger
 from embodichain.utils.math import look_at_to_pose
 
@@ -140,6 +141,7 @@ def main() -> None:
             width=FRAME_WIDTH,
             height=FRAME_HEIGHT,
             headless=True,
+            visualization=VisualizationCfg(),
         )
     )
     try:
