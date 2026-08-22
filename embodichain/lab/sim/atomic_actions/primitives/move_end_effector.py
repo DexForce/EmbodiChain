@@ -23,30 +23,36 @@ from typing import ClassVar
 
 import torch
 
-from ..bindings import JointPositionTarget
-from ..core import AtomicAction
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
-from ..requirements import (
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
-from ..state import PlanningContext
-from ..trajectory_ops import (
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     resolve_pose_target,
     to_full_robot_trajectory,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_motion_slot,
 )
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class EndEffectorPoseGoal:
     """End-effector pose goal with optional batched intermediate waypoints."""
-
-    goal_kind: ClassVar[str] = "end_effector_pose"
 
     xpos: PoseGoalValue
     """Homogeneous pose with shape ``(4,4)``, ``(B,4,4)`` or ``(B,N,4,4)``."""
@@ -67,24 +73,13 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
     GoalType: ClassVar[type] = EndEffectorPoseGoal
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                    ),
-                ),
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
             ),
         ),
     )
     OptionsType: ClassVar[type] = MoveEndEffectorOptions
-
-    def __init__(
-        self,
-        default_options: MoveEndEffectorOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
 
     def _plan(
         self,
@@ -92,7 +87,7 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan an end-effector pose goal from the observed joint state."""
-        goal = self.require_goal(request)
+        goal = request.goal
         motion_target = request.binding.endpoint("primary", "motion").require_target(
             JointPositionTarget
         )
@@ -100,7 +95,7 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
         joint_ids = list(motion_target.joint_ids)
         move_xpos = resolve_pose_target(
             resolve_pose_goal(goal.xpos, context, name="xpos"),
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
         )
         start_qpos = context.robot.qpos[:, joint_ids]
@@ -109,6 +104,7 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
             options=request.motion_policy.to_motion_gen_options(
                 start_qpos=start_qpos,
                 control_part=control_part,
+                interpolation_dt=context.control_dt,
             ),
         )
         success, trajectory = to_full_robot_trajectory(
@@ -116,7 +112,6 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
             env_ids=context.env_ids,
-            control_dt=request.motion_policy.control_dt,
         )
         return self.build_plan(
             request,

@@ -432,7 +432,7 @@ class StateDelta:
 
         Args:
             state: Input task state.
-            update_mask: Successful and verified rows, shape ``(n_envs,)``.
+            update_mask: Successful and verified rows, shape ``(num_envs,)``.
 
         Returns:
             New task state with masked updates.

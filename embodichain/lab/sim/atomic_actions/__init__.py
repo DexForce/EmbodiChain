@@ -31,10 +31,11 @@ from __future__ import annotations
 from .affordance import (
     Affordance,
     AntipodalAffordance,
-    ArticulationOperationAffordance,
-    ArticulationOperationTarget,
     AssembleAffordance,
     InteractionPoints,
+    PressAffordance,
+    SlideAffordance,
+    TwistAffordance,
 )
 from .bindings import (
     ActionBinding,
@@ -52,12 +53,7 @@ from .control import (
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
-from .engine import (
-    AtomicActionEngine,
-    get_registered_actions,
-    register_action,
-    unregister_action,
-)
+from .engine import AtomicActionEngine
 from .execution import (
     EffectVerificationRequest,
     EffectVerificationResult,
@@ -69,10 +65,8 @@ from .execution import (
     ExecutionTick,
 )
 from .goals import (
-    ActionGoal,
     ObjectActionGoal,
     PoseGoalValue,
-    SceneArticulationOperationGeometry,
     SceneEntityPose,
 )
 from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
@@ -129,9 +123,6 @@ from .primitives import (
     MoveHeldObjectOptions,
     MoveJoints,
     MoveJointsOptions,
-    OperateArticulation,
-    OperateArticulationGoal,
-    OperateArticulationOptions,
     PickUp,
     PickUpOptions,
     Place,
@@ -140,6 +131,12 @@ from .primitives import (
     Press,
     PressGoal,
     PressOptions,
+    Slide,
+    SlideGoal,
+    SlideOptions,
+    Twist,
+    TwistGoal,
+    TwistOptions,
 )
 from .runner import (
     CommandAcknowledgement,
@@ -179,15 +176,12 @@ from .state import (
 __all__ = [
     "ActionBinding",
     "ActionControlOverrides",
-    "ActionGoal",
     "ActionInvocation",
     "ActionOptions",
     "ActionPlan",
     "ActionPlanningServices",
     "Affordance",
     "AntipodalAffordance",
-    "ArticulationOperationAffordance",
-    "ArticulationOperationTarget",
     "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
@@ -262,9 +256,6 @@ __all__ = [
     "OPEN_COMMAND",
     "ObservationProvider",
     "ObservedArticulationJointState",
-    "OperateArticulation",
-    "OperateArticulationGoal",
-    "OperateArticulationOptions",
     "PickUp",
     "PickUpOptions",
     "Place",
@@ -274,8 +265,16 @@ __all__ = [
     "PlanningContext",
     "PoseGoalValue",
     "Press",
+    "PressAffordance",
     "PressGoal",
     "PressOptions",
+    "SlideAffordance",
+    "Slide",
+    "SlideGoal",
+    "SlideOptions",
+    "Twist",
+    "TwistGoal",
+    "TwistOptions",
     "RecoveryPolicy",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
@@ -288,7 +287,6 @@ __all__ = [
     "RunnerStep",
     "RunnerStepCallback",
     "SceneProvider",
-    "SceneArticulationOperationGeometry",
     "SceneSnapshot",
     "SceneSnapshotSupplier",
     "SceneEntityPose",
@@ -301,8 +299,6 @@ __all__ = [
     "TaskState",
     "TimedCommandSequence",
     "TimedTrajectory",
+    "TwistAffordance",
     "TrajectorySegment",
-    "get_registered_actions",
-    "register_action",
-    "unregister_action",
 ]

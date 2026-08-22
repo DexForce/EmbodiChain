@@ -292,6 +292,15 @@ class EmbodiedEnv(BaseEnv):
     - affordance_datas: The affordance data that can be used to store the intermediate results or information
     """
 
+    _defer_initialization_summary: bool = True
+    _manager_summary_fields: tuple[tuple[str, str], ...] = (
+        ("EventManager", "event_manager"),
+        ("ObservationManager", "observation_manager"),
+        ("RewardManager", "reward_manager"),
+        ("ActionManager", "action_manager"),
+        ("DatasetManager", "dataset_manager"),
+    )
+
     @classmethod
     def __init_subclass__(cls, **kwargs):
         """Automatically wrap subclass demo-action builders with shape checks.
@@ -414,6 +423,87 @@ class EmbodiedEnv(BaseEnv):
 
         all_env_ids = torch.arange(self.num_envs, device=self.device)
         self._seed_recording_state(self._init_raw_obs, all_env_ids)
+
+        self._log_initialization_summary()
+
+    def _extra_initialization_summary_lines(self) -> list[str]:
+        """Build manager and functor details for the initialization summary."""
+        manager_summaries: list[tuple[str, list[tuple[str, list[str]]] | None, int]] = (
+            []
+        )
+        active_manager_count = 0
+        total_functor_count = 0
+
+        for manager_name, attribute_name in self._manager_summary_fields:
+            manager = getattr(self, attribute_name, None)
+            if manager is None:
+                manager_summaries.append((manager_name, None, 0))
+                continue
+
+            groups = self._manager_functor_groups(manager_name, manager)
+            functor_count = sum(len(names) for _, names in groups)
+            manager_summaries.append((manager_name, groups, functor_count))
+            active_manager_count += 1
+            total_functor_count += functor_count
+
+        functor_noun = "functor" if total_functor_count == 1 else "functors"
+        lines = [
+            f"├─ Managers ({active_manager_count}/{len(manager_summaries)} active, "
+            f"{total_functor_count} {functor_noun})"
+        ]
+        for manager_name, groups, functor_count in manager_summaries:
+            if groups is None:
+                lines.append(
+                    self._format_initialization_summary_row(manager_name, "disabled")
+                )
+                continue
+
+            manager_functor_noun = "functor" if functor_count == 1 else "functors"
+            lines.append(
+                self._format_initialization_summary_row(
+                    manager_name, f"{functor_count} {manager_functor_noun}"
+                )
+            )
+            for mode, names in groups:
+                lines.append(
+                    self._format_initialization_summary_row(
+                        mode, ", ".join(names), indent=1
+                    )
+                )
+        return lines
+
+    @staticmethod
+    def _manager_functor_groups(
+        manager_name: str, manager: object
+    ) -> list[tuple[str, list[str]]]:
+        """Normalize a manager's active functors into display groups."""
+        active_functors = manager.active_functors
+        if isinstance(active_functors, Mapping):
+            return [
+                (str(mode), [str(name) for name in names])
+                for mode, names in active_functors.items()
+            ]
+
+        names = [str(name) for name in active_functors]
+        if manager_name != "ActionManager":
+            return [("terms", names)] if names else []
+
+        get_terms_by_mode = getattr(manager, "get_terms_by_mode", None)
+        if not callable(get_terms_by_mode):
+            return [("terms", names)] if names else []
+
+        groups: list[tuple[str, list[str]]] = []
+        grouped_names: set[str] = set()
+        for mode in ("pre", "post"):
+            mode_names = [str(name) for name, _ in get_terms_by_mode(mode)]
+            if mode_names:
+                groups.append((mode, mode_names))
+                grouped_names.update(mode_names)
+
+        remaining_names = [name for name in names if name not in grouped_names]
+        if remaining_names:
+            groups.append(("terms", remaining_names))
+        return groups
 
     def reset(
         self, seed: int | None = None, options: dict | None = None

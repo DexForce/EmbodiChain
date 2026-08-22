@@ -289,10 +289,10 @@ In this mode, the physics simulation stepping is automatically handling by the p
 > Currently, multiple instances are not supported for ray tracing rendering backend. Good news is that we are working on adding this feature in future releases.
 
 
-For more methods and details, refer to the [SimulationManager](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager) documentation.
+For more methods and details, see the {doc}`SimulationManager API </api_reference/embodichain/embodichain.lab.sim.sim_manager>`.
 
-### Related Tutorials
+### Related Documentation
 
-- [Basic scene creation](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html)
-- [Interactive simulation with Gizmo](https://dexforce.github.io/EmbodiChain/tutorial/gizmo.html)
+- {doc}`Basic scene creation </tutorial/create_scene>`
+- {doc}`Interactive Gizmos </features/interaction/gizmo>`
 - {doc}`Viser browser visualization <viser_visualization>`

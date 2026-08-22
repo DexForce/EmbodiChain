@@ -63,6 +63,13 @@ step. Put invocation-varying behavior in ``ActionInvocation.skill_options``.
 ``register()`` remains available for custom implementations, and
 ``load_builtins=False`` creates an isolated or fully custom engine.
 
+Trajectory timing is strict. A planner that returns positions must also return
+per-waypoint ``dt``; ``PlanResult.duration`` is derived from it. A custom action
+must pass a complete ``TimedTrajectory`` to ``build_plan``. The engine does not
+repair missing timing. Action-owned interpolation reads an explicit
+``PlanningContext.control_dt`` supplied by the integration, normally
+``BaseEnv.step_dt``.
+
 Choosing an engine entry point
 ------------------------------
 
@@ -98,9 +105,8 @@ new observations.
 ``AtomicAction.plan(request, context)`` is different from ``engine.plan()``.
 It is the framework-owned template method called by the engine, not an
 additional application execution entry point. Atomic-action authors implement
-the protected ``_plan()`` hook instead. Similarly,
-``engine.plan_action()`` is reserved for extensions and isolated tests that
-need to plan an unregistered instance.
+the protected ``_plan()`` hook instead. Register custom action instances with
+``engine.register()`` before using the same public planning entry points.
 
 This extension contract is intentionally strict: a subclass that defines
 ``plan()`` raises ``TypeError`` at class definition. There is no legacy adapter;
@@ -114,11 +120,14 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 
 * ``move_end_effector.py``
 * ``move_joints.py``
+* ``control_dt.py``
 * ``pickup.py``
 * ``move_held_object.py``
 * ``place.py``
 * ``assemble.py``
 * ``press.py``
+* ``slide.py``
+* ``twist.py``
 * ``coordinated_pickment.py``
 * ``coordinated_placement.py``
 * ``hand_over.py``
@@ -132,9 +141,16 @@ video under ``outputs/videos``:
 .. code-block:: bash
 
    python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/control_dt.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/assemble.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
+
+``control_dt.py`` compiles the same 40-waypoint ``ik_interp`` path twice. The
+positions stay identical, while changing ``PlanningContext.control_dt`` from
+``2 * physics_dt`` to ``8 * physics_dt`` makes every arrival interval and the
+total trajectory duration four times longer. The script checks that relationship
+before replaying the fast and slow trajectories in sequence.
 
 The ``motion_generator`` variable in the snippets below is a configured
 :class:`~embodichain.lab.sim.planners.MotionGenerator`; its robot, planner,
@@ -196,7 +212,7 @@ application-owned orchestration:
        skill_id="move_end_effector",
        goal=EndEffectorPoseGoal(xpos=target_pose),
        binding=binding,
-       motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+       motion_policy=MotionPolicy(sample_count=80),
    )
 
    plan = engine.plan(invocation, latest_context)
@@ -241,7 +257,7 @@ planning, and every action retains ``joint_trajectory``:
        "move_end_effector",
        {"primary": {"motion": "left_arm"}},
    )
-   motion_policy = MotionPolicy(sample_count=80, control_dt=1.0 / 60.0)
+   motion_policy = MotionPolicy(sample_count=80)
 
    approach = ActionInvocation(
        skill_id="move_end_effector",
@@ -388,10 +404,12 @@ the robot, then applies a short horizontal force pulse so physics and friction
 slide it sideways during one ``PickUp`` invocation whose
 ``GraspGoal.grasp_xpos`` is a ``SceneEntityPose``. The session observes
 ``dynamic_goal_changed`` and ``replanned`` events, discards the entire stale
-approach/close/lift plan, and rebuilds it from the cube's new location. The
-replanned action closes the gripper, verifies the physical lift, and finishes
-while holding the cube. The original and regenerated goal axes remain visible
-for comparison:
+approach/close/lift plan, and rebuilds it from the cube's new location while the
+approach segment is active. After approach is dispatched, Pick stops monitoring
+that object dependency so contact-, close-, and lift-induced movement does not
+trigger a false dynamic-goal update. The replanned action closes the gripper,
+verifies the physical lift, and finishes while holding the cube. The original
+and regenerated goal axes remain visible for comparison:
 
 .. code-block:: bash
 
@@ -468,7 +486,11 @@ dependencies. Object-centric skills may additionally declare an explicit
 ``ObjectSemantics.entity_id`` when they ground an object pose from the same
 scene snapshot; for example, ``PickUp`` automatically tracks that ID. The
 legacy ``ObjectSemantics.entity`` live-pose fallback is deprecated and does not
-create a scene dependency.
+create a scene dependency. An ``ActionPlan`` may bound dependency monitoring
+for every dependency with ``scene_dependency_end_segment`` or assign per-entity
+exclusive command-frame cutoffs with ``scene_dependency_monitor_until``.
+``PickUp`` uses the end of ``approach`` for its semantic object ID; joint
+tracking and collision-world revision checks are unaffected.
 
 Task-state effects
 ------------------
@@ -532,8 +554,8 @@ that one-time event.
 Adding an action
 ----------------
 
-Define an action-owned frozen goal dataclass with a stable ``goal_kind``. Then
-define typed runtime options when needed, implement the protected
+Define an action-owned frozen goal dataclass. Then define typed runtime options
+when needed, implement the protected
 ``_plan(request, context)`` hook, and declare the stable skill metadata. Do not
 override the inherited public ``plan()`` method because it binds the latest
 collision scene first. Legacy custom actions that implemented ``plan()`` must
@@ -541,7 +563,8 @@ rename it to ``_plan()``; defining ``plan()`` is rejected immediately.
 
 Return scalar or per-environment planner success through ``build_plan``. The
 framework normalizes the mask and holds failed rows at the observed qpos, so a
-new action should not reproduce that masking itself.
+new action should not reproduce that masking itself. ``build_plan`` accepts
+only a ``TimedTrajectory``; an untimed position tensor raises immediately.
 
 A minimal implementation looks like:
 
@@ -563,11 +586,11 @@ A minimal implementation looks like:
        SkillBindingContract,
        SkillEndpointRequirement,
        SkillResourceSlot,
+       TimedTrajectory,
    )
 
    @dataclass(frozen=True, slots=True)
    class PushGoal:
-       goal_kind: ClassVar[str] = "push"
        contact_pose: torch.Tensor
 
    @dataclass(frozen=True, slots=True)
@@ -606,14 +629,20 @@ A minimal implementation looks like:
            options = request.skill_options
            motion = request.binding.endpoint("primary", "motion")
            motion_target = motion.require_target(JointPositionTarget)
-           # Plan from context.robot.qpos using motion_target.joint_ids.
+           # Plan from context.robot.qpos using motion_target.joint_ids and
+           # produce full_robot_positions.
            # The joint helper lowers the result into RuntimeCommandFrame values
            # and retains the trajectory for joint-position feedback.
+           trajectory = TimedTrajectory.from_uniform_step(
+               full_robot_positions,
+               env_ids=context.env_ids,
+               step_dt=context.require_control_dt(),
+           )
            return self.build_plan(
                request,
                context,
                success=success_mask,
-               trajectory=full_robot_positions,
+               trajectory=trajectory,
            )
 
 For a non-joint endpoint, define a typed ``RuntimeEndpointTarget`` and matching

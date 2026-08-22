@@ -1,10 +1,10 @@
 .. _guide_add_robot:
 
-Adding a New Robot — Quick Reference
-=====================================
+Adding a New Robot
+==================
 
-This guide is a checklist + reference for adding a new robot to EmbodiChain. For
-the full step-by-step walkthrough with code examples, see :doc:`/tutorial/add_robot`.
+This guide provides a practical checklist and reference for adding a new robot
+to EmbodiChain.
 
 The protocol
 ------------
@@ -81,26 +81,28 @@ Key parameters
 Common mistakes
 ---------------
 
-+-----------------------------------+----------------------------------------------------------+
-| Mistake                           | Fix                                                      |
-+===================================+==========================================================+
-| ``all`` instead of ``__all__``    | Use ``__all__`` — lowercase ``all`` breaks ``import *``. |
-+-----------------------------------+----------------------------------------------------------+
-| ``solver_cfg`` set twice          | Set it once in ``_build_defaults`` only.                  |
-+-----------------------------------+----------------------------------------------------------+
-| PK URDF drifts from sim URDF      | Route PK through ``_pk_urdf_path``; keep the DOF guard.  |
-+-----------------------------------+----------------------------------------------------------+
-| Reimplementing ``from_dict``      | Keep the 3-line template; put logic in ``_build_defaults``.|
-+-----------------------------------+----------------------------------------------------------+
-| ``root_link_name`` as a tuple     | It must be a ``str``.                                     |
-+-----------------------------------+----------------------------------------------------------+
-| Calling a nonexistent ``validate``| Don't call methods that don't exist.                      |
-+-----------------------------------+----------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Mistake
+     - Fix
+   * - ``all`` instead of ``__all__``
+     - Use ``__all__`` — lowercase ``all`` breaks ``import *``.
+   * - ``solver_cfg`` set twice
+     - Set it once in ``_build_defaults`` only.
+   * - PK URDF drifts from sim URDF
+     - Route PK through ``_pk_urdf_path``; keep the DOF guard.
+   * - Reimplementing ``from_dict``
+     - Keep the 3-line template; put logic in ``_build_defaults``.
+   * - ``root_link_name`` as a tuple
+     - It must be a ``str``.
+   * - Calling a nonexistent ``validate``
+     - Don't call methods that don't exist.
 
 See Also
 --------
 
-- :doc:`/tutorial/add_robot` — Full step-by-step tutorial
 - :doc:`/tutorial/robot` — Using robots in simulation
 - :doc:`/overview/sim/solvers/index` — IK solver reference
 - :doc:`/resources/robot/index` — Existing robot documentation
