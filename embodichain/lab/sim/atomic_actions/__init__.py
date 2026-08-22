@@ -31,8 +31,6 @@ from __future__ import annotations
 from .affordance import (
     Affordance,
     AntipodalAffordance,
-    ArticulationOperationAffordance,
-    ArticulationOperationTarget,
     AssembleAffordance,
     InteractionPoints,
     PressAffordance,
@@ -69,7 +67,6 @@ from .execution import (
 from .goals import (
     ObjectActionGoal,
     PoseGoalValue,
-    SceneArticulationOperationGeometry,
     SceneEntityPose,
 )
 from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
@@ -126,9 +123,6 @@ from .primitives import (
     MoveHeldObjectOptions,
     MoveJoints,
     MoveJointsOptions,
-    OperateArticulation,
-    OperateArticulationGoal,
-    OperateArticulationOptions,
     PickUp,
     PickUpOptions,
     Place,
@@ -189,8 +183,6 @@ __all__ = [
     "Affordance",
     "AntipodalAffordance",
     "ArticulationJointState",
-    "ArticulationOperationAffordance",
-    "ArticulationOperationTarget",
     "AssembleAffordance",
     "AssembleGoal",
     "AtomicAction",
@@ -264,9 +256,6 @@ __all__ = [
     "OPEN_COMMAND",
     "ObservationProvider",
     "ObservedArticulationJointState",
-    "OperateArticulation",
-    "OperateArticulationGoal",
-    "OperateArticulationOptions",
     "PickUp",
     "PickUpOptions",
     "Place",
@@ -298,7 +287,6 @@ __all__ = [
     "RunnerStep",
     "RunnerStepCallback",
     "SceneProvider",
-    "SceneArticulationOperationGeometry",
     "SceneSnapshot",
     "SceneSnapshotSupplier",
     "SceneEntityPose",

@@ -1415,7 +1415,6 @@ def test_policy_preset_defaults_exact_builtin_effect_monitor_refs() -> None:
         "pick",
         "place",
         "hand_over",
-        "operate_articulation",
     }
     for monitor_ref in preset.effect_monitors.values():
         assert monitor_ref.monitor_id == COMPOSITE_EFFECT_MONITOR_ID

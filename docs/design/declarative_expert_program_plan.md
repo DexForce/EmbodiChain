@@ -1181,8 +1181,8 @@ Exit criteria:
 Deliverables:
 
 - articulation/link/affordance registry integration;
-- reusable articulation-operation semantic call, compiler, effect monitor, and
-  named trajectory segments;
+- reusable `Slide` semantic integration, compiler lowering, application-level
+  articulation verification, and named trajectory segments;
 - configuration-based Open Drawer migration;
 - migrate additional sequential tasks to reveal missing reusable grounders,
   monitors, and validators.

@@ -41,11 +41,6 @@ from .move_held_object import (
     MoveHeldObjectOptions,
 )
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
-from .operate_articulation import (
-    OperateArticulation,
-    OperateArticulationGoal,
-    OperateArticulationOptions,
-)
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import Press, PressGoal, PressOptions
@@ -68,7 +63,6 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     CoordinatedPickment,
     CoordinatedPlacement,
     HandOver,
-    OperateArticulation,
 )
 """Built-in action implementations instantiated once per action engine."""
 
@@ -93,9 +87,6 @@ __all__ = [
     "MoveHeldObjectOptions",
     "MoveJoints",
     "MoveJointsOptions",
-    "OperateArticulation",
-    "OperateArticulationGoal",
-    "OperateArticulationOptions",
     "PickUp",
     "PickUpOptions",
     "Place",

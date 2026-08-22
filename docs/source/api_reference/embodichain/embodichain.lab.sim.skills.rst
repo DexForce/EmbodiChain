@@ -109,7 +109,6 @@ embodichain.lab.sim.skills
       Pick
       Place
       HandOver
-      OperateArticulation
       RegisteredSemanticCall
       SemanticCallCatalog
       SemanticSkillCompiler
@@ -304,9 +303,6 @@ Semantic calls and runtime
    :members:
 
 .. autoclass:: HandOver
-   :members:
-
-.. autoclass:: OperateArticulation
    :members:
 
 .. autoclass:: RegisteredSemanticCall

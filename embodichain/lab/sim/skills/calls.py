@@ -492,76 +492,6 @@ class HandOver(SemanticCallSpec):
             )
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class OperateArticulation(SemanticCallSpec):
-    """Operate one registered articulation through a typed handle affordance.
-
-    Select either a named affordance target or an explicit absolute joint
-    position plus handle-relative displacement. Grounding captures the current
-    live joint position as the source of that declared stroke. Recovery
-    replans then combine the latest handle pose and joint position to execute
-    only the remaining signed displacement.
-
-    Args:
-        articulation: Authoritative articulation reference.
-        handle: Optional explicit operation affordance. Omission requests the
-            capability-scoped default registered on the articulation.
-        target: Optional target name registered by the affordance.
-        target_position: Explicit absolute desired joint position.
-        target_displacement: Explicit full signed operation displacement from
-            the joint position and handle pose captured during grounding.
-        resources: Optional skill-local resource overrides.
-    """
-
-    call_kind: ClassVar[str] = "operate_articulation"
-
-    articulation: SceneArticulationRef
-    handle: SceneAffordanceRef | None = None
-    target: str | None = None
-    target_position: float | None = None
-    target_displacement: float | None = None
-
-    def __post_init__(self) -> None:
-        SemanticCallSpec.__post_init__(self)
-        if type(self.articulation) is not SceneArticulationRef:
-            raise TypeError(
-                "OperateArticulation.articulation must be a SceneArticulationRef."
-            )
-        if self.handle is not None and type(self.handle) is not SceneAffordanceRef:
-            raise TypeError(
-                "OperateArticulation.handle must be a SceneAffordanceRef or None."
-            )
-        named = self.target is not None
-        explicit_position = self.target_position is not None
-        explicit_displacement = self.target_displacement is not None
-        if named:
-            _validate_identifier(
-                self.target,
-                field_name="OperateArticulation.target",
-            )
-            if explicit_position or explicit_displacement:
-                raise ValueError(
-                    "OperateArticulation.target is mutually exclusive with "
-                    "target_position and target_displacement."
-                )
-            return
-        if not (explicit_position and explicit_displacement):
-            raise ValueError(
-                "OperateArticulation requires either target or the explicit "
-                "target_position and target_displacement pair."
-            )
-        for field_name in ("target_position", "target_displacement"):
-            value = getattr(self, field_name)
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise TypeError(
-                    f"OperateArticulation.{field_name} must be a finite scalar."
-                )
-            normalized = float(value)
-            if not math.isfinite(normalized):
-                raise ValueError(f"OperateArticulation.{field_name} must be finite.")
-            object.__setattr__(self, field_name, normalized)
-
-
 DeclarativeValue: TypeAlias = (
     None
     | bool
@@ -724,14 +654,12 @@ class SemanticCallDescriptor:
             Pick,
             Place,
             HandOver,
-            OperateArticulation,
             RegisteredSemanticCall,
         ):
             raise TypeError(
-                "spec_type must be exactly Pick, Place, HandOver, "
-                "OperateArticulation, or RegisteredSemanticCall; extensions use "
-                "the registered payload contract rather than executable call "
-                "subclasses."
+                "spec_type must be exactly Pick, Place, HandOver, or "
+                "RegisteredSemanticCall; extensions use the registered payload "
+                "contract rather than executable call subclasses."
             )
         if self.skill_id is not None:
             _validate_identifier(
@@ -819,7 +747,6 @@ class SemanticCallDescriptor:
             Pick.call_kind,
             Place.call_kind,
             HandOver.call_kind,
-            OperateArticulation.call_kind,
             RegisteredSemanticCall.call_kind,
         }:
             raise ValueError(
@@ -888,7 +815,6 @@ class SemanticCallCatalog:
             Pick,
             Place,
             HandOver,
-            OperateArticulation,
             RegisteredSemanticCall,
         ):
             call_id = call.semantic_id
@@ -926,9 +852,6 @@ def _builtin_call_target(
     from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
         HandOver as HandOverAction,
     )
-    from embodichain.lab.sim.atomic_actions.primitives.operate_articulation import (
-        OperateArticulation as OperateArticulationAction,
-    )
     from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
     from embodichain.lab.sim.atomic_actions.primitives.place import Place as PlaceAction
 
@@ -936,7 +859,6 @@ def _builtin_call_target(
         Pick: PickUp.descriptor(),
         Place: PlaceAction.descriptor(),
         HandOver: HandOverAction.descriptor(),
-        OperateArticulation: OperateArticulationAction.descriptor(),
     }
     try:
         return targets[spec_type]
@@ -958,7 +880,7 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
             skill_id=_builtin_call_target(spec_type).skill_id,
             binding_contract=_builtin_call_target(spec_type).binding_contract,
         )
-        for spec_type in (Pick, Place, HandOver, OperateArticulation)
+        for spec_type in (Pick, Place, HandOver)
     )
     return SemanticCallCatalog(descriptors)
 
@@ -966,7 +888,6 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
 __all__ = [
     "DeclarativeValue",
     "HandOver",
-    "OperateArticulation",
     "Pick",
     "Place",
     "PlaceRelationTarget",

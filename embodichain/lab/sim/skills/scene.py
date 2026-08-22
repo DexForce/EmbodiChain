@@ -32,7 +32,6 @@ from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AntipodalAffordance,
-    ArticulationOperationAffordance,
     EntityState,
     ObjectSemantics,
     ObservedArticulationJointState,
@@ -50,9 +49,6 @@ RefT = TypeVar("RefT", bound="SceneEntityRef")
 
 GRASP_AFFORDANCE_CAPABILITY = "affordance.grasp"
 """Capability for an affordance usable by object pickup or handover."""
-
-ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY = "affordance.articulation.operation"
-"""Capability for a typed handle-driven articulation operation."""
 
 PLACE_ON_AFFORDANCE_CAPABILITY = "affordance.place.on"
 """Capability for an affordance that defines an ``on`` placement relation."""
@@ -350,18 +346,6 @@ class SceneEntityMetadata:
                 raise TypeError(
                     f"{GRASP_AFFORDANCE_CAPABILITY!r} requires an "
                     "AntipodalAffordance payload."
-                )
-            if (
-                ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
-                in self.affordance_capabilities
-                and not issubclass(
-                    self.affordance_payload_type,
-                    ArticulationOperationAffordance,
-                )
-            ):
-                raise TypeError(
-                    f"{ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY!r} requires "
-                    "an ArticulationOperationAffordance payload."
                 )
             return
         if self.parent is not None or self.native_name is not None:
@@ -2163,7 +2147,6 @@ class RegistrySceneProvider(SceneProvider):
 
 
 __all__ = [
-    "ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY",
     "ArticulationJointEvidenceAddress",
     "AmbiguousSceneAffordanceError",
     "GRASP_AFFORDANCE_CAPABILITY",

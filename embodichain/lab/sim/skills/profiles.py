@@ -702,7 +702,6 @@ class SkillPolicyPreset:
                     "pick",
                     "place",
                     "hand_over",
-                    "operate_articulation",
                 )
             }
             if effect_monitors is None

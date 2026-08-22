@@ -147,11 +147,3 @@ HandOver
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
-
-OperateArticulation
--------------------
-
-.. automodule:: embodichain.lab.sim.atomic_actions.primitives.operate_articulation
-   :members:
-   :show-inheritance:
-   :exclude-members: __init__, copy, replace, to_dict

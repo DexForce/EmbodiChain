@@ -34,7 +34,6 @@ from embodichain.lab.sim.atomic_actions import (
 
 from .calls import (
     HandOver,
-    OperateArticulation,
     Pick,
     Place,
     RegisteredSemanticCall,
@@ -53,7 +52,6 @@ from .profiles import (
     SkillPolicyPreset,
 )
 from .scene import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
     GRASP_AFFORDANCE_CAPABILITY,
     PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
@@ -584,7 +582,6 @@ class LinkedSemanticCall:
             Pick,
             Place,
             HandOver,
-            OperateArticulation,
             RegisteredSemanticCall,
         ):
             raise TypeError("call must be an exact supported semantic call value.")
@@ -813,24 +810,6 @@ class SemanticIntegrationManifest:
             )
             normalized_call = replace(call, object=object_ref)
             affordances["receiver_grasp"] = grasp
-        elif isinstance(call, OperateArticulation):
-            articulation_ref = self.scene.resolve(
-                call.articulation,
-                expected_type=SceneArticulationRef,
-                path=(*path, "articulation"),
-            )
-            handle = self.scene.resolve_affordance(
-                articulation_ref,
-                capability=ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
-                explicit=call.handle,
-                path=(*path, "handle"),
-            )
-            normalized_call = replace(
-                call,
-                articulation=articulation_ref,
-                handle=handle,
-            )
-            affordances["handle"] = handle
         elif isinstance(call, RegisteredSemanticCall):
             normalized_call = replace(
                 call,
