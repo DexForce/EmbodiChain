@@ -16,7 +16,11 @@
 from __future__ import annotations
 
 import torch
-import pytest
+
+
+def _set_identity_policy_frames(planner) -> None:
+    planner._policy_frame_from_world = torch.eye(4)
+    planner._runtime_tcp_from_policy_tcp = torch.eye(4)
 
 
 class TestNeuralParseWaypoints:
@@ -28,6 +32,7 @@ class TestNeuralParseWaypoints:
         planner = NeuralPlanner.__new__(NeuralPlanner)
         planner.device = torch.device("cpu")
         planner._num_waypoints = 4
+        _set_identity_policy_frames(planner)
         B = 3
         states = [
             PlanState.from_xpos(
@@ -60,7 +65,8 @@ class TestNeuralPlanBatched:
         planner._rot_eps = 1e9
         planner._intermediate_orientation = True
         planner._use_relative_obs = False
-        planner._obs_dim = 57  # 7+7+4*3+4*4+4+4+7
+        planner._obs_dim = 101
+        _set_identity_policy_frames(planner)
         planner.cfg = type(
             "c",
             (),
@@ -72,9 +78,8 @@ class TestNeuralPlanBatched:
             },
         )()
 
-        # stub actor: returns zeros so qpos never changes but eps is huge -> reached
-        planner._actor = lambda obs: torch.zeros(obs.shape[0], 7)
-        planner._normalizer = type("n", (), {"normalize": lambda self, o: o})()
+        # Stub ONNX policy: qpos stays fixed but the huge eps marks each goal reached.
+        planner._policy = lambda obs: torch.zeros(obs.shape[0], 7)
 
         # stub robot FK + limits
         class _Robot:
@@ -127,8 +132,8 @@ class TestNeuralEarlyConvergenceHold:
         planner._rot_eps = 1e9
         planner._intermediate_orientation = True
         planner._use_relative_obs = False
-        # joint(7)+ee(7)+wp_pos(4*3)+wp_quat(4*4)+onehot(4)+valid(4)+last_act(7)=57
-        planner._obs_dim = 57
+        planner._obs_dim = 101
+        _set_identity_policy_frames(planner)
         planner.cfg = type(
             "c",
             (),
@@ -140,9 +145,8 @@ class TestNeuralEarlyConvergenceHold:
             },
         )()
 
-        # actor: non-trivial action so qpos would drift if not masked
-        planner._actor = lambda obs: torch.ones(obs.shape[0], 7) * 0.5
-        planner._normalizer = type("n", (), {"normalize": lambda self, o: o})()
+        # Non-trivial policy action so qpos would drift if not masked.
+        planner._policy = lambda obs: torch.ones(obs.shape[0], 7) * 0.5
 
         class _Robot:
             num_instances = 3

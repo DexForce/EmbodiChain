@@ -213,9 +213,9 @@ class SuiteCfg:
             _validate_free_space(self.free_space)
         nmg = next((spec for spec in self.planners if spec.id == "nmg"), None)
         if nmg is not None:
-            if float(nmg.config.get("pos_eps", 0.05)) <= 0.0:
+            if float(nmg.config.get("pos_eps", 0.01)) <= 0.0:
                 raise ValueError("NMG pos_eps must be > 0.")
-            if float(nmg.config.get("rot_eps", 0.3)) <= 0.0:
+            if float(nmg.config.get("rot_eps", 0.1)) <= 0.0:
                 raise ValueError("NMG rot_eps must be > 0.")
 
 

@@ -17,8 +17,7 @@
 """Run the extensible planner motion-generation benchmark.
 
 cuRobo is the default primary baseline. IK interpolation and TOPPRA are
-optional diagnostic baselines. NMG remains an explicitly configurable,
-unsupported adapter stub until its production checkpoint contract is ready.
+optional diagnostic baselines. NMG is loaded from a standalone ONNX policy.
 
 Run: ``python -m scripts.benchmark.motion_generation.run_benchmark --suite
 smoke`` or select the Franka + PGI Atomic Task slice with
@@ -98,9 +97,9 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
         help="NMG internal waypoint rotation threshold in radians.",
     )
     parser.add_argument(
-        "--checkpoint-path",
+        "--nmg-onnx-path",
         default=None,
-        help="Reserved NMG checkpoint path; the current NMG adapter remains a stub.",
+        help="Path to the standalone NMG ONNX policy.",
     )
     parser.add_argument(
         "--output-root", default="outputs/benchmarks", help="Artifact root directory."
@@ -190,7 +189,7 @@ def _apply_overrides(
     rotation_threshold_rad: float | None = None,
     nmg_pos_eps: float | None = None,
     nmg_rot_eps: float | None = None,
-    checkpoint_path: str | None = None,
+    nmg_onnx_path: str | None = None,
 ) -> None:
     """Apply explicit CLI/programmatic overrides to a loaded suite."""
     if batch_sizes is not None:
@@ -222,8 +221,8 @@ def _apply_overrides(
             nmg.config["pos_eps"] = nmg_pos_eps
         if nmg_rot_eps is not None:
             nmg.config["rot_eps"] = nmg_rot_eps
-        if checkpoint_path is not None:
-            nmg.config["checkpoint_path"] = str(Path(checkpoint_path))
+        if nmg_onnx_path is not None:
+            nmg.config["onnx_model_path"] = str(Path(nmg_onnx_path))
     suite.validate_benchmark()
 
 
@@ -231,7 +230,7 @@ def run_all_benchmarks(
     num_waypoints_list: list[int] | None = None,
     sim_device: str = "auto",
     headless: bool = True,
-    checkpoint_path: str | None = None,
+    nmg_onnx_path: str | None = None,
     *,
     suite_name: str = "smoke",
     algorithms: list[str] | None = None,
@@ -270,7 +269,7 @@ def run_all_benchmarks(
         rotation_threshold_rad=rotation_threshold_rad,
         nmg_pos_eps=nmg_pos_eps,
         nmg_rot_eps=nmg_rot_eps,
-        checkpoint_path=checkpoint_path,
+        nmg_onnx_path=nmg_onnx_path,
     )
     specs = _resolve_planners(suite, algorithms, list(extra_baselines or []))
     return BenchmarkRunner(
@@ -289,7 +288,7 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
         num_waypoints_list=args.num_waypoints,
         sim_device=args.device,
         headless=args.headless,
-        checkpoint_path=args.checkpoint_path,
+        nmg_onnx_path=args.nmg_onnx_path,
         suite_name=args.suite,
         algorithms=args.algorithms,
         extra_baselines=args.extra_baselines,

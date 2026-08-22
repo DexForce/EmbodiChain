@@ -17,10 +17,8 @@ from __future__ import annotations
 
 from dataclasses import MISSING
 from pathlib import Path
-
 import numpy as np
 import torch
-import torch.nn as nn
 
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
@@ -40,169 +38,99 @@ __all__ = [
 ]
 
 
-def _safe_torch_load(path: Path, map_location: torch.device) -> dict:
-    """Load a PyTorch checkpoint with safe deserialization when possible.
+class _OnnxPolicy:
+    """Small ONNX Runtime wrapper that keeps NMG model code out of EmbodiChain."""
 
-    Attempts ``weights_only=True`` first. If that fails (e.g. on older PyTorch
-    versions or checkpoints with unsupported pickle objects), falls back to
-    ``weights_only=False`` and logs a warning.
+    def __init__(self, path: Path, providers: list[str] | None = None) -> None:
+        try:
+            import onnxruntime as ort
+        except ImportError as exc:
+            raise ImportError(
+                "NeuralPlanner requires onnxruntime. Install EmbodiChain with "
+                "the 'nmg' optional dependency."
+            ) from exc
 
-    Args:
-        path: Path to the checkpoint file.
-        map_location: Device to map tensors to.
-
-    Returns:
-        The loaded checkpoint dictionary.
-    """
-    try:
-        return torch.load(path, map_location=map_location, weights_only=True)
-    except (TypeError, RuntimeError, AttributeError) as exc:
-        logger.log_warning(
-            f"Failed to load checkpoint with weights_only=True from {path}: {exc}. "
-            "Falling back to weights_only=False."
+        options = ort.SessionOptions()
+        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        self.session = ort.InferenceSession(
+            str(path), sess_options=options, providers=providers
         )
-        return torch.load(path, map_location=map_location, weights_only=False)
-
-
-def _layer_init(layer: nn.Linear, std: float = np.sqrt(2), bias_const: float = 0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
-class _RunningObsNormalizer:
-    def __init__(self, mean: torch.Tensor, var: torch.Tensor):
-        self.mean = mean
-        self.var = var
-
-    def normalize(self, obs: torch.Tensor) -> torch.Tensor:
-        return (obs - self.mean) / (self.var.sqrt() + 1e-8)
-
-
-class _WaypointTransformerActor(nn.Module):
-    """APG waypoint actor runtime copied in lightweight form for inference."""
-
-    def __init__(
-        self,
-        obs_dim: int,
-        action_dim: int,
-        num_waypoints: int,
-        use_relative_obs: bool = True,
-        hidden_dim: int = 256,
-        transformer_nhead: int = 4,
-        transformer_num_layers: int = 2,
-        transformer_ff_dim: int | None = None,
-    ):
-        super().__init__()
-        self.num_waypoints = int(num_waypoints)
-        self.use_relative_obs = bool(use_relative_obs)
-        if int(action_dim) != 7:
+        inputs = self.session.get_inputs()
+        outputs = self.session.get_outputs()
+        if len(inputs) != 1 or len(outputs) != 1:
             raise ValueError(
-                "Waypoint transformer checkpoints currently assume a 7-DoF arm. "
-                f"Got action_dim={action_dim}."
+                "NMG ONNX policy must expose exactly one input and one output; "
+                f"got {len(inputs)} inputs and {len(outputs)} outputs."
             )
-        self.state_dim = 7 + 7 + 7 + (7 if self.use_relative_obs else 0)
-        self.waypoint_token_dim = 3 + 4 + 1 + 1
-
-        expected_obs_dim = 7 + 7 + self.num_waypoints * 3
-        expected_obs_dim += self.num_waypoints * 4 + self.num_waypoints * 2 + 7
-        if self.use_relative_obs:
-            expected_obs_dim += 7
-        if int(obs_dim) != expected_obs_dim:
+        self.input_name = inputs[0].name
+        self.output_name = outputs[0].name
+        input_shape = inputs[0].shape
+        output_shape = outputs[0].shape
+        if len(input_shape) != 2 or not isinstance(input_shape[1], int):
             raise ValueError(
-                "Waypoint transformer expected obs_dim "
-                f"{expected_obs_dim}, got {obs_dim}."
+                f"Expected ONNX input shape [batch, obs], got {input_shape}."
             )
-
-        if hidden_dim % transformer_nhead != 0:
-            raise ValueError("hidden_dim must be divisible by transformer_nhead")
-
-        ff_dim = transformer_ff_dim or hidden_dim * 4
-        self.state_proj = _layer_init(nn.Linear(self.state_dim, hidden_dim))
-        self.waypoint_proj = _layer_init(nn.Linear(self.waypoint_token_dim, hidden_dim))
-        self.state_type_embedding = nn.Parameter(torch.zeros(1, 1, hidden_dim))
-        self.waypoint_type_embedding = nn.Parameter(torch.zeros(1, 1, hidden_dim))
-        self.waypoint_index_embedding = nn.Parameter(
-            torch.zeros(1, self.num_waypoints, hidden_dim)
+        if len(output_shape) != 2 or output_shape[1] != 7:
+            raise ValueError(
+                f"Expected ONNX output shape [batch, 7], got {output_shape}."
+            )
+        self.obs_dim = int(input_shape[1])
+        self.fixed_batch_size = (
+            int(input_shape[0]) if isinstance(input_shape[0], int) else None
         )
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim,
-            nhead=transformer_nhead,
-            dim_feedforward=ff_dim,
-            dropout=0.0,
-            activation="gelu",
-            batch_first=True,
-            norm_first=False,
-        )
-        self.encoder = nn.TransformerEncoder(
-            encoder_layer, num_layers=transformer_num_layers
-        )
-        self.actor_head = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            _layer_init(nn.Linear(hidden_dim, hidden_dim)),
-            nn.Tanh(),
-            _layer_init(nn.Linear(hidden_dim, action_dim), std=0.01),
-        )
+    def __call__(self, obs: torch.Tensor) -> torch.Tensor:
+        if self.fixed_batch_size is not None and obs.shape[0] != self.fixed_batch_size:
+            raise ValueError(
+                f"ONNX policy has fixed batch size {self.fixed_batch_size}, "
+                f"but received {obs.shape[0]}."
+            )
+        obs_np = np.ascontiguousarray(obs.detach().cpu().numpy(), dtype=np.float32)
+        action = self.session.run([self.output_name], {self.input_name: obs_np})[0]
+        return torch.as_tensor(action, dtype=torch.float32, device=obs.device)
 
-    def _parse_obs(self, x: torch.Tensor):
-        n = self.num_waypoints
-        cursor = 0
-        joint = x[:, cursor : cursor + 7]
-        cursor += 7
-        eef_pose = x[:, cursor : cursor + 7]
-        cursor += 7
-        waypoint_pos = x[:, cursor : cursor + 3 * n].reshape(-1, n, 3)
-        cursor += 3 * n
-        waypoint_quat = x[:, cursor : cursor + 4 * n].reshape(-1, n, 4)
-        cursor += 4 * n
-        active_onehot = x[:, cursor : cursor + n].reshape(-1, n, 1)
-        cursor += n
-        valid_mask = x[:, cursor : cursor + n].reshape(-1, n, 1)
-        cursor += n
-        last_action = x[:, cursor : cursor + 7]
-        cursor += 7
 
-        state_parts = [joint, eef_pose, last_action]
-        if self.use_relative_obs:
-            state_parts.append(x[:, cursor : cursor + 7])
+def _waypoint_obs_dim(num_waypoints: int, use_relative_obs: bool) -> int:
+    """Return the unified NMG constraint-observation width."""
+    n = int(num_waypoints)
+    dim = 7 + 7 + n * (3 + 4 + 7 + 5) + 7 + n
+    if use_relative_obs:
+        dim += 7 + n * (3 + 4 + 7)
+    return dim
 
-        state = torch.cat(state_parts, dim=-1)
-        waypoint_tokens = torch.cat(
-            [waypoint_pos, waypoint_quat, active_onehot, valid_mask], dim=-1
-        )
-        return state, waypoint_tokens, valid_mask.squeeze(-1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        state, waypoint_tokens, valid_mask = self._parse_obs(x)
-        state_token = self.state_proj(state).unsqueeze(1) + self.state_type_embedding
-        waypoint_tokens = (
-            self.waypoint_proj(waypoint_tokens)
-            + self.waypoint_type_embedding
-            + self.waypoint_index_embedding
-        )
-        tokens = torch.cat([state_token, waypoint_tokens], dim=1)
-        state_padding = torch.zeros(
-            valid_mask.shape[0], 1, dtype=torch.bool, device=valid_mask.device
-        )
-        waypoint_padding = valid_mask < 0.5
-        padding_mask = torch.cat([state_padding, waypoint_padding], dim=1)
-        encoded = self.encoder(tokens, src_key_padding_mask=padding_mask)
-        return self.actor_head(encoded[:, 0])
+def _quat_inverse_xyzw(q: torch.Tensor) -> torch.Tensor:
+    """Return the inverse of a unit quaternion stored as xyzw."""
+    return torch.cat([-q[..., :3], q[..., 3:4]], dim=-1)
+
+
+def _quat_mul_xyzw(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Multiply quaternion tensors stored as xyzw."""
+    ax, ay, az, aw = a.unbind(dim=-1)
+    bx, by, bz, bw = b.unbind(dim=-1)
+    return torch.stack(
+        [
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz,
+        ],
+        dim=-1,
+    )
 
 
 @configclass
 class NeuralPlannerCfg(BasePlannerCfg):
     planner_type: str = "neural"
 
-    checkpoint_path: str = MISSING
-    """Path to an APG waypoint checkpoint (.pt), e.g. from ``download_neural_planner_checkpoint()``."""
+    onnx_model_path: str = MISSING
+    """Path to a standalone NMG ONNX policy, including observation normalization."""
 
     control_part: str | None = None
     """Robot control part used for FK and qpos, e.g. 'left_arm'."""
 
-    max_steps: int | None = None
-    """Maximum rollout steps. If None, uses checkpoint max_episode_steps."""
+    max_steps: int = 240
+    """Maximum closed-loop kinematic rollout steps."""
 
     action_scale: float = 0.2
     """Delta joint scaling factor in radians."""
@@ -210,11 +138,34 @@ class NeuralPlannerCfg(BasePlannerCfg):
     num_arm_joints: int = 7
     """Number of arm joints controlled by the APG policy."""
 
-    pos_eps: float | None = None
-    """Waypoint position threshold. If None, uses checkpoint waypoint_pos_threshold."""
+    num_waypoints: int = 8
+    """Number of constraint slots encoded by the ONNX policy."""
 
-    rot_eps: float | None = None
-    """Waypoint rotation threshold. If None, uses checkpoint waypoint_rot_threshold."""
+    use_relative_obs: bool = True
+    """Whether the exported policy uses the unified relative-observation blocks."""
+
+    intermediate_orientation: bool = True
+    """Whether every Cartesian waypoint requires its orientation constraint."""
+
+    pos_eps: float = 0.01
+    """Waypoint position threshold in metres."""
+
+    rot_eps: float = 0.1
+    """Waypoint rotation threshold in radians."""
+
+    onnx_providers: list[str] | None = None
+    """Optional ONNX Runtime execution-provider priority list."""
+
+    policy_frame_from_world: list[list[float]] | None = None
+    """Optional left transform ``policy_T_world`` for runtime poses."""
+
+    runtime_tcp_from_policy_tcp: list[list[float]] | None = None
+    """Optional right transform ``runtime_tcp_T_policy_tcp`` for runtime poses.
+
+    Together, pose conversion is
+    ``policy_T_policy_tcp = policy_T_world @ world_T_runtime_tcp
+    @ runtime_tcp_T_policy_tcp``.
+    """
 
     dt: float = 0.01
     """Nominal timestep reported in PlanResult."""
@@ -230,8 +181,8 @@ class NeuralPlanOptions(PlanOptions):
 class NeuralPlanner(BasePlanner):
     r"""Neural motion planner based on an APG waypoint transformer policy.
 
-    The planner loads a checkpoint containing a waypoint-conditioned actor and
-    rolls it out in closed loop to drive the arm toward a sequence of
+    The planner loads a standalone ONNX waypoint policy and rolls it out in
+    closed loop to drive the arm toward a sequence of
     end-effector waypoints. Velocities and accelerations in the returned
     :class:`PlanResult` are estimated via finite differences over the generated
     position trajectory.
@@ -240,9 +191,9 @@ class NeuralPlanner(BasePlanner):
         cfg: Configuration for the neural planner.
 
     Raises:
-        ValueError: If ``checkpoint_path`` is missing or invalid.
-        FileNotFoundError: If the checkpoint file does not exist.
-        KeyError: If the checkpoint is missing required keys.
+        ValueError: If ``onnx_model_path`` is missing or invalid.
+        FileNotFoundError: If the ONNX model file does not exist.
+        ImportError: If ONNX Runtime is not installed.
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE})
@@ -251,9 +202,9 @@ class NeuralPlanner(BasePlanner):
         super().__init__(cfg)
 
         self.cfg: NeuralPlannerCfg = cfg
-        if cfg.checkpoint_path is MISSING or not str(cfg.checkpoint_path):
-            logger.log_error("checkpoint_path is required", ValueError)
-        self._load_checkpoint(Path(cfg.checkpoint_path))
+        if cfg.onnx_model_path is MISSING or not str(cfg.onnx_model_path):
+            logger.log_error("onnx_model_path is required", ValueError)
+        self._load_onnx_model(Path(cfg.onnx_model_path))
 
     def default_plan_options(self) -> NeuralPlanOptions:
         return NeuralPlanOptions()
@@ -274,92 +225,57 @@ class NeuralPlanner(BasePlanner):
             options.start_qpos = start_qpos
         return options
 
-    def _load_checkpoint(self, checkpoint_path: Path) -> None:
-        if not checkpoint_path.exists():
-            logger.log_error(
-                f"Checkpoint not found: {checkpoint_path}", FileNotFoundError
-            )
-
-        ckpt = _safe_torch_load(checkpoint_path, map_location=self.device)
-        if "agent" not in ckpt:
-            raise KeyError(
-                f"Checkpoint at '{checkpoint_path}' is missing 'agent'. "
-                f"Available keys: {list(ckpt.keys())}."
-            )
-        if "obs_normalizer" not in ckpt:
-            raise KeyError(
-                f"Checkpoint at '{checkpoint_path}' is missing 'obs_normalizer'. "
-                f"Available keys: {list(ckpt.keys())}."
-            )
-        for subkey in ("mean", "var"):
-            if subkey not in ckpt["obs_normalizer"]:
-                raise KeyError(
-                    f"Checkpoint obs_normalizer is missing '{subkey}'. "
-                    f"Available: {list(ckpt['obs_normalizer'].keys())}."
-                )
-
-        self._ckpt_args = ckpt.get("args", {})
-        self._num_waypoints = int(self._ckpt_args.get("waypoint_max", 1))
-        self._use_relative_obs = bool(
-            self._ckpt_args.get("waypoint_use_relative_obs", True)
-        )
-        self._policy_arch = self._ckpt_args.get("policy_arch")
-        if self._policy_arch != "transformer":
+    def _load_onnx_model(self, model_path: Path) -> None:
+        if not model_path.exists():
+            logger.log_error(f"ONNX policy not found: {model_path}", FileNotFoundError)
+        if model_path.suffix.lower() != ".onnx":
             raise ValueError(
-                "NeuralPlanner only supports transformer waypoint checkpoints. "
-                f"Got policy_arch={self._policy_arch!r}."
+                "NeuralPlanner only accepts standalone .onnx policies; "
+                f"got {model_path}."
             )
-        self._hidden_dim = int(self._ckpt_args.get("hidden_dim", 256))
+
+        self._num_waypoints = int(self.cfg.num_waypoints)
+        self._use_relative_obs = bool(self.cfg.use_relative_obs)
         self._action_dim = int(self.cfg.num_arm_joints)
-        self._obs_dim = int(ckpt["obs_normalizer"]["mean"].numel())
-        self._max_steps = int(
-            self.cfg.max_steps or self._ckpt_args.get("max_episode_steps", 30)
+        if self._action_dim != 7:
+            raise ValueError(
+                f"NMG ONNX policy controls 7 arm joints, got {self._action_dim}."
+            )
+        self._max_steps = int(self.cfg.max_steps)
+        self._pos_eps = float(self.cfg.pos_eps)
+        self._rot_eps = float(self.cfg.rot_eps)
+        self._intermediate_orientation = bool(self.cfg.intermediate_orientation)
+        self._policy = _OnnxPolicy(model_path, self.cfg.onnx_providers)
+        self._obs_dim = self._policy.obs_dim
+        self._policy_frame_from_world = self._as_transform(
+            self.cfg.policy_frame_from_world, "policy_frame_from_world"
         )
-        self._pos_eps = float(
-            self.cfg.pos_eps
-            if self.cfg.pos_eps is not None
-            else self._ckpt_args.get("waypoint_pos_threshold", 0.05)
+        self._runtime_tcp_from_policy_tcp = self._as_transform(
+            self.cfg.runtime_tcp_from_policy_tcp, "runtime_tcp_from_policy_tcp"
         )
-        self._rot_eps = float(
-            self.cfg.rot_eps
-            if self.cfg.rot_eps is not None
-            else self._ckpt_args.get("waypoint_rot_threshold", 0.3)
+        expected_obs_dim = _waypoint_obs_dim(
+            self._num_waypoints, self._use_relative_obs
         )
-        self._intermediate_orientation = bool(
-            self._ckpt_args.get("waypoint_intermediate_orientation", True)
-        )
+        if self._obs_dim != expected_obs_dim:
+            raise ValueError(
+                f"ONNX input has obs dim {self._obs_dim}, but the configured "
+                f"unified constraint layout requires {expected_obs_dim}."
+            )
 
-        self._normalizer = _RunningObsNormalizer(
-            ckpt["obs_normalizer"]["mean"].to(self.device),
-            ckpt["obs_normalizer"]["var"].to(self.device),
-        )
-        self._actor = self._build_actor().to(self.device)
+    def _as_transform(self, value: list[list[float]] | None, name: str) -> torch.Tensor:
+        """Convert an optional homogeneous-transform config to a device tensor."""
+        if value is None:
+            return torch.eye(4, dtype=torch.float32, device=self.device)
+        transform = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+        if transform.shape != (4, 4):
+            raise ValueError(f"{name} must have shape (4, 4), got {transform.shape}.")
+        return transform
 
-        state_dict = {
-            k.replace("actor_mean.", ""): v.to(self.device)
-            for k, v in ckpt["agent"].items()
-            if k.startswith("actor_mean.")
-        }
-        if not state_dict:
-            raise KeyError("Checkpoint agent has no actor_mean.* weights.")
-        self._actor.load_state_dict(state_dict)
-        self._actor.eval()
-
-    def _build_actor(self) -> nn.Module:
-        return _WaypointTransformerActor(
-            obs_dim=self._obs_dim,
-            action_dim=self._action_dim,
-            num_waypoints=self._num_waypoints,
-            use_relative_obs=self._use_relative_obs,
-            hidden_dim=self._hidden_dim,
-            transformer_nhead=int(self._ckpt_args.get("transformer_nhead", 4)),
-            transformer_num_layers=int(
-                self._ckpt_args.get("transformer_num_layers", 2)
-            ),
-            transformer_ff_dim=(
-                int(self._ckpt_args.get("transformer_ff_dim", 0)) or None
-            ),
-        )
+    def _to_policy_frame(self, xpos: torch.Tensor) -> torch.Tensor:
+        """Map runtime-world TCP poses to the NMG training base and TCP frame."""
+        left = self._policy_frame_from_world.expand(xpos.shape[0], -1, -1)
+        right = self._runtime_tcp_from_policy_tcp.expand(xpos.shape[0], -1, -1)
+        return torch.bmm(torch.bmm(left, xpos), right)
 
     @validate_plan_options(options_cls=NeuralPlanOptions)
     def plan(
@@ -432,7 +348,7 @@ class NeuralPlanner(BasePlanner):
                     active_idx,
                     last_action,
                 )
-                action = self._actor(self._normalizer.normalize(obs)).clamp(-1.0, 1.0)
+                action = self._policy(obs).clamp(-1.0, 1.0)
                 # Hold converged envs: zero their action so qpos does not drift.
                 # `converged` reflects state up to the end of the previous step, so
                 # once an env converged at the end of step N its action is masked
@@ -494,7 +410,7 @@ class NeuralPlanner(BasePlanner):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
         if len(target_states) > self._num_waypoints:
             logger.log_error(
-                f"Received {len(target_states)} waypoints, but checkpoint supports "
+                f"Received {len(target_states)} waypoints, but the ONNX policy supports "
                 f"at most {self._num_waypoints}.",
                 ValueError,
             )
@@ -511,9 +427,10 @@ class NeuralPlanner(BasePlanner):
             xpos = torch.as_tensor(target.xpos, dtype=torch.float32, device=self.device)
             if xpos.dim() == 2:
                 xpos = xpos.unsqueeze(0)
-            waypoint_pos[:, idx] = xpos[:, :3, 3]
+            policy_xpos = self._to_policy_frame(xpos)
+            waypoint_pos[:, idx] = policy_xpos[:, :3, 3]
             waypoint_quat[:, idx] = convert_quat(
-                quat_from_matrix(xpos[:, :3, :3]), to="xyzw"
+                quat_from_matrix(policy_xpos[:, :3, :3]), to="xyzw"
             )
             valid_mask[:, idx] = 1.0
         return waypoint_pos, waypoint_quat, valid_mask, len(target_states)
@@ -539,9 +456,9 @@ class NeuralPlanner(BasePlanner):
         return self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=True)
 
     def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
-        fk = self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=False)
-        pos = fk[:, :3]
-        quat_xyzw = convert_quat(fk[:, 3:7], to="xyzw")
+        fk = self._to_policy_frame(self._fk_matrix(qpos, control_part))
+        pos = fk[:, :3, 3]
+        quat_xyzw = convert_quat(quat_from_matrix(fk[:, :3, :3]), to="xyzw")
         return torch.cat([pos, quat_xyzw], dim=-1)
 
     def _build_obs(
@@ -558,22 +475,85 @@ class NeuralPlanner(BasePlanner):
         active_idx_clamped = torch.clamp(active_idx, max=self._num_waypoints - 1)
         active_onehot = torch.zeros(b, self._num_waypoints, device=self.device)
         active_onehot.scatter_(1, active_idx_clamped.unsqueeze(1), 1.0)
+        pos_mask = valid_mask.clone()
+        rot_mask = valid_mask.clone()
+        if not self._intermediate_orientation:
+            waypoint_ids = torch.arange(self._num_waypoints, device=self.device)
+            episode_k = valid_mask.sum(dim=-1).long()
+            rot_mask = (waypoint_ids.unsqueeze(0) == (episode_k - 1).unsqueeze(1)).to(
+                valid_mask.dtype
+            )
+        joint_mask = torch.zeros_like(valid_mask)
+        waypoint_joint = torch.zeros(
+            b,
+            self._num_waypoints,
+            self._action_dim,
+            dtype=joint_pos.dtype,
+            device=self.device,
+        )
+        pos_block = waypoint_pos * pos_mask.unsqueeze(-1)
+        identity = torch.tensor(
+            [0.0, 0.0, 0.0, 1.0],
+            dtype=waypoint_quat.dtype,
+            device=self.device,
+        )
+        quat_block = torch.where(
+            rot_mask.unsqueeze(-1) > 0.5,
+            waypoint_quat,
+            identity.view(1, 1, 4),
+        )
         obs_parts = [
             joint_pos,
             ee_pose,
-            waypoint_pos.reshape(b, self._num_waypoints * 3),
-            waypoint_quat.reshape(b, self._num_waypoints * 4),
+            pos_block.reshape(b, self._num_waypoints * 3),
+            quat_block.reshape(b, self._num_waypoints * 4),
+            waypoint_joint.reshape(b, self._num_waypoints * self._action_dim),
             active_onehot,
             valid_mask,
+            pos_mask,
+            rot_mask,
+            joint_mask,
             last_action,
         ]
         if self._use_relative_obs:
             idx = torch.arange(b, device=self.device)
-            active_pos = waypoint_pos[idx, active_idx_clamped]
-            active_quat = waypoint_quat[idx, active_idx_clamped]
+            active_pos = pos_block[idx, active_idx_clamped]
+            active_quat = quat_block[idx, active_idx_clamped]
+            inv_eef = _quat_inverse_xyzw(ee_pose[:, 3:7])
+            active_rel_quat = _quat_mul_xyzw(active_quat, inv_eef)
             obs_parts.append(
-                torch.cat([active_pos - ee_pose[:, :3], active_quat], dim=-1)
+                torch.cat([active_pos - ee_pose[:, :3], active_rel_quat], dim=-1)
             )
+            rel_pos = (pos_block - ee_pose[:, None, :3]) * pos_mask.unsqueeze(-1)
+            rel_quat = _quat_mul_xyzw(
+                quat_block,
+                inv_eef[:, None, :].expand_as(quat_block),
+            )
+            rel_quat = torch.where(
+                rot_mask.unsqueeze(-1) > 0.5,
+                rel_quat,
+                identity.view(1, 1, 4),
+            )
+            joint_err = torch.zeros_like(waypoint_joint)
+            obs_parts.extend(
+                [
+                    rel_pos.reshape(b, self._num_waypoints * 3),
+                    rel_quat.reshape(b, self._num_waypoints * 4),
+                    joint_err.reshape(b, self._num_waypoints * self._action_dim),
+                ]
+            )
+        waypoint_type = torch.zeros(
+            b,
+            self._num_waypoints,
+            dtype=joint_pos.dtype,
+            device=self.device,
+        )
+        waypoint_type = torch.where(
+            (valid_mask > 0.5) & (rot_mask < 0.5),
+            torch.ones_like(waypoint_type),
+            waypoint_type,
+        )
+        obs_parts.append(waypoint_type)
         obs = torch.cat(obs_parts, dim=-1)
         if obs.shape[-1] != self._obs_dim:
             raise ValueError(

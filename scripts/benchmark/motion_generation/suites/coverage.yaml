@@ -37,13 +37,19 @@ planners:
       velocity: 0.2
       acceleration: 0.5
   - id: nmg
-    adapter: neural_stub
+    adapter: nmg_onnx
     role: candidate
     enabled: false
     config:
-      model_revision: not-ready
-      pos_eps: 0.05
-      rot_eps: 0.3
+      model_revision: nmg-onnx-v1
+      onnx_model_path: null
+      num_waypoints: 8
+      max_steps: 240
+      action_scale: 0.2
+      use_relative_obs: true
+      intermediate_orientation: true
+      pos_eps: 0.01
+      rot_eps: 0.1
 
 protocol:
   warmup_trials: 3

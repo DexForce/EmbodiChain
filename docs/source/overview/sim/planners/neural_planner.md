@@ -3,21 +3,24 @@
 ````{admonition} Experimental
 :class: warning
 
-`NeuralPlanner` is an **experimental** feature. The API, checkpoint format,
+`NeuralPlanner` is an **experimental** feature. The API, ONNX model contract,
 and default parameters may change without a deprecation cycle. It is currently
 only validated on the **Franka Panda** robot.
 ````
 
 `NeuralPlanner` is a learning-based EEF waypoint planner. It rolls out a
-trained APG checkpoint through `MotionGenerator` to reach Cartesian targets.
+standalone NMG ONNX policy through `MotionGenerator` to reach Cartesian targets.
+The ONNX graph must include raw-observation normalization.
 
 ## Configuration
 
-Pre-trained checkpoints are hosted on HuggingFace and can be downloaded with
-`download_neural_planner_checkpoint()` (requires `HF_TOKEN` environment variable).
+Install the optional runtime and export the trained policy to ONNX before use:
+
+```bash
+pip install -e '.[nmg]'
+```
 
 ```python
-from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
 from embodichain.lab.sim.planners import (
     MotionGenCfg,
     MotionGenOptions,
@@ -28,13 +31,13 @@ from embodichain.lab.sim.planners import (
 )
 from embodichain.lab.sim.planners.neural_planner import NeuralPlanOptions
 
-checkpoint_path = download_neural_planner_checkpoint()
+onnx_model_path = "/path/to/best_mean.onnx"
 
 motion_generator = MotionGenerator(
     cfg=MotionGenCfg(
         planner_cfg=NeuralPlannerCfg(
             robot_uid=robot.uid,
-            checkpoint_path=checkpoint_path,
+            onnx_model_path=onnx_model_path,
             control_part="main_arm",
         )
     )
@@ -57,7 +60,18 @@ result = motion_generator.generate(
 ## Example
 
 ```bash
-python examples/sim/planners/neural_planner.py --headless --device cuda
+python examples/sim/planners/neural_planner.py \
+  --headless --device cuda \
+  --onnx-model-path /path/to/best_mean.onnx
 ```
 
-The example downloads the checkpoint automatically on first run.
+The current exported policy has a fixed batch size of one. If the runtime robot
+base frame or TCP differs from training, configure `policy_frame_from_world` and
+`runtime_tcp_from_policy_tcp` as explicit homogeneous transforms. The conversion
+is
+
+```text
+policy_T_policy_tcp = policy_T_world
+                    @ world_T_runtime_tcp
+                    @ runtime_tcp_T_policy_tcp
+```

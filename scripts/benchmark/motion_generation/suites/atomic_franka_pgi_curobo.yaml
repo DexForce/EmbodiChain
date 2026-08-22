@@ -9,6 +9,30 @@ robot:
   config: {}
 
 planners:
+  - id: nmg
+    adapter: nmg_onnx
+    role: candidate
+    enabled: false
+    config:
+      model_revision: nmg-cartesian-300m
+      onnx_model_path: null
+      num_waypoints: 8
+      max_steps: 240
+      action_scale: 0.2
+      use_relative_obs: true
+      intermediate_orientation: true
+      pos_eps: 0.01
+      rot_eps: 0.1
+      policy_frame_from_world:
+        - [-1.0, 0.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.0]
+        - [0.0, 0.0, 0.0, 1.0]
+      runtime_tcp_from_policy_tcp:
+        - [0.70710678, 0.70710678, 0.0, 0.0]
+        - [-0.70710678, 0.70710678, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, -0.0466]
+        - [0.0, 0.0, 0.0, 1.0]
   - id: curobo
     adapter: curobo
     role: primary_baseline

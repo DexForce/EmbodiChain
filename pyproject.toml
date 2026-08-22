@@ -52,6 +52,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+nmg = [
+  "onnxruntime>=1.20",
+]
 gensim = [
   "bpy",
   "pyrender==0.1.45",
