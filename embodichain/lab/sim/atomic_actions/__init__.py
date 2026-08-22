@@ -64,7 +64,11 @@ from .execution import (
     ExecutionStatus,
     ExecutionTick,
 )
-from .goals import ObjectActionGoal, PoseGoalValue, SceneEntityPose
+from .goals import (
+    ObjectActionGoal,
+    PoseGoalValue,
+    SceneEntityPose,
+)
 from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
@@ -158,8 +162,11 @@ from .sim_adapter import (
     SimulationExecutionAdapter,
 )
 from .state import (
+    ArticulationJointState,
+    CoordinatedHeldObjectState,
     EntityState,
     HeldObjectState,
+    ObservedArticulationJointState,
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
@@ -175,6 +182,7 @@ __all__ = [
     "ActionPlanningServices",
     "Affordance",
     "AntipodalAffordance",
+    "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
     "AtomicAction",
@@ -190,6 +198,7 @@ __all__ = [
     "CommandSink",
     "ControlCommand",
     "ControlPartCommandProfile",
+    "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentOptions",
@@ -246,6 +255,7 @@ __all__ = [
     "ObjectSemantics",
     "OPEN_COMMAND",
     "ObservationProvider",
+    "ObservedArticulationJointState",
     "PickUp",
     "PickUpOptions",
     "Place",

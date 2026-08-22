@@ -68,6 +68,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     plan_named_arm_trajectory,
     repeat_qpos,
+    require_shared_task_state_key,
     resolve_batched_pose,
 )
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
@@ -158,6 +159,8 @@ class HandOverOptions(ActionOptions):
 class _HandOverResources:
     """Invocation-bound control parts and compatible hand commands."""
 
+    transfer_task_state_key: str
+    receive_task_state_key: str
     transfer_arm: JointPositionTarget
     receive_arm: JointPositionTarget
     transfer_hand: JointPositionTarget
@@ -238,6 +241,21 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         receive_arm = receive_motion.require_target(JointPositionTarget)
         transfer_hand = transfer_grasp.require_target(JointPositionTarget)
         receive_hand = receive_grasp.require_target(JointPositionTarget)
+        transfer_task_state_key = require_shared_task_state_key(
+            transfer_motion,
+            transfer_grasp,
+            participant="HandOver source participant",
+        )
+        receive_task_state_key = require_shared_task_state_key(
+            receive_motion,
+            receive_grasp,
+            participant="HandOver destination participant",
+        )
+        if transfer_task_state_key == receive_task_state_key:
+            raise ValueError(
+                "HandOver source and destination must use different "
+                "task_state_key values."
+            )
         if transfer_arm.control_part == receive_arm.control_part:
             raise ValueError(
                 "HandOver source and destination must use different manipulator "
@@ -249,6 +267,8 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 "control parts."
             )
         return _HandOverResources(
+            transfer_task_state_key=transfer_task_state_key,
+            receive_task_state_key=receive_task_state_key,
             transfer_arm=transfer_arm,
             receive_arm=receive_arm,
             transfer_hand=transfer_hand,
@@ -301,15 +321,15 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 "Coordinated dual-arm planning is not supported by the cuRobo backend."
             )
         state = context
-        transfer_control_part = resources.transfer_arm.control_part
+        transfer_task_state_key = resources.transfer_task_state_key
         transfer_held_object = self._resolve_transfer_held_object(
-            state, transfer_control_part
+            state, transfer_task_state_key
         )
         self._validate_requested_object(
             target.semantics, transfer_held_object.semantics
         )
         semantics = transfer_held_object.semantics
-        eligible = context.task.exclusive_held_object_mask(transfer_control_part)
+        eligible = context.task.exclusive_held_object_mask(transfer_task_state_key)
         if not eligible.any():
             logger.log_warning("HandOver requires an exclusively held source object.")
             return self.failed_plan(
@@ -615,8 +635,8 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             ),
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.transfer_arm.control_part: None,
-                    resources.receive_arm.control_part: held_object,
+                    resources.transfer_task_state_key: None,
+                    resources.receive_task_state_key: held_object,
                 }
             ),
             segment_lengths=segment_lengths,
@@ -643,13 +663,13 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     def _resolve_transfer_held_object(
         self,
         state: PlanningContext,
-        transfer_control_part: str,
+        transfer_task_state_key: str,
     ) -> HeldObjectState:
-        held = state.get_held_object(transfer_control_part)
+        held = state.get_held_object(transfer_task_state_key)
         if held is None:
             raise ValueError(
-                "HandOver requires an object held by transfer control part "
-                f"{transfer_control_part!r} (run PickUp first)."
+                "HandOver requires an object held by source task-state resource "
+                f"{transfer_task_state_key!r} (run PickUp first)."
             )
         return held
 

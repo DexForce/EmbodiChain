@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from ..bindings import EndpointBinding
 from ..state import PlanningContext
 from ..trajectory_ops import build_pose_plan_states
 
@@ -65,6 +66,25 @@ def resolve_object_target(
         device=device,
         name=name,
     )
+
+
+def require_shared_task_state_key(
+    motion: EndpointBinding,
+    grasp: EndpointBinding,
+    *,
+    participant: str,
+) -> str:
+    """Return the logical held-object key shared by one participant's endpoints."""
+    motion_key = motion.task_state_key
+    grasp_key = grasp.task_state_key
+    if motion_key != grasp_key:
+        raise ValueError(
+            f"{participant} motion and grasp endpoints must share one "
+            f"task_state_key, but got {motion_key!r} and {grasp_key!r}."
+        )
+    if not isinstance(motion_key, str) or not motion_key:
+        raise ValueError(f"{participant} task_state_key must be a non-empty string.")
+    return motion_key
 
 
 def repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
@@ -130,6 +150,7 @@ __all__ = [
     "arm_qpos_from_state",
     "assemble_full_robot_trajectory",
     "plan_named_arm_trajectory",
+    "require_shared_task_state_key",
     "repeat_qpos",
     "resolve_batched_pose",
     "resolve_object_target",

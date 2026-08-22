@@ -31,6 +31,7 @@ from embodichain.utils.math import (
 
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
+    require_shared_task_state_key,
     resolve_object_target,
 )
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
@@ -134,6 +135,11 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         grasp = binding.endpoint("primary", "grasp")
         motion_target = motion.require_target(JointPositionTarget)
         grasp_target = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="MoveHeldObject primary participant",
+        )
         control_part = motion_target.control_part
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
@@ -144,13 +150,13 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             dtype=context.robot.qpos.dtype,
         )
         state = context
-        held_object = state.get_held_object(control_part)
+        held_object = state.get_held_object(task_state_key)
         if held_object is None:
             raise ValueError(
-                "MoveHeldObject requires an object held by control part "
-                f"{control_part!r} - run PickUp first."
+                "MoveHeldObject requires an object held by task-state resource "
+                f"{task_state_key!r} - run PickUp first."
             )
-        eligible = context.task.exclusive_held_object_mask(control_part)
+        eligible = context.task.exclusive_held_object_mask(task_state_key)
         if not eligible.any():
             return self.failed_plan(
                 request,

@@ -24,7 +24,9 @@ from types import MappingProxyType
 from typing import TypeVar
 
 from embodichain.lab.sim.atomic_actions import (
+    Affordance,
     AtomicActionEngine,
+    DynamicCollisionMode,
     DisjointResourceSlots,
     DisjointSlotEndpoints,
     SkillResourceSlot,
@@ -55,13 +57,15 @@ from .scene import (
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneArticulationRef,
+    SceneCollisionRole,
     SceneCollisionWorldMode,
+    SceneDynamics,
     SceneEntityMetadata,
     SceneEntityRef,
+    SceneEntityRegistration,
     SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
-    _SceneMetadataIndex,
 )
 
 PathPart = str | int
@@ -142,12 +146,105 @@ class SemanticValidationError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class SceneEntityManifest(SceneEntityMetadata):
-    """Static scene declaration sharing the canonical metadata value model."""
+class SceneEntityManifest:
+    """Provider-free static scene-entity declaration.
+
+    Args:
+        ref: Canonical typed entity reference.
+        aliases: Boundary aliases accepted during static linking.
+        parent: Canonical parent for links and affordances.
+        native_name: Backend-local child name.
+        dynamics: Physical mobility classification.
+        collision_role: Planner collision classification.
+        semantic_type: Optional application classification.
+        affordance_capabilities: Semantic operations supplied by an affordance.
+        default_affordances: Capability-scoped direct-child defaults.
+        affordance_payload_type: Exact registered affordance payload type.
+        affordance_revision: Stable payload revision or fingerprint.
+        relative_pose: Flattened parent-relative homogeneous transform.
+    """
+
+    ref: SceneEntityRef
+    aliases: tuple[str, ...] = ()
+    parent: SceneEntityRef | None = None
+    native_name: str | None = None
+    dynamics: SceneDynamics = SceneDynamics.UNKNOWN
+    collision_role: SceneCollisionRole = SceneCollisionRole.NONE
+    semantic_type: str | None = None
+    affordance_capabilities: frozenset[str] = frozenset()
+    default_affordances: Mapping[str, SceneAffordanceRef] = field(default_factory=dict)
+    affordance_payload_type: type[Affordance] | None = None
+    affordance_revision: str | None = None
+    relative_pose: tuple[float, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.ref, SceneEntityRef):
+            raise TypeError("SceneEntityManifest.ref must be a SceneEntityRef.")
+        if isinstance(self.aliases, (str, bytes)):
+            raise TypeError("aliases must be an iterable of identifiers.")
+        aliases = tuple(self.aliases)
+        for alias in aliases:
+            _validate_identifier(alias, field_name="scene aliases")
+        aliases = tuple(alias for alias in aliases if alias != self.ref.entity_id)
+        if len(set(aliases)) != len(aliases):
+            raise ValueError("SceneEntityManifest.aliases must be unique.")
+        object.__setattr__(self, "aliases", aliases)
+        if self.parent is not None and not isinstance(self.parent, SceneEntityRef):
+            raise TypeError("parent must be a SceneEntityRef or None.")
+        if self.semantic_type is not None:
+            _validate_identifier(self.semantic_type, field_name="semantic_type")
+        if isinstance(self.affordance_capabilities, (str, bytes)):
+            raise TypeError("affordance_capabilities must be an iterable.")
+        capabilities = frozenset(self.affordance_capabilities)
+        for capability in capabilities:
+            _validate_identifier(capability, field_name="affordance capabilities")
+        object.__setattr__(self, "affordance_capabilities", capabilities)
+        if not isinstance(self.default_affordances, Mapping):
+            raise TypeError("default_affordances must be a mapping.")
+        defaults: dict[str, SceneAffordanceRef] = {}
+        for capability, affordance in self.default_affordances.items():
+            _validate_identifier(capability, field_name="default capabilities")
+            if type(affordance) is not SceneAffordanceRef:
+                raise TypeError(
+                    "default_affordances values must be SceneAffordanceRef values."
+                )
+            defaults[capability] = affordance
+        object.__setattr__(
+            self,
+            "default_affordances",
+            MappingProxyType(defaults),
+        )
+        metadata = SceneEntityMetadata(
+            ref=self.ref,
+            aliases=self.aliases,
+            parent=self.parent,
+            native_name=self.native_name,
+            dynamics=self.dynamics,
+            collision_role=self.collision_role,
+            semantic_type=self.semantic_type,
+            affordance_capabilities=self.affordance_capabilities,
+            default_affordances=self.default_affordances,
+            affordance_payload_type=self.affordance_payload_type,
+            affordance_revision=self.affordance_revision,
+            relative_pose=self.relative_pose,
+        )
+        object.__setattr__(self, "aliases", metadata.aliases)
+        object.__setattr__(self, "default_affordances", metadata.default_affordances)
+        object.__setattr__(self, "relative_pose", metadata.relative_pose)
+
+    @classmethod
+    def from_registration(
+        cls,
+        registration: SceneEntityRegistration,
+    ) -> SceneEntityManifest:
+        """Project live registration metadata without reading providers."""
+        if not isinstance(registration, SceneEntityRegistration):
+            raise TypeError("registration must be a SceneEntityRegistration.")
+        return cls.from_metadata(SceneEntityMetadata.from_registration(registration))
 
     @classmethod
     def from_metadata(cls, metadata: SceneEntityMetadata) -> SceneEntityManifest:
-        """Copy one canonical provider-free metadata value."""
+        """Copy one provider-free registry metadata value."""
         if not isinstance(metadata, SceneEntityMetadata):
             raise TypeError("metadata must be a SceneEntityMetadata.")
         return cls(
@@ -171,7 +268,9 @@ class SceneManifest:
     """Immutable provider-free scene catalog used before simulation starts."""
 
     _entries: tuple[SceneEntityManifest, ...]
-    _index: _SceneMetadataIndex
+    _by_id: Mapping[str, SceneEntityManifest]
+    _aliases: Mapping[str, str]
+    _affordances: Mapping[tuple[str, str], tuple[SceneAffordanceRef, ...]]
     collision_world_mode: SceneCollisionWorldMode | None
 
     def __init__(
@@ -195,8 +294,109 @@ class SceneManifest:
             raise TypeError(
                 "collision_world_mode must be a SceneCollisionWorldMode or None."
             )
+        by_id: dict[str, SceneEntityManifest] = {}
+        for entry in supplied:
+            if entry.ref.entity_id in by_id:
+                raise ValueError(
+                    f"Duplicate scene manifest ID {entry.ref.entity_id!r}."
+                )
+            by_id[entry.ref.entity_id] = entry
+        aliases: dict[str, str] = {}
+        for entry in supplied:
+            for alias in entry.aliases:
+                if alias in by_id:
+                    raise ValueError(
+                        f"Scene manifest alias {alias!r} collides with a canonical ID."
+                    )
+                previous = aliases.get(alias)
+                if previous is not None:
+                    raise ValueError(
+                        f"Scene manifest alias {alias!r} is ambiguous between "
+                        f"{previous!r} and {entry.ref.entity_id!r}."
+                    )
+                aliases[alias] = entry.ref.entity_id
+        affordances: dict[tuple[str, str], list[SceneAffordanceRef]] = {}
+        native_members: dict[tuple[type[SceneEntityRef], str, str], str] = {}
+        for entry in supplied:
+            if entry.parent is not None:
+                parent_entry = by_id.get(entry.parent.entity_id)
+                if parent_entry is None:
+                    raise ValueError(
+                        f"Scene manifest entity {entry.ref.entity_id!r} references "
+                        f"unknown parent {entry.parent.entity_id!r}."
+                    )
+                if type(parent_entry.ref) is not type(entry.parent):
+                    raise TypeError(
+                        f"Scene manifest parent {entry.parent.entity_id!r} has "
+                        "the wrong reference type."
+                    )
+                if entry.native_name is not None and isinstance(
+                    entry.ref, (SceneLinkRef, SceneAffordanceRef)
+                ):
+                    native_key = (
+                        type(entry.ref),
+                        entry.parent.entity_id,
+                        entry.native_name,
+                    )
+                    previous = native_members.get(native_key)
+                    if previous is not None:
+                        raise ValueError(
+                            f"Scene manifest parent {entry.parent.entity_id!r} "
+                            f"and native_name {entry.native_name!r} are already "
+                            f"registered as {previous!r}."
+                        )
+                    native_members[native_key] = entry.ref.entity_id
+            if isinstance(entry.ref, SceneAffordanceRef):
+                if entry.parent is None:
+                    raise ValueError(
+                        f"Affordance {entry.ref.entity_id!r} requires a parent."
+                    )
+                for capability in entry.affordance_capabilities:
+                    affordances.setdefault(
+                        (entry.parent.entity_id, capability), []
+                    ).append(entry.ref)
+            elif entry.affordance_capabilities:
+                raise ValueError(
+                    "Only SceneAffordanceRef entries may declare "
+                    "affordance_capabilities."
+                )
+        for entry in supplied:
+            if isinstance(entry.ref, SceneAffordanceRef) and entry.default_affordances:
+                raise ValueError(
+                    "Scene affordance entries cannot declare default_affordances."
+                )
+            for capability, default in entry.default_affordances.items():
+                default_entry = by_id.get(default.entity_id)
+                if default_entry is None or not isinstance(
+                    default_entry.ref, SceneAffordanceRef
+                ):
+                    raise ValueError(
+                        f"Default affordance {default.entity_id!r} is not a "
+                        "registered affordance entry."
+                    )
+                if default_entry.parent != entry.ref:
+                    raise ValueError(
+                        f"Default affordance {default.entity_id!r} is not a direct "
+                        f"child of {entry.ref.entity_id!r}."
+                    )
+                if capability not in default_entry.affordance_capabilities:
+                    raise ValueError(
+                        f"Default affordance {default.entity_id!r} does not support "
+                        f"capability {capability!r}."
+                    )
         object.__setattr__(self, "_entries", supplied)
-        object.__setattr__(self, "_index", _SceneMetadataIndex(supplied))
+        object.__setattr__(self, "_by_id", MappingProxyType(by_id))
+        object.__setattr__(self, "_aliases", MappingProxyType(aliases))
+        object.__setattr__(
+            self,
+            "_affordances",
+            MappingProxyType(
+                {
+                    key: tuple(sorted(refs, key=lambda ref: ref.entity_id))
+                    for key, refs in affordances.items()
+                }
+            ),
+        )
         object.__setattr__(self, "collision_world_mode", collision_world_mode)
 
     @property
@@ -230,7 +430,7 @@ class SceneManifest:
             supplied_type: type[SceneEntityRef] | None = type(identifier)
         elif isinstance(identifier, str):
             _validate_identifier(identifier, field_name="scene identifier")
-            candidate_id = self._index.aliases.get(identifier, identifier)
+            candidate_id = self._aliases.get(identifier, identifier)
             supplied_type = None
         else:
             raise SemanticValidationError(
@@ -240,14 +440,14 @@ class SceneManifest:
                     "Expected a scene identifier or typed scene reference.",
                 )
             )
-        entry = self._index.by_id.get(candidate_id)
+        entry = self._by_id.get(candidate_id)
         if entry is None:
             raise SemanticValidationError(
                 SemanticDiagnostic(
                     "unknown_entity",
                     path,
                     f"Unknown scene entity {candidate_id!r}.",
-                    tuple(self._index.by_id),
+                    tuple(self._by_id),
                 )
             )
         if supplied_type is not None and supplied_type is not type(entry.ref):
@@ -279,7 +479,7 @@ class SceneManifest:
     ) -> SceneEntityManifest:
         """Return one static entry after canonical typed resolution."""
         ref = self.resolve(identifier, expected_type=expected_type, path=path)
-        return self._index.by_id[ref.entity_id]  # type: ignore[return-value]
+        return self._by_id[ref.entity_id]
 
     def resolve_affordance(
         self,
@@ -292,17 +492,14 @@ class SceneManifest:
         """Resolve one affordance using the same strict rule as SceneRegistry."""
         parent_ref = self.resolve(parent, path=path)
         _validate_identifier(capability, field_name="affordance capability")
-        candidates = self._index.affordances_by_parent_capability.get(
-            (parent_ref.entity_id, capability),
-            (),
-        )
+        candidates = self._affordances.get((parent_ref.entity_id, capability), ())
         if explicit is not None:
             selected = self.resolve(
                 explicit,
                 expected_type=SceneAffordanceRef,
                 path=path,
             )
-            entry = self._index.by_id[selected.entity_id]
+            entry = self._by_id[selected.entity_id]
             if entry.parent != parent_ref:
                 raise SemanticValidationError(
                     SemanticDiagnostic(
@@ -335,7 +532,7 @@ class SceneManifest:
             )
         if len(candidates) == 1:
             return candidates[0]
-        parent_entry = self._index.by_id[parent_ref.entity_id]
+        parent_entry = self._by_id[parent_ref.entity_id]
         default = parent_entry.default_affordances.get(capability)
         if default is not None:
             return default
@@ -366,8 +563,8 @@ class SceneManifest:
                     f"Could not project the live scene registry: {exc}",
                 )
             ) from exc
-        static_ids = set(self._index.by_id)
-        live_ids = set(live._index.by_id)
+        static_ids = set(self._by_id)
+        live_ids = set(live._by_id)
         if static_ids != live_ids:
             raise SemanticValidationError(
                 SemanticDiagnostic(
@@ -379,7 +576,7 @@ class SceneManifest:
                 )
             )
         for entity_id in sorted(static_ids):
-            if self._index.by_id[entity_id] != live._index.by_id[entity_id]:
+            if self._by_id[entity_id] != live._by_id[entity_id]:
                 raise SemanticValidationError(
                     SemanticDiagnostic(
                         "scene_manifest_mismatch",
@@ -407,7 +604,12 @@ class LinkedSemanticCall:
     affordances: Mapping[str, SceneAffordanceRef] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if type(self.call) not in (Pick, Place, HandOver, RegisteredSemanticCall):
+        if type(self.call) not in (
+            Pick,
+            Place,
+            HandOver,
+            RegisteredSemanticCall,
+        ):
             raise TypeError("call must be an exact supported semantic call value.")
         if type(self.descriptor) is not SemanticCallDescriptor:
             raise TypeError("descriptor must be exactly SemanticCallDescriptor.")
@@ -429,16 +631,42 @@ class LinkedSemanticCall:
         object.__setattr__(self, "affordances", MappingProxyType(normalized))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class BoundSemanticCall:
-    """Call linked to one installed engine/profile combination."""
+    """Factory-owned call linked to one installed engine/profile combination."""
 
     linked: LinkedSemanticCall
     binding: ResolvedSkillBinding
     preset: SkillPolicyPreset
     _robot_profile: BoundRobotSkillProfile = field(repr=False, compare=False)
 
-    def __post_init__(self) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Reject construction outside :class:`BoundSemanticIntegration`."""
+        del args, kwargs
+        raise TypeError(
+            "BoundSemanticCall values are created by "
+            "BoundSemanticIntegration.link_call()."
+        )
+
+    @classmethod
+    def _create(
+        cls,
+        *,
+        linked: LinkedSemanticCall,
+        binding: ResolvedSkillBinding,
+        preset: SkillPolicyPreset,
+        robot_profile: BoundRobotSkillProfile,
+    ) -> BoundSemanticCall:
+        """Create and validate one engine/profile-owned result."""
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "linked", linked)
+        object.__setattr__(instance, "binding", binding)
+        object.__setattr__(instance, "preset", preset)
+        object.__setattr__(instance, "_robot_profile", robot_profile)
+        instance._validate()
+        return instance
+
+    def _validate(self) -> None:
         """Validate the static and live ownership links."""
         if not isinstance(self.linked, LinkedSemanticCall):
             raise TypeError("linked must be a LinkedSemanticCall.")
@@ -489,6 +717,29 @@ class SemanticIntegrationManifest:
             raise TypeError("robot_profile must be exactly RobotSkillProfile.")
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
+        known_semantic_ids = set(self.call_catalog.descriptors)
+        for preset_id, preset in self.robot_profile.presets.items():
+            unknown_monitor_ids = sorted(
+                set(preset.effect_monitors).difference(known_semantic_ids)
+            )
+            if unknown_monitor_ids:
+                semantic_id = unknown_monitor_ids[0]
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "unknown_effect_monitor_call",
+                        (
+                            "integration",
+                            "robot_profile",
+                            "presets",
+                            preset_id,
+                            "effect_monitors",
+                            semantic_id,
+                        ),
+                        f"Effect monitor configuration references unknown semantic "
+                        f"call {semantic_id!r}.",
+                        tuple(self.call_catalog.descriptors),
+                    )
+                )
         if self.runtime_preset is not None:
             _validate_identifier(
                 self.runtime_preset,
@@ -615,6 +866,34 @@ class SemanticIntegrationManifest:
             descriptor=descriptor,
             preset_id=preset_id,
             affordances=affordances,
+        )
+
+    def _selects_preset(self, preset_id: str) -> bool:
+        """Return whether one preset is reachable through this integration.
+
+        Args:
+            preset_id: Stable policy preset identifier.
+
+        Returns:
+            ``True`` when the integration-wide override or at least one
+            catalogued target skill can resolve to ``preset_id`` through its
+            per-skill or profile-default selection. This is intentionally a
+            conservative integration-level check, not a concrete-program
+            reachability analysis.
+        """
+        _validate_identifier(preset_id, field_name="preset_id")
+        if self.runtime_preset is not None:
+            return self.runtime_preset == preset_id
+        skill_ids = {
+            descriptor.skill_id for descriptor in self.call_catalog.descriptors.values()
+        }
+        return any(
+            self.robot_profile.skill_presets.get(
+                skill_id,
+                self.robot_profile.default_preset,
+            )
+            == preset_id
+            for skill_id in skill_ids
         )
 
     def _resolve_declared_preset(
@@ -923,6 +1202,12 @@ class SemanticIntegrationManifest:
     ) -> BoundSemanticIntegration:
         """Validate live scene and robot bindings without observing or planning."""
         self.scene.validate_registry(scene_registry)
+        if not isinstance(engine, AtomicActionEngine):
+            raise TypeError("engine must be an AtomicActionEngine.")
+        self._validate_safe_dynamic_collision_policy(
+            scene_registry=scene_registry,
+            engine=engine,
+        )
         try:
             bound_profile = engine.bind_skill_profile(
                 self.robot_profile,
@@ -942,6 +1227,53 @@ class SemanticIntegrationManifest:
             robot_profile=bound_profile,
             engine=engine,
         )
+
+    def _validate_safe_dynamic_collision_policy(
+        self,
+        *,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> None:
+        """Fail before observation when selected safe planning cannot be strict."""
+        if not scene_registry.dynamic_collision_entity_ids or not self._selects_preset(
+            "safe"
+        ):
+            return
+        preset = self.robot_profile.presets["safe"]
+        policy_path: tuple[PathPart, ...] = (
+            "integration",
+            "robot_profile",
+            "presets",
+            "safe",
+            "motion_policy",
+        )
+        if preset.motion_policy.strategy != "motion_gen":
+            raise SemanticValidationError(
+                SemanticDiagnostic(
+                    "safe_dynamic_collision_unsupported",
+                    (*policy_path, "strategy"),
+                    "The 'safe' preset requires strategy='motion_gen' when the "
+                    "scene registry declares dynamic collision entities.",
+                    ("motion_gen",),
+                )
+            )
+        if (
+            getattr(
+                engine.motion_generator,
+                "supports_dynamic_collision_world",
+                False,
+            )
+            is not True
+        ):
+            raise SemanticValidationError(
+                SemanticDiagnostic(
+                    "safe_dynamic_collision_unsupported",
+                    (*policy_path, "dynamic_collision_mode"),
+                    "The 'safe' preset requires an active planner with dynamic "
+                    "collision-world support for the registered dynamic entities "
+                    f"{scene_registry.dynamic_collision_entity_ids!r}.",
+                )
+            )
 
 
 class BoundSemanticIntegration:
@@ -963,6 +1295,11 @@ class BoundSemanticIntegration:
             raise TypeError("robot_profile must be exactly BoundRobotSkillProfile.")
         if not isinstance(engine, AtomicActionEngine):
             raise TypeError("engine must be an AtomicActionEngine.")
+        manifest.scene.validate_registry(scene_registry)
+        manifest._validate_safe_dynamic_collision_policy(
+            scene_registry=scene_registry,
+            engine=engine,
+        )
         if robot_profile.engine is not engine:
             raise ValueError("robot_profile belongs to a different engine.")
         if engine.skill_profile is not robot_profile:
@@ -1043,16 +1380,32 @@ class BoundSemanticIntegration:
                     str(exc),
                 )
             ) from exc
-        return BoundSemanticCall(
+        if (
+            linked.preset_id == "safe"
+            and self._scene_registry.dynamic_collision_entity_ids
+        ):
+            preset = SkillPolicyPreset(
+                preset_id=preset.preset_id,
+                schema_version=preset.schema_version,
+                motion_policy=replace(
+                    preset.motion_policy,
+                    dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
+                ),
+                recovery_policy=preset.recovery_policy,
+                runner_cfg=preset.runner_cfg,
+                effect_monitors=preset.effect_monitors,
+            )
+        return BoundSemanticCall._create(
             linked=linked,
             binding=binding,
             preset=preset,
-            _robot_profile=self._robot_profile,
+            robot_profile=self._robot_profile,
         )
 
 
 __all__ = [
     "BoundSemanticCall",
+    "BoundSemanticIntegration",
     "LinkedSemanticCall",
     "PathPart",
     "SceneEntityManifest",

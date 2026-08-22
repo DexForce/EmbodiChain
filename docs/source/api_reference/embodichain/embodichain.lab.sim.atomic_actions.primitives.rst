@@ -2,6 +2,8 @@ embodichain.lab.sim.atomic_actions.primitives
 =============================================
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives
+   :members:
+   :no-index:
 
 Overview
 --------

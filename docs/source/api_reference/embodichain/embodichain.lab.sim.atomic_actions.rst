@@ -2,6 +2,8 @@ embodichain.lab.sim.atomic_actions
 ==================================
 
 .. automodule:: embodichain.lab.sim.atomic_actions
+   :members:
+   :no-index:
 
    .. rubric:: Planning contracts
 

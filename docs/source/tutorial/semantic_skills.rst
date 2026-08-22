@@ -94,9 +94,10 @@ The factory installs the live effect verifier on the runtime, so it does not
 appear in every ``run`` call. ``on_step`` remains explicit because it is
 optional tutorial observability rather than semantic task intent.
 
-Keep the whole known task in one tuple when possible. Use ``open_task`` and
-multiple segments only when a later call genuinely depends on a new
-observation or an application/agent decision.
+Keep the whole known task in one tuple when possible. When a later call
+genuinely depends on a new observation or an application/agent decision, wait
+for the current workflow to reach a terminal ``SkillResult`` and submit the
+next workflow on the same runtime.
 
 Example 1: semantic Pick and Place
 ----------------------------------
@@ -367,39 +368,38 @@ relation. At the transfer boundary it verifies source release, destination
 grasp, destination ownership, and the final object target before committing the
 new ``TaskState``.
 
-Dynamic decisions between segments
-----------------------------------
+Dynamic decisions between workflows
+-----------------------------------
 
-Use ``open_task`` when an application or agent cannot know the whole task in
-advance:
+When an application or agent cannot know the whole task in advance, use a
+completed workflow as the decision boundary:
 
 .. code-block:: python
 
-   with app.open_task("agent_task") as task:
-       acquire = task.run_segment(
-           (Pick(object=workpiece),),
-           segment_id="acquire",
-       )
+   acquire = app.run(
+       (Pick(object=workpiece),),
+       task_id="agent_task.acquire",
+   )
+   acquire.require_all_succeeded()
 
-       # Decide only after the successful segment has committed verified state.
-       destination = choose_destination(acquire.task_state, task.latest_context)
-       task.run_segment(
-           (Place(object=workpiece, at=destination),),
-           segment_id="deliver",
-       )
-       result = task.finish()
+   # Decide only after the workflow has committed verified state.
+   destination = choose_destination(acquire.task_state)
+   result = app.run(
+       (Place(object=workpiece, at=destination),),
+       task_id="agent_task.deliver",
+   )
 
-Successful segments retain verified symbolic state and the per-environment
-eligible mask. A failed or cancelled segment is terminal. Only one task and one
-segment may own a runtime at a time; scheduling multiple independent tasks is an
+Successful workflows retain verified symbolic state and the per-environment
+eligible mask. A failed or cancelled workflow is terminal. Only one workflow
+may own a runtime at a time; scheduling multiple independent tasks is an
 application responsibility.
 
-For non-blocking integration, replace ``run_segment`` with ``start_segment`` and
-advance the returned ``SemanticExecution`` through ``step``. When its status is
-``WAITING_FOR_EFFECT``, inspect ``pending_effect`` and submit an
-``effect_success`` boolean mask on a later step. If that step occurs before the
-runner is due, wait for ``runner_step.wait_duration``, re-read the current
-request, and submit the mask again.
+For non-blocking integration, call ``app.start(*calls,
+workflow_id=...)`` and repeatedly call ``app.step()``. If the returned result
+has a positive ``wait_duration``, wait on the runtime clock before the next
+step. Physical effects are evaluated from the configured evidence collector and
+effect monitors; application callbacks observe runner steps but do not submit a
+separate boolean success mask.
 
 Recovery boundaries
 -------------------
@@ -416,13 +416,11 @@ Keep these distinctions in mind:
 * Physical effects are never committed from planning success alone.
 * Rows that exhaust recovery become ineligible and remain excluded from later
   calls and dynamic segments.
-* ``revise_current`` can change a compatible active call, but cannot switch to a
-  different skill or controller address.
 * A terminal runtime failure does not automatically choose another skill or
-  reconcile uncertain physical state. Perform that task-level recovery at an
-  application-controlled segment boundary.
+  reconcile uncertain physical state. Perform that task-level recovery at a
+  completed-workflow boundary.
 
-Inspect ``SemanticTaskResult.status``, ``eligible_mask``, ``segments``, and
+Inspect ``SkillResult.status``, ``eligible_mask``, ``calls``, ``effects``, and
 aggregated ``events`` for structured feedback. Call ``require_all_succeeded``
 when partial vectorized success should be treated as an application error.
 

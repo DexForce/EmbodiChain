@@ -646,10 +646,15 @@ topics:
       - SemanticIntegrationManifest
       - BoundSemanticIntegration
       - SemanticSkillCompiler
+      - SkillRuntime
       - SemanticSkillRuntime
-      - SemanticTask
-      - SemanticExecution
-      - SemanticTaskResult
+      - AtomicSkills
+      - SkillResult
+      - SkillFailure
+      - execution_prefix_length
+      - EffectEvidenceCollector
+      - ParallelSkillRuntime
+      - ParallelCommandSafetyValidator
       - SemanticWorkflow
       - SemanticLowering
       - GroundedSemanticCall
@@ -751,6 +756,10 @@ topics:
       - embodichain/lab/sim/skills/calls.py
       - embodichain/lab/sim/skills/integration.py
       - embodichain/lab/sim/skills/compiler.py
+      - embodichain/lab/sim/skills/effects.py
+      - embodichain/lab/sim/skills/evidence.py
+      - embodichain/lab/sim/skills/parallel.py
+      - embodichain/lab/sim/skills/parallel_runtime.py
       - embodichain/lab/sim/skills/runtime.py
       - embodichain/lab/sim/skills/__init__.py
       - scripts/tutorials/semantic_skill/

@@ -2,6 +2,8 @@ embodichain.lab.sim.skills
 ==========================
 
 .. automodule:: embodichain.lab.sim.skills
+   :members:
+   :no-index:
 
    .. rubric:: Semantic calls and catalog
 
@@ -42,14 +44,15 @@ embodichain.lab.sim.skills
       SemanticValidationError
       SemanticEffectVerifier
       SemanticSkillRuntime
-      SemanticTask
-      SemanticExecution
-      SemanticExecutionStatus
-      SemanticTaskStatus
-      SemanticExecutionStep
-      SemanticCallRecord
-      SemanticSegmentResult
-      SemanticTaskResult
+      AtomicSkills
+      SkillRuntime
+      SkillResult
+      SkillStatus
+      SkillCallTrace
+      SkillPlanAttemptTrace
+      SkillEffectTrace
+      SkillFailure
+      SkillScene
 
    .. rubric:: Scene integration contracts
 
@@ -96,6 +99,37 @@ embodichain.lab.sim.skills
       ProfileValidationError
       UnsupportedSkillError
       AmbiguousSkillBindingError
+
+   .. rubric:: Semantic calls and runtime
+
+   .. autosummary::
+
+      SemanticCallSpec
+      SemanticPose
+      Pick
+      Place
+      HandOver
+      RegisteredSemanticCall
+      SemanticCallCatalog
+      SemanticSkillCompiler
+      AtomicSkills
+      SkillRuntime
+      SkillResult
+      SkillCallTrace
+      SkillPlanAttemptTrace
+      SkillEffectTrace
+
+   .. rubric:: Effects, evidence, and parallel execution
+
+   .. autosummary::
+
+      SemanticEffectSpec
+      EffectMonitorRef
+      EffectMonitor
+      EffectEvidenceCollector
+      ParallelSkillRuntime
+      ParallelSkillResult
+      ParallelCommandSafetyValidator
 
 .. currentmodule:: embodichain.lab.sim.skills
 
@@ -184,28 +218,19 @@ Semantic runtime
 .. autoclass:: SemanticSkillRuntime
    :members:
 
-.. autoclass:: SemanticTask
+.. autoclass:: AtomicSkills
    :members:
 
-.. autoclass:: SemanticExecution
+.. autoclass:: SkillRuntime
    :members:
 
-.. autoclass:: SemanticExecutionStatus
+.. autoclass:: SkillResult
    :members:
 
-.. autoclass:: SemanticTaskStatus
+.. autoclass:: SkillStatus
    :members:
 
-.. autoclass:: SemanticExecutionStep
-   :members:
-
-.. autoclass:: SemanticCallRecord
-   :members:
-
-.. autoclass:: SemanticSegmentResult
-   :members:
-
-.. autoclass:: SemanticTaskResult
+.. autoclass:: SkillFailure
    :members:
 
 Robot resources and profiles
@@ -261,6 +286,75 @@ Profile errors
 .. autoclass:: UnsupportedSkillError
 
 .. autoclass:: AmbiguousSkillBindingError
+
+Semantic calls and runtime
+--------------------------
+
+.. autoclass:: SemanticCallSpec
+   :members:
+
+.. autoclass:: SemanticPose
+   :members:
+
+.. autoclass:: Pick
+   :members:
+
+.. autoclass:: Place
+   :members:
+
+.. autoclass:: HandOver
+   :members:
+
+.. autoclass:: RegisteredSemanticCall
+   :members:
+
+.. autoclass:: SemanticCallCatalog
+   :members:
+
+.. autoclass:: SemanticSkillCompiler
+   :members:
+
+.. autoclass:: AtomicSkills
+   :members:
+
+.. autoclass:: SkillRuntime
+   :members:
+
+.. autoclass:: SkillResult
+   :members:
+
+.. autoclass:: SkillCallTrace
+   :members:
+
+.. autoclass:: SkillPlanAttemptTrace
+   :members:
+
+.. autoclass:: SkillEffectTrace
+   :members:
+
+Effects, evidence, and parallel execution
+-----------------------------------------
+
+.. autoclass:: SemanticEffectSpec
+   :members:
+
+.. autoclass:: EffectMonitorRef
+   :members:
+
+.. autoclass:: EffectMonitor
+   :members:
+
+.. autoclass:: EffectEvidenceCollector
+   :members:
+
+.. autoclass:: ParallelSkillRuntime
+   :members:
+
+.. autoclass:: ParallelSkillResult
+   :members:
+
+.. autoclass:: ParallelCommandSafetyValidator
+   :members:
 
 Registry and provider
 ---------------------

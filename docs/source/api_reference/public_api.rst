@@ -317,6 +317,10 @@ embodichain.lab.sim.atomic_actions.affordance
    InteractionPoints
    AssembleAffordance
 
+.. automodule:: embodichain.lab.sim.atomic_actions.affordance
+   :members:
+   :no-index:
+
 embodichain.lab.sim.atomic_actions.bindings
 -------------------------------------------
 
@@ -403,6 +407,10 @@ embodichain.lab.sim.atomic_actions.goals
    resolve_pose_goal
    validate_pose_goal
    validate_pose_tensor
+
+.. automodule:: embodichain.lab.sim.atomic_actions.goals
+   :members:
+   :no-index:
 
 embodichain.lab.sim.atomic_actions.invocation
 ---------------------------------------------
@@ -550,6 +558,10 @@ embodichain.lab.sim.atomic_actions.state
    RobotObservation
    SceneSnapshot
    TaskState
+
+.. automodule:: embodichain.lab.sim.atomic_actions.state
+   :members:
+   :no-index:
 
 embodichain.lab.sim.atomic_actions.trajectory_ops
 -------------------------------------------------
@@ -878,6 +890,10 @@ embodichain.lab.sim.skills.calls
    SemanticPose
    builtin_semantic_call_catalog
 
+.. automodule:: embodichain.lab.sim.skills.calls
+   :members:
+   :no-index:
+
 embodichain.lab.sim.skills.compiler
 -----------------------------------
 
@@ -916,6 +932,38 @@ embodichain.lab.sim.skills.integration
    SemanticIntegrationManifest
    SemanticValidationError
 
+.. automodule:: embodichain.lab.sim.skills.integration
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.effects
+----------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.effects
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.evidence
+-----------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.evidence
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.parallel
+------------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.parallel
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.parallel_runtime
+--------------------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.parallel_runtime
+   :members:
+   :no-index:
+
 embodichain.lab.sim.skills.profiles
 -----------------------------------
 
@@ -944,20 +992,9 @@ embodichain.lab.sim.skills.profiles
 embodichain.lab.sim.skills.runtime
 ----------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.runtime
-
-.. autosummary::
-
-   SemanticCallRecord
-   SemanticEffectVerifier
-   SemanticExecution
-   SemanticExecutionStatus
-   SemanticExecutionStep
-   SemanticSegmentResult
-   SemanticSkillRuntime
-   SemanticTask
-   SemanticTaskResult
-   SemanticTaskStatus
+.. automodule:: embodichain.lab.sim.skills.runtime
+   :members:
+   :no-index:
 
 embodichain.lab.sim.skills.scene
 --------------------------------
@@ -985,6 +1022,10 @@ embodichain.lab.sim.skills.scene
    SceneObjectRef
    SceneRegistry
    UnsupportedSceneAffordanceError
+
+.. automodule:: embodichain.lab.sim.skills.scene
+   :members:
+   :no-index:
 
 embodichain.lab.sim.solvers.neural_ik_solver
 --------------------------------------------

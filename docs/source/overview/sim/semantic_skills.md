@@ -35,7 +35,7 @@ SemanticSkillCompiler
   ground()  -> GroundedSemanticCall   latest observation -> ActionInvocation
         |
         v
-SemanticSkillRuntime / SemanticTask
+SkillRuntime / AtomicSkills
         |
         v
 ExecutionRunner -> controller transports -> verified effects
@@ -159,9 +159,10 @@ valid, but removes that look-ahead information from the earlier Pick.
 ## Construct a runtime
 
 Use {meth}`SemanticSkillRuntime.from_simulation` for the standard simulation
-path. It creates a registry-backed planning scene provider, a
-`SimulationExecutionAdapter`, an `AtomicActionEngine` with built-ins, and the
-semantic manifest/compiler:
+path. This compatibility facade creates a registry-backed planning scene
+provider, a `SimulationExecutionAdapter`, an `AtomicActionEngine` with
+built-ins, the semantic manifest/compiler, and typed effect-evidence
+collectors:
 
 ```python
 runtime = SemanticSkillRuntime.from_simulation(
@@ -175,15 +176,13 @@ runtime = SemanticSkillRuntime.from_simulation(
 )
 ```
 
-Use {meth}`SemanticSkillRuntime.bind` when the application owns custom
-observation, command, clock, endpoint-adapter, or hardware ports. Only one
-{class}`SemanticTask` may own a runtime at a time; this layer does not implement
-a resource scheduler or lease manager.
-
-`runtime.runner_cfg`, when supplied, overrides the runner configuration from
-every selected skill preset. When omitted, each grounded call uses its own
-preset's runner configuration. `control_dt` is the command cadence and is
-independent of the simulation physics period.
+For custom observation, command, clock, endpoint-adapter, or hardware ports,
+construct {class}`SkillRuntime` with {meth}`SkillRuntime.from_components` and
+an explicit {class}`EffectEvidenceCollector`. {class}`AtomicSkills` provides a
+small application-facing facade over the same runtime. A runtime executes one
+workflow at a time; application-level scheduling and resource leasing remain
+outside this layer. `control_dt` is the command cadence and is independent of
+the simulation physics period.
 
 ## Execute a fixed workflow
 
@@ -213,48 +212,42 @@ result = runtime.run(
 result.require_all_succeeded()
 ```
 
-{meth}`SemanticSkillRuntime.run` is blocking and requires a
-`SemanticEffectVerifier`. Use {meth}`SemanticSkillRuntime.start` plus
-{meth}`SemanticExecution.step` or
-{meth}`SemanticExecution.run_until_blocked` when physical verification arrives
-asynchronously. A pending effect produces
-`SemanticExecutionStatus.WAITING_FOR_EFFECT`; resume it with a boolean
-per-environment `effect_success` mask. A non-blocking step made before the next
-runner cycle is due leaves the request pending; wait for
-`runner_step.wait_duration`, re-read `pending_effect`, and submit the mask again.
+{meth}`SemanticSkillRuntime.run` is a convenience entry point over the
+step-wise {class}`SkillRuntime`. The canonical runtime obtains typed evidence
+from its {class}`EffectEvidenceCollector` and lets the selected effect monitor
+decide whether the physical effect is verified. A legacy
+{class}`SemanticEffectVerifier`, when supplied, is an additional application
+gate rather than a replacement for evidence collection.
+
+For a non-blocking integration, call {meth}`SkillRuntime.start` and advance it
+with {meth}`SkillRuntime.step`. If `result.wait_duration` is positive, wait on
+the runtime clock before the next step. `SkillResult.terminal` identifies the
+completion boundary.
 
 ## Dynamic tasks
 
-Dynamic task construction is supported at completed semantic-segment
-boundaries. A {class}`SemanticTask` carries verified `TaskState`, the latest
-observation, and a sticky eligible cohort across those decisions:
+Dynamic task construction is supported between completed workflows. The
+runtime retains verified `TaskState` and the active eligibility cohort, so an
+application can choose its next semantic calls after inspecting a completed
+{class}`SkillResult`:
 
 ```python
-with runtime.open_task("clear_table") as task:
-    first = task.run_segment(
-        (Pick(object=workpiece),),
-        segment_id="acquire",
-        effect_verifier=verify_effect,
-    )
-
-    next_calls = decide_next_calls(first.task_state, task.latest_context)
-    task.run_segment(
-        next_calls,
-        segment_id="agent_decision_1",
-        effect_verifier=verify_effect,
-    )
-    result = task.finish()
+first = runtime.run(
+    (Pick(object=workpiece),),
+    task_id="clear_table.acquire",
+)
+if first.status is SkillStatus.COMPLETED:
+    next_calls = decide_next_calls(first.task_state)
+    result = runtime.run(next_calls, task_id="clear_table.agent_decision_1")
 ```
 
 The following boundaries are intentional:
 
-- only one segment executes at a time;
-- successful segments leave the task open until `finish()` or `cancel()`;
-- failed or cancelled segments are terminal and release runtime ownership;
-- environment rows that become ineligible remain excluded in later calls and
-  segments;
-- `revise_current()` can update a compatible in-flight call, but it cannot
-  replace the semantic skill, logical invocation, or runtime endpoint addresses.
+- only one workflow executes at a time;
+- a terminal result is the safe boundary for choosing a later workflow;
+- failed or cancelled workflows do not implicitly retry at the semantic layer;
+- environment rows that become ineligible remain excluded in later calls until
+  the application explicitly replaces verified state.
 
 The runtime does not automatically choose a replacement skill, re-run an agent,
 or reconcile symbolic state after an uncertain physical effect. Implement those
@@ -266,8 +259,8 @@ Each grounded call runs through the existing closed-loop `ExecutionRunner`.
 Depending on its `RecoveryPolicy`, it can detect and recover from tracking
 errors, supported scene-target motion, collision-world revisions, timeouts, and
 per-environment planning failure. Recovery is bounded and emits structured
-atomic-action events retained in {class}`SemanticCallRecord` and aggregated by
-{class}`SemanticSegmentResult` and {class}`SemanticTaskResult`.
+atomic-action events retained in {class}`SkillCallTrace` and
+{class}`SkillResult`.
 
 Dynamic target recovery follows the atomic primitive's dependency contract.
 For example, Pick monitors its object/grasp dependency only through the
@@ -275,26 +268,23 @@ For example, Pick monitors its object/grasp dependency only through the
 treated as an external target update. Atomic HandOver can monitor
 `SceneEntityPose` values supplied for its middle and final option poses.
 
-Planning success is not physical success. Attachment, release, and ownership
-transfer are committed only after the application verifier accepts the pending
-effect for each environment. A failed verification follows the configured
-atomic recovery budget; if the runner terminates unsuccessfully, the semantic
-segment and task fail. There is no implicit success assumption.
+Planning success is not physical success. Attachment, release, ownership
+transfer, and articulation state are committed only after the selected effect
+monitor verifies collected evidence for each environment. A failed verification
+follows the configured atomic recovery budget; if the runner terminates
+unsuccessfully, the workflow fails. There is no implicit success assumption.
 
-Final task status is:
-
-- `SemanticTaskStatus.SUCCEEDED` when all initially eligible rows remain;
-- `SemanticTaskStatus.PARTIAL_SUCCESS` when a non-empty subset remains;
-- `SemanticTaskStatus.FAILED` when execution fails or no row remains;
-- `SemanticTaskStatus.CANCELLED` after explicit cancellation.
-
-Call {meth}`SemanticTaskResult.require_all_succeeded` when partial batch success
-is not acceptable.
+Final workflow status is {attr}`SkillStatus.COMPLETED`,
+{attr}`SkillStatus.FAILED`, or {attr}`SkillStatus.CANCELLED`. A completed
+vectorized run may still have a smaller `success_mask` than its original cohort;
+call {meth}`SkillResult.require_all_succeeded` when partial batch success is not
+acceptable.
 
 ## Diagnostics and extension points
 
-{meth}`SemanticSkillRuntime.validate` exposes static analysis without observing,
-planning, or executing. Static integration and grounding errors use
+{meth}`SemanticSkillRuntime.validate` (or
+{meth}`SemanticSkillCompiler.analyze`) exposes static analysis without
+observing, planning, or executing. Static integration and grounding errors use
 {class}`SemanticValidationError`, whose {class}`SemanticDiagnostic` contains a
 stable code, a complete path, a human-readable message, and sorted candidates.
 Agents should consume the structured fields rather than parse the exception

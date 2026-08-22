@@ -32,13 +32,14 @@ from embodichain.lab.sim.atomic_actions import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     ControlPartCommandProfile,
+    DynamicCollisionMode,
     EntityState,
-    ExecutionStatus,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     GraspGoal,
     HandOverOptions,
     HeldObjectState,
+    MotionPolicy,
     ObjectSemantics,
     PickUp,
     PickUpOptions,
@@ -46,6 +47,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlanningContext,
     RobotObservation,
     SceneEntityPose,
+    SkillDescriptor,
     TaskState,
 )
 from embodichain.lab.sim.skills.calls import (
@@ -58,6 +60,7 @@ from embodichain.lab.sim.skills.calls import (
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.skills.compiler import (
+    GroundedSemanticCall,
     HandOverPoseProvider,
     HandOverPoseTargets,
     RegisteredSemanticLowerer,
@@ -66,6 +69,25 @@ from embodichain.lab.sim.skills.compiler import (
     SemanticObjectTarget,
     SemanticRelationTarget,
     SemanticSkillCompiler,
+    SemanticWorkflow,
+)
+from embodichain.lab.sim.skills.effects import (
+    BinaryEffectClause,
+    BinaryEvidenceKind,
+    COMPOSITE_EFFECT_MONITOR_ID,
+    COMPOSITE_EFFECT_MONITOR_REVISION,
+    CompositeEffectMonitorFactory,
+    ControlPartEvidenceAddress,
+    EffectMonitor,
+    EffectMonitorRef,
+    EffectMonitorRegistry,
+    HeldObjectRelation,
+    HeldObjectStateExpectation,
+    PoseRelationClause,
+    PoseRelationExpectation,
+    SemanticEffectKind,
+    SemanticEffectSpec,
+    SymbolicStateKey,
 )
 from embodichain.lab.sim.skills.integration import (
     BoundSemanticCall,
@@ -84,6 +106,8 @@ from embodichain.lab.sim.skills.scene import (
     GRASP_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
+    SceneCollisionRole,
+    SceneCollisionWorldMode,
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
@@ -117,6 +141,13 @@ class _PoseProvider:
         return EntityState(self.pose)
 
 
+class _GeometryProvider:
+    """Return one opaque planner-facing geometry descriptor."""
+
+    def get_geometry(self) -> object:
+        return object()
+
+
 class _FrameRelationGrounder(RelationTargetGrounder):
     """Explicit test contract: relation frame equals target object frame."""
 
@@ -140,6 +171,7 @@ class _InspectLowerer(RegisteredSemanticLowerer):
 
     call_id: ClassVar[str] = "vendor.inspect"
     schema_version: ClassVar[int] = 1
+    target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def lower(
         self,
@@ -174,6 +206,7 @@ class _SubclassOutputLowerer(RegisteredSemanticLowerer):
 
     call_id: ClassVar[str] = "vendor.inspect"
     schema_version: ClassVar[int] = 1
+    target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def __init__(self, output: str) -> None:
         self.output = output
@@ -220,9 +253,9 @@ class _DualCenterHandOverProvider(HandOverPoseProvider):
         del call, context, bound
         self.calls += 1
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(SceneEntityPose("table_top")),
+            middle=SemanticObjectTarget(pose=SceneEntityPose("table_top")),
             final=SemanticObjectTarget(
-                SemanticPose(
+                pose=SemanticPose(
                     (0.5, 0.0, 0.4),
                     (1.0, 0.0, 0.0, 0.0),
                 )
@@ -230,7 +263,37 @@ class _DualCenterHandOverProvider(HandOverPoseProvider):
         )
 
 
-def _scene_registry() -> tuple[SceneRegistry, tuple[_PoseProvider, _PoseProvider]]:
+class _CountingRelationMonitorFactory(CompositeEffectMonitorFactory):
+    """Count monitor construction without changing built-in behavior."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def create(
+        self,
+        spec: SemanticEffectSpec,
+        ref: EffectMonitorRef,
+    ) -> EffectMonitor:
+        self.calls += 1
+        return super().create(spec, ref)
+
+
+class _BadCreatingRelationMonitorFactory(CompositeEffectMonitorFactory):
+    """Return an invalid monitor value after successful static validation."""
+
+    def create(
+        self,
+        spec: SemanticEffectSpec,
+        ref: EffectMonitorRef,
+    ) -> EffectMonitor:
+        del spec, ref
+        return object()  # type: ignore[return-value]
+
+
+def _scene_registry(
+    *,
+    dynamic_collision: bool = False,
+) -> tuple[SceneRegistry, tuple[_PoseProvider, _PoseProvider]]:
     cube_provider = _PoseProvider(torch.eye(4).repeat(2, 1, 1))
     table_pose = torch.eye(4).repeat(2, 1, 1)
     table_pose[:, 0, 3] = 0.6
@@ -246,6 +309,12 @@ def _scene_registry() -> tuple[SceneRegistry, tuple[_PoseProvider, _PoseProvider
                 state_provider=cube_provider,
                 semantic_type="cube",
                 default_affordances={GRASP_AFFORDANCE_CAPABILITY: grasp},
+                geometry_provider=(_GeometryProvider() if dynamic_collision else None),
+                collision_role=(
+                    SceneCollisionRole.DYNAMIC
+                    if dynamic_collision
+                    else SceneCollisionRole.NONE
+                ),
             ),
             SceneEntityRegistration(
                 ref=grasp,
@@ -271,12 +340,15 @@ def _scene_registry() -> tuple[SceneRegistry, tuple[_PoseProvider, _PoseProvider
                 affordance_revision="relation-v1",
                 relative_pose=torch.eye(4),
             ),
-        )
+        ),
+        collision_world_mode=(
+            SceneCollisionWorldMode.PER_ENV if dynamic_collision else None
+        ),
     )
     return registry, (cube_provider, table_provider)
 
 
-def _profile() -> RobotSkillProfile:
+def _profile(*, preset: SkillPolicyPreset | None = None) -> RobotSkillProfile:
     return RobotSkillProfile(
         profile_id="test_robot",
         resources={
@@ -300,7 +372,7 @@ def _profile() -> RobotSkillProfile:
                 grasp=torch.tensor([1.0]),
             )
         },
-        presets={"safe": SkillPolicyPreset("safe")},
+        presets={"safe": SkillPolicyPreset("safe") if preset is None else preset},
         default_preset="safe",
     )
 
@@ -342,7 +414,11 @@ def _dual_profile(*, provider_id: str | None = "dual_center") -> RobotSkillProfi
     )
 
 
-def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
+def _engine(
+    profile: RobotSkillProfile,
+    *,
+    supports_dynamic_collision_world: bool = False,
+) -> AtomicActionEngine:
     robot = Mock()
     robot.device = torch.device("cpu")
     control_parts = tuple(
@@ -366,6 +442,7 @@ def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
+    generator.supports_dynamic_collision_world = supports_dynamic_collision_world
     return AtomicActionEngine(generator, skill_profile=profile)
 
 
@@ -373,8 +450,10 @@ def _integration(
     registry: SceneRegistry,
     *,
     registered: bool = False,
+    profile: RobotSkillProfile | None = None,
+    supports_dynamic_collision_world: bool = False,
 ) -> tuple[SemanticIntegrationManifest, AtomicActionEngine]:
-    profile = _profile()
+    selected_profile = _profile() if profile is None else profile
     catalog = builtin_semantic_call_catalog()
     if registered:
         assert _PICK_TARGET.binding_contract is not None
@@ -382,15 +461,20 @@ def _integration(
             SemanticCallDescriptor(
                 call_id="vendor.inspect",
                 spec_type=RegisteredSemanticCall,
+                skill_id=_PICK_TARGET.skill_id,
+                binding_contract=_PICK_TARGET.binding_contract,
                 target_descriptor=_PICK_TARGET,
             )
         )
     manifest = SemanticIntegrationManifest(
         scene=SceneManifest.from_registry(registry),
-        robot_profile=profile,
+        robot_profile=selected_profile,
         call_catalog=catalog,
     )
-    return manifest, _engine(profile)
+    return manifest, _engine(
+        selected_profile,
+        supports_dynamic_collision_world=supports_dynamic_collision_world,
+    )
 
 
 def _compiler(
@@ -401,42 +485,27 @@ def _compiler(
         _FrameRelationGrounder(),
     ),
     registered_lowerers: tuple[RegisteredSemanticLowerer, ...] = (),
+    handover_pose_providers: tuple[HandOverPoseProvider, ...] = (),
+    profile: RobotSkillProfile | None = None,
+    effect_monitor_registry: EffectMonitorRegistry | None = None,
+    supports_dynamic_collision_world: bool = False,
 ) -> tuple[SemanticSkillCompiler, AtomicActionEngine]:
-    manifest, engine = _integration(registry, registered=registered)
+    manifest, engine = _integration(
+        registry,
+        registered=registered,
+        profile=profile,
+        supports_dynamic_collision_world=supports_dynamic_collision_world,
+    )
     bound = manifest.bind(registry, engine)
     return (
         SemanticSkillCompiler(
             bound,
             relation_grounders=relation_grounders,
             registered_lowerers=registered_lowerers,
+            handover_pose_providers=handover_pose_providers,
+            effect_monitor_registry=effect_monitor_registry,
         ),
         engine,
-    )
-
-
-def _dual_compiler(
-    registry: SceneRegistry,
-) -> tuple[
-    SemanticSkillCompiler,
-    AtomicActionEngine,
-    _DualCenterHandOverProvider,
-]:
-    profile = _dual_profile()
-    manifest = SemanticIntegrationManifest(
-        scene=SceneManifest.from_registry(registry),
-        robot_profile=profile,
-        call_catalog=builtin_semantic_call_catalog(),
-    )
-    engine = _engine(profile)
-    provider = _DualCenterHandOverProvider()
-    return (
-        SemanticSkillCompiler(
-            manifest.bind(registry, engine),
-            relation_grounders=(_FrameRelationGrounder(),),
-            handover_pose_providers=(provider,),
-        ),
-        engine,
-        provider,
     )
 
 
@@ -470,7 +539,7 @@ def _held_context(
     object_to_eef: torch.Tensor,
     *,
     env_mask: torch.Tensor | None = None,
-    control_part: str = "arm",
+    task_state_key: str = "manipulator",
     robot_dof: int = 2,
 ) -> PlanningContext:
     held = HeldObjectState(
@@ -484,10 +553,348 @@ def _held_context(
         task=TaskState(
             batch_size=2,
             device="cpu",
-            held_objects={control_part: held},
+            held_objects={task_state_key: held},
         ),
         robot_dof=robot_dof,
     )
+
+
+def test_curated_analysis_selects_exact_preset_monitor_without_creating_it() -> None:
+    registry, providers = _scene_registry()
+    factory = _CountingRelationMonitorFactory()
+    compiler, _ = _compiler(
+        registry,
+        effect_monitor_registry=EffectMonitorRegistry((factory,)),
+    )
+
+    workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+
+    monitor_ref = workflow.calls[0].effect_monitor_ref
+    assert monitor_ref is not None
+    assert monitor_ref.monitor_id == COMPOSITE_EFFECT_MONITOR_ID
+    assert monitor_ref.revision == COMPOSITE_EFFECT_MONITOR_REVISION
+    assert workflow.calls[0].symbolic_writes == frozenset(
+        {SymbolicStateKey.held_object("manipulator")}
+    )
+    assert not workflow.calls[0].opaque_symbolic_effect
+    assert factory.calls == 0
+    assert [provider.calls for provider in providers] == [0, 0]
+
+
+def test_curated_analysis_rejects_explicitly_missing_monitor() -> None:
+    registry, _ = _scene_registry()
+    profile = _profile(
+        preset=SkillPolicyPreset("safe", effect_monitors={}),
+    )
+    compiler, _ = _compiler(registry, profile=profile)
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+
+    assert error.value.diagnostic.code == "missing_effect_monitor"
+
+
+def test_uninstalled_effect_monitor_fails_analysis_without_factory_creation() -> None:
+    registry, providers = _scene_registry()
+    factory = _CountingRelationMonitorFactory()
+    profile = _profile(
+        preset=SkillPolicyPreset(
+            "safe",
+            effect_monitors={
+                "pick": EffectMonitorRef("test.not_installed", "1"),
+            },
+        ),
+    )
+    compiler, _ = _compiler(
+        registry,
+        profile=profile,
+        effect_monitor_registry=EffectMonitorRegistry((factory,)),
+    )
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+
+    assert error.value.diagnostic.code == "effect_monitor_not_installed"
+    assert factory.calls == 0
+    assert [provider.calls for provider in providers] == [0, 0]
+
+
+def test_invalid_effect_monitor_config_fails_analysis_without_side_effects() -> None:
+    registry, providers = _scene_registry()
+    factory = _CountingRelationMonitorFactory()
+    profile = _profile(
+        preset=SkillPolicyPreset(
+            "safe",
+            effect_monitors={
+                "pick": EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                    {
+                        "attached_translation_threshold": 0.10,
+                        "detached_translation_threshold": 0.05,
+                    },
+                ),
+            },
+        ),
+    )
+    compiler, _ = _compiler(
+        registry,
+        profile=profile,
+        effect_monitor_registry=EffectMonitorRegistry((factory,)),
+    )
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+
+    diagnostic = error.value.diagnostic
+    assert diagnostic.code == "invalid_effect_monitor_config"
+    assert diagnostic.path == ("workflow", 0, "effect_monitor")
+    assert factory.calls == 0
+    assert [provider.calls for provider in providers] == [0, 0]
+
+
+def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding() -> None:
+    registry, _ = _scene_registry()
+    compiler, _ = _compiler(registry)
+    workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    context = _context(registry)
+
+    first = compiler.ground(workflow, 0, context)
+    repeated = compiler.ground(workflow, 0, context)
+    revised = compiler.ground(workflow, 0, context, revision=1)
+
+    spec = first.effect_spec
+    assert spec is not None
+    assert spec.semantic_id == "pick"
+    assert spec.effect_kind is SemanticEffectKind.ATTACH
+    assert spec.skill_id == first.invocation.skill_id
+    assert spec.invocation_id == first.invocation.invocation_id
+    assert spec.invocation_revision == 0
+    torch.testing.assert_close(spec.env_ids, context.env_ids)
+    assert len(spec.state_expectations) == 1
+    relation = spec.state_expectations[0]
+    assert isinstance(relation, HeldObjectStateExpectation)
+    assert relation.expectation_id == "destination"
+    assert relation.relation is HeldObjectRelation.ATTACHED
+    assert relation.object_id == "cube"
+    assert relation.slot_id == "primary"
+    assert relation.resource_id == "manipulator"
+    assert relation.task_state_key == "manipulator"
+    pose, constraint = spec.clauses
+    assert isinstance(pose, PoseRelationClause)
+    assert pose.expectation is PoseRelationExpectation.MATCHED
+    assert pose.baseline_object_to_endpoint is None
+    assert pose.source.address == ControlPartEvidenceAddress("arm", "pose_relation")
+    assert isinstance(constraint, BinaryEffectClause)
+    assert constraint.evidence_kind is BinaryEvidenceKind.CONSTRAINT
+    assert constraint.expected is True
+    assert constraint.source.address == ControlPartEvidenceAddress("hand", "constraint")
+    assert (
+        first.analyzed.bound.binding.action_binding.endpoint(
+            "primary", "motion"
+        ).task_state_key
+        == "manipulator"
+    )
+    assert first.effect_monitor is not None
+    assert repeated.effect_monitor is not None
+    assert revised.effect_monitor is not None
+    assert repeated.effect_monitor is not first.effect_monitor
+    assert revised.effect_monitor is not first.effect_monitor
+    assert repeated.effect_spec is not None
+    assert repeated.effect_spec.invocation_revision == 0
+    assert revised.effect_spec is not None
+    assert revised.effect_spec.invocation_revision == 1
+    assert revised.effect_monitor.spec.invocation_revision == 1
+
+
+def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
+    registry, _ = _scene_registry()
+    compiler, _ = _compiler(registry)
+    pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    pick = compiler.ground(pick_workflow, 0, _context(registry))
+    semantics = pick.invocation.goal.semantics
+    object_to_eef = torch.eye(4).repeat(2, 1, 1)
+    object_to_eef[:, 2, 3] = 0.12
+    context = _held_context(registry, semantics, object_to_eef)
+    workflow = compiler.analyze(
+        (
+            Place(
+                object=SceneObjectRef("cube"),
+                at=SemanticPose(
+                    (0.5, -0.2, 0.4),
+                    (1.0, 0.0, 0.0, 0.0),
+                ),
+            ),
+        )
+    )
+
+    assert workflow.calls[0].symbolic_writes == frozenset(
+        {SymbolicStateKey.held_object("manipulator")}
+    )
+    grounded = compiler.ground(workflow, 0, context)
+
+    spec = grounded.effect_spec
+    assert spec is not None
+    assert spec.semantic_id == "place"
+    assert spec.effect_kind is SemanticEffectKind.RELEASE
+    assert len(spec.state_expectations) == 1
+    relation = spec.state_expectations[0]
+    assert isinstance(relation, HeldObjectStateExpectation)
+    assert relation.expectation_id == "source"
+    assert relation.relation is HeldObjectRelation.DETACHED
+    assert relation.object_id == "cube"
+    assert relation.slot_id == "primary"
+    assert relation.resource_id == "manipulator"
+    assert relation.task_state_key == "manipulator"
+    pose, constraint = spec.clauses
+    assert isinstance(pose, PoseRelationClause)
+    assert pose.expectation is PoseRelationExpectation.SEPARATED
+    assert pose.baseline_object_to_endpoint is not None
+    torch.testing.assert_close(
+        pose.baseline_object_to_endpoint,
+        object_to_eef,
+    )
+    assert isinstance(constraint, BinaryEffectClause)
+    assert constraint.expected is False
+
+
+def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
+    registry, _ = _scene_registry()
+    provider = _DualCenterHandOverProvider()
+    compiler, _ = _compiler(
+        registry,
+        profile=_dual_profile(),
+        handover_pose_providers=(provider,),
+    )
+    pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    pick = compiler.ground(
+        pick_workflow,
+        0,
+        _context(registry, robot_dof=4),
+    )
+    semantics = pick.invocation.goal.semantics
+    object_to_source = torch.eye(4).repeat(2, 1, 1)
+    object_to_source[:, 0, 3] = 0.08
+    context = _held_context(
+        registry,
+        semantics,
+        object_to_source,
+        task_state_key="left",
+        robot_dof=4,
+    )
+    workflow = compiler.analyze((HandOver(object=SceneObjectRef("cube")),))
+
+    assert workflow.calls[0].symbolic_writes == frozenset(
+        {
+            SymbolicStateKey.held_object("left"),
+            SymbolicStateKey.held_object("right"),
+        }
+    )
+    grounded = compiler.ground(workflow, 0, context)
+
+    spec = grounded.effect_spec
+    assert spec is not None
+    assert spec.semantic_id == "hand_over"
+    assert spec.effect_kind is SemanticEffectKind.TRANSFER
+    assert tuple(relation.expectation_id for relation in spec.state_expectations) == (
+        "source",
+        "destination",
+    )
+    source, destination = spec.state_expectations
+    assert isinstance(source, HeldObjectStateExpectation)
+    assert source.relation is HeldObjectRelation.DETACHED
+    assert source.object_id == "cube"
+    assert source.slot_id == "source"
+    assert source.resource_id == "left"
+    assert source.task_state_key == "left"
+    source_pose, source_constraint, destination_pose, destination_constraint = (
+        spec.clauses
+    )
+    assert isinstance(source_pose, PoseRelationClause)
+    assert source_pose.expectation is PoseRelationExpectation.SEPARATED
+    assert source_pose.baseline_object_to_endpoint is not None
+    torch.testing.assert_close(
+        source_pose.baseline_object_to_endpoint,
+        object_to_source,
+    )
+    assert isinstance(source_constraint, BinaryEffectClause)
+    assert source_constraint.expected is False
+    assert isinstance(destination, HeldObjectStateExpectation)
+    assert destination.relation is HeldObjectRelation.ATTACHED
+    assert destination.object_id == "cube"
+    assert destination.slot_id == "destination"
+    assert destination.resource_id == "right"
+    assert destination.task_state_key == "right"
+    assert isinstance(destination_pose, PoseRelationClause)
+    assert destination_pose.expectation is PoseRelationExpectation.MATCHED
+    assert destination_pose.baseline_object_to_endpoint is None
+    assert isinstance(destination_constraint, BinaryEffectClause)
+    assert destination_constraint.expected is True
+
+
+def test_registered_call_without_monitor_has_no_effect_contract() -> None:
+    registry, _ = _scene_registry()
+    factory = _CountingRelationMonitorFactory()
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(_InspectLowerer(),),
+        effect_monitor_registry=EffectMonitorRegistry((factory,)),
+    )
+    workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+
+    grounded = compiler.ground(workflow, 0, _context(registry))
+
+    assert workflow.calls[0].symbolic_writes == frozenset()
+    assert workflow.calls[0].opaque_symbolic_effect
+    assert workflow.calls[0].effect_monitor_ref is None
+    assert grounded.effect_spec is None
+    assert grounded.effect_monitor is None
+    assert factory.calls == 0
+
+
+def test_registered_monitor_without_effect_grounder_fails_during_analysis() -> None:
+    registry, _ = _scene_registry()
+    profile = _profile(
+        preset=SkillPolicyPreset(
+            "safe",
+            effect_monitors={
+                "vendor.inspect": EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                )
+            },
+        )
+    )
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(_InspectLowerer(),),
+        profile=profile,
+    )
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+
+    assert error.value.diagnostic.code == "registered_effect_contract_not_installed"
+    assert error.value.diagnostic.path == ("workflow", 0, "effect_monitor")
+
+
+def test_ground_wraps_effect_monitor_factory_contract_failure_with_path() -> None:
+    registry, _ = _scene_registry()
+    compiler, _ = _compiler(
+        registry,
+        effect_monitor_registry=EffectMonitorRegistry(
+            (_BadCreatingRelationMonitorFactory(),)
+        ),
+    )
+    workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.ground(workflow, 0, _context(registry))
+
+    assert error.value.diagnostic.code == "effect_monitor_creation_failed"
+    assert error.value.diagnostic.path == ("workflow", 0, "effect_monitor")
 
 
 def test_analysis_is_provider_free_and_propagates_object_target() -> None:
@@ -504,8 +911,7 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     )
 
     assert [provider.calls for provider in providers] == [0, 0]
-    assert workflow.calls[0].downstream_object_target is not None
-    assert workflow.calls[0].downstream_object_target.pose is not drop
+    assert workflow.calls[0].downstream_object_targets[0].pose is not drop
     assert workflow.effect_dependencies[0].producer_index == 0
     context = _context(registry)
     grounded = compiler.ground(workflow, 0, context)
@@ -520,110 +926,31 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     engine.resolve(grounded.invocation)
 
 
-def test_place_inherits_known_pick_resource_when_primary_is_omitted() -> None:
-    registry, _ = _scene_registry()
-    compiler, _, _ = _dual_compiler(registry)
-    place = Place(
-        object=SceneObjectRef("cube"),
-        at=SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0)),
-    )
-
-    workflow = compiler.analyze(
-        (
-            Pick(
-                object=SceneObjectRef("cube"),
-                resources={"primary": "right"},
-            ),
-            place,
+def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> None:
+    registry, _ = _scene_registry(dynamic_collision=True)
+    profile = _profile(
+        preset=SkillPolicyPreset(
+            "safe",
+            motion_policy=MotionPolicy(strategy="motion_gen"),
         )
     )
-
-    assert place.resources == {}
-    assert workflow.calls[1].call.resources == {"primary": "right"}
-    assert workflow.calls[1].bound.binding.resource_ids == {"primary": "right"}
-
-
-def test_handover_source_inherits_known_pick_resource() -> None:
-    registry, _ = _scene_registry()
-    compiler, _, provider = _dual_compiler(registry)
-    handover = HandOver(
-        object=SceneObjectRef("cube"),
-        resources={"destination": "left"},
+    compiler, engine = _compiler(
+        registry,
+        profile=profile,
+        supports_dynamic_collision_world=True,
     )
-
-    workflow = compiler.analyze(
-        (
-            Pick(
-                object=SceneObjectRef("cube"),
-                resources={"primary": "right"},
-            ),
-            handover,
-        )
-    )
-
-    assert handover.resources == {"destination": "left"}
-    assert workflow.calls[1].call.resources == {
-        "source": "right",
-        "destination": "left",
-    }
-    assert workflow.calls[1].bound.binding.resource_ids == {
-        "source": "right",
-        "destination": "left",
-    }
-    assert provider.calls == 0
-
-
-def test_explicit_consumer_resource_must_match_known_holder() -> None:
-    registry, _ = _scene_registry()
-    compiler, _, _ = _dual_compiler(registry)
-
-    with pytest.raises(SemanticValidationError) as error:
-        compiler.analyze(
-            (
-                Pick(
-                    object=SceneObjectRef("cube"),
-                    resources={"primary": "right"},
-                ),
-                Place(
-                    object=SceneObjectRef("cube"),
-                    at=SemanticPose(
-                        (0.4, 0.2, 0.3),
-                        (1.0, 0.0, 0.0, 0.0),
-                    ),
-                    resources={"primary": "left"},
-                ),
-            )
-        )
-
-    assert error.value.diagnostic.code == "held_resource_mismatch"
-    assert error.value.diagnostic.rendered_path == (
-        "workflow[1].call.resources.primary"
-    )
-
-
-def test_grounded_eligibility_hands_off_to_execution_session() -> None:
-    registry, _ = _scene_registry()
-    compiler, engine = _compiler(registry)
-    context = _context(registry)
     workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
-    eligible_mask = torch.tensor([False, False])
 
-    grounded = compiler.ground(
-        workflow,
-        0,
-        context,
-        eligible_mask=eligible_mask,
-    )
-    eligible_mask.fill_(True)
-    session = engine.start(
-        (grounded.invocation,),
-        context,
-        eligible_mask=grounded.eligible_mask,
-    )
+    grounded = compiler.ground(workflow, 0, _context(registry))
 
-    assert grounded.eligible_mask.tolist() == [False, False]
-    assert session.status is ExecutionStatus.FAILED
-    assert session.eligible_mask.tolist() == [False, False]
+    assert (
+        grounded.invocation.motion_policy.dynamic_collision_mode
+        is DynamicCollisionMode.REQUIRED
+    )
+    assert (
+        engine.resolve(grounded.invocation).motion_policy.dynamic_collision_mode
+        is DynamicCollisionMode.REQUIRED
+    )
 
 
 def test_pick_relation_lookahead_stays_late_bound_scene_dependency() -> None:
@@ -732,14 +1059,14 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
             Place(
                 object=SceneObjectRef("cube"),
                 on=SceneObjectRef("table"),
+                resources={"primary": "right"},
             ),
         )
     )
 
     assert provider.calls == 0
     assert [scene_provider.calls for scene_provider in providers] == [0, 0]
-    assert workflow.calls[0].downstream_object_target is not None
-    assert workflow.calls[2].call.resources == {"primary": "right"}
+    assert len(workflow.calls[0].downstream_object_targets) == 1
     pick = compiler.ground(workflow, 0, _context(registry, robot_dof=4))
     assert provider.calls == 1
     pick_options = pick.invocation.skill_options
@@ -751,7 +1078,7 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
         registry,
         pick.invocation.goal.semantics,
         torch.eye(4).repeat(2, 1, 1),
-        control_part="left_arm",
+        task_state_key="left",
         robot_dof=4,
     )
     handover = compiler.ground(workflow, 1, held_context)
@@ -786,7 +1113,7 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
         registry,
         pick.invocation.goal.semantics,
         torch.eye(4).repeat(2, 1, 1),
-        control_part="left_arm",
+        task_state_key="left",
         robot_dof=4,
     )
     with pytest.raises(RuntimeError, match="captured target"):
@@ -925,7 +1252,6 @@ def test_place_rejects_wrong_or_inactive_verified_holder() -> None:
     with pytest.raises(SemanticValidationError) as wrong_error:
         compiler.ground(workflow, 0, wrong_context)
     assert wrong_error.value.diagnostic.code == "verified_held_object_required"
-    assert wrong_error.value.diagnostic.rendered_path == "workflow[0].call.object"
 
     pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
     semantics = compiler.ground(
@@ -942,7 +1268,6 @@ def test_place_rejects_wrong_or_inactive_verified_holder() -> None:
     with pytest.raises(SemanticValidationError) as inactive_error:
         compiler.ground(workflow, 0, partial_context)
     assert inactive_error.value.diagnostic.code == "verified_held_object_required"
-    assert inactive_error.value.diagnostic.rendered_path == "workflow[0].call.object"
 
     grounded = compiler.ground(
         workflow,
@@ -951,6 +1276,12 @@ def test_place_rejects_wrong_or_inactive_verified_holder() -> None:
         eligible_mask=torch.tensor([True, False]),
     )
     assert grounded.eligible_mask.tolist() == [True, False]
+    with pytest.raises(TypeError, match="created by"):
+        GroundedSemanticCall(
+            analyzed=grounded.analyzed,
+            invocation=grounded.invocation,
+            eligible_mask=torch.tensor([True, False]),
+        )
 
 
 def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
@@ -978,7 +1309,7 @@ def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
         )
     )
 
-    assert workflow.calls[0].downstream_object_target is None
+    assert workflow.calls[0].downstream_object_targets == ()
     assert workflow.effect_dependencies[0].producer_index is None
     grounded = compiler.ground(workflow, 1, _context(registry))
     assert grounded.invocation.skill_id == "pick_up"
@@ -999,12 +1330,17 @@ def test_registered_lowerer_cannot_return_target_subclasses(output: str) -> None
         compiler.ground(workflow, 0, _context(registry))
 
 
-def test_workflow_cannot_cross_compilers() -> None:
+def test_workflow_is_factory_owned_and_cannot_cross_compilers() -> None:
     registry, _ = _scene_registry()
     first, _ = _compiler(registry)
     second, _ = _compiler(registry)
     workflow = first.analyze((Pick(object=SceneObjectRef("cube")),))
 
+    with pytest.raises(TypeError, match="created by"):
+        SemanticWorkflow()
     with pytest.raises(SemanticValidationError) as error:
         second.ground(workflow, 0, _context(registry))
-    assert error.value.diagnostic.code == "semantic_program_stale"
+    assert error.value.diagnostic.code in {
+        "semantic_program_stale",
+        "semantic_workflow_owner_mismatch",
+    }

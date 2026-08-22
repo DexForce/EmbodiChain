@@ -88,7 +88,7 @@ The boundary is deliberate:
 | Scene observation | Registry-derived `SceneProvider` | Captures canonical ordered entities plus monotonic global or per-environment collision-world revisions |
 | Scheduling and controller lifecycle | `ExecutionRunner` | Observes only when due, dispatches timed commands, records acknowledgements, and performs safe stop |
 | Robot/simulator I/O | `ObservationProvider`, `EndpointCommandRouter`, `EndpointCommandTransport`, and `ExecutionClock` adapters | Isolates observation, per-controller command transport, and time/physics advancement from planning and session state |
-| Physical-effect verification | Application observer | Verifies grasp, release, handover, and other symbolic effects |
+| Physical-effect verification | Semantic effect monitor and evidence collector | Verifies grasp, release, handover, and other symbolic effects; an application callback may add a stricter gate |
 
 `ExecutionRunner.step()` is non-blocking. Its convenience
 `run_until_blocked()` loop waits or advances simulation through an injected
@@ -105,8 +105,8 @@ state.
 The engine supports two first-class caller paths. An Action Agent or
 configuration-driven application can emit a semantic call for
 {class}`~embodichain.lab.sim.skills.SemanticSkillCompiler` and
-{class}`~embodichain.lab.sim.skills.SemanticSkillRuntime` to validate, ground,
-and convert into an `ActionInvocation`. A user can instead author the typed
+{class}`~embodichain.lab.sim.skills.SkillRuntime` to validate, ground, and
+convert into an `ActionInvocation`. A user can instead author the typed
 invocation directly in Python or load it from an application-owned
 configuration layer:
 
@@ -840,10 +840,9 @@ row deactivation can also replace the request before the delayed result arrives.
 An MLLM should not construct `ActionInvocation` by copying arbitrary JSON into
 runtime objects. The `embodichain.lab.sim.skills` package provides the semantic
 boundary: stable call descriptors, immutable call values, scene/profile
-manifests, a compiler, and a runtime facade. The agent selects among
-`SemanticSkillRuntime.available_calls` and supplies declarative object-centric
-values; the compiler performs validation and grounding before the atomic engine
-sees the request:
+manifests, a compiler, and a runtime facade. The agent selects from the semantic
+call catalog and supplies declarative object-centric values; the compiler
+performs validation and grounding before the atomic engine sees the request:
 
 ```text
 MLLM / application SemanticCallSpec
@@ -865,10 +864,10 @@ correlate compatible in-flight updates with planner diagnostics and execution
 events without mutating a request implicitly.
 
 The semantic runtime is also useful without an agent. `run()` executes one
-known workflow, while `open_task()` and `run_segment()` retain verified state
-across safe application decision boundaries. Call-local recovery remains owned
-by `ExecutionRunner`; automatic skill replacement or symbolic-state
-reconciliation after a terminal failure is intentionally not provided. See
+known workflow and preserves verified state for a later workflow submitted at a
+terminal result boundary. Call-local recovery remains owned by
+`ExecutionRunner`; automatic skill replacement or symbolic-state reconciliation
+after a terminal failure is intentionally not provided. See
 {doc}`../semantic_skills` for the complete compiler/runtime and dynamic-task
 contract.
 
