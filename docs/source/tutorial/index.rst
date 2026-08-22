@@ -12,18 +12,19 @@ Follow the tutorials in this order for the best learning experience:
 
 1. :doc:`create_scene` — Set up a simulation, add objects, run the render loop,
    and inspect the scene through Viser. **Start here.**
-2. :doc:`create_softbody` and :doc:`create_cloth` — Add deformable bodies to your scenes.
-3. :doc:`rigid_object_group` — Manage collections of rigid objects efficiently.
-4. :doc:`rigid_constraint` — Attach and detach two rigid objects via a fixed constraint.
-5. :doc:`articulation` — Load a passive articulated asset and inspect its joint drives.
-6. :doc:`robot` — Load and control a robot in simulation.
-7. :doc:`sensor` — Add cameras and capture RGB/depth/segmentation data.
-8. :doc:`solver` — Configure IK solvers for end-effector control.
-9. :doc:`motion_gen` — Generate smooth trajectories with motion planners.
-10. :doc:`robot_articulation` — Plan contact-rich motion to open a passive drawer and push it halfway back.
-11. :doc:`atomic_actions` — Use built-in action primitives (move, move joints, pick, move held object, place).
-12. :doc:`semantic_skills` — Build robot-independent Pick, Place, and dual-arm workflows on top of atomic actions.
-13. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
+2. :doc:`point_cloud_visualization` — Inspect native point placement and color data.
+3. :doc:`create_softbody` and :doc:`create_cloth` — Add deformable bodies to your scenes.
+4. :doc:`rigid_object_group` — Manage collections of rigid objects efficiently.
+5. :doc:`rigid_constraint` — Attach and detach two rigid objects via a fixed constraint.
+6. :doc:`articulation` — Load a passive articulated asset and inspect its joint drives.
+7. :doc:`robot` — Load and control a robot in simulation.
+8. :doc:`sensor` — Add cameras and capture RGB/depth/segmentation data.
+9. :doc:`solver` — Configure IK solvers for end-effector control.
+10. :doc:`motion_gen` — Generate smooth trajectories with motion planners.
+11. :doc:`robot_articulation` — Plan contact-rich motion to open a passive drawer and push it halfway back.
+12. :doc:`atomic_actions` — Use built-in action primitives (move, move joints, pick, move held object, place).
+13. :doc:`semantic_skills` — Build robot-independent Pick, Place, and dual-arm workflows on top of atomic actions.
+14. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
 
 **Phase 2: Environments**
 
@@ -41,6 +42,7 @@ Follow the tutorials in this order for the best learning experience:
    :hidden:
 
    create_scene
+   point_cloud_visualization
    create_softbody
    create_cloth
    rigid_object_group
