@@ -20,6 +20,15 @@ The ``@configclass`` decorator, ``CfgNode`` configuration system, logging, math/
 """
 
 from .configclass import configclass, is_configclass
+from .config_paths import resolve_config_path
+
+__all__ = [
+    "GLOBAL_SEED",
+    "configclass",
+    "is_configclass",
+    "resolve_config_path",
+    "set_seed",
+]
 
 GLOBAL_SEED = 1024
 

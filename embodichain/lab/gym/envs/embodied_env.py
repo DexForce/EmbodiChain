@@ -27,7 +27,17 @@ import numpy as np
 import gymnasium as gym
 
 from dataclasses import MISSING
-from typing import Dict, Union, Sequence, Tuple, Any, Iterable, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Union,
+    Sequence,
+    Tuple,
+    Any,
+    Iterable,
+    List,
+    Optional,
+)
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
@@ -52,6 +62,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
     DemoSegment,
     DemoSegmentResult,
+    ProcessedEnvAction,
 )
 from embodichain.lab.gym.envs.managers import (
     EventManager,
@@ -69,6 +80,13 @@ from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
 from embodichain.utils import configclass, logger
 from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+
+if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.expert_program import (
+        CompiledProgram,
+        ExpertProgramCfg,
+    )
+    from embodichain.lab.gym.envs.expert_program.bridge import AtomicDemoBridge
 
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
@@ -239,6 +257,14 @@ class EmbodiedEnvCfg(EnvCfg):
     trajectory_auto_save: bool = True
     """If True (and record_trajectory is True), auto-save each env's trajectory to
     ``trajectory_save_dir`` at episode end and on close()."""
+
+    expert_program: ExpertProgramCfg | None = None
+    """Optional declarative Expert Program used to generate demo segments.
+
+    The program remains inert until :meth:`EmbodiedEnv.create_demo_segments`
+    requests an explicit environment compiler and bridge through the dedicated
+    hooks. No live provider, planner, or callable is stored in this config.
+    """
 
 
 @register_env("EmbodiedEnv-v1")
@@ -1338,14 +1364,30 @@ class EmbodiedEnv(BaseEnv):
             : self.num_envs, self.current_rollout_step
         ].copy_(truncateds.to(buffer_device), non_blocking=True)
 
-    def _normalize_demo_action(self, action: EnvAction) -> EnvAction:
-        """Normalize one legacy or segment action to the environment action space."""
+    def _normalize_demo_action(
+        self, action: EnvAction | ProcessedEnvAction
+    ) -> EnvAction | ProcessedEnvAction:
+        """Normalize one raw action or preserve a controller-ready envelope."""
+        if isinstance(action, ProcessedEnvAction):
+            value = action.value
+            if value.ndim == 0:
+                raise ValueError(
+                    "Processed demo actions must have a leading environment "
+                    "dimension."
+                )
+            if value.shape[0] != self.num_envs:
+                raise ValueError(
+                    "Processed demo action batch size must match num_envs."
+                )
+            return action.snapshot()
         expected_dim = int(np.prod(self.single_action_space.shape))
         return self._normalize_demo_action_tensor(action, expected_dim)
 
     def _mask_demo_action(
-        self, action: EnvAction, active_mask: Sequence[bool]
-    ) -> EnvAction:
+        self,
+        action: EnvAction | ProcessedEnvAction,
+        active_mask: Sequence[bool],
+    ) -> EnvAction | ProcessedEnvAction:
         """Accept an asynchronously completed vector-demo action.
 
         Raw actions may still require :class:`ActionManager` preprocessing, so
@@ -1638,15 +1680,18 @@ class EmbodiedEnv(BaseEnv):
                 eval_dict[key] = value
         return eval_dict
 
-    def _preprocess_action(self, action: EnvAction) -> EnvAction:
-        """Delegate to ActionManager when configured; stash raw action for trajectory."""
+    def _preprocess_action(self, action: EnvAction | ProcessedEnvAction) -> EnvAction:
+        """Apply raw preprocessing once and stash the executed controller action."""
+        is_processed = isinstance(action, ProcessedEnvAction)
+        if is_processed:
+            action = action.value
         if self._traj_buffer is not None:
             self._traj_raw_action = (
                 action.clone() if hasattr(action, "clone") else action
             )
-        if self.action_manager is not None:
+        if self.action_manager is not None and not is_processed:
             action = self.action_manager.process_action(action, mode="pre")
-        else:
+        elif not is_processed:
             action = super()._preprocess_action(action)
         if getattr(self, "_demo_no_auto_reset", False):
             action = self._mask_processed_demo_action(action)
@@ -1853,13 +1898,65 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
+    def compile_expert_program(
+        self,
+        program: ExpertProgramCfg,
+    ) -> CompiledProgram:
+        """Compile a configured Expert Program through explicit scene providers.
+
+        Declarative environments override this hook to supply their authoritative
+        scene registry/resolver to :class:`ExpertProgramCompiler`. Keeping the
+        provider boundary explicit prevents the base environment from inferring
+        identities or scanning mutable simulator internals.
+
+        Args:
+            program: Strict Expert Program configuration attached to ``cfg``.
+
+        Returns:
+            Provider-free compiled program ready for runtime assembly.
+
+        Raises:
+            NotImplementedError: If an environment enables ``expert_program``
+                without supplying the compiler/provider integration.
+        """
+        raise NotImplementedError(
+            "An environment with cfg.expert_program must implement "
+            "compile_expert_program() using an explicit scene resolver."
+        )
+
+    def create_expert_program_bridge(
+        self,
+        program: CompiledProgram,
+    ) -> AtomicDemoBridge:
+        """Create the Gym demo bridge through explicit runtime-port factories.
+
+        Declarative environments override this hook to assemble ``SkillRuntime``
+        and Gym-aware command/clock/post-policy/validator ports. The returned
+        bridge must emit commands through normal ``env.step()`` processing.
+
+        Args:
+            program: Compiled provider-free Expert Program.
+
+        Returns:
+            Atomic demo bridge whose segments are consumed lazily.
+
+        Raises:
+            NotImplementedError: If no explicit runtime factory is available.
+        """
+        raise NotImplementedError(
+            "An environment with cfg.expert_program must implement "
+            "create_expert_program_bridge() using explicit runtime ports."
+        )
+
     def create_demo_segments(self, *args, **kwargs) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
 
-        The default adapter preserves existing tasks by wrapping their single
-        ``create_demo_action_list`` result in one segment. Multi-object tasks
-        should override this method and may return a lazy generator so each
-        segment can be planned from the scene state left by the previous one.
+        When ``cfg.expert_program`` is configured, the environment compiles it
+        through an explicit scene-provider hook and creates an atomic demo bridge
+        through an explicit runtime-port factory hook. Otherwise, the default
+        adapter wraps ``create_demo_action_list`` in one segment. Multi-object
+        tasks may return a lazy generator so each segment can be planned from
+        the scene state left by the previous one.
 
         Args:
             *args: Positional arguments forwarded to the legacy planner.
@@ -1868,6 +1965,12 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Segment sequence, or ``None`` when planning fails.
         """
+        expert_program = getattr(getattr(self, "cfg", None), "expert_program", None)
+        if expert_program is not None:
+            compiled_program = self.compile_expert_program(expert_program)
+            bridge = self.create_expert_program_bridge(compiled_program)
+            return bridge.iter_segments()
+
         actions = self.create_demo_action_list(*args, **kwargs)
         if actions is None:
             return None
