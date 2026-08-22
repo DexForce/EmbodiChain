@@ -42,6 +42,7 @@ from .invocation import (
 )
 from .plans import (
     ActionPlan,
+    EffectVerificationRequirement,
     ExecutionFeedbackMode,
     PlannerDiagnostics,
     TimedTrajectory,
@@ -506,9 +507,12 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         success: bool | torch.Tensor,
         trajectory: TimedTrajectory,
         expected_effects: StateDelta | None = None,
+        effect_verification: EffectVerificationRequirement | None = None,
         replannable: bool = True,
         diagnostics: PlannerDiagnostics | None = None,
         segment_lengths: Mapping[str, int] | None = None,
+        scene_dependency_monitor_until: Mapping[str, int] | None = None,
+        scene_dependency_end_segment: str | None = None,
     ) -> ActionPlan:
         """Build a validated action plan for a primitive implementation.
 
@@ -518,10 +522,22 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             success: Per-environment planning success or scalar planner result.
             trajectory: Full-robot trajectory with explicit timing.
             expected_effects: Symbolic effects to verify after execution.
+            effect_verification: Optional explicit physical-effect boundary.
+                Use this when verification is required without a symbolic task-
+                state delta.
             replannable: Whether the execution runtime may replan this action.
             diagnostics: Optional retained planner diagnostics.
             segment_lengths: Optional ordered mapping from semantic segment
                 names to waypoint counts. Zero-length entries are omitted.
+            scene_dependency_monitor_until: Optional per-entity exclusive
+                waypoint-index upper bound for scene-motion invalidation. An
+                entity is monitored while the current waypoint index is smaller
+                than its bound. ``0`` disables monitoring immediately; omitted
+                dependencies remain monitored for the full action. Once the bound
+                is reached, all pose changes for that entity are ignored.
+            scene_dependency_end_segment: Optional last segment during which
+                scene motion may invalidate and replan the action for every
+                dependency.
 
         Returns:
             Side-effect-free action plan.
@@ -556,9 +572,12 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             success=success_mask,
             commands=commands,
             expected_effects=expected_effects,
+            effect_verification=effect_verification,
             replannable=replannable,
             diagnostics=diagnostics,
             segment_lengths=segment_lengths,
+            scene_dependency_monitor_until=scene_dependency_monitor_until,
+            scene_dependency_end_segment=scene_dependency_end_segment,
             feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
             joint_trajectory=timed,
         )
@@ -571,9 +590,12 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         success: bool | torch.Tensor,
         commands: TimedCommandSequence,
         expected_effects: StateDelta | None = None,
+        effect_verification: EffectVerificationRequirement | None = None,
         replannable: bool = True,
         diagnostics: PlannerDiagnostics | None = None,
         segment_lengths: Mapping[str, int] | None = None,
+        scene_dependency_monitor_until: Mapping[str, int] | None = None,
+        scene_dependency_end_segment: str | None = None,
         feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED,
         joint_trajectory: TimedTrajectory | None = None,
     ) -> ActionPlan:
@@ -582,6 +604,33 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         Non-joint command sequences use timed completion unless a future
         endpoint-specific feedback evaluator is installed. Semantic effects
         remain externally verified through the execution session.
+
+        Args:
+            request: Resolved invocation snapshot being planned.
+            context: Planning input used for the plan.
+            success: Per-environment planning success or scalar planner result.
+            commands: Transport-neutral command sequence for the action.
+            expected_effects: Symbolic effects to verify after execution.
+            effect_verification: Optional explicit physical-effect boundary.
+            replannable: Whether the execution runtime may replan this action.
+            diagnostics: Optional retained planner diagnostics.
+            segment_lengths: Optional ordered mapping from semantic segment names
+                to command-frame counts. Zero-length entries are omitted.
+            scene_dependency_monitor_until: Optional per-entity exclusive
+                command-frame-index upper bound for scene-motion invalidation. An
+                entity is monitored while the current frame index is smaller than
+                its bound. ``0`` disables monitoring immediately; omitted
+                dependencies remain monitored for the full action. Once the bound
+                is reached, all pose changes for that entity are ignored.
+            scene_dependency_end_segment: Optional last segment during which
+                scene motion may invalidate and replan the action for every
+                dependency.
+            feedback_mode: Feedback contract used to determine target completion.
+            joint_trajectory: Optional joint trajectory retained for joint-position
+                feedback and inspection.
+
+        Returns:
+            Side-effect-free action plan.
         """
         if not isinstance(commands, TimedCommandSequence):
             raise TypeError("commands must be a TimedCommandSequence.")
@@ -624,9 +673,16 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             joint_trajectory=joint_trajectory,
             segments=segments,
             scene_dependencies=self._scene_dependencies(request),
+            scene_dependency_monitor_until=(
+                {}
+                if scene_dependency_monitor_until is None
+                else scene_dependency_monitor_until
+            ),
+            scene_dependency_end_segment=scene_dependency_end_segment,
             collision_world_sensitive=self._uses_collision_world(request, context),
             replannable=replannable,
             expected_effects=expected_effects or StateDelta(),
+            effect_verification=effect_verification,
             invocation_id=request.invocation_id,
             invocation_revision=request.revision,
         )

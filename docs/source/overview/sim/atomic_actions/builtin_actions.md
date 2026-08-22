@@ -225,12 +225,13 @@ entity as a recovery dependency.
 | `Place.xpos` | yes | yes |
 | `CoordinatedPickGoal.object_target_pose` / `object_initial_pose` | yes | yes |
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
-| `PickUp.grasp_xpos` | yes | yes |
-| `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `PickUp.grasp_xpos` | yes | yes; monitored through `approach` only |
+| `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; monitored through `approach` only |
 | Coordinated pickup implicit initial pose via `ObjectSemantics.entity_id` | implicit snapshot reference | yes; only when `object_initial_pose` is omitted |
 | `AssembleGoal.base_pose` | yes | yes |
 | Deprecated `ObjectSemantics.entity` / `AssembleAffordance.base_object_entity` fallback | no | no |
 | `HandOver` current held-object pose | no scene lookup | no; derived from observed EEF pose and verified attachment state |
+| `HandOverOptions.middle_object_pose` / `final_object_pose` | yes | yes |
 
 ### Object identity and grounding
 
@@ -376,7 +377,11 @@ bound motion target.
 `grasp_xpos` may be `(4, 4)`, `(B, 4, 4)`, or a `SceneEntityPose`. A scene
 reference resolves the latest grasp pose and registers its entity as a recovery
 dependency, so material target motion invalidates and replans an executing
-`PickUp`. When omitted, the action samples valid affordance grasps, evaluates
+`PickUp` while its `approach` segment is active. Once approach has been
+dispatched, dependency monitoring stops: contact-, close-, and lift-induced
+object motion must not be misclassified as an external target update. Tracking
+and collision-world checks remain active independently. When `grasp_xpos` is
+omitted, the action samples valid affordance grasps, evaluates
 reachability, and stores the selected `object_to_eef` transform in the expected
 held-object state. Later object-centric skills reuse that transform.
 
@@ -719,15 +724,18 @@ source/destination motion and grasp endpoints come exclusively from the
 corresponding generic `ActionBinding` slots. The destination attachment reuses
 the source relation's canonical `ObjectSemantics` instance.
 
-The middle and final poses are currently option tensors rather than
-`SceneEntityPose` goal fields. Consequently, handover supports tracking-error
-and timeout recovery, but does not automatically invalidate a moving handover
-point. An application can submit a newer invocation revision with updated
-`HandOverOptions`. The action verifies that the goal and source attachment have
-the same stable object identity, then derives the current object orientation
-from the observed source EEF pose and verified `object_to_eef` relation.
-The reused `GraspGoal.grasp_xpos` field is not consumed by `HandOver` and does
-not create a scene dependency.
+`middle_object_pose` and `final_object_pose` accept `(4, 4)`, `(B, 4, 4)`, or
+`SceneEntityPose`. Scene-relative option values register their referenced
+entities as recovery dependencies, so material movement of a handover or final
+target can invalidate and replan the action. Tensor options remain fixed for the
+invocation revision; an application can submit a newer compatible revision when
+it intentionally changes them.
+
+The action verifies that the goal and source attachment have the same stable
+object identity, then derives the current object orientation from the observed
+source EEF pose and verified `object_to_eef` relation. The reused
+`GraspGoal.grasp_xpos` field is not consumed by `HandOver` and does not create a
+scene dependency; only the middle and final option poses do.
 
 As with the other coordinated primitive, cuRobo does not currently support its
 dual-arm `strategy="motion_gen"` path.

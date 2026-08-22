@@ -23,7 +23,8 @@ Follow the tutorials in this order for the best learning experience:
 10. :doc:`motion_gen` — Generate smooth trajectories with motion planners.
 11. :doc:`robot_articulation` — Plan contact-rich motion to open a passive drawer and push it halfway back.
 12. :doc:`atomic_actions` — Use built-in action primitives (move, move joints, pick, move held object, place).
-13. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
+13. :doc:`semantic_skills` — Build robot-independent Pick, Place, and dual-arm workflows on top of atomic actions.
+14. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
 
 **Phase 2: Environments**
 
@@ -53,6 +54,7 @@ Follow the tutorials in this order for the best learning experience:
    motion_gen
    robot_articulation
    atomic_actions
+   semantic_skills
    gizmo
    basic_env
    modular_env

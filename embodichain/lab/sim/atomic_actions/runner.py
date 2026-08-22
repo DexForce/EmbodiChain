@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import math
 import time
@@ -31,6 +31,8 @@ from embodichain.utils import configclass
 
 from .bindings import RuntimeEndpointTarget
 from .execution import (
+    EffectVerificationRequest,
+    EffectVerificationResult,
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
@@ -291,8 +293,11 @@ class RunnerStep:
         )
 
 
-EffectVerifier = Callable[[PlanningContext, ExecutionTick], torch.Tensor | None]
-"""Callback that verifies a pending semantic effect for each environment."""
+EffectVerifier = Callable[
+    [PlanningContext, EffectVerificationRequest],
+    EffectVerificationResult,
+]
+"""Synchronous verifier called on a fresh due-cycle observation."""
 
 RunnerStepCallback = Callable[[RunnerStep], None]
 """Optional observer called after every blocking runner-loop iteration."""
@@ -307,6 +312,8 @@ class ExecutionRunner:
     :meth:`run_until_blocked` supplies the blocking loop for tutorials and simple
     applications. Controller rejection, timeout, observation failure, and
     session exceptions all trigger a best-effort cancel-then-hold sequence.
+    Runner methods are designed for serialized event-loop use and are not
+    thread-safe.
 
     Args:
         session: Stateful atomic-action execution session.
@@ -354,8 +361,9 @@ class ExecutionRunner:
     def session(self) -> ExecutionSession:
         """Execution session advanced by this runner.
 
-        Call :meth:`revise_current` on the runner, rather than mutating the
-        session directly, while this runner owns scheduling.
+        Call :meth:`revise_current` or :meth:`deactivate_rows` on the runner,
+        rather than mutating the session directly, while this runner owns
+        scheduling.
         """
         return self._session
 
@@ -410,22 +418,77 @@ class ExecutionRunner:
             )
         self._pending_revision = prepared
 
+    def deactivate_rows(
+        self,
+        env_mask: torch.Tensor,
+        *,
+        reason: str,
+    ) -> torch.Tensor:
+        """Permanently deactivate environment rows owned by this runner.
+
+        The runner refreshes its cached effect boundary so a verifier cannot
+        submit a result correlated with a request that deactivation replaced.
+        In-flight controller work is neutralized for those rows by the next
+        due command frame according to the :class:`CommandSink` contract.
+
+        Args:
+            env_mask: Rows requested for deactivation.
+            reason: Human-readable event message.
+
+        Returns:
+            Owned mask of rows that changed from eligible to inactive.
+
+        Raises:
+            RuntimeError: If the runner is already terminal.
+            TypeError: If ``env_mask`` is not a tensor.
+            ValueError: If the mask or reason is invalid.
+        """
+        if self._status is not RunnerStatus.RUNNING:
+            raise RuntimeError("Only a running execution runner can deactivate rows.")
+        changed = self._session.deactivate_rows(env_mask, reason=reason)
+        if self._session.status is not ExecutionStatus.RUNNING:
+            self._pending_revision = None
+        pending_effect = self._session.pending_effect
+        if pending_effect is None:
+            self._clear_effect_boundary()
+        elif self._effect_tick is not None:
+            self._effect_tick = replace(
+                self._effect_tick,
+                status=self._session.status,
+                eligible_mask=self._session.eligible_mask,
+                task_state=self._session.task_state,
+                pending_effect=pending_effect,
+            )
+        return changed
+
     def step(
         self,
         *,
-        effect_success: torch.Tensor | None = None,
+        effect_result: EffectVerificationResult | None = None,
+        effect_verifier: EffectVerifier | None = None,
     ) -> RunnerStep:
         """Perform one due observation/session/controller update without sleeping.
 
         Args:
-            effect_success: Optional per-environment verification mask. If this
-                call occurs before the next cycle is due, it is not consumed and
+            effect_result: Optional correlated effect result. If this call
+                occurs before the next cycle is due, it is not consumed and
                 must be supplied again on a later call.
+            effect_verifier: Optional synchronous verifier for the current
+                pending request. It runs after a fresh due-cycle observation
+                and before the session consumes the result. It is not called
+                after the request deadline. Mutually exclusive with
+                ``effect_result``.
 
         Returns:
             Runner status, optional session tick, controller acknowledgements,
             and time remaining before another update is due.
         """
+        if effect_result is not None and effect_verifier is not None:
+            raise ValueError(
+                "effect_result and effect_verifier are mutually exclusive."
+            )
+        if effect_verifier is not None and not callable(effect_verifier):
+            raise TypeError("effect_verifier must be callable or None.")
         now = self._clock_now()
         if self._status is not RunnerStatus.RUNNING:
             return self._result(timestamp=now)
@@ -449,6 +512,25 @@ class ExecutionRunner:
             )
         self._last_context = context
 
+        pending_effect = self._session.pending_effect
+        if (
+            effect_verifier is not None
+            and pending_effect is not None
+            and context.robot.timestamp <= pending_effect.deadline
+        ):
+            try:
+                effect_result = effect_verifier(context, pending_effect)
+                if type(effect_result) is not EffectVerificationResult:
+                    raise TypeError(
+                        "EffectVerifier must return exactly "
+                        "EffectVerificationResult."
+                    )
+            except Exception as exc:
+                return self._fail(
+                    f"Effect verifier failed: {type(exc).__name__}: {exc}",
+                    context=context,
+                )
+
         try:
             if self._pending_revision is not None:
                 self._session._install_prepared_revision(
@@ -456,7 +538,9 @@ class ExecutionRunner:
                     context,
                 )
                 self._pending_revision = None
-            tick = self._session.tick(context, effect_success=effect_success)
+            tick = self._session.tick(context, effect_result=effect_result)
+            context = self._session.latest_context
+            self._last_context = context
         except Exception as exc:
             return self._fail(
                 f"Execution session failed: {type(exc).__name__}: {exc}",
@@ -520,6 +604,8 @@ class ExecutionRunner:
                     dispatches=dispatches,
                 )
             self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
+        elif tick.pending_effect is not None:
+            self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
         else:
             self._next_step_at = self._clock_now()
 
@@ -549,7 +635,7 @@ class ExecutionRunner:
             self._next_step_at = self._clock_now()
         elif tick.status is ExecutionStatus.FAILED:
             return self._fail(
-                "Execution session exhausted its recovery budget.",
+                "Execution session failed; inspect its terminal events for the cause.",
                 context=context,
                 tick=tick,
                 dispatches=dispatches,
@@ -605,9 +691,10 @@ class ExecutionRunner:
         """Run with clock-driven waiting until terminal or effect verification blocks.
 
         Args:
-            effect_verifier: Optional callback used after an
-                ``effect_verification_required`` event. Without one, the method
-                returns the running step so the caller can verify externally.
+            effect_verifier: Optional synchronous callback used on fresh
+                due-cycle observations while effect verification is pending.
+                Without one, the method returns the running boundary so the
+                caller can verify externally.
             on_step: Optional callback for tracing or tutorial visualization.
             max_steps: Hard bound on loop iterations.
 
@@ -616,7 +703,6 @@ class ExecutionRunner:
         """
         if max_steps <= 0:
             raise ValueError("max_steps must be greater than zero.")
-        effect_success: torch.Tensor | None = None
         now = self._clock_now()
         last_result = self._result(
             timestamp=now,
@@ -624,30 +710,10 @@ class ExecutionRunner:
             context=self._effect_context,
             tick=self._effect_tick,
         )
-        if self.effect_verification_pending:
-            if (
-                effect_verifier is None
-                or self._effect_context is None
-                or self._effect_tick is None
-            ):
-                return last_result
-            try:
-                effect_success = effect_verifier(
-                    self._effect_context,
-                    self._effect_tick,
-                )
-            except Exception as exc:
-                return self._fail(
-                    f"Effect verifier failed: {type(exc).__name__}: {exc}",
-                    context=self._effect_context,
-                    tick=self._effect_tick,
-                )
-            if effect_success is None:
-                return last_result
+        if self.effect_verification_pending and effect_verifier is None:
+            return last_result
         for _ in range(max_steps):
-            result = self.step(effect_success=effect_success)
-            if result.tick is not None:
-                effect_success = None
+            result = self.step(effect_verifier=effect_verifier)
             if on_step is not None:
                 try:
                     on_step(result)
@@ -664,20 +730,8 @@ class ExecutionRunner:
             verification_required = (
                 result.tick is not None and result.tick.pending_effect is not None
             )
-            if verification_required:
-                if effect_verifier is None or result.context is None:
-                    return result
-                try:
-                    effect_success = effect_verifier(result.context, result.tick)
-                except Exception as exc:
-                    return self._fail(
-                        f"Effect verifier failed: {type(exc).__name__}: {exc}",
-                        context=result.context,
-                        tick=result.tick,
-                        dispatches=list(result.dispatches),
-                    )
-                if effect_success is None:
-                    return result
+            if verification_required and effect_verifier is None:
+                return result
             if result.wait_duration > 0.0:
                 try:
                     self._clock.sleep(result.wait_duration)

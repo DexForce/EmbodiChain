@@ -212,10 +212,9 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         target = request.goal
         options = request.skill_options
         binding = request.binding
-        motion_target = binding.endpoint("primary", "motion").require_target(
-            JointPositionTarget
-        )
+        motion = binding.endpoint("primary", "motion")
         grasp = binding.endpoint("primary", "grasp")
+        motion_target = motion.require_target(JointPositionTarget)
         grasp_target = grasp.require_target(JointPositionTarget)
         control_part = motion_target.control_part
         arm_joint_ids = list(motion_target.joint_ids)
@@ -357,7 +356,6 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         Args:
             target: Either an explicit EEF pose target or an assembly target.
             state: World state carrying the held-object transform.
-
         Returns:
             Place EEF poses with shape ``(num_envs, 4, 4)`` or
             ``(num_envs, n_waypoint, 4, 4)``.
@@ -385,7 +383,6 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         Args:
             target: Assembly target carrying the base/assemble affordance.
             state: World state carrying the held-object transform.
-
         Returns:
             Place EEF poses with shape ``(num_envs, 4, 4)``.
 

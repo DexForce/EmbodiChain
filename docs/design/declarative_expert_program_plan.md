@@ -481,14 +481,17 @@ Version 1 should provide first-class calls for:
 
 - `Pick(object, grasp?, resources?)`;
 - `Place(object, pose?|on?|in?, resources?)`;
-- `HandOver(object, receiver?, final_target?, resources?)`;
+- `HandOver(object, final_target?, resources?)`;
 - a registered semantic call for shared extensions.
 
 `resources`, when present, is a mapping from the selected skill's local slot
 IDs to profile resource IDs (for example, `{"primary": "left_actor"}` or
 `{"body": "mobile_base"}`). It is an explicit ambiguity override, not a
 fixed arm/tool field. Ordinary calls omit it and use unique or profile-default
-resolution.
+resolution. Within one analyzed workflow, an omitted `Place.primary` or
+`HandOver.source` inherits the known resource holding that object. Explicit
+consumer selections remain authoritative constraints and fail if they conflict
+with the known holder; inference never crosses a registered-call boundary.
 
 `Place` consumes verified held-object state. The compiler computes the release
 EEF pose from the requested object-space target and the verified
@@ -844,22 +847,23 @@ approach, gripper close, pull trajectory, and command assembly.
 
 The integration model should therefore support articulation, link, and
 affordance references from the beginning, while implementation remains phased.
-A reusable semantic call can be shaped as:
+A reusable semantic call should reuse the existing slide primitive:
 
 ```text
-OperateArticulation(
-  articulation=drawer,
-  affordance=handle,
-  target={joint_position or semantic state},
-  operation=pull,
+Slide(
+  target=drawer_handle,
+  direction=pull,
+  translation_distance=0.15,
 )
 ```
 
-Its compiler selects an affordance pose, resolves one participant resource and
-its required motion/interaction endpoints, builds the approach and constrained
-operation, and installs an articulation effect monitor. Once implemented once
-in the shared layer, Open Drawer variants should differ only in
-scene/affordance data, target state, resource defaults, presets, and validators.
+Its compiler resolves the handle pose and ``SlideAffordance``, selects one
+participant resource and its required motion/grasp endpoints, then builds the
+approach, grasp, and axis-constrained pull. ``Slide`` remains motion-centric and
+open-loop; task-level articulation completion belongs to the application
+verifier or validator. Open Drawer variants should differ only in
+scene/affordance data, direction and distance options, resource defaults,
+presets, and validators.
 
 This is the precise meaning of "almost no action-layer code": task expansion is
 configuration-only when a compatible semantic capability already exists; new
