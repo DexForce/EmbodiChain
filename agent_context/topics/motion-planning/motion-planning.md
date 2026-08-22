@@ -92,7 +92,7 @@ Learning-based EEF waypoint planner. Franka Panda only.
 - Use via `MotionGenerator` with `planner_type="neural"` and `plan_opts=NeuralPlanOptions(...)`
 - Input: `EEF_MOVE` `PlanState` list with batched `xpos:(B, 4, 4)`
 - Key cfg: `onnx_model_path`, `control_part`, `num_waypoints`, `policy_frame_from_world`, `runtime_tcp_from_policy_tcp`
-- The current exported policy has fixed batch size one; dynamic-batch ONNX is not yet supported.
+- The NMG exporter produces a dynamic-batch ONNX policy; NeuralPlanner rolls out all environments together.
 
 ### CuroboPlanner collision worlds
 

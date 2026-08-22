@@ -278,6 +278,7 @@ class NeuralPlanner(BasePlanner):
         return torch.bmm(torch.bmm(left, xpos), right)
 
     @validate_plan_options(options_cls=NeuralPlanOptions)
+    @torch.no_grad()
     def plan(
         self,
         target_states: list[PlanState],

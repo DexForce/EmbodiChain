@@ -238,6 +238,41 @@ def test_neural_planner_returns_velocities_and_accelerations(tmp_path, monkeypat
     assert torch.isfinite(result.accelerations).all()
 
 
+def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    grad_states = []
+    original_compute_fk = fake_sim.robot.compute_fk
+
+    def checked_compute_fk(*args, **kwargs):
+        grad_states.append(torch.is_grad_enabled())
+        return original_compute_fk(*args, **kwargs)
+
+    monkeypatch.setattr(fake_sim.robot, "compute_fk", checked_compute_fk)
+    monkeypatch.setattr(
+        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+
+    planner.plan(
+        [PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        NeuralPlanOptions(
+            control_part="main_arm",
+            start_qpos=torch.zeros(NUM_ARM_JOINTS),
+            max_steps=1,
+        ),
+    )
+
+    assert grad_states
+    assert not any(grad_states)
+
+
 def test_neural_planner_builds_unified_300d_cartesian_observation(
     tmp_path, monkeypatch
 ):

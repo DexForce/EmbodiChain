@@ -32,7 +32,7 @@ in that run's `videos/` directory.
 - Initial Atomic Task slice: Franka + PGI, cuRobo, `MoveEndEffector`, and
   antipodal-grasp `PickUp` on a declarative cube
 - Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics
-- NMG adapter stub (`candidate`, disabled until a checkpoint is ready)
+- Direct, batched NMG ONNX adapter (`candidate`, enabled when a model path is supplied)
 - Lifecycle timing: construct / prepare / cold / warm
 - Distinct planning, motion-valid, execution, and physical task-success stages
 - Planning latency, execution wall time, end-to-end time, nominal trajectory
@@ -55,7 +55,6 @@ in that run's `videos/` directory.
 
 ## Current limits
 
-- Real NMG checkpoint adapter
 - `collision-deployment` and obstacle-aware common-input tracks
 - Atomic Task execution is currently `B=1`; the supplied suite covers only
   Franka + PGI and cuRobo

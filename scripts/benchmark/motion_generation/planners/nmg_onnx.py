@@ -42,7 +42,9 @@ __all__ = ["NmgOnnxAdapter"]
 class NmgOnnxAdapter(PlannerAdapter):
     """Run a standalone NMG ONNX policy through :class:`NeuralPlanner`."""
 
-    capabilities = frozenset({"eef_waypoint", "empty_world", "atomic_action"})
+    capabilities = frozenset(
+        {"eef_waypoint", "batched", "empty_world", "atomic_action"}
+    )
     model_revision = "nmg-onnx-v1"
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:

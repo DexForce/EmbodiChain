@@ -65,10 +65,10 @@ python examples/sim/planners/neural_planner.py \
   --onnx-model-path /path/to/best_mean.onnx
 ```
 
-The current exported policy has a fixed batch size of one. If the runtime robot
-base frame or TCP differs from training, configure `policy_frame_from_world` and
-`runtime_tcp_from_policy_tcp` as explicit homogeneous transforms. The conversion
-is
+The NMG exporter produces a dynamic-batch ONNX policy, so one graph can serve
+single-env and env-batched rollout. If the runtime robot base frame or TCP differs
+from training, configure `policy_frame_from_world` and
+`runtime_tcp_from_policy_tcp` as explicit homogeneous transforms. The conversion is
 
 ```text
 policy_T_policy_tcp = policy_T_world
