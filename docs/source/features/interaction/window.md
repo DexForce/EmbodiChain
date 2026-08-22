@@ -53,6 +53,49 @@ Recording hotkey registration is controlled by `SimConfig.window_record.enable_h
 
 The camera-pose hotkey is controlled by `SimulationManagerCfg.window_camera_pose.enable_hotkey` and prints look-at form by default. Set `SimulationManagerCfg.window_camera_pose.convert_to_look_at=False` to print the raw 4x4 pose matrix instead. The same output can be requested programmatically with `SimulationManager.print_window_camera_pose()`.
 
+### Entity Gizmo Control
+
+DexSim owns native entity selection and manipulation. Enable it explicitly after
+opening a native window:
+
+```python
+import dexsim
+
+gizmo_config = dexsim.interaction.EntityGizmoConfig()
+gizmo_config.max_gizmos = 0  # Unlimited simultaneous bindings.
+sim.open_window()
+sim.enable_entity_gizmo(gizmo_config)
+```
+
+While enabled, left-click a render mesh, dynamic/kinematic rigid body, or
+articulation link and press **G** to attach or detach its root gizmo. The
+controller supports multiple simultaneous bindings and owns selection,
+temporary physics-state changes, and cleanup. No `sim.update_gizmos()` call is
+needed for this world-level controller.
+
+EmbodiChain's built-in `default_plane` is registered as an immovable target and
+cannot receive an entity gizmo. Other supported scene entities remain
+selectable normally.
+
+`sim.enable_entity_gizmo(config)` is a thin helper that also excludes
+EmbodiChain's render-only default plane. All other lifecycle operations stay on
+DexSim's world object:
+
+```python
+world = sim.get_world()
+controller = world.get_entity_gizmo()
+world.disable_entity_gizmo()
+```
+
+This controller is distinct from DexSim's target-specific Robot TCP IK
+controller. When both are active, **G** controls entity roots and **I** shows or
+hides the Robot TCP target.
+
+The entity gizmo is native-window only. The Viser backend offers an analogous
+**click-to-pick** flow (an *Enable click-to-pick Gizmo* checkbox instead of the
+**G** hotkey, since browsers do not expose keyboard events); see
+:doc:`tutorial/gizmo` for details.
+
 ## Customizing Window Events
 
 Users can create their own custom window interaction controls by subclassing the `ObjectManipulator` class (provided by `dexsim`). This allows for the implementation of specific behaviors and responses to user inputs.

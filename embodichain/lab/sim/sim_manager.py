@@ -54,7 +54,7 @@ from dexsim.core import TASK_RETURN
 from dexsim.engine import CudaArray, Material
 from dexsim.models import MeshObject
 from dexsim.render import Light as _Light, LightType, Windows
-from dexsim.engine import GizmoController, ObjectManipulator
+from dexsim.engine import ObjectManipulator
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -97,6 +97,7 @@ from embodichain.utils import configclass, logger
 from embodichain.utils.math import look_at_to_pose, matrix_from_quat, pose_inv
 
 if TYPE_CHECKING:
+    from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
     from embodichain.lab.visualization import (
         RuntimeHealth,
         RuntimeStats,
@@ -242,6 +243,7 @@ class SimulationManager:
     _instances = {}
 
     _cleanup_queue: queue.Queue = queue.Queue()
+    _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
 
     SUPPORTED_SENSOR_TYPES = {
         "Camera": Camera,
@@ -335,6 +337,10 @@ class SimulationManager:
 
         # gizmo management
         self._gizmos: Dict[str, object] = dict()  # Store active gizmos
+        # ``(uid, control_part)`` of the Gizmo currently owned by the Viser
+        # click-to-pick feature, or ``None``. Only one picker Gizmo is kept at a
+        # time and user-created Gizmos are never touched.
+        self._picker_gizmo: tuple[str, str | None] | None = None
 
         # marker management
         self._markers: dict[str, _AxisMarkerGroup] = {}
@@ -689,6 +695,8 @@ class SimulationManager:
         try:
             runtime.stop()
         finally:
+            if getattr(self, "_picker_gizmo", None) is not None:
+                self._release_picker_gizmo()
             for _, gizmo in self.get_gizmo_items():
                 cancel = getattr(gizmo, "cancel_interaction", None)
                 if cancel is not None:
@@ -1992,22 +2000,51 @@ class SimulationManager:
         """
         return list(self._robots.keys())
 
+    def enable_entity_gizmo(
+        self,
+        config: EntityGizmoConfig | None = None,
+    ) -> EntityGizmoManipulator:
+        """Enable DexSim entity control and exclude the EmbodiChain ground.
+
+        Args:
+            config: Native DexSim entity-Gizmo configuration.
+
+        Returns:
+            The active world-owned entity Gizmo manipulator.
+        """
+        controller = (
+            self._world.enable_entity_gizmo()
+            if config is None
+            else self._world.enable_entity_gizmo(config)
+        )
+        default_plane = getattr(self, "_default_plane", None)
+        if default_plane is None:
+            return controller
+        result = controller.register_external_target(
+            self._DEFAULT_PLANE_GIZMO_TARGET_ID,
+            dexsim.interaction.EntityGizmoTargetType.RIGID_BODY,
+            default_plane,
+            ActorType.STATIC,
+        )
+        if result != dexsim.interaction.EntityGizmoResult.SUCCESS:
+            logger.log_warning(
+                "Failed to exclude the default plane from entity Gizmo "
+                f"control: {result}."
+            )
+        return controller
+
     def enable_gizmo(
         self,
         uid: str,
         control_part: str | None = None,
         gizmo_cfg: GizmoCfg | None = None,
-        *,
-        enable_native: bool | None = None,
     ) -> Gizmo | None:
-        """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
+        """Enable Viser Gizmo control for a simulation target.
 
         Args:
             uid: UID of the robot, rigid object, or camera sensor.
             control_part: Robot control part used for IK/FK.
-            gizmo_cfg: Native and Viser Gizmo appearance configuration.
-            enable_native: Whether to create a DexSim Gizmo. By default, native
-                controls are created only when a native window is active.
+            gizmo_cfg: Viser appearance and robot IK configuration.
 
         Returns:
             The created Gizmo, or ``None`` if setup failed.
@@ -2042,36 +2079,14 @@ class SimulationManager:
             )
             return None
 
-        if enable_native is None:
-            enable_native = self.is_window_opened or not self.sim_config.headless
         gizmo: Gizmo | None = None
         try:
-            gizmo = Gizmo(
-                target,
-                gizmo_cfg,
-                control_part,
-                enable_native=enable_native,
-            )
-            if enable_native and (
-                not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None
-            ):
-                window = (
-                    self._world.get_windows()
-                    if hasattr(self._world, "get_windows")
-                    else None
-                )
-                if window is None:
-                    raise RuntimeError(
-                        "A native window is required for the DexSim Gizmo controller."
-                    )
-                self._gizmo_controller = GizmoController()
-                window.add_input_control(self._gizmo_controller)
+            gizmo = Gizmo(target, gizmo_cfg, control_part)
             self._gizmos[gizmo_key] = gizmo
             self.notify_visualization_topology_changed()
             logger.log_info(
-                f"Gizmo enabled for {object_type} '{uid}' with control_part "
-                f"'{control_part}' (native={enable_native}, "
-                f"viser={self.sim_config.visualization.allow_commands})"
+                f"Viser Gizmo enabled for {object_type} '{uid}' with "
+                f"control_part '{control_part}'."
             )
 
         except Exception as e:
@@ -2100,6 +2115,8 @@ class SimulationManager:
 
         try:
             gizmo = self._gizmos.pop(gizmo_key)
+            if self._picker_gizmo == (uid, control_part):
+                self._picker_gizmo = None
             try:
                 if gizmo is not None:
                     gizmo.destroy()
@@ -2217,6 +2234,7 @@ class SimulationManager:
 
     def update_gizmos(self) -> None:
         """Apply Viser commands and update all active Gizmos."""
+        self.process_pick_commands()
         self.process_visualization_commands()
         for gizmo_key, gizmo in list(
             getattr(self, "_gizmos", {}).items()
@@ -2226,6 +2244,65 @@ class SimulationManager:
                     gizmo.update()
                 except Exception as error:
                     logger.log_error(f"Error updating gizmo '{gizmo_key}': {error}")
+
+    def process_pick_commands(self) -> int:
+        """Apply queued Viser click-pick commands on the simulation thread.
+
+        A non-empty pick attaches a picker-owned Gizmo to the clicked node;
+        an empty pick (clicking empty space) clears it. Only one picker-owned
+        Gizmo is kept at a time and user-created Gizmos are never touched.
+
+        Returns:
+            Number of pick commands drained from the visualization runtime.
+        """
+        runtime = self._visualization_runtime
+        if runtime is None or not getattr(
+            self.sim_config.visualization, "allow_commands", False
+        ):
+            return 0
+        processed = 0
+        for command in runtime.drain_pick_commands():
+            processed += 1
+            if (
+                command.run_id != runtime.exporter.run_id
+                or command.scene_revision != runtime.exporter.scene_revision
+            ):
+                continue
+            if command.node_id is None:
+                # Clicking empty space detaches the picker-owned Gizmo.
+                self._release_picker_gizmo()
+                continue
+            resolved = runtime.exporter.resolve_node_target(command.node_id)
+            if resolved is None:
+                continue
+            uid, kind = resolved
+            if kind not in {"robot", "rigid"}:
+                logger.log_warning(
+                    f"Pick target kind {kind!r} (uid {uid!r}) is not gizmo-able; "
+                    "only rigid objects and robots can be picked."
+                )
+                self._release_picker_gizmo()
+                continue
+            # Re-clicking the already-picked target is a no-op (avoids flicker
+            # from recreating the same Gizmo, e.g. clicking near its handle).
+            if self._picker_gizmo is not None and self._picker_gizmo[0] == uid:
+                continue
+            self._release_picker_gizmo()
+            if any(key == uid or key.startswith(f"{uid}:") for key in self._gizmos):
+                continue
+            gizmo = self.enable_gizmo(uid=uid)
+            if gizmo is not None:
+                self._picker_gizmo = (uid, None)
+        return processed
+
+    def _release_picker_gizmo(self) -> None:
+        """Detach the picker-owned Gizmo if one is currently attached."""
+        if self._picker_gizmo is None:
+            return
+        uid, control_part = self._picker_gizmo
+        self._picker_gizmo = None
+        if self.has_gizmo(uid, control_part=control_part):
+            self.disable_gizmo(uid, control_part=control_part)
 
     def toggle_gizmo_visibility(
         self, uid: str, control_part: str | None = None

@@ -13,9 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""
-Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
-"""
+"""Control a UR10 end effector with a native DexSim or Viser Gizmo."""
 
 from __future__ import annotations
 
@@ -27,6 +25,10 @@ import argparse
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.objects import (
+    GizmoCfg,
+    create_robot_ik_gizmo_controller,
+)
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RobotCfg,
@@ -34,7 +36,6 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
@@ -118,12 +119,29 @@ def main():
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    # Enable gizmo using the new API
-    if native_window_opened or args.viser:
+    gizmo_cfg = GizmoCfg(
+        ik_root_link_name="base_link",
+        ik_end_link_name="ee_link",
+        ik_tcp_pose=[
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.12],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    )
+    native_control = None
+    if native_window_opened:
+        native_control = create_robot_ik_gizmo_controller(
+            robot,
+            control_part="arm",
+            cfg=gizmo_cfg,
+            world=sim.get_world(),
+        )
+    elif args.viser:
         sim.enable_gizmo(
             uid="ur10_gizmo_test",
             control_part="arm",
-            enable_native=native_window_opened,
+            gizmo_cfg=gizmo_cfg,
         )
         if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
             logger.log_error("Failed to enable gizmo!")
@@ -136,19 +154,22 @@ def main():
     logger.log_info("Gizmo-Robot example started!")
     if native_window_opened or args.viser:
         logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
+    if native_window_opened:
+        logger.log_info("Press I to show or hide the native robot IK Gizmo")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim)
+    run_simulation(sim, native_control)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, native_control=None):
     step_count = 0
     try:
         last_time = time.time()
         last_step = 0
         while True:
             time.sleep(0.033)  # 30Hz
-            # Update all gizmos managed by sim
+            if native_control is not None:
+                native_control[0].update()
             sim.update_gizmos()
             sim.capture_visualization_safely()
             step_count += 1

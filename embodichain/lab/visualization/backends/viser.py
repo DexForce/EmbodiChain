@@ -25,6 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..cfg import ViserServerCfg
+from ..picker import ScenePicker
 from ..protocol import (
     CameraImageFrame,
     CameraSpec,
@@ -36,6 +37,7 @@ from ..protocol import (
     JointControlSpec,
     JointControlState,
     MeshGeometry,
+    PickCommand,
     PointCloudOverlay,
     SceneFrame,
     SceneManifest,
@@ -140,6 +142,13 @@ class ViserBackend(VisualizationBackend):
         self._gizmo_owners: dict[str, str] = {}
         self._gizmo_drag_poses: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self._gizmo_sequence = 0
+        self._picker = ScenePicker()
+        self._pick_enabled = False
+        self._node_geometry: dict[str, str] = {}
+        self._frame_positions: np.ndarray | None = None
+        self._frame_wxyz: np.ndarray | None = None
+        self._frame_visible: np.ndarray | None = None
+        self._pointer_handler: object | None = None
         self._joint_control_handles: dict[str, _JointControlHandle] = {}
         self._joint_control_specs: dict[str, JointControlSpec] = {}
         self._joint_control_states: dict[str, JointControlState] = {}
@@ -230,6 +239,14 @@ class ViserBackend(VisualizationBackend):
                             client_id=str(client_id),
                         )
                     )
+
+        if self.allow_commands and self._pointer_handler is None:
+
+            @self._server.scene.on_pointer_event("click")
+            def _on_pick_click(event: object) -> None:
+                self._handle_pick_click(event)
+
+            self._pointer_handler = _on_pick_click
 
     def _register_visibility_controls(self, manifest: SceneManifest) -> None:
         previous_env_visibility = self._env_visibility
@@ -342,6 +359,22 @@ class ViserBackend(VisualizationBackend):
                         )
                     )
 
+        if self.allow_commands:
+            with self._server.gui.add_folder("Interaction"):
+                pick_checkbox = self._server.gui.add_checkbox(
+                    "Enable click-to-pick Gizmo",
+                    initial_value=self._pick_enabled,
+                )
+
+                @pick_checkbox.on_update
+                def _(event: object) -> None:
+                    self._gui_events.put(
+                        _GuiEvent(
+                            category="pick_enabled",
+                            value=bool(event.target.value),
+                        )
+                    )
+
     @staticmethod
     def _event_client_id(event: object) -> str | None:
         client_id = getattr(event, "client_id", None)
@@ -351,6 +384,88 @@ class ViserBackend(VisualizationBackend):
         if client_id is None:
             return None
         return str(client_id)
+
+    def _handle_pick_click(self, event: object) -> None:
+        """Ray-cast a browser click and enqueue a PickCommand.
+
+        Clicking a scene node attaches a picker-owned Gizmo to it; clicking
+        empty space (no hit) clears the picker-owned Gizmo. The command is
+        processed on the simulation thread.
+        """
+        if not self._pick_enabled:
+            return
+        sink = getattr(self, "_pick_command_sink", None)
+        if sink is None or self._run_id is None:
+            return
+        ray_origin = getattr(event, "ray_origin", None)
+        ray_direction = getattr(event, "ray_direction", None)
+        if ray_origin is None or ray_direction is None:
+            return
+        client_id = self._event_client_id(event) or "unknown"
+        hit_node = self._picker.pick(
+            np.asarray(ray_origin, dtype=np.float32),
+            np.asarray(ray_direction, dtype=np.float32),
+            self._pick_instances(),
+        )
+        sink(
+            PickCommand(
+                run_id=self._run_id,
+                scene_revision=self._scene_revision,
+                client_id=client_id,
+                node_id=hit_node,
+            )
+        )
+
+    def _pick_instances(
+        self,
+    ) -> list[tuple[str, str, np.ndarray, np.ndarray]]:
+        """Build the ``(node_id, geometry_id, position, wxyz)`` pick candidates.
+
+        Only visible, non-deformable mesh nodes are considered, since deformable
+        nodes update their vertices every frame and are not gizmo targets.
+        """
+        instances: list[tuple[str, str, np.ndarray, np.ndarray]] = []
+        positions = self._frame_positions
+        wxyz = self._frame_wxyz
+        visible = self._frame_visible
+        if positions is None or wxyz is None or visible is None:
+            return instances
+        for index, node_id in enumerate(self._frame_node_ids):
+            geometry_id = self._node_geometry.get(node_id)
+            if geometry_id is None or not bool(visible[index]):
+                continue
+            instances.append((node_id, geometry_id, positions[index], wxyz[index]))
+        return instances
+
+    def _rebuild_picker(
+        self,
+        geometry_by_id: dict[str, MeshGeometry],
+        nodes_by_geometry: dict[str, list[SceneNode]],
+    ) -> None:
+        """Refresh cached pick geometry and the node-to-geometry map."""
+        self._picker.clear()
+        self._node_geometry = {}
+        for geometry_id, nodes in nodes_by_geometry.items():
+            geometry = geometry_by_id.get(geometry_id)
+            if geometry is None:
+                continue
+            self._picker.set_geometry(geometry_id, geometry.vertices, geometry.faces)
+            for node in nodes:
+                self._node_geometry[node.node_id] = geometry_id
+
+    def _clear_picker_gizmo(self) -> None:
+        """Tell the simulation thread to release the picker-owned Gizmo."""
+        sink = getattr(self, "_pick_command_sink", None)
+        if sink is None or self._run_id is None:
+            return
+        sink(
+            PickCommand(
+                run_id=self._run_id,
+                scene_revision=self._scene_revision,
+                client_id="picker-toggle",
+                node_id=None,
+            )
+        )
 
     def _queue_gizmo_event(
         self,
@@ -1024,6 +1139,8 @@ class ViserBackend(VisualizationBackend):
             else:
                 nodes_by_geometry[node.geometry_id].append(node)
 
+        self._rebuild_picker(geometry_by_id, nodes_by_geometry)
+
         removed_geometry_ids = set(self._mesh_batches) - set(nodes_by_geometry)
         for geometry_id in removed_geometry_ids:
             self._mesh_batches.pop(geometry_id).handle.remove()
@@ -1181,6 +1298,10 @@ class ViserBackend(VisualizationBackend):
             elif event.category == "overlay":
                 category, visible = event.value
                 self._overlay_visibility[str(category)] = bool(visible)
+            elif event.category == "pick_enabled":
+                self._pick_enabled = bool(event.value)
+                if not self._pick_enabled:
+                    self._clear_picker_gizmo()
             elif event.category == "camera_environment":
                 self._selected_camera_env = int(event.value)
                 camera_uids = self._camera_uids_for_env(self._selected_camera_env)
@@ -1405,6 +1526,10 @@ class ViserBackend(VisualizationBackend):
             if not np.array_equal(batch.frame_visible, frame_visible):
                 batch.frame_visible = frame_visible
                 self._apply_mesh_visibility(batch)
+        # Retain the latest world-space poses for click-to-pick ray casting.
+        self._frame_positions = frame.positions
+        self._frame_wxyz = frame.wxyz
+        self._frame_visible = frame.visible
         for node_id, dynamic_mesh in self._dynamic_meshes.items():
             index = dynamic_mesh.frame_index
             dynamic_mesh.frame_visible = bool(frame.visible[index])
@@ -1556,6 +1681,13 @@ class ViserBackend(VisualizationBackend):
         self._gizmo_owners.clear()
         self._gizmo_drag_poses.clear()
         self._gizmo_sequence = 0
+        self._picker.clear()
+        self._pick_enabled = False
+        self._node_geometry.clear()
+        self._frame_positions = None
+        self._frame_wxyz = None
+        self._frame_visible = None
+        self._pointer_handler = None
         self._joint_control_handles.clear()
         self._joint_control_specs.clear()
         self._joint_control_states.clear()

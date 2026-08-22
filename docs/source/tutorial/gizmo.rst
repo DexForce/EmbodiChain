@@ -5,7 +5,9 @@ Interactive Robot Control with Gizmo
 
 .. currentmodule:: embodichain.lab.sim
 
-This tutorial demonstrates how to use the Gizmo class for interactive robot manipulation in SimulationManager. You'll learn how to create a gizmo attached to a robot's end-effector and use it for real-time inverse kinematics (IK) control, allowing intuitive manipulation of robot poses through visual interaction.
+This tutorial demonstrates native DexSim and browser-based Viser Gizmo control.
+DexSim owns native entity and robot IK controllers; EmbodiChain keeps only the
+robot control-part adapter and the Viser command path.
 
 For the cross-frontend capability summary, supported targets, lifecycle rules,
 and security boundary, see :doc:`/features/interaction/gizmo`.
@@ -33,7 +35,8 @@ Similar to the previous tutorial on robot simulation, we use the :class:`Simulat
 
 **Important:** Gizmo only supports single environment mode (`num_envs=1`). Using multiple environments will raise an exception.
 
-All gizmo creation, visibility, and destruction operations must be managed via the SimulationManager API:
+Viser Gizmo creation, visibility, and destruction are managed through
+SimulationManager:
 
 .. code-block:: python
 
@@ -43,10 +46,8 @@ All gizmo creation, visibility, and destruction operations must be managed via t
    # Set visibility explicitly
    sim.set_gizmo_visibility("ur10_gizmo_test", visible=False, control_part="arm")
 
-Always use the SimulationManager API to control gizmo visibility and lifecycle. Do not operate on the Gizmo instance directly.
-
-The same target behavior is available in either the DexSim window or Viser.
-The standard Viser mode includes interactive Gizmo control:
+Native controls use DexSim directly. The standard Viser mode includes
+interactive Gizmo control:
 
 .. code-block:: bash
 
@@ -54,6 +55,27 @@ The standard Viser mode includes interactive Gizmo control:
 
 Only expose the Viser endpoint to trusted browser clients because dragging a
 Gizmo mutates simulation targets.
+
+Click-to-Pick in Viser
+~~~~~~~~~~~~~~~~~~~~~~
+
+Unlike the native DexSim window, the browser does not ray-cast the scene for
+you, so EmbodiChain performs the click hit-test against the published scene
+geometry. Enable it explicitly in the browser panel:
+
+1. Toggle the **Enable click-to-pick Gizmo** checkbox under the **Interaction**
+   folder.
+2. Click a rigid object or robot link in the 3D view. A transform control is
+   attached to it (replacing any previously picked Gizmo); drag it to move the
+   target. Robot IK is solved with DexSim Newton IK, just as in the native
+   window.
+3. Click empty space, or uncheck the checkbox, to detach the picker-owned
+   Gizmo.
+
+The picker manages at most one Gizmo at a time and never touches Gizmos you
+created yourself through ``sim.enable_gizmo(...)``. Only rigid objects and
+robots are pickable; articulations, soft bodies, and cameras are ignored by the
+picker.
 
 What is a Gizmo?
 -----------------
@@ -65,7 +87,8 @@ A Gizmo is an interactive visual tool that allows users to manipulate simulation
 - **Real-time Manipulation**: Provide immediate visual feedback during robot motion planning
 - **Debugging and Visualization**: Test robot reachability and workspace limits
 
-The :class:`objects.Gizmo` class provides a unified interface for interactive control of different simulation elements including robots, rigid objects, and cameras.
+The :class:`objects.Gizmo` class is the Viser-side target controller for robots,
+rigid objects, and cameras. Native controls are DexSim controllers.
 
 Setting up Robot Configuration
 ------------------------------
@@ -84,77 +107,94 @@ Key components of the robot configuration:
 - **IK Solver**: :class:`solvers.PinkSolverCfg` provides inverse kinematics capabilities
 - **Drive Properties**: Sets stiffness and damping for joint control
 
-The IK solver is crucial for gizmo functionality, as it enables the robot to automatically calculate joint angles needed to reach gizmo target positions.
+The configured EmbodiChain solver is optional: it supplies default IK-chain
+metadata (root link, end link, and TCP transform). IK itself is solved by
+DexSim Newton IK. Applications may instead set this metadata directly in
+:class:`objects.GizmoCfg`.
 
 Creating and Attaching a Gizmo
 -------------------------------
 
 
 
-After configuring the robot, enable the gizmo for interactive control using the SimulationManager API (supports robot, rigid object, camera; key is `uid:control_part`):
+For native-window robot control, create DexSim's IK controller through the
+small EmbodiChain adapter factory and retain both returned objects:
 
 .. code-block:: python
 
-   # Enable gizmo for the robot's arm
-   sim.enable_gizmo(
-       uid="ur10_gizmo_test",
-       control_part="arm",
-       enable_native=False,  # Pure Viser; use True for a DexSim window too.
+   from embodichain.lab.sim.objects import (
+       GizmoCfg,
+       create_robot_ik_gizmo_controller,
    )
-   if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
-       logger.log_error("Failed to enable gizmo!")
-       return
 
+   ik_controller, input_controller = create_robot_ik_gizmo_controller(
+       robot,
+       control_part="arm",
+       cfg=GizmoCfg(
+           ik_root_link_name="base_link",
+           ik_end_link_name="ee_link",
+       ),
+       world=sim.get_world(),
+   )
 
-
-The Gizmo instance is managed internally by SimulationManager. If you need to access it:
+Call ``ik_controller.update()`` once per frame. DexSim owns the native target,
+hotkey, solve trigger, and visibility state. For Viser, use the SimulationManager
+command path instead:
 
 .. code-block:: python
 
-   gizmo = sim.get_gizmo("ur10_gizmo_test", control_part="arm")
+   sim.enable_gizmo(
+       "ur10_gizmo_test",
+       control_part="arm",
+       gizmo_cfg=GizmoCfg(
+           ik_root_link_name="base_link",
+           ik_end_link_name="ee_link",
+       ),
+   )
 
 
 
 The Gizmo system will automatically:
 
-1. **Detect Target Type**: Identify that the target is a robot (vs. rigid object or camera)
-2. **Find End-Effector**: Locate the robot's end-effector link (``ee_link`` for UR10)
-3. **Create Proxy Object**: Generate a small invisible cube at the end-effector position
-4. **Set Up IK Callback**: Configure the gizmo to trigger IK solving when moved
+1. **Resolve the IK Chain**: Locate the root and end-effector links
+2. **Build Newton IK**: Construct DexSim's reduced-chain solver
+3. **Bridge State**: Map one EmbodiChain control part to DexSim's joint API
+4. **Own the Frontend**: DexSim owns native interaction; SimulationManager owns Viser commands
 
 How Gizmo-Robot Interaction Works
 ----------------------------------
 
 
 
-The gizmo-robot interaction follows this efficient workflow:
+The gizmo-robot interaction follows this workflow:
 
-1. **Gizmo Callback**: DexSim or Viser records the requested transform
-2. **Deferred IK Solving**: Instead of solving IK in the UI callback, the target transform is queued
-3. **Update Loop**: During each simulation step, ``gizmo.update()`` solves IK and applies joint commands
-4. **Robot Motion**: The robot smoothly moves to follow the gizmo position
-
-This design separates UI responsiveness from computational IK solving, ensuring smooth interaction even with complex robots.
+1. **Target Update**: DexSim or Viser records the requested TCP transform
+2. **Deferred Solve**: the native controller or ``sim.update_gizmos()`` invokes Newton IK only when needed
+3. **State Bridge**: Newton IK reads and writes the selected EmbodiChain control-part joints through an adapter
+4. **Drive Target**: Both paths use ``Robot.set_qpos(..., target=True)``
+5. **Robot Motion**: Joint drives move the robot toward the target without teleporting its current state
 
 The Simulation Loop
 -------------------
 
 
 
-In the main loop, simply call `sim.update_gizmos()`. There is no need to manually update any Gizmo instance.
+Update the DexSim native controller explicitly, then service any Viser controls:
 
 
 
 .. code-block:: python
 
-   def run_simulation(sim: SimulationManager):
+   def run_simulation(sim: SimulationManager, ik_controller=None):
        step_count = 0
        try:
            last_time = time.time()
            last_step = 0
            while True:
                time.sleep(0.033)  # 30Hz
-               sim.update_gizmos()  # Update all gizmos
+               if ik_controller is not None:
+                   ik_controller.update()
+               sim.update_gizmos()  # Update Viser gizmos
                sim.capture_visualization_safely()  # Publish Viser state, if enabled
                step_count += 1
                # ...performance statistics, etc...
@@ -168,8 +208,9 @@ In the main loop, simply call `sim.update_gizmos()`. There is no need to manuall
 
 Main loop highlights:
 
-- **Gizmo update**: Only `sim.update_gizmos()` is needed, no `gizmo.update()`
-- **Viser update**: Automatic-physics loops also call `sim.capture_visualization_safely()`
+- **Native update**: Call DexSim's ``IKGizmoController.update()`` each frame
+- **Viser command update**: Call ``sim.update_gizmos()``
+- **Viser frame update**: Automatic-physics loops also call ``sim.capture_visualization_safely()``
 - **Performance monitoring**: Optional FPS statistics
 - **Resource cleanup**: Only `sim.destroy()` is needed, no manual Gizmo destruction
 - **Graceful shutdown**: Supports Ctrl+C interruption
@@ -180,42 +221,17 @@ Gizmo Lifecycle Management
 
 
 
-Gizmo lifecycle is managed by SimulationManager:
+Viser Gizmo lifecycle is managed by SimulationManager:
 
 - Enable: `sim.enable_gizmo(...)`
-- Update: Main loop automatically calls `sim.update_gizmos()`
+- Update: Call ``sim.update_gizmos()`` from the main loop
 - Destroy/disable: `sim.disable_gizmo(...)` or `sim.destroy()` (recommended)
 
-There is no need to manually create or destroy Gizmo instances. All resources are managed by SimulationManager.
-
-Available Gizmo Methods
------------------------
-
-
-
-
-If you need to access the underlying Gizmo instance (via `sim.get_gizmo`), you can use the following methods:
-
-**Transform Control:**
-
-- ``set_world_pose(pose)``: Set gizmo world position and orientation
-- ``get_world_pose()``: Get current gizmo world transform
-- ``set_local_pose(pose)``: Set gizmo local transform relative to parent
-- ``get_local_pose()``: Get gizmo local transform
-
-
-
-**Visual properties (strongly recommend using SimulationManager API):**
+Native controller lifecycle remains in DexSim. Viser visual properties are
+available through SimulationManager:
 
 - ``sim.toggle_gizmo_visibility(uid, control_part=None)``: Toggle gizmo visibility
 - ``sim.set_gizmo_visibility(uid, visible, control_part=None)``: Set gizmo visibility
-
-**Hierarchy Management:**
-
-- ``get_parent()``: Get gizmo's parent node in scene hierarchy
-- ``get_name()``: Get gizmo node name for debugging
-- ``detach()``: Disconnect gizmo from current target
-- ``attach(target)``: Attach gizmo to a new simulation object
 
 Running the Tutorial
 --------------------
@@ -236,7 +252,7 @@ Command-line options:
 
 Once running:
 
-1. **Mouse Interaction**: Click and drag the gizmo (colorful axes) to move the robot
+1. **Mouse Interaction**: Click and drag the gizmo to move the robot
 2. **Real-time IK**: Watch the robot joints automatically adjust to follow the gizmo
 3. **Workspace Limits**: Observe how the robot behaves at workspace boundaries
 4. **Performance**: Monitor FPS in the console output
@@ -248,7 +264,8 @@ Tips and Best Practices
 
 **Performance optimization:**
 
-- Only call ``sim.update_gizmos()`` in the main loop, no need for ``gizmo.update()``
+- Call the native IK controller's ``update()`` once per frame; call
+  ``sim.update_gizmos()`` for Viser
 - Reduce IK solver iterations for better real-time performance if needed
 - Use ``set_manual_update(False)`` for smoother interaction
 
@@ -257,14 +274,14 @@ Tips and Best Practices
 **Debugging tips:**
 
 - Check console output for IK solver success/failure messages
-- Use ``get_world_pose()`` to check gizmo position (if needed)
+- Inspect the robot TCP or Viser target pose when debugging alignment
 - Monitor FPS to identify performance bottlenecks
 
 
 
 **Robot compatibility:**
 
-- Ensure your robot is configured with a correct IK solver
+- Set the IK chain (root link and end-effector link) in :class:`objects.GizmoCfg`, or configure an EmbodiChain solver to supply them as defaults
 - Check the end-effector (EE) link name
 - Test joint limits and workspace boundaries
 
@@ -272,7 +289,7 @@ Tips and Best Practices
 
 **Visualization customization:**
 
-- Adjust gizmo appearance via Gizmo config (e.g., ``set_line_width()``; requires access to the instance via `sim.get_gizmo`)
+- Adjust Viser axis lengths, ring radius, and line width through :class:`objects.GizmoCfg`
 - Adjust gizmo scale according to robot size
 - Enable collision for debugging if needed
 
@@ -282,7 +299,6 @@ Next Steps
 After mastering basic gizmo usage, you can explore:
 
 - **Multi-robot Gizmos**: Attach gizmos to multiple robots simultaneously
-- **Custom Gizmo Callbacks**: Implement application-specific interaction logic  
 - **Gizmo with Rigid Objects**: Use gizmos for interactive object manipulation
 - **Advanced IK Configuration**: Fine-tune solver parameters for specific robots
 

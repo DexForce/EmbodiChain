@@ -37,6 +37,7 @@ from embodichain.lab.sim.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
+from embodichain.lab.sim.objects import create_robot_ik_gizmo_controller
 
 
 def main():
@@ -158,12 +159,20 @@ def main():
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    # Enable gizmo for both arms using the new API
-    if native_window_opened or args.viser:
+    native_controls = []
+    if native_window_opened:
+        for control_part in ("left_arm", "right_arm"):
+            native_controls.append(
+                create_robot_ik_gizmo_controller(
+                    robot,
+                    control_part=control_part,
+                    world=sim.get_world(),
+                )
+            )
+    elif args.viser:
         sim.enable_gizmo(
             uid="w1_gizmo_test",
             control_part="left_arm",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
             logger.log_error("Failed to enable left arm gizmo!")
@@ -172,7 +181,6 @@ def main():
         sim.enable_gizmo(
             uid="w1_gizmo_test",
             control_part="right_arm",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
             logger.log_error("Failed to enable right arm gizmo!")
@@ -187,17 +195,18 @@ def main():
         logger.log_info("Use the gizmos to drag both robot arms' end-effectors")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim)
+    run_simulation(sim, native_controls)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, native_controls=()):
     step_count = 0
     try:
         last_time = time.time()
         last_step = 0
         while True:
             time.sleep(0.033)  # 30Hz
-            # Update all gizmos managed by sim
+            for controller, _ in native_controls:
+                controller.update()
             sim.update_gizmos()
             sim.capture_visualization_safely()
             step_count += 1

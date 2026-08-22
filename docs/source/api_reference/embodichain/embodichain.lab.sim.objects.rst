@@ -41,6 +41,7 @@ bodies.
     RobotWorkspaceCfg
     Gizmo
     GizmoCfg
+    create_robot_ik_gizmo_controller
     RigidConstraint
 
 .. currentmodule:: embodichain.lab.sim.objects
@@ -185,6 +186,8 @@ Gizmo
     :inherited-members:
     :show-inheritance:
     :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autofunction:: create_robot_ik_gizmo_controller
 
 Rigid Constraint
 ----------------
