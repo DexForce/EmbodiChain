@@ -433,6 +433,40 @@ def test_point_cloud_visualizer_publishes_persistent_viser_overlay():
     )
 
 
+def test_point_cloud_visualizer_uses_sim_manager_point_cloud_api():
+    """The native workspace backend delegates point-cloud creation to the manager."""
+    from embodichain.lab.sim.workspace.visualizers import (
+        PointCloudVisualizer,
+    )
+
+    class SimStub:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+            self.handle = object()
+
+        def visualize_point_cloud(self, **kwargs: object) -> object:
+            self.calls.append(kwargs)
+            return self.handle
+
+    sim = SimStub()
+    visualizer = PointCloudVisualizer(
+        backend="sim_manager",
+        point_size=0.02,
+        sim_manager=sim,
+        control_part_name="arm",
+    )
+    points = np.array([[0.0, 0.0, 0.0]], dtype=np.float32)
+    colors = np.array([[0.0, 1.0, 0.0]], dtype=np.float32)
+
+    assert visualizer.visualize(points, colors) is sim.handle
+    assert len(sim.calls) == 1
+    call = sim.calls[0]
+    np.testing.assert_array_equal(call["points"], points)
+    np.testing.assert_array_equal(call["colors"], colors)
+    assert call["point_size"] == 0.02
+    assert call["name"] == "workspace_pcd_arm"
+
+
 def test_workspace_analyzer_prefers_configured_viser_backend():
     """Automatic workspace visualization selects Viser before local backends."""
     from types import SimpleNamespace

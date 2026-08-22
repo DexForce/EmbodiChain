@@ -26,6 +26,11 @@ instance registry instead of passing it around explicitly.
    :members:
    :undoc-members:
    :show-inheritance:
+   :exclude-members: visualize_point_cloud
+
+.. rubric:: Native point-cloud visualization
+
+.. automethod:: SimulationManager.visualize_point_cloud
 
 .. autoclass:: SimulationManagerCfg
    :members:
