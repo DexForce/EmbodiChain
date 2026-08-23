@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-import math
 from types import MappingProxyType
 from typing import Any, Literal
 
@@ -28,6 +27,8 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.sim.types import EnvAction
+
+from ._json import json_safe_copy as _json_safe_copy
 
 __all__ = [
     "DEMO_ANNOTATION_KEYS",
@@ -54,35 +55,6 @@ DEMO_ANNOTATION_KEYS = (
     "truncated",
 )
 """Per-frame annotation keys stored in expert rollout buffers."""
-
-
-def _json_safe_copy(value: Any, *, field_name: str) -> Any:
-    """Return an owned JSON value without implicit type coercion."""
-    if value is None or type(value) in {bool, int, str}:
-        return value
-    if type(value) is float:
-        if not math.isfinite(value):
-            raise ValueError(f"{field_name} contains a non-finite float.")
-        return value
-    if isinstance(value, Mapping):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            if type(key) is not str or not key or key != key.strip():
-                raise ValueError(
-                    f"{field_name} mapping keys must be non-empty strings "
-                    "without outer whitespace."
-                )
-            result[key] = _json_safe_copy(
-                item,
-                field_name=f"{field_name}.{key}",
-            )
-        return result
-    if isinstance(value, (list, tuple)):
-        return [
-            _json_safe_copy(item, field_name=f"{field_name}[{index}]")
-            for index, item in enumerate(value)
-        ]
-    raise TypeError(f"{field_name} contains non-JSON value {type(value).__name__}.")
 
 
 @dataclass(frozen=True, slots=True, eq=False)

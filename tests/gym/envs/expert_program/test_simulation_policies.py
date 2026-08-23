@@ -31,10 +31,7 @@ from embodichain.lab.gym.envs.expert_program import (
     decode_expert_program,
 )
 from embodichain.lab.gym.envs.expert_program.bridge import (
-    SegmentPostPolicyMetadataPort,
     SegmentPostPolicyPort,
-    SegmentPostPolicyResultPort,
-    SegmentValidatorMetadataPort,
     SegmentValidatorPort,
 )
 from embodichain.lab.gym.envs.expert_program.simulation_policies import (
@@ -113,7 +110,7 @@ class _Simulation:
 def _compiled_segment(*, settle_preset: str = "fast"):
     """Compile one segment containing both supported policy types."""
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "program_id": "policy_test",
         "integration": {
             "robot_profile": "test_robot",
@@ -206,15 +203,12 @@ def _port(
     return port, entity, robot
 
 
-def test_port_implements_both_bridge_policy_protocols() -> None:
-    """One shared instance serves post-policy and validator boundaries."""
+def test_port_implements_complete_bridge_policy_protocols() -> None:
+    """One shared instance serves both complete policy boundaries."""
     port, _, _ = _port(torch.zeros(2, 3))
 
     assert isinstance(port, SegmentPostPolicyPort)
-    assert isinstance(port, SegmentPostPolicyMetadataPort)
-    assert isinstance(port, SegmentPostPolicyResultPort)
     assert isinstance(port, SegmentValidatorPort)
-    assert isinstance(port, SegmentValidatorMetadataPort)
     assert port.settle_preset_ids == ("fast",)
 
 

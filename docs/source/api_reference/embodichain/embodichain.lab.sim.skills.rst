@@ -9,6 +9,7 @@ embodichain.lab.sim.skills
 
    .. autosummary::
 
+      SemanticCallSpec
       SemanticPose
       Pick
       Place
@@ -43,7 +44,6 @@ embodichain.lab.sim.skills
       SemanticDiagnostic
       SemanticValidationError
       SemanticEffectVerifier
-      SemanticSkillRuntime
       AtomicSkills
       SkillRuntime
       SkillResult
@@ -100,25 +100,6 @@ embodichain.lab.sim.skills
       UnsupportedSkillError
       AmbiguousSkillBindingError
 
-   .. rubric:: Semantic calls and runtime
-
-   .. autosummary::
-
-      SemanticCallSpec
-      SemanticPose
-      Pick
-      Place
-      HandOver
-      RegisteredSemanticCall
-      SemanticCallCatalog
-      SemanticSkillCompiler
-      AtomicSkills
-      SkillRuntime
-      SkillResult
-      SkillCallTrace
-      SkillPlanAttemptTrace
-      SkillEffectTrace
-
    .. rubric:: Effects, evidence, and parallel execution
 
    .. autosummary::
@@ -135,6 +116,9 @@ embodichain.lab.sim.skills
 
 Semantic calls and catalog
 --------------------------
+
+.. autoclass:: SemanticCallSpec
+   :members:
 
 .. autoclass:: SemanticPose
    :members:
@@ -215,9 +199,6 @@ Semantic runtime
 
 .. autodata:: SemanticEffectVerifier
 
-.. autoclass:: SemanticSkillRuntime
-   :members:
-
 .. autoclass:: AtomicSkills
    :members:
 
@@ -231,6 +212,15 @@ Semantic runtime
    :members:
 
 .. autoclass:: SkillFailure
+   :members:
+
+.. autoclass:: SkillCallTrace
+   :members:
+
+.. autoclass:: SkillPlanAttemptTrace
+   :members:
+
+.. autoclass:: SkillEffectTrace
    :members:
 
 Robot resources and profiles
@@ -286,51 +276,6 @@ Profile errors
 .. autoclass:: UnsupportedSkillError
 
 .. autoclass:: AmbiguousSkillBindingError
-
-Semantic calls and runtime
---------------------------
-
-.. autoclass:: SemanticCallSpec
-   :members:
-
-.. autoclass:: SemanticPose
-   :members:
-
-.. autoclass:: Pick
-   :members:
-
-.. autoclass:: Place
-   :members:
-
-.. autoclass:: HandOver
-   :members:
-
-.. autoclass:: RegisteredSemanticCall
-   :members:
-
-.. autoclass:: SemanticCallCatalog
-   :members:
-
-.. autoclass:: SemanticSkillCompiler
-   :members:
-
-.. autoclass:: AtomicSkills
-   :members:
-
-.. autoclass:: SkillRuntime
-   :members:
-
-.. autoclass:: SkillResult
-   :members:
-
-.. autoclass:: SkillCallTrace
-   :members:
-
-.. autoclass:: SkillPlanAttemptTrace
-   :members:
-
-.. autoclass:: SkillEffectTrace
-   :members:
 
 Effects, evidence, and parallel execution
 -----------------------------------------

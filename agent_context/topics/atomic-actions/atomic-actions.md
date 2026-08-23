@@ -353,11 +353,11 @@ when available, while low-level execution events remain in the call trace.
 Failures are terminal in the current runtime; workflow-level replacement,
 reacquisition, and symbolic-state reconciliation are not yet provided.
 
-`SemanticSkillRuntime` is only the compatibility subclass retaining the
-simulation-oriented `from_simulation()` factory and legacy verifier callback.
-New integrations depend on `SkillRuntime` and typed evidence collectors.
-`AtomicSkills` is a small application facade over that same runtime; it does
-not own a second compiler or execution loop.
+`SkillRuntime.from_simulation()` is the standard explicit simulation factory.
+It may combine one application-owned physical-effect gate with the typed
+evidence monitor selected by the profile. `AtomicSkills` is a small application
+facade over that same runtime; it does not own a second compiler or execution
+loop.
 
 `ParallelSkillRuntime` coordinates two or more forked semantic lanes on one
 clock. It rejects overlapping `ResourceClaim` values and symbolic writes,
@@ -685,9 +685,9 @@ structured invalidation/replan events, and requires terminal completion.
 Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
 Both examples separate `create_*_application()` (scene/profile/runtime and
 default verifier wiring), `create_*_task()` (robot-independent semantic calls),
-and the application-facing `app.run(task, ...)` entry. The examples retain the
-compatibility `SemanticSkillRuntime` simulation factory; there is no
-tutorial-specific execution loop. `place.py`
+and the application-facing `app.run(task, ...)` entry. Both examples use the
+canonical `SkillRuntime.from_simulation()` factory; there is no tutorial-specific
+execution loop. `place.py`
 executes `Pick -> Place`, verifying the observed lift, planned object-to-EEF
 relation, release pose, and open hand. `hand_over.py` demonstrates disjoint
 dual-arm resources plus an explicit `RegisteredSemanticLowerer`, then verifies

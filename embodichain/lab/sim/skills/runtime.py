@@ -75,7 +75,7 @@ SemanticEffectVerifier = Callable[
     [SemanticCallSpec, EffectVerificationRequest, PlanningContext],
     torch.Tensor,
 ]
-"""Compatibility callback for application-owned physical effect checks."""
+"""Optional application-owned physical-effect gate."""
 
 
 def _snapshot_task_state(state: TaskState) -> TaskState:
@@ -1232,8 +1232,8 @@ class SkillResult:
     def require_all_succeeded(self) -> None:
         """Raise unless every environment completed the workflow successfully.
 
-        This small compatibility helper keeps application entry points concise
-        while the canonical result continues to expose row-local masks.
+        This convenience assertion keeps application entry points concise while
+        the canonical result continues to expose row-local masks.
         """
         if self.status is not SkillStatus.COMPLETED or not bool(
             self.success_mask.all()
@@ -1291,6 +1291,7 @@ class _PrimedObservationProvider:
             task=task_state,
             scene=context.scene,
             env_ids=context.env_ids,
+            control_dt=context.control_dt,
         )
 
 
@@ -1313,7 +1314,7 @@ class SkillRuntime:
         task_state: TaskState | None = None,
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
-        legacy_effect_verifier: SemanticEffectVerifier | None = None,
+        effect_verifier: SemanticEffectVerifier | None = None,
     ) -> None:
         if not isinstance(compiler, SemanticSkillCompiler):
             raise TypeError("compiler must be a SemanticSkillCompiler.")
@@ -1329,8 +1330,8 @@ class SkillRuntime:
             raise TypeError("clock must implement ExecutionClock.")
         if runner_cfg is not None and not isinstance(runner_cfg, ExecutionRunnerCfg):
             raise TypeError("runner_cfg must be an ExecutionRunnerCfg or None.")
-        if legacy_effect_verifier is not None and not callable(legacy_effect_verifier):
-            raise TypeError("legacy_effect_verifier must be callable or None.")
+        if effect_verifier is not None and not callable(effect_verifier):
+            raise TypeError("effect_verifier must be callable or None.")
         integration = compiler.integration
         engine = integration.engine
         if not isinstance(engine, AtomicActionEngine):
@@ -1352,7 +1353,7 @@ class SkillRuntime:
         self._evidence_collector = evidence_collector
         self._clock = clock or MonotonicExecutionClock()
         self._runner_cfg_override = runner_cfg
-        self._legacy_effect_verifier = legacy_effect_verifier
+        self._application_effect_verifier = effect_verifier
         self._step_observer: Callable[[RunnerStep], None] | None = None
         self._task_state = _snapshot_task_state(initial_task)
         self._env_ids = torch.arange(
@@ -1399,7 +1400,7 @@ class SkillRuntime:
         task_state: TaskState | None = None,
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
-        legacy_effect_verifier: SemanticEffectVerifier | None = None,
+        effect_verifier: SemanticEffectVerifier | None = None,
     ) -> SkillRuntime:
         """Construct the canonical runtime from explicit reusable ports."""
         return cls(
@@ -1410,13 +1411,135 @@ class SkillRuntime:
             task_state=task_state,
             clock=clock,
             runner_cfg=runner_cfg,
-            legacy_effect_verifier=legacy_effect_verifier,
+            effect_verifier=effect_verifier,
+        )
+
+    @classmethod
+    def from_simulation(
+        cls,
+        *,
+        simulation: object,
+        robot: object,
+        motion_generator: object,
+        scene_registry: SceneRegistry,
+        robot_profile: object,
+        call_catalog: object | None = None,
+        effect_verifier: SemanticEffectVerifier | None = None,
+        registered_lowerers: Iterable[object] = (),
+        relation_grounders: Iterable[object] = (),
+        handover_pose_providers: Iterable[object] = (),
+        endpoint_adapters: Mapping[type[object], object] | None = None,
+        runner_cfg: ExecutionRunnerCfg | None = None,
+        control_dt: float | None = None,
+        scene_translation_threshold: float = 1.0e-4,
+        scene_rotation_threshold: float = 1.0e-3,
+    ) -> SkillRuntime:
+        """Build the canonical runtime from one explicit simulation integration.
+
+        The optional ``effect_verifier`` is an additional application-owned
+        physical gate combined with the typed evidence monitor selected by the
+        robot profile.
+        """
+        from embodichain.lab.sim.atomic_actions.sim_adapter import (
+            SimulationExecutionAdapter,
+        )
+
+        from .calls import SemanticCallCatalog, builtin_semantic_call_catalog
+        from .evidence import (
+            ControlPartSimulationEvidenceProvider,
+            EffectEvidenceCollector,
+            EffectEvidenceProviderRegistry,
+            SceneArticulationEvidenceProvider,
+        )
+        from .integration import SceneManifest, SemanticIntegrationManifest
+        from .profiles import RobotSkillProfile
+
+        if not isinstance(scene_registry, SceneRegistry):
+            raise TypeError("scene_registry must be a SceneRegistry.")
+        if type(robot_profile) is not RobotSkillProfile:
+            raise TypeError("robot_profile must be exactly RobotSkillProfile.")
+        if call_catalog is not None and type(call_catalog) is not SemanticCallCatalog:
+            raise TypeError("call_catalog must be exactly SemanticCallCatalog or None.")
+        if effect_verifier is not None and not callable(effect_verifier):
+            raise TypeError("effect_verifier must be callable or None.")
+        get_qpos = getattr(robot, "get_qpos", None)
+        if not callable(get_qpos):
+            raise TypeError("robot must provide get_qpos().")
+        qpos = get_qpos()
+        if not isinstance(qpos, torch.Tensor) or qpos.dim() != 2:
+            raise ValueError("robot.get_qpos() must return shape (B, robot_dof).")
+
+        scene_provider = scene_registry.make_planning_scene_provider(
+            motion_generator,
+            batch_size=int(qpos.shape[0]),
+            translation_threshold=scene_translation_threshold,
+            rotation_threshold=scene_rotation_threshold,
+        )
+        adapter = SimulationExecutionAdapter(
+            simulation,
+            robot,
+            control_dt=control_dt,
+            scene_provider=scene_provider,
+        )
+        engine = AtomicActionEngine(
+            motion_generator,
+            control_profiles=robot_profile.action_control_profiles(),
+        )
+        manifest = SemanticIntegrationManifest(
+            scene=SceneManifest.from_registry(scene_registry),
+            robot_profile=robot_profile,
+            call_catalog=(
+                builtin_semantic_call_catalog()
+                if call_catalog is None
+                else call_catalog
+            ),
+        )
+        integration = manifest.bind(
+            scene_registry,
+            engine,
+            endpoint_adapters=endpoint_adapters,
+        )
+        compiler = SemanticSkillCompiler(
+            integration,
+            registered_lowerers=registered_lowerers,
+            relation_grounders=relation_grounders,
+            handover_pose_providers=handover_pose_providers,
+        )
+        collector = EffectEvidenceCollector(
+            EffectEvidenceProviderRegistry(
+                (
+                    ControlPartSimulationEvidenceProvider(
+                        robot,
+                        scene_provider=scene_provider,
+                    ),
+                    SceneArticulationEvidenceProvider(scene_provider=scene_provider),
+                )
+            )
+        )
+        return cls(
+            compiler,
+            adapter,
+            adapter,
+            collector,
+            clock=adapter,
+            runner_cfg=runner_cfg,
+            effect_verifier=effect_verifier,
         )
 
     @property
     def compiler(self) -> SemanticSkillCompiler:
         """Return the installed semantic compiler."""
         return self._compiler
+
+    @property
+    def engine(self) -> AtomicActionEngine:
+        """Return the atomic-action engine owned by this runtime."""
+        return self._engine
+
+    @property
+    def observation_provider(self) -> ObservationProvider:
+        """Return the observation port used for just-in-time grounding."""
+        return self._observation_provider
 
     @property
     def clock(self) -> ExecutionClock:
@@ -1431,6 +1554,15 @@ class SkillRuntime:
     def scene_registry(self) -> SceneRegistry:
         """Return the authoritative semantic scene registry."""
         return self._compiler.integration.scene_registry
+
+    def validate(
+        self,
+        calls: Iterable[SemanticCallSpec],
+        *,
+        workflow_id: str = "semantic_workflow",
+    ) -> object:
+        """Analyze a workflow without executing it."""
+        return self.compiler.analyze(calls, workflow_id=workflow_id)
 
     @property
     def task_state(self) -> TaskState:
@@ -1472,7 +1604,7 @@ class SkillRuntime:
             task_state=initial_state,
             clock=self._clock,
             runner_cfg=self._runner_cfg_override,
-            legacy_effect_verifier=self._legacy_effect_verifier,
+            effect_verifier=self._application_effect_verifier,
         )
 
     @property
@@ -1609,24 +1741,32 @@ class SkillRuntime:
         eligible_mask: torch.Tensor | None = None,
         execution_prefix_length: int | None = None,
         max_steps: int = 100_000,
+        on_step: Callable[[RunnerStep], None] | None = None,
     ) -> SkillResult:
         """Synchronously execute an analyzed semantic-call prefix."""
         if type(max_steps) is not int or max_steps <= 0:
             raise ValueError("max_steps must be a positive integer.")
-        result = self.start(
-            *calls,
-            workflow_id=workflow_id,
-            eligible_mask=eligible_mask,
-            execution_prefix_length=execution_prefix_length,
-        )
-        for _ in range(max_steps):
-            if result.terminal:
-                return result
-            if result.wait_duration > 0.0:
-                self._clock.sleep(result.wait_duration)
-            result = self.step()
-        self._abort(f"Semantic runtime exceeded max_steps={max_steps}.")
-        return self.result
+        if on_step is not None and not callable(on_step):
+            raise TypeError("on_step must be callable or None.")
+        previous_observer = self._step_observer
+        self._step_observer = on_step
+        try:
+            result = self.start(
+                *calls,
+                workflow_id=workflow_id,
+                eligible_mask=eligible_mask,
+                execution_prefix_length=execution_prefix_length,
+            )
+            for _ in range(max_steps):
+                if result.terminal:
+                    return result
+                if result.wait_duration > 0.0:
+                    self._clock.sleep(result.wait_duration)
+                result = self.step()
+            self._abort(f"Semantic runtime exceeded max_steps={max_steps}.")
+            return self.result
+        finally:
+            self._step_observer = previous_observer
 
     def cancel(
         self, reason: str = "Semantic workflow cancelled by caller."
@@ -1837,6 +1977,7 @@ class SkillRuntime:
             task=self._task_state,
             scene=context.scene,
             env_ids=context.env_ids,
+            control_dt=context.control_dt,
         )
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(
@@ -1960,30 +2101,32 @@ class SkillRuntime:
         )
         decision = monitor.observe(request, evidence)
         analyzed = getattr(grounded, "analyzed", None)
-        legacy_verifier = self._legacy_effect_verifier
-        if legacy_verifier is not None:
+        application_verifier = self._application_effect_verifier
+        if application_verifier is not None:
             call = getattr(analyzed, "call", None)
             if not isinstance(call, SemanticCallSpec):
                 raise TypeError(
                     "Grounded semantic calls must retain a SemanticCallSpec for "
-                    "legacy effect verification."
+                    "application effect verification."
                 )
-            legacy_success = legacy_verifier(call, request, context)
+            application_success = application_verifier(call, request, context)
             if (
-                not isinstance(legacy_success, torch.Tensor)
-                or legacy_success.dtype != torch.bool
-                or legacy_success.shape != request.env_mask.shape
-                or legacy_success.device != request.env_mask.device
+                not isinstance(application_success, torch.Tensor)
+                or application_success.dtype != torch.bool
+                or application_success.shape != request.env_mask.shape
+                or application_success.device != request.env_mask.device
             ):
                 raise ValueError(
                     "SemanticEffectVerifier must return a bool tensor matching "
                     "the request env_mask and device."
                 )
             active = request.env_mask.to(device=decision.success_mask.device)
-            legacy_success = legacy_success.to(device=decision.success_mask.device)
+            application_success = application_success.to(
+                device=decision.success_mask.device
+            )
             decision = EffectMonitorDecision(
-                success_mask=decision.success_mask & legacy_success,
-                failure_mask=decision.failure_mask | (active & ~legacy_success),
+                success_mask=decision.success_mask & application_success,
+                failure_mask=decision.failure_mask | (active & ~application_success),
             )
         monitor_ref = getattr(analyzed, "effect_monitor_ref", None)
         if monitor_ref is not None and not isinstance(monitor_ref, EffectMonitorRef):
@@ -2244,189 +2387,6 @@ class SkillRuntime:
         return self._current_call_index
 
 
-class SemanticSkillRuntime(SkillRuntime):
-    """Compatibility facade for the original simulation-facing runtime API.
-
-    New integrations should depend on :class:`SkillRuntime` directly and
-    provide typed evidence collectors. This facade retains the stable
-    ``from_simulation`` entry point used by application tutorials while routing
-    planning, execution, and physical-effect checks through the canonical
-    runtime.
-    """
-
-    @classmethod
-    def from_simulation(
-        cls,
-        *,
-        simulation: object,
-        robot: object,
-        motion_generator: object,
-        scene_registry: SceneRegistry,
-        robot_profile: object,
-        call_catalog: object | None = None,
-        effect_verifier: SemanticEffectVerifier | None = None,
-        registered_lowerers: Iterable[object] = (),
-        relation_grounders: Iterable[object] = (),
-        handover_pose_providers: Iterable[object] = (),
-        endpoint_adapters: Mapping[type[object], object] | None = None,
-        runner_cfg: ExecutionRunnerCfg | None = None,
-        control_dt: float | None = None,
-        scene_translation_threshold: float = 1.0e-4,
-        scene_rotation_threshold: float = 1.0e-3,
-    ) -> SemanticSkillRuntime:
-        """Build the standard simulation runtime with typed evidence sources.
-
-        The optional ``effect_verifier`` is retained as an additional
-        application-owned physical gate. Its result is combined with the typed
-        evidence monitor selected by the robot profile.
-        """
-        from embodichain.lab.sim.atomic_actions.sim_adapter import (
-            SimulationExecutionAdapter,
-        )
-
-        from .calls import SemanticCallCatalog, builtin_semantic_call_catalog
-        from .evidence import (
-            ControlPartSimulationEvidenceProvider,
-            EffectEvidenceCollector,
-            EffectEvidenceProviderRegistry,
-            SceneArticulationEvidenceProvider,
-        )
-        from .integration import SceneManifest, SemanticIntegrationManifest
-        from .profiles import RobotSkillProfile
-
-        if not isinstance(scene_registry, SceneRegistry):
-            raise TypeError("scene_registry must be a SceneRegistry.")
-        if type(robot_profile) is not RobotSkillProfile:
-            raise TypeError("robot_profile must be exactly RobotSkillProfile.")
-        if call_catalog is not None and type(call_catalog) is not SemanticCallCatalog:
-            raise TypeError("call_catalog must be exactly SemanticCallCatalog or None.")
-        if effect_verifier is not None and not callable(effect_verifier):
-            raise TypeError("effect_verifier must be callable or None.")
-        get_qpos = getattr(robot, "get_qpos", None)
-        if not callable(get_qpos):
-            raise TypeError("robot must provide get_qpos().")
-        qpos = get_qpos()
-        if not isinstance(qpos, torch.Tensor) or qpos.dim() != 2:
-            raise ValueError("robot.get_qpos() must return shape (B, robot_dof).")
-
-        scene_provider = scene_registry.make_planning_scene_provider(
-            motion_generator,
-            batch_size=int(qpos.shape[0]),
-            translation_threshold=scene_translation_threshold,
-            rotation_threshold=scene_rotation_threshold,
-        )
-        adapter = SimulationExecutionAdapter(
-            simulation,
-            robot,
-            control_dt=control_dt,
-            scene_provider=scene_provider,
-        )
-        engine = AtomicActionEngine(
-            motion_generator,
-            control_profiles=robot_profile.action_control_profiles(),
-        )
-        manifest = SemanticIntegrationManifest(
-            scene=SceneManifest.from_registry(scene_registry),
-            robot_profile=robot_profile,
-            call_catalog=(
-                builtin_semantic_call_catalog()
-                if call_catalog is None
-                else call_catalog
-            ),
-        )
-        integration = manifest.bind(
-            scene_registry,
-            engine,
-            endpoint_adapters=endpoint_adapters,
-        )
-        compiler = SemanticSkillCompiler(
-            integration,
-            registered_lowerers=registered_lowerers,
-            relation_grounders=relation_grounders,
-            handover_pose_providers=handover_pose_providers,
-        )
-        collector = EffectEvidenceCollector(
-            EffectEvidenceProviderRegistry(
-                (
-                    ControlPartSimulationEvidenceProvider(
-                        robot,
-                        scene_provider=scene_provider,
-                    ),
-                    SceneArticulationEvidenceProvider(scene_provider=scene_provider),
-                )
-            )
-        )
-        return cls(
-            compiler,
-            adapter,
-            adapter,
-            collector,
-            clock=adapter,
-            runner_cfg=runner_cfg,
-            legacy_effect_verifier=effect_verifier,
-        )
-
-    @property
-    def engine(self) -> AtomicActionEngine:
-        """Return the atomic-action engine owned by this runtime."""
-        return self._engine
-
-    @property
-    def observation_provider(self) -> ObservationProvider:
-        """Return the observation port used for just-in-time grounding."""
-        return self._observation_provider
-
-    def validate(
-        self,
-        calls: Iterable[SemanticCallSpec],
-        *,
-        workflow_id: str = "semantic_workflow",
-    ) -> object:
-        """Analyze a workflow without executing it."""
-        return self.compiler.analyze(calls, workflow_id=workflow_id)
-
-    def run(
-        self,
-        calls: Iterable[SemanticCallSpec],
-        *,
-        task_id: str = "semantic_task",
-        segment_id: str = "main",
-        initial_task_state: TaskState | None = None,
-        eligible_mask: torch.Tensor | None = None,
-        effect_verifier: SemanticEffectVerifier | None = None,
-        on_step: Callable[[RunnerStep], None] | None = None,
-        max_steps_per_call: int = 100_000,
-    ) -> SkillResult:
-        """Run a fixed semantic workflow through the canonical runtime."""
-        if type(task_id) is not str or not task_id:
-            raise ValueError("task_id must be a non-empty string.")
-        if type(segment_id) is not str or not segment_id:
-            raise ValueError("segment_id must be a non-empty string.")
-        if effect_verifier is not None and not callable(effect_verifier):
-            raise TypeError("effect_verifier must be callable or None.")
-        if on_step is not None and not callable(on_step):
-            raise TypeError("on_step must be callable or None.")
-        if initial_task_state is not None:
-            self.adopt_verified_task_state(initial_task_state)
-        prior_verifier = self._legacy_effect_verifier
-        prior_observer = self._step_observer
-        self._legacy_effect_verifier = (
-            prior_verifier if effect_verifier is None else effect_verifier
-        )
-        self._step_observer = on_step
-        try:
-            workflow_id = task_id if segment_id == "main" else f"{task_id}:{segment_id}"
-            return super().run(
-                calls,
-                workflow_id=workflow_id,
-                eligible_mask=eligible_mask,
-                max_steps=max_steps_per_call,
-            )
-        finally:
-            self._legacy_effect_verifier = prior_verifier
-            self._step_observer = prior_observer
-
-
 class SkillScene:
     """Typed convenience lookup surface backed by one immutable registry."""
 
@@ -2588,7 +2548,6 @@ __all__ = [
     "EffectEvidenceCollectorPort",
     "ResolvedCorePolicyTrace",
     "SemanticEffectVerifier",
-    "SemanticSkillRuntime",
     "SkillCallTrace",
     "SkillEndpointBindingTrace",
     "SkillEffectTrace",

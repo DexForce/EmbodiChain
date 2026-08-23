@@ -19,7 +19,7 @@
 The workflow contains an object-centric ``Pick`` followed by a registered
 dual-arm transfer call. The robot profile chooses the left and right resources;
 an explicit lowerer supplies the atomic HandOver goal and embodiment-specific
-receive behavior at grounding time. :class:`SemanticSkillRuntime` executes each
+receive behavior at grounding time. :class:`SkillRuntime` executes each
 call from fresh observations and commits transfer state only after physical
 verification.
 """
@@ -63,7 +63,7 @@ from embodichain.lab.sim.skills import (
     SemanticEffectVerifier,
     SemanticLowering,
     SemanticPose,
-    SemanticSkillRuntime,
+    SkillRuntime,
     SkillPolicyPreset,
     builtin_semantic_call_catalog,
 )
@@ -409,12 +409,12 @@ def create_handover_application(
     right_grasp: torch.Tensor,
     n_sample: int,
     force_reannotate: bool,
-) -> SemanticSkillRuntime:
+) -> SkillRuntime:
     """Assemble the application-facing runtime for the HandOver tutorial.
 
     The returned runtime owns the registered call extension, robot binding,
     scene catalog, and default physical-effect verifier. Task code only needs
-    to submit semantic calls through :meth:`SemanticSkillRuntime.run`.
+    to submit semantic calls through :meth:`SkillRuntime.run`.
 
     Args:
         simulation: Simulation containing the robot and workpiece.
@@ -456,7 +456,7 @@ def create_handover_application(
             target_descriptor=AtomicHandOver.descriptor(),
         )
     )
-    return SemanticSkillRuntime.from_simulation(
+    return SkillRuntime.from_simulation(
         simulation=simulation,
         robot=robot,
         motion_generator=create_toppra_motion_generator(robot),
@@ -545,7 +545,7 @@ def main() -> None:
     try:
         result = app.run(
             calls,
-            task_id="tutorial.semantic_pick_handover",
+            workflow_id="tutorial.semantic_pick_handover",
             on_step=create_runtime_step_observer(
                 obj,
                 robot,

@@ -84,9 +84,9 @@ def test_create_demo_segments_uses_explicit_compiler_and_bridge_hooks() -> None:
     assert env.bridge_input is compiled_program
 
 
-def test_configured_program_requires_explicit_scene_provider_hook() -> None:
-    """The base environment never guesses a live scene provider."""
+def test_configured_program_requires_explicit_adapter() -> None:
+    """The base environment never guesses a live scene or runtime provider."""
     env = _uninitialized_env(EmbodiedEnv, object())
 
-    with pytest.raises(NotImplementedError, match="explicit scene resolver"):
+    with pytest.raises(NotImplementedError, match="expert_program_adapter"):
         env.create_demo_segments()

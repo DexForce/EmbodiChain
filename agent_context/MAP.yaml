@@ -647,7 +647,6 @@ topics:
       - BoundSemanticIntegration
       - SemanticSkillCompiler
       - SkillRuntime
-      - SemanticSkillRuntime
       - AtomicSkills
       - SkillResult
       - SkillFailure

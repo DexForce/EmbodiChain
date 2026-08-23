@@ -18,7 +18,7 @@
 
 Unlike the direct atomic-action tutorial, this example never names ``arm`` or
 ``hand`` in the workflow. The scene registry owns object identity, the robot
-profile owns embodiment-specific resources, and :class:`SemanticSkillRuntime`
+profile owns embodiment-specific resources, and :class:`SkillRuntime`
 lowers each call from fresh observations, executes it, and commits only
 verified effects.
 """
@@ -52,7 +52,7 @@ from embodichain.lab.sim.skills import (
     SceneObjectRef,
     SemanticEffectVerifier,
     SemanticPose,
-    SemanticSkillRuntime,
+    SkillRuntime,
     SkillPolicyPreset,
 )
 from embodichain.utils import logger
@@ -277,12 +277,12 @@ def create_place_application(
     hand_grasp: torch.Tensor,
     n_sample: int,
     force_reannotate: bool,
-) -> SemanticSkillRuntime:
+) -> SkillRuntime:
     """Assemble the application-facing runtime for the Place tutorial.
 
     The returned runtime owns the scene/profile/compiler binding and the
     default physical-effect verifier. Task code only needs to submit semantic
-    calls through :meth:`SemanticSkillRuntime.run`.
+    calls through :meth:`SkillRuntime.run`.
 
     Args:
         simulation: Simulation containing the robot and workpiece.
@@ -309,7 +309,7 @@ def create_place_application(
         semantic_type="cube",
         affordance=object_semantics.affordance,
     )
-    return SemanticSkillRuntime.from_simulation(
+    return SkillRuntime.from_simulation(
         simulation=simulation,
         robot=robot,
         motion_generator=create_curobo_motion_generator(robot),
@@ -379,7 +379,7 @@ def main() -> None:
     try:
         result = app.run(
             calls,
-            task_id="tutorial.semantic_pick_place",
+            workflow_id="tutorial.semantic_pick_place",
             on_step=create_runtime_step_observer(
                 obj,
                 robot,

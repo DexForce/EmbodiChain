@@ -581,12 +581,6 @@ class SimulationSegmentPolicyPort:
                     f"object {binding.object_id!r}."
                 )
             settle_targets[binding.entity_id] = parent
-        for binding in self._scene_binding.articulation_operations:
-            settle_targets[binding.entity_id] = self._require_parent_target(
-                articulation_targets,
-                child_id=binding.entity_id,
-                parent_id=binding.articulation_id,
-            )
         return MappingProxyType(settle_targets), MappingProxyType(rigid_objects)
 
     @staticmethod
@@ -712,4 +706,4 @@ class SimulationSegmentPolicyPort:
         return pose.clone()
 
 
-__all__ = ["SimulationSegmentPolicyPort"]
+__all__: list[str] = []

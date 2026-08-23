@@ -69,7 +69,6 @@ from embodichain.lab.sim.skills.runtime import SkillRuntime
 from embodichain.lab.sim.skills.scene import SceneRegistry
 
 from .bridge import (
-    AcceptedRuntimeCommandObserver,
     AtomicDemoBridge,
     BufferedGymCommandSink,
     CurrentQposProvider,
@@ -84,7 +83,6 @@ from .cfg import ExpertProgramCfg, ExpertProgramIntegrationCfg
 from .compiler import (
     CompiledProgram,
     ExpertProgramCompiler,
-    MaterializedCompiledProgram,
 )
 
 
@@ -196,25 +194,6 @@ class ExpertProgramEnvironmentFactory(Protocol):
         """
 
 
-@runtime_checkable
-class AcceptedRuntimeCommandObserverFactory(Protocol):
-    """Optional factory capability for runtime-local accepted-command state.
-
-    The observer is created from the exact observation provider used by the
-    runtime so command-derived evidence cannot leak across bridge instances or
-    bind to a different simulation batch.
-    """
-
-    def create_accepted_runtime_command_observer(
-        self,
-        *,
-        scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
-        observation_provider: PlanningObservationPort,
-    ) -> AcceptedRuntimeCommandObserver:
-        """Return the observer shared by the command sink and evidence ports."""
-
-
 @dataclass(frozen=True, slots=True)
 class ExpertProgramRuntimeAssembly:
     """Auditable result of one fresh environment runtime assembly.
@@ -231,7 +210,6 @@ class ExpertProgramRuntimeAssembly:
         clock: Shared environment-step clock.
         command_encoder: Runtime-frame to Gym-action encoder.
         command_sink: Buffered Gym command sink.
-        accepted_command_observer: Optional transactional command-state owner.
         runtime: Nonblocking semantic skill runtime.
     """
 
@@ -246,7 +224,6 @@ class ExpertProgramRuntimeAssembly:
     clock: EnvironmentStepClock
     command_encoder: RuntimeCommandFrameEncoder
     command_sink: BufferedGymCommandSink
-    accepted_command_observer: AcceptedRuntimeCommandObserver | None
     runtime: SkillRuntime
 
 
@@ -532,28 +509,7 @@ class ExpertProgramEnvironmentAdapter:
             observation_provider,
             transports=self._runtime_transports,
         )
-        accepted_command_observer: AcceptedRuntimeCommandObserver | None = None
-        if isinstance(self._factory, AcceptedRuntimeCommandObserverFactory):
-            accepted_command_observer = (
-                self._factory.create_accepted_runtime_command_observer(
-                    scene_registry=semantic.scene_registry,
-                    engine=semantic.engine,
-                    observation_provider=observation_provider,
-                )
-            )
-            if not isinstance(
-                accepted_command_observer,
-                AcceptedRuntimeCommandObserver,
-            ):
-                raise TypeError(
-                    "create_accepted_runtime_command_observer() must return an "
-                    "AcceptedRuntimeCommandObserver."
-                )
-        command_sink = BufferedGymCommandSink(
-            command_encoder,
-            clock,
-            accepted_command_observer=accepted_command_observer,
-        )
+        command_sink = BufferedGymCommandSink(command_encoder, clock)
         runtime = SkillRuntime.from_components(
             semantic.compiler,
             observation_provider,
@@ -574,7 +530,6 @@ class ExpertProgramEnvironmentAdapter:
             clock=clock,
             command_encoder=command_encoder,
             command_sink=command_sink,
-            accepted_command_observer=accepted_command_observer,
             runtime=runtime,
         )
 
@@ -589,14 +544,13 @@ class ExpertProgramEnvironmentAdapter:
         """
         if type(program) is not CompiledProgram:
             raise TypeError("program must be exactly CompiledProgram.")
-        materialized = program.materialize()
-        self._validate_selection(materialized.integration)
-        self._preflight_program_surfaces(materialized)
-        semantic = self._assemble_semantic_components(materialized.integration)
-        self._preflight_program(materialized, semantic.compiler)
+        self._validate_selection(program.integration)
+        self._preflight_program_surfaces(program)
+        semantic = self._assemble_semantic_components(program.integration)
+        self._preflight_program(program, semantic.compiler)
         assembly = self._assemble_execution_runtime(semantic)
         return AtomicDemoBridge(
-            materialized,
+            program,
             assembly.runtime,
             assembly.command_sink,
             assembly.clock,
@@ -607,11 +561,11 @@ class ExpertProgramEnvironmentAdapter:
 
     def _preflight_program_surfaces(
         self,
-        program: MaterializedCompiledProgram,
+        program: CompiledProgram,
     ) -> None:
         """Validate every segment hook without live observation or action."""
-        if type(program) is not MaterializedCompiledProgram:
-            raise TypeError("program must be exactly MaterializedCompiledProgram.")
+        if type(program) is not CompiledProgram:
+            raise TypeError("program must be exactly CompiledProgram.")
         for segment in program.iter_segments():
             if segment.post_policies and self._post_policy_port is None:
                 raise DemoBridgeError(
@@ -635,7 +589,7 @@ class ExpertProgramEnvironmentAdapter:
 
     def _preflight_program(
         self,
-        program: MaterializedCompiledProgram,
+        program: CompiledProgram,
         compiler: SemanticSkillCompiler,
     ) -> None:
         """Analyze every program workflow before any physical action can run.
@@ -646,8 +600,8 @@ class ExpertProgramEnvironmentAdapter:
         runtime.  This boundary materializes no observations and starts no
         execution session.
         """
-        if type(program) is not MaterializedCompiledProgram:
-            raise TypeError("program must be exactly MaterializedCompiledProgram.")
+        if type(program) is not CompiledProgram:
+            raise TypeError("program must be exactly CompiledProgram.")
         if not isinstance(compiler, SemanticSkillCompiler):
             raise TypeError("compiler must be a SemanticSkillCompiler.")
         analyses = program.preflight_analyses()
@@ -763,69 +717,4 @@ class ExpertProgramEnvironmentAdapter:
         )
 
 
-class ExpertProgramEnvironmentMixin:
-    """Delegate environment hooks to one reusable explicit adapter.
-
-    Environment classes place this mixin before their normal environment base
-    and implement only :attr:`expert_program_adapter`.  Motion generation and
-    runtime stepping remain in shared components.
-    """
-
-    @property
-    def expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
-        """Return the environment-owned reusable adapter.
-
-        Returns:
-            Exact shared Expert Program environment adapter.
-        """
-        raise NotImplementedError(
-            "Expert Program environments must expose expert_program_adapter."
-        )
-
-    def compile_expert_program(
-        self,
-        program: ExpertProgramCfg,
-    ) -> CompiledProgram:
-        """Delegate provider-free compilation to the explicit adapter.
-
-        Args:
-            program: Strict declarative program configuration.
-
-        Returns:
-            Provider-free compiled program.
-        """
-        return self._checked_expert_program_adapter().compile(program)
-
-    def create_expert_program_bridge(
-        self,
-        program: CompiledProgram,
-    ) -> AtomicDemoBridge:
-        """Delegate live runtime and Gym bridge assembly to the adapter.
-
-        Args:
-            program: Provider-free compiled program.
-
-        Returns:
-            Fresh lazy Gym bridge.
-        """
-        return self._checked_expert_program_adapter().create_bridge(program)
-
-    def _checked_expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
-        """Return the exact adapter or fail before any provider is touched."""
-        adapter = self.expert_program_adapter
-        if type(adapter) is not ExpertProgramEnvironmentAdapter:
-            raise TypeError(
-                "expert_program_adapter must be exactly "
-                "ExpertProgramEnvironmentAdapter."
-            )
-        return adapter
-
-
-__all__ = [
-    "AcceptedRuntimeCommandObserverFactory",
-    "ExpertProgramEnvironmentAdapter",
-    "ExpertProgramEnvironmentFactory",
-    "ExpertProgramEnvironmentMixin",
-    "ExpertProgramRuntimeAssembly",
-    "PlanningObservationPort",
-]
+__all__: list[str] = []

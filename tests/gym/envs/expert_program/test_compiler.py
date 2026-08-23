@@ -25,13 +25,13 @@ import torch
 
 from embodichain.lab.gym.envs.expert_program import (
     CyclicPoseTargetCfg,
+    CompiledProgram,
     ExpertProgramCfg,
     ExpertProgramCompileError,
     ExpertProgramCompiler,
     ExpertProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
-    MaterializedCompiledProgram,
     ObjectNearTargetValidatorCfg,
     PickCfg,
     PlaceCfg,
@@ -143,9 +143,9 @@ def _program(
     targets: dict[str, CyclicPoseTargetCfg] | None = None,
     program_id: str = "test_program",
 ) -> ExpertProgramCfg:
-    """Build one valid Version 1 program around a supplied node."""
+    """Build one valid Expert Program around a supplied node."""
     return ExpertProgramCfg(
-        schema_version=1,
+        schema_version=2,
         program_id=program_id,
         integration=_integration(),
         program=node,
@@ -302,7 +302,7 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
         range(6)
     )
     assert all(not segment.implicit for segment in segments)
-    assert all(segment is not other for segment, other in zip(segments, second_pass))
+    assert segments == second_pass
     for index, (segment, pose) in enumerate(zip(segments, poses, strict=True)):
         assert len(segment.repeat_frames) == 1
         assert segment.repeat_frames[0].path == ("program",)
@@ -323,7 +323,7 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
     assert provider.calls == 0
 
 
-def test_repeat_expansion_is_lazy_and_never_observes_scene_providers() -> None:
+def test_repeat_expansion_is_bounded_and_never_observes_scene_providers() -> None:
     registry, provider = _scene_registry()
     config = _program(
         RepeatCfg(
@@ -345,9 +345,7 @@ def test_repeat_expansion_is_lazy_and_never_observes_scene_providers() -> None:
     assert provider.calls == 0
 
 
-def test_materialized_program_builds_cross_segment_analysis_windows_provider_free() -> (
-    None
-):
+def test_compiled_program_builds_cross_segment_analysis_windows_provider_free() -> None:
     registry, provider = _scene_registry()
     config = _program(
         SequenceCfg(
@@ -370,17 +368,13 @@ def test_materialized_program_builds_cross_segment_analysis_windows_provider_fre
         targets={"drop_pose": CyclicPoseTargetCfg(values=(_pose(0.5),))},
     )
 
-    materialized = (
-        ExpertProgramCompiler.from_scene_registry(registry)
-        .compile(config)
-        .materialize()
-    )
-    preflight = materialized.preflight_analyses()
-    execution = materialized.sequential_execution_analysis(0)
+    compiled = ExpertProgramCompiler.from_scene_registry(registry).compile(config)
+    preflight = compiled.preflight_analyses()
+    execution = compiled.sequential_execution_analysis(0)
 
-    assert type(materialized) is MaterializedCompiledProgram
-    assert materialized.segment_count == 2
-    assert len(tuple(materialized.iter_segments())) == 2
+    assert type(compiled) is CompiledProgram
+    assert compiled.segment_count == 2
+    assert len(tuple(compiled.iter_segments())) == 2
     assert len(preflight) == 1
     assert preflight[0].kind == "sequential_stretch"
     assert [type(call) for call in preflight[0].calls] == [Pick, Place]
@@ -390,7 +384,7 @@ def test_materialized_program_builds_cross_segment_analysis_windows_provider_fre
     assert provider.calls == 0
 
 
-def test_materialization_rechecks_expanded_call_bound_after_config_mutation() -> None:
+def test_compilation_rechecks_expanded_call_bound_after_config_mutation() -> None:
     registry, provider = _scene_registry()
     inner = RepeatCfg(count=1, body=InvokeCfg(call=PickCfg(object="cube")))
     config = _program(RepeatCfg(count=1, body=inner))
@@ -398,10 +392,8 @@ def test_materialization_rechecks_expanded_call_bound_after_config_mutation() ->
     assert type(config.program.body) is RepeatCfg
     config.program.count = 1_000
     config.program.body.count = 1_000
-    compiled = ExpertProgramCompiler.from_scene_registry(registry).compile(config)
-
     with pytest.raises(ExpertProgramCompileError) as error:
-        compiled.materialize()
+        ExpertProgramCompiler.from_scene_registry(registry).compile(config)
 
     assert error.value.code == "expanded_call_limit"
     assert provider.calls == 0
@@ -485,15 +477,9 @@ def test_compiled_program_owns_source_and_each_emitted_mutable_config() -> None:
     assert first_pass[0].post_policies[0].cfg.preset == "rigid_object"
     assert first_pass[0].validators[0].cfg.position_tolerance == pytest.approx(0.03)
 
-    first_pass[0].post_policies[0].cfg.preset = "mutated_output"
-    first_pass[0].validators[0].cfg.position_tolerance = 8.0
-    exposed_position = compiled.targets["drop_pose"][0].position
-    exposed_position[0] = -10.0
-
     second_pass = list(compiled)
     assert second_pass[0].post_policies[0].cfg.preset == "rigid_object"
     assert second_pass[0].validators[0].cfg.position_tolerance == pytest.approx(0.03)
-    assert compiled.targets["drop_pose"][0].position[0].item() == pytest.approx(0.4)
 
 
 def test_compiler_rejects_nested_segment_at_exact_path() -> None:

@@ -63,6 +63,8 @@ containing one or more semantic subtasks. Segment action iterables may be lazy,
 and the common executor records per-environment lengths, terminal status, and
 segment spans.
 
+.. currentmodule:: embodichain.lab.gym.envs.demo
+
 .. autoclass:: DemoSegment
     :members:
 
@@ -79,8 +81,30 @@ segment spans.
 
 .. autofunction:: resolve_demo_segments
 
+Dynamic Settling
+----------------
+
+The shared settling monitor is used by both reset events and Expert Program
+post-policies, so they apply the same row-local stability semantics.
+
+.. currentmodule:: embodichain.lab.gym.envs.settling
+
+.. autoclass:: DynamicSettleMonitorCfg
+    :members:
+
+.. autoclass:: DynamicSettleSample
+    :members:
+
+.. autoclass:: DynamicSettleState
+    :members:
+
+.. autoclass:: DynamicSettleMonitor
+    :members:
+
 Wrappers
 --------
+
+.. currentmodule:: embodichain.lab.gym.envs
 
 .. autoclass:: NoFailWrapper
     :members:

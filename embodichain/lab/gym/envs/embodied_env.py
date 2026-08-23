@@ -85,6 +85,7 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs.expert_program import (
         CompiledProgram,
         ExpertProgramCfg,
+        ExpertProgramEnvironmentAdapter,
     )
     from embodichain.lab.gym.envs.expert_program.bridge import AtomicDemoBridge
 
@@ -1898,16 +1899,37 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
+    @property
+    def expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
+        """Return the explicit adapter used by declarative expert programs.
+
+        Environments that configure :attr:`EmbodiedEnvCfg.expert_program`
+        override this property and return their reusable adapter.
+        """
+        raise NotImplementedError(
+            "An environment with cfg.expert_program must expose "
+            "expert_program_adapter."
+        )
+
+    def _checked_expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
+        """Return the exact configured adapter before touching live providers."""
+        from embodichain.lab.gym.envs.expert_program import (
+            ExpertProgramEnvironmentAdapter,
+        )
+
+        adapter = self.expert_program_adapter
+        if type(adapter) is not ExpertProgramEnvironmentAdapter:
+            raise TypeError(
+                "expert_program_adapter must be exactly "
+                "ExpertProgramEnvironmentAdapter."
+            )
+        return adapter
+
     def compile_expert_program(
         self,
         program: ExpertProgramCfg,
     ) -> CompiledProgram:
-        """Compile a configured Expert Program through explicit scene providers.
-
-        Declarative environments override this hook to supply their authoritative
-        scene registry/resolver to :class:`ExpertProgramCompiler`. Keeping the
-        provider boundary explicit prevents the base environment from inferring
-        identities or scanning mutable simulator internals.
+        """Compile a configured Expert Program through the explicit adapter.
 
         Args:
             program: Strict Expert Program configuration attached to ``cfg``.
@@ -1915,24 +1937,14 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Provider-free compiled program ready for runtime assembly.
 
-        Raises:
-            NotImplementedError: If an environment enables ``expert_program``
-                without supplying the compiler/provider integration.
         """
-        raise NotImplementedError(
-            "An environment with cfg.expert_program must implement "
-            "compile_expert_program() using an explicit scene resolver."
-        )
+        return self._checked_expert_program_adapter().compile(program)
 
     def create_expert_program_bridge(
         self,
         program: CompiledProgram,
     ) -> AtomicDemoBridge:
-        """Create the Gym demo bridge through explicit runtime-port factories.
-
-        Declarative environments override this hook to assemble ``SkillRuntime``
-        and Gym-aware command/clock/post-policy/validator ports. The returned
-        bridge must emit commands through normal ``env.step()`` processing.
+        """Create the Gym demo bridge through the explicit adapter.
 
         Args:
             program: Compiled provider-free Expert Program.
@@ -1940,13 +1952,8 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Atomic demo bridge whose segments are consumed lazily.
 
-        Raises:
-            NotImplementedError: If no explicit runtime factory is available.
         """
-        raise NotImplementedError(
-            "An environment with cfg.expert_program must implement "
-            "create_expert_program_bridge() using explicit runtime ports."
-        )
+        return self._checked_expert_program_adapter().create_bridge(program)
 
     def create_demo_segments(self, *args, **kwargs) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
