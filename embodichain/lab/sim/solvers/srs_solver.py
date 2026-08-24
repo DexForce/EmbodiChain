@@ -136,8 +136,12 @@ class _BaseSRSSolverImpl:
             raise ValueError("num_samples must be at least 1")
         if self.cfg.search_mode not in ("seeded", "full"):
             raise ValueError("search_mode must be 'seeded' or 'full'")
-        if not np.isfinite(self.cfg.redundancy_step) or self.cfg.redundancy_step <= 0:
-            raise ValueError("redundancy_step must be finite and positive")
+        if (
+            not np.isfinite(self.cfg.redundancy_step)
+            or self.cfg.redundancy_step <= 0
+            or self.cfg.redundancy_step > np.pi
+        ):
+            raise ValueError("redundancy_step must be finite and in the range (0, pi]")
 
     def _sample_elbow_angles(
         self,
@@ -207,16 +211,13 @@ class _BaseSRSSolverImpl:
         """Remove periodic-equivalent solutions while preserving their order."""
         if solutions.shape[0] < 2:
             return solutions
-        unique_indices: list[int] = []
-        for index in range(solutions.shape[0]):
-            if not unique_indices:
-                unique_indices.append(index)
-                continue
-            diff = solutions[index] - solutions[unique_indices]
-            wrapped_diff = torch.atan2(torch.sin(diff), torch.cos(diff))
-            if not torch.any(torch.amax(torch.abs(wrapped_diff), dim=1) <= tolerance):
-                unique_indices.append(index)
-        return solutions[unique_indices]
+        pairwise_diff = solutions[:, None, :] - solutions[None, :, :]
+        wrapped_diff = (
+            torch.remainder(pairwise_diff + torch.pi, 2.0 * torch.pi) - torch.pi
+        )
+        equivalent = torch.amax(torch.abs(wrapped_diff), dim=-1) <= tolerance
+        has_equivalent_predecessor = torch.tril(equivalent, diagonal=-1).any(dim=1)
+        return solutions[~has_equivalent_predecessor]
 
 
 class _CPUSRSSolverImpl(_BaseSRSSolverImpl):

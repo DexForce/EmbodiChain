@@ -102,9 +102,9 @@ class BaseSolverTest:
 
         ik_xpos = self.solver[arm_name].get_fk(qpos=ik_qpos[:, 0, :])
 
-        assert torch.allclose(fk_xpos, ik_xpos, atol=1e-3, rtol=1e-3), (
-            f"FK and IK results do not match for {arm_name}"
-        )
+        assert torch.allclose(
+            fk_xpos, ik_xpos, atol=1e-3, rtol=1e-3
+        ), f"FK and IK results do not match for {arm_name}"
 
     def test_update_with_robot_limit_intersects_existing_solver_limits(self):
         """Test robot limit sync only tightens solver limits and never widens them."""
@@ -210,6 +210,15 @@ class BaseSolverTest:
         ).unsqueeze(0)
         assert torch.all(wrapped_delta.masked_fill(diagonal, torch.inf) > 1e-6)
 
+    def test_redundancy_step_larger_than_pi_is_rejected(self):
+        """Test invalid seeded-search steps fail instead of silently using one sample."""
+        solver = self.solver[next(iter(self.solver))]
+        cfg = solver.cfg.copy()
+        cfg.redundancy_step = np.pi + 1e-3
+
+        with pytest.raises(ValueError, match=r"range \(0, pi\]"):
+            cfg.init_solver(num_envs=1, device=solver.device)
+
     def test_periodic_joint_values_wrap_inside_limits_near_seed(self):
         """Test equivalent revolute values are retained instead of rejected."""
         solver = self.solver[next(iter(self.solver))]
@@ -223,6 +232,25 @@ class BaseSolverTest:
         assert np.isclose(wrapped[0], -3.2 + 2.0 * np.pi)
         assert np.all(wrapped >= limits[:, 0])
         assert np.all(wrapped <= limits[:, 1])
+
+    def test_all_solution_deduplication_is_periodic_and_order_preserving(self):
+        """Test vectorized deduplication retains the first periodic representative."""
+        solver = self.solver[next(iter(self.solver))]
+        first = torch.tensor(
+            [0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7], device=solver.device
+        )
+        second = torch.tensor(
+            [-0.8, 0.9, -1.0, 1.1, -1.2, 1.3, -1.4], device=solver.device
+        )
+        solutions = torch.stack(
+            (first, first + 2.0 * torch.pi, second, second - 2.0 * torch.pi)
+        )
+
+        unique = solver.impl._deduplicate_solutions(solutions)
+
+        assert unique.shape == (2, 7)
+        assert torch.allclose(unique[0], first)
+        assert torch.allclose(unique[1], second)
 
     def test_runtime_tcp_and_weight_updates_reach_backend(self):
         """Test mutable solver settings synchronize analytical backend caches."""
@@ -371,9 +399,9 @@ class BaseRobotSolverTest:
         else:
             ik_xpos = self.robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
 
-        assert torch.allclose(fk_xpos, ik_xpos, atol=1e-4, rtol=1e-4), (
-            f"FK and IK results do not match for {arm_name}"
-        )
+        assert torch.allclose(
+            fk_xpos, ik_xpos, atol=1e-4, rtol=1e-4
+        ), f"FK and IK results do not match for {arm_name}"
 
         # test for failed xpos
         invalid_pose = torch.tensor(
