@@ -237,8 +237,8 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                     if metadata_getter is not None
                     else None
                 )
-                self._save_queue.put(
-                    (
+                payloads = list(
+                    self._episode_payloads(
                         env_id,
                         obs_clone,
                         action_clone,
@@ -246,6 +246,17 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                         episode_metadata,
                     )
                 )
+                if (
+                    episode_metadata is not None
+                    and episode_metadata.get("output_mode") == "segment_fragments"
+                    and not payloads
+                ):
+                    raise RuntimeError(
+                        f"Committed fragment collection for env {env_id} had no "
+                        "eligible segment spans."
+                    )
+                for payload in payloads:
+                    self._save_queue.put(payload)
 
     def finalize(self) -> Optional[str]:
         """Drain committed writes, finalize storage, and surface all failures.

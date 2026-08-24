@@ -59,6 +59,7 @@ from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs.demo import (
     DEMO_SCHEMA_VERSION,
+    DemoExecutionCfg,
     DemoEpisodeResult,
     DemoSegment,
     DemoSegmentResult,
@@ -402,6 +403,10 @@ class EmbodiedEnv(BaseEnv):
         # common demo executor updates this context while the regular rollout
         # writer turns it into per-frame annotations.
         self._demo_episode_index = 0
+        self._demo_execution_cfg = DemoExecutionCfg()
+        self._demo_attempt_id = 0
+        self._demo_continuity_id = 0
+        self._demo_program_run_id = "0:0"
         self._demo_active_segment_id = 0
         self._demo_active_segment_ids = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
@@ -858,8 +863,18 @@ class EmbodiedEnv(BaseEnv):
                     env_ids_to_save = env_ids_to_process
                 else:
                     successful_envs = self.episode_success_status | self._task_success
+                    fragment_envs = torch.tensor(
+                        [
+                            EmbodiedEnv._demo_fragment_row_is_persistable(
+                                self, int(env_id)
+                            )
+                            for env_id in env_ids_to_process.cpu().tolist()
+                        ],
+                        dtype=torch.bool,
+                        device=status_device,
+                    )
                     env_ids_to_save = env_ids_to_process[
-                        successful_envs[env_ids_to_process]
+                        successful_envs[env_ids_to_process] | fragment_envs
                     ]
 
                 if env_ids_to_save.numel() > 0:
@@ -968,20 +983,58 @@ class EmbodiedEnv(BaseEnv):
             "valid",
             "segment_start",
             "segment_end",
+            "segment_accepted",
             "terminated",
             "truncated",
         ):
             if key in self.rollout_buffer.keys():
                 self.rollout_buffer[key][buffer_ids] = False
-        for key in ("episode_step", "segment_id", "segment_step"):
+        for key in (
+            "episode_step",
+            "segment_id",
+            "segment_step",
+            "segment_attempt_id",
+            "continuity_id",
+        ):
             if key in self.rollout_buffer.keys():
                 self.rollout_buffer[key][buffer_ids] = -1
 
+    def _demo_fragment_row_is_persistable(self, env_id: int) -> bool:
+        """Return whether one fragment-mode row owns an eligible frame span."""
+        episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if episode_metadata is None or env_id >= len(episode_metadata):
+            return False
+        metadata = episode_metadata[env_id]
+        if metadata.get("output_mode") != "segment_fragments":
+            return False
+        include_failed = bool(metadata.get("save_failed_fragments", False))
+        for segment in metadata.get("segments", []):
+            if int(segment.get("end_step", 0)) <= int(segment.get("start_step", 0)):
+                continue
+            if bool(segment.get("success", False)) or include_failed:
+                return True
+        return False
+
     def _new_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Create an empty metadata record for one environment row."""
+        execution_cfg = getattr(self, "_demo_execution_cfg", None)
+        if execution_cfg is None:
+            execution_cfg = DemoExecutionCfg()
+        attempt_id = int(getattr(self, "_demo_attempt_id", 0))
         return {
             "schema_version": DEMO_SCHEMA_VERSION,
             "episode_index": int(getattr(self, "_demo_episode_index", 0)),
+            "output_mode": execution_cfg.mode,
+            "save_failed_fragments": execution_cfg.save_failed_fragments,
+            "attempt_id": attempt_id,
+            "continuity_id": int(getattr(self, "_demo_continuity_id", 0)),
+            "program_run_id": str(
+                getattr(
+                    self,
+                    "_demo_program_run_id",
+                    f"{int(getattr(self, '_demo_episode_index', 0))}:{attempt_id}",
+                )
+            ),
             "env_id": env_id,
             "length": 0,
             "completed": False,
@@ -992,9 +1045,20 @@ class EmbodiedEnv(BaseEnv):
             "segments": [],
         }
 
-    def _begin_demo_episode_recording(self, episode_index: int = 0) -> None:
+    def _begin_demo_episode_recording(
+        self,
+        episode_index: int = 0,
+        execution_cfg: DemoExecutionCfg | None = None,
+        attempt_id: int = 0,
+    ) -> None:
         """Start annotation metadata for a new demonstration episode."""
+        if execution_cfg is None:
+            execution_cfg = DemoExecutionCfg()
         self._demo_episode_index = episode_index
+        self._demo_execution_cfg = execution_cfg
+        self._demo_attempt_id = attempt_id
+        self._demo_continuity_id = 0
+        self._demo_program_run_id = f"{episode_index}:{attempt_id}"
         self._demo_active_segment_id = 0
         self._demo_active_segment_ids.zero_()
         self._demo_active_mask.fill_(True)
@@ -1057,6 +1121,17 @@ class EmbodiedEnv(BaseEnv):
                 and rollout_end > rollout_start
             ):
                 self.rollout_buffer["segment_end"][env_id, rollout_end - 1] = True
+            if (
+                self.rollout_buffer is not None
+                and "segment_accepted" in self.rollout_buffer.keys()
+                and rollout_end > rollout_start
+            ):
+                accepted = (
+                    result.successes[env_id] if result.successes else result.success
+                )
+                self.rollout_buffer["segment_accepted"][
+                    env_id, rollout_start:rollout_end
+                ] = accepted
 
             metadata = result.to_metadata(env_id if result.start_steps else None)
             metadata["start_step"] = start
@@ -1179,6 +1254,13 @@ class EmbodiedEnv(BaseEnv):
                     "start_step": 0,
                     "end_step": length,
                     "success": success,
+                    "attempt_id": int(metadata.get("attempt_id", 0)),
+                    "continuity_id": int(metadata.get("continuity_id", 0)),
+                    "outcome_kind": (
+                        "succeeded"
+                        if success
+                        else ("truncated" if truncated else "validation_failed")
+                    ),
                     "target_uid": None,
                     "instruction": instruction,
                     "failure_reason": None if success else terminal_reason,
@@ -1284,6 +1366,20 @@ class EmbodiedEnv(BaseEnv):
         if "segment_start" in buffer_keys:
             self.rollout_buffer["segment_start"][buffer_env_ids, buffer_step_ids] = (
                 segment_steps.to(buffer_device) == 0
+            )
+        if "segment_accepted" in buffer_keys:
+            # Acceptance is unknown until the segment validator commits. The
+            # end-segment hook fills this complete span retroactively.
+            self.rollout_buffer["segment_accepted"][
+                buffer_env_ids, buffer_step_ids
+            ] = False
+        if "segment_attempt_id" in buffer_keys:
+            self.rollout_buffer["segment_attempt_id"][
+                buffer_env_ids, buffer_step_ids
+            ] = int(getattr(self, "_demo_attempt_id", 0))
+        if "continuity_id" in buffer_keys:
+            self.rollout_buffer["continuity_id"][buffer_env_ids, buffer_step_ids] = int(
+                getattr(self, "_demo_continuity_id", 0)
             )
 
         if terminateds is None:

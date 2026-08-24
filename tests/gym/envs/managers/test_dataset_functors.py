@@ -339,6 +339,13 @@ class TestLeRobotRecorderFeatures:
             "shape": (1,),
             "names": ["segment_id"],
         }
+        assert features["annotation.segment_accepted"] == {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": ["segment_accepted"],
+        }
+        assert "annotation.segment_attempt_id" in features
+        assert "annotation.continuity_id" in features
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_build_features_with_sensor(self, mock_lerobot_dataset):
@@ -850,6 +857,120 @@ def test_episode_metadata_sidecar_appends_json_lines(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_segment_fragment_payloads_are_independent_and_keep_provenance() -> None:
+    """Only accepted natural segments are sliced by default."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    obs = TensorDict(
+        {"state": torch.arange(5, dtype=torch.float32).unsqueeze(-1)},
+        batch_size=[5],
+    )
+    actions = torch.arange(5, dtype=torch.float32).unsqueeze(-1)
+    annotations = {
+        "valid": torch.ones(5, dtype=torch.bool),
+        "episode_step": torch.arange(5),
+        "segment_id": torch.tensor([0, 0, 1, 1, 1]),
+        "segment_step": torch.tensor([0, 1, 0, 1, 2]),
+        "segment_start": torch.tensor([True, False, True, False, False]),
+        "segment_end": torch.tensor([False, True, False, False, True]),
+        "segment_accepted": torch.tensor([True, True, False, False, False]),
+        "segment_attempt_id": torch.full((5,), 2),
+        "continuity_id": torch.zeros(5, dtype=torch.long),
+        "terminated": torch.zeros(5, dtype=torch.bool),
+        "truncated": torch.zeros(5, dtype=torch.bool),
+    }
+    metadata = {
+        "output_mode": "segment_fragments",
+        "save_failed_fragments": False,
+        "episode_index": 9,
+        "attempt_id": 2,
+        "program_run_id": "9:2",
+        "terminated": False,
+        "truncated": True,
+        "segments": [
+            {
+                "segment_id": 0,
+                "start_step": 0,
+                "end_step": 2,
+                "success": True,
+                "instruction": "Pick the cube",
+                "attempt_id": 2,
+                "continuity_id": 0,
+                "outcome_kind": "succeeded",
+                "metadata": {
+                    "expert_program_id": "repeat_pick_place",
+                    "program_segment_id": "pick_0",
+                },
+            },
+            {
+                "segment_id": 1,
+                "start_step": 2,
+                "end_step": 5,
+                "success": False,
+                "failure_reason": "segment_validation_failed",
+                "outcome_kind": "validation_failed",
+                "instruction": "Place the cube",
+                "attempt_id": 2,
+                "continuity_id": 0,
+                "metadata": {},
+            },
+        ],
+    }
+
+    payloads = list(recorder._episode_payloads(0, obs, actions, annotations, metadata))
+
+    assert len(payloads) == 1
+    _, fragment_obs, fragment_actions, fragment_annotations, fragment_metadata = (
+        payloads[0]
+    )
+    assert fragment_obs.batch_size == torch.Size([2])
+    assert fragment_actions.shape == (2, 1)
+    assert fragment_annotations["episode_step"].tolist() == [0, 1]
+    assert fragment_annotations["segment_start"].tolist() == [True, False]
+    assert fragment_annotations["segment_end"].tolist() == [False, True]
+    assert fragment_annotations["segment_accepted"].all()
+    assert fragment_metadata["fragment_origin"] == "natural_segment"
+    assert fragment_metadata["source_program_id"] == "repeat_pick_place"
+    assert fragment_metadata["program_segment_id"] == "pick_0"
+    assert fragment_metadata["source_start_step"] == 0
+    assert fragment_metadata["source_end_step"] == 2
+    assert fragment_metadata["terminated"] is False
+    assert fragment_metadata["truncated"] is False
+    assert fragment_metadata["segments"][0]["start_step"] == 0
+    assert fragment_metadata["segments"][0]["end_step"] == 2
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_failed_segment_fragment_requires_explicit_opt_in() -> None:
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    obs = TensorDict({"state": torch.zeros(2, 1)}, batch_size=[2])
+    actions = torch.zeros(2, 1)
+    annotations = {
+        "segment_id": torch.zeros(2, dtype=torch.long),
+        "segment_accepted": torch.zeros(2, dtype=torch.bool),
+    }
+    metadata = {
+        "output_mode": "segment_fragments",
+        "save_failed_fragments": True,
+        "segments": [
+            {
+                "segment_id": 0,
+                "start_step": 0,
+                "end_step": 2,
+                "success": False,
+                "outcome_kind": "runtime_failed",
+                "metadata": {},
+            }
+        ],
+    }
+
+    payloads = list(recorder._episode_payloads(0, obs, actions, annotations, metadata))
+
+    assert len(payloads) == 1
+    assert not payloads[0][3]["segment_accepted"].any()
+    assert payloads[0][4]["success"] is False
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
 def test_subtask_registry_writes_stable_deduplicated_indices(tmp_path) -> None:
     """Repeated descriptions retain one stable row in subtasks.parquet."""
     recorder = LeRobotRecorder.__new__(LeRobotRecorder)
@@ -983,6 +1104,49 @@ def test_post_commit_metadata_failure_does_not_reuse_episode_index() -> None:
 
     recorder.dataset.save_episode.assert_called_once_with()
     assert recorder.curr_episode == 1
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_missing_dense_annotations_fall_back_to_segment_sidecar_outcome() -> None:
+    """Legacy buffers do not silently label a retained failed segment accepted."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = MockEnvForDataset(has_sensors=False)
+    recorder.instruction = None
+    recorder.extra = {}
+    recorder.total_time = 0.0
+    recorder.curr_episode = 0
+    recorder.dataset_full_path = Path("/tmp/test_dataset")
+    recorder.dataset = MagicMock()
+    recorder.dataset.meta.info = {"fps": 30}
+    recorder._depth_manager = None
+    recorder._register_subtasks = MagicMock(return_value={"unknown_task": 0})
+    recorder._convert_frame_to_lerobot = MagicMock(return_value={})
+    recorder._write_episode_metadata = MagicMock()
+
+    assert recorder._save_single_episode(
+        0,
+        [object()],
+        [object()],
+        episode_metadata={
+            "attempt_id": 4,
+            "continuity_id": 2,
+            "segments": [
+                {
+                    "start_step": 0,
+                    "end_step": 1,
+                    "success": False,
+                    "failure_reason": "segment_validation_failed",
+                }
+            ],
+        },
+    )
+
+    frame_annotations = recorder._convert_frame_to_lerobot.call_args.kwargs[
+        "annotations"
+    ]
+    assert frame_annotations["segment_accepted"] is False
+    assert frame_annotations["segment_attempt_id"] == 4
+    assert frame_annotations["continuity_id"] == 2
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")

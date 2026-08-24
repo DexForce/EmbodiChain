@@ -1196,6 +1196,21 @@ def init_rollout_buffer_from_gym_space(
             "segment_end": torch.zeros(
                 (num_envs, max_episode_steps), dtype=torch.bool, device=device
             ),
+            "segment_accepted": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_attempt_id": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "continuity_id": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
             "terminated": torch.zeros(
                 (num_envs, max_episode_steps), dtype=torch.bool, device=device
             ),
@@ -1421,6 +1436,21 @@ def init_rollout_buffer_from_config(
             ),
             "segment_end": torch.zeros(
                 (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_accepted": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_attempt_id": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "continuity_id": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
             ),
             "terminated": torch.zeros(
                 (batch_size, max_episode_steps), dtype=torch.bool, device=device

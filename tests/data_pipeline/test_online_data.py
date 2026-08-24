@@ -124,6 +124,12 @@ def _make_fake_engine(
             "rewards": torch.randn(buffer_size, max_episode_steps, 1),
             "valid": torch.ones(buffer_size, max_episode_steps, dtype=torch.bool),
             "segment_id": torch.zeros(buffer_size, max_episode_steps, dtype=torch.long),
+            "segment_accepted": torch.ones(
+                buffer_size, max_episode_steps, dtype=torch.bool
+            ),
+            "continuity_id": torch.zeros(
+                buffer_size, max_episode_steps, dtype=torch.long
+            ),
         },
         batch_size=[buffer_size, max_episode_steps],
     )
@@ -730,6 +736,61 @@ class TestOnlineDataEngine:
             .any(dim=1)
             .all()
         )
+
+    def test_segment_sampling_excludes_failed_segment_frames(self) -> None:
+        """A valid transition remains ineligible when its segment was rejected."""
+        midpoint = MAX_EPISODE_STEPS // 2
+        self.engine.shared_buffer["segment_id"][:, midpoint:] = 1
+        self.engine.shared_buffer["segment_accepted"][:, midpoint:] = False
+
+        result = self.engine.sample_batch(
+            batch_size=64,
+            chunk_size=8,
+            sampling_mode="segment",
+        )
+
+        assert result["segment_accepted"].all()
+        assert (result["segment_id"] == 0).all()
+
+    def test_boundary_sampling_rejects_failed_side_of_boundary(self) -> None:
+        """Boundary chunks cannot promote a rejected segment into training data."""
+        midpoint = MAX_EPISODE_STEPS // 2
+        self.engine.shared_buffer["segment_id"][:, midpoint:] = 1
+        self.engine.shared_buffer["segment_accepted"][:, midpoint:] = False
+
+        with pytest.raises(RuntimeError, match="No unlocked valid chunk"):
+            self.engine.sample_batch(
+                batch_size=1,
+                chunk_size=8,
+                sampling_mode="boundary",
+            )
+
+    def test_sampling_never_crosses_continuity_boundary(self) -> None:
+        """An out-of-band state jump is not exposed as a learnable transition."""
+        midpoint = MAX_EPISODE_STEPS // 2
+        self.engine.shared_buffer["continuity_id"][:, midpoint:] = 1
+
+        result = self.engine.sample_batch(
+            batch_size=64,
+            chunk_size=10,
+            sampling_mode="episode",
+        )
+
+        assert (result["continuity_id"] == result["continuity_id"][:, :1]).all()
+
+    def test_boundary_sampling_rejects_cross_continuity_segment_boundary(
+        self,
+    ) -> None:
+        midpoint = MAX_EPISODE_STEPS // 2
+        self.engine.shared_buffer["segment_id"][:, midpoint:] = 1
+        self.engine.shared_buffer["continuity_id"][:, midpoint:] = 1
+
+        with pytest.raises(RuntimeError, match="No unlocked valid chunk"):
+            self.engine.sample_batch(
+                batch_size=1,
+                chunk_size=8,
+                sampling_mode="boundary",
+            )
 
     def test_no_valid_window_raises(self) -> None:
         """Sampling fails clearly when all real episodes are too short."""

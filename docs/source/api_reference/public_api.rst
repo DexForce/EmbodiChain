@@ -85,8 +85,11 @@ embodichain.lab.gym.envs.demo
 
    DEMO_ANNOTATION_KEYS
    DEMO_SCHEMA_VERSION
+   DemoExecutionCfg
    DemoEpisodeResult
+   DemoOutputMode
    DemoSegment
+   DemoSegmentOutcomeKind
    DemoSegmentResult
    execute_demo_episode
    resolve_demo_segments

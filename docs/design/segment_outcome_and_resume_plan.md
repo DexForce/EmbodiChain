@@ -1,8 +1,9 @@
 # Program-Segment Outcome and Checkpoint Resume
 
-- Status: proposed
+- Status: outcome propagation and natural segment fragments implemented;
+  checkpoint resume deferred
 - Scope: Expert Program demonstration generation in simulation
-- Date: 2026-08-23
+- Date: 2026-08-24
 - Related design: `docs/design/declarative_expert_program_plan.md`
 
 ## 1. Decision
@@ -19,9 +20,9 @@ The current layers already have the right semantic boundary:
   application validators;
 - `DemoSegmentResult` records the resulting per-environment outcome.
 
-The missing behavior is downstream of that decision:
+The original gaps were downstream of that decision:
 
-1. trajectory buffers and online sampling do not expose the segment outcome as
+1. trajectory buffers and online sampling did not expose the segment outcome as
    a dense frame annotation;
 2. failed rows are permanently removed from the current program run;
 3. there is no typed, auditable way to restore the entry state of a later
@@ -29,7 +30,7 @@ The missing behavior is downstream of that decision:
 4. a discontinuous restore cannot currently be represented without making the
    resulting data look like one continuous episode.
 
-The proposal therefore has two parts:
+The design therefore has two parts:
 
 1. persist the existing program-segment acceptance result as trajectory/data
    quality metadata;
@@ -38,6 +39,12 @@ The proposal therefore has two parts:
    fails.
 
 The default continuous-episode path remains fail-closed and unchanged.
+
+Implementation scope for the current change stops after outcome propagation,
+causal-continuity-aware sampling, and persistence of naturally executed
+segments as independent fragments. Checkpoint values, simulator state restore,
+and resume-after-failure execution remain future work. Consequently every
+currently recorded frame has ``continuity_id == 0``.
 
 ## 2. Terminology
 
@@ -81,7 +88,7 @@ The public outcome should preserve both `accepted` and the first authoritative
 failure phase. A boolean alone is insufficient for diagnostics and recovery
 policy.
 
-Recommended stable outcome kinds are:
+Implemented stable outcome kinds are:
 
 ```text
 succeeded
@@ -91,8 +98,10 @@ validation_failed
 cancelled
 truncated
 not_attempted
-restore_failed
 ```
+
+``restore_failed`` remains reserved for the deferred checkpoint implementation;
+it is not exposed by the current result type because no restore can occur.
 
 `DemoSegmentResult.successes` remains the compatibility boolean view. Its
 source must stay the bridge's accepted mask rather than a new call to
@@ -108,20 +117,31 @@ ordinary Expert Program execution.
 
 ## 4. Data contract
 
+The implementation remains compatible with EmbodiChain's current LeRobot
+``>=0.4.4,<0.5`` dependency. It does not require a dataset-format upgrade:
+dense qualification is stored as additive numeric ``annotation.*`` features,
+the fragment's segment instruction becomes its LeRobot task, and richer
+program provenance stays in EmbodiChain's JSONL sidecar. This also keeps the
+program-segment acceptance meaning separate from LeRobot reward/task success.
+
 ### 4.1 Dense frame annotations
 
-Extend expert rollout annotations with:
+Expert rollout annotations include:
 
 ```text
-segment_success: bool
+segment_accepted: bool
 segment_attempt_id: int64
 continuity_id: int64
 ```
 
-`segment_success` is filled retroactively for the segment's complete frame span
+`segment_accepted` is filled retroactively for the segment's complete frame span
 when `_end_demo_segment_recording()` receives the terminal result. It does not
 replace `valid`; `valid` continues to mean that a buffer slot contains a real
 transition.
+
+The name intentionally avoids collision with LeRobot's task/reward success
+fields: this value means that the owning Expert Program segment passed runtime,
+post-policy, and validator qualification.
 
 `segment_attempt_id` distinguishes retries or repeated attempts of the same
 compiled segment occurrence. `continuity_id` increments whenever state is
@@ -142,7 +162,7 @@ The online sampler's normal segment mode selects only windows for which:
 
 ```text
 valid == true
-segment_success == true
+segment_accepted == true
 segment_id is constant
 continuity_id is constant
 ```
@@ -283,29 +303,40 @@ written for the state jump.
 
 ## 7. Execution modes
 
-Add a collector-owned configuration, not an Expert Program field:
+The implemented collector-owned configuration, rather than an Expert Program
+field, is:
 
 ```python
 @configclass
 class DemoExecutionCfg:
     mode: Literal["continuous", "segment_fragments"] = "continuous"
-    on_segment_failure: Literal["stop", "resume_next"] = "stop"
     save_failed_fragments: bool = False
 ```
 
-The checkpoint port is passed as a live dependency rather than serialized in
-this config.
+Both modes stop at the current fail-closed execution boundary. A future resume
+extension should add an explicit failure policy only together with the live
+checkpoint port; the current config deliberately cannot request unsupported
+restore behavior.
 
-`continuous + stop` is the current default. `resume_next` is accepted only in
-`segment_fragments` mode and only when a checkpoint port is installed. It is
-rejected for real devices unless that integration supplies an authoritative
-restore implementation.
+The mode is selected through the collection API:
+
+```python
+generate_function(
+    env,
+    execution_cfg=DemoExecutionCfg(mode="segment_fragments"),
+)
+```
+
+One source program row may produce multiple LeRobot episodes in fragment mode.
+Accepted fragments are saved by default; ``save_failed_fragments=True`` is an
+explicit diagnostic-data opt-in. The existing CLI ``max_episodes`` accounting
+therefore remains on continuous mode until a fragment-count quota is defined.
 
 The existing `DemoSegment.failure_policy` continues to mean batch behavior
 (`batch_abort` versus `row_independent`). It must not be overloaded with
 cross-segment recovery semantics.
 
-### State machine
+### Future resume state machine
 
 ```text
 READY(k)
@@ -325,30 +356,31 @@ shared segment barrier. Rows that cannot be restored remain inactive.
 
 ## 8. Public result semantics
 
-Do not redefine `DemoEpisodeResult.completed`. Add explicit collection-level
-views instead:
+Do not redefine `DemoEpisodeResult.completed`. The current implementation adds
+``successful_fragment_count_by_env`` and retains the existing continuous
+success fields. Checkpoint-dependent views remain deferred:
 
 ```text
-program_exhausted_by_env
-continuous_success_by_env
 recovered_by_env
-successful_fragment_count_by_env
+program_exhausted_by_env
 ```
 
-Each segment/fragment result additionally records:
+Each current segment/fragment result additionally records:
 
 ```text
 attempt_id
 continuity_id
 outcome_kind
-resumed_from_checkpoint
-checkpoint_id
 ```
 
-This makes the following cases distinguishable:
+``resumed_from_checkpoint`` and ``checkpoint_id`` are deferred with resume.
+
+Current fields distinguish the first three natural-execution cases below;
+deferred checkpoint fields will distinguish the final two:
 
 - a fully successful continuous expert trajectory;
 - a failed complete episode retained for diagnostics;
+- a successful independent natural segment fragment;
 - a successful independent suffix fragment restored from a checkpoint;
 - a failed restore that emitted no controller commands.
 
@@ -364,7 +396,7 @@ The first implementation should remain outside atomic-action planning.
 | `embodichain/lab/gym/envs/expert_program/bridge.py` | Allow one selected compiled segment to run from an explicit initial eligibility mask and `TaskState`; keep validator as the acceptance commit point |
 | `embodichain/lab/gym/envs/expert_program/environment.py` | Assemble a fresh runtime from an explicit initial `TaskState` and selected segment index |
 | simulation Expert Program integration | Implement the checkpoint port and post-restore synchronization/entry validation |
-| dataset recorders | Persist fragment provenance and `segment_success` without treating a restored suffix as a continuous episode |
+| dataset recorders | Persist fragment provenance and `segment_accepted` without treating a fragment as a continuous episode |
 | online data engine | Filter unsuccessful segments and reject windows crossing `continuity_id` |
 
 `TrajectorySegment`, `ActionPlan`, `ExecutionSession`, atomic recovery policy,
@@ -375,14 +407,16 @@ and semantic effect monitors require no API change for the initial feature.
 ### Phase A: outcome propagation
 
 1. Expose the bridge's accepted mask as the sole segment outcome.
-2. Add dense `segment_success`, `segment_attempt_id`, and `continuity_id`
+2. Add dense `segment_accepted`, `segment_attempt_id`, and `continuity_id`
    annotations.
 3. Update recorders and online sampling to consume them.
 4. Keep execution fail-closed.
 
-This phase is independently useful and low risk.
+This phase is implemented.
 
 ### Phase B: checkpoint primitives
+
+Deferred; not part of the current implementation.
 
 1. Add immutable checkpoint/result values and an explicit port.
 2. Extend simulation state capture/restore for selected rows and controller
@@ -393,20 +427,28 @@ This phase is independently useful and low risk.
 
 ### Phase C: fragment collector
 
-1. Execute one selected compiled segment through a fresh runtime.
-2. Commit accepted segments independently.
+1. Commit naturally executed accepted segments independently. **Implemented.**
+2. Execute one selected compiled segment through a fresh runtime. **Deferred.**
 3. On failure, optionally restore entry of the next segment and continue under
    a new `continuity_id`.
+   **Deferred.**
 4. Preserve failed attempt metadata without promoting the collection session
-   to continuous episode success.
+   to continuous episode success. **Implemented.**
 
 ## 11. Validation surface
 
-Focused unit tests must cover:
+Implemented focused unit tests cover:
 
 - runtime, post-policy, and validator masks combining into one accepted mask;
 - retroactive per-frame segment outcome annotation;
 - online sampling excluding failed segments and cross-restore windows;
+- natural accepted segments being saved as separate synchronous and
+  asynchronous LeRobot episodes;
+- failed fragments requiring explicit opt-in;
+- accepted prefix fragments not promoting whole-episode success.
+
+Deferred checkpoint work must additionally cover:
+
 - missing, incompatible, and stale checkpoints failing before commands;
 - row-selective restore leaving healthy peers unchanged;
 - controller targets matching restored qpos on the first subsequent step;
