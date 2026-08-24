@@ -29,6 +29,11 @@ from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
     ImageSegmentationClient,
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import (
+    SceneGraph,
+    SceneGraphNode,
+    TABLE_OBJECT_ID,
+)
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
@@ -36,6 +41,7 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
+    render_asset_mask_id_overlay,
     render_image_without_masks,
     render_numbered_mask_candidates,
     save_binary_mask,
@@ -44,12 +50,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils im
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-_LOCATION_WORD_PATTERN = re.compile(
-    r"\b(?:left|right|front|back|center|middle|top|bottom|upper|lower|"
-    r"foreground|background|near|next|beside|behind|between|on|in|inside|"
-    r"under|above|below|against)\b",
-    flags=re.IGNORECASE,
-)
 _SYSTEM_PROMPT = """You inspect one tabletop-scene image.
 Identify the main table and every visible, physically distinct object that should
 be segmented and later generated as an independent 3D asset.
@@ -62,19 +62,23 @@ Rules:
 3. Do not merge objects merely resting on another object. A mug on a table and
    the table are separate entries.
 4. List every visible physical instance separately. If two objects look alike,
-   keep the same category and name, but distinguish them in description using
-   location. Do not add location to name.
+   keep the same category and name. Do not encode location or spatial context
+   in any semantic field.
 5. category is a lower-case singular snake_case class, such as mug, book,
    potted_plant, or coffee_table. It must not contain color or material.
-6. name contains only color, material, texture, shape, and object description.
-   It must not contain position or relations, such as left, right, on, in, or
-   near.
+6. name is a concise human-readable phrase containing only color, material,
+   texture, shape, and object details. It may contain spaces, but must not
+   contain position or relations, such as left, right, on, in, or near.
 7. For table, description contains only its category, material, color, texture,
    shape, and visible structural details. Do not mention image coverage, image
    position, camera framing, or viewpoint. For example, do not write "occupying
    most of the image" or "at the center of the image".
-8. For assets, description may include all visible details, including location
-   and spatial context.
+8. For assets, description contains only visible category, material, color,
+   texture, shape, and structural details. Do not mention location, the table,
+   or any relationship to another object.
+   Structural direction words are allowed when they describe the object itself:
+   "bottle with a black cap on top" is valid, while "bottle on the left of the
+   table" is not.
 
 Return JSON only: no Markdown, comments, or prose outside this exact schema:
 {
@@ -87,14 +91,14 @@ Return JSON only: no Markdown, comments, or prose outside this exact schema:
     {
       "category": "mug",
       "name": "blue ceramic mug",
-      "description": "small blue ceramic mug on the left side of the table"
+      "description": "small blue ceramic mug with a curved handle"
     }
   ]
 }
-For two identical blue mugs, output two asset entries with the same category and
-name, and use their descriptions to state left/right or front/back. Do not
-infer objects that are not visible. Use an empty assets array when no objects
-are visible. Every field must be a non-empty string."""
+For two identical blue mugs, output two asset entries with the same category,
+name, and description. Do not infer objects that are not visible. Use an empty
+assets array when no objects are visible. Every field must be a non-empty
+string."""
 
 _USER_PROMPT = "Analyze the provided image and return only the required JSON object."
 
@@ -141,6 +145,23 @@ Examples:
 Return JSON only, with exactly one key: assignments. It must be null or an
 array of asset_id and mask_index objects. Do not include Markdown or any other
 text."""
+_ORIENTATION_STATE_SYSTEM_PROMPT = """You inspect an outlined tabletop-scene image.
+Each visible asset has an outline and an ID label. Determine whether each listed
+asset is standing, lying, or unknown in the image.
+
+Use a non-null state only for an elongated object with a clear primary long axis.
+Use "standing" when its primary axis is approximately vertical to the tabletop.
+Use "lying" when its primary axis is approximately parallel to the tabletop.
+Use null for every object without a clear primary long axis or when uncertain.
+
+Return JSON only, with exactly this schema. Include every supplied asset ID
+exactly once. Never include the table or any ID that was not supplied:
+{
+  "orientation_states": [
+    {"object_id": "bottle_001", "orientation_state": "standing"},
+    {"object_id": "book_001", "orientation_state": null}
+  ]
+}"""
 
 
 def understand_scene(
@@ -149,8 +170,9 @@ def understand_scene(
     output_root: str | Path,
     *,
     vlm_client: OpenAICompatibleVLM,
+    image_segmentation_client: ImageSegmentationClient,
     json_max_attempts: int = 3,
-) -> Scene:
+) -> tuple[Scene, SceneGraph]:
 
     resolved_image_path = _validate_image_path(image_path)
     # The output in this stage will keep a JSON which contains
@@ -167,26 +189,165 @@ def understand_scene(
         json_max_attempts=json_max_attempts,
     )
 
-    # Load .env settings and fail if the Image Segmentation Server is unavailable.
-    image_segmentation_client = ImageSegmentationClient.from_dotenv()
-    try:
-        image_segmentation_client.check_health()  # Error raising will happen internally.
-        _segment_scene(
-            image_path=resolved_image_path,
-            stage_output_root=stage_output_root,
-            scene=scene,
-            vlm_client=vlm_client,
-            image_segmentation_client=image_segmentation_client,
-        )
-    finally:
-        image_segmentation_client.close()  # Kill the session to avoid resource leaks.
+    # Receive the validated whole-scene mask, for VLM output the scene graph.
+    asset_mask_id_overlay_path = _segment_scene(
+        image_path=resolved_image_path,
+        stage_output_root=stage_output_root,
+        scene=scene,
+        vlm_client=vlm_client,
+        image_segmentation_client=image_segmentation_client,
+    )
+
+    # Use the segmented image to initialize the scene graph
+    # with the help of the VLM client.
+    # But at here, we do with the simplest way (hard code).
+    scene_graph = _initialize_scene_graph_from_segmented_scene(
+        scene,
+        asset_mask_id_overlay_path=asset_mask_id_overlay_path,
+        vlm_client=vlm_client,
+        json_max_attempts=json_max_attempts,
+    )
 
     # Write the Updated scene JSON for debugging.
     (stage_output_root / "scene.json").write_text(
         json.dumps(scene.to_dict(), indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    return scene
+    (stage_output_root / "scene_graph.json").write_text(
+        json.dumps(scene_graph.to_dict(), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return scene, scene_graph
+
+
+def _initialize_scene_graph_from_segmented_scene(
+    scene: Scene,
+    *,
+    asset_mask_id_overlay_path: str | Path,
+    vlm_client: OpenAICompatibleVLM,
+    json_max_attempts: int = 3,
+) -> SceneGraph:
+    """Build the initial graph assuming every segmented asset rests on the table."""
+    # Get simplified scene info for VLM.
+    scene_info = _simplify_scene_info_for_graph_initialization(scene=scene)
+    resolved_asset_mask_id_overlay_path = _validate_image_path(
+        asset_mask_id_overlay_path
+    )
+    if scene.table is None:
+        raise ValueError("Cannot initialize a scene graph without a table.")
+    orientation_states_by_id = _query_orientation_states(
+        scene_info=scene_info,
+        asset_mask_id_overlay_path=resolved_asset_mask_id_overlay_path,
+        vlm_client=vlm_client,
+        json_max_attempts=json_max_attempts,
+    )
+    return SceneGraph(
+        nodes=[
+            SceneGraphNode(object_id=TABLE_OBJECT_ID, parent_id=None),
+            *[
+                SceneGraphNode(
+                    object_id=asset.id,
+                    parent_id=TABLE_OBJECT_ID,
+                    parent_relation="on",  # semi-hard-code.
+                    orientation_state=orientation_states_by_id[asset.id],
+                )
+                for asset in scene.assets
+            ],
+        ],
+    )
+
+
+def _simplify_scene_info_for_graph_initialization(
+    *,
+    scene: Scene,
+) -> dict[str, object]:
+    """Return the object metadata needed to initialize an image-based graph."""
+    return {
+        "asset_ids": [asset.id for asset in scene.assets],
+    }
+
+
+def _query_orientation_states(
+    *,
+    scene_info: dict[str, object],
+    asset_mask_id_overlay_path: Path,
+    vlm_client: OpenAICompatibleVLM,
+    json_max_attempts: int,
+) -> dict[str, str | None]:
+    """Return validated image-observed orientation states keyed by asset ID."""
+    if json_max_attempts < 1:
+        raise ValueError("json_max_attempts must be at least 1.")
+    last_validation_error: ValueError | None = None
+    for _ in range(json_max_attempts):
+        response_text = vlm_client.complete(
+            image_path=asset_mask_id_overlay_path,
+            system_prompt=_ORIENTATION_STATE_SYSTEM_PROMPT,
+            user_prompt=json.dumps(scene_info, ensure_ascii=False),
+        )
+        try:
+            return _parse_orientation_states_response(
+                response_text=response_text,
+                asset_ids=scene_info["asset_ids"],
+            )
+        except ValueError as exc:
+            last_validation_error = exc
+    assert last_validation_error is not None
+    raise ValueError(
+        "VLM returned invalid orientation-state JSON after "
+        f"{json_max_attempts} attempts: {last_validation_error}"
+    ) from last_validation_error
+
+
+def _parse_orientation_states_response(
+    *,
+    response_text: str,
+    asset_ids: object,
+) -> dict[str, str | None]:
+    """Parse a complete VLM orientation-state response for known asset IDs."""
+    if not isinstance(asset_ids, list) or not all(
+        isinstance(object_id, str) for object_id in asset_ids
+    ):
+        raise ValueError("Scene graph initialization requires string asset IDs.")
+    json_text = _strip_json_code_fence(response_text)
+    try:
+        payload = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"VLM response is not valid JSON: {exc.msg}") from exc
+    if not isinstance(payload, dict) or set(payload) != {"orientation_states"}:
+        raise ValueError("VLM JSON must contain exactly the key: orientation_states.")
+    states_value = payload["orientation_states"]
+    if not isinstance(states_value, list):
+        raise ValueError("VLM JSON key orientation_states must be an array.")
+
+    orientation_states_by_id: dict[str, str | None] = {}
+    for index, state_value in enumerate(states_value):
+        if not isinstance(state_value, dict) or set(state_value) != {
+            "object_id",
+            "orientation_state",
+        }:
+            raise ValueError(
+                "VLM JSON orientation_states["
+                f"{index}] must contain exactly object_id and orientation_state."
+            )
+        object_id = state_value["object_id"]
+        orientation_state = state_value["orientation_state"]
+        if not isinstance(object_id, str) or not object_id:
+            raise ValueError(
+                f"VLM JSON orientation_states[{index}].object_id is invalid."
+            )
+        if orientation_state not in {None, "standing", "lying"}:
+            raise ValueError(
+                f"VLM JSON orientation_states[{index}].orientation_state is invalid."
+            )
+        if object_id in orientation_states_by_id:
+            raise ValueError(f"VLM JSON repeats orientation state for {object_id!r}.")
+        orientation_states_by_id[object_id] = orientation_state
+
+    if set(orientation_states_by_id) != set(asset_ids):
+        raise ValueError(
+            "VLM JSON orientation states must match all supplied asset IDs."
+        )
+    return orientation_states_by_id
 
 
 def _analyze_image_objects(
@@ -330,13 +491,6 @@ def _parse_scene_object_fields(
             f"VLM JSON key {field_name}.category must be a lower-case snake_case "
             "class name."
         )
-    if _LOCATION_WORD_PATTERN.search(
-        fields["name"]
-    ):  # Check whether the name contains location.
-        raise ValueError(
-            f"VLM JSON key {field_name}.name must not contain location or "
-            "relationship words."
-        )
     return fields
 
 
@@ -353,8 +507,8 @@ def _segment_scene(
     scene: Scene,
     vlm_client: OpenAICompatibleVLM,
     image_segmentation_client: ImageSegmentationClient,
-) -> None:
-    """Add validated table and asset mask paths to a semantic scene."""
+) -> Path:
+    """Add validated masks and return an asset-only ID overlay image."""
     debug_output_root = (
         Path(stage_output_root) / "debug"
     )  # Keeps the mask debug images.
@@ -395,6 +549,16 @@ def _segment_scene(
         scene=scene,
         vlm_client=vlm_client,
         image_segmentation_client=image_segmentation_client,
+    )
+    asset_masks: list[tuple[str, str]] = []
+    for asset in scene.assets:
+        if asset.mask_path is None:
+            raise ValueError(f"Asset {asset.id!r} has no validated mask path.")
+        asset_masks.append((asset.id, asset.mask_path))
+    return render_asset_mask_id_overlay(
+        image_path=image_path,
+        asset_masks=asset_masks,
+        output_path=Path(masks_output_root) / "asset_masks_with_ids.png",
     )
 
 

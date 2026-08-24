@@ -17,20 +17,33 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-import re
 
 import numpy as np
-import open3d as o3d
-from scipy.spatial import ConvexHull, QhullError
 from scipy.spatial.transform import Rotation
 import trimesh
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import OrientationState
 from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
+)
+from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
+    OpenAICompatibleVLM,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
+    DEFAULT_NEEDED_LAYOUT,
+    LYING_NEEDED_LAYOUT,
+    STANDING_NEEDED_LAYOUT,
+    compute_uniform_xy_scale_for_target,
+    query_vlm_object_rotation_and_target_size,
+    render_object_front_top_views,
+    rotate_glb_about_x_axis,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
+    TableSupportSurfaceDetector,
 )
 from embodichain.utils.logger import log_info
 
@@ -53,16 +66,17 @@ _FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VHACD hull budget for settling and exp
 
 
 @dataclass(frozen=True)
-class SimReadySceneProcessorConfig:
-    """Object-category policy for SimReady mesh canonicalization."""
+class SimReadyProcessorConfig:
+    """SceneGraph-conditioned policy for SimReady mesh canonicalization."""
 
-    upright_container_id_tokens: frozenset[str] = frozenset(
-        {"bottle", "can", "jar", "flask", "thermos"}
-    )  # Object-id tokens that enable upright-container standardization.
+    use_vlm_scale: bool = False  # Use the VLM-selected asset scale.
+    use_vlm_rotation: bool = False  # Use the VLM-selected asset rotation.
+    # Explicit graph orientation overrides the default stable tabletop pose.
+    orientation_states_by_id: dict[str, OrientationState] = field(default_factory=dict)
 
 
-class SimReadySceneProcessor:
-    """Create SimReady GLBs and layouts for one table and its scene assets."""
+class SimReadyProcessor:
+    """Create SimReady GLBs and layouts for scene objects."""
 
     def __init__(
         self,
@@ -71,7 +85,9 @@ class SimReadySceneProcessor:
         coarse_layout_by_id: dict[str, dict[str, object]],
         coarse_geometry_root: str | Path,
         simready_geometry_root: str | Path,
-        config: SimReadySceneProcessorConfig | None = None,
+        debug_output_root: str | Path | None = None,
+        config: SimReadyProcessorConfig | None = None,
+        vlm_client: OpenAICompatibleVLM | None = None,
     ) -> None:
         self.scene = scene
         self.coarse_layout_by_id = coarse_layout_by_id
@@ -79,11 +95,22 @@ class SimReadySceneProcessor:
         self.simready_geometry_root = (
             Path(simready_geometry_root).expanduser().resolve()
         )
+        # Save rendered debug images.
+        self.debug_output_root = (
+            Path(debug_output_root).expanduser().resolve()
+            if debug_output_root is not None
+            else None
+        )
         self.simready_table_layout: dict[str, object] | None = None
         self.simready_assets_layout: list[dict[str, object]] | None = None
-        self.config = config if config is not None else SimReadySceneProcessorConfig()
-        if not self.config.upright_container_id_tokens:
-            raise ValueError("upright_container_id_tokens must not be empty.")
+        self.config = config if config is not None else SimReadyProcessorConfig()
+        self.vlm_client = vlm_client
+        if (
+            self.config.use_vlm_scale
+            or self.config.use_vlm_rotation
+            or self.config.orientation_states_by_id
+        ) and vlm_client is None:
+            raise ValueError("vlm_client is required when VLM transforms are enabled.")
 
     def process_table(self) -> dict[str, object]:
         """Process the required scene table and return its SimReady layout."""
@@ -104,7 +131,13 @@ class SimReadySceneProcessor:
         self.simready_assets_layout = processed_assets
         return self.simready_assets_layout
 
-    def _process_object(self, scene_object: SceneObject) -> dict[str, object]:
+    def _process_object(
+        self,
+        scene_object: SceneObject,
+        *,
+        scale: object | None = None,
+        rot: object | None = None,
+    ) -> dict[str, object]:
         """Canonicalize one coarse object and write its SimReady GLB."""
         object_id = scene_object.id
         object_role = scene_object.kind
@@ -113,12 +146,18 @@ class SimReadySceneProcessor:
         coarse_layout = self.coarse_layout_by_id.get(object_id)
         if coarse_layout is None:
             raise ValueError(f"Coarse layout does not contain object {object_id!r}.")
+        prepared_glb_path, vlm_scale = self._prepare_vlm_rotated_glb(scene_object)
+        selected_scale = scale
+        if selected_scale is None:
+            selected_scale = vlm_scale or coarse_layout.get("scale")
         simready_mesh, simready_transform = self._canonicalize_object_mesh(
-            coarse_glb_path=self.coarse_geometry_root / f"{object_id}.glb",
+            coarse_glb_path=prepared_glb_path,
             object_id=object_id,
-            rot=coarse_layout.get("rot"),
+            # An enabled external rotation replaces the coarse-layout rotation.
+            rot=coarse_layout.get("rot") if rot is None else rot,
             pos=coarse_layout.get("pos"),
-            scale=coarse_layout.get("scale"),
+            # An enabled VLM scale replaces the coarse-layout scale.
+            scale=selected_scale,
         )
         output_path = self.simready_geometry_root / f"{object_id}.glb"
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,8 +168,119 @@ class SimReadySceneProcessor:
             )
         scene_object.simready_glb_path = str(output_path)
         scene_object.physics = self._fixed_physics_for_kind(object_role)
+        # For table. (currently the id is fixed into table)
+        if object_role == "table":
+            # Detect and persist all reusable tabletop support geometry at SimReady time.
+            support_detector = TableSupportSurfaceDetector(
+                table_world_mesh=self._z_up_table_mesh(simready_mesh),
+                debug_output_root=self.debug_output_root,
+            )
+            support_region = support_detector.detect()
+            scene_object.support_surface_z = support_region.top_z
+            scene_object.support_contour_xy = [
+                [float(x), float(y)]
+                for x, y in support_region.support_polygon.exterior.coords[:-1]
+            ]
+            scene_object.support_optimization_rect_xy = [
+                [float(x), float(y)]
+                for x, y in support_region.optimization_rectangle.exterior.coords[:-1]
+            ]
+            if self.debug_output_root is not None:
+                # Keep the 3D selected surface and 2D contour diagnostics beside SimReady output.
+                support_detector.save_support_surface_debug_images()
         log_info(f"Created SimReady {object_role}: {object_id!r}.")
         return {"id": object_id, **simready_transform}
+
+    @staticmethod
+    def _z_up_table_mesh(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+        """Convert one canonical y-up GLB mesh into the detector's z-up frame."""
+        y_up_to_z_up = np.eye(4)
+        y_up_to_z_up[:3, :3] = Rotation.from_euler("x", 90.0, degrees=True).as_matrix()
+        z_up_mesh = mesh.copy()
+        z_up_mesh.apply_transform(y_up_to_z_up)
+        return z_up_mesh
+
+    def _prepare_vlm_rotated_glb(
+        self, scene_object: SceneObject
+    ) -> tuple[Path, list[float] | None]:
+        """Render, query, and optionally bake the VLM-selected x-axis rotation."""
+        coarse_path = self.coarse_geometry_root / f"{scene_object.id}.glb"
+        orientation_state = self._orientation_state_for_object(scene_object.id)
+        orientation_pose_required = orientation_state is not None
+        if not (
+            self.config.use_vlm_scale
+            or self.config.use_vlm_rotation
+            or orientation_pose_required
+        ):
+            return coarse_path, None
+        decision = self._vlm_transform_for_object(
+            scene_object,
+            needed_layout=self._needed_layout_for_object(scene_object.id),
+        )
+        rotate_about_x = bool(decision["rotate_about_x"])
+        vlm_scale = None
+        if self.config.use_vlm_scale:
+            # The VLM target describes the final, post-rotation z-up XY footprint.
+            vlm_scale = compute_uniform_xy_scale_for_target(
+                glb_path=coarse_path,
+                target_xy_size_cm=decision["target_xy_size_cm"],
+                rotate_about_x=rotate_about_x,
+            )
+        rotated_path = rotate_glb_about_x_axis(
+            input_path=coarse_path,
+            output_path=self.simready_geometry_root
+            / "vlm_rotated"
+            / f"{scene_object.id}.glb",
+            rotate=rotate_about_x
+            and (orientation_pose_required or self.config.use_vlm_rotation),
+        )
+        # The scale flag controls whether this VLM-derived isotropic scale is used.
+        # Apply the same factor on x, y, and z to preserve the asset's proportions.
+        return (
+            rotated_path,
+            [vlm_scale, vlm_scale, vlm_scale] if self.config.use_vlm_scale else None,
+        )
+
+    def _orientation_state_for_object(self, object_id: str) -> OrientationState | None:
+        """Return the explicit graph orientation requested for one object."""
+        return self.config.orientation_states_by_id.get(object_id)
+
+    def _needed_layout_for_object(self, object_id: str) -> str:
+        """Return the VLM layout instruction for one object's graph semantics."""
+        return (
+            STANDING_NEEDED_LAYOUT
+            if self._orientation_state_for_object(object_id) == "standing"
+            else (
+                LYING_NEEDED_LAYOUT
+                if self._orientation_state_for_object(object_id) == "lying"
+                else DEFAULT_NEEDED_LAYOUT
+            )
+        )
+
+    def _vlm_transform_for_object(
+        self,
+        scene_object: SceneObject,
+        *,
+        needed_layout: str,
+    ) -> dict[str, object]:
+        """Render the object and return the validated VLM pose decision."""
+        assert self.vlm_client is not None
+        coarse_path = self.coarse_geometry_root / f"{scene_object.id}.glb"
+        debug_root = (
+            self.debug_output_root or self.simready_geometry_root.parent / "debug"
+        )
+        rendered_path = render_object_front_top_views(
+            glb_path=coarse_path,
+            output_path=debug_root / "vlm_views" / f"{scene_object.id}.png",
+        )
+        # Both semantic questions are always answered in one multimodal call.
+        return query_vlm_object_rotation_and_target_size(
+            scene_object_description=scene_object.description,
+            needed_layout=needed_layout,
+            rendered_views_path=rendered_path,
+            vlm_client=self.vlm_client,
+            debug_output_path=debug_root / "vlm_outputs" / f"{scene_object.id}.json",
+        )
 
     @staticmethod
     def _fixed_physics_for_kind(kind: str) -> ObjectPhysics:
@@ -185,8 +335,6 @@ class SimReadySceneProcessor:
         )
         if np.any(coarse_scale <= 0):
             raise ValueError("Coarse object scale values must be positive.")
-        # We need the object id to determine whether it is a bottle-like object.
-        # If it does, then we will do a special standardization. (Hard code)
         if not isinstance(object_id, str) or not object_id:
             raise ValueError("Scene object id must be a non-empty string.")
 
@@ -197,16 +345,6 @@ class SimReadySceneProcessor:
         y_up_to_z_up_transform[:3, :3] = y_up_to_z_up_matrix
         mesh.apply_transform(y_up_to_z_up_transform)
 
-        # Standardize upright containers in temporary z-up coordinates before the
-        # shared center, scale, and bottom-center preprocessing.
-        # This is to ensure the action agent can pick up the bottle or can-like objects.
-        bottle_alignment_matrix = np.eye(3)
-        if self._is_upright_container_id(object_id):
-            bottle_alignment_matrix = self._standardize_bottle_z_up(mesh)
-            bottle_alignment_transform = np.eye(4)
-            bottle_alignment_transform[:3, :3] = bottle_alignment_matrix
-            mesh.apply_transform(bottle_alignment_transform)
-
         # First make the object's AABB center at the origin.
         original_aabb_center = mesh.bounds.mean(axis=0)
         mesh.apply_translation(-original_aabb_center)
@@ -214,13 +352,7 @@ class SimReadySceneProcessor:
         # Scale the object with the value in the coarse layout.
         scale_transform = np.eye(4)
         scale_transform[:3, :3] = (
-            # Actually there's no need to do so, for the scale factor is all equal
-            # in x, y, z axes.
-            bottle_alignment_matrix
-            @ y_up_to_z_up_matrix
-            @ np.diag(coarse_scale)
-            @ y_up_to_z_up_matrix.T
-            @ bottle_alignment_matrix.T
+            y_up_to_z_up_matrix @ np.diag(coarse_scale) @ y_up_to_z_up_matrix.T
         )
         mesh.apply_transform(scale_transform)
 
@@ -240,17 +372,7 @@ class SimReadySceneProcessor:
         z_up_to_y_up_transform[:3, :3] = y_up_to_z_up_matrix.T
         mesh.apply_transform(z_up_to_y_up_transform)
 
-        # Compensate the bottle's local rotation so that its coarse world pose does
-        # not change.
-        local_bottle_rotation = Rotation.from_matrix(
-            y_up_to_z_up_matrix.T @ bottle_alignment_matrix @ y_up_to_z_up_matrix
-        )
-        coarse_rotation_matrix = Rotation.from_euler(
-            "xyz", coarse_rot, degrees=True
-        ).as_matrix()
-        rotation = Rotation.from_matrix(
-            coarse_rotation_matrix @ local_bottle_rotation.inv().as_matrix()
-        )
+        rotation = Rotation.from_euler("xyz", coarse_rot, degrees=True)
         # Update the pos.
         position_offset = y_up_to_z_up_matrix.T @ (
             scale_transform[:3, :3] @ original_aabb_center + scaled_aabb_bottom_center
@@ -260,87 +382,6 @@ class SimReadySceneProcessor:
             "pos": (coarse_pos + rotation.apply(position_offset)).tolist(),
             "scale": [1.0, 1.0, 1.0],
         }
-
-    def _is_upright_container_id(self, object_id: str) -> bool:
-        """Return whether object-id tokens indicate a bottle-like container."""
-        # Example: soda_can_0
-        # tokens: {"soda", "can", "0"}
-        # upright_container_id_tokens: {"bottle", "can", "jar"}
-        # So this returns True because "can" is in the configured token set.
-        tokens = set(re.findall(r"[a-z0-9]+", object_id.lower()))
-        return bool(tokens & self.config.upright_container_id_tokens)
-
-    @staticmethod
-    def _standardize_bottle_z_up(mesh: trimesh.Trimesh) -> np.ndarray:
-        """Return a proper rotation that maps a bottle-like mesh's long axis to z-up.
-
-        Thanks to chenjian for this idea!
-        """
-        if len(mesh.vertices) < 4 or len(mesh.faces) < 4:
-            raise ValueError(
-                "Bottle standardization requires a non-degenerate triangle mesh."
-            )
-        open3d_mesh = o3d.geometry.TriangleMesh(
-            vertices=o3d.utility.Vector3dVector(mesh.vertices),
-            triangles=o3d.utility.Vector3iVector(mesh.faces),
-        )
-        sampled_points = np.asarray(
-            open3d_mesh.sample_points_uniformly(number_of_points=10_000).points
-        )  # (10000, 3) x (x, y, z)
-
-        # Check the number of the points again, and check whether have some
-        # non-finite values.
-        if sampled_points.shape[0] < 4 or not np.all(np.isfinite(sampled_points)):
-            raise ValueError(
-                "Bottle standardization could not sample valid mesh points."
-            )
-
-        centered_points = sampled_points - sampled_points.mean(axis=0)
-        # SVD find the longest axis.
-        _, _, principal_axes = np.linalg.svd(centered_points, full_matrices=False)
-        if np.linalg.det(principal_axes) < 0:
-            principal_axes[2, :] *= -1  # in case the SVD returns a reflection.
-
-        bottle_rotation = Rotation.from_euler(
-            "y", 90.0, degrees=True
-        ).as_matrix()  # 3x3 matrix
-        # The first PCA axis is the longest axis; rotate it onto the temporary z axis.
-        bottle_rotation = bottle_rotation @ principal_axes
-        standardized_points = (bottle_rotation @ centered_points.T).T
-
-        axis_min = standardized_points[:, 2].min()
-        axis_max = standardized_points[:, 2].max()
-        axis_range = axis_max - axis_min
-        upper_points = standardized_points[
-            standardized_points[:, 2] > axis_min + axis_range * 0.8
-        ]
-        lower_points = standardized_points[
-            standardized_points[:, 2] < axis_min + axis_range * 0.2
-        ]
-        upper_volume = SimReadySceneProcessor._convex_hull_volume(upper_points)
-        lower_volume = SimReadySceneProcessor._convex_hull_volume(lower_points)
-
-        # Bottles usually have a smaller top (neck) than bottom; flip if necessary.
-        if upper_volume > lower_volume:
-            bottle_rotation = (
-                Rotation.from_euler("x", 180.0, degrees=True).as_matrix()
-                @ bottle_rotation
-            )
-        return bottle_rotation
-
-    @staticmethod
-    def _convex_hull_volume(points: np.ndarray) -> float:
-        """Return the volume of a non-degenerate point set's convex hull."""
-        if points.shape[0] < 4:
-            raise ValueError(
-                "Bottle standardization needs at least four points per end."
-            )
-        try:
-            return float(ConvexHull(points).volume)
-        except QhullError as exc:
-            raise ValueError(
-                "Bottle standardization found a degenerate end volume."
-            ) from exc
 
     @staticmethod
     def _three_floats(value: object, *, field_name: str) -> list[float]:
