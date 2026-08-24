@@ -25,6 +25,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     Affordance,
     AntipodalAffordance,
     AssembleAffordance,
+    AxisAlignAffordance,
     InteractionPoints,
     PressAffordance,
     SlideAffordance,
@@ -48,6 +49,40 @@ class TestAffordance:
 
 
 class TestAntipodalAffordance:
+    @staticmethod
+    def _long_box_mesh() -> tuple[torch.Tensor, torch.Tensor]:
+        vertices = torch.tensor(
+            [
+                [-0.1, -0.1, -1.0],
+                [0.1, -0.1, -1.0],
+                [0.1, 0.1, -1.0],
+                [-0.1, 0.1, -1.0],
+                [-0.1, -0.1, 1.0],
+                [0.1, -0.1, 1.0],
+                [0.1, 0.1, 1.0],
+                [-0.1, 0.1, 1.0],
+            ],
+            dtype=torch.float32,
+        )
+        triangles = torch.tensor(
+            [
+                [0, 1, 2],
+                [0, 2, 3],
+                [4, 6, 5],
+                [4, 7, 6],
+                [0, 4, 5],
+                [0, 5, 1],
+                [1, 5, 6],
+                [1, 6, 2],
+                [2, 6, 7],
+                [2, 7, 3],
+                [3, 7, 4],
+                [3, 4, 0],
+            ],
+            dtype=torch.long,
+        )
+        return vertices, triangles
+
     def test_stores_mesh_fields_directly(self):
         v = torch.randn(8, 3)
         t = torch.randint(0, 8, (5, 3))
@@ -70,6 +105,49 @@ class TestAntipodalAffordance:
     def test_requires_mesh_fields_together(self):
         with pytest.raises(ValueError, match="provided together"):
             AntipodalAffordance(mesh_vertices=torch.zeros(3, 3))
+
+    def test_surface_svd_uses_at_most_1000_points_in_current_pose(self):
+        vertices, triangles = self._long_box_mesh()
+        affordance = AntipodalAffordance(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
+        )
+        first_points = affordance.sample_surface_points(max_points=1000)
+        second_points = affordance.sample_surface_points(max_points=1000)
+        poses = torch.eye(4).repeat(2, 1, 1)
+        poses[1, :3, :3] = torch.tensor(
+            [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+        )
+
+        axes = affordance.get_object_longest_axis(poses, max_points=1000)
+
+        assert first_points.shape == (1000, 3)
+        assert torch.equal(first_points, second_points)
+        assert torch.abs(axes[0, 2]) > 0.99
+        assert torch.abs(axes[1, 0]) > 0.99
+
+
+class TestAxisAlignAffordance:
+    def test_extends_antipodal_affordance_with_owned_internal_axis(self):
+        internal_axis = torch.tensor([1.0, 0.0, 0.0])
+
+        affordance = AxisAlignAffordance(internal_axis=internal_axis)
+        internal_axis[0] = 0.0
+
+        assert isinstance(affordance, AntipodalAffordance)
+        assert torch.equal(affordance.internal_axis, torch.tensor([1.0, 0.0, 0.0]))
+
+    @pytest.mark.parametrize(
+        "internal_axis",
+        (
+            torch.zeros(3),
+            torch.tensor([float("nan"), 0.0, 0.0]),
+            torch.zeros(2),
+        ),
+    )
+    def test_rejects_invalid_internal_axis(self, internal_axis):
+        with pytest.raises(ValueError, match="internal_axis"):
+            AxisAlignAffordance(internal_axis=internal_axis)
 
 
 class TestTwistAffordance:

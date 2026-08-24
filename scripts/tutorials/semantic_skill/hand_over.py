@@ -14,14 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Use semantic skills to pick with one arm and hand over to the other.
+"""Use one semantic call to pick, hand over, place, and release an object.
 
-The workflow contains an object-centric ``Pick`` followed by a registered
-dual-arm transfer call. The robot profile chooses the left and right resources;
-an explicit lowerer supplies the atomic HandOver goal and embodiment-specific
-receive behavior at grounding time. :class:`SkillRuntime` executes each
-call from fresh observations and commits transfer state only after physical
-verification.
+The workflow contains one registered dual-arm call. The robot profile chooses
+the two candidate resources; an explicit lowerer supplies the unified atomic
+HandOver goal and final object pose at grounding time.
 """
 
 from __future__ import annotations
@@ -42,8 +39,8 @@ from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     EffectVerificationRequest,
-    GraspGoal,
     HandOver as AtomicHandOver,
+    HandOverGoal,
     HandOverOptions,
     MotionPolicy,
     PlanningContext,
@@ -53,7 +50,6 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.skills import (
     GRASP_AFFORDANCE_CAPABILITY,
-    Pick,
     RegisteredSemanticCall,
     RegisteredSemanticLowerer,
     ResourceBinding,
@@ -99,7 +95,6 @@ from scripts.tutorials.semantic_skill.tutorial_utils import (
     create_manipulator_resource,
     create_runtime_step_observer,
     joint_target_error,
-    object_to_eef_translation_error,
 )
 
 if TYPE_CHECKING:
@@ -107,21 +102,14 @@ if TYPE_CHECKING:
 
 OBJECT_ID = "workpiece"
 OBJECT_SIMULATION_UID = "handover_object"
-PICK_SAMPLE_COUNT = 80
 HANDOVER_SAMPLE_COUNT = 140
-MIDDLE_OBJECT_POSITION = (0.0, 0.0, 0.70)
 FINAL_OBJECT_POSITION = (0.0, -0.20, 0.70)
 OBJECT_QUATERNION_WXYZ = (0.70710678, 0.70710678, 0.0, 0.0)
 HANDOVER_CALL_ID = "tutorial.hand_over"
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
 HANDOVER_LIFT_HEIGHT = 0.08
 HANDOVER_HAND_INTERP_STEPS = 10
-HANDOVER_HOLD_STEPS = 4
-HANDOVER_RETREAT_STEPS = 28
-HANDOVER_RECEIVE_APPROACH_DIRECTION = (0.0, 0.70710678, -0.70710678)
 TRACKING_ERROR_THRESHOLD = 1.0
-MINIMUM_PICK_LIFT = 0.05
-MAXIMUM_HELD_RELATION_ERROR = 0.06
 MAXIMUM_FINAL_POSITION_ERROR = 0.10
 MAXIMUM_HAND_ERROR = 0.03
 POST_EXECUTION_UPDATES = 120
@@ -161,32 +149,20 @@ class TutorialHandOverLowerer(RegisteredSemanticLowerer):
             affordance=grasp_ref,
         )
         device = context.robot.qpos.device
+        final_pose = (
+            SemanticPose(
+                FINAL_OBJECT_POSITION,
+                OBJECT_QUATERNION_WXYZ,
+            )
+            .to_matrix()
+            .to(device)
+        )
         return SemanticLowering(
-            goal=GraspGoal(semantics),
+            goal=HandOverGoal(semantics, target_pose=final_pose),
             skill_options=HandOverOptions(
-                receive_pick_object_part="bottom",
-                middle_object_pose=SemanticPose(
-                    MIDDLE_OBJECT_POSITION,
-                    OBJECT_QUATERNION_WXYZ,
-                )
-                .to_matrix()
-                .to(device),
-                final_object_pose=SemanticPose(
-                    FINAL_OBJECT_POSITION,
-                    OBJECT_QUATERNION_WXYZ,
-                )
-                .to_matrix()
-                .to(device),
                 pre_grasp_distance=HANDOVER_PRE_GRASP_DISTANCE,
                 lift_height=HANDOVER_LIFT_HEIGHT,
                 hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
-                hold_steps=HANDOVER_HOLD_STEPS,
-                retreat_steps=HANDOVER_RETREAT_STEPS,
-                receive_approach_direction=torch.tensor(
-                    HANDOVER_RECEIVE_APPROACH_DIRECTION,
-                    dtype=torch.float32,
-                    device=device,
-                ),
             ),
         )
 
@@ -194,7 +170,7 @@ class TutorialHandOverLowerer(RegisteredSemanticLowerer):
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the semantic HandOver tutorial."""
     parser = create_tutorial_argument_parser(
-        "Execute and verify semantic Pick -> HandOver through the skill runtime.",
+        "Execute a unified semantic HandOver through the skill runtime.",
         features=("diagnose_plan", "grasp_sampling", "headless_play"),
         default_device="cpu",
         default_renderer="hybrid",
@@ -217,7 +193,7 @@ def create_robot_profile(
         right_grasp: Right-hand joint positions for ``grasp``.
 
     Returns:
-        A dual-arm profile with deterministic Pick and HandOver assignments.
+        A dual-arm profile with deterministic HandOver candidate assignments.
     """
     return RobotSkillProfile(
         profile_id="tutorial.dual_arm",
@@ -244,21 +220,9 @@ def create_robot_profile(
             ),
         },
         defaults={
-            "pick_up": ResourceBinding({"primary": "left"}),
             "hand_over": ResourceBinding({"source": "left", "destination": "right"}),
         },
         presets={
-            "pick": SkillPolicyPreset(
-                "pick",
-                motion_policy=MotionPolicy(
-                    strategy="motion_gen",
-                    sample_count=PICK_SAMPLE_COUNT,
-                ),
-                tracking_policy=TrackingPolicy.joint_position(
-                    in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
-                    terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
-                ),
-            ),
             "hand_over": SkillPolicyPreset(
                 "hand_over",
                 motion_policy=MotionPolicy(
@@ -274,16 +238,15 @@ def create_robot_profile(
                 recovery_policy=RecoveryPolicy(max_action_retries=0),
             ),
         },
-        default_preset="pick",
-        skill_presets={"pick_up": "pick", "hand_over": "hand_over"},
+        default_preset="hand_over",
+        skill_presets={"hand_over": "hand_over"},
     )
 
 
-def create_handover_task() -> tuple[Pick, RegisteredSemanticCall]:
+def create_handover_task() -> tuple[RegisteredSemanticCall]:
     """Declare the robot-independent calls submitted at the application entry."""
     object_ref = SceneObjectRef(OBJECT_ID)
     return (
-        Pick(object=object_ref),
         RegisteredSemanticCall(
             call_id=HANDOVER_CALL_ID,
             arguments={"object": object_ref},
@@ -296,23 +259,19 @@ def create_handover_effect_verifier(
     robot: Robot,
     *,
     left_open: torch.Tensor,
-    right_grasp: torch.Tensor,
+    right_open: torch.Tensor,
 ) -> SemanticEffectVerifier:
-    """Create physical Pick and HandOver verification for the tutorial scene.
+    """Create physical unified-HandOver verification for the tutorial scene.
 
     Args:
         obj: Object transferred between manipulators.
         robot: Dual-arm robot executing the workflow.
         left_open: Source-hand release target.
-        right_grasp: Destination-hand grasp target.
+        right_open: Destination-hand release target.
 
     Returns:
         Runtime callback producing a boolean result per environment.
     """
-    initial_pose = obj.get_local_pose(to_matrix=True)
-    if not isinstance(initial_pose, torch.Tensor) or initial_pose.dim() != 3:
-        raise ValueError("The tutorial object pose must have shape (B, 4, 4).")
-    initial_height = initial_pose[:, 2, 3].clone()
     final_position = torch.tensor(FINAL_OBJECT_POSITION, dtype=torch.float32)
 
     def verify(
@@ -321,28 +280,7 @@ def create_handover_effect_verifier(
         context: PlanningContext,
     ) -> torch.Tensor:
         object_position = obj.get_local_pose(to_matrix=True)[:, :3, 3]
-        if type(call) is Pick and request.skill_id == "pick_up":
-            lift = object_position[:, 2] - initial_height.to(object_position.device)
-            held = request.expected_effects.held_object_updates.get("left_arm")
-            if held is None:
-                raise RuntimeError("Pick verification requires a left-arm attachment.")
-            held_error = object_to_eef_translation_error(
-                obj,
-                robot,
-                motion_control_part="left_arm",
-                expected_object_to_eef=held.object_to_eef,
-            )
-            success = (lift >= MINIMUM_PICK_LIFT) & (
-                held_error <= MAXIMUM_HELD_RELATION_ERROR
-            )
-            logger.log_info(
-                "Semantic Pick verification: "
-                f"lift={lift.detach().cpu().tolist()} m, "
-                "object-to-left-EEF translation error="
-                f"{held_error.detach().cpu().tolist()} m, "
-                f"success={success.detach().cpu().tolist()}."
-            )
-        elif (
+        if (
             type(call) is RegisteredSemanticCall
             and call.call_id == HANDOVER_CALL_ID
             and request.skill_id == "hand_over"
@@ -355,17 +293,6 @@ def create_handover_effect_verifier(
                 ),
                 dim=1,
             )
-            held = request.expected_effects.held_object_updates.get("right_arm")
-            if held is None:
-                raise RuntimeError(
-                    "HandOver verification requires a right-arm attachment."
-                )
-            receiver_error = object_to_eef_translation_error(
-                obj,
-                robot,
-                motion_control_part="right_arm",
-                expected_object_to_eef=held.object_to_eef,
-            )
             source_error = joint_target_error(
                 robot,
                 control_part="left_hand",
@@ -374,21 +301,18 @@ def create_handover_effect_verifier(
             receiver_hand_error = joint_target_error(
                 robot,
                 control_part="right_hand",
-                target=right_grasp,
+                target=right_open,
             )
             success = (
                 (final_error <= MAXIMUM_FINAL_POSITION_ERROR)
-                & (receiver_error <= MAXIMUM_HELD_RELATION_ERROR)
                 & (source_error <= MAXIMUM_HAND_ERROR)
                 & (receiver_hand_error <= MAXIMUM_HAND_ERROR)
             )
             logger.log_info(
                 "Semantic HandOver verification: "
                 f"final_error={final_error.detach().cpu().tolist()} m, "
-                "object-to-right-EEF translation error="
-                f"{receiver_error.detach().cpu().tolist()} m, "
                 f"source_open_error={source_error.detach().cpu().tolist()} rad, "
-                "receiver_grasp_error="
+                "receiver_open_error="
                 f"{receiver_hand_error.detach().cpu().tolist()} rad, "
                 f"success={success.detach().cpu().tolist()}."
             )
@@ -477,7 +401,7 @@ def create_handover_application(
             obj,
             robot,
             left_open=left_open,
-            right_grasp=right_grasp,
+            right_open=right_open,
         ),
         registered_lowerers=(TutorialHandOverLowerer(registry),),
         control_dt=TRAJECTORY_SIM_STEPS * simulation.sim_config.physics_dt,
@@ -525,7 +449,7 @@ def main() -> None:
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
-        "Inspect the scene, then press Enter to execute Pick -> HandOver...",
+        "Inspect the scene, then press Enter to execute unified HandOver...",
     )
     for _ in range(20):
         sim.update(step=10)
@@ -569,7 +493,7 @@ def main() -> None:
     finally:
         stop_auto_play_recording(sim, recording_started)
     logger.log_info(
-        "Closed-loop semantic Pick -> HandOver completed with "
+        "Closed-loop semantic HandOver completed with "
         f"{sum(call.command_count for call in result.segments[0].calls)} "
         "accepted commands.",
         color="green",
