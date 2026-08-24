@@ -17,14 +17,21 @@
 
 from __future__ import annotations
 
+from collections import deque
 import json
 from pathlib import Path
 import shutil
 
+import matplotlib
 import numpy as np
 from scipy.spatial.transform import Rotation
 import trimesh
 from shapely.geometry import Polygon
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
@@ -48,11 +55,20 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
     GravitySettleBody,
     GravitySettler,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optimizer import (
+    ParentSurfaceLayoutOptimizer,
+    ParentSurfaceLayoutProblem,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
     load_glb_mesh,
     quaternion_wxyz_to_euler_xyz_degrees,
     transform_matrix_to_layout_object,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    measure_scene_object_z_up_world_aabb,
+    scene_object_y_up_layout,
+    update_scene_object_y_up_pose_from_z_up_support,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessor,
@@ -216,8 +232,55 @@ def _generate_coarse_results_from_masks(
         json.dumps(coarse_layout, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    _write_baked_coarse_layout_debug_glbs(
+        coarse_layout=coarse_layout,
+        coarse_geometry_root=coarse_geometry_output_root,
+        debug_output_root=debug_output_root,
+    )
     # Nothing to be returned.
     return None
+
+
+def _write_baked_coarse_layout_debug_glbs(
+    *,
+    coarse_layout: list[dict[str, object]],
+    coarse_geometry_root: str | Path,
+    debug_output_root: str | Path,
+) -> Path:
+    """Write per-object and combined GLBs with each coarse pose baked in."""
+    resolved_geometry_root = Path(coarse_geometry_root).expanduser().resolve()
+    baked_root = (
+        Path(debug_output_root).expanduser().resolve() / "coarse_layout_baked_glbs"
+    )
+    baked_root.mkdir(parents=True, exist_ok=True)
+
+    baked_scene = trimesh.Scene()
+    baked_object_ids: set[str] = set()
+    for layout_object in coarse_layout:
+        object_id = layout_object.get("id")
+        if not isinstance(object_id, str) or not object_id:
+            raise ValueError(
+                "Each coarse layout object must contain a non-empty string id."
+            )
+        if object_id in baked_object_ids:
+            raise ValueError(f"Coarse layout contains duplicate id {object_id!r}.")
+        baked_object_ids.add(object_id)
+
+        # The geometry server declares these poses in the GLB y-up convention.
+        baked_mesh = load_glb_mesh(resolved_geometry_root / f"{object_id}.glb")
+        baked_mesh.apply_transform(layout_object_to_transform_matrix(layout_object))
+        baked_mesh.export(baked_root / f"{object_id}.glb", file_type="glb")
+        baked_scene.add_geometry(
+            baked_mesh,
+            node_name=object_id,
+            geom_name=object_id,
+        )
+
+    if not baked_object_ids:
+        raise ValueError("Cannot write baked coarse debug GLBs for an empty layout.")
+    baked_scene.export(baked_root / "scene.glb", file_type="glb")
+    log_info(f"Wrote baked coarse-pose debug GLBs: {baked_root}")
+    return baked_root
 
 
 def _update_scene_final_y_up_layout_and_z_up_centers(
@@ -376,19 +439,39 @@ def _layout_refinement(
         assets_layout=refined_assets_layout,
     )
 
-    # 4. Move all assets as one rigid group so its lowest AABB point is 2cm above
-    # the table. This preserves the initial relative poses for the later
-    # gravity simulation, which can settle individual assets physically.
+    # 4. Only direct on-table children participate in the table-level layout
+    # stages. Their descendants follow each solved root transform until their
+    # own parent-surface optimization is introduced in a later BFS pass.
+    table_root_ids = _table_on_asset_ids(scene_graph=scene_graph, table_id=table_id)
+    table_root_layouts = _select_asset_layouts(
+        assets_layout=refined_assets_layout,
+        asset_ids=table_root_ids,
+    )
+    if not table_root_layouts:
+        log_info("Scene has no on-table assets; skipping table layout refinement.")
+        return refined_table_layout, refined_assets_layout
 
+    # Move the direct on-table assets as one rigid group so their lowest AABB
+    # point is 2cm above the table. Descendants retain their relative transforms.
+    table_root_matrices_before_align = _layout_matrices_by_id(table_root_layouts)
     group_table_aligner = AssetsGroupTableAligner(
         table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,
+        assets_layout=table_root_layouts,
         geometry_root=simready_geometry_output_root,
     )
-    refined_table_layout, refined_assets_layout = group_table_aligner.align()
-    if not refined_assets_layout:
-        log_info("Scene has no movable assets; skipping support-region clamping.")
-        return refined_table_layout, []
+    # Align.
+    refined_table_layout, aligned_table_root_layouts = group_table_aligner.align()
+    refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+        scene_graph=scene_graph,
+        assets_layout=refined_assets_layout,
+        updated_root_layouts=aligned_table_root_layouts,
+        root_matrices_before_update=table_root_matrices_before_align,
+    )
+    # After update the layouts, re-select those who are direct on-table children.
+    table_root_layouts = _select_asset_layouts(
+        assets_layout=refined_assets_layout,
+        asset_ids=table_root_ids,
+    )
 
     # 5. Reuse support geometry detected during SimReady processing.
     if (
@@ -406,60 +489,91 @@ def _layout_refinement(
         or table_optimization_rectangle.is_empty
     ):
         raise ValueError("Scene table optimization rectangle is not valid.")
-    _, assets_aabb_2d_z_up_world_corners_by_id = (
+    _, table_root_aabb_2d_z_up_world_corners_by_id = (
         _measure_table_and_assets_in_z_up_world(
             table_layout=refined_table_layout,
-            assets_layout=refined_assets_layout,
+            assets_layout=table_root_layouts,
             geometry_root=simready_geometry_output_root,
         )
     )
 
-    # 6. Keep the complete clutter rigid in the table plane.  A successful
-    # result applies one shared z-up XY delta to every AABB, so it preserves
-    # all existing asset-to-asset relations.  It is *not* an asset packing
-    # pass: pre-existing overlap is deliberately left to a later optimizer.
+    # 6. Keep the direct on-table clutter rigid in the table plane. A successful
+    # result applies one shared z-up XY delta to every root AABB, and the same
+    # transform is propagated to each root's descendants. It is *not* an asset
+    # packing pass: pre-existing overlap is deliberately left to a later optimizer.
+    table_root_matrices_before_clamp = _layout_matrices_by_id(table_root_layouts)
     group_clamp = AssetsGroupSupportClamp(
         support_region=table_support_polygon,
         assets_aabb_2d_z_up_world_corners_by_id=(
-            assets_aabb_2d_z_up_world_corners_by_id
+            table_root_aabb_2d_z_up_world_corners_by_id
         ),
-        assets_layout=refined_assets_layout,
+        assets_layout=table_root_layouts,
         debug_output_root=debug_output_root,
     )
-    refined_assets_layout = group_clamp.clamp()
+    # Clamp.
+    clamped_table_root_layouts = group_clamp.clamp()
+    # Save debug images.
     group_clamp.save_group_clamp_debug_images()
+    # Update to descendants.
+    refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+        scene_graph=scene_graph,
+        assets_layout=refined_assets_layout,
+        updated_root_layouts=clamped_table_root_layouts,
+        root_matrices_before_update=table_root_matrices_before_clamp,
+    )
+    # Re-select.
+    table_root_layouts = _select_asset_layouts(
+        assets_layout=refined_assets_layout,
+        asset_ids=table_root_ids,
+    )
 
     # The clamp returns y-up layouts; measure their resulting z-up AABBs again
     # so the following independent optimizer consumes the same world-frame
     # geometry as every other stage.
-    _, clamped_assets_aabb_2d_z_up_world_corners_by_id = (
+    _, clamped_table_root_aabb_2d_z_up_world_corners_by_id = (
         _measure_table_and_assets_in_z_up_world(
             table_layout=refined_table_layout,
-            assets_layout=refined_assets_layout,
+            assets_layout=table_root_layouts,
             geometry_root=simready_geometry_output_root,
         )
     )
 
-    # 7. Optimize independent asset positions inside the conservative rectangle.
+    # 7. Optimize independent on-table root positions inside the conservative
+    # rectangle.
     # The clamp above already used the exact outer contour for the shared shift.
+    table_root_matrices_before_optimization = _layout_matrices_by_id(table_root_layouts)
     overlap_optimizer = AssetsSupportLayoutOptimizer(
         support_region=table_optimization_rectangle,
         assets_aabb_2d_z_up_world_corners_by_id=(
-            clamped_assets_aabb_2d_z_up_world_corners_by_id
+            clamped_table_root_aabb_2d_z_up_world_corners_by_id
         ),
-        assets_layout=refined_assets_layout,
+        assets_layout=table_root_layouts,
         debug_output_root=debug_output_root,
     )
     # Render this stage separately from the rigid group clamp.  The latter
     # intentionally preserves pre-existing overlaps, while this figure shows
     # whether independent AABB separation actually resolved them.
-    refined_assets_layout = overlap_optimizer.optimize()
+    optimized_table_root_layouts = overlap_optimizer.optimize()
+    # Save debug image.
     overlap_optimizer.save_overlap_optimization_debug_images()
+    # Update.
+    refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+        scene_graph=scene_graph,
+        assets_layout=refined_assets_layout,
+        updated_root_layouts=optimized_table_root_layouts,
+        root_matrices_before_update=table_root_matrices_before_optimization,
+    )
+    # Re-select.
+    table_root_layouts = _select_asset_layouts(
+        assets_layout=refined_assets_layout,
+        asset_ids=table_root_ids,
+    )
 
-    # 8. The initial image graph has one on-table level, so every asset settles
-    # dynamically against the table in this first generic gravity pass.
+    # 8. Settle only the direct on-table roots. Their unoptimized descendants
+    # stay outside this simulation and inherit each root's final pose delta.
     assets_by_id = {asset.id: asset for asset in scene.assets}
-    # All the assets are dynamic; the table is static.
+    table_root_matrices_before_settle = _layout_matrices_by_id(table_root_layouts)
+    # Settle.
     settled_pose_by_id = GravitySettler(
         table_body=GravitySettleBody(
             scene_object=scene.table,
@@ -470,17 +584,40 @@ def _layout_refinement(
                 scene_object=assets_by_id[str(asset_layout["id"])],
                 y_up_layout=asset_layout,
             )
-            for asset_layout in refined_assets_layout
+            for asset_layout in table_root_layouts
         ],
-        dynamic_asset_ids=set(assets_by_id),
+        dynamic_asset_ids=set(table_root_ids),
         static_asset_ids=set(),
     ).settle()
-    # Update.
-    for asset_layout in refined_assets_layout:
+    settled_table_root_layouts: list[dict[str, object]] = []
+    for asset_layout in table_root_layouts:
         asset_id = str(asset_layout["id"])
         settled_pose = settled_pose_by_id[asset_id]
-        asset_layout["pos"] = settled_pose["pos"]
-        asset_layout["rot"] = settled_pose["rot"]
+        settled_table_root_layouts.append(
+            {
+                **asset_layout,
+                "pos": settled_pose["pos"],
+                "rot": settled_pose["rot"],
+            }
+        )
+    # Update the descendants.
+    refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+        scene_graph=scene_graph,
+        assets_layout=refined_assets_layout,
+        updated_root_layouts=settled_table_root_layouts,
+        root_matrices_before_update=table_root_matrices_before_settle,
+    )
+
+    # 9. The table roots are now stable, so refine each non-table on-parent
+    # group in BFS order. Every child begins only after its parent is current.
+    refined_assets_layout = _refine_on_children_bfs(
+        scene=scene,
+        scene_graph=scene_graph,
+        table_layout=refined_table_layout,
+        assets_layout=refined_assets_layout,
+        table_root_ids=table_root_ids,
+        debug_output_root=debug_output_root,
+    )
 
     # Update the scene data structure with the final layout and spatial metadata.
     _update_scene_final_y_up_layout_and_z_up_centers(
@@ -490,6 +627,489 @@ def _layout_refinement(
         geometry_root=simready_geometry_output_root,
     )
     return refined_table_layout, refined_assets_layout
+
+
+def _refine_on_children_bfs(
+    *,
+    scene: Scene,
+    scene_graph: SceneGraph,
+    table_layout: dict[str, object],
+    assets_layout: list[dict[str, object]],
+    table_root_ids: set[str],
+    debug_output_root: str | Path,
+) -> list[dict[str, object]]:
+    """Refine every non-table ``on`` group after its parent has settled."""
+    if scene.table is None:
+        raise ValueError("Cannot refine parent-surface groups without a table.")
+    _sync_scene_y_up_poses_from_layouts(
+        scene=scene,
+        table_layout=table_layout,
+        assets_layout=assets_layout,
+    )
+    assets_by_id = {asset.id: asset for asset in scene.assets}
+    children_by_parent: dict[str, list[str]] = {}
+    for node in scene_graph.nodes:
+        if node.parent_id is not None and node.parent_relation == "on":
+            children_by_parent.setdefault(node.parent_id, []).append(node.object_id)
+
+    parent_surface_optimizer = ParentSurfaceLayoutOptimizer()
+    pending_parent_ids = deque(table_root_ids)
+    refined_assets_layout = assets_layout
+    while pending_parent_ids:
+        parent_id = pending_parent_ids.popleft()
+        child_ids = children_by_parent.get(parent_id, [])
+        if not child_ids:
+            continue
+        parent = assets_by_id.get(parent_id)
+        if parent is None:
+            raise ValueError(f"Non-table parent {parent_id!r} is not an asset.")
+
+        parent_aabb = measure_scene_object_z_up_world_aabb(scene_object=parent)
+        parent_aabb_xy = [
+            [float(parent_aabb[0][0]), float(parent_aabb[0][1])],
+            [float(parent_aabb[1][0]), float(parent_aabb[1][1])],
+        ]
+        child_aabbs_xy_by_id = {
+            child_id: _scene_object_z_up_aabb_xy(scene_object=assets_by_id[child_id])
+            for child_id in child_ids
+        }
+        child_seed_xy_by_id, projected_child_aabbs_xy_by_id = (
+            _project_child_aabb_centers_into_parent_aabb(
+                parent_aabb_xy=parent_aabb_xy,
+                child_aabbs_xy_by_id=child_aabbs_xy_by_id,
+            )
+        )
+        projected_child_ids = [
+            child_id
+            for child_id in child_ids
+            if not np.allclose(
+                child_aabbs_xy_by_id[child_id],
+                projected_child_aabbs_xy_by_id[child_id],
+            )
+        ]
+        if projected_child_ids:
+            log_info(
+                "Projected "
+                f"{len(projected_child_ids)} child AABBs into parent {parent_id!r}: "
+                f"{projected_child_ids}."
+            )
+        else:
+            log_info(
+                f"All direct children are already inside parent {parent_id!r}'s AABB."
+            )
+        _render_parent_child_aabb_transition(
+            parent_id=parent_id,
+            parent_aabb_xy=parent_aabb_xy,
+            before_child_aabbs_xy_by_id=child_aabbs_xy_by_id,
+            after_child_aabbs_xy_by_id=projected_child_aabbs_xy_by_id,
+            before_title="Before parent-AABB projection",
+            after_title="After parent-AABB projection",
+            output_path=(
+                Path(debug_output_root)
+                / f"parent_{parent_id}_child_aabb_projection_2d.png"
+            ),
+        )
+        child_id_set = set(child_ids)
+        # All image-observed children are movable and start from their nearest
+        # parent-AABB-valid image seed.
+        parent_surface_problem = ParentSurfaceLayoutProblem(
+            assets_by_id=assets_by_id,
+            child_ids=child_ids,
+            child_seed_xy_by_id=child_seed_xy_by_id,
+            imported_child_ids=child_id_set,
+            fixed_child_xy_by_id={child_id: None for child_id in child_ids},
+            parent_aabb_xy=parent_aabb_xy,
+            parent_top_z=float(parent_aabb[1][2]),
+            child_relations=[
+                relation
+                for relation in scene_graph.relations
+                if relation.source_id in child_id_set
+                and relation.target_id in child_id_set
+            ],
+        )
+        solved_child_xy_by_id = parent_surface_optimizer.optimize(
+            parent_surface_problem
+        )
+        optimized_child_aabbs_xy_by_id = {
+            child_id: _translated_aabb_xy(
+                aabb_xy=projected_child_aabbs_xy_by_id[child_id],
+                delta_xy=(
+                    np.asarray(solved_child_xy_by_id[child_id], dtype=float)
+                    - np.asarray(child_seed_xy_by_id[child_id], dtype=float)
+                ),
+            )
+            for child_id in child_ids
+        }
+        _render_parent_child_aabb_transition(
+            parent_id=parent_id,
+            parent_aabb_xy=parent_aabb_xy,
+            before_child_aabbs_xy_by_id=projected_child_aabbs_xy_by_id,
+            after_child_aabbs_xy_by_id=optimized_child_aabbs_xy_by_id,
+            before_title="Before parent-child AABB optimization",
+            after_title="After parent-child AABB optimization",
+            output_path=(
+                Path(debug_output_root)
+                / f"parent_{parent_id}_child_aabb_optimization_2d.png"
+            ),
+        )
+
+        child_matrices_before_placement = _layout_matrices_by_id(
+            _select_asset_layouts(
+                assets_layout=refined_assets_layout,
+                asset_ids=child_id_set,
+            )
+        )
+        for child_id, solved_xy in solved_child_xy_by_id.items():
+            # Place each child above the parent's current top before gravity settles it.
+            update_scene_object_y_up_pose_from_z_up_support(
+                scene_object=assets_by_id[child_id],
+                support_region_z=parent_surface_problem.parent_top_z,
+                center_xy=solved_xy,
+                clearance_m=0.02,
+            )
+        refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+            scene_graph=scene_graph,
+            assets_layout=refined_assets_layout,
+            updated_root_layouts=[
+                scene_object_y_up_layout(assets_by_id[child_id])
+                for child_id in child_ids
+            ],
+            root_matrices_before_update=child_matrices_before_placement,
+        )
+        _sync_scene_y_up_poses_from_layouts(
+            scene=scene,
+            table_layout=table_layout,
+            assets_layout=refined_assets_layout,
+        )
+
+        child_matrices_before_settle = _layout_matrices_by_id(
+            _select_asset_layouts(
+                assets_layout=refined_assets_layout,
+                asset_ids=child_id_set,
+            )
+        )
+        settled_pose_by_id = parent_surface_optimizer.settle_dynamic_children(
+            table=scene.table,
+            parent=parent,
+            problem=parent_surface_problem,
+            dynamic_child_ids=child_id_set,
+        )
+        for child_id, settled_pose in settled_pose_by_id.items():
+            assets_by_id[child_id].pos = settled_pose["pos"]
+            assets_by_id[child_id].rot = settled_pose["rot"]
+        refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+            scene_graph=scene_graph,
+            assets_layout=refined_assets_layout,
+            updated_root_layouts=[
+                scene_object_y_up_layout(assets_by_id[child_id])
+                for child_id in child_ids
+            ],
+            root_matrices_before_update=child_matrices_before_settle,
+        )
+        _sync_scene_y_up_poses_from_layouts(
+            scene=scene,
+            table_layout=table_layout,
+            assets_layout=refined_assets_layout,
+        )
+        pending_parent_ids.extend(child_ids)
+
+    return refined_assets_layout
+
+
+def _sync_scene_y_up_poses_from_layouts(
+    *,
+    scene: Scene,
+    table_layout: dict[str, object],
+    assets_layout: list[dict[str, object]],
+) -> None:
+    """Synchronize current y-up poses without rewriting final spatial metadata."""
+    if scene.table is None:
+        raise ValueError("Cannot synchronize layouts without a table.")
+    _copy_y_up_layout_to_scene_object(scene.table, table_layout)
+    assets_by_id = {asset.id: asset for asset in scene.assets}
+    synced_asset_ids: set[str] = set()
+    for asset_layout in assets_layout:
+        asset_id = asset_layout.get("id")
+        asset = assets_by_id.get(asset_id)
+        if asset is None:
+            raise ValueError(f"Current layout contains unknown asset {asset_id!r}.")
+        if asset_id in synced_asset_ids:
+            raise ValueError(f"Current layout contains duplicate asset {asset_id!r}.")
+        _copy_y_up_layout_to_scene_object(asset, asset_layout)
+        synced_asset_ids.add(asset_id)
+    if synced_asset_ids != set(assets_by_id):
+        raise ValueError("Current layouts do not cover every scene asset.")
+
+
+def _scene_object_z_up_aabb_xy(*, scene_object: SceneObject) -> np.ndarray:
+    """Measure one current scene object's z-up XY AABB bounds."""
+    aabb = measure_scene_object_z_up_world_aabb(scene_object=scene_object)
+    return np.asarray(
+        [
+            [float(aabb[0][0]), float(aabb[0][1])],
+            [float(aabb[1][0]), float(aabb[1][1])],
+        ]
+    )
+
+
+def _project_child_aabb_centers_into_parent_aabb(
+    *,
+    parent_aabb_xy: list[list[float]],
+    child_aabbs_xy_by_id: dict[str, np.ndarray],
+) -> tuple[dict[str, list[float]], dict[str, np.ndarray]]:
+    """Project child AABB centers to their nearest parent-AABB-valid positions."""
+    parent_bounds = np.asarray(parent_aabb_xy, dtype=float)
+    if parent_bounds.shape != (2, 2) or not np.all(np.isfinite(parent_bounds)):
+        raise ValueError("Parent AABB must contain two finite XY corners.")
+    parent_minimum, parent_maximum = parent_bounds
+    projected_center_xy_by_id: dict[str, list[float]] = {}
+    projected_aabbs_xy_by_id: dict[str, np.ndarray] = {}
+    for child_id, child_aabb_xy in child_aabbs_xy_by_id.items():
+        child_bounds = np.asarray(child_aabb_xy, dtype=float)
+        if child_bounds.shape != (2, 2) or not np.all(np.isfinite(child_bounds)):
+            raise ValueError(f"Child {child_id!r} has an invalid XY AABB.")
+        child_minimum, child_maximum = child_bounds
+        half_extents_xy = (child_maximum - child_minimum) / 2.0
+        center_xy = (child_minimum + child_maximum) / 2.0
+        legal_minimum = parent_minimum + half_extents_xy
+        legal_maximum = parent_maximum - half_extents_xy
+        if np.any(legal_minimum > legal_maximum):
+            raise ValueError(f"Asset {child_id!r} cannot fit inside its parent AABB.")
+        projected_center_xy = np.clip(center_xy, legal_minimum, legal_maximum)
+        projected_center_xy_by_id[child_id] = projected_center_xy.tolist()
+        projected_aabbs_xy_by_id[child_id] = _translated_aabb_xy(
+            aabb_xy=child_bounds,
+            delta_xy=projected_center_xy - center_xy,
+        )
+    return projected_center_xy_by_id, projected_aabbs_xy_by_id
+
+
+def _translated_aabb_xy(*, aabb_xy: np.ndarray, delta_xy: np.ndarray) -> np.ndarray:
+    """Translate one validated XY AABB by a finite two-dimensional delta."""
+    bounds = np.asarray(aabb_xy, dtype=float)
+    delta = np.asarray(delta_xy, dtype=float)
+    if bounds.shape != (2, 2) or delta.shape != (2,):
+        raise ValueError(
+            "AABB translation requires two XY corners and a two-value delta."
+        )
+    if not np.all(np.isfinite(bounds)) or not np.all(np.isfinite(delta)):
+        raise ValueError("AABB translation requires finite values.")
+    return bounds + delta
+
+
+def _render_parent_child_aabb_transition(
+    *,
+    parent_id: str,
+    parent_aabb_xy: list[list[float]],
+    before_child_aabbs_xy_by_id: dict[str, np.ndarray],
+    after_child_aabbs_xy_by_id: dict[str, np.ndarray],
+    before_title: str,
+    after_title: str,
+    output_path: str | Path,
+) -> None:
+    """Render one parent AABB and its direct-child AABBs before and after a stage."""
+    parent_bounds = np.asarray(parent_aabb_xy, dtype=float)
+    if parent_bounds.shape != (2, 2) or not np.all(np.isfinite(parent_bounds)):
+        raise ValueError("Parent AABB must contain two finite XY corners.")
+    if set(before_child_aabbs_xy_by_id) != set(after_child_aabbs_xy_by_id):
+        raise ValueError("Parent-child debug AABB states must contain identical IDs.")
+
+    output = Path(output_path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure, axes = plt.subplots(1, 2, figsize=(14, 7), dpi=160, constrained_layout=True)
+    for axis, child_aabbs_xy_by_id, title, color in (
+        (axes[0], before_child_aabbs_xy_by_id, before_title, "tab:blue"),
+        (axes[1], after_child_aabbs_xy_by_id, after_title, "tab:green"),
+    ):
+        _draw_parent_child_aabb_state(
+            axis=axis,
+            parent_id=parent_id,
+            parent_bounds=parent_bounds,
+            child_aabbs_xy_by_id=child_aabbs_xy_by_id,
+            title=title,
+            child_color=color,
+        )
+    figure.savefig(output, bbox_inches="tight")
+    plt.close(figure)
+
+
+def _draw_parent_child_aabb_state(
+    *,
+    axis: object,
+    parent_id: str,
+    parent_bounds: np.ndarray,
+    child_aabbs_xy_by_id: dict[str, np.ndarray],
+    title: str,
+    child_color: str,
+) -> None:
+    """Draw one parent AABB and direct children in a single z-up XY panel."""
+    parent_minimum, parent_maximum = parent_bounds
+    axis.add_patch(
+        Rectangle(
+            parent_minimum,
+            *(parent_maximum - parent_minimum),
+            facecolor="tab:orange",
+            edgecolor="saddlebrown",
+            alpha=0.25,
+            linewidth=2.0,
+        )
+    )
+    axis.text(
+        *parent_bounds.mean(axis=0),
+        parent_id,
+        ha="center",
+        va="center",
+        fontsize=10,
+        bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+    )
+    all_bounds = [parent_bounds]
+    for child_id, child_aabb_xy in child_aabbs_xy_by_id.items():
+        child_bounds = np.asarray(child_aabb_xy, dtype=float)
+        if child_bounds.shape != (2, 2) or not np.all(np.isfinite(child_bounds)):
+            raise ValueError(f"Child {child_id!r} has an invalid debug XY AABB.")
+        child_minimum, child_maximum = child_bounds
+        axis.add_patch(
+            Rectangle(
+                child_minimum,
+                *(child_maximum - child_minimum),
+                facecolor=child_color,
+                edgecolor=child_color,
+                alpha=0.3,
+                linewidth=1.5,
+            )
+        )
+        axis.text(
+            *child_bounds.mean(axis=0),
+            child_id,
+            ha="center",
+            va="center",
+            fontsize=9,
+            bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+        )
+        all_bounds.append(child_bounds)
+    combined_bounds = np.vstack(all_bounds)
+    padding = max(float(np.ptp(combined_bounds, axis=0).max()) * 0.1, 0.02)
+    axis.set_xlim(
+        combined_bounds[:, 0].min() - padding, combined_bounds[:, 0].max() + padding
+    )
+    axis.set_ylim(
+        combined_bounds[:, 1].min() - padding, combined_bounds[:, 1].max() + padding
+    )
+    axis.set_aspect("equal", adjustable="box")
+    axis.set_xlabel("x (z-up world)")
+    axis.set_ylabel("y (z-up world)")
+    axis.set_title(title)
+    axis.grid(True, alpha=0.25)
+
+
+def _table_on_asset_ids(*, scene_graph: SceneGraph, table_id: str) -> set[str]:
+    """Return the IDs of assets that directly rest on the table."""
+    return {
+        node.object_id
+        for node in scene_graph.nodes
+        if node.parent_id == table_id and node.parent_relation == "on"
+    }
+
+
+def _select_asset_layouts(
+    *,
+    assets_layout: list[dict[str, object]],
+    asset_ids: set[str],
+) -> list[dict[str, object]]:
+    """Return the requested asset layouts without discarding other scene assets."""
+    selected_assets_layout = [
+        asset_layout
+        for asset_layout in assets_layout
+        if asset_layout.get("id") in asset_ids
+    ]
+    selected_ids = {
+        asset_id
+        for asset_layout in selected_assets_layout
+        if isinstance(asset_id := asset_layout.get("id"), str)
+    }
+    if selected_ids != asset_ids:
+        raise ValueError(
+            "Scene graph on-table assets and refined asset layouts do not match."
+        )
+    return selected_assets_layout
+
+
+def _layout_matrices_by_id(
+    assets_layout: list[dict[str, object]],
+) -> dict[str, np.ndarray]:
+    """Return complete layout transforms keyed by their validated asset IDs."""
+    matrices_by_id: dict[str, np.ndarray] = {}
+    for asset_layout in assets_layout:
+        asset_id = asset_layout.get("id")
+        if not isinstance(asset_id, str) or not asset_id:
+            raise ValueError("Each asset layout must contain a non-empty string id.")
+        if asset_id in matrices_by_id:
+            raise ValueError(f"Asset layouts repeat id {asset_id!r}.")
+        matrices_by_id[asset_id] = layout_object_to_transform_matrix(asset_layout)
+    return matrices_by_id
+
+
+def _apply_root_layout_updates_to_descendant_subtrees(
+    *,
+    scene_graph: SceneGraph,
+    assets_layout: list[dict[str, object]],
+    updated_root_layouts: list[dict[str, object]],
+    root_matrices_before_update: dict[str, np.ndarray],
+) -> list[dict[str, object]]:
+    """Replace solved root layouts and propagate each complete pose delta downward."""
+    assets_layout_by_id = {
+        asset_id: asset_layout
+        for asset_layout in assets_layout
+        if isinstance(asset_id := asset_layout.get("id"), str) and asset_id
+    }
+    if len(assets_layout_by_id) != len(assets_layout):
+        raise ValueError(
+            "Each asset layout must contain one unique non-empty string id."
+        )
+    updated_root_layouts_by_id = {
+        asset_id: asset_layout
+        for asset_layout in updated_root_layouts
+        if isinstance(asset_id := asset_layout.get("id"), str) and asset_id
+    }
+    if len(updated_root_layouts_by_id) != len(updated_root_layouts):
+        raise ValueError("Updated root layouts must have unique non-empty string ids.")
+    if set(updated_root_layouts_by_id) != set(root_matrices_before_update):
+        raise ValueError("Updated root layouts do not match the saved root poses.")
+
+    children_by_parent: dict[str, list[str]] = {}
+    for node in scene_graph.nodes:
+        if node.parent_id is not None:
+            children_by_parent.setdefault(node.parent_id, []).append(node.object_id)
+
+    for root_id, root_layout in updated_root_layouts_by_id.items():
+        if root_id not in assets_layout_by_id:
+            raise ValueError(f"Updated root layout {root_id!r} is not an asset layout.")
+        # Compute the world-frame delta from the previous root pose to the updated root pose.
+        root_matrix_after_update = layout_object_to_transform_matrix(root_layout)
+        root_delta = root_matrix_after_update @ np.linalg.inv(
+            root_matrices_before_update[root_id]
+        )
+        assets_layout_by_id[root_id] = root_layout
+
+        # A parent pose update moves every descendant in the same world frame.
+        pending_descendant_ids = list(children_by_parent.get(root_id, []))
+        while pending_descendant_ids:
+            descendant_id = pending_descendant_ids.pop(0)
+            descendant_layout = assets_layout_by_id.get(descendant_id)
+            if descendant_layout is None:
+                raise ValueError(
+                    f"Scene graph descendant {descendant_id!r} has no asset layout."
+                )
+            assets_layout_by_id[descendant_id] = transform_matrix_to_layout_object(
+                descendant_id,
+                root_delta @ layout_object_to_transform_matrix(descendant_layout),
+            )
+            # Add the next generation of descendants to the pending list.
+            pending_descendant_ids.extend(children_by_parent.get(descendant_id, []))
+
+    return [
+        assets_layout_by_id[str(asset_layout["id"])] for asset_layout in assets_layout
+    ]
 
 
 def _scene_graph_based_calibration(
