@@ -9,6 +9,19 @@ covered by a more focused API-reference page. Prefer curated pages for APIs
 that need deeper explanations or examples. Sphinx obtains signatures and
 summaries here from the canonical Python docstrings.
 
+embodichain.agents.mllm.expert_program
+--------------------------------------
+
+Strict MLLM entry points that inject host-owned integration settings before
+decoding and compiling the constrained Expert Program schema surface.
+
+.. currentmodule:: embodichain.agents.mllm.expert_program
+
+.. autosummary::
+
+   compile_mllm_expert_program
+   decode_mllm_expert_program
+
 embodichain.data.assets.planner_assets
 --------------------------------------
 
@@ -1678,7 +1691,7 @@ embodichain_tasks.expert_program.open_drawer
    ExpertProgramOpenDrawerEnv
 
 embodichain_tasks.expert_program.repeated_pick_place
----------------------------------------------------
+----------------------------------------------------
 
 .. currentmodule:: embodichain_tasks.expert_program.repeated_pick_place
 

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from ..pose_generator import *
 from .antipodal_sampler import *
 from .collision_checker import *

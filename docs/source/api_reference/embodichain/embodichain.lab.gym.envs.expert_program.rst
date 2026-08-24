@@ -159,6 +159,17 @@ barrier is owned by the enclosing parallel node.
 
 .. autoclass:: ExpertProgramValidationError
 
+MLLM frontend
+-------------
+
+The MLLM frontend intentionally accepts only the constrained sequential subset
+of schema version 2. Trusted host code remains responsible for authoring
+parallel structure and selecting the integration.
+
+.. autofunction:: embodichain.agents.mllm.decode_mllm_expert_program
+
+.. autofunction:: embodichain.agents.mllm.compile_mllm_expert_program
+
 Compilation and environment integration
 ---------------------------------------
 

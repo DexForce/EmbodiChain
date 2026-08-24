@@ -22,6 +22,7 @@ import ast
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 import inspect
+import json
 import textwrap
 from types import MethodType, SimpleNamespace
 from typing import Any, ClassVar
@@ -30,12 +31,13 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+from embodichain.agents.mllm import compile_mllm_expert_program
 from embodichain.lab.gym.envs.expert_program import (
     AntipodalGraspAffordanceBinding,
+    CompiledProgram,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
-    ExpertProgramCompiler,
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
     ExpertProgramEnvironmentAdapter,
@@ -903,12 +905,22 @@ def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     )
 
 
-def _evidence_runtime() -> tuple[
+def _evidence_integration() -> ExpertProgramIntegrationCfg:
+    """Return the host-owned integration shared by all frontend paths."""
+    return ExpertProgramIntegrationCfg(
+        robot_profile="evidence_profile",
+        scene_registry="evidence_scene",
+        runtime_preset="evidence",
+    )
+
+
+def _evidence_adapter_runtime() -> tuple[
+    ExpertProgramEnvironmentAdapter,
     ExpertProgramRuntimeAssembly,
     _EvidenceRobot,
     _RigidObject,
 ]:
-    """Assemble the production Pick/Place evidence chain on CPU fixtures."""
+    """Assemble the production adapter and Pick/Place evidence chain."""
     robot = _EvidenceRobot()
     cube = _RigidObject()
     simulation = _Simulation(robot, {"cube_native": cube})
@@ -959,17 +971,21 @@ def _evidence_runtime() -> tuple[
             hold_on_completion=False,
         )
     )
-    assembly = adapter.assemble_runtime(
-        ExpertProgramIntegrationCfg(
-            robot_profile="evidence_profile",
-            scene_registry="evidence_scene",
-            runtime_preset="evidence",
-        )
-    )
+    assembly = adapter.assemble_runtime(_evidence_integration())
     pick_action = assembly.engine.actions["pick_up"]
     place_action = assembly.engine.actions["place"]
     pick_action._plan = MethodType(_pick_evidence_plan, pick_action)
     place_action._plan = MethodType(_place_evidence_plan, place_action)
+    return adapter, assembly, robot, cube
+
+
+def _evidence_runtime() -> tuple[
+    ExpertProgramRuntimeAssembly,
+    _EvidenceRobot,
+    _RigidObject,
+]:
+    """Assemble the production Pick/Place evidence chain on CPU fixtures."""
+    _, assembly, robot, cube = _evidence_adapter_runtime()
     return assembly, robot, cube
 
 
@@ -1139,58 +1155,77 @@ def _python_pick_place_calls() -> tuple[SemanticCallSpec, ...]:
     )
 
 
-def _decoded_pick_place_calls(
-    registry: SceneRegistry,
-) -> tuple[SemanticCallSpec, ...]:
-    """Decode and provider-free compile the config equivalent of Python calls."""
-    config = decode_expert_program(
-        {
-            "schema_version": 2,
-            "program_id": "pick_place_equivalence",
-            "integration": {
-                "robot_profile": "evidence_profile",
-                "scene_registry": "evidence_scene",
-                "runtime_preset": "evidence",
-            },
-            "targets": {
-                "place_target": {
-                    "kind": "cyclic_pose",
-                    "values": [
-                        {
-                            "position": _DIRECT_PLACE_TARGET.position.tolist(),
-                            "quaternion_wxyz": (
-                                _DIRECT_PLACE_TARGET.quaternion_wxyz.tolist()
-                            ),
-                        }
-                    ],
-                }
-            },
-            "program": {
-                "kind": "sequence",
-                "items": [
+def _pick_place_program_data() -> dict[str, object]:
+    """Return the integration-free program shared with the MLLM frontend."""
+    return {
+        "schema_version": 2,
+        "program_id": "pick_place_equivalence",
+        "targets": {
+            "place_target": {
+                "kind": "cyclic_pose",
+                "values": [
                     {
-                        "kind": "invoke",
-                        "call": {"kind": "pick", "object": "cube"},
-                    },
-                    {
-                        "kind": "invoke",
-                        "call": {
-                            "kind": "place",
-                            "object": "cube",
-                            "at": {
-                                "kind": "target_ref",
-                                "target": "place_target",
-                            },
+                        "position": _DIRECT_PLACE_TARGET.position.tolist(),
+                        "quaternion_wxyz": (
+                            _DIRECT_PLACE_TARGET.quaternion_wxyz.tolist()
+                        ),
+                    }
+                ],
+            }
+        },
+        "program": {
+            "kind": "sequence",
+            "items": [
+                {
+                    "kind": "invoke",
+                    "call": {"kind": "pick", "object": "cube"},
+                },
+                {
+                    "kind": "invoke",
+                    "call": {
+                        "kind": "place",
+                        "object": "cube",
+                        "at": {
+                            "kind": "target_ref",
+                            "target": "place_target",
                         },
                     },
-                ],
-            },
-        }
-    )
-    program = ExpertProgramCompiler.from_scene_registry(registry).compile(config)
+                },
+            ],
+        },
+    }
+
+
+def _compiled_program_calls(program: CompiledProgram) -> tuple[SemanticCallSpec, ...]:
+    """Flatten one provider-free compiled program into semantic calls."""
     return tuple(
         compiled_call.call for segment in program for compiled_call in segment.calls
     )
+
+
+def _decoded_pick_place_calls(
+    adapter: ExpertProgramEnvironmentAdapter,
+) -> tuple[SemanticCallSpec, ...]:
+    """Decode and compile the config equivalent of the Python calls."""
+    data = _pick_place_program_data()
+    data["integration"] = {
+        "robot_profile": "evidence_profile",
+        "scene_registry": "evidence_scene",
+        "runtime_preset": "evidence",
+    }
+    return _compiled_program_calls(adapter.compile(decode_expert_program(data)))
+
+
+def _mllm_pick_place_calls(
+    adapter: ExpertProgramEnvironmentAdapter,
+) -> tuple[SemanticCallSpec, ...]:
+    """Compile the same program through the strict MLLM frontend."""
+    program = compile_mllm_expert_program(
+        json.dumps(_pick_place_program_data()),
+        adapter=adapter,
+        integration=_evidence_integration(),
+    )
+    return _compiled_program_calls(program)
 
 
 def _capture_grounded_invocations(
@@ -1215,9 +1250,12 @@ def _run_evidence_pick_place(
     robot: _EvidenceRobot,
     cube: _RigidObject,
     calls: tuple[SemanticCallSpec, ...],
+    *,
+    skills: AtomicSkills | None = None,
 ) -> tuple[SkillResult, HeldObjectState]:
     """Drive one happy-path workflow through accepted commands and live evidence."""
-    result = assembly.runtime.start(calls, workflow_id="pick_place_equivalence")
+    entry = assembly.runtime if skills is None else skills
+    result = entry.start(calls, workflow_id="pick_place_equivalence")
     verified_pick: HeldObjectState | None = None
     for _ in range(32):
         while assembly.command_sink.pending_count:
@@ -1229,7 +1267,7 @@ def _run_evidence_pick_place(
                 verified_pick = result.task_state.get_held_object("manipulator")
             cube.pose[:, 0, 3] = _RELEASE_SEPARATION
         assembly.clock.advance_after_env_step()
-        result = assembly.runtime.step()
+        result = entry.step()
 
     assert result.status is SkillStatus.COMPLETED
     assert verified_pick is not None
@@ -1336,37 +1374,70 @@ def test_simulation_observation_owns_gym_control_cadence() -> None:
     assert context.control_dt == pytest.approx(_STEP_DT)
 
 
-def test_decoded_program_and_python_calls_share_invocations_and_results(
+def test_mllm_config_and_atomic_skills_share_invocations_and_verified_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both frontends reach equivalent core invocations and verified state."""
-    python_assembly, python_robot, python_cube = _evidence_runtime()
-    config_assembly, config_robot, config_cube = _evidence_runtime()
+    """All public frontends reach equivalent invocations and verified state."""
+    (
+        _,
+        python_assembly,
+        python_robot,
+        python_cube,
+    ) = _evidence_adapter_runtime()
+    (
+        config_adapter,
+        config_assembly,
+        config_robot,
+        config_cube,
+    ) = _evidence_adapter_runtime()
+    (
+        mllm_adapter,
+        mllm_assembly,
+        mllm_robot,
+        mllm_cube,
+    ) = _evidence_adapter_runtime()
     python_invocations = _capture_grounded_invocations(monkeypatch, python_assembly)
     config_invocations = _capture_grounded_invocations(monkeypatch, config_assembly)
+    mllm_invocations = _capture_grounded_invocations(monkeypatch, mllm_assembly)
+    runtime_provider = _QuickstartRuntimeProvider(python_assembly.runtime)
+    python_skills = AtomicSkills.from_env(runtime_provider, preset="evidence")
 
     python_result, python_held = _run_evidence_pick_place(
         python_assembly,
         python_robot,
         python_cube,
         _python_pick_place_calls(),
+        skills=python_skills,
     )
     config_result, config_held = _run_evidence_pick_place(
         config_assembly,
         config_robot,
         config_cube,
-        _decoded_pick_place_calls(config_assembly.scene_registry),
+        _decoded_pick_place_calls(config_adapter),
+    )
+    mllm_result, mllm_held = _run_evidence_pick_place(
+        mllm_assembly,
+        mllm_robot,
+        mllm_cube,
+        _mllm_pick_place_calls(mllm_adapter),
     )
 
-    assert len(python_invocations) == len(config_invocations) == 2
-    for python_invocation, config_invocation in zip(
+    assert runtime_provider.presets == ["evidence"]
+    assert (
+        len(python_invocations) == len(config_invocations) == len(mllm_invocations) == 2
+    )
+    for python_invocation, config_invocation, mllm_invocation in zip(
         python_invocations,
         config_invocations,
+        mllm_invocations,
         strict=True,
     ):
         _assert_invocation_equivalent(python_invocation, config_invocation)
+        _assert_invocation_equivalent(python_invocation, mllm_invocation)
     _assert_typed_equivalent(python_held, config_held)
+    _assert_typed_equivalent(python_held, mllm_held)
     _assert_typed_equivalent(python_result, config_result)
+    _assert_typed_equivalent(python_result, mllm_result)
 
 
 def test_atomic_skills_from_env_runs_documented_pick_place_quickstart() -> None:
