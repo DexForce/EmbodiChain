@@ -41,6 +41,7 @@ if TYPE_CHECKING:
         ResourceEndpointAdapter,
         RobotSkillProfile,
     )
+    from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession
 
@@ -52,6 +53,7 @@ class AtomicActionEngine:
         self,
         motion_generator: MotionGenerator,
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         load_builtins: bool = True,
         skill_profile: RobotSkillProfile | None = None,
@@ -64,6 +66,9 @@ class AtomicActionEngine:
         Args:
             motion_generator: Engine-owned motion-generation backend.
             control_profiles: Semantic commands keyed by robot control-part name.
+            grasp_pose_generators: Standalone grasp-pose services keyed by the
+                runtime target ID of each grasp endpoint, normally its robot
+                control-part name.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             skill_profile: Optional authoritative robot skill profile. Its
@@ -89,6 +94,7 @@ class AtomicActionEngine:
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
+            grasp_pose_generators=grasp_pose_generators,
         )
         self._actions: dict[str, AtomicAction] = {}
         self._skill_catalog_revision = 0
@@ -130,6 +136,11 @@ class AtomicActionEngine:
     def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
         """Semantic command profiles registered for robot control parts."""
         return self._planning_services.control_profiles
+
+    @property
+    def grasp_pose_generators(self) -> Mapping[str, GraspPoseGenerator]:
+        """Standalone grasp-pose services installed for endpoint targets."""
+        return self._planning_services.grasp_pose_generators
 
     @property
     def actions(self) -> dict[str, AtomicAction]:

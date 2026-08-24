@@ -44,7 +44,7 @@ from embodichain.lab.sim.skills import (
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
-    SemanticSkillRuntime,
+    SkillRuntime,
 )
 from embodichain.lab.sim.skills.calls import SemanticCallSpec
 from embodichain.utils import logger
@@ -138,7 +138,7 @@ def create_manipulator_resource(
 
 
 def compile_semantic_workflow_for_diagnostics(
-    runtime: SemanticSkillRuntime,
+    runtime: SkillRuntime,
     calls: Iterable[SemanticCallSpec],
     *,
     workflow_id: str,
@@ -147,7 +147,7 @@ def compile_semantic_workflow_for_diagnostics(
 
     This helper exists only for the tutorials' ``--diagnose-plan`` path.
     Expected effects are projected hypothetically between calls; normal runs
-    must use :class:`SemanticSkillRuntime` and verify physical effects.
+    must use :class:`SkillRuntime` and verify physical effects.
 
     Args:
         runtime: Fully bound semantic runtime.
@@ -282,7 +282,7 @@ def create_runtime_step_observer(
         grasp_tolerance: Maximum joint error before dynamics are cleared once.
 
     Returns:
-        Callback accepted by ``SemanticSkillRuntime.run(on_step=...)``.
+        Callback accepted by ``SkillRuntime.run(on_step=...)``.
     """
     if grasp_tolerance <= 0.0:
         raise ValueError("grasp_tolerance must be greater than zero.")

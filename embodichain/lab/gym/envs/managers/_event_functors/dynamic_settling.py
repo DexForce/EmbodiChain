@@ -18,14 +18,17 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
-from numbers import Real
 from typing import TYPE_CHECKING, Literal
 
 import torch
 
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+from embodichain.lab.gym.envs.settling import (
+    DynamicSettleMonitor,
+    DynamicSettleMonitorCfg,
+    DynamicSettleSample,
+)
 from embodichain.lab.sim.objects import Articulation, RigidObject, RigidObjectGroup
 from embodichain.utils import logger
 
@@ -37,7 +40,6 @@ __all__ = ["wait_for_dynamic_objects_to_settle"]
 
 _DynamicEntity = RigidObject | RigidObjectGroup | Articulation
 _SettleEntity = tuple[str, SceneEntityCfg, _DynamicEntity]
-_SpeedSample = tuple[str, torch.Tensor, torch.Tensor]
 
 
 def _validate_settle_parameters(
@@ -49,48 +51,21 @@ def _validate_settle_parameters(
     required_stable_checks: int,
     timeout_behavior: str,
     allow_partial_envs: bool,
-) -> None:
-    """Validate dynamic-object settle parameters."""
-    for name, value in (
-        ("min_steps", min_steps),
-        ("max_steps", max_steps),
-        ("check_interval_steps", check_interval_steps),
-        ("required_stable_checks", required_stable_checks),
-    ):
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise TypeError(f"{name} must be an integer, got {type(value).__name__}.")
-
-    if min_steps < 0:
-        raise ValueError("min_steps must be non-negative.")
-    if max_steps < min_steps:
-        raise ValueError("max_steps must be greater than or equal to min_steps.")
-    if check_interval_steps < 1:
-        raise ValueError("check_interval_steps must be at least 1.")
-    if required_stable_checks < 1:
-        raise ValueError("required_stable_checks must be at least 1.")
-
-    for name, value in (
-        ("linear_velocity_threshold", linear_velocity_threshold),
-        ("angular_velocity_threshold", angular_velocity_threshold),
-    ):
-        if isinstance(value, bool) or not isinstance(value, Real):
-            raise TypeError(f"{name} must be a real number.")
-        if not math.isfinite(float(value)) or value < 0:
-            raise ValueError(f"{name} must be finite and non-negative.")
-
-    available_checks = (
-        1 + (max_steps - min_steps + check_interval_steps - 1) // check_interval_steps
+) -> DynamicSettleMonitorCfg:
+    """Validate parameters and return the reusable monitor policy."""
+    cfg = DynamicSettleMonitorCfg(
+        linear_velocity_threshold=linear_velocity_threshold,
+        angular_velocity_threshold=angular_velocity_threshold,
+        min_steps=min_steps,
+        max_steps=max_steps,
+        check_interval_steps=check_interval_steps,
+        required_stable_checks=required_stable_checks,
     )
-    if required_stable_checks > available_checks:
-        raise ValueError(
-            "required_stable_checks cannot be reached within the configured "
-            f"step budget; at most {available_checks} checks are possible."
-        )
-
     if timeout_behavior not in ("warn", "raise"):
         raise ValueError("timeout_behavior must be either 'warn' or 'raise'.")
     if not isinstance(allow_partial_envs, bool):
         raise TypeError("allow_partial_envs must be a boolean.")
+    return cfg
 
 
 def _normalize_settle_env_ids(
@@ -210,9 +185,9 @@ def _resolve_settle_entities(
 def _measure_settle_speeds(
     entities: Sequence[_SettleEntity],
     env_ids: torch.Tensor,
-) -> list[_SpeedSample]:
+) -> list[DynamicSettleSample]:
     """Measure per-body linear and angular speeds for selected environments."""
-    samples: list[_SpeedSample] = []
+    samples: list[DynamicSettleSample] = []
     for kind, entity_cfg, entity in entities:
         if kind == "articulation":
             velocity = entity.body_data.body_link_vel[env_ids]
@@ -238,29 +213,18 @@ def _measure_settle_speeds(
         angular_speed = torch.linalg.vector_norm(angular_velocity, dim=-1).reshape(
             env_ids.numel(), -1
         )
-        samples.append((entity_cfg.uid, linear_speed, angular_speed))
+        samples.append(
+            DynamicSettleSample(
+                entity_id=entity_cfg.uid,
+                linear_speed=linear_speed,
+                angular_speed=angular_speed,
+            )
+        )
     return samples
 
 
-def _settle_samples_are_stable(
-    samples: Sequence[_SpeedSample],
-    linear_velocity_threshold: float,
-    angular_velocity_threshold: float,
-) -> bool:
-    """Return whether every measured body is finite and below both thresholds."""
-    stable = []
-    for _, linear_speed, angular_speed in samples:
-        stable.append(
-            torch.isfinite(linear_speed)
-            & torch.isfinite(angular_speed)
-            & (linear_speed <= linear_velocity_threshold)
-            & (angular_speed <= angular_velocity_threshold)
-        )
-    return bool(torch.cat([value.reshape(-1) for value in stable]).all().item())
-
-
 def _format_settle_timeout(
-    samples: Sequence[_SpeedSample],
+    samples: Sequence[DynamicSettleSample],
     env_ids: torch.Tensor,
     linear_velocity_threshold: float,
     angular_velocity_threshold: float,
@@ -272,7 +236,9 @@ def _format_settle_timeout(
     unsettled: list[str] = []
     all_linear_speeds: list[torch.Tensor] = []
     all_angular_speeds: list[torch.Tensor] = []
-    for uid, linear_speed, angular_speed in samples:
+    for sample in samples:
+        linear_speed = sample.linear_speed
+        angular_speed = sample.angular_speed
         stable = (
             torch.isfinite(linear_speed)
             & torch.isfinite(angular_speed)
@@ -282,7 +248,7 @@ def _format_settle_timeout(
         unsettled_mask = ~stable.all(dim=1)
         if bool(unsettled_mask.any().item()):
             unsettled_env_ids = env_ids[unsettled_mask].detach().cpu().tolist()
-            unsettled.append(f"{uid}(env_ids={unsettled_env_ids})")
+            unsettled.append(f"{sample.entity_id}(env_ids={unsettled_env_ids})")
         all_linear_speeds.append(linear_speed.reshape(-1))
         all_angular_speeds.append(angular_speed.reshape(-1))
 
@@ -364,7 +330,7 @@ def wait_for_dynamic_objects_to_settle(
         TypeError: If a parameter or entity configuration has the wrong type.
         ValueError: If parameters, targets, or environment selection are invalid.
     """
-    _validate_settle_parameters(
+    monitor_cfg = _validate_settle_parameters(
         linear_velocity_threshold=linear_velocity_threshold,
         angular_velocity_threshold=angular_velocity_threshold,
         min_steps=min_steps,
@@ -395,20 +361,14 @@ def wait_for_dynamic_objects_to_settle(
         env.sim.update(step=min_steps)
         step_count = min_steps
 
-    stable_checks = 0
-    samples: list[_SpeedSample]
+    monitor = DynamicSettleMonitor(monitor_cfg, target_env_ids)
+    samples: list[DynamicSettleSample]
+    settle_state = None
     while True:
         samples = _measure_settle_speeds(entities, target_env_ids)
-        if _settle_samples_are_stable(
-            samples,
-            linear_velocity_threshold=linear_velocity_threshold,
-            angular_velocity_threshold=angular_velocity_threshold,
-        ):
-            stable_checks += 1
-            if stable_checks >= required_stable_checks:
-                return
-        else:
-            stable_checks = 0
+        settle_state = monitor.observe(samples, elapsed_steps=step_count)
+        if bool(settle_state.settled_mask.all().item()):
+            return
 
         if step_count >= max_steps:
             break
@@ -422,7 +382,7 @@ def wait_for_dynamic_objects_to_settle(
         linear_velocity_threshold=linear_velocity_threshold,
         angular_velocity_threshold=angular_velocity_threshold,
         max_steps=max_steps,
-        stable_checks=stable_checks,
+        stable_checks=int(settle_state.stable_counts.min().item()),
         required_stable_checks=required_stable_checks,
     )
     if timeout_behavior == "raise":

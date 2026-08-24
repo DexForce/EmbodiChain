@@ -21,6 +21,8 @@ from __future__ import annotations
 from .base_env import *
 from .demo import *
 from .embodied_env import *
+from .settling import *
+from .types import *
 from .wrapper import *
 
 # Official task environments live in the bundled ``embodichain_tasks`` package

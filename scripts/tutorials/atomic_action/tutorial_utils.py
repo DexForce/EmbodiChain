@@ -44,13 +44,13 @@ from embodichain.lab.sim.planners import (
 )
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
 from embodichain.lab.sim.solvers import URSolverCfg
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
-    AntipodalSamplerCfg,
-    GraspGeneratorCfg,
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalGraspPoseGenerator,
+    AntipodalGraspPoseGeneratorCfg,
+    GraspAnnotationCfg,
+    ParallelJawGraspCollisionCfg,
 )
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
-)
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.utils import logger
 
 RECORD_WIDTH = 640
@@ -69,11 +69,15 @@ DEFAULT_AXIS_SIZE = 0.003
 
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
-GRIPPER_MAX_OPEN_WIDTH = 0.100
-GRIPPER_MIN_OPEN_WIDTH = 0.003
-GRIPPER_FINGER_LENGTH = 0.10
-GRIPPER_ROOT_Z_WIDTH = 0.096
-GRIPPER_Y_THICKNESS = 0.040
+TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
+    model_id="dh_pgi_140_80",
+    min_opening_width=0.003,
+    max_opening_width=0.100,
+    finger_length=0.10,
+    finger_width=0.040,
+    finger_thickness=0.01,
+    palm_depth=0.096,
+)
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
 DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
@@ -390,17 +394,12 @@ def create_antipodal_semantics(
     obj: RigidObject,
     *,
     label: str,
-    n_sample: int,
-    force_reannotate: bool,
 ) -> ObjectSemantics:
-    """Describe a rigid object using the standard PGI antipodal-grasp setup.
+    """Describe a rigid object using target-local antipodal geometry.
 
     Args:
         obj: Rigid object that will be grasped.
         label: Human-readable object category.
-        n_sample: Number of grasp-pair samples to generate.
-        force_reannotate: Whether to ignore cached grasp annotations.
-
     Returns:
         Object semantics with mesh data stored only on its affordance.
     """
@@ -412,27 +411,31 @@ def create_antipodal_semantics(
         affordance=AntipodalAffordance(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
-            gripper_collision_cfg=GripperCollisionCfg(
-                max_open_length=GRIPPER_MAX_OPEN_WIDTH,
-                finger_length=GRIPPER_FINGER_LENGTH,
-                y_thickness=GRIPPER_Y_THICKNESS,
-                root_z_width=GRIPPER_ROOT_Z_WIDTH,
-                open_check_margin=0.03,
-                point_sample_dense=0.012,
-            ),
-            generator_cfg=GraspGeneratorCfg(
-                viser_port=11801,
-                antipodal_sampler_cfg=AntipodalSamplerCfg(
-                    n_sample=n_sample,
-                    max_length=GRIPPER_MAX_OPEN_WIDTH,
-                    min_length=GRIPPER_MIN_OPEN_WIDTH,
-                ),
-                is_partial_annotate=False,
-                is_filter_ground_collision=False,
-            ),
-            force_reannotate=force_reannotate,
         ),
         entity=obj,
+    )
+
+
+def create_parallel_jaw_grasp_pose_generator(
+    *,
+    n_sample: int,
+    force_refresh: bool,
+    opening_margin: float = 0.03,
+) -> AntipodalGraspPoseGenerator:
+    """Create the standalone generator shared by tutorial planning paths."""
+    return AntipodalGraspPoseGenerator(
+        TUTORIAL_PARALLEL_JAW_MODEL,
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=n_sample),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            opening_margin=opening_margin,
+            point_sample_density=0.012,
+            filter_ground_collision=False,
+        ),
+        annotation_cfg=GraspAnnotationCfg(
+            selection_mode="whole_mesh",
+            viser_port=11801,
+            force_refresh=force_refresh,
+        ),
     )
 
 
@@ -1045,6 +1048,7 @@ __all__ = [
     "broadcast_waypoint_pose_batch",
     "clone_local_pose_from_first_env",
     "create_antipodal_semantics",
+    "create_parallel_jaw_grasp_pose_generator",
     "create_curobo_motion_generator",
     "create_franka_panda_robot_cfg",
     "create_toppra_motion_generator",

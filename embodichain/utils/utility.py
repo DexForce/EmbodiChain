@@ -31,6 +31,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Callable
 
+from embodichain.utils.config_paths import resolve_config_path as _resolve_config_path
 from embodichain.utils.string import callable_to_string
 
 
@@ -373,22 +374,6 @@ def _config_format_from_path(path: str | Path) -> str:
         f"Unsupported config file format for '{path}'. "
         "Supported extensions: .json, .yaml, .yml"
     )
-
-
-def _resolve_config_path(path: str | Path) -> Path:
-    """Resolve repository-style official-task paths from an installed wheel."""
-    resolved_path = Path(path).expanduser()
-    if resolved_path.exists() or resolved_path.is_absolute():
-        return resolved_path
-
-    task_prefix = ("embodichain_tasks", "configs")
-    if resolved_path.parts[: len(task_prefix)] != task_prefix:
-        return resolved_path
-
-    from embodichain_tasks.configs import get_config_path
-
-    relative_path = Path(*resolved_path.parts[len(task_prefix) :])
-    return get_config_path(relative_path)
 
 
 def load_config(path: str | Path) -> Dict[str, Any]:

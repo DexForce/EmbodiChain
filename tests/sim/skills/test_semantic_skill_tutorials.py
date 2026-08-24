@@ -231,7 +231,7 @@ def test_place_application_installs_default_effect_verifier(
         Mock(return_value=motion_generator),
     )
     monkeypatch.setattr(
-        place_tutorial.SemanticSkillRuntime,
+        place_tutorial.SkillRuntime,
         "from_simulation",
         runtime_factory,
     )
@@ -400,7 +400,7 @@ def test_handover_application_installs_extension_and_default_verifier(
         Mock(return_value=motion_generator),
     )
     monkeypatch.setattr(
-        handover_tutorial.SemanticSkillRuntime,
+        handover_tutorial.SkillRuntime,
         "from_simulation",
         runtime_factory,
     )

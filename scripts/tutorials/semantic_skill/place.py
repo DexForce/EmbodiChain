@@ -18,7 +18,7 @@
 
 Unlike the direct atomic-action tutorial, this example never names ``arm`` or
 ``hand`` in the workflow. The scene registry owns object identity, the robot
-profile owns embodiment-specific resources, and :class:`SemanticSkillRuntime`
+profile owns embodiment-specific resources, and :class:`SkillRuntime`
 lowers each call from fresh observations, executes it, and commits only
 verified effects.
 """
@@ -52,7 +52,7 @@ from embodichain.lab.sim.skills import (
     SceneObjectRef,
     SemanticEffectVerifier,
     SemanticPose,
-    SemanticSkillRuntime,
+    SkillRuntime,
     SkillPolicyPreset,
 )
 from embodichain.utils import logger
@@ -62,6 +62,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     create_antipodal_semantics,
     create_curobo_motion_generator,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -277,12 +278,12 @@ def create_place_application(
     hand_grasp: torch.Tensor,
     n_sample: int,
     force_reannotate: bool,
-) -> SemanticSkillRuntime:
+) -> SkillRuntime:
     """Assemble the application-facing runtime for the Place tutorial.
 
     The returned runtime owns the scene/profile/compiler binding and the
     default physical-effect verifier. Task code only needs to submit semantic
-    calls through :meth:`SemanticSkillRuntime.run`.
+    calls through :meth:`SkillRuntime.run`.
 
     Args:
         simulation: Simulation containing the robot and workpiece.
@@ -299,8 +300,6 @@ def create_place_application(
     object_semantics = create_antipodal_semantics(
         obj,
         label="cube",
-        n_sample=n_sample,
-        force_reannotate=force_reannotate,
     )
     registry, _ = create_graspable_object_registry(
         simulation,
@@ -309,12 +308,18 @@ def create_place_application(
         semantic_type="cube",
         affordance=object_semantics.affordance,
     )
-    return SemanticSkillRuntime.from_simulation(
+    return SkillRuntime.from_simulation(
         simulation=simulation,
         robot=robot,
         motion_generator=create_curobo_motion_generator(robot),
         scene_registry=registry,
         robot_profile=create_robot_profile(hand_open, hand_grasp),
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=n_sample,
+                force_refresh=force_reannotate,
+            )
+        },
         effect_verifier=create_place_effect_verifier(obj, robot, hand_open),
         control_dt=TRAJECTORY_SIM_STEPS * simulation.sim_config.physics_dt,
     )
@@ -379,7 +384,7 @@ def main() -> None:
     try:
         result = app.run(
             calls,
-            task_id="tutorial.semantic_pick_place",
+            workflow_id="tutorial.semantic_pick_place",
             on_step=create_runtime_step_observer(
                 obj,
                 robot,

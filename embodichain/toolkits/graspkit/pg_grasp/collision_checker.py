@@ -33,6 +33,7 @@ from embodichain.utils.warp import convex_signed_distance_kernel
 from embodichain.utils.device_utils import standardize_device_string
 from embodichain.utils.math import transform_points_mat
 from embodichain.utils import configclass
+from embodichain.toolkits.graspkit._paths import CONVEX_DECOMPOSITION_CACHE_DIR
 
 __all__ = ["ConvexCollisionCheckerCfg", "ConvexCollisionChecker"]
 
@@ -67,10 +68,8 @@ class ConvexCollisionChecker:
             base_mesh_faces: [M, 3] triangle indices of the input mesh.
             max_decomposition_hulls: maximum number of convex hulls to decompose into. A higher number allows for a more accurate approximation of the original mesh but increases computation time and memory usage. The optimal number may depend on the complexity of the mesh and the required precision of collision checking.
         """
-        from embodichain.lab.sim import CONVEX_DECOMP_DIR
-
-        if not os.path.isdir(CONVEX_DECOMP_DIR):
-            os.makedirs(CONVEX_DECOMP_DIR, exist_ok=True)
+        if not os.path.isdir(CONVEX_DECOMPOSITION_CACHE_DIR):
+            os.makedirs(CONVEX_DECOMPOSITION_CACHE_DIR, exist_ok=True)
         self.device = base_mesh_verts.device
         base_mesh_verts_np = base_mesh_verts.cpu().numpy()
         base_mesh_faces_np = base_mesh_faces.cpu().numpy()
@@ -86,7 +85,8 @@ class ConvexCollisionChecker:
         self.mesh.compute_vertex_normals()
 
         self.cache_path = os.path.join(
-            CONVEX_DECOMP_DIR, f"{mesh_hash}_{max_decomposition_hulls}.pkl"
+            CONVEX_DECOMPOSITION_CACHE_DIR,
+            f"{mesh_hash}_{max_decomposition_hulls}.pkl",
         )
 
         if not os.path.isfile(self.cache_path):

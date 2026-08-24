@@ -188,7 +188,12 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         )
         translation_axis = translation_axis / torch.linalg.vector_norm(translation_axis)
         translation_axis_world = torch.matmul(link_pose[:, :3, :3], translation_axis)
-        grasp_success, grasp_xpos, _ = affordance.get_best_grasp_poses(
+        grasp_generator = self.planning_services.grasp_pose_generator(
+            grasp_target.target_id
+        )
+        grasp_success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
+            mesh_vertices=affordance.mesh_vertices,
+            mesh_triangles=affordance.mesh_triangles,
             obj_poses=link_pose,
             approach_direction=translation_axis_world,
         )
@@ -344,6 +349,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             ),
             expected_effects=StateDelta(),
             segment_lengths=segment_lengths,
+            # Once reach completes, contact or the commanded slide may move the
+            # articulated target. That self-induced motion must not recover.
+            scene_dependency_end_segment=(
+                "reach" if self._scene_dependencies(request) else None
+            ),
         )
 
     @staticmethod

@@ -21,15 +21,6 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from embodichain.toolkits.graspkit.pg_grasp import (
-    GraspGenerator,
-    GraspGeneratorCfg,
-)
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
-)
-from embodichain.utils import logger
-
 if TYPE_CHECKING:
     from embodichain.lab.sim.common import BatchEntity
 
@@ -76,162 +67,47 @@ class AntipodalAffordance(Affordance):
     mesh_triangles: torch.Tensor | None = None
     """Object mesh triangle indices, shape [M, 3]."""
 
-    generator_cfg: GraspGeneratorCfg | None = None
-    """Optional grasp-generator configuration."""
-
-    gripper_collision_cfg: GripperCollisionCfg | None = None
-    """Optional gripper-collision configuration."""
-
-    force_reannotate: bool = False
-    """If True, recompute the grasp annotation on each access."""
-
-    _generator: GraspGenerator | None = field(default=None, init=False, repr=False)
-
-    def _init_generator(self) -> None:
+    def __post_init__(self) -> None:
+        """Validate optional target-local geometry without owning a generator."""
+        if self.mesh_vertices is None and self.mesh_triangles is None:
+            return
         if self.mesh_vertices is None or self.mesh_triangles is None:
-            logger.log_error(
-                "mesh_vertices and mesh_triangles must be provided to initialize "
-                "AntipodalAffordance.",
-                ValueError,
-            )
-        self._generator = GraspGenerator(
-            vertices=self.mesh_vertices,
-            triangles=self.mesh_triangles,
-            cfg=self.generator_cfg,
-            gripper_collision_cfg=self.gripper_collision_cfg,
-        )
-        if self.force_reannotate or self._generator._hit_point_pairs is None:
-            self._generator.annotate()
-
-    def _resolve_approach_direction(
-        self, approach_direction: torch.Tensor
-    ) -> torch.Tensor:
-        """Move the approach direction to the grasp generator device."""
-        return approach_direction.to(
-            device=self._generator.device,
-            dtype=torch.float32,
-        )
-
-    def get_valid_grasp_poses(
-        self,
-        obj_poses: torch.Tensor,
-        approach_direction: torch.Tensor = torch.tensor(
-            [0, 0, -1], dtype=torch.float32
-        ),
-        object_part: str = "center",
-    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        if self._generator is None:
-            self._init_generator()
-        approach_direction = self._resolve_approach_direction(approach_direction)
-        results = []
-        for i, obj_pose in enumerate(obj_poses):
-            is_success, grasp_poses, _, costs = self._generator.get_valid_grasp_poses(
-                object_pose=obj_pose,
-                approach_direction=approach_direction,
-                object_part=object_part,
-            )
-            if grasp_poses.shape == (4, 4):
-                grasp_poses = grasp_poses.unsqueeze(0)
-            if costs.dim() == 0:
-                costs = costs.unsqueeze(0)
-            if not is_success:
-                logger.log_warning(
-                    f"Failed to find valid grasp poses for {i}-th object."
-                )
-                costs = torch.full(
-                    (grasp_poses.shape[0],),
-                    torch.inf,
-                    dtype=torch.float32,
-                    device=grasp_poses.device,
-                )
-            results.append((grasp_poses, costs))
-        return results
-
-    def get_dual_arm_valid_grasp_poses(
-        self,
-        obj_poses: torch.Tensor,
-        left_to_right_arm_direction: torch.Tensor,
-        approach_direction: torch.Tensor = torch.tensor(
-            [0, 0, -1], dtype=torch.float32
-        ),
-        middle_empty_ratio: float = 0.4,
-    ) -> list[dict | None]:
-        if self._generator is None:
-            self._init_generator()
-        approach_direction = self._resolve_approach_direction(approach_direction)
-        results = []
-        for i, obj_pose in enumerate(obj_poses):
-            result = self._generator.get_dual_arm_valid_grasp_poses(
-                object_pose=obj_pose,
-                approach_direction=approach_direction,
-                left_to_right_arm_direction=left_to_right_arm_direction,
-                middle_empty_ratio=middle_empty_ratio,
-            )
-            results.append(result)
-        return results
-
-    def get_best_grasp_poses(
-        self,
-        obj_poses: torch.Tensor,
-        approach_direction: torch.Tensor = torch.tensor(
-            [0, 0, -1], dtype=torch.float32
-        ),
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return the best antipodal grasp for each object pose.
-
-        Args:
-            obj_poses: Batched object poses with shape ``(B, 4, 4)``.
-            approach_direction: One shared ``(3,)`` world-frame direction or
-                per-object directions with shape ``(B, 3)``.
-
-        Returns:
-            A success mask, best grasp poses, and gripper opening lengths with
-            batch dimension ``B``.
-
-        Raises:
-            ValueError: If ``approach_direction`` has an incompatible shape.
-        """
-        if self._generator is None:
-            self._init_generator()
-        approach_direction = self._resolve_approach_direction(approach_direction)
-        if approach_direction.shape == (3,):
-            approach_directions = approach_direction.unsqueeze(0).expand(
-                obj_poses.shape[0], -1
-            )
-        elif approach_direction.shape == (obj_poses.shape[0], 3):
-            approach_directions = approach_direction
-        else:
             raise ValueError(
-                "approach_direction must have shape (3,) or "
-                f"({obj_poses.shape[0]}, 3), got "
-                f"{tuple(approach_direction.shape)}."
+                "mesh_vertices and mesh_triangles must be provided together."
             )
-        grasp_xpos_list: list[torch.Tensor] = []
-        is_success_list: list[bool] = []
-        open_length_list: list[float] = []
-        for i, obj_pose in enumerate(obj_poses):
-            is_success, grasp_xpos, open_length = self._generator.get_grasp_poses(
-                obj_pose, approach_directions[i]
+        if (
+            not isinstance(self.mesh_vertices, torch.Tensor)
+            or not self.mesh_vertices.is_floating_point()
+            or self.mesh_vertices.dim() != 2
+            or self.mesh_vertices.shape[1] != 3
+            or self.mesh_vertices.shape[0] == 0
+            or not bool(torch.isfinite(self.mesh_vertices).all().item())
+        ):
+            raise ValueError(
+                "AntipodalAffordance.mesh_vertices must be a non-empty finite "
+                "floating tensor with shape (N, 3)."
             )
-            if is_success:
-                grasp_xpos_list.append(grasp_xpos.unsqueeze(0))
-            else:
-                logger.log_warning(f"No valid grasp pose found for {i}-th object.")
-                grasp_xpos_list.append(
-                    torch.eye(
-                        4, dtype=torch.float32, device=self._generator.device
-                    ).unsqueeze(0)
-                )
-            is_success_list.append(is_success)
-            open_length_list.append(open_length)
-        is_success_t = torch.tensor(
-            is_success_list, dtype=torch.bool, device=self._generator.device
-        )
-        grasp_xpos = torch.concatenate(grasp_xpos_list, dim=0)
-        open_length_t = torch.tensor(
-            open_length_list, dtype=torch.float32, device=self._generator.device
-        )
-        return is_success_t, grasp_xpos, open_length_t
+        if (
+            not isinstance(self.mesh_triangles, torch.Tensor)
+            or self.mesh_triangles.dtype == torch.bool
+            or self.mesh_triangles.is_floating_point()
+            or self.mesh_triangles.dim() != 2
+            or self.mesh_triangles.shape[1] != 3
+            or self.mesh_triangles.shape[0] == 0
+        ):
+            raise ValueError(
+                "AntipodalAffordance.mesh_triangles must be a non-empty integer "
+                "tensor with shape (M, 3)."
+            )
+        if self.mesh_vertices.device != self.mesh_triangles.device:
+            raise ValueError("Antipodal affordance mesh tensors must share a device.")
+        if (
+            bool((self.mesh_triangles < 0).any().item())
+            or int(self.mesh_triangles.max().item()) >= self.mesh_vertices.shape[0]
+        ):
+            raise ValueError(
+                "AntipodalAffordance.mesh_triangles reference invalid vertices."
+            )
 
 
 @dataclass
@@ -339,17 +215,7 @@ class SlideAffordance(AntipodalAffordance):
     """Optional lower and upper translation limits in metres."""
 
     def __post_init__(self) -> None:
-        if self.mesh_vertices.dim() != 2 or self.mesh_vertices.shape[1] != 3:
-            raise ValueError("SlideAffordance.mesh_vertices must have shape (N, 3).")
-        if (
-            self.mesh_vertices.shape[0] == 0
-            or not torch.isfinite(self.mesh_vertices).all()
-        ):
-            raise ValueError(
-                "SlideAffordance.mesh_vertices must be finite and non-empty."
-            )
-        if self.mesh_triangles.dim() != 2 or self.mesh_triangles.shape[1] != 3:
-            raise ValueError("SlideAffordance.mesh_triangles must have shape (M, 3).")
+        AntipodalAffordance.__post_init__(self)
         if (
             not isinstance(self.translation_axis, torch.Tensor)
             or self.translation_axis.shape != (3,)

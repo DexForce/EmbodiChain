@@ -186,6 +186,16 @@ Unified interface for trajectory planning with optional pre-interpolation.
   supplied `start_qpos`, and every returned trajectory has explicit `dt` and
   a `duration` derived from it.
 
+Grasp-pose generation is a sibling planning service, not a
+`MotionGenerator` feature. `embodichain.toolkits.graspkit` owns its standalone
+contract and the `pg_grasp` implementation without importing `embodichain.lab`.
+Atomic actions and Expert Program install a generator instance in
+`AtomicActionEngine`; the non-atomic reference environment
+`embodichain_tasks/embodichain_tasks/multi_segments/cube_pick_place.py` calls
+the same generator directly, then feeds the selected end-effector poses into
+four explicit `MotionGenerator.generate()` phases. That task deliberately does
+not create an `AtomicActionEngine`.
+
 `MotionGenOptions` fields:
 
 | Field | Type | Default | Notes |

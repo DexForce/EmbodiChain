@@ -45,9 +45,26 @@ recompute private sample splits in callers.
 
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
 instance, which contains its robot, one `MotionGenerator`/planner backend, and
-its direct control-part command-profile snapshot. It also issues an opaque
-binding-owner ID, so an `ActionBinding` cannot cross engine instances. It does
-not own a timing fallback. Planner results with positions require explicit `dt`;
+its direct control-part command-profile snapshot. It may also contain
+standalone `GraspPoseGenerator` services keyed by grasp endpoint runtime target
+ID. These services are siblings of `MotionGenerator`, not motion-generator
+features: direct callers may use them without atomic actions, while `PickUp`,
+`HandOver`, `Slide`, and `CoordinatedPickment` resolve them through their bound
+grasp endpoints. `AntipodalAffordance` owns target-local mesh geometry only.
+`embodichain.toolkits.graspkit` owns the backend-neutral
+`GraspPoseGenerator`, `ParallelJawGraspPoseGenerator`, and gripper-model
+contracts. The toolkit has no dependency on `embodichain.lab`; simulation,
+atomic actions, Expert Program, and handwritten environments are consumers of
+the same service API. Its `pg_grasp` package exposes
+`AntipodalGraspPoseGenerator` as the sole antipodal generator entry point;
+mesh-specific sampling, annotation, collision, and on-disk cache state live
+behind a private backend rather than a second public generator/configuration
+pair.
+The engine-scoped registry retains generator instances by reference, so a
+composition root may reuse an already prepared service in a handwritten
+environment. The engine also issues an opaque binding-owner ID, so an
+`ActionBinding` cannot cross engine instances. It does not own a timing
+fallback. Planner results with positions require explicit `dt`;
 `duration` is derived from it. Actions must pass a complete `TimedTrajectory` to
 `build_plan()`. Environment-backed integrations put `BaseEnv.step_dt` on
 `PlanningContext.control_dt` when action-owned interpolation needs a cadence.
@@ -353,11 +370,11 @@ when available, while low-level execution events remain in the call trace.
 Failures are terminal in the current runtime; workflow-level replacement,
 reacquisition, and symbolic-state reconciliation are not yet provided.
 
-`SemanticSkillRuntime` is only the compatibility subclass retaining the
-simulation-oriented `from_simulation()` factory and legacy verifier callback.
-New integrations depend on `SkillRuntime` and typed evidence collectors.
-`AtomicSkills` is a small application facade over that same runtime; it does
-not own a second compiler or execution loop.
+`SkillRuntime.from_simulation()` is the standard explicit simulation factory.
+It may combine one application-owned physical-effect gate with the typed
+evidence monitor selected by the profile. `AtomicSkills` is a small application
+facade over that same runtime; it does not own a second compiler or execution
+loop.
 
 `ParallelSkillRuntime` coordinates two or more forked semantic lanes on one
 clock. It rejects overlapping `ResourceClaim` values and symbolic writes,
@@ -685,9 +702,9 @@ structured invalidation/replan events, and requires terminal completion.
 Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
 Both examples separate `create_*_application()` (scene/profile/runtime and
 default verifier wiring), `create_*_task()` (robot-independent semantic calls),
-and the application-facing `app.run(task, ...)` entry. The examples retain the
-compatibility `SemanticSkillRuntime` simulation factory; there is no
-tutorial-specific execution loop. `place.py`
+and the application-facing `app.run(task, ...)` entry. Both examples use the
+canonical `SkillRuntime.from_simulation()` factory; there is no tutorial-specific
+execution loop. `place.py`
 executes `Pick -> Place`, verifying the observed lift, planned object-to-EEF
 relation, release pose, and open hand. `hand_over.py` demonstrates disjoint
 dual-arm resources plus an explicit `RegisteredSemanticLowerer`, then verifies

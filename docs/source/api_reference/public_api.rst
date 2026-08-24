@@ -1521,16 +1521,6 @@ embodichain.toolkits.acd.urdf_modifider
 
    URDFModifider
 
-embodichain.toolkits.graspkit.pg_grasp.antipodal_generator
-----------------------------------------------------------
-
-.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.antipodal_generator
-
-.. autosummary::
-
-   GraspGenerator
-   GraspGeneratorCfg
-
 embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler
 --------------------------------------------------------
 
@@ -1664,6 +1654,37 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.expert_program
+--------------------------------
+
+Declarative task references that bind packaged Expert Programs to live
+simulation scenes, robot skill profiles, and atomic actions.
+
+.. currentmodule:: embodichain_tasks.expert_program
+
+.. autosummary::
+
+   ExpertProgramOpenDrawerEnv
+   ExpertProgramRepeatedPickPlaceEnv
+
+embodichain_tasks.expert_program.open_drawer
+--------------------------------------------
+
+.. currentmodule:: embodichain_tasks.expert_program.open_drawer
+
+.. autosummary::
+
+   ExpertProgramOpenDrawerEnv
+
+embodichain_tasks.expert_program.repeated_pick_place
+---------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.expert_program.repeated_pick_place
+
+.. autosummary::
+
+   ExpertProgramRepeatedPickPlaceEnv
 
 embodichain_tasks.multi_segments
 --------------------------------

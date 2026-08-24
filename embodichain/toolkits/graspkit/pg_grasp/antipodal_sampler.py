@@ -347,7 +347,7 @@ class AntipodalSampler:
 
         Temporary debug helper that draws the mesh, a ground plane, and the
         antipodal point pairs (surface origin connected to its antipodal hit)
-        in the style of :meth:`GraspGenerator.visualize_grasp_poses`.
+        in the same style as the grasp-pose backend visualizer.
 
         .. attention::
             ``self.mesh`` must have been populated by a prior call to

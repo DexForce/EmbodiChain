@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -27,6 +28,7 @@ from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
 from embodichain.lab.scripts import run_env
 from embodichain.lab.scripts.run_env import (
     _create_parser,
+    _load_expert_program,
     _run_replay_control_loop,
     generate_function,
 )
@@ -38,6 +40,24 @@ ACTION_LIST_INDEX = 0
 REPLAY_NUM_STEPS = 5
 REPLAY_TARGET_STEP = 3
 VISER_POLL_INTERVAL = 0.05
+
+
+def _expert_program_payload() -> dict[str, object]:
+    """Return one minimal strict Expert Program payload."""
+    return {
+        "schema_version": 2,
+        "program_id": "cli_pick",
+        "integration": {
+            "robot_profile": "default_robot",
+            "scene_registry": "default_scene",
+            "runtime_preset": "default_runtime",
+        },
+        "targets": {},
+        "program": {
+            "kind": "invoke",
+            "call": {"kind": "pick", "object": "cube"},
+        },
+    }
 
 
 class _LegacyProgressEnv:
@@ -121,6 +141,86 @@ def test_run_env_preserves_configured_viser_image_fps() -> None:
     )
 
     assert merged["visualization"]["sensor_image_fps"] == configured_fps
+
+
+def test_run_env_parser_accepts_expert_program_path() -> None:
+    """The declarative program is an explicit, opt-in CLI input."""
+    program_path = "program.yaml"
+
+    args = _create_parser().parse_args(
+        ["--gym_config", GYM_CONFIG_PATH, "--expert-program", program_path]
+    )
+
+    assert args.expert_program == program_path
+
+
+def test_run_env_parser_accepts_debug_trace_mode() -> None:
+    """Failed Expert Program attempts can expose their structured trace."""
+    args = _create_parser().parse_args(
+        ["--gym_config", GYM_CONFIG_PATH, "--debug-mode"]
+    )
+
+    assert args.debug_mode is True
+
+
+@pytest.mark.parametrize("suffix", [".json", ".yaml", ".yml"])
+def test_load_expert_program_safely_decodes_supported_files(
+    tmp_path,
+    suffix: str,
+) -> None:
+    """JSON and safe YAML inputs share the same strict schema decoder."""
+    path = tmp_path / f"program{suffix}"
+    payload = _expert_program_payload()
+    if suffix == ".json":
+        serialized = json.dumps(payload)
+    else:
+        import yaml
+
+        serialized = yaml.safe_dump(payload)
+    path.write_text(serialized, encoding="utf-8")
+
+    program = _load_expert_program(path)
+
+    assert program.program_id == "cli_pick"
+    assert program.integration.scene_registry == "default_scene"
+
+
+@pytest.mark.parametrize(
+    ("filename", "serialized", "message"),
+    [
+        (
+            "program.json",
+            '{"schema_version": 2, "schema_version": 2}',
+            "Duplicate JSON key",
+        ),
+        (
+            "program.yaml",
+            "schema_version: 2\nschema_version: 2\n",
+            "found duplicate key",
+        ),
+    ],
+)
+def test_load_expert_program_rejects_duplicate_mapping_keys(
+    tmp_path,
+    filename: str,
+    serialized: str,
+    message: str,
+) -> None:
+    """Ambiguous duplicate keys are rejected before schema decoding."""
+    path = tmp_path / filename
+    path.write_text(serialized, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        _load_expert_program(path)
+
+
+def test_load_expert_program_rejects_unsupported_file_extension(tmp_path) -> None:
+    """Only explicit JSON and YAML file formats are accepted."""
+    path = tmp_path / "program.toml"
+    path.write_text("schema_version = 1", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=".json, .yaml, or .yml"):
+        _load_expert_program(path)
 
 
 def test_replay_restores_wrapper_state_without_closing_caller_env(monkeypatch) -> None:
@@ -228,6 +328,34 @@ def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None
 
     assert generated
     assert env.reset_options == [{"save_data": False}, None]
+
+
+def test_generate_function_logs_failed_trace_in_debug_mode(monkeypatch) -> None:
+    """Debug retries expose the owned structured episode trace."""
+    env = _ResetTrackingEnv()
+    result = _episode_result(success=False, reason="segment_validation_failed")
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: result,
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.log_warning",
+        warnings.append,
+    )
+
+    generated = generate_function(
+        env,
+        max_attempts=1,
+        reset_before=False,
+        debug_mode=True,
+    )
+
+    assert not generated
+    debug_trace = next(
+        message for message in warnings if "Failed demo trace" in message
+    )
+    assert '"terminal_reason":"segment_validation_failed"' in debug_trace
 
 
 def test_generate_function_commits_failed_episode_when_configured(monkeypatch) -> None:
@@ -419,6 +547,49 @@ def test_cli_aborts_before_closing_environment_once(monkeypatch) -> None:
 
     abort_event = ("reset", {"save_data": False})
     assert env.events == [abort_event, abort_event, ("close", None)]
+
+
+def test_cli_injects_decoded_expert_program_before_environment_creation(
+    monkeypatch,
+) -> None:
+    """The CLI attaches the strict program config to the environment config."""
+    env = _LifecycleTrackingEnv()
+    env_cfg = SimpleNamespace(expert_program=None)
+    decoded_program = object()
+    args = SimpleNamespace(
+        replay=False,
+        replay_mode="kinematic",
+        preview=True,
+        expert_program="program.yaml",
+    )
+    parser = MagicMock()
+    parser.parse_args.return_value = args
+    make = MagicMock(return_value=env)
+
+    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(
+        run_env,
+        "build_env_cfg_from_args",
+        lambda parsed_args: (env_cfg, {"id": GYM_ID}, {}),
+    )
+    monkeypatch.setattr(
+        run_env,
+        "_load_expert_program",
+        MagicMock(return_value=decoded_program),
+    )
+    monkeypatch.setattr(run_env.gymnasium, "make", make)
+    monkeypatch.setattr(run_env, "main", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
+        lambda: None,
+    )
+
+    run_env.cli([])
+
+    assert env_cfg.expert_program is decoded_program
+    make.assert_called_once_with(id=GYM_ID, cfg=env_cfg)
 
 
 def test_close_durability_failure_is_not_swallowed() -> None:

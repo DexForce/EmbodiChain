@@ -158,14 +158,14 @@ valid, but removes that look-ahead information from the earlier Pick.
 
 ## Construct a runtime
 
-Use {meth}`SemanticSkillRuntime.from_simulation` for the standard simulation
-path. This compatibility facade creates a registry-backed planning scene
-provider, a `SimulationExecutionAdapter`, an `AtomicActionEngine` with
+Use {meth}`SkillRuntime.from_simulation` for the standard simulation
+path. This canonical factory creates a registry-backed planning scene provider,
+a `SimulationExecutionAdapter`, an `AtomicActionEngine` with
 built-ins, the semantic manifest/compiler, and typed effect-evidence
 collectors:
 
 ```python
-runtime = SemanticSkillRuntime.from_simulation(
+runtime = SkillRuntime.from_simulation(
     simulation=sim,
     robot=robot,
     motion_generator=motion_generator,
@@ -212,7 +212,7 @@ result = runtime.run(
 result.require_all_succeeded()
 ```
 
-{meth}`SemanticSkillRuntime.run` is a convenience entry point over the
+{meth}`SkillRuntime.run` is the synchronous entry point over the
 step-wise {class}`SkillRuntime`. The canonical runtime obtains typed evidence
 from its {class}`EffectEvidenceCollector` and lets the selected effect monitor
 decide whether the physical effect is verified. A legacy
@@ -282,7 +282,7 @@ acceptable.
 
 ## Diagnostics and extension points
 
-{meth}`SemanticSkillRuntime.validate` (or
+{meth}`SkillRuntime.validate` (or
 {meth}`SemanticSkillCompiler.analyze`) exposes static analysis without
 observing, planning, or executing. Static integration and grounding errors use
 {class}`SemanticValidationError`, whose {class}`SemanticDiagnostic` contains a

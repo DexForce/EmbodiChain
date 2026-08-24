@@ -34,7 +34,7 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | `ObservationManager` | `ObservationCfg` | `modify`, `add` | `compute(obs) → EnvObs` |
 | `RewardManager` | `RewardCfg` | `add`, `replace` | `compute(obs, action, info) → (reward, info_dict)` |
 | `EventManager` | `EventCfg` | `startup`, `reset`, `interval`, user-defined | `apply(mode, env_ids)` |
-| `ActionManager` | `ActionTermCfg` | `pre`, `post` | `process_actions(actions) → EnvAction` |
+| `ActionManager` | `ActionTermCfg` | `pre`, `post` | `process_action(action, mode) → EnvAction` |
 | `DatasetManager` | `DatasetFunctorCfg` | `save` | `step(obs, action, done, info)` |
 
 ---
@@ -173,11 +173,18 @@ class compute_exteroception(Functor):
    - Groups functors by `mode` into `_mode_functor_names` / `_mode_functor_cfgs`.
 
 ### Per-step execution (env `step`)
-1. **Actions**: `ActionManager.process_actions(raw_actions)` → robot control commands.
+1. **Actions**: raw actions use `ActionManager.process_action(..., mode="pre")`;
+   explicit `ControllerAction` values skip `pre`. Both paths then pass through
+   `EmbodiedEnv._prepare_controller_action()` before robot control.
 2. **Sim step**: physics advances.
 3. **Observations**: `ObservationManager.compute(obs)` → updated obs dict.
 4. **Rewards**: `RewardManager.compute(obs, action, info)` → `(total_reward, reward_info)`.
 5. **Events**: `EventManager.apply("interval")` for interval-mode functors (step counter checked internally).
+
+After robot control and simulation, configured action terms in `post` mode run
+for both raw and `ControllerAction` inputs. `ControllerAction` is therefore not
+an alternate action manager; it marks that only the raw-policy preprocessing
+stage has already completed.
 
 ### On reset
 1. `EventManager.apply("reset", env_ids)` — domain randomization etc.

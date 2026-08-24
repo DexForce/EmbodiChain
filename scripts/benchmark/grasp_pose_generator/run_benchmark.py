@@ -16,8 +16,8 @@
 
 """Benchmark the grasp pose generator used by the grasp tutorial.
 
-Measures how ``grasp_cfg.antipodal_sampler_cfg.n_sample`` and
-``grasp_cfg.n_top_grasps`` affect antipodal sampling, grasp-pose selection
+Measures how ``algorithm_cfg.sample_count`` and ``algorithm_cfg.max_candidates``
+affect antipodal sampling, grasp-pose selection
 latency, and memory usage for the CoffeeCup mesh used in
 ``scripts/tutorials/grasp/grasp_generator.py``.
 Run: embodichain benchmark grasp-pose-generator
@@ -38,15 +38,12 @@ import torch
 import trimesh
 
 from embodichain.data import get_data_path
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
-    GraspGenerator,
-    GraspGeneratorCfg,
-)
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
-    AntipodalSamplerCfg,
-)
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalGraspPoseGenerator,
+    AntipodalGraspPoseGeneratorCfg,
+    GraspAnnotationCfg,
+    ParallelJawGraspCollisionCfg,
 )
 
 DEFAULT_N_SAMPLES = [5000, 10000, 20000]
@@ -65,14 +62,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         nargs="+",
         type=int,
         default=DEFAULT_N_SAMPLES,
-        help="Values for grasp_cfg.antipodal_sampler_cfg.n_sample.",
+        help="Values for algorithm_cfg.sample_count.",
     )
     parser.add_argument(
         "--n-top-grasps",
         nargs="+",
         type=int,
         default=DEFAULT_N_TOP_GRASPS,
-        help="Values for grasp_cfg.n_top_grasps.",
+        help="Values for algorithm_cfg.max_candidates.",
     )
     parser.add_argument(
         "--device",
@@ -202,65 +199,51 @@ def _set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def _remove_antipodal_cache_file(generator: GraspGenerator) -> None:
-    """Remove the whole-mesh antipodal cache file used by GraspGenerator.generate."""
-    cache_path = Path(generator._get_cache_dir(generator.vertices, generator.triangles))
-    if cache_path.exists():
-        cache_path.unlink()
-
-
-def _clear_antipodal_cache(generator: GraspGenerator) -> None:
-    """Remove cached antipodal pairs from disk and memory."""
-    _remove_antipodal_cache_file(generator)
-    generator._hit_point_pairs = None
-
-
 def _make_grasp_generator(
-    vertices: torch.Tensor,
-    triangles: torch.Tensor,
     n_sample: int,
     n_top_grasps: int,
-) -> GraspGenerator:
-    """Create the tutorial-style GraspGenerator for one parameter setting."""
-    grasp_cfg = GraspGeneratorCfg(
-        antipodal_sampler_cfg=AntipodalSamplerCfg(
-            n_sample=n_sample,
-            max_length=0.088,
-            min_length=0.003,
+    *,
+    force_refresh: bool,
+) -> AntipodalGraspPoseGenerator:
+    """Create the public grasp service for one parameter setting."""
+    return AntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(
+            model_id="benchmark_parallel_jaw",
+            min_opening_width=0.003,
+            max_opening_width=0.088,
+            finger_length=0.078,
         ),
-        is_partial_annotate=False,
-        is_filter_ground_collision=True,
-        n_top_grasps=n_top_grasps,
-    )
-    gripper_collision_cfg = GripperCollisionCfg(
-        max_open_length=0.088,
-        finger_length=0.078,
-        point_sample_dense=0.012,
-    )
-    return GraspGenerator(
-        vertices=vertices,
-        triangles=triangles,
-        cfg=grasp_cfg,
-        gripper_collision_cfg=gripper_collision_cfg,
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+            sample_count=n_sample,
+            max_candidates=n_top_grasps,
+        ),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            point_sample_density=0.012,
+            filter_ground_collision=True,
+        ),
+        annotation_cfg=GraspAnnotationCfg(force_refresh=force_refresh),
     )
 
 
 def _timed_generate(
-    generator: GraspGenerator,
+    generator: AntipodalGraspPoseGenerator,
+    vertices: torch.Tensor,
+    triangles: torch.Tensor,
     seed: int,
 ) -> tuple[float, dict[str, float], float, torch.Tensor]:
     """Run a timed antipodal point generation call."""
-    _clear_antipodal_cache(generator)
     _set_seed(seed)
     _reset_peak_gpu_memory()
     mem_before = _memory_snapshot()
     _sync_cuda()
 
     start = time.perf_counter()
-    hit_point_pairs = generator.generate()
+    hit_point_pairs = generator.prepare_mesh(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+    )
     _sync_cuda()
     elapsed = time.perf_counter() - start
-    _remove_antipodal_cache_file(generator)
 
     mem_after = _memory_snapshot()
     deltas = {
@@ -271,20 +254,18 @@ def _timed_generate(
 
 
 def _timed_pose_selection(
-    generator: GraspGenerator,
-    n_top_grasps: int,
+    generator: AntipodalGraspPoseGenerator,
+    vertices: torch.Tensor,
+    triangles: torch.Tensor,
     seed: int,
-) -> tuple[
-    float, dict[str, float], float, bool, torch.Tensor, torch.Tensor, torch.Tensor
-]:
+) -> tuple[float, dict[str, float], float, bool, torch.Tensor, torch.Tensor]:
     """Run a timed grasp-pose selection call."""
-    generator.cfg.n_top_grasps = n_top_grasps
-    object_pose = torch.eye(4, dtype=torch.float32, device=generator.device)
+    object_pose = torch.eye(4, dtype=torch.float32, device=vertices.device)
     object_pose[:3, 3] = torch.tensor(
-        [0.55, 0.0, 0.01], dtype=torch.float32, device=generator.device
+        [0.55, 0.0, 0.01], dtype=torch.float32, device=vertices.device
     )
     approach_direction = torch.tensor(
-        [0.0, 0.0, -1.0], dtype=torch.float32, device=generator.device
+        [0.0, 0.0, -1.0], dtype=torch.float32, device=vertices.device
     )
 
     _set_seed(seed)
@@ -293,11 +274,13 @@ def _timed_pose_selection(
     _sync_cuda()
 
     start = time.perf_counter()
-    is_success, grasp_poses, open_lengths, total_cost = generator.get_valid_grasp_poses(
-        object_pose=object_pose,
+    grasp_poses, total_cost = generator.get_valid_grasp_poses(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=object_pose.unsqueeze(0),
         approach_direction=approach_direction,
-        visualize_collision=False,
-    )
+    )[0]
+    is_success = bool(torch.isfinite(total_cost).any().item())
     _sync_cuda()
     elapsed = time.perf_counter() - start
 
@@ -312,7 +295,6 @@ def _timed_pose_selection(
         _peak_gpu_memory_mb(),
         is_success,
         grasp_poses,
-        open_lengths,
         total_cost,
     )
 
@@ -360,7 +342,7 @@ def benchmark_grasp_pose_generator(
     pipeline_rows: list[dict[str, object]] = []
     notes: list[str] = [
         "Mesh source matches scripts/tutorials/grasp/grasp_generator.py: CoffeeCup/cup.ply scaled by 4.0.",
-        "GraspGenerator.generate() cache is cleared before each timed generation so n_sample changes are measured.",
+        "GraspAnnotationCfg.force_refresh ensures each timed sampling call measures generation rather than a cache hit.",
     ]
 
     if not torch.cuda.is_available() and not skip_pose_selection:
@@ -379,14 +361,18 @@ def benchmark_grasp_pose_generator(
 
     for n_sample in n_samples:
         generator = _make_grasp_generator(
-            vertices=vertices,
-            triangles=triangles,
             n_sample=n_sample,
             n_top_grasps=max(n_top_grasps_list),
+            force_refresh=True,
         )
 
         generate_elapsed, generate_mem, generate_peak_gpu, hit_point_pairs = (
-            _timed_generate(generator, seed + n_sample)
+            _timed_generate(
+                generator,
+                vertices,
+                triangles,
+                seed + n_sample,
+            )
         )
         hit_pairs = int(hit_point_pairs.shape[0])
         generate_ms = generate_elapsed * 1000.0
@@ -428,17 +414,26 @@ def benchmark_grasp_pose_generator(
             continue
 
         for n_top_grasps in n_top_grasps_list:
+            generator = _make_grasp_generator(
+                n_sample=n_sample,
+                n_top_grasps=n_top_grasps,
+                force_refresh=False,
+            )
+            generator.prepare_mesh(
+                mesh_vertices=vertices,
+                mesh_triangles=triangles,
+            )
             (
                 pose_elapsed,
                 pose_mem,
                 pose_peak_gpu,
                 is_success,
                 grasp_poses,
-                open_lengths,
                 total_cost,
             ) = _timed_pose_selection(
                 generator=generator,
-                n_top_grasps=n_top_grasps,
+                vertices=vertices,
+                triangles=triangles,
                 seed=seed + n_sample + n_top_grasps,
             )
             pose_ms = pose_elapsed * 1000.0
