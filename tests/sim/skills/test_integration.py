@@ -36,7 +36,6 @@ from embodichain.lab.sim.atomic_actions import (
     GRASP_CAPABILITY,
     HandOverOptions,
     MotionPolicy,
-    OperateArticulationOptions,
     PickUpOptions,
     PlaceOptions,
 )
@@ -91,7 +90,6 @@ def _action_option_templates() -> dict[str, object]:
         "pick": PickUpOptions(),
         "place": PlaceOptions(),
         "hand_over": HandOverOptions(),
-        "operate_articulation": OperateArticulationOptions(),
     }
 
 
@@ -406,6 +404,25 @@ def test_scene_manifest_detects_grounding_metadata_drift() -> None:
     assert error.value.diagnostic.code == "scene_manifest_mismatch"
 
 
+def test_scene_manifest_detects_collision_world_mode_drift() -> None:
+    manifest = SceneManifest.from_registry(
+        SceneRegistry(collision_world_mode=SceneCollisionWorldMode.SHARED)
+    )
+
+    assert manifest.collision_world_mode is SceneCollisionWorldMode.SHARED
+    with pytest.raises(SemanticValidationError) as error:
+        manifest.validate_registry(
+            SceneRegistry(collision_world_mode=SceneCollisionWorldMode.PER_ENV)
+        )
+
+    assert error.value.diagnostic.code == "scene_manifest_mismatch"
+    assert error.value.diagnostic.path == (
+        "integration",
+        "scene_registry",
+        "collision_world_mode",
+    )
+
+
 def test_scene_manifest_rejects_impossible_typed_topology() -> None:
     affordance = SceneAffordanceRef("self")
 
@@ -526,21 +543,6 @@ def test_semantic_integration_rejects_compiler_owned_option_fields() -> None:
         )
     assert pick_error.value.diagnostic.code == "reserved_action_option_field"
     assert pick_error.value.diagnostic.path[-1] == ("downstream_object_target_poses")
-
-    with pytest.raises(SemanticValidationError) as handover_error:
-        _semantic_integration(
-            registry,
-            preset=SkillPolicyPreset(
-                "safe",
-                action_option_templates={
-                    "hand_over": HandOverOptions(
-                        middle_object_pose=torch.eye(4),
-                    )
-                },
-            ),
-        )
-    assert handover_error.value.diagnostic.code == "reserved_action_option_field"
-    assert handover_error.value.diagnostic.path[-1] == "middle_object_pose"
 
 
 def test_static_link_requires_selected_preset_action_option_template() -> None:

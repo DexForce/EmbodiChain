@@ -243,7 +243,7 @@ episode count.
 #### Run the built-in three-cycle example
 
 The shipped
-`embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json` config uses
+`embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json` config uses
 a specified UR5 with a parallel gripper to pick up and freely place the same
 cube three times. Each cycle is a separate lazy segment. The next pickup is
 planned only after the previous placement has fallen and become stable, so the
@@ -254,14 +254,14 @@ No action-bank config is needed:
 
 ```bash
 embodichain run-env \
-    --gym_config embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json \
+    --gym_config embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json \
     --headless \
     --device cuda \
     --max_episodes 1
 ```
 
 The configured `LeRobotRecorder` writes below
-`outputs/lerobot/multi_segments/` using an auto-numbered directory. The episode
+`outputs/lerobot/expert_program/` using an auto-numbered directory. The episode
 contains one overall task plus three per-frame subtask/segment annotations.
 See {ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for
 the EmbodiChain terminal validator and LeRobot's official Rerun viewer.
@@ -404,6 +404,7 @@ re-simulated rather than merely restored. Results may diverge if the replay
 configuration changes physics, control, randomization, assets, or timestep
 settings that are not stored in the trajectory file.
 
+(run-env-interactive-replay)=
 ### Interactive control replay
 
 Control mode uses kinematic state restoration and lets you scrub the trajectory

@@ -488,7 +488,7 @@ def test_joint_query_type_is_built_for_articulation_expectation() -> None:
     spec = SemanticEffectSpec(
         semantic_id="open:drawer",
         effect_kind=SemanticEffectKind.ARTICULATION,
-        skill_id="OperateArticulation",
+        skill_id="test_articulation",
         invocation_id="open-1",
         invocation_revision=0,
         env_ids=torch.tensor([0]),
@@ -515,7 +515,7 @@ def _articulation_spec(
     return SemanticEffectSpec(
         semantic_id="open:drawer",
         effect_kind=SemanticEffectKind.ARTICULATION,
-        skill_id="OperateArticulation",
+        skill_id="test_articulation",
         invocation_id="open-1",
         invocation_revision=0,
         env_ids=torch.tensor([0, 1]),

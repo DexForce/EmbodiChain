@@ -14,7 +14,7 @@ follow the canonical routing rules in `.agents/skills/project-dev-context/`.
 - Add atomic actions: `.github/copilot/add-atomic-action.md`
 - Add robots: `.github/copilot/add-robot.md`
 - Add tests: `.github/copilot/add-test.md`
+- Update public API docs: `.github/copilot/update-api-docs.md`
 - Run pre-commit checks: `.github/copilot/pre-commit-check.md`
 - Draft or create pull requests: `.github/copilot/pr.md`
 - Write benchmarks: `.github/copilot/benchmark.md`
-

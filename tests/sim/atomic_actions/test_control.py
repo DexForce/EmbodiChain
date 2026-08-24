@@ -114,7 +114,7 @@ def test_joint_position_command_broadcasts_owned_batch() -> None:
     command = JointPositionCommand(source)
     source.fill_(9.0)
 
-    resolved = command.resolve(n_envs=3, control_dof=2, device="cpu")
+    resolved = command.resolve(num_envs=3, control_dof=2, device="cpu")
     resolved[0].fill_(7.0)
 
     assert torch.allclose(resolved[1:], torch.tensor([[0.1, 0.2], [0.1, 0.2]]))
@@ -125,7 +125,7 @@ def test_joint_position_command_rejects_incompatible_control_part() -> None:
     command = JointPositionCommand(torch.zeros(2))
 
     with pytest.raises(ValueError, match="resolved control part has 3"):
-        command.resolve(n_envs=1, control_dof=3, device="cpu")
+        command.resolve(num_envs=1, control_dof=3, device="cpu")
 
 
 def test_control_profile_rejects_invalid_command_snapshot_type() -> None:
@@ -161,7 +161,7 @@ def test_control_profile_is_resolved_from_robot_control_part() -> None:
 
     grasp = resolved.endpoint("primary", "grasp").joint_positions(
         "grasp",
-        n_envs=2,
+        num_envs=2,
         device="cpu",
     )
 
@@ -169,66 +169,8 @@ def test_control_profile_is_resolved_from_robot_control_part() -> None:
     with pytest.raises(KeyError, match="available commands"):
         resolved.endpoint("primary", "grasp").joint_positions(
             "pinch",
-            n_envs=2,
+            num_envs=2,
             device="cpu",
-        )
-
-
-def test_direct_binding_shares_motion_task_state_key_across_slot_endpoints() -> None:
-    resolved = _binding(_services())
-
-    assert resolved.endpoint("primary", "motion").task_state_key == "arm"
-    assert resolved.endpoint("primary", "grasp").task_state_key == "arm"
-
-
-def test_direct_binding_accepts_explicit_stable_task_state_key() -> None:
-    resolved = _services().bind_control_parts(
-        _contract(),
-        {"primary": {"motion": "arm", "grasp": "hand"}},
-        task_state_keys={"primary": "logical_manipulator"},
-    )
-
-    assert {endpoint.task_state_key for endpoint in resolved.endpoints} == {
-        "logical_manipulator"
-    }
-
-
-def test_direct_binding_without_motion_requires_unambiguous_task_state_key() -> None:
-    contract = SkillBindingContract(
-        slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(endpoint_id="grasp"),
-                    SkillEndpointRequirement(endpoint_id="support"),
-                ),
-            ),
-        )
-    )
-    endpoints = {"primary": {"grasp": "hand", "support": "arm"}}
-    services = _services()
-
-    with pytest.raises(ValueError, match="no 'motion'.*task_state_keys"):
-        services.bind_control_parts(contract, endpoints)
-
-    resolved = services.bind_control_parts(
-        contract,
-        endpoints,
-        task_state_keys={"primary": "logical_manipulator"},
-    )
-    assert {endpoint.task_state_key for endpoint in resolved.endpoints} == {
-        "logical_manipulator"
-    }
-
-
-def test_direct_binding_requires_exact_task_state_key_slot_coverage() -> None:
-    services = _services()
-
-    with pytest.raises(ValueError, match="cover the binding slots exactly"):
-        services.bind_control_parts(
-            _contract(),
-            {"primary": {"motion": "arm", "grasp": "hand"}},
-            task_state_keys={},
         )
 
 
@@ -251,13 +193,13 @@ def test_invocation_override_replaces_only_resolved_endpoint_snapshot() -> None:
 
     assert torch.allclose(
         overridden.endpoint("primary", "grasp").joint_positions(
-            "grasp", n_envs=1, device="cpu"
+            "grasp", num_envs=1, device="cpu"
         ),
         torch.full((1, 2), 0.4),
     )
     assert torch.equal(
         base.endpoint("primary", "grasp").joint_positions(
-            "grasp", n_envs=1, device="cpu"
+            "grasp", num_envs=1, device="cpu"
         ),
         torch.ones(1, 2),
     )

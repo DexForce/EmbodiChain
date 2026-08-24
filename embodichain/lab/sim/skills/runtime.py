@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
 import math
@@ -27,6 +27,8 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 import torch
+
+from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 from ..atomic_actions.bindings import EndpointBinding
 from ..atomic_actions.engine import AtomicActionEngine
@@ -83,6 +85,7 @@ from .effects import (
     ScalarEffectEvidenceBatch,
     SemanticEffectSpec,
 )
+from .integration import SemanticDiagnostic, SemanticValidationError
 from .scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
@@ -92,6 +95,12 @@ from .scene import (
     SceneRegistry,
 )
 from .profiles import WorkflowRecoveryPolicy
+
+SemanticEffectVerifier = Callable[
+    [SemanticCallSpec, EffectVerificationRequest, PlanningContext],
+    torch.Tensor,
+]
+"""Optional application-owned physical-effect gate."""
 
 
 def _snapshot_task_state(state: TaskState) -> TaskState:
@@ -449,12 +458,8 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
             "values": _metadata_value(values),
         }
     return {
-        "planner": policy.planner,
         "strategy": policy.strategy,
         "sample_count": policy.sample_count,
-        "control_dt": _metadata_value(policy.control_dt),
-        "velocity_limit": _metadata_value(policy.velocity_limit),
-        "acceleration_limit": _metadata_value(policy.acceleration_limit),
         "dynamic_collision_mode": policy.dynamic_collision_mode.value,
         "plan_options": options_metadata,
     }
@@ -1217,6 +1222,9 @@ class SkillFailure:
     semantic_id: str
     env_mask: torch.Tensor
     message: str
+    code: str = "semantic_call_failed"
+    phase: str = "execution"
+    diagnostic: SemanticDiagnostic | None = None
 
     def __post_init__(self) -> None:
         if type(self.call_index) is not int or self.call_index < 0:
@@ -1229,6 +1237,25 @@ class SkillFailure:
             raise ValueError("env_mask must be a one-dimensional bool tensor.")
         if type(self.message) is not str or not self.message:
             raise ValueError("message must be a non-empty string.")
+        if (
+            type(self.code) is not str
+            or not self.code
+            or self.code != self.code.strip()
+        ):
+            raise ValueError(
+                "code must be a non-empty string without outer whitespace."
+            )
+        if type(self.phase) is not str:
+            raise TypeError("phase must be a string.")
+        if self.phase not in {"preparation", "execution", "runtime"}:
+            raise ValueError(
+                "phase must be one of 'preparation', 'execution', or 'runtime'."
+            )
+        if self.diagnostic is not None and not isinstance(
+            self.diagnostic,
+            SemanticDiagnostic,
+        ):
+            raise TypeError("diagnostic must be a SemanticDiagnostic or None.")
         object.__setattr__(self, "env_mask", self.env_mask.clone())
 
     def snapshot(self) -> SkillFailure:
@@ -1238,6 +1265,9 @@ class SkillFailure:
             semantic_id=self.semantic_id,
             env_mask=self.env_mask,
             message=self.message,
+            code=self.code,
+            phase=self.phase,
+            diagnostic=self.diagnostic,
         )
 
     def to_metadata(self) -> dict[str, object]:
@@ -1247,6 +1277,19 @@ class SkillFailure:
             "semantic_id": self.semantic_id,
             "env_mask": _metadata_value(self.env_mask),
             "message": self.message,
+            "code": self.code,
+            "phase": self.phase,
+            "diagnostic": (
+                None
+                if self.diagnostic is None
+                else {
+                    "code": self.diagnostic.code,
+                    "path": _metadata_value(self.diagnostic.path),
+                    "rendered_path": self.diagnostic.rendered_path,
+                    "message": self.diagnostic.message,
+                    "candidates": _metadata_value(self.diagnostic.candidates),
+                }
+            ),
         }
 
 
@@ -1781,6 +1824,22 @@ class SkillResult:
             "message": self.message,
         }
 
+    def require_all_succeeded(self) -> None:
+        """Raise unless every environment completed the workflow successfully.
+
+        This convenience assertion keeps application entry points concise while
+        the canonical result continues to expose row-local masks.
+        """
+        if self.status is not SkillStatus.COMPLETED or not bool(
+            self.success_mask.all()
+        ):
+            raise RuntimeError(
+                "Semantic workflow did not succeed for every environment: "
+                f"status={self.status.value}, "
+                f"failed={self.failure_mask.detach().cpu().tolist()}, "
+                f"cancelled={self.cancelled_mask.detach().cpu().tolist()}."
+            )
+
 
 @runtime_checkable
 class EffectEvidenceCollectorPort(Protocol):
@@ -1827,6 +1886,7 @@ class _PrimedObservationProvider:
             task=task_state,
             scene=context.scene,
             env_ids=context.env_ids,
+            control_dt=context.control_dt,
         )
 
 
@@ -1849,6 +1909,7 @@ class SkillRuntime:
         task_state: TaskState | None = None,
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
+        effect_verifier: SemanticEffectVerifier | None = None,
     ) -> None:
         if not isinstance(compiler, SemanticSkillCompiler):
             raise TypeError("compiler must be a SemanticSkillCompiler.")
@@ -1864,6 +1925,8 @@ class SkillRuntime:
             raise TypeError("clock must implement ExecutionClock.")
         if runner_cfg is not None and not isinstance(runner_cfg, ExecutionRunnerCfg):
             raise TypeError("runner_cfg must be an ExecutionRunnerCfg or None.")
+        if effect_verifier is not None and not callable(effect_verifier):
+            raise TypeError("effect_verifier must be callable or None.")
         integration = compiler.integration
         engine = integration.engine
         if not isinstance(engine, AtomicActionEngine):
@@ -1884,7 +1947,9 @@ class SkillRuntime:
         self._command_sink = command_sink
         self._evidence_collector = evidence_collector
         self._clock = clock or MonotonicExecutionClock()
-        self._runner_cfg = runner_cfg or ExecutionRunnerCfg()
+        self._runner_cfg_override = runner_cfg
+        self._application_effect_verifier = effect_verifier
+        self._step_observer: Callable[[RunnerStep], None] | None = None
         self._task_state = _snapshot_task_state(initial_task)
         self._env_ids = torch.arange(
             self._task_state.batch_size,
@@ -1937,6 +2002,7 @@ class SkillRuntime:
         task_state: TaskState | None = None,
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
+        effect_verifier: SemanticEffectVerifier | None = None,
     ) -> SkillRuntime:
         """Construct the canonical runtime from explicit reusable ports."""
         return cls(
@@ -1947,12 +2013,137 @@ class SkillRuntime:
             task_state=task_state,
             clock=clock,
             runner_cfg=runner_cfg,
+            effect_verifier=effect_verifier,
+        )
+
+    @classmethod
+    def from_simulation(
+        cls,
+        *,
+        simulation: object,
+        robot: object,
+        motion_generator: object,
+        scene_registry: SceneRegistry,
+        robot_profile: object,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+        call_catalog: object | None = None,
+        effect_verifier: SemanticEffectVerifier | None = None,
+        registered_lowerers: Iterable[object] = (),
+        relation_grounders: Iterable[object] = (),
+        handover_pose_providers: Iterable[object] = (),
+        endpoint_adapters: Mapping[type[object], object] | None = None,
+        runner_cfg: ExecutionRunnerCfg | None = None,
+        control_dt: float | None = None,
+        scene_translation_threshold: float = 1.0e-4,
+        scene_rotation_threshold: float = 1.0e-3,
+    ) -> SkillRuntime:
+        """Build the canonical runtime from one explicit simulation integration.
+
+        The optional ``effect_verifier`` is an additional application-owned
+        physical gate combined with the typed evidence monitor selected by the
+        robot profile.
+        """
+        from embodichain.lab.sim.atomic_actions.sim_adapter import (
+            SimulationExecutionAdapter,
+        )
+
+        from .calls import SemanticCallCatalog, builtin_semantic_call_catalog
+        from .evidence import (
+            ControlPartSimulationEvidenceProvider,
+            EffectEvidenceCollector,
+            EffectEvidenceProviderRegistry,
+            SceneArticulationEvidenceProvider,
+        )
+        from .integration import SceneManifest, SemanticIntegrationManifest
+        from .profiles import RobotSkillProfile
+
+        if not isinstance(scene_registry, SceneRegistry):
+            raise TypeError("scene_registry must be a SceneRegistry.")
+        if type(robot_profile) is not RobotSkillProfile:
+            raise TypeError("robot_profile must be exactly RobotSkillProfile.")
+        if call_catalog is not None and type(call_catalog) is not SemanticCallCatalog:
+            raise TypeError("call_catalog must be exactly SemanticCallCatalog or None.")
+        if effect_verifier is not None and not callable(effect_verifier):
+            raise TypeError("effect_verifier must be callable or None.")
+        get_qpos = getattr(robot, "get_qpos", None)
+        if not callable(get_qpos):
+            raise TypeError("robot must provide get_qpos().")
+        qpos = get_qpos()
+        if not isinstance(qpos, torch.Tensor) or qpos.dim() != 2:
+            raise ValueError("robot.get_qpos() must return shape (B, robot_dof).")
+
+        scene_provider = scene_registry.make_planning_scene_provider(
+            motion_generator,
+            batch_size=int(qpos.shape[0]),
+            translation_threshold=scene_translation_threshold,
+            rotation_threshold=scene_rotation_threshold,
+        )
+        adapter = SimulationExecutionAdapter(
+            simulation,
+            robot,
+            control_dt=control_dt,
+            scene_provider=scene_provider,
+        )
+        engine = AtomicActionEngine(
+            motion_generator,
+            control_profiles=robot_profile.action_control_profiles(),
+            grasp_pose_generators=grasp_pose_generators,
+        )
+        manifest = SemanticIntegrationManifest(
+            scene=SceneManifest.from_registry(scene_registry),
+            robot_profile=robot_profile,
+            call_catalog=(
+                builtin_semantic_call_catalog()
+                if call_catalog is None
+                else call_catalog
+            ),
+        )
+        integration = manifest.bind(
+            scene_registry,
+            engine,
+            endpoint_adapters=endpoint_adapters,
+        )
+        compiler = SemanticSkillCompiler(
+            integration,
+            registered_lowerers=registered_lowerers,
+            relation_grounders=relation_grounders,
+            handover_pose_providers=handover_pose_providers,
+        )
+        collector = EffectEvidenceCollector(
+            EffectEvidenceProviderRegistry(
+                (
+                    ControlPartSimulationEvidenceProvider(
+                        robot,
+                        scene_provider=scene_provider,
+                    ),
+                    SceneArticulationEvidenceProvider(scene_provider=scene_provider),
+                )
+            )
+        )
+        return cls(
+            compiler,
+            adapter,
+            adapter,
+            collector,
+            clock=adapter,
+            runner_cfg=runner_cfg,
+            effect_verifier=effect_verifier,
         )
 
     @property
     def compiler(self) -> SemanticSkillCompiler:
         """Return the installed semantic compiler."""
         return self._compiler
+
+    @property
+    def engine(self) -> AtomicActionEngine:
+        """Return the atomic-action engine owned by this runtime."""
+        return self._engine
+
+    @property
+    def observation_provider(self) -> ObservationProvider:
+        """Return the observation port used for just-in-time grounding."""
+        return self._observation_provider
 
     @property
     def clock(self) -> ExecutionClock:
@@ -1967,6 +2158,15 @@ class SkillRuntime:
     def scene_registry(self) -> SceneRegistry:
         """Return the authoritative semantic scene registry."""
         return self._compiler.integration.scene_registry
+
+    def validate(
+        self,
+        calls: Iterable[SemanticCallSpec],
+        *,
+        workflow_id: str = "semantic_workflow",
+    ) -> object:
+        """Analyze a workflow without executing it."""
+        return self.compiler.analyze(calls, workflow_id=workflow_id)
 
     @property
     def task_state(self) -> TaskState:
@@ -2007,7 +2207,8 @@ class SkillRuntime:
             self._evidence_collector,
             task_state=initial_state,
             clock=self._clock,
-            runner_cfg=self._runner_cfg,
+            runner_cfg=self._runner_cfg_override,
+            effect_verifier=self._application_effect_verifier,
         )
 
     @property
@@ -2098,6 +2299,8 @@ class SkillRuntime:
             phase_effect_gate_verifier=gate_verifier,
             held_object_guard_verifier=guard_verifier,
         )
+        if self._step_observer is not None:
+            self._step_observer(runner_step)
         self._consume_runner_step(runner_step)
         if (
             runner_step.status is RunnerStatus.RUNNING
@@ -2144,24 +2347,32 @@ class SkillRuntime:
         eligible_mask: torch.Tensor | None = None,
         execution_prefix_length: int | None = None,
         max_steps: int = 100_000,
+        on_step: Callable[[RunnerStep], None] | None = None,
     ) -> SkillResult:
         """Synchronously execute an analyzed semantic-call prefix."""
         if type(max_steps) is not int or max_steps <= 0:
             raise ValueError("max_steps must be a positive integer.")
-        result = self.start(
-            *calls,
-            workflow_id=workflow_id,
-            eligible_mask=eligible_mask,
-            execution_prefix_length=execution_prefix_length,
-        )
-        for _ in range(max_steps):
-            if result.terminal:
-                return result
-            if result.wait_duration > 0.0:
-                self._clock.sleep(result.wait_duration)
-            result = self.step()
-        self._abort(f"Semantic runtime exceeded max_steps={max_steps}.")
-        return self.result
+        if on_step is not None and not callable(on_step):
+            raise TypeError("on_step must be callable or None.")
+        previous_observer = self._step_observer
+        self._step_observer = on_step
+        try:
+            result = self.start(
+                *calls,
+                workflow_id=workflow_id,
+                eligible_mask=eligible_mask,
+                execution_prefix_length=execution_prefix_length,
+            )
+            for _ in range(max_steps):
+                if result.terminal:
+                    return result
+                if result.wait_duration > 0.0:
+                    self._clock.sleep(result.wait_duration)
+                result = self.step()
+            self._abort(f"Semantic runtime exceeded max_steps={max_steps}.")
+            return self.result
+        finally:
+            self._step_observer = previous_observer
 
     def cancel(
         self, reason: str = "Semantic workflow cancelled by caller."
@@ -2421,6 +2632,7 @@ class SkillRuntime:
             task=self._task_state,
             scene=context.scene,
             env_ids=context.env_ids,
+            control_dt=context.control_dt,
         )
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(
@@ -2542,6 +2754,16 @@ class SkillRuntime:
             raise ValueError("Grounded phase-effect gates require an effect spec.")
 
         self._grounded = grounded
+        runner_cfg = self._runner_cfg_override
+        if runner_cfg is None:
+            analyzed = getattr(grounded, "analyzed", None)
+            bound = getattr(analyzed, "bound", None)
+            preset = getattr(bound, "preset", None)
+            runner_cfg = getattr(preset, "runner_cfg", None)
+            if not isinstance(runner_cfg, ExecutionRunnerCfg):
+                raise TypeError(
+                    "Grounded semantic call preset must own an ExecutionRunnerCfg."
+                )
         session = self._engine.start(
             (invocation,),
             context,
@@ -2553,7 +2775,7 @@ class SkillRuntime:
             primed,
             self._command_sink,
             clock=self._clock,
-            cfg=self._runner_cfg,
+            cfg=runner_cfg,
         )
         self._current_call_index = workflow_call_index
         self._runner = runner
@@ -2945,6 +3167,34 @@ class SkillRuntime:
             expectation_decisions=expectation_decisions,
         )
         analyzed = getattr(grounded, "analyzed", None)
+        application_verifier = self._application_effect_verifier
+        if application_verifier is not None:
+            call = getattr(analyzed, "call", None)
+            if not isinstance(call, SemanticCallSpec):
+                raise TypeError(
+                    "Grounded semantic calls must retain a SemanticCallSpec for "
+                    "application effect verification."
+                )
+            application_success = application_verifier(call, request, context)
+            if (
+                not isinstance(application_success, torch.Tensor)
+                or application_success.dtype != torch.bool
+                or application_success.shape != request.env_mask.shape
+                or application_success.device != request.env_mask.device
+            ):
+                raise ValueError(
+                    "SemanticEffectVerifier must return a bool tensor matching "
+                    "the request env_mask and device."
+                )
+            active = request.env_mask.to(device=decision.success_mask.device)
+            application_success = application_success.to(
+                device=decision.success_mask.device
+            )
+            decision = EffectMonitorDecision(
+                success_mask=decision.success_mask & application_success,
+                failure_mask=decision.failure_mask | (active & ~application_success),
+                expectation_decisions=decision.expectation_decisions,
+            )
         monitor_ref = getattr(analyzed, "effect_monitor_ref", None)
         if monitor_ref is not None and not isinstance(monitor_ref, EffectMonitorRef):
             raise TypeError("Grounded effect monitor reference must be typed.")
@@ -3445,7 +3695,24 @@ class SkillRuntime:
             f"Could not prepare semantic call {call_index} ({semantic_id!r}): "
             f"{type(exc).__name__}: {exc}"
         )
-        self._failures.append(SkillFailure(call_index, semantic_id, failed, message))
+        diagnostic = (
+            exc.diagnostic if isinstance(exc, SemanticValidationError) else None
+        )
+        self._failures.append(
+            SkillFailure(
+                call_index=call_index,
+                semantic_id=semantic_id,
+                env_mask=failed,
+                message=message,
+                code=(
+                    "semantic_call_preparation_failed"
+                    if diagnostic is None
+                    else diagnostic.code
+                ),
+                phase="preparation",
+                diagnostic=diagnostic,
+            )
+        )
         self._append_preparation_failure_trace(call_index, failed)
         self._message = message
         self._status = SkillStatus.FAILED
@@ -3557,10 +3824,12 @@ class SkillRuntime:
             )
             self._failures.append(
                 SkillFailure(
-                    call_index,
-                    self._calls[call_index].semantic_id,
-                    failed,
-                    reason,
+                    call_index=call_index,
+                    semantic_id=self._calls[call_index].semantic_id,
+                    env_mask=failed,
+                    message=reason,
+                    code="semantic_runtime_aborted",
+                    phase="runtime",
                 )
             )
         self._message = reason
@@ -3750,6 +4019,7 @@ __all__ = [
     "AtomicSkills",
     "EffectEvidenceCollectorPort",
     "ResolvedCorePolicyTrace",
+    "SemanticEffectVerifier",
     "SkillCallTrace",
     "SkillEndpointBindingTrace",
     "SkillEndpointTrackingChannelTrace",

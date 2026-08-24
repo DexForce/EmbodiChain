@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Gym environment registration and task-package discovery utilities."""
+
 from __future__ import annotations
 
 import importlib
@@ -42,6 +44,21 @@ if TYPE_CHECKING:
     )
 
 _logger = logging.getLogger(__name__)
+
+__all__ = [
+    "EnvSpec",
+    "REGISTERED_ENVS",
+    "TimeLimitWrapper",
+    "build_env",
+    "discover_task_packages",
+    "execute_init_hooks",
+    "get_env_spec",
+    "make",
+    "make_vec",
+    "register",
+    "register_env",
+    "register_env_function",
+]
 
 
 class EnvSpec:

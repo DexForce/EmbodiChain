@@ -93,7 +93,8 @@ class TestMotionStrategyReachEquivalence:
                             sample_count=self.SAMPLE_INTERVAL,
                         ),
                     ),
-                )
+                ),
+                engine.initial_context(control_dt=sim.sim_config.physics_dt),
             )
             assert result.plan_success.all().item(), f"{strategy} reported failure"
             plan = result.action_plans[0]

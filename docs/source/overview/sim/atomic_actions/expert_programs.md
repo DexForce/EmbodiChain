@@ -16,9 +16,10 @@ state before the next call is grounded.
 
 ## Author a program
 
-Schema version 1 supports bounded `sequence`, `repeat`, `segment`, and `invoke`
-nodes. Schema version 2 additionally supports deterministic `parallel` blocks
-and explicit `barrier` nodes. Unknown fields, unsupported discriminators,
+Schema version 2 is the only accepted schema. It supports bounded `sequence`,
+`repeat`, `segment`, and `invoke` nodes plus deterministic `parallel` blocks.
+Each parallel block owns its explicit `barrier`; a barrier is not a standalone
+program node. Unknown fields, unsupported discriminators,
 unbounded structures, executable values, and dotted environment traversal are
 rejected before physical execution or command emission.
 
@@ -30,11 +31,11 @@ verification semantics.
 The repeated-cube task is configured entirely as semantic calls:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 program_id: repeated_cube_pick_place
 integration:
-  robot_profile: ur5_parallel_gripper_v1
-  scene_registry: multi_segments_cube_v1
+  robot_profile: expert_program_ur5_pick_place
+  scene_registry: expert_program_repeated_pick_place
   runtime_preset: safe
 targets:
   drop_pose:
@@ -76,7 +77,7 @@ configuration file:
 }
 ```
 
-`run_env` can override it explicitly:
+Alternatively, `run_env` can load a program explicitly:
 
 ```bash
 python -m embodichain.lab.scripts.run_env \
@@ -84,40 +85,10 @@ python -m embodichain.lab.scripts.run_env \
   --expert-program path/to/program.yaml
 ```
 
-## Accept untrusted model output
-
-Model-generated programs use the same decoder and compiler, but enter through
-the narrower MLLM frontend. The trusted host owns the scene, robot profile, and
-runtime preset; the model response must omit `integration` entirely:
-
-```python
-from embodichain.agents.mllm import compile_mllm_expert_program
-from embodichain.lab.gym.envs.expert_program import ExpertProgramIntegrationCfg
-
-compiled = compile_mllm_expert_program(
-    model_response,
-    adapter=adapter,
-    integration=ExpertProgramIntegrationCfg(
-        robot_profile="my_robot_v1",
-        scene_registry="my_scene_v1",
-        runtime_preset="safe",
-    ),
-)
-```
-
-This entry point accepts exactly one bounded JSON document. It rejects duplicate
-keys, non-finite or overflowing numeric values, invalid Unicode, Markdown
-fences, trailing text, and every normal schema violation. Its initial policy is
-deliberately smaller than the file format: only schema version 1 and curated
-`pick`, `place`, `hand_over`, and `operate_articulation` calls are admitted.
-The model cannot select `resources`, a hand-over `receiver`, a runtime preset,
-or an explicit articulation position/displacement; articulation operations must
-use a host-declared named target. Registered calls and parallel nodes remain
-host-authored extensions.
-
-`compile_mllm_expert_program` delegates to the existing
-`ExpertProgramEnvironmentAdapter.compile` method. It neither creates a second
-compiler nor assembles a runtime while validating model output.
+Future model-facing frontends must feed the same strict decoder and
+`ExpertProgramEnvironmentAdapter.compile` boundary. They must not introduce a
+second schema, compiler, or runtime, and the trusted host must continue to own
+integration selection and executable extensions.
 
 ## Integrate a simulation task
 
@@ -133,7 +104,7 @@ MY_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistration(
 )
 
 
-class MyTaskEnv(ExpertProgramEnvironmentMixin, EmbodiedEnv):
+class MyTaskEnv(EmbodiedEnv):
     def __init__(self, cfg, **kwargs):
         super().__init__(cfg, **kwargs)
         self._expert_program_adapter = create_simulation_expert_program_adapter(
@@ -150,24 +121,23 @@ The scene binding is authoritative for semantic identity, live pose sources,
 geometry, affordances, and collision roles. The robot profile owns reusable
 resources, endpoint capabilities, semantic commands, policy presets, and effect
 monitor selection. `SimulationRobotSkillProfileBinding` accepts generic
-`RobotResourceBinding` declarations containing arbitrary typed
-`ResourceEndpoint` values; `ControlPartResourceBinding` is its stricter
-joint-backed convenience. Endpoint adapters and runtime transports are the
-extension boundary for mobile-base, whole-body, or non-joint controllers and
+core `RobotResource` declarations containing arbitrary typed `ResourceEndpoint`
+values directly; `ControlPartResourceBinding` is the joint-backed convenience.
+Endpoint adapters and runtime transports are the extension boundary for
+mobile-base, whole-body, or non-joint controllers. On the standard path they
 are owned by `SimulationExpertProgramRegistration`, not passed as live helper
-overrides. Their exact static target, payload, route, and transport declarations
-enter the catalog fingerprint, while transport tuple order defines deterministic
-Gym-action composition order. Task programs keep the same semantic calls and do
-not gain controller-shaped fields.
+overrides. Their exact target, payload, route, and transport declarations enter
+the catalog fingerprint, while transport tuple order defines deterministic
+Gym-action composition order. Task programs keep the same semantic calls and
+do not gain controller-shaped fields.
 
-The current standard registration installs built-in joint tracking and effect
-evidence providers only for `ControlPartEndpoint`. Every custom endpoint adapter
-must declare empty tracking/evidence route sets and therefore uses
-timed/open-loop completion. A non-joint closed-loop projector, feedback source,
-or effect-evidence backend still requires the planned registration-owned
-provider-factory extension; it must not be injected from a task after preflight.
-Whole-body controllers expressed through existing joint control parts continue
-to use the built-in joint route.
+The standard registration currently installs built-in joint tracking and
+effect-evidence routes only for `ControlPartEndpoint`. A custom endpoint adapter
+must declare empty tracking and evidence routes, so it uses timed/open-loop
+completion. Non-joint closed-loop projectors, feedback sources, metric
+evaluators, and effect-evidence backends still require registration-owned
+provider-factory contracts. Whole-body controllers expressed through existing
+joint control parts continue to use the built-in joint route.
 
 Relation and rendezvous semantics are also explicit integration capabilities.
 `Place(on=...)` and `Place(inside=...)` require an exact typed/versioned
@@ -188,26 +158,18 @@ timing, and dataset boundaries remain authoritative. `BaseEnv.step_dt` is the
 only control cadence; a command duration that is not representable on that grid
 fails instead of being silently resampled.
 
-Creating a bridge materializes the bounded segment stream and performs
-provider-aware semantic analysis before any command can be emitted. Sequential
+Compilation returns one already materialized bounded program. Creating a bridge
+performs provider-aware semantic analysis before any command can be emitted. Sequential
 stretches retain downstream object-target look-ahead across segment boundaries;
 an explicit parallel block is a conservative look-ahead barrier. Runtime still
 re-observes and grounds each call just in time after prior verified effects.
 
-The standard simulation integration verifies grasp and release with two pieces
-of evidence:
-
-- the last exact open/grasp command accepted by the buffered Gym command sink,
-  tracked independently for every stable environment ID; and
-- the live object-to-endpoint pose relation from the shared scene snapshot.
-
-The command-state update is transactional: encoder, buffer, cancellation, or
-safe-stop failures invalidate it. The current C1 standard path does not accept
-task-side evidence callbacks: custom endpoint adapters must expose empty
-tracking and effect-evidence route sets. Contact, constraint, force, wrench, or
-other custom closed-loop sensing requires a future registration-owned provider
-factory whose declaration enters the integration fingerprint; this will not
-change the semantic call or program.
+The standard simulation integration never treats an accepted controller command
+as physical evidence. Grasp, release, and hand-over verification consume live
+pose evidence together with registered physical evidence routes. The standard
+registration path does not accept task-side contact, constraint, force, or
+wrench callback overrides; missing physical channels remain invalid and fail
+closed. Advanced integrations may still assemble explicit providers directly.
 
 Program/demo-segment metadata records runtime call results, named trajectory
 segments, effect decisions, recovery events, scene and collision revisions,
@@ -215,17 +177,16 @@ settling outcomes, and validator results in deterministic JSON-safe values.
 Trajectory segments are trace ranges inside one atomic plan; they do not create
 independent recovery or timeout boundaries.
 
-Schema-version-2 parallel blocks additionally require an authoritative
+Parallel blocks additionally require an authoritative
 `ParallelCommandSafetyValidator`. Resource-claim disjointness is necessary but
 is not treated as proof of physical safety. If no validator is installed, the
 parallel block refuses to start; the standard simulation adapter intentionally
-does not invent one from resource names. Its task registration must instead
-declare a safety factory covering the exact registered transport set; each
-runtime assembly receives a fresh validator instance from that factory. Every
-parallel frame must occupy
+does not invent one from resource names. Its task registration must declare a
+safety factory for the exact transport set, and each runtime assembly receives
+a fresh validator from that factory. Every parallel frame must occupy
 exactly one `BaseEnv.step_dt`; shorter lanes repeat their last safe target as
 hold padding, while fractional frames are rejected rather than resampled.
-Version 2 also uses strict symbolic key-level conflict detection at the barrier:
+The runtime also uses strict symbolic key-level conflict detection at the barrier:
 two branches may not commit the same task-state key, even when their physical
 changes occurred in disjoint environment rows.
 
@@ -263,7 +224,6 @@ robot resource and endpoint declarations, see {doc}`robot_skill_profiles`.
 | `Place(at=...)` | Object-centric lowering with verified held state | Direct semantic pose target |
 | `Place(on=...)` / `Place(inside=...)` | Exact typed relation dispatch | Integration must install the matching `RelationTargetGrounder` |
 | `HandOver` | Coordinated call, state flow, and effect contract | Embodiment must install its named `HandOverPoseProvider` and evidence sources |
-| `OperateArticulation` | Named/absolute/displacement target and joint effect | Link, joint, operation-affordance, and interaction endpoint bindings |
 | Registered calls | Typed call catalog and explicit lowerer | Physical extensions must add an explicit effect contract |
 | Mobile/whole-body extensions | Generic resources, claims, endpoint targets, command frames, and routing | Requires a reusable semantic skill/lowerer plus matching adapter, payload, transport, and effect integration; no curated navigation or whole-body skill is installed today |
 | Parallel blocks | Shared-clock coordinator and strict barrier merge | Requires an authoritative `ParallelCommandSafetyValidator`; none is inferred by default |
@@ -272,7 +232,6 @@ The table separates implemented reusable contracts from embodiment-specific
 providers. It is not a claim that every row has completed task-level physical
 simulation acceptance.
 
-The Open Drawer vertical slice has completed its supported-simulation physical
-run and reached the configured drawer joint target. Repeated cube pick/place has
-completed one physical Pick/Place/settle/validator cycle; its full three-cycle
-run remains in threshold calibration.
+Articulated tasks should reuse the existing motion-centric `Slide` primitive and
+verify articulation completion at the application boundary. A dedicated drawer
+or `OperateArticulation` semantic path is intentionally not part of this API.

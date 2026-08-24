@@ -195,6 +195,6 @@ The source preparation mode only affects the ingest step. The downstream geometr
 
 ## See Also
 
-- [Asset Preview](../interaction/preview_asset.md): Load generated meshes and USD assets in the simulator.
+- [Previewing Assets](../../guides/preview_asset.md): Load generated meshes and USD assets in the simulator.
 - [Installation](../../quick_start/install.md): Install EmbodiChain with Blender and rendering dependencies.
 - [Toolkits](../toolkits/index.rst): Other asset preparation utilities.

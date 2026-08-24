@@ -25,9 +25,10 @@ import torch
 
 from .bindings import ActionBinding
 from .core import AtomicAction, SkillDescriptor
-from .control import ControlPartCommandProfile
-from .invocation import ActionInvocation, ResolvedActionRequest
+from .control import ActionControlOverrides, ControlPartCommandProfile
+from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 from .tracking import TrackingRuntime
@@ -41,51 +42,9 @@ if TYPE_CHECKING:
         ResourceEndpointAdapter,
         RobotSkillProfile,
     )
+    from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession
-
-
-_global_extension_registry: dict[str, type[AtomicAction]] = {}
-
-
-def register_action(action_class: type[AtomicAction]) -> None:
-    """Register an extension action type for process-wide discovery.
-
-    This catalog does not bind the type to an engine or automatically load it.
-    Built-in types live in ``BUILTIN_ACTION_TYPES`` and are loaded separately
-    by each :class:`AtomicActionEngine`.
-
-    Args:
-        action_class: Concrete :class:`AtomicAction` subclass.
-
-    Raises:
-        TypeError: If ``action_class`` is not an AtomicAction subclass.
-        ValueError: If another class already owns the same skill identifier.
-    """
-    if not isinstance(action_class, type) or not issubclass(action_class, AtomicAction):
-        raise TypeError("action_class must be an AtomicAction subclass.")
-    descriptor = action_class.descriptor()
-    existing = _global_extension_registry.get(descriptor.skill_id)
-    if existing is not None and existing is not action_class:
-        raise ValueError(
-            f"Skill id {descriptor.skill_id!r} is already registered by "
-            f"{existing.__name__}."
-        )
-    _global_extension_registry[descriptor.skill_id] = action_class
-
-
-def unregister_action(skill_id: str) -> None:
-    """Remove a globally discoverable extension action type if present.
-
-    Args:
-        skill_id: Stable registered skill identifier.
-    """
-    _global_extension_registry.pop(skill_id, None)
-
-
-def get_registered_actions() -> dict[str, type[AtomicAction]]:
-    """Return a copy of the process-wide extension action-type registry."""
-    return dict(_global_extension_registry)
 
 
 class AtomicActionEngine:
@@ -95,6 +54,7 @@ class AtomicActionEngine:
         self,
         motion_generator: MotionGenerator,
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         load_builtins: bool = True,
         skill_profile: RobotSkillProfile | None = None,
@@ -108,6 +68,9 @@ class AtomicActionEngine:
         Args:
             motion_generator: Engine-owned motion-generation backend.
             control_profiles: Semantic commands keyed by robot control-part name.
+            grasp_pose_generators: Standalone grasp-pose services keyed by the
+                runtime target ID of each grasp endpoint, normally its robot
+                control-part name.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
             skill_profile: Optional authoritative robot skill profile. Its
@@ -137,6 +100,7 @@ class AtomicActionEngine:
             motion_generator,
             control_profiles=control_profiles,
             tracking_runtime=tracking_runtime,
+            grasp_pose_generators=grasp_pose_generators,
         )
         self._actions: dict[str, AtomicAction] = {}
         self._skill_catalog_revision = 0
@@ -183,6 +147,11 @@ class AtomicActionEngine:
     def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
         """Semantic command profiles registered for robot control parts."""
         return self._planning_services.control_profiles
+
+    @property
+    def grasp_pose_generators(self) -> Mapping[str, GraspPoseGenerator]:
+        """Standalone grasp-pose services installed for endpoint targets."""
+        return self._planning_services.grasp_pose_generators
 
     @property
     def actions(self) -> dict[str, AtomicAction]:
@@ -269,9 +238,8 @@ class AtomicActionEngine:
                 :meth:`plan_action`.
             endpoints: Nested ``slot_id -> endpoint_id -> control_part`` mapping.
             task_state_keys: Optional explicit stable task-state key for each
-                resource slot. See
-                :meth:`ActionPlanningServices.bind_control_parts` for inference
-                rules when omitted.
+                resource slot. See :meth:`ActionPlanningServices.bind_control_parts`
+                for inference rules when omitted.
 
         Returns:
             Engine-owned generic endpoint binding.
@@ -300,6 +268,84 @@ class AtomicActionEngine:
             contract,
             endpoints,
             task_state_keys=task_state_keys,
+        )
+
+    def make_invocation(
+        self,
+        skill_id: str,
+        goal: GoalT,
+        *,
+        control_parts: Mapping[str, Mapping[str, str]] | None = None,
+        resources: Mapping[str, str] | None = None,
+        motion_policy: MotionPolicy | None = None,
+        recovery_policy: RecoveryPolicy | None = None,
+        skill_options: OptionsT | None = None,
+        control_overrides: ActionControlOverrides | None = None,
+        invocation_id: str | None = None,
+        revision: int = 0,
+    ) -> ActionInvocation[GoalT, OptionsT]:
+        """Construct a grounded invocation while naming the skill only once.
+
+        ``control_parts`` uses the advanced direct-core binding path. When it is
+        omitted, the engine must own a bound robot skill profile; ``resources``
+        then optionally selects logical resource IDs by skill-local slot. An
+        omitted resource selection uses the profile's unique or default binding.
+        This method resolves bindings only; profile policy presets and runner
+        configuration remain responsibilities of the semantic runtime layer.
+
+        Args:
+            skill_id: Stable identifier of an installed atomic skill.
+            goal: Action-specific typed goal.
+            control_parts: Optional direct ``slot -> endpoint -> control_part``
+                mapping.
+            resources: Optional profile ``slot -> resource_id`` selections.
+            motion_policy: Optional invocation motion policy.
+            recovery_policy: Optional invocation recovery policy.
+            skill_options: Optional action-specific invocation options.
+            control_overrides: Optional endpoint-scoped command overrides.
+            invocation_id: Optional correlation identifier.
+            revision: Monotonic invocation revision.
+
+        Returns:
+            A standard :class:`ActionInvocation` accepted by ``plan``,
+            ``compile``, and ``start``.
+
+        Raises:
+            ValueError: If binding sources conflict or no binding source is
+                available.
+            KeyError: If the skill or an explicitly selected resource is unknown.
+            TypeError: If an invocation field or binding input has an invalid type.
+        """
+        if control_parts is not None and resources is not None:
+            raise ValueError("control_parts and resources are mutually exclusive.")
+        if control_parts is not None:
+            binding = self.bind_control_parts(skill_id, control_parts)
+        else:
+            profile = self.skill_profile
+            if profile is None:
+                if resources is not None:
+                    raise ValueError("resources requires a bound RobotSkillProfile.")
+                raise ValueError(
+                    "control_parts is required when no RobotSkillProfile is bound."
+                )
+            binding = profile.resolve(skill_id, resources).action_binding
+
+        return ActionInvocation(
+            skill_id=skill_id,
+            goal=goal,
+            binding=binding,
+            motion_policy=MotionPolicy() if motion_policy is None else motion_policy,
+            recovery_policy=(
+                RecoveryPolicy() if recovery_policy is None else recovery_policy
+            ),
+            skill_options=skill_options,
+            control_overrides=(
+                ActionControlOverrides()
+                if control_overrides is None
+                else control_overrides
+            ),
+            invocation_id=invocation_id,
+            revision=revision,
         )
 
     def register(self, action: AtomicAction, *, replace: bool = False) -> None:
@@ -350,24 +396,19 @@ class AtomicActionEngine:
         invocation: ActionInvocation,
         context: PlanningContext,
     ) -> ActionPlan:
-        """Plan with a configured action using this engine's resources.
+        """Plan with an unregistered action using this engine's resources.
 
-        Unlike :meth:`plan`, the supplied action does not need to be in the
-        skill registry. This is an advanced extension and testing escape hatch;
-        built-in parameter variants should use ``ActionInvocation.skill_options``
-        with the engine's registered implementation.
+        This is an advanced extension and testing escape hatch. Built-in
+        parameter variants should use invocation ``skill_options`` with the
+        engine's registered implementation.
 
         Args:
             action: Configured action implementation to invoke.
-            invocation: Grounded request matching the action's skill identifier.
+            invocation: Grounded request matching the action skill identifier.
             context: Latest measured planning state.
 
         Returns:
             Validated side-effect-free action plan.
-
-        Raises:
-            TypeError: If ``action`` is not an :class:`AtomicAction`.
-            ValueError: If the action, invocation, context, or plan is invalid.
         """
         if not isinstance(action, AtomicAction):
             raise TypeError("action must be an AtomicAction instance.")
@@ -379,6 +420,21 @@ class AtomicActionEngine:
         return plan
 
     def resolve(
+        self,
+        invocation: ActionInvocation,
+    ) -> ResolvedActionRequest:
+        """Resolve a registered invocation into an engine-owned snapshot."""
+        return self._resolve(invocation)
+
+    def plan_request(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext | None = None,
+    ) -> ActionPlan:
+        """Plan an already-resolved request without rebuilding its snapshot."""
+        return self._plan_request(request, context)
+
+    def _resolve(
         self,
         invocation: ActionInvocation,
     ) -> ResolvedActionRequest:
@@ -404,7 +460,7 @@ class AtomicActionEngine:
             )
         return action.resolve_request(invocation)
 
-    def plan_request(
+    def _plan_request(
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
@@ -416,7 +472,7 @@ class AtomicActionEngine:
         calls this method for every replan.
 
         Args:
-            request: Immutable request previously returned by :meth:`resolve`.
+            request: Immutable request previously returned by :meth:`_resolve`.
             context: Optional latest planning state; captured when omitted.
 
         Returns:
@@ -453,8 +509,8 @@ class AtomicActionEngine:
             KeyError: If the invocation references an unregistered skill.
         """
         current = self.initial_context() if context is None else context
-        request = self.resolve(invocation)
-        return self.plan_request(request, current)
+        request = self._resolve(invocation)
+        return self._plan_request(request, current)
 
     def initial_context(
         self,
@@ -462,6 +518,7 @@ class AtomicActionEngine:
         task: TaskState | None = None,
         scene: SceneSnapshot | None = None,
         timestamp: float = 0.0,
+        control_dt: float | None = None,
     ) -> PlanningContext:
         """Capture the robot state needed to start offline compilation.
 
@@ -469,6 +526,7 @@ class AtomicActionEngine:
             task: Optional symbolic task state; an empty state is used otherwise.
             scene: Optional scene snapshot; an empty snapshot is used otherwise.
             timestamp: Timestamp assigned to the captured robot observation.
+            control_dt: Explicit command period for action-owned interpolation.
 
         Returns:
             Planning context containing owned robot tensors.
@@ -491,6 +549,7 @@ class AtomicActionEngine:
             task=task,
             scene=scene,
             env_ids=torch.arange(batch_size, dtype=torch.long, device=self.device),
+            control_dt=control_dt,
         )
 
     def compile(
@@ -576,8 +635,9 @@ class AtomicActionEngine:
             invocations: Grounded action requests in execution order.
             context: Initial measured state and scene snapshot. The engine
                 captures one when omitted.
-            eligible_mask: Optional rows allowed to enter this session. Inactive
-                rows remain inactive across every invocation in the sequence.
+            eligible_mask: Optional per-environment cohort allowed to execute.
+                Ineligible rows remain excluded for the whole session. All rows
+                are eligible when omitted.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -659,9 +719,4 @@ class AtomicActionEngine:
             )
 
 
-__all__ = [
-    "AtomicActionEngine",
-    "get_registered_actions",
-    "register_action",
-    "unregister_action",
-]
+__all__ = ["AtomicActionEngine"]

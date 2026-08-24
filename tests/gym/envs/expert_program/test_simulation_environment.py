@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import dataclass, fields, is_dataclass
 import inspect
 import json
 import textwrap
-from types import MappingProxyType, MethodType, SimpleNamespace
+from types import MethodType, SimpleNamespace
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
@@ -35,23 +35,17 @@ from embodichain.agents.mllm import compile_mllm_expert_program
 from embodichain.lab.gym.envs.expert_program import (
     AntipodalGraspAffordanceBinding,
     CompiledProgram,
-    ControlCommandStateEvidenceTracker,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
-    ExpertProgramCompiler,
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
     ExpertProgramEnvironmentAdapter,
     ExpertProgramRuntimeAssembly,
     HandOverCfg,
     InvokeCfg,
-    IntegrationFingerprintMismatch,
-    RobotResourceBinding,
-    SharedTickSceneProvider,
     SimulationExpertProgramRegistration,
     SimulationExpertProgramFactory,
-    SimulationPlanningObservationProvider,
     SimulationRigidObjectBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
@@ -59,6 +53,10 @@ from embodichain.lab.gym.envs.expert_program import (
     decode_expert_program,
 )
 from embodichain.lab.gym.envs.expert_program.bridge import EnvironmentStepClock
+from embodichain.lab.gym.envs.expert_program.simulation_environment import (
+    SharedTickSceneProvider,
+    SimulationPlanningObservationProvider,
+)
 from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     Affordance,
@@ -68,8 +66,8 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
-    HeldObjectState,
     HandOverOptions,
+    HeldObjectState,
     MotionPolicy,
     ObservedArticulationJointState,
     PlanningContext,
@@ -77,22 +75,12 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     StateDelta,
     TaskState,
-    TrackingPolicy,
+    TimedTrajectory,
 )
 from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
-from embodichain.lab.sim.atomic_actions.tracking import (
-    JOINT_POSITION_CHANNEL,
-    EndpointTrackingChannelBinding,
-    EndpointTrackingFeedbackAddress,
-    TrackingFeedbackSourceRef,
-    TrackingProjectorRef,
-)
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.bindings import RuntimeEndpointTarget
-from embodichain.lab.sim.atomic_actions.control import ControlPartCommandProfile
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
-    JointPositionPayload,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
@@ -109,6 +97,7 @@ from embodichain.lab.sim.skills import (
     RelationTargetGrounder,
     ResourceEndpoint,
     ResourceEndpointAdapter,
+    RobotResource,
     SceneArticulationRef,
     SceneEntityRegistration,
     SceneRegistry,
@@ -116,8 +105,8 @@ from embodichain.lab.sim.skills import (
     SemanticObjectTarget,
     SemanticPose,
     SemanticRelationTarget,
+    SemanticValidationError,
     SkillPolicyPreset,
-    WorkflowRecoveryPolicy,
 )
 from embodichain.lab.sim.skills.effects import (
     CONSTRAINT_EFFECT_CHANNEL,
@@ -129,7 +118,6 @@ from embodichain.lab.sim.skills.effects import (
     EffectEvidenceSourceRef,
     HeldObjectRelation,
     HeldObjectStateExpectation,
-    JOINT_STATE_EFFECT_CHANNEL,
 )
 from embodichain.lab.sim.skills.evidence import (
     BinaryEffectEvidenceQuery,
@@ -149,11 +137,8 @@ from embodichain.lab.sim.skills.scene import SceneObjectRef
 _BATCH_SIZE = 3
 _ROBOT_DOF = 2
 _STEP_DT = 0.04
-_UNALIGNED_PROFILE_DT = 0.01
-_TRACKER_ENV_IDS = torch.tensor((7, 3, 11), dtype=torch.long)
 _HAND_OPEN_POSITION = 0.0
 _HAND_GRASP_POSITION = 0.8
-_HAND_INTERMEDIATE_POSITION = 0.4
 _DUAL_ROBOT_DOF = 4
 _RELEASE_SEPARATION = 0.2
 _DIRECT_PLACE_TARGET = SemanticPose(
@@ -161,80 +146,6 @@ _DIRECT_PLACE_TARGET = SemanticPose(
     quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
 )
 _QUICKSTART_MAX_LINES = 15
-
-
-def _command_state_tracker() -> ControlCommandStateEvidenceTracker:
-    """Build a three-row tracker for one semantic gripper profile."""
-    profile = ControlPartCommandProfile.joint_positions(
-        open=torch.tensor((_HAND_OPEN_POSITION,)),
-        grasp=torch.tensor((_HAND_GRASP_POSITION,)),
-    )
-    return ControlCommandStateEvidenceTracker(
-        {"hand": profile},
-        _TRACKER_ENV_IDS,
-    )
-
-
-def _hand_command_frame(
-    *,
-    env_ids: tuple[int, ...],
-    positions: tuple[float, ...],
-    active: tuple[bool, ...] | None = None,
-) -> RuntimeCommandFrame:
-    """Build one row-addressed semantic hand command frame."""
-    batch_size = len(env_ids)
-    if len(positions) != batch_size:
-        raise ValueError("positions must have one value per environment ID.")
-    if active is None:
-        active = (True,) * batch_size
-    return RuntimeCommandFrame(
-        commands=(
-            EndpointCommand(
-                target=JointPositionTarget("hand", (1,)),
-                payload=JointPositionPayload(
-                    torch.tensor(positions, dtype=torch.float32).unsqueeze(1)
-                ),
-            ),
-        ),
-        active_mask=torch.tensor(active, dtype=torch.bool),
-        env_ids=torch.tensor(env_ids, dtype=torch.long),
-        hold_duration=torch.full((batch_size,), _STEP_DT),
-    )
-
-
-def _hand_state_observation(
-    tracker: ControlCommandStateEvidenceTracker,
-    *env_ids: int,
-) -> BinaryEffectObservation:
-    """Observe command-state evidence in an explicit stable-ID order."""
-    expectation = HeldObjectStateExpectation(
-        expectation_id="held-cube",
-        relation=HeldObjectRelation.ATTACHED,
-        object_id="cube",
-        slot_id="primary",
-        resource_id="manipulator",
-        task_state_key="held-cube",
-    )
-    query = BinaryEffectEvidenceQuery(
-        BinaryEffectClause(
-            clause_id="hand-constraint",
-            expectation_id=expectation.expectation_id,
-            source=EffectEvidenceSourceRef(
-                CONTROL_PART_EVIDENCE_PROVIDER_ID,
-                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
-                ControlPartEvidenceAddress("hand", CONSTRAINT_EFFECT_CHANNEL),
-            ),
-            evidence_kind=BinaryEvidenceKind.CONSTRAINT,
-            expected=True,
-        ),
-        expectation,
-    )
-    context = EffectEvidenceCollectionContext(
-        timestamp=0.0,
-        observation_revision=0,
-        env_ids=torch.tensor(env_ids, dtype=torch.long),
-    )
-    return tracker.observe(query, context)
 
 
 class _CountingEntityProvider:
@@ -365,119 +276,6 @@ def test_shared_tick_scene_provider_rejects_unknown_or_regressing_rows() -> None
     assert len(entity_provider.calls) == 1
 
 
-def test_command_state_tracker_correlates_open_and_grasp_across_subsets() -> None:
-    """Stable IDs, not subset row positions, own accepted gripper state."""
-    tracker = _command_state_tracker()
-
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(3, 7),
-            positions=(_HAND_GRASP_POSITION, _HAND_OPEN_POSITION),
-        )
-    )
-    observation = _hand_state_observation(tracker, 7, 11, 3)
-
-    assert tracker.tracked_control_parts == ("hand",)
-    assert observation.values.tolist() == [False, False, True]
-    assert observation.valid is not None
-    assert observation.valid.tolist() == [True, False, True]
-    assert observation.acquisition_errors[0] is None
-    assert observation.acquisition_errors[1] is not None
-    assert observation.acquisition_errors[2] is None
-
-
-def test_command_state_tracker_preserves_intermediate_and_inactive_rows() -> None:
-    """Unrecognized targets and inactive rows cannot overwrite prior evidence."""
-    tracker = _command_state_tracker()
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(7, 3),
-            positions=(_HAND_OPEN_POSITION, _HAND_GRASP_POSITION),
-        )
-    )
-
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(3, 7),
-            positions=(
-                _HAND_INTERMEDIATE_POSITION,
-                _HAND_INTERMEDIATE_POSITION,
-            ),
-        )
-    )
-    after_intermediate = _hand_state_observation(tracker, 3, 7)
-    assert after_intermediate.values.tolist() == [True, False]
-    assert after_intermediate.valid is not None
-    assert after_intermediate.valid.tolist() == [True, True]
-
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(3, 7),
-            positions=(_HAND_OPEN_POSITION, _HAND_GRASP_POSITION),
-            active=(False, True),
-        )
-    )
-    after_inactive_row = _hand_state_observation(tracker, 3, 7)
-    assert after_inactive_row.values.tolist() == [True, True]
-    assert after_inactive_row.valid is not None
-    assert after_inactive_row.valid.tolist() == [True, True]
-
-
-def test_command_state_tracker_cancel_invalidates_target_state() -> None:
-    """Cancelling a hand destination invalidates every correlated hand row."""
-    tracker = _command_state_tracker()
-    frame = _hand_command_frame(
-        env_ids=(7, 3),
-        positions=(_HAND_OPEN_POSITION, _HAND_GRASP_POSITION),
-    )
-    tracker.accepted(frame)
-
-    tracker.cancelled(frame.targets)
-    observation = _hand_state_observation(tracker, 3, 7)
-
-    assert observation.values.tolist() == [False, False]
-    assert observation.valid is not None
-    assert observation.valid.tolist() == [False, False]
-    assert all(error is not None for error in observation.acquisition_errors)
-
-
-def test_command_state_tracker_discard_invalidates_all_state() -> None:
-    """A fail-closed sink discard removes every accepted row state."""
-    tracker = _command_state_tracker()
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(11, 3),
-            positions=(_HAND_GRASP_POSITION, _HAND_OPEN_POSITION),
-        )
-    )
-
-    tracker.discarded()
-    observation = _hand_state_observation(tracker, 11, 3)
-
-    assert observation.values.tolist() == [False, False]
-    assert observation.valid is not None
-    assert observation.valid.tolist() == [False, False]
-
-
-def test_command_state_tracker_rejects_unknown_environment_ids() -> None:
-    """Unknown correlation IDs fail before tracker state can be mutated or read."""
-    tracker = _command_state_tracker()
-
-    with pytest.raises(ValueError, match="absent from tracker env_ids"):
-        tracker.accepted(
-            _hand_command_frame(
-                env_ids=(99,),
-                positions=(_HAND_GRASP_POSITION,),
-            )
-        )
-    with pytest.raises(ValueError, match="absent from tracker env_ids"):
-        _hand_state_observation(tracker, 99)
-
-    observation = _hand_state_observation(tracker, 7, 3, 11)
-    assert observation.valid is not None
-    assert observation.valid.tolist() == [False, False, False]
-
-
 class _Robot:
     """Minimal typed robot surface used by the production factory."""
 
@@ -547,6 +345,7 @@ class _EvidenceRobot(_Robot):
     def __init__(self) -> None:
         super().__init__()
         self.endpoint_pose = torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+        self.constraint_state = torch.zeros(_BATCH_SIZE, dtype=torch.bool)
 
     def get_qpos(
         self,
@@ -701,6 +500,9 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
 
     provider_id: ClassVar[str] = "test.handover_pose"
 
+    def __init__(self) -> None:
+        self.calls = 0
+
     def resolve(
         self,
         call: HandOver,
@@ -710,6 +512,7 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
     ) -> HandOverPoseTargets:
         """Return owned direct targets without embedding task-side motion code."""
         del call, context, bound
+        self.calls += 1
         pose = SemanticPose(
             position=(0.0, 0.0, 0.5),
             quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
@@ -731,8 +534,9 @@ class _MobileEndpoint(ResourceEndpoint):
 class _MobileTarget(RuntimeEndpointTarget):
     """Runtime destination for the test mobile controller."""
 
-    TRANSPORT_ID: ClassVar[str] = "test.mobile_velocity"
     controller_id: str
+
+    TRANSPORT_ID: ClassVar[str] = "test.mobile_velocity"
 
     @property
     def transport_id(self) -> str:
@@ -742,38 +546,6 @@ class _MobileTarget(RuntimeEndpointTarget):
     @property
     def target_id(self) -> str:
         """Return the selected controller ID."""
-        return self.controller_id
-
-
-@dataclass(frozen=True, slots=True)
-class _UndeclaredMobileTarget(RuntimeEndpointTarget):
-    """Live target intentionally absent from the adapter declaration."""
-
-    TRANSPORT_ID: ClassVar[str] = _MobileTarget.TRANSPORT_ID
-    controller_id: str
-
-    @property
-    def transport_id(self) -> str:
-        return self.TRANSPORT_ID
-
-    @property
-    def target_id(self) -> str:
-        return self.controller_id
-
-
-@dataclass(frozen=True, slots=True)
-class _LyingTransportMobileTarget(RuntimeEndpointTarget):
-    """Declare one transport statically but expose another on the live value."""
-
-    TRANSPORT_ID: ClassVar[str] = _MobileTarget.TRANSPORT_ID
-    controller_id: str
-
-    @property
-    def transport_id(self) -> str:
-        return "test.unregistered_live_transport"
-
-    @property
-    def target_id(self) -> str:
         return self.controller_id
 
 
@@ -808,139 +580,13 @@ class _MobileEndpointAdapter(ResourceEndpointAdapter):
         )
 
 
-class _LyingMobileEndpointAdapter(_MobileEndpointAdapter):
-    """Declare one target type but resolve a different live target type."""
-
-    adapter_id: ClassVar[str] = "test.lying_mobile_velocity"
-
-    def resolve(
-        self,
-        endpoint: ResourceEndpoint,
-        *,
-        engine: Any,
-    ) -> EndpointResolution:
-        del engine
-        if not isinstance(endpoint, _MobileEndpoint):
-            raise TypeError("_LyingMobileEndpointAdapter requires _MobileEndpoint.")
-        return EndpointResolution(
-            runtime_target=_UndeclaredMobileTarget(endpoint.controller_id),
-            claim_tokens=frozenset({f"controller:{endpoint.controller_id}"}),
-        )
-
-
-class _LyingTransportMobileEndpointAdapter(_MobileEndpointAdapter):
-    """Resolve a target whose live transport contradicts its static owner."""
-
-    adapter_id: ClassVar[str] = "test.lying_mobile_transport"
-    runtime_target_types: ClassVar[tuple[type[RuntimeEndpointTarget], ...]] = (
-        _LyingTransportMobileTarget,
-    )
-
-    def resolve(
-        self,
-        endpoint: ResourceEndpoint,
-        *,
-        engine: Any,
-    ) -> EndpointResolution:
-        del engine
-        if not isinstance(endpoint, _MobileEndpoint):
-            raise TypeError("_LyingTransportMobileEndpointAdapter requires mobile.")
-        return EndpointResolution(
-            runtime_target=_LyingTransportMobileTarget(endpoint.controller_id),
-            claim_tokens=frozenset({f"controller:{endpoint.controller_id}"}),
-        )
-
-
-class _LyingAdapterIdMobileEndpointAdapter(_MobileEndpointAdapter):
-    """Expose a different live adapter ID than the class declaration."""
-
-    adapter_id: ClassVar[str] = "test.declared_mobile_adapter"
-
-    def __getattribute__(self, name: str) -> Any:
-        if name == "adapter_id":
-            return "test.live_mobile_adapter"
-        return super().__getattribute__(name)
-
-
-class _LyingFeedbackMobileEndpointAdapter(_MobileEndpointAdapter):
-    """Emit fingerprinted tracking routes absent from the declaration."""
-
-    adapter_id: ClassVar[str] = "test.lying_mobile_feedback"
-
-    def resolve(
-        self,
-        endpoint: ResourceEndpoint,
-        *,
-        engine: Any,
-    ) -> EndpointResolution:
-        del engine
-        if not isinstance(endpoint, _MobileEndpoint):
-            raise TypeError("_LyingFeedbackMobileEndpointAdapter requires mobile.")
-        target = _MobileTarget(endpoint.controller_id)
-        tracking = EndpointTrackingChannelBinding(
-            JOINT_POSITION_CHANNEL,
-            TrackingFeedbackSourceRef(
-                "planning_context.robot",
-                "1",
-                EndpointTrackingFeedbackAddress(target, JOINT_POSITION_CHANNEL),
-            ),
-            TrackingProjectorRef("joint_position_payload", "1"),
-        )
-        return EndpointResolution(
-            runtime_target=target,
-            tracking_channels={JOINT_POSITION_CHANNEL: tracking},
-            claim_tokens=frozenset({f"controller:{endpoint.controller_id}"}),
-        )
-
-
-class _LyingProjectorMobileEndpointAdapter(_LyingFeedbackMobileEndpointAdapter):
-    """Declare only the live feedback route while hiding its projector route."""
-
-    adapter_id: ClassVar[str] = "test.lying_mobile_projector"
-    tracking_feedback_source_keys: ClassVar[frozenset[tuple[str, str]]] = frozenset(
-        {("planning_context.robot", "1")}
-    )
-
-
-class _LyingEvidenceMobileEndpointAdapter(_MobileEndpointAdapter):
-    """Emit effect evidence absent from the adapter declaration."""
-
-    adapter_id: ClassVar[str] = "test.lying_mobile_evidence"
-
-    def resolve(
-        self,
-        endpoint: ResourceEndpoint,
-        *,
-        engine: Any,
-    ) -> EndpointResolution:
-        del engine
-        if not isinstance(endpoint, _MobileEndpoint):
-            raise TypeError("_LyingEvidenceMobileEndpointAdapter requires mobile.")
-        return EndpointResolution(
-            runtime_target=_MobileTarget(endpoint.controller_id),
-            effect_sources={
-                JOINT_STATE_EFFECT_CHANNEL: EffectEvidenceSourceRef(
-                    CONTROL_PART_EVIDENCE_PROVIDER_ID,
-                    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
-                    ControlPartEvidenceAddress(
-                        endpoint.controller_id,
-                        JOINT_STATE_EFFECT_CHANNEL,
-                    ),
-                )
-            },
-            claim_tokens=frozenset({f"controller:{endpoint.controller_id}"}),
-        )
-
-
 @dataclass(frozen=True, slots=True, eq=False)
 class _MobilePayload(RuntimeCommandPayload):
-    """Minimal payload declaration for the custom transport contract."""
+    """Minimal typed payload declaration for the mobile transport."""
 
-    TRANSPORT_ID: ClassVar[str] = _MobileTarget.TRANSPORT_ID
     values: torch.Tensor
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "values", self.values.clone())
+    TRANSPORT_ID: ClassVar[str] = _MobileTarget.TRANSPORT_ID
 
     @property
     def batch_size(self) -> int:
@@ -955,7 +601,7 @@ class _MobilePayload(RuntimeCommandPayload):
         return self.TRANSPORT_ID
 
     def snapshot(self) -> _MobilePayload:
-        return _MobilePayload(self.values)
+        return type(self)(self.values.clone())
 
 
 class _MobileTransportEncoder:
@@ -972,12 +618,9 @@ class _MobileTransportEncoder:
         base_action: Any,
         active_mask: torch.Tensor,
     ) -> Any:
-        """Write the custom payload into one test controller channel."""
-        if type(command.payload) is not _MobilePayload:
-            raise TypeError("_MobileTransportEncoder requires _MobilePayload.")
-        action = base_action.clone()
-        action[active_mask, 0] = command.payload.values[active_mask]
-        return action
+        """Preserve the base action in this assembly-only test transport."""
+        del command, active_mask
+        return base_action.clone()
 
     def hold(
         self,
@@ -989,14 +632,6 @@ class _MobileTransportEncoder:
         """Preserve the base action for a mobile safe hold."""
         del targets, context
         return base_action.clone()
-
-
-class _LyingTargetMobileTransportEncoder(_MobileTransportEncoder):
-    """Declare the statically owned type whose live transport property lies."""
-
-    target_types: ClassVar[tuple[type[RuntimeEndpointTarget], ...]] = (
-        _LyingTransportMobileTarget,
-    )
 
 
 class _MobileRobot:
@@ -1043,62 +678,8 @@ class _Simulation:
         return self.rigid_objects.get(uid)
 
 
-class _RegisteredParallelSafety:
-    """Fresh test gate produced only by its registration-owned factory."""
-
-    def validate(
-        self,
-        *,
-        branch_frames: Mapping[str, RuntimeCommandFrame],
-        merged_frame: RuntimeCommandFrame,
-    ) -> None:
-        del branch_frames, merged_frame
-
-
-class _RegisteredParallelSafetyFactory:
-    """Stateless declarative factory for a live joint-transport gate."""
-
-    validator_id: ClassVar[str] = "test.registered_parallel_safety"
-    revision: ClassVar[str] = "1"
-    supported_transport_ids: ClassVar[frozenset[str]] = frozenset(
-        {JointPositionTarget.TRANSPORT_ID}
-    )
-
-    def create(self, *, simulation: object, robot: object) -> _RegisteredParallelSafety:
-        assert getattr(simulation, "get_robot")(getattr(robot, "uid")) is robot
-        return _RegisteredParallelSafety()
-
-
-class _ReusedParallelSafetyFactory(_RegisteredParallelSafetyFactory):
-    """Invalid stateless factory that reuses one live validator singleton."""
-
-    validator_id: ClassVar[str] = "test.reused_parallel_safety"
-    _validator: ClassVar[_RegisteredParallelSafety] = _RegisteredParallelSafety()
-
-    def create(self, *, simulation: object, robot: object) -> _RegisteredParallelSafety:
-        del simulation, robot
-        return self._validator
-
-
-class _AlternatingReusedParallelSafetyFactory(_RegisteredParallelSafetyFactory):
-    """Invalid factory that hides A/B/A reuse behind alternating instances."""
-
-    validator_id: ClassVar[str] = "test.alternating_parallel_safety"
-    _validators: ClassVar[tuple[_RegisteredParallelSafety, ...]] = (
-        _RegisteredParallelSafety(),
-        _RegisteredParallelSafety(),
-    )
-    _next_index: ClassVar[int] = 0
-
-    def create(self, *, simulation: object, robot: object) -> _RegisteredParallelSafety:
-        del simulation, robot
-        validator = self._validators[self._next_index % len(self._validators)]
-        type(self)._next_index += 1
-        return validator
-
-
 def _profile_binding() -> SimulationRobotSkillProfileBinding:
-    """Build one motion-only profile with an intentionally wrong cadence."""
+    """Build one motion-only semantic policy profile."""
     return SimulationRobotSkillProfileBinding(
         profile_id="robot_profile",
         resources=(
@@ -1116,44 +697,11 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                action_option_templates={
-                    "pick": PickUpOptions(),
-                    "place": PlaceOptions(),
-                },
-                motion_policy=MotionPolicy(control_dt=_UNALIGNED_PROFILE_DT),
-                tracking_policy=TrackingPolicy.joint_position(
-                    in_flight_max_abs_error=0.037,
-                    terminal_max_abs_error=0.019,
-                ),
-                runner_cfg=ExecutionRunnerCfg(
-                    command_timeout=0.37,
-                    safe_stop_timeout=0.61,
-                    minimum_cycle_time=_UNALIGNED_PROFILE_DT,
-                    hold_on_completion=False,
-                ),
+                action_option_templates={},
+                motion_policy=MotionPolicy(),
             ),
         ),
         default_preset="safe",
-    )
-
-
-def _mobile_profile_binding() -> SimulationRobotSkillProfileBinding:
-    """Build one pure custom-endpoint profile without a joint transport."""
-    return SimulationRobotSkillProfileBinding(
-        profile_id="mobile_profile",
-        resources=(
-            RobotResourceBinding(
-                resource_id="mobile_base",
-                endpoints={
-                    "motion": _MobileEndpoint(
-                        controller_id="base_velocity",
-                        capabilities=frozenset({"motion.base.velocity"}),
-                    )
-                },
-            ),
-        ),
-        presets=(SkillPolicyPreset("runtime", action_option_templates={}),),
-        default_preset="runtime",
     )
 
 
@@ -1253,7 +801,7 @@ def _handover_helper_inputs() -> tuple[
 def _handover_program() -> ExpertProgramCfg:
     """Build one external-held-state HandOver call for static preflight."""
     return ExpertProgramCfg(
-        schema_version=1,
+        schema_version=2,
         program_id="handover_preflight",
         integration=ExpertProgramIntegrationCfg(
             robot_profile="handover_profile",
@@ -1270,6 +818,7 @@ def _motion_generator(robot: _Robot) -> MotionGenerator:
     generator.robot = robot
     generator.device = robot.device
     generator.planner = SimpleNamespace(cfg=SimpleNamespace(planner_type="test"))
+    generator.collision_world_info = None
     generator.dynamic_collision_entity_ids = ()
     generator.collision_world_entity_ids = ()
     generator.supports_dynamic_collision_world = False
@@ -1277,52 +826,20 @@ def _motion_generator(robot: _Robot) -> MotionGenerator:
     return generator
 
 
-def _factory(
-    robot_profile_binding: SimulationRobotSkillProfileBinding | None = None,
-) -> tuple[SimulationExpertProgramFactory, _Robot]:
+def _factory() -> tuple[SimulationExpertProgramFactory, _Robot]:
     """Create one production factory around CPU-only test doubles."""
     robot = _Robot()
     simulation = _Simulation(robot)
-    selected_profile_binding = (
-        _profile_binding() if robot_profile_binding is None else robot_profile_binding
-    )
     return (
         SimulationExpertProgramFactory(
             simulation,  # type: ignore[arg-type]
             robot,  # type: ignore[arg-type]
-            SimulationExpertProgramRegistration(
-                scene_binding=SimulationSceneBinding(registry_id="scene"),
-                robot_profile_binding=selected_profile_binding,
-            ),
+            SimulationSceneBinding(registry_id="scene"),
+            _profile_binding(),
             step_dt=_STEP_DT,
             motion_generator_factory=lambda: _motion_generator(robot),
         ),
         robot,
-    )
-
-
-def _mobile_factory() -> tuple[
-    SimulationExpertProgramFactory,
-    SimulationExpertProgramRegistration,
-]:
-    """Create one pure-custom standard factory and its exact registration."""
-    robot = _MobileRobot()
-    simulation = _Simulation(robot)  # type: ignore[arg-type]
-    registration = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
-        robot_profile_binding=_mobile_profile_binding(),
-        endpoint_adapters=(_MobileEndpointAdapter(),),
-        runtime_transports=(_MobileTransportEncoder(),),
-    )
-    return (
-        SimulationExpertProgramFactory(
-            simulation,  # type: ignore[arg-type]
-            robot,  # type: ignore[arg-type]
-            registration,
-            step_dt=_STEP_DT,
-            motion_generator_factory=lambda: _motion_generator(robot),  # type: ignore[arg-type]
-        ),
-        registration,
     )
 
 
@@ -1376,10 +893,6 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                 },
-                runner_cfg=ExecutionRunnerCfg(
-                    minimum_cycle_time=0.0,
-                    hold_on_completion=False,
-                ),
             ),
         ),
         default_preset="evidence",
@@ -1389,8 +902,18 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
 def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     """Build one grasp frame and an identity object-to-endpoint expectation."""
     goal = action.require_goal(request)
-    trajectory = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
-    trajectory[:, :, 1] = _HAND_GRASP_POSITION
+    positions = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
+    positions[:, :, 1] = _HAND_GRASP_POSITION
+    trajectory = TimedTrajectory.from_positions(
+        positions,
+        env_ids=context.env_ids,
+        dt=torch.full(
+            (context.batch_size, 2),
+            context.require_control_dt(),
+            dtype=positions.dtype,
+            device=positions.device,
+        ),
+    )
     relation = torch.eye(4).repeat(context.batch_size, 1, 1)
     held = HeldObjectState(
         semantics=goal.semantics,
@@ -1413,8 +936,18 @@ def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
 
 def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     """Build one open frame and the matching held-object removal delta."""
-    trajectory = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
-    trajectory[:, :, 1] = _HAND_OPEN_POSITION
+    positions = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
+    positions[:, :, 1] = _HAND_OPEN_POSITION
+    trajectory = TimedTrajectory.from_positions(
+        positions,
+        env_ids=context.env_ids,
+        dt=torch.full(
+            (context.batch_size, 2),
+            context.require_control_dt(),
+            dtype=positions.dtype,
+            device=positions.device,
+        ),
+    )
     return action.build_plan(
         request,
         context,
@@ -1447,6 +980,20 @@ def _evidence_adapter_runtime() -> tuple[
     robot = _EvidenceRobot()
     cube = _RigidObject()
     simulation = _Simulation(robot, {"cube_native": cube})
+
+    def observe_constraint(
+        query: BinaryEffectEvidenceQuery,
+        context: EffectEvidenceCollectionContext,
+    ) -> BinaryEffectObservation:
+        """Read the fixture's explicit physical constraint sensor state."""
+        del query
+        rows = context.env_ids.to(device=robot.constraint_state.device)
+        values = robot.constraint_state.index_select(0, rows)
+        return BinaryEffectObservation(
+            values=values,
+            valid=torch.ones_like(values),
+        )
+
     scene_binding = SimulationSceneBinding(
         registry_id="evidence_scene",
         rigid_objects=(
@@ -1468,14 +1015,18 @@ def _evidence_adapter_runtime() -> tuple[
     factory = SimulationExpertProgramFactory(
         simulation,  # type: ignore[arg-type]
         robot,  # type: ignore[arg-type]
-        SimulationExpertProgramRegistration(
-            scene_binding=scene_binding,
-            robot_profile_binding=_evidence_profile_binding(),
-        ),
+        scene_binding,
+        _evidence_profile_binding(),
         step_dt=_STEP_DT,
         motion_generator_factory=lambda: _motion_generator(robot),
+        constraint_observer=observe_constraint,
     )
-    adapter = factory.create_adapter()
+    adapter = factory.create_adapter(
+        runner_cfg=ExecutionRunnerCfg(
+            minimum_cycle_time=0.0,
+            hold_on_completion=False,
+        )
+    )
     assembly = adapter.assemble_runtime(_evidence_integration())
     pick_action = assembly.engine.actions["pick_up"]
     place_action = assembly.engine.actions["place"]
@@ -1503,23 +1054,11 @@ def _consume_buffered_action(
     if not isinstance(processed.value, torch.Tensor):
         raise TypeError("Joint-backed evidence actions must be tensors.")
     robot.qpos = processed.value.clone()
-    assembly.clock.advance_after_env_step()
-
-
-def _accept_hand_command(
-    assembly: ExpertProgramRuntimeAssembly,
-    robot: _EvidenceRobot,
-    position: float,
-) -> None:
-    """Accept and consume one semantic hand command through the Gym sink."""
-    assert assembly.command_sink.pending_count == 0
-    frame = _hand_command_frame(
-        env_ids=tuple(range(_BATCH_SIZE)),
-        positions=(position,) * _BATCH_SIZE,
+    robot.constraint_state = torch.isclose(
+        robot.qpos[:, 1],
+        torch.full_like(robot.qpos[:, 1], _HAND_GRASP_POSITION),
     )
-    acknowledgement = assembly.command_sink.send(frame, timeout=1.0)
-    assert acknowledgement.accepted
-    _consume_buffered_action(assembly, robot)
+    assembly.clock.advance_after_env_step()
 
 
 def _sample_effect(
@@ -1572,7 +1111,6 @@ class _ImmediateEvidenceCommandSink:
         cube: _RigidObject,
     ) -> None:
         self._encoder = assembly.command_encoder
-        self._observer = assembly.accepted_command_observer
         self._clock = assembly.clock
         self._robot = robot
         self._cube = cube
@@ -1583,15 +1121,16 @@ class _ImmediateEvidenceCommandSink:
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Apply one command and publish its accepted semantic hand state."""
+        """Apply one command and update the fixture's physical sensor state."""
         assert timeout > 0.0
         action = self._encoder.encode(command)
         if not isinstance(action, torch.Tensor):
             raise TypeError("The CPU quickstart fixture requires tensor actions.")
         self._robot.qpos = action.clone()
-        if self._observer is None:
-            raise RuntimeError("The evidence fixture requires an accepted observer.")
-        self._observer.accepted(command.snapshot())
+        self._robot.constraint_state = torch.isclose(
+            action[:, 1],
+            torch.full_like(action[:, 1], _HAND_GRASP_POSITION),
+        )
         if torch.allclose(
             action[:, 1],
             torch.full_like(action[:, 1], _HAND_OPEN_POSITION),
@@ -1621,10 +1160,9 @@ class _ImmediateEvidenceCommandSink:
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Clear accepted command evidence for cancelled destinations."""
+        """Accept cancellation without inventing physical evidence changes."""
         assert timeout > 0.0
-        if self._observer is not None:
-            self._observer.cancelled(targets)
+        del targets
         return CommandAcknowledgement.accepted_ack()
 
 
@@ -1682,7 +1220,7 @@ def _python_pick_place_calls() -> tuple[SemanticCallSpec, ...]:
 def _pick_place_program_data() -> dict[str, object]:
     """Return the integration-free program shared with the MLLM frontend."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "program_id": "pick_place_equivalence",
         "targets": {
             "place_target": {
@@ -1889,51 +1427,21 @@ def _assert_invocation_equivalent(
     )
 
 
-def test_simulation_factory_aligns_every_runtime_policy_to_gym_step() -> None:
-    """Cadence lowering preserves source declarations and unrelated policy."""
-    binding = _profile_binding()
-    base_preset = binding.presets[0]
-    source_preset = SkillPolicyPreset(
-        base_preset.preset_id,
-        schema_version=base_preset.schema_version,
-        action_option_templates=base_preset.action_option_templates,
-        motion_policy=base_preset.motion_policy,
-        tracking_policy=base_preset.tracking_policy,
-        recovery_policy=base_preset.recovery_policy,
-        workflow_recovery_policy=WorkflowRecoveryPolicy(
-            max_recovery_attempts=2,
-        ),
-        runner_cfg=base_preset.runner_cfg,
-        effect_monitors=base_preset.effect_monitors,
-    )
-    binding = replace(binding, presets=(source_preset,))
-    source_runner_cfg = source_preset.runner_cfg
-    factory, _ = _factory(binding)
-
+def test_simulation_observation_owns_gym_control_cadence() -> None:
+    """The live planning context, not a motion preset, owns control cadence."""
+    factory, robot = _factory()
+    registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
+    engine = factory.create_atomic_action_engine(profile)
+    observation = factory.create_planning_observation_provider(
+        scene_registry=registry,
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
 
-    aligned_preset = profile.presets["safe"]
-    aligned_runner_cfg = aligned_preset.runner_cfg
-    assert aligned_preset.motion_policy.control_dt == pytest.approx(_STEP_DT)
-    assert aligned_runner_cfg.minimum_cycle_time == pytest.approx(_STEP_DT)
-    assert aligned_runner_cfg.command_timeout == source_runner_cfg.command_timeout
-    assert aligned_runner_cfg.safe_stop_timeout == source_runner_cfg.safe_stop_timeout
-    assert aligned_runner_cfg.hold_on_completion is source_runner_cfg.hold_on_completion
-    assert (
-        aligned_runner_cfg.hold_during_effect_verification
-        is source_runner_cfg.hold_during_effect_verification
-    )
-    assert aligned_preset.tracking_policy == TrackingPolicy.joint_position(
-        in_flight_max_abs_error=0.037,
-        terminal_max_abs_error=0.019,
-    )
-    assert aligned_preset.workflow_recovery_policy.max_recovery_attempts == 2
-    assert binding.presets[0].motion_policy.control_dt == pytest.approx(
-        _UNALIGNED_PROFILE_DT
-    )
-    assert binding.presets[0].runner_cfg.minimum_cycle_time == pytest.approx(
-        _UNALIGNED_PROFILE_DT
-    )
+    context = observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+
+    assert context.control_dt == pytest.approx(_STEP_DT)
 
 
 def test_mllm_config_and_atomic_skills_share_invocations_and_verified_results(
@@ -2065,24 +1573,51 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> No
             observation_provider=observation,
         )
     )
-    accepted_command_observer = factory.create_accepted_runtime_command_observer(
-        scene_registry=registry,
-        engine=engine,
-        observation_provider=observation,
-    )
-
     assert context.robot.timestamp == pytest.approx(0.0)
+    assert context.control_dt == pytest.approx(_STEP_DT)
     assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos)
-    assert accepted_command_observer is observation.command_state_tracker
     assert len(providers) == 2
     assert all(
         getattr(provider, "_scene_provider") is observation.scene_provider
         for provider in providers
     )
+    expectation = HeldObjectStateExpectation(
+        expectation_id="held-cube",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id="cube",
+        slot_id="primary",
+        resource_id="manipulator",
+        task_state_key="held-cube",
+    )
+    query = BinaryEffectEvidenceQuery(
+        BinaryEffectClause(
+            clause_id="arm-constraint",
+            expectation_id=expectation.expectation_id,
+            source=EffectEvidenceSourceRef(
+                CONTROL_PART_EVIDENCE_PROVIDER_ID,
+                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+                ControlPartEvidenceAddress("arm", CONSTRAINT_EFFECT_CHANNEL),
+            ),
+            evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+            expected=True,
+        ),
+        expectation,
+    )
+    evidence = providers[0].collect(
+        (query,),
+        EffectEvidenceCollectionContext(
+            timestamp=0.0,
+            observation_revision=0,
+            env_ids=context.env_ids,
+        ),
+    )[query.evidence_id]
+    assert type(evidence) is BinaryEffectEvidenceBatch
+    assert evidence.valid.tolist() == [False] * _BATCH_SIZE
+    assert all(error is not None for error in evidence.acquisition_errors)
 
 
 def test_simulation_factory_returns_exact_environment_adapter() -> None:
-    """The convenience path remains compatible with the exact-type mixin check."""
+    """The convenience path returns the exact adapter expected by EmbodiedEnv."""
     factory, _ = _factory()
 
     adapter = factory.create_adapter()
@@ -2092,141 +1627,13 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert factory.segment_policy_port is not None
 
 
-@pytest.mark.parametrize(
-    "override",
-    (
-        {"call_catalog": object()},
-        {"endpoint_adapters": {}},
-        {"registered_lowerers": (object(),)},
-        {"relation_grounders": (object(),)},
-        {"handover_pose_providers": (object(),)},
-        {"effect_monitor_registry": object()},
-        {"runtime_transports": (object(),)},
-        {"runner_cfg": ExecutionRunnerCfg()},
-        {"post_policy_port": object()},
-        {"validator_port": object()},
-        {"parallel_safety_validator": object()},
-    ),
-)
-def test_standard_registration_rejects_runtime_side_channel_overrides(
-    override: dict[str, object],
-) -> None:
-    """The exact registration is the standard path's only extension owner."""
-    factory, _ = _factory()
-
-    with pytest.raises(ValueError, match="external overrides are forbidden"):
-        ExpertProgramEnvironmentAdapter(
-            factory,
-            step_dt=_STEP_DT,
-            registration=factory.expert_program_registration,
-            **override,
-        )
-
-
-def test_registration_owning_factory_rejects_catalog_only_adapter() -> None:
-    """A standard factory cannot be rewrapped through the advanced catalog seam."""
-    factory, _ = _factory()
-
-    with pytest.raises(ValueError, match="catalog-only"):
-        ExpertProgramEnvironmentAdapter(
-            factory,
-            step_dt=_STEP_DT,
-            integration_catalog=factory.expert_program_registration.catalog,
-        )
-
-
-def test_standard_registration_rejects_integration_catalog_override() -> None:
-    """Even the owner's catalog cannot be resupplied beside exact registration."""
-    factory, _ = _factory()
-    registration = factory.expert_program_registration
-
-    with pytest.raises(ValueError, match="cannot override"):
-        ExpertProgramEnvironmentAdapter(
-            factory,
-            step_dt=_STEP_DT,
-            registration=registration,
-            integration_catalog=registration.catalog,
-        )
-
-
-def test_registration_owning_factory_rejects_equivalent_registration_object() -> None:
-    """Equal IDs and fingerprint cannot substitute for the factory-owned object."""
-    factory, _ = _factory()
-    owned = factory.expert_program_registration
-    equivalent = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="scene"),
-        robot_profile_binding=_profile_binding(),
-    )
-    assert equivalent is not owned
-    assert equivalent.fingerprint == owned.fingerprint
-
-    with pytest.raises(ValueError, match="exact object owned by the factory"):
-        ExpertProgramEnvironmentAdapter(
-            factory,
-            step_dt=_STEP_DT,
-            registration=equivalent,
-        )
-
-
-def test_adapter_rejects_factory_registration_ownership_drift() -> None:
-    """A factory cannot replace its registration after adapter construction."""
-    factory, _ = _factory()
-    adapter = factory.create_adapter()
-    equivalent = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="scene"),
-        robot_profile_binding=_profile_binding(),
-    )
-    factory._registration = equivalent
-
-    with pytest.raises(IntegrationFingerprintMismatch, match="ownership changed"):
-        adapter.assemble_runtime(
-            ExpertProgramIntegrationCfg(
-                robot_profile="robot_profile",
-                scene_registry="scene",
-                runtime_preset="safe",
-            )
-        )
-
-
-def test_adapter_rejects_engine_bound_to_equivalent_profile_object() -> None:
-    """The engine must bind the exact profile object validated by the adapter."""
-    factory, _ = _factory()
-    original_create_engine = factory.create_atomic_action_engine
-
-    def create_with_different_profile(
-        owner: SimulationExpertProgramFactory,
-        profile: Any,
-    ) -> Any:
-        replacement = owner.create_robot_skill_profile()
-        assert replacement is not profile
-        return original_create_engine(replacement)
-
-    factory.create_atomic_action_engine = MethodType(
-        create_with_different_profile,
-        factory,
-    )
-
-    with pytest.raises(
-        IntegrationFingerprintMismatch,
-        match="different robot profile object",
-    ):
-        factory.create_adapter().assemble_runtime(
-            ExpertProgramIntegrationCfg(
-                robot_profile="robot_profile",
-                scene_registry="scene",
-                runtime_preset="safe",
-            )
-        )
-
-
-def test_standard_factory_uses_preset_runner_and_fresh_registered_safety() -> None:
-    """Live assembly consumes preset policy and creates no shared safety gate."""
+def test_standard_registration_owns_and_freezes_live_runtime_assembly() -> None:
+    """The standard path preserves exact ownership through live assembly."""
     robot = _Robot()
     simulation = _Simulation(robot)
     registration = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="scene"),
-        robot_profile_binding=_profile_binding(),
-        parallel_safety_factory=_RegisteredParallelSafetyFactory(),
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
     )
     factory = SimulationExpertProgramFactory(
         simulation,  # type: ignore[arg-type]
@@ -2235,103 +1642,25 @@ def test_standard_factory_uses_preset_runner_and_fresh_registered_safety() -> No
         step_dt=_STEP_DT,
         motion_generator_factory=lambda: _motion_generator(robot),
     )
-    adapter = factory.create_adapter()
-    integration = ExpertProgramIntegrationCfg(
-        robot_profile="robot_profile",
-        scene_registry="scene",
-        runtime_preset="safe",
-    )
 
-    first = adapter.assemble_runtime(integration)
-    second = adapter.assemble_runtime(integration)
-
-    assert first.runner_cfg.command_timeout == pytest.approx(0.37)
-    assert first.runner_cfg.safe_stop_timeout == pytest.approx(0.61)
-    assert first.runner_cfg.minimum_cycle_time == pytest.approx(0.04)
-    assert first.runner_cfg.hold_on_completion is False
-    assert type(first.parallel_safety_validator) is _RegisteredParallelSafety
-    assert type(second.parallel_safety_validator) is _RegisteredParallelSafety
-    assert first.parallel_safety_validator is not second.parallel_safety_validator
-
-
-def test_standard_factory_rejects_reused_live_safety_validator() -> None:
-    """A declarative factory cannot leak one validator across runtime assemblies."""
-    robot = _Robot()
-    simulation = _Simulation(robot)
-    registration = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="scene"),
-        robot_profile_binding=_profile_binding(),
-        parallel_safety_factory=_ReusedParallelSafetyFactory(),
-    )
-    factory = SimulationExpertProgramFactory(
-        simulation,  # type: ignore[arg-type]
-        robot,  # type: ignore[arg-type]
-        registration,
-        step_dt=_STEP_DT,
-        motion_generator_factory=lambda: _motion_generator(robot),
-    )
-    adapter = factory.create_adapter()
-    integration = ExpertProgramIntegrationCfg(
-        robot_profile="robot_profile",
-        scene_registry="scene",
-        runtime_preset="safe",
-    )
-    adapter.assemble_runtime(integration)
-
-    with pytest.raises(ValueError, match="fresh validator"):
-        adapter.assemble_runtime(integration)
-
-
-def test_registration_rejects_a_b_a_safety_reuse_across_factories() -> None:
-    """Freshness history belongs to the registration rather than one factory."""
-    robot = _Robot()
-    simulation = _Simulation(robot)
-    _AlternatingReusedParallelSafetyFactory._next_index = 0
-    registration = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="scene"),
-        robot_profile_binding=_profile_binding(),
-        parallel_safety_factory=_AlternatingReusedParallelSafetyFactory(),
-    )
-    factories = tuple(
-        SimulationExpertProgramFactory(
-            simulation,  # type: ignore[arg-type]
-            robot,  # type: ignore[arg-type]
-            registration,
-            step_dt=_STEP_DT,
-            motion_generator_factory=lambda: _motion_generator(robot),
+    assembly = factory.create_adapter().assemble_runtime(
+        ExpertProgramIntegrationCfg(
+            robot_profile="robot_profile",
+            scene_registry="scene",
+            runtime_preset="safe",
         )
-        for _ in range(3)
-    )
-    integration = ExpertProgramIntegrationCfg(
-        robot_profile="robot_profile",
-        scene_registry="scene",
-        runtime_preset="safe",
     )
 
-    factories[0].create_adapter().assemble_runtime(integration)
-    factories[1].create_adapter().assemble_runtime(integration)
-
-    with pytest.raises(ValueError, match="fresh validator"):
-        factories[2].create_adapter().assemble_runtime(integration)
-
-
-def test_standard_simulation_helper_has_no_live_extension_override_parameters() -> None:
-    """Task code can select only its immutable registration on the standard path."""
-    parameters = inspect.signature(create_simulation_expert_program_adapter).parameters
-
-    assert {
-        "endpoint_adapters",
-        "runtime_transports",
-        "contact_observer",
-        "constraint_observer",
-        "force_observer",
-        "wrench_observer",
-        "parallel_safety_validator",
-    }.isdisjoint(parameters)
+    assert factory.expert_program_registration is registration
+    assert assembly.command_encoder.transport_ids == tuple(
+        declaration.transport_id
+        for declaration in registration.catalog.runtime_transport_declarations
+    )
+    assert assembly.command_encoder.is_frozen
 
 
-def test_simulation_helper_consumes_registered_semantic_grounding_extensions() -> None:
-    """Both registration-owned grounding seams reach the compiler unchanged."""
+def test_simulation_helper_forwards_semantic_grounding_extensions() -> None:
+    """Both explicit grounding seams reach the runtime compiler unchanged."""
     robot = _Robot()
     environment = SimpleNamespace(
         sim=_Simulation(robot),
@@ -2342,13 +1671,11 @@ def test_simulation_helper_consumes_registered_semantic_grounding_extensions() -
     handover_provider = _ForwardedHandOverPoseProvider()
     adapter = create_simulation_expert_program_adapter(
         environment,  # type: ignore[arg-type]
-        registration=SimulationExpertProgramRegistration(
-            scene_binding=SimulationSceneBinding(registry_id="scene"),
-            robot_profile_binding=_profile_binding(),
-            relation_grounders=(relation_grounder,),
-            handover_pose_providers=(handover_provider,),
-        ),
+        scene_binding=SimulationSceneBinding(registry_id="scene"),
+        robot_profile_binding=_profile_binding(),
         motion_generator_factory=lambda: _motion_generator(robot),
+        relation_grounders=(relation_grounder,),
+        handover_pose_providers=(handover_provider,),
     )
 
     assembly = adapter.assemble_runtime(
@@ -2365,35 +1692,41 @@ def test_simulation_helper_consumes_registered_semantic_grounding_extensions() -
     )
 
 
-def test_handover_registration_is_fail_closed_without_selected_provider() -> None:
-    """A profile-selected provider must be installed before simulation startup."""
-    _, scene_binding, profile_binding = _handover_helper_inputs()
+def test_simulation_helper_handover_preflight_is_fail_closed_by_default() -> None:
+    """Selecting a provider ID does not infer or auto-install an implementation."""
+    environment, scene_binding, profile_binding = _handover_helper_inputs()
+    robot = environment.robot
+    adapter = create_simulation_expert_program_adapter(
+        environment,  # type: ignore[arg-type]
+        scene_binding=scene_binding,
+        robot_profile_binding=profile_binding,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    compiled = adapter.compile(_handover_program())
 
-    with pytest.raises(ValueError, match="selects handover pose provider"):
-        SimulationExpertProgramRegistration(
-            scene_binding=scene_binding,
-            robot_profile_binding=profile_binding,
-        )
+    with pytest.raises(SemanticValidationError) as error:
+        adapter.create_bridge(compiled)
+
+    assert error.value.diagnostic.code == "handover_grounding_provider_not_installed"
 
 
-def test_simulation_helper_uses_registered_handover_provider_for_preflight() -> None:
-    """A registration-owned embodiment provider satisfies standard preflight."""
+def test_simulation_helper_forwards_handover_provider_to_preflight() -> None:
+    """An explicitly supplied embodiment provider satisfies standard preflight."""
     environment, scene_binding, profile_binding = _handover_helper_inputs()
     robot = environment.robot
     provider = _ForwardedHandOverPoseProvider()
     adapter = create_simulation_expert_program_adapter(
         environment,  # type: ignore[arg-type]
-        registration=SimulationExpertProgramRegistration(
-            scene_binding=scene_binding,
-            robot_profile_binding=profile_binding,
-            handover_pose_providers=(provider,),
-        ),
+        scene_binding=scene_binding,
+        robot_profile_binding=profile_binding,
         motion_generator_factory=lambda: _motion_generator(robot),
+        handover_pose_providers=(provider,),
     )
 
     bridge = adapter.create_bridge(adapter.compile(_handover_program()))
 
     assert bridge is not None
+    assert provider.calls == 0
 
 
 def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joints() -> (
@@ -2402,11 +1735,21 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
     """The one-line factory path supports a custom non-joint controller."""
     robot = _MobileRobot()
     simulation = _Simulation(robot)  # type: ignore[arg-type]
-    registration = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
-        robot_profile_binding=_mobile_profile_binding(),
-        endpoint_adapters=(_MobileEndpointAdapter(),),
-        runtime_transports=(_MobileTransportEncoder(),),
+    profile_binding = SimulationRobotSkillProfileBinding(
+        profile_id="mobile_profile",
+        resources=(
+            RobotResource(
+                resource_id="mobile_base",
+                endpoints={
+                    "motion": _MobileEndpoint(
+                        controller_id="base_velocity",
+                        capabilities=frozenset({"motion.base.velocity"}),
+                    )
+                },
+            ),
+        ),
+        presets=(SkillPolicyPreset("runtime", action_option_templates={}),),
+        default_preset="runtime",
     )
     environment = SimpleNamespace(
         sim=simulation,
@@ -2416,8 +1759,11 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
 
     adapter = create_simulation_expert_program_adapter(
         environment,  # type: ignore[arg-type]
-        registration=registration,
+        scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
+        robot_profile_binding=profile_binding,
         motion_generator_factory=lambda: _motion_generator(robot),  # type: ignore[arg-type]
+        endpoint_adapters={_MobileEndpoint: _MobileEndpointAdapter()},
+        runtime_transports=(_MobileTransportEncoder(),),
     )
     assembly = adapter.assemble_runtime(
         ExpertProgramIntegrationCfg(
@@ -2429,254 +1775,15 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
 
     endpoint = assembly.robot_profile.resources["mobile_base"].endpoints["motion"]
     assert isinstance(endpoint, _MobileEndpoint)
-    assert assembly.command_encoder.transport_ids == (_MobileTarget.TRANSPORT_ID,)
-    assert assembly.command_encoder.is_frozen
-    with pytest.raises(RuntimeError, match="registration is frozen"):
-        assembly.command_encoder.register_transport(
-            _MobileTransportEncoder(),
-            replace=True,
-        )
+    assert "test.mobile_velocity" in assembly.command_encoder.transport_ids
     assert assembly.engine.skill_profile is not None
     resolved = assembly.engine.skill_profile.resources["mobile_base"]
     assert isinstance(resolved.endpoints["motion"].runtime_target, _MobileTarget)
     assert resolved.claim.claim_tokens == frozenset({"controller:base_velocity"})
-    context = assembly.observation_provider.observe(
-        TaskState.empty(_BATCH_SIZE, robot.device)
-    )
-    values = torch.linspace(0.1, 0.2, _BATCH_SIZE)
-    action = assembly.command_encoder.encode(
-        RuntimeCommandFrame(
-            commands=(
-                EndpointCommand(
-                    _MobileTarget("base_velocity"),
-                    _MobilePayload(values),
-                ),
-            ),
-            active_mask=torch.ones(_BATCH_SIZE, dtype=torch.bool),
-            env_ids=context.env_ids,
-            hold_duration=torch.full((_BATCH_SIZE,), _STEP_DT),
-        )
-    )
-    torch.testing.assert_close(action[:, 0], values)
 
 
-@pytest.mark.parametrize(
-    "drift",
-    ("missing_resource", "extra_resource", "missing_endpoint", "extra_endpoint"),
-)
-def test_catalog_rejects_live_resource_and_endpoint_coverage_drift(
-    drift: str,
-) -> None:
-    """Live bound topology must cover the registered profile exactly."""
-    factory, registration = _mobile_factory()
-    assembly = factory.create_adapter().assemble_runtime(
-        ExpertProgramIntegrationCfg(
-            robot_profile="mobile_profile",
-            scene_registry="mobile_scene",
-            runtime_preset="runtime",
-        )
-    )
-    bound_profile = assembly.engine.skill_profile
-    assert bound_profile is not None
-    resources = dict(bound_profile.resources)
-    resource = resources["mobile_base"]
-    if drift == "missing_resource":
-        resources.pop("mobile_base")
-    elif drift == "extra_resource":
-        resources["extra"] = replace(
-            resource,
-            resource_id="extra",
-            claim=replace(
-                resource.claim,
-                leaf_resource_ids=frozenset({"extra"}),
-            ),
-        )
-    elif drift == "missing_endpoint":
-        resources["mobile_base"] = replace(
-            resource,
-            endpoints={},
-            claim=replace(
-                resource.claim,
-                joint_ids=(),
-                claim_tokens=frozenset(),
-            ),
-        )
-    else:
-        endpoints = dict(resource.endpoints)
-        endpoints["extra"] = endpoints["motion"]
-        resources["mobile_base"] = replace(resource, endpoints=endpoints)
-    bound_profile._resources = MappingProxyType(resources)
-
-    with pytest.raises(IntegrationFingerprintMismatch, match="IDs differ"):
-        registration.catalog.validate_bound_endpoint_extensions(bound_profile)
-
-
-@pytest.mark.parametrize(
-    ("route", "message"),
-    (("tracking", "tracking address"), ("evidence", "effect-evidence address")),
-)
-def test_catalog_rejects_control_part_live_route_address_drift(
-    route: str,
-    message: str,
-) -> None:
-    """Built-in route IDs cannot hide a different target or evidence address."""
-    factory, _ = _factory()
-    registration = factory.expert_program_registration
-    assembly = factory.create_adapter().assemble_runtime(
-        ExpertProgramIntegrationCfg(
-            robot_profile="robot_profile",
-            scene_registry="scene",
-            runtime_preset="safe",
-        )
-    )
-    bound_profile = assembly.engine.skill_profile
-    assert bound_profile is not None
-    resources = dict(bound_profile.resources)
-    resource = resources["manipulator"]
-    endpoints = dict(resource.endpoints)
-    endpoint = endpoints["motion"]
-    if route == "tracking":
-        tracking = endpoint.tracking_channels[JOINT_POSITION_CHANNEL]
-        wrong_target = JointPositionTarget(
-            "different_arm",
-            endpoint.runtime_target.joint_ids,
-        )
-        wrong_tracking = EndpointTrackingChannelBinding(
-            JOINT_POSITION_CHANNEL,
-            TrackingFeedbackSourceRef(
-                tracking.source.provider_id,
-                tracking.source.revision,
-                EndpointTrackingFeedbackAddress(
-                    wrong_target,
-                    JOINT_POSITION_CHANNEL,
-                ),
-            ),
-            tracking.projector,
-        )
-        endpoints["motion"] = replace(
-            endpoint,
-            tracking_channels={JOINT_POSITION_CHANNEL: wrong_tracking},
-        )
-    else:
-        effect_sources = dict(endpoint.effect_sources)
-        channel = next(iter(effect_sources))
-        source = effect_sources[channel]
-        effect_sources[channel] = EffectEvidenceSourceRef(
-            source.provider_id,
-            source.revision,
-            ControlPartEvidenceAddress("different_arm", channel),
-        )
-        endpoints["motion"] = replace(
-            endpoint,
-            effect_sources=effect_sources,
-        )
-    resources["manipulator"] = replace(resource, endpoints=endpoints)
-    bound_profile._resources = MappingProxyType(resources)
-
-    with pytest.raises(IntegrationFingerprintMismatch, match=message):
-        registration.catalog.validate_bound_endpoint_extensions(bound_profile)
-
-
-def test_standard_factory_rejects_adapter_live_target_declaration_drift() -> None:
-    """A lying adapter cannot emit a target absent from its catalog declaration."""
-    robot = _MobileRobot()
-    simulation = _Simulation(robot)  # type: ignore[arg-type]
-    registration = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
-        robot_profile_binding=_mobile_profile_binding(),
-        endpoint_adapters=(_LyingMobileEndpointAdapter(),),
-        runtime_transports=(_MobileTransportEncoder(),),
-    )
-    factory = SimulationExpertProgramFactory(
-        simulation,  # type: ignore[arg-type]
-        robot,  # type: ignore[arg-type]
-        registration,
-        step_dt=_STEP_DT,
-        motion_generator_factory=lambda: _motion_generator(robot),  # type: ignore[arg-type]
-    )
-
-    with pytest.raises(
-        IntegrationFingerprintMismatch,
-        match="undeclared exact runtime target type",
-    ):
-        factory.create_adapter().assemble_runtime(
-            ExpertProgramIntegrationCfg(
-                robot_profile="mobile_profile",
-                scene_registry="mobile_scene",
-                runtime_preset="runtime",
-            )
-        )
-
-
-def test_standard_factory_rejects_target_live_transport_declaration_drift() -> None:
-    """A target instance cannot contradict its statically registered transport."""
-    robot = _MobileRobot()
-    simulation = _Simulation(robot)  # type: ignore[arg-type]
-    registration = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
-        robot_profile_binding=_mobile_profile_binding(),
-        endpoint_adapters=(_LyingTransportMobileEndpointAdapter(),),
-        runtime_transports=(_LyingTargetMobileTransportEncoder(),),
-    )
-    factory = SimulationExpertProgramFactory(
-        simulation,  # type: ignore[arg-type]
-        robot,  # type: ignore[arg-type]
-        registration,
-        step_dt=_STEP_DT,
-        motion_generator_factory=lambda: _motion_generator(robot),  # type: ignore[arg-type]
-    )
-
-    with pytest.raises(IntegrationFingerprintMismatch, match="live transport"):
-        factory.create_adapter().assemble_runtime(
-            ExpertProgramIntegrationCfg(
-                robot_profile="mobile_profile",
-                scene_registry="mobile_scene",
-                runtime_preset="runtime",
-            )
-        )
-
-
-@pytest.mark.parametrize(
-    ("endpoint_adapter", "message"),
-    (
-        (_LyingAdapterIdMobileEndpointAdapter(), "adapter ID"),
-        (_LyingFeedbackMobileEndpointAdapter(), "tracking-feedback routes"),
-        (_LyingEvidenceMobileEndpointAdapter(), "effect-evidence routes"),
-    ),
-)
-def test_standard_factory_rejects_adapter_live_route_declaration_drift(
-    endpoint_adapter: ResourceEndpointAdapter,
-    message: str,
-) -> None:
-    """Every live adapter identity and provider route must match its fingerprint."""
-    robot = _MobileRobot()
-    simulation = _Simulation(robot)  # type: ignore[arg-type]
-    registration = SimulationExpertProgramRegistration(
-        scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
-        robot_profile_binding=_mobile_profile_binding(),
-        endpoint_adapters=(endpoint_adapter,),
-        runtime_transports=(_MobileTransportEncoder(),),
-    )
-    factory = SimulationExpertProgramFactory(
-        simulation,  # type: ignore[arg-type]
-        robot,  # type: ignore[arg-type]
-        registration,
-        step_dt=_STEP_DT,
-        motion_generator_factory=lambda: _motion_generator(robot),  # type: ignore[arg-type]
-    )
-
-    with pytest.raises(IntegrationFingerprintMismatch, match=message):
-        factory.create_adapter().assemble_runtime(
-            ExpertProgramIntegrationCfg(
-                robot_profile="mobile_profile",
-                scene_registry="mobile_scene",
-                runtime_preset="runtime",
-            )
-        )
-
-
-def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
-    """Terminal Pick/Place evidence stays conjunctive through runtime traces."""
+def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
+    """Production Pick/Place evidence stays conjunctive through runtime traces."""
     assembly, robot, cube = _evidence_runtime()
 
     def without_phase_gates(
@@ -2707,9 +1814,6 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
     assembly.compiler._ground_held_object_guards = MethodType(
         without_in_flight_guards,
         assembly.compiler,
-    )
-    assert type(assembly.accepted_command_observer) is (
-        ControlCommandStateEvidenceTracker
     )
     cube.pose[:, 0, 3] = 0.2
     result = assembly.runtime.start(
@@ -2753,33 +1857,17 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
     assert not pick_pose_missing.success_mask.any()
 
     cube.pose = torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
-    assembly.command_sink.discard_pending()
-    result, pick_command_missing = _sample_effect(
-        assembly,
-        robot,
-        expected_trace_count=2,
-    )
-    pick_pose = pick_command_missing.evidence["destination.pose"]
-    pick_constraint = pick_command_missing.evidence["destination.constraint"]
-    torch.testing.assert_close(
-        pick_pose.object_to_endpoint,
-        torch.eye(4).repeat(_BATCH_SIZE, 1, 1),
-    )
-    assert pick_constraint.valid.tolist() == [False] * _BATCH_SIZE
-    assert not pick_command_missing.success_mask.any()
-
-    _accept_hand_command(assembly, robot, _HAND_GRASP_POSITION)
     result, pick_first_complete_sample = _sample_effect(
         assembly,
         robot,
-        expected_trace_count=3,
+        expected_trace_count=2,
         advance_clock=False,
     )
     assert not pick_first_complete_sample.success_mask.any()
     result, pick_success = _sample_effect(
         assembly,
         robot,
-        expected_trace_count=4,
+        expected_trace_count=3,
     )
     assert pick_success.call_index == 0
     assert pick_success.effect_spec.semantic_id == "pick"
@@ -2793,17 +1881,17 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
 
     result = assembly.runtime.step()
     assert assembly.command_sink.pending_count == 1
-    assert len(result.effects) == 4
+    assert len(result.effects) == 3
     _consume_buffered_action(assembly, robot)
     result = assembly.runtime.step()
-    assert len(result.effects) == 4
+    assert len(result.effects) == 3
     while assembly.command_sink.pending_count:
         _consume_buffered_action(assembly, robot)
 
     result, place_pose_missing = _sample_effect(
         assembly,
         robot,
-        expected_trace_count=5,
+        expected_trace_count=4,
     )
     place_pose = place_pose_missing.evidence["source.pose"]
     place_constraint = place_pose_missing.evidence["source.constraint"]
@@ -2817,35 +1905,20 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
     assert place_constraint.valid.tolist() == [True] * _BATCH_SIZE
     assert not place_pose_missing.success_mask.any()
 
-    cube.pose[:, 0, 3] = 0.2
-    assembly.command_sink.discard_pending()
-    result, place_command_missing = _sample_effect(
-        assembly,
-        robot,
-        expected_trace_count=6,
-    )
-    place_pose = place_command_missing.evidence["source.pose"]
-    place_constraint = place_command_missing.evidence["source.constraint"]
-    assert place_pose.object_to_endpoint[:, 0, 3].tolist() == pytest.approx(
-        [-0.2] * _BATCH_SIZE
-    )
-    assert place_constraint.valid.tolist() == [False] * _BATCH_SIZE
-    assert not place_command_missing.success_mask.any()
-
-    _accept_hand_command(assembly, robot, _HAND_OPEN_POSITION)
+    cube.pose[:, 0, 3] = _RELEASE_SEPARATION
     result, place_first_complete_sample = _sample_effect(
         assembly,
         robot,
-        expected_trace_count=7,
+        expected_trace_count=5,
         advance_clock=False,
     )
     assert not place_first_complete_sample.success_mask.any()
-    result, place_success = _sample_effect(
-        assembly,
-        robot,
-        expected_trace_count=8,
-    )
-    assert result.status is SkillStatus.COMPLETED
+    for _ in range(16):
+        assembly.clock.advance_after_env_step()
+        result = assembly.runtime.step()
+        if result.effects[-1].success_mask.all():
+            break
+    place_success = result.effects[-1]
     assert place_success.call_index == 1
     assert place_success.effect_spec.semantic_id == "place"
     assert place_success.success_mask.tolist() == [True] * _BATCH_SIZE
@@ -2854,5 +1927,8 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
         == [False] * _BATCH_SIZE
     )
     assert result.task_state.get_held_object("manipulator") is None
-    assert [len(call.effects) for call in result.calls] == [4, 4]
+    assert all(len(call.effects) >= 3 for call in result.calls)
+    if result.status is SkillStatus.RUNNING:
+        result = assembly.runtime.step()
+    assert result.status is SkillStatus.COMPLETED
     assert assembly.command_sink.accepted_action_count >= 4

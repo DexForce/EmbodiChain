@@ -25,7 +25,6 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.expert_program import (
-    RobotResourceBinding,
     SimulationExpertProgramRegistration,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
@@ -513,7 +512,7 @@ def test_runtime_transport_tuple_order_changes_registration_fingerprint() -> Non
     profile_binding = SimulationRobotSkillProfileBinding(
         profile_id="custom",
         resources=(
-            RobotResourceBinding(
+            RobotResource(
                 resource_id="custom",
                 endpoints={
                     "motion": _MobileEndpoint(capabilities=frozenset()),

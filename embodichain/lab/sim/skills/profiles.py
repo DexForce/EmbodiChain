@@ -950,6 +950,8 @@ class SkillPolicyPreset:
 
     preset_id: str
     schema_version: int
+    required_planner: str | None
+    """Optional planner backend required by this preset."""
     _motion_policy: MotionPolicy
     _tracking_policy: TrackingPolicy
     _recovery_policy: RecoveryPolicy
@@ -970,6 +972,7 @@ class SkillPolicyPreset:
         workflow_recovery_policy: WorkflowRecoveryPolicy | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         effect_monitors: Mapping[str, EffectMonitorRef] | None = None,
+        required_planner: str | None = None,
     ) -> None:
         """Own one policy bundle without exposing mutable nested configuration."""
         _validate_identifier(preset_id, field_name="SkillPolicyPreset.preset_id")
@@ -979,6 +982,11 @@ class SkillPolicyPreset:
             raise ValueError(
                 "Unsupported SkillPolicyPreset.schema_version "
                 f"{schema_version}; supported versions are [3]."
+            )
+        if required_planner is not None:
+            _validate_identifier(
+                required_planner,
+                field_name="SkillPolicyPreset.required_planner",
             )
         selected_motion = MotionPolicy() if motion_policy is None else motion_policy
         selected_tracking = (
@@ -1017,7 +1025,6 @@ class SkillPolicyPreset:
                     "pick",
                     "place",
                     "hand_over",
-                    "operate_articulation",
                 )
             }
             if effect_monitors is None
@@ -1049,6 +1056,7 @@ class SkillPolicyPreset:
             )
         object.__setattr__(self, "preset_id", preset_id)
         object.__setattr__(self, "schema_version", schema_version)
+        object.__setattr__(self, "required_planner", required_planner)
         object.__setattr__(self, "_motion_policy", deepcopy(selected_motion))
         object.__setattr__(self, "_tracking_policy", deepcopy(selected_tracking))
         object.__setattr__(self, "_recovery_policy", deepcopy(selected_recovery))
@@ -1144,6 +1152,7 @@ class SkillPolicyPreset:
             workflow_recovery_policy=self.workflow_recovery_policy,
             runner_cfg=self.runner_cfg,
             effect_monitors=self.effect_monitors,
+            required_planner=self.required_planner,
             action_option_templates=self.action_option_templates,
         )
 
@@ -1864,7 +1873,7 @@ class BoundRobotSkillProfile:
         """Validate planner-pinned presets against the selected engine backend."""
         configured = self._engine.planning_services.planner_name
         for preset in self._profile.presets.values():
-            required = preset.motion_policy.planner
+            required = preset.required_planner
             if required is not None and required != configured:
                 raise ProfileValidationError(
                     f"Preset {preset.preset_id!r} requires planner {required!r}, "
