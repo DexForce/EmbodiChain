@@ -32,12 +32,7 @@ from .decoder import (
     decode_expert_program,
 )
 
-__all__ = [
-    "MAX_EXPERT_PROGRAM_BYTES",
-    "load_expert_program",
-    "loads_expert_program_json",
-    "parse_expert_program_json",
-]
+__all__: list[str] = []
 
 MAX_EXPERT_PROGRAM_BYTES = 4 * 1024 * 1024
 """Maximum serialized Expert Program size accepted by the file loader."""

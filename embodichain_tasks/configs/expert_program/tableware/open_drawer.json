@@ -1,9 +1,9 @@
 {
-    "schema_version": 1,
+    "schema_version": 2,
     "program_id": "open_drawer",
     "integration": {
-        "robot_profile": "cobot_magic_right_manipulator_v1",
-        "scene_registry": "open_drawer_v1",
+        "robot_profile": "cobot_magic_right_manipulator_v2",
+        "scene_registry": "open_drawer_v2",
         "runtime_preset": "safe"
     },
     "targets": {},
@@ -13,11 +13,35 @@
         "steps": {
             "kind": "invoke",
             "call": {
-                "kind": "operate_articulation",
-                "articulation": "drawer",
-                "handle": "drawer_handle",
-                "target": "open"
+                "kind": "registered",
+                "call_id": "embodichain_tasks.open_drawer",
+                "schema_version": 1,
+                "arguments": {
+                    "handle": "drawer_handle",
+                    "direction": "pull",
+                    "hand_interp_steps": 20,
+                    "approach_distance": 0.10,
+                    "translation_distance": 0.12
+                },
+                "resources": {
+                    "primary": "right_manipulator"
+                }
             }
-        }
+        },
+        "post": [
+            {
+                "kind": "wait_stable",
+                "entity": "drawer",
+                "preset": "articulation"
+            }
+        ],
+        "validators": [
+            {
+                "kind": "articulation_joint_position",
+                "articulation": "drawer",
+                "joint": "slide_rails",
+                "minimum_position": 0.09
+            }
+        ]
     }
 }

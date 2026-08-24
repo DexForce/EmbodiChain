@@ -45,7 +45,7 @@ VISER_POLL_INTERVAL = 0.05
 def _expert_program_payload() -> dict[str, object]:
     """Return one minimal strict Expert Program payload."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "program_id": "cli_pick",
         "integration": {
             "robot_profile": "default_robot",
@@ -190,12 +190,12 @@ def test_load_expert_program_safely_decodes_supported_files(
     [
         (
             "program.json",
-            '{"schema_version": 1, "schema_version": 1}',
+            '{"schema_version": 2, "schema_version": 2}',
             "Duplicate JSON key",
         ),
         (
             "program.yaml",
-            "schema_version: 1\nschema_version: 1\n",
+            "schema_version: 2\nschema_version: 2\n",
             "found duplicate key",
         ),
     ],

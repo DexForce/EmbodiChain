@@ -301,7 +301,6 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         trajectory = TimedTrajectory.from_positions(
             positions,
             env_ids=context.env_ids,
-            control_dt=request.motion_policy.control_dt,
             dt=dt,
         )
         effects = StateDelta()
@@ -373,7 +372,7 @@ def _make_runner(
         skill_id="timed",
         goal=EndEffectorPoseGoal(goal_pose),
         binding=_timed_action_binding(action),
-        motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
+        motion_policy=MotionPolicy(sample_count=3),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             max_action_retries=max_action_retries,
@@ -713,7 +712,7 @@ def test_runner_revision_waits_for_deadline_and_plans_from_fresh_observation() -
         skill_id="timed",
         goal=EndEffectorPoseGoal(revised_pose),
         binding=_timed_action_binding(action),
-        motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
+        motion_policy=MotionPolicy(sample_count=3),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             action_timeout=10.0,
@@ -759,7 +758,7 @@ def test_runner_revision_rejects_pending_effect_verification() -> None:
         skill_id="timed",
         goal=EndEffectorPoseGoal(revised_pose),
         binding=_timed_action_binding(action),
-        motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
+        motion_policy=MotionPolicy(sample_count=3),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             action_timeout=10.0,

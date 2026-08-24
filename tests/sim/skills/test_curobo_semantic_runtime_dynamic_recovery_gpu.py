@@ -184,7 +184,6 @@ def _profile() -> RobotSkillProfile:
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=SAMPLE_COUNT,
-                    control_dt=COMMAND_CYCLE_TIME,
                 ),
                 tracking_policy=TrackingPolicy.joint_position(
                     in_flight_max_abs_error=0.1,
@@ -281,6 +280,7 @@ def test_semantic_runtime_replans_after_dynamic_curobo_world_change() -> None:
         adapter = SimulationExecutionAdapter(
             sim,
             robot,
+            control_dt=COMMAND_CYCLE_TIME,
             scene_provider=scene_provider,
         )
         sink = _CountingCommandSink(adapter)

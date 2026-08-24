@@ -177,7 +177,9 @@ for relative_path, expected_program_id in expected.items():
 print(json.dumps(decoded, sort_keys=True))
 """
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(staged_config_package.build_lib)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        (str(staged_config_package.build_lib), str(_REPOSITORY_ROOT))
+    )
     completed = subprocess.run(
         [
             sys.executable,
@@ -193,4 +195,4 @@ print(json.dumps(decoded, sort_keys=True))
         text=True,
     )
 
-    assert json.loads(completed.stdout) == expected_ids
+    assert json.loads(completed.stdout.splitlines()[-1]) == expected_ids

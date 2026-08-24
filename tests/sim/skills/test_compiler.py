@@ -1018,6 +1018,7 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
         object_pose: torch.Tensor,
         start_qpos: torch.Tensor,
         manipulator: object,
+        grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:

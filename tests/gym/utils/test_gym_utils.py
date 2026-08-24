@@ -526,7 +526,7 @@ class TestConfigToCfgFromFile:
     def _expert_program_payload() -> dict[str, object]:
         """Return one minimal strict Expert Program payload."""
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "program_id": "configured_pick",
             "integration": {
                 "robot_profile": "default_robot",

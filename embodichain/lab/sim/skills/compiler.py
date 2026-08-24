@@ -32,23 +32,19 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     ActionOptions,
     Affordance,
-    ArticulationOperationAffordance,
     GraspGoal,
     HandOverOptions,
     HeldObjectState,
     PickUpOptions,
     PlaceGoal,
     PlaceOptions,
-    OperateArticulationGoal,
     PlanningContext,
     PoseGoalValue,
-    SceneArticulationOperationGeometry,
     SceneEntityPose,
     SkillDescriptor,
 )
 from .calls import (
     HandOver,
-    OperateArticulation,
     Pick,
     Place,
     RegisteredSemanticCall,
@@ -56,7 +52,6 @@ from .calls import (
     SemanticPose,
 )
 from .effects import (
-    ArticulationJointStateExpectation,
     CONTACT_EFFECT_CHANNEL,
     CONSTRAINT_EFFECT_CHANNEL,
     POSE_RELATION_EFFECT_CHANNEL,
@@ -72,7 +67,6 @@ from .effects import (
     EffectStateExpectation,
     HeldObjectRelation,
     HeldObjectStateExpectation,
-    JointStateEffectClause,
     PoseRelationClause,
     PoseRelationExpectation,
     SemanticEffectKind,
@@ -87,10 +81,6 @@ from .integration import (
     SemanticValidationError,
 )
 from .scene import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
-    SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
-    SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION,
-    ArticulationJointEvidenceAddress,
     PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
@@ -396,9 +386,6 @@ class SemanticLowering:
     )
 
     def __post_init__(self) -> None:
-        goal_kind = getattr(type(self.goal), "goal_kind", None)
-        if type(goal_kind) is not str or not goal_kind:
-            raise TypeError("goal must implement the typed ActionGoal protocol.")
         if self.skill_options is not None and not isinstance(
             self.skill_options, ActionOptions
         ):
@@ -747,7 +734,6 @@ class SemanticSkillCompiler:
             Pick,
             Place,
             HandOver,
-            OperateArticulation,
             RegisteredSemanticCall,
         )
         if not all(type(call) in allowed_types for call in supplied):
@@ -860,8 +846,6 @@ class SemanticSkillCompiler:
                     index,
                     bound.binding.resource_ids["destination"],
                 )
-            elif type(call) is OperateArticulation:
-                effect_kind = SemanticEffectKind.ARTICULATION
             else:
                 effect_kind = SemanticEffectKind.REGISTERED
                 # A registered extension has no declarative state-flow contract
@@ -943,40 +927,6 @@ class SemanticSkillCompiler:
                         )
                     )
                     for slot_id in ("source", "destination")
-                ),
-                False,
-            )
-        if type(call) is OperateArticulation:
-            handle_ref = bound.linked.affordances.get("handle")
-            if handle_ref is None:
-                raise AssertionError(
-                    "Linked articulation call lacks an operation affordance."
-                )
-            registration = self._integration.scene_registry.lookup(
-                handle_ref,
-                expected_type=SceneAffordanceRef,
-            )
-            affordance = registration.affordance
-            if (
-                type(affordance) is not ArticulationOperationAffordance
-                or ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
-                not in registration.affordance_capabilities
-            ):
-                raise _diagnostic(
-                    "invalid_articulation_affordance",
-                    (*path, "handle"),
-                    f"Handle {handle_ref.entity_id!r} must expose an exact "
-                    "ArticulationOperationAffordance payload and the articulation "
-                    "operation capability.",
-                )
-            return (
-                frozenset(
-                    {
-                        SymbolicStateKey.articulation_joint(
-                            call.articulation.entity_id,
-                            affordance.joint_id,
-                        )
-                    }
                 ),
                 False,
             )
@@ -1066,12 +1016,6 @@ class SemanticSkillCompiler:
             lowering = self._lower_place(analyzed, context, eligible, path=path)
         elif type(call) is HandOver:
             lowering = self._lower_handover(analyzed, context, eligible, path=path)
-        elif type(call) is OperateArticulation:
-            lowering = self._lower_operate_articulation(
-                analyzed,
-                context,
-                path=path,
-            )
         elif type(call) is RegisteredSemanticCall:
             lowering = self._lower_registered(analyzed, context, path=path)
         else:  # pragma: no cover - exact workflow construction prevents this
@@ -1221,7 +1165,6 @@ class SemanticSkillCompiler:
                 Pick,
                 Place,
                 HandOver,
-                OperateArticulation,
             ):
                 raise _diagnostic(
                     "missing_effect_monitor",
@@ -1419,136 +1362,6 @@ class SemanticSkillCompiler:
             ),
         )
 
-    def _lower_operate_articulation(
-        self,
-        analyzed: AnalyzedSemanticCall,
-        context: PlanningContext,
-        *,
-        path: tuple[PathPart, ...],
-    ) -> SemanticLowering:
-        """Ground one handle operation from the latest scene snapshot."""
-        call = analyzed.call
-        assert type(call) is OperateArticulation
-        handle_ref = analyzed.bound.linked.affordances.get("handle")
-        if handle_ref is None:
-            raise AssertionError(
-                "Linked articulation call lacks an operation affordance."
-            )
-        registration = self._integration.scene_registry.lookup(
-            handle_ref,
-            expected_type=SceneAffordanceRef,
-        )
-        affordance = registration.affordance
-        if (
-            type(affordance) is not ArticulationOperationAffordance
-            or ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
-            not in registration.affordance_capabilities
-        ):
-            raise _diagnostic(
-                "invalid_articulation_affordance",
-                (*path, analyzed.index, "call", "handle"),
-                f"Handle {handle_ref.entity_id!r} must expose an exact "
-                "ArticulationOperationAffordance payload and the articulation "
-                "operation capability.",
-            )
-
-        if call.target is not None:
-            try:
-                resolved_target = affordance.resolve_target(call.target)
-            except KeyError as exc:
-                raise _diagnostic(
-                    "unknown_articulation_target",
-                    (*path, analyzed.index, "call", "target"),
-                    f"Handle {handle_ref.entity_id!r} has no semantic target "
-                    f"{call.target!r}.",
-                    tuple(affordance.semantic_targets),
-                ) from exc
-            target_position = resolved_target.target_position
-            displacement = resolved_target.displacement
-        else:
-            assert call.target_position is not None
-            assert call.target_displacement is not None
-            target_position = call.target_position
-            displacement = call.target_displacement
-
-        try:
-            handle_state = context.scene.entities[handle_ref.entity_id]
-        except KeyError as exc:
-            raise _diagnostic(
-                "missing_handle_observation",
-                (*path, analyzed.index, "call", "handle"),
-                f"The current planning snapshot has no pose for handle "
-                f"{handle_ref.entity_id!r}.",
-            ) from exc
-        try:
-            self._broadcast_pose(
-                handle_state.pose,
-                context,
-                name=f"handle {handle_ref.entity_id!r}",
-            )
-        except (TypeError, ValueError) as exc:
-            raise _diagnostic(
-                "articulation_grounding_failed",
-                (*path, analyzed.index, "call", "handle"),
-                f"Could not ground articulation handle geometry: {exc}",
-            ) from exc
-        joint_address = call.articulation.entity_id, affordance.joint_id
-        observed_joint = context.scene.get_articulation_joint_state(*joint_address)
-        if observed_joint is None:
-            raise _diagnostic(
-                "missing_articulation_joint_observation",
-                (*path, analyzed.index, "call", "articulation"),
-                "Recovery-safe articulation grounding requires a live "
-                "ObservedArticulationJointState for "
-                f"{joint_address!r} in the current scene snapshot.",
-            )
-        try:
-            source_position = self._broadcast_joint_position(
-                observed_joint.position,
-                context,
-                name=f"articulation joint {joint_address!r}",
-            )
-        except (TypeError, ValueError) as exc:
-            raise _diagnostic(
-                "invalid_articulation_joint_observation",
-                (*path, analyzed.index, "call", "articulation"),
-                f"Could not use live articulation joint state: {exc}",
-            ) from exc
-        if observed_joint.valid_mask is not None:
-            valid = observed_joint.valid_mask.to(device=context.robot.qpos.device)
-            if bool((~valid).any()):
-                rows = (~valid).nonzero(as_tuple=False).flatten().tolist()
-                raise _diagnostic(
-                    "invalid_articulation_joint_observation",
-                    (*path, analyzed.index, "call", "articulation"),
-                    "Live articulation joint state is unavailable for planning "
-                    f"rows {rows}.",
-                )
-        target = torch.full(
-            (context.batch_size, 1),
-            target_position,
-            dtype=context.robot.qpos.dtype,
-            device=context.robot.qpos.device,
-        )
-        return SemanticLowering(
-            goal=OperateArticulationGoal(
-                articulation_id=call.articulation.entity_id,
-                joint_id=affordance.joint_id,
-                geometry=SceneArticulationOperationGeometry(
-                    handle_pose=SceneEntityPose(handle_ref.entity_id),
-                    approach_offset=affordance.approach_offset,
-                    contact_offset=affordance.contact_offset,
-                    operation_offset=affordance.operation_offset,
-                    retract_offset=affordance.retract_offset,
-                    operation_axis=affordance.operation_axis,
-                    position_scale=affordance.position_scale,
-                ),
-                source_position=source_position,
-                target_position=target,
-                target_displacement=displacement,
-            )
-        )
-
     def _lower_registered(
         self,
         analyzed: AnalyzedSemanticCall,
@@ -1669,35 +1482,6 @@ class SemanticSkillCompiler:
             )
             state_expectations.extend((source, destination))
             clauses.extend((*source_clauses, *destination_clauses))
-        elif type(call) is OperateArticulation:
-            goal = invocation.goal
-            if type(goal) is not OperateArticulationGoal:
-                raise AssertionError(
-                    "OperateArticulation lowering produced an incompatible goal."
-                )
-            expectation = ArticulationJointStateExpectation(
-                expectation_id="joint",
-                articulation_id=goal.articulation_id,
-                joint_id=goal.joint_id,
-                target_position=goal.target_position,
-            )
-            source = EffectEvidenceSourceRef(
-                provider_id=SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
-                revision=SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION,
-                address=ArticulationJointEvidenceAddress(
-                    articulation_id=goal.articulation_id,
-                    joint_id=goal.joint_id,
-                ),
-            )
-            state_expectations.append(expectation)
-            clauses.append(
-                JointStateEffectClause(
-                    clause_id="joint.position",
-                    expectation_id=expectation.expectation_id,
-                    source=source,
-                    target_position=goal.target_position,
-                )
-            )
         else:  # pragma: no cover - exact workflow construction prevents this
             raise AssertionError(f"Unsupported analyzed call {type(call).__name__}.")
         return SemanticEffectSpec(
@@ -2101,31 +1885,6 @@ class SemanticSkillCompiler:
                 f"{name} must have shape (4, 4) or " f"({context.batch_size}, 4, 4)."
             )
         return pose.clone()
-
-    @staticmethod
-    def _broadcast_joint_position(
-        position: torch.Tensor,
-        context: PlanningContext,
-        *,
-        name: str,
-    ) -> torch.Tensor:
-        """Move and broadcast one scalar articulation joint observation."""
-        if not isinstance(position, torch.Tensor):
-            raise TypeError(f"{name} position must be a torch.Tensor.")
-        if not position.is_floating_point() or not torch.isfinite(position).all():
-            raise ValueError(f"{name} position must be a finite floating tensor.")
-        position = position.to(
-            device=context.robot.qpos.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        if position.shape == (1,):
-            return position.unsqueeze(0).expand(context.batch_size, -1).clone()
-        if position.shape != (context.batch_size, 1):
-            raise ValueError(
-                f"{name} position must have shape (1,) or "
-                f"({context.batch_size}, 1)."
-            )
-        return position.clone()
 
 
 __all__ = [

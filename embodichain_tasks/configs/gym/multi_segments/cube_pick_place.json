@@ -50,10 +50,7 @@
                 }
             }
         },
-        "extensions": {
-            "grasp_samples": 10000,
-            "force_reannotate": false
-        }
+        "extensions": {}
     },
     "robot": {
         "class_type": "URRobot",
@@ -93,7 +90,24 @@
         },
         "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
     },
-    "sensor": [],
+    "sensor": [
+        {
+            "sensor_type": "ContactSensor",
+            "uid": "grasp_contacts",
+            "rigid_uid_list": ["cube"],
+            "articulation_cfg_list": [
+                {
+                    "articulation_uid": "UR5",
+                    "link_name_list": [
+                        "gripper_finger1_link_1",
+                        "gripper_finger2_link_1"
+                    ]
+                }
+            ],
+            "filter_need_both_actor": true,
+            "max_contacts_per_env": 64
+        }
+    ],
     "light": {
         "direct": [
             {

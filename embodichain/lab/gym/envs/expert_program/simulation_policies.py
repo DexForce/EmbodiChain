@@ -42,6 +42,8 @@ from embodichain.lab.gym.envs.settling import (
 )
 
 from .compiler import (
+    CompiledArticulationJointPositionValidator,
+    CompiledObjectNearTargetValidator,
     CompiledPostPolicy,
     CompiledProgramSegment,
     CompiledProgramValidator,
@@ -73,7 +75,15 @@ def _default_settle_presets() -> Mapping[str, DynamicSettleMonitorCfg]:
                 max_steps=240,
                 check_interval_steps=2,
                 required_stable_checks=3,
-            )
+            ),
+            "articulation": DynamicSettleMonitorCfg(
+                linear_velocity_threshold=0.02,
+                angular_velocity_threshold=0.10,
+                min_steps=10,
+                max_steps=120,
+                check_interval_steps=2,
+                required_stable_checks=3,
+            ),
         }
     )
 
@@ -95,7 +105,7 @@ class SimulationSegmentPolicyPort:
         robot: Live robot used to produce controller-safe full-qpos holds.
         scene_binding: Exact canonical-to-native scene declaration.
         settle_presets: Named settling policies. ``None`` installs the shared
-            ``rigid_object`` preset.
+            ``rigid_object`` and ``articulation`` presets.
         env_ids: Optional stable logical row IDs. They describe correlation,
             not simulator row indices; simulator rows remain ordered exactly as
             returned by the robot and bound entities.
@@ -164,7 +174,11 @@ class SimulationSegmentPolicyPort:
             device=qpos.device,
         )
         self._settle_presets = MappingProxyType(normalized_presets)
-        self._settle_targets, self._rigid_objects = self._resolve_native_entities()
+        (
+            self._settle_targets,
+            self._rigid_objects,
+            self._articulations,
+        ) = self._resolve_native_entities()
         self._post_policy_results: dict[int, dict[str, object]] = {}
         self._post_policy_success: dict[int, torch.Tensor] = {}
         self._validator_results: dict[int, dict[str, object]] = {}
@@ -337,31 +351,57 @@ class SimulationSegmentPolicyPort:
         segment: Any,
     ) -> None:
         """Validate one validator against static bindings without observation."""
-        if type(validator) is not CompiledProgramValidator:
-            raise TypeError("validator must be exactly CompiledProgramValidator.")
+        if type(validator) not in (
+            CompiledObjectNearTargetValidator,
+            CompiledArticulationJointPositionValidator,
+        ):
+            raise TypeError("validator must be an exact compiled validator.")
         self._validate_segment_membership(segment, validator, kind="validator")
-        if validator.cfg.kind != "object_near_target":
+        if type(validator) is CompiledObjectNearTargetValidator:
+            if validator.cfg.kind != "object_near_target":
+                raise ValueError(
+                    f"Unsupported compiled validator kind {validator.cfg.kind!r}."
+                )
+            entity_id = validator.object.entity_id
+            if entity_id not in self._rigid_objects:
+                raise KeyError(
+                    f"Canonical validator object {entity_id!r} has no explicit "
+                    "rigid-object binding."
+                )
+            return
+
+        if validator.cfg.kind != "articulation_joint_position":
             raise ValueError(
                 f"Unsupported compiled validator kind {validator.cfg.kind!r}."
             )
-        entity_id = validator.object.entity_id
-        if entity_id not in self._rigid_objects:
+        entity_id = validator.articulation.entity_id
+        articulation = self._articulations.get(entity_id)
+        if articulation is None:
             raise KeyError(
-                f"Canonical validator object {entity_id!r} has no explicit rigid-"
-                "object binding."
+                f"Canonical validator articulation {entity_id!r} has no explicit "
+                "articulation binding."
             )
+        self._articulation_joint_index(
+            articulation,
+            entity_id=entity_id,
+            joint_name=validator.cfg.joint,
+        )
 
     def validate(self, validator: Any, *, segment: Any) -> torch.Tensor:
-        """Observe an explicitly bound rigid object against a world target.
+        """Observe one explicitly bound entity against its validator contract.
 
         Args:
-            validator: Exact compiled ``object_near_target`` validator.
+            validator: Exact compiled segment validator.
             segment: Exact segment that owns ``validator``.
 
         Returns:
             Boolean tensor with one result per simulation row.
         """
         self.validate_validator(validator, segment=segment)
+        if type(validator) is CompiledArticulationJointPositionValidator:
+            return self._validate_articulation_joint_position(validator)
+        if type(validator) is not CompiledObjectNearTargetValidator:
+            raise TypeError("validator must be an exact compiled validator.")
         entity_id = validator.object.entity_id
         entity = self._rigid_objects[entity_id]
         pose = self._read_pose(entity, entity_id=entity_id)
@@ -402,13 +442,56 @@ class SimulationSegmentPolicyPort:
         segment: Any,
     ) -> Mapping[str, object]:
         """Return an owned JSON-safe trace for one completed validator."""
-        if type(validator) is not CompiledProgramValidator:
-            raise TypeError("validator must be exactly CompiledProgramValidator.")
+        if type(validator) not in (
+            CompiledObjectNearTargetValidator,
+            CompiledArticulationJointPositionValidator,
+        ):
+            raise TypeError("validator must be an exact compiled validator.")
         self._validate_segment_membership(segment, validator, kind="validator")
         metadata = self._validator_results.get(id(validator))
         if metadata is None:
             raise RuntimeError("Validator metadata is unavailable before validation.")
         return deepcopy(metadata)
+
+    def _validate_articulation_joint_position(
+        self,
+        validator: CompiledArticulationJointPositionValidator,
+    ) -> torch.Tensor:
+        """Evaluate one measured articulation joint against inclusive bounds."""
+        entity_id = validator.articulation.entity_id
+        articulation = self._articulations[entity_id]
+        joint_index = self._articulation_joint_index(
+            articulation,
+            entity_id=entity_id,
+            joint_name=validator.cfg.joint,
+        )
+        qpos = self._read_articulation_qpos(articulation, entity_id=entity_id)
+        if joint_index >= qpos.shape[1]:
+            raise ValueError(
+                f"Joint {validator.cfg.joint!r} resolves to index {joint_index}, "
+                f"outside articulation {entity_id!r} qpos width {qpos.shape[1]}."
+            )
+        position = qpos[:, joint_index]
+        accepted = torch.isfinite(position)
+        if validator.cfg.minimum_position is not None:
+            accepted &= position >= float(validator.cfg.minimum_position)
+        if validator.cfg.maximum_position is not None:
+            accepted &= position <= float(validator.cfg.maximum_position)
+        self._validator_results[id(validator)] = {
+            "kind": validator.cfg.kind,
+            "articulation_id": entity_id,
+            "joint": validator.cfg.joint,
+            "source_path": list(validator.source_path),
+            "minimum_position": validator.cfg.minimum_position,
+            "maximum_position": validator.cfg.maximum_position,
+            "env_ids": self._env_ids.detach().cpu().tolist(),
+            "joint_position": [
+                float(value) if math.isfinite(float(value)) else None
+                for value in position.detach().cpu().tolist()
+            ],
+            "accepted_mask": accepted.detach().cpu().tolist(),
+        }
+        return accepted
 
     @staticmethod
     def _read_robot_qpos(robot: Robot) -> torch.Tensor:
@@ -533,6 +616,7 @@ class SimulationSegmentPolicyPort:
     ) -> tuple[
         Mapping[str, _SimulationSettleTarget],
         Mapping[str, Any],
+        Mapping[str, Any],
     ]:
         """Resolve only explicitly declared canonical/native pairs."""
         settle_targets: dict[str, _SimulationSettleTarget] = {}
@@ -581,13 +665,15 @@ class SimulationSegmentPolicyPort:
                     f"object {binding.object_id!r}."
                 )
             settle_targets[binding.entity_id] = parent
-        for binding in self._scene_binding.articulation_operations:
-            settle_targets[binding.entity_id] = self._require_parent_target(
-                articulation_targets,
-                child_id=binding.entity_id,
-                parent_id=binding.articulation_id,
-            )
-        return MappingProxyType(settle_targets), MappingProxyType(rigid_objects)
+        articulations = {
+            entity_id: target.native_entity
+            for entity_id, target in articulation_targets.items()
+        }
+        return (
+            MappingProxyType(settle_targets),
+            MappingProxyType(rigid_objects),
+            MappingProxyType(articulations),
+        )
 
     @staticmethod
     def _require_parent_target(
@@ -688,6 +774,62 @@ class SimulationSegmentPolicyPort:
             angular_speed=angular_speed.to(device=device),
         )
 
+    @staticmethod
+    def _articulation_joint_index(
+        articulation: Any,
+        *,
+        entity_id: str,
+        joint_name: str,
+    ) -> int:
+        """Resolve one explicitly named native articulation joint."""
+        names = getattr(articulation, "joint_names", None)
+        if names is None or isinstance(names, (str, bytes)):
+            raise TypeError(
+                f"Articulation {entity_id!r} must expose an iterable joint_names."
+            )
+        try:
+            normalized = tuple(names)
+        except TypeError as exc:
+            raise TypeError(
+                f"Articulation {entity_id!r} must expose an iterable joint_names."
+            ) from exc
+        if not all(type(name) is str and name for name in normalized):
+            raise ValueError(
+                f"Articulation {entity_id!r} joint_names must be non-empty strings."
+            )
+        if len(set(normalized)) != len(normalized):
+            raise ValueError(f"Articulation {entity_id!r} joint_names must be unique.")
+        try:
+            return normalized.index(joint_name)
+        except ValueError as exc:
+            raise KeyError(
+                f"Joint {joint_name!r} was not found on articulation "
+                f"{entity_id!r}; available joints are {sorted(normalized)}."
+            ) from exc
+
+    def _read_articulation_qpos(
+        self,
+        articulation: Any,
+        *,
+        entity_id: str,
+    ) -> torch.Tensor:
+        """Read one articulation position batch in simulator row order."""
+        getter = getattr(articulation, "get_qpos", None)
+        if not callable(getter):
+            raise TypeError(
+                f"Native articulation for {entity_id!r} must provide get_qpos()."
+            )
+        qpos = getter()
+        if not isinstance(qpos, torch.Tensor) or not qpos.is_floating_point():
+            raise TypeError("Articulation get_qpos() must return a floating tensor.")
+        batch_size = int(self._env_ids.numel())
+        if qpos.dim() != 2 or qpos.shape[0] != batch_size or qpos.shape[1] == 0:
+            raise ValueError(
+                f"Articulation {entity_id!r} qpos must have shape "
+                f"({batch_size}, J) with J > 0."
+            )
+        return qpos.clone()
+
     def _read_pose(self, entity: Any, *, entity_id: str) -> torch.Tensor:
         """Read one rigid-object pose batch in simulator row order."""
         getter = getattr(entity, "get_local_pose", None)
@@ -712,4 +854,4 @@ class SimulationSegmentPolicyPort:
         return pose.clone()
 
 
-__all__ = ["SimulationSegmentPolicyPort"]
+__all__: list[str] = []

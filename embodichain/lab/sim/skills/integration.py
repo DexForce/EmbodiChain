@@ -34,7 +34,6 @@ from embodichain.lab.sim.atomic_actions import (
 
 from .calls import (
     HandOver,
-    OperateArticulation,
     Pick,
     Place,
     RegisteredSemanticCall,
@@ -53,13 +52,13 @@ from .profiles import (
     SkillPolicyPreset,
 )
 from .scene import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
     GRASP_AFFORDANCE_CAPABILITY,
     PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneCollisionRole,
+    SceneCollisionWorldMode,
     SceneDynamics,
     SceneEntityMetadata,
     SceneEntityRef,
@@ -272,8 +271,14 @@ class SceneManifest:
     _by_id: Mapping[str, SceneEntityManifest]
     _aliases: Mapping[str, str]
     _affordances: Mapping[tuple[str, str], tuple[SceneAffordanceRef, ...]]
+    collision_world_mode: SceneCollisionWorldMode | None
 
-    def __init__(self, entries: Iterable[SceneEntityManifest] = ()) -> None:
+    def __init__(
+        self,
+        entries: Iterable[SceneEntityManifest] = (),
+        *,
+        collision_world_mode: SceneCollisionWorldMode | None = None,
+    ) -> None:
         if isinstance(entries, (str, bytes)):
             raise TypeError("entries must be an iterable of scene manifests.")
         try:
@@ -282,6 +287,13 @@ class SceneManifest:
             raise TypeError("entries must be an iterable of scene manifests.") from exc
         if not all(type(entry) is SceneEntityManifest for entry in supplied):
             raise TypeError("entries must contain exact SceneEntityManifest values.")
+        if collision_world_mode is not None and not isinstance(
+            collision_world_mode,
+            SceneCollisionWorldMode,
+        ):
+            raise TypeError(
+                "collision_world_mode must be a SceneCollisionWorldMode or None."
+            )
         by_id: dict[str, SceneEntityManifest] = {}
         for entry in supplied:
             if entry.ref.entity_id in by_id:
@@ -385,6 +397,7 @@ class SceneManifest:
                 }
             ),
         )
+        object.__setattr__(self, "collision_world_mode", collision_world_mode)
 
     @property
     def entries(self) -> tuple[SceneEntityManifest, ...]:
@@ -397,8 +410,11 @@ class SceneManifest:
         if not isinstance(registry, SceneRegistry):
             raise TypeError("registry must be a SceneRegistry.")
         return cls(
-            SceneEntityManifest.from_metadata(metadata)
-            for metadata in registry.entity_metadata
+            (
+                SceneEntityManifest.from_metadata(metadata)
+                for metadata in registry.entity_metadata
+            ),
+            collision_world_mode=registry.collision_world_mode,
         )
 
     def resolve(
@@ -568,6 +584,14 @@ class SceneManifest:
                         "Live scene metadata differs from the static manifest.",
                     )
                 )
+        if self.collision_world_mode is not live.collision_world_mode:
+            raise SemanticValidationError(
+                SemanticDiagnostic(
+                    "scene_manifest_mismatch",
+                    (*path, "collision_world_mode"),
+                    "Live collision-world mode differs from the static manifest.",
+                )
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -584,7 +608,6 @@ class LinkedSemanticCall:
             Pick,
             Place,
             HandOver,
-            OperateArticulation,
             RegisteredSemanticCall,
         ):
             raise TypeError("call must be an exact supported semantic call value.")
@@ -813,24 +836,6 @@ class SemanticIntegrationManifest:
             )
             normalized_call = replace(call, object=object_ref)
             affordances["receiver_grasp"] = grasp
-        elif isinstance(call, OperateArticulation):
-            articulation_ref = self.scene.resolve(
-                call.articulation,
-                expected_type=SceneArticulationRef,
-                path=(*path, "articulation"),
-            )
-            handle = self.scene.resolve_affordance(
-                articulation_ref,
-                capability=ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
-                explicit=call.handle,
-                path=(*path, "handle"),
-            )
-            normalized_call = replace(
-                call,
-                articulation=articulation_ref,
-                handle=handle,
-            )
-            affordances["handle"] = handle
         elif isinstance(call, RegisteredSemanticCall):
             normalized_call = replace(
                 call,

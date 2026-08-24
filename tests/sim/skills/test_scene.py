@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from typing import Literal
 
 import pytest
 import torch
@@ -30,6 +31,7 @@ from embodichain.lab.sim.atomic_actions import (
     ObservedArticulationJointState,
     SceneSnapshot,
 )
+from embodichain.lab.sim.planners.base_planner import CollisionWorldInfo
 from embodichain.lab.sim.skills import (
     AmbiguousSceneAffordanceError,
     GRASP_AFFORDANCE_CAPABILITY,
@@ -117,14 +119,14 @@ class _MotionGenerator:
         entity_ids: tuple[str, ...],
         world_entity_ids: tuple[str, ...] | None = None,
         supports_updates: bool = True,
-        batch_mode: str | None = "per_env",
+        batch_mode: Literal["shared", "per_env"] | None = "per_env",
     ) -> None:
-        self.dynamic_collision_entity_ids = entity_ids
-        self.collision_world_entity_ids = (
-            entity_ids if world_entity_ids is None else world_entity_ids
+        self.collision_world_info = CollisionWorldInfo(
+            entity_ids=entity_ids if world_entity_ids is None else world_entity_ids,
+            dynamic_entity_ids=entity_ids,
+            supports_updates=supports_updates,
+            batch_mode=batch_mode,
         )
-        self.supports_dynamic_collision_world = supports_updates
-        self.collision_world_batch_mode = batch_mode
 
 
 class _ExternalSceneProvider:

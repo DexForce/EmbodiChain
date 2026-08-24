@@ -21,18 +21,18 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Protocol, runtime_checkable
+from typing import TypeAlias
 
 from embodichain.lab.sim.skills.calls import (
     DeclarativeValue,
     HandOver,
-    OperateArticulation,
     Pick,
     Place,
     RegisteredSemanticCall,
     SemanticCallSpec,
     SemanticPose,
 )
+from embodichain.lab.sim.skills.integration import SceneManifest
 from embodichain.lab.sim.skills.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
@@ -44,10 +44,10 @@ from embodichain.lab.sim.skills.scene import (
 
 from .cfg import (
     EXPERT_PROGRAM_SCHEMA_VERSION,
-    EXPERT_PROGRAM_SCHEMA_VERSION_V2,
+    REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION,
     MAX_EXPANDED_CALLS,
     MAX_REPEAT_COUNT,
-    SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS,
+    ArticulationJointPositionValidatorCfg,
     BarrierCfg,
     CyclicPoseTargetCfg,
     ExpertProgramCfg,
@@ -55,7 +55,6 @@ from .cfg import (
     HandOverCfg,
     InvokeCfg,
     ObjectNearTargetValidatorCfg,
-    OperateArticulationCfg,
     ParallelCfg,
     PickCfg,
     PlaceCfg,
@@ -74,7 +73,6 @@ _SEMANTIC_CALL_TYPES = (
     Pick,
     Place,
     HandOver,
-    OperateArticulation,
     RegisteredSemanticCall,
 )
 _SCENE_REF_TYPES = (
@@ -90,107 +88,11 @@ class ExpertProgramCompileError(ExpertProgramConfigError):
     """Raised when a validated AST cannot lower to canonical semantic calls."""
 
 
-@runtime_checkable
-class ExpertProgramSceneResolver(Protocol):
-    """Provider-free typed resolver for canonical static scene references."""
-
-    def resolve(
-        self,
-        reference: str,
-        *,
-        expected_types: tuple[type[SceneEntityRef], ...],
-        path: ConfigPath,
-    ) -> SceneEntityRef:
-        """Resolve one canonical or aliased ID without observing scene state."""
-
-
 def _copy_scene_ref(reference: SceneEntityRef) -> SceneEntityRef:
     """Return one independent exact typed scene reference."""
     if type(reference) not in _SCENE_REF_TYPES:
         raise TypeError(f"Unsupported scene reference {type(reference).__name__}.")
     return type(reference)(reference.entity_id)
-
-
-class SceneRegistryProgramResolver:
-    """Provider-free static resolver snapshotted from one SceneRegistry.
-
-    The resolver copies only canonical typed references and aliases. It does not
-    retain registrations, state providers, geometry providers, or the registry
-    itself, so compilation cannot observe dynamic scene state.
-    """
-
-    def __init__(self, registry: SceneRegistry) -> None:
-        """Snapshot the registry's static identity table.
-
-        Args:
-            registry: Authoritative registry used only for static identity data.
-        """
-        if type(registry) is not SceneRegistry:
-            raise TypeError("registry must be exactly SceneRegistry.")
-        references = {
-            reference.entity_id: _copy_scene_ref(reference)
-            for reference in registry.entity_refs
-        }
-        self._references = MappingProxyType(references)
-        self._aliases = MappingProxyType(dict(registry.aliases))
-
-    @property
-    def canonical_references(self) -> Mapping[str, SceneEntityRef]:
-        """Return an independent canonical typed-reference mapping."""
-        return MappingProxyType(
-            {
-                entity_id: _copy_scene_ref(reference)
-                for entity_id, reference in self._references.items()
-            }
-        )
-
-    def resolve(
-        self,
-        reference: str,
-        *,
-        expected_types: tuple[type[SceneEntityRef], ...],
-        path: ConfigPath,
-    ) -> SceneEntityRef:
-        """Resolve one ID or alias through the snapshotted type table."""
-        if (
-            type(reference) is not str
-            or not reference
-            or reference != reference.strip()
-        ):
-            raise ExpertProgramCompileError(
-                "invalid_scene_reference",
-                path,
-                "Scene references must be non-empty strings without outer whitespace.",
-            )
-        if (
-            type(expected_types) is not tuple
-            or not expected_types
-            or not all(
-                isinstance(expected_type, type)
-                and issubclass(expected_type, SceneEntityRef)
-                for expected_type in expected_types
-            )
-        ):
-            raise TypeError(
-                "expected_types must be a non-empty tuple of SceneEntityRef types."
-            )
-        canonical_id = self._aliases.get(reference, reference)
-        resolved = self._references.get(canonical_id)
-        if resolved is None:
-            raise ExpertProgramCompileError(
-                "unknown_scene_reference",
-                path,
-                f"Unknown scene reference {reference!r}.",
-            )
-        if type(resolved) not in expected_types:
-            expected_names = tuple(value.__name__ for value in expected_types)
-            raise ExpertProgramCompileError(
-                "scene_reference_type_mismatch",
-                path,
-                f"Scene reference {reference!r} resolves to "
-                f"{type(resolved).__name__}, expected one of {expected_names}.",
-            )
-        return _copy_scene_ref(resolved)
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,15 +164,6 @@ def _snapshot_semantic_call(call: SemanticCallSpec) -> SemanticCallSpec:
             final_target=(
                 None if call.final_target is None else call.final_target.snapshot()
             ),
-            resources=dict(call.resources),
-        )
-    if type(call) is OperateArticulation:
-        return OperateArticulation(
-            articulation=_copy_scene_ref(call.articulation),
-            handle=(None if call.handle is None else _copy_scene_ref(call.handle)),
-            target=call.target,
-            target_position=call.target_position,
-            target_displacement=call.target_displacement,
             resources=dict(call.resources),
         )
     if type(call) is RegisteredSemanticCall:
@@ -345,7 +238,7 @@ class CompiledPostPolicy:
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledProgramValidator:
+class CompiledObjectNearTargetValidator:
     """Owned validator config with canonical object and resolved target pose."""
 
     cfg: ObjectNearTargetValidatorCfg
@@ -377,6 +270,50 @@ class CompiledProgramValidator:
         )
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
         object.__setattr__(self, "target_pose", self.target_pose.snapshot())
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledArticulationJointPositionValidator:
+    """Owned joint-position validator with its canonical articulation."""
+
+    cfg: ArticulationJointPositionValidatorCfg
+    articulation: SceneArticulationRef
+    source_path: ConfigPath
+
+    def __post_init__(self) -> None:
+        if type(self.cfg) is not ArticulationJointPositionValidatorCfg:
+            raise TypeError(
+                "cfg must be exactly ArticulationJointPositionValidatorCfg."
+            )
+        if type(self.articulation) is not SceneArticulationRef:
+            raise TypeError("articulation must be exactly SceneArticulationRef.")
+        if type(self.source_path) is not tuple:
+            raise TypeError("source_path must be a ConfigPath tuple.")
+        object.__setattr__(
+            self,
+            "cfg",
+            ArticulationJointPositionValidatorCfg(
+                articulation=self.cfg.articulation,
+                joint=self.cfg.joint,
+                minimum_position=self.cfg.minimum_position,
+                maximum_position=self.cfg.maximum_position,
+                kind=self.cfg.kind,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "articulation",
+            _copy_scene_ref(self.articulation),
+        )
+
+
+CompiledProgramValidator: TypeAlias = (
+    CompiledObjectNearTargetValidator | CompiledArticulationJointPositionValidator
+)
+_COMPILED_VALIDATOR_TYPES = (
+    CompiledObjectNearTargetValidator,
+    CompiledArticulationJointPositionValidator,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -481,8 +418,8 @@ class CompiledProgramSegment:
             raise TypeError("repeat_frames must contain CompiledRepeatFrame values.")
         if not all(type(value) is CompiledPostPolicy for value in post):
             raise TypeError("post_policies must contain CompiledPostPolicy values.")
-        if not all(type(value) is CompiledProgramValidator for value in validators):
-            raise TypeError("validators must contain CompiledProgramValidator values.")
+        if not all(type(value) in _COMPILED_VALIDATOR_TYPES for value in validators):
+            raise TypeError("validators must contain compiled validator values.")
         if type(self.implicit) is not bool:
             raise TypeError("implicit must be a bool.")
         if self.implicit and (post or validators):
@@ -565,11 +502,6 @@ class _CallTemplate:
     inside: SceneObjectRef | SceneAffordanceRef | None = None
     receiver: str | None = None
     final_target_id: str | None = None
-    articulation: SceneArticulationRef | None = None
-    handle: SceneAffordanceRef | None = None
-    articulation_target: str | None = None
-    target_position: float | None = None
-    target_displacement: float | None = None
     call_id: str | None = None
     arguments: Mapping[str, DeclarativeValue] | None = None
     resources: tuple[tuple[str, str], ...] = ()
@@ -617,11 +549,23 @@ class _PostTemplate:
 
 
 @dataclass(frozen=True, slots=True)
-class _ValidatorTemplate:
+class _ObjectNearTargetValidatorTemplate:
     cfg: ObjectNearTargetValidatorCfg
     object: SceneObjectRef
     target_id: str
     source_path: ConfigPath
+
+
+@dataclass(frozen=True, slots=True)
+class _ArticulationJointPositionValidatorTemplate:
+    cfg: ArticulationJointPositionValidatorCfg
+    articulation: SceneArticulationRef
+    source_path: ConfigPath
+
+
+_ValidatorTemplate: TypeAlias = (
+    _ObjectNearTargetValidatorTemplate | _ArticulationJointPositionValidatorTemplate
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -639,7 +583,6 @@ _NodeTemplate = (
     | _RepeatTemplate
     | _SegmentTemplate
     | _ParallelTemplate
-    | _BarrierTemplate
 )
 
 
@@ -732,18 +675,6 @@ def _instantiate_call(
             object=_copy_scene_ref(template.object),
             receiver=template.receiver,
             final_target=final_target,
-            resources=resources,
-        )
-    elif template.kind == "operate_articulation":
-        assert template.articulation is not None
-        call = OperateArticulation(
-            articulation=_copy_scene_ref(template.articulation),
-            handle=(
-                None if template.handle is None else _copy_scene_ref(template.handle)
-            ),
-            target=template.articulation_target,
-            target_position=template.target_position,
-            target_displacement=template.target_displacement,
             resources=resources,
         )
     elif template.kind == "registered":
@@ -980,20 +911,33 @@ def _iter_segments(
     )
     validators: list[CompiledProgramValidator] = []
     for validator in template.validators:
-        target_pose, selection = _resolve_target(
-            validator.target_id,
-            targets=targets,
-            repeat_frames=repeat_frames,
-        )
-        validators.append(
-            CompiledProgramValidator(
-                cfg=validator.cfg,
-                object=validator.object,
-                target_pose=target_pose,
-                target_selection=selection,
-                source_path=validator.source_path,
+        if type(validator) is _ObjectNearTargetValidatorTemplate:
+            target_pose, selection = _resolve_target(
+                validator.target_id,
+                targets=targets,
+                repeat_frames=repeat_frames,
             )
-        )
+            validators.append(
+                CompiledObjectNearTargetValidator(
+                    cfg=validator.cfg,
+                    object=validator.object,
+                    target_pose=target_pose,
+                    target_selection=selection,
+                    source_path=validator.source_path,
+                )
+            )
+        elif type(validator) is _ArticulationJointPositionValidatorTemplate:
+            validators.append(
+                CompiledArticulationJointPositionValidator(
+                    cfg=validator.cfg,
+                    articulation=validator.articulation,
+                    source_path=validator.source_path,
+                )
+            )
+        else:
+            raise TypeError(
+                f"Unsupported internal validator template {type(validator).__name__}."
+            )
     segment = CompiledProgramSegment(
         segment_index=state.segment_index,
         segment_id=_segment_identity(
@@ -1017,16 +961,15 @@ def _iter_segments(
 
 @dataclass(frozen=True, slots=True, init=False)
 class CompiledProgram:
-    """Owned provider-free program template with lazy deterministic expansion."""
+    """Bounded provider-free segment snapshot used by preflight and execution."""
 
     schema_version: int
     program_id: str
     _integration: ExpertProgramIntegrationCfg = field(repr=False, compare=False)
-    _targets: Mapping[str, tuple[SemanticPose, ...]] = field(
+    _segments: tuple[CompiledProgramSegment, ...] = field(
         repr=False,
         compare=False,
     )
-    _root: _NodeTemplate = field(repr=False, compare=False)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Reject construction outside :class:`ExpertProgramCompiler`."""
@@ -1040,125 +983,16 @@ class CompiledProgram:
         schema_version: int,
         program_id: str,
         integration: ExpertProgramIntegrationCfg,
-        targets: Mapping[str, tuple[SemanticPose, ...]],
-        root: _NodeTemplate,
-    ) -> CompiledProgram:
-        """Create one compiler-owned lazy program template."""
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "schema_version", schema_version)
-        object.__setattr__(instance, "program_id", program_id)
-        object.__setattr__(instance, "_integration", integration)
-        object.__setattr__(
-            instance,
-            "_targets",
-            MappingProxyType(
-                {
-                    target_id: tuple(pose.snapshot() for pose in values)
-                    for target_id, values in targets.items()
-                }
-            ),
-        )
-        object.__setattr__(instance, "_root", root)
-        return instance
-
-    @property
-    def integration(self) -> ExpertProgramIntegrationCfg:
-        """Return an independent integration-selection snapshot."""
-        return ExpertProgramIntegrationCfg(
-            robot_profile=self._integration.robot_profile,
-            scene_registry=self._integration.scene_registry,
-            runtime_preset=self._integration.runtime_preset,
-        )
-
-    @property
-    def targets(self) -> Mapping[str, tuple[SemanticPose, ...]]:
-        """Return independent static target-pose snapshots."""
-        return MappingProxyType(
-            {
-                target_id: tuple(pose.snapshot() for pose in values)
-                for target_id, values in self._targets.items()
-            }
-        )
-
-    def iter_segments(self) -> Iterator[CompiledProgramSegment]:
-        """Lazily expand a fresh deterministic segment stream."""
-        return _iter_segments(
-            self._root,
-            program_id=self.program_id,
-            targets=self._targets,
-            repeat_frames=(),
-            state=_ExpansionState(),
-        )
-
-    def materialize(self) -> MaterializedCompiledProgram:
-        """Expand the bounded provider-free segment stream exactly once.
-
-        Materialization never observes a scene provider.  It also re-enforces
-        the public expanded-call bound so a configuration mutated after its
-        initial validation cannot create an unbounded bridge-preflight pass.
-
-        Returns:
-            Immutable materialized program with deterministic analysis windows.
-
-        Raises:
-            ExpertProgramCompileError: If expansion exceeds the configured
-                semantic-call bound.
-        """
-        segments: list[CompiledProgramSegment] = []
-        expanded_calls = 0
-        for segment in self.iter_segments():
-            expanded_calls += len(segment.calls)
-            if expanded_calls > MAX_EXPANDED_CALLS:
-                raise ExpertProgramCompileError(
-                    "expanded_call_limit",
-                    segment.source_path,
-                    "Program materialization exceeds the static limit of "
-                    f"{MAX_EXPANDED_CALLS} semantic calls.",
-                )
-            segments.append(segment)
-        return MaterializedCompiledProgram._create(
-            schema_version=self.schema_version,
-            program_id=self.program_id,
-            integration=self._integration,
-            segments=tuple(segments),
-        )
-
-    def __iter__(self) -> Iterator[CompiledProgramSegment]:
-        return self.iter_segments()
-
-
-@dataclass(frozen=True, slots=True, init=False)
-class MaterializedCompiledProgram:
-    """Bounded provider-free segment snapshot used by preflight and execution."""
-
-    schema_version: int
-    program_id: str
-    _integration: ExpertProgramIntegrationCfg = field(repr=False, compare=False)
-    _segments: tuple[CompiledProgramSegment, ...] = field(
-        repr=False,
-        compare=False,
-    )
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        """Reject construction outside :meth:`CompiledProgram.materialize`."""
-        del args, kwargs
-        raise TypeError(
-            "MaterializedCompiledProgram values are created by "
-            "CompiledProgram.materialize()."
-        )
-
-    @classmethod
-    def _create(
-        cls,
-        *,
-        schema_version: int,
-        program_id: str,
-        integration: ExpertProgramIntegrationCfg,
         segments: tuple[CompiledProgramSegment, ...],
-    ) -> MaterializedCompiledProgram:
+    ) -> CompiledProgram:
         """Create one compiler-owned materialized program."""
-        if type(schema_version) is not int or schema_version < 1:
-            raise ValueError("schema_version must be a positive integer.")
+        if (
+            type(schema_version) is not int
+            or schema_version != EXPERT_PROGRAM_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                f"schema_version must be exactly {EXPERT_PROGRAM_SCHEMA_VERSION}."
+            )
         if type(program_id) is not str or not program_id:
             raise ValueError("program_id must be a non-empty string.")
         if type(integration) is not ExpertProgramIntegrationCfg:
@@ -1318,23 +1152,58 @@ class MaterializedCompiledProgram:
         return self.iter_segments()
 
 
-class ExpertProgramCompiler:
-    """Compile validated Expert Program ASTs through one typed resolver."""
+def _materialize_program(
+    *,
+    schema_version: int,
+    program_id: str,
+    integration: ExpertProgramIntegrationCfg,
+    targets: Mapping[str, tuple[SemanticPose, ...]],
+    root: _NodeTemplate,
+) -> CompiledProgram:
+    """Expand one internal template directly into the public bounded snapshot."""
+    segments: list[CompiledProgramSegment] = []
+    expanded_calls = 0
+    for segment in _iter_segments(
+        root,
+        program_id=program_id,
+        targets=targets,
+        repeat_frames=(),
+        state=_ExpansionState(),
+    ):
+        expanded_calls += len(segment.calls)
+        if expanded_calls > MAX_EXPANDED_CALLS:
+            raise ExpertProgramCompileError(
+                "expanded_call_limit",
+                segment.source_path,
+                "Program expansion exceeds the static limit of "
+                f"{MAX_EXPANDED_CALLS} semantic calls.",
+            )
+        segments.append(segment)
+    return CompiledProgram._create(
+        schema_version=schema_version,
+        program_id=program_id,
+        integration=integration,
+        segments=tuple(segments),
+    )
 
-    def __init__(self, scene_resolver: ExpertProgramSceneResolver) -> None:
+
+class ExpertProgramCompiler:
+    """Compile validated Expert Program ASTs through one static scene manifest."""
+
+    def __init__(self, scene_manifest: SceneManifest) -> None:
         """Create one provider-free compiler.
 
         Args:
-            scene_resolver: Static typed scene identity resolver.
+            scene_manifest: Canonical provider-free scene identity catalog.
         """
-        if not isinstance(scene_resolver, ExpertProgramSceneResolver):
-            raise TypeError("scene_resolver must implement ExpertProgramSceneResolver.")
-        self._scene_resolver = scene_resolver
+        if type(scene_manifest) is not SceneManifest:
+            raise TypeError("scene_manifest must be exactly SceneManifest.")
+        self._scene_manifest = scene_manifest
 
     @classmethod
     def from_scene_registry(cls, registry: SceneRegistry) -> ExpertProgramCompiler:
         """Create a compiler from a provider-free SceneRegistry identity snapshot."""
-        return cls(SceneRegistryProgramResolver(registry))
+        return cls(SceneManifest.from_registry(registry))
 
     def _resolve_scene(
         self,
@@ -1345,9 +1214,8 @@ class ExpertProgramCompiler:
     ) -> SceneEntityRef:
         """Resolve and validate one exact typed canonical scene reference."""
         try:
-            resolved = self._scene_resolver.resolve(
+            resolved = self._scene_manifest.resolve(
                 reference,
-                expected_types=expected_types,
                 path=path,
             )
         except ExpertProgramConfigError:
@@ -1360,9 +1228,11 @@ class ExpertProgramCompiler:
             ) from exc
         if type(resolved) not in expected_types:
             raise ExpertProgramCompileError(
-                "scene_resolver_contract_violation",
+                "scene_reference_type_mismatch",
                 path,
-                "Scene resolver returned an incompatible typed reference.",
+                f"Scene reference {reference!r} resolves to "
+                f"{type(resolved).__name__}, expected one of "
+                f"{tuple(value.__name__ for value in expected_types)}.",
             )
         return _copy_scene_ref(resolved)
 
@@ -1497,45 +1367,6 @@ class ExpertProgramCompiler:
                 final_target_id=final_target_id,
                 resources=tuple(sorted(cfg.resources.items())),
             )
-        if type(cfg) is OperateArticulationCfg:
-            if cfg.kind != "operate_articulation":
-                raise ExpertProgramCompileError(
-                    "invalid_discriminator",
-                    (*path, "kind"),
-                    "Expected 'operate_articulation'.",
-                )
-            articulation = self._resolve_scene(
-                cfg.articulation,
-                expected_types=(SceneArticulationRef,),
-                path=(*path, "articulation"),
-            )
-            handle = (
-                None
-                if cfg.handle is None
-                else self._resolve_scene(
-                    cfg.handle,
-                    expected_types=(SceneAffordanceRef,),
-                    path=(*path, "handle"),
-                )
-            )
-            snapshot = OperateArticulation(
-                articulation=articulation,
-                handle=handle,
-                target=cfg.target,
-                target_position=cfg.target_position,
-                target_displacement=cfg.target_displacement,
-                resources=cfg.resources,
-            )
-            return _CallTemplate(
-                kind="operate_articulation",
-                source_path=path,
-                articulation=snapshot.articulation,
-                handle=snapshot.handle,
-                articulation_target=snapshot.target,
-                target_position=snapshot.target_position,
-                target_displacement=snapshot.target_displacement,
-                resources=tuple(sorted(snapshot.resources.items())),
-            )
         if type(cfg) is RegisteredSemanticCallCfg:
             if cfg.kind != "registered":
                 raise ExpertProgramCompileError(
@@ -1543,7 +1374,7 @@ class ExpertProgramCompiler:
                     (*path, "kind"),
                     "Expected 'registered'.",
                 )
-            if cfg.schema_version != EXPERT_PROGRAM_SCHEMA_VERSION:
+            if cfg.schema_version != REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION:
                 raise ExpertProgramCompileError(
                     "unsupported_registered_schema",
                     (*path, "schema_version"),
@@ -1684,39 +1515,70 @@ class ExpertProgramCompiler:
             validators: list[_ValidatorTemplate] = []
             for index, cfg in enumerate(node.validators):
                 validator_path = (*path, "validators", index)
-                if (
-                    type(cfg) is not ObjectNearTargetValidatorCfg
-                    or cfg.kind != "object_near_target"
-                ):
-                    raise ExpertProgramCompileError(
-                        "unsupported_validator",
-                        validator_path,
-                        "Supported schemas accept only exact object_near_target "
-                        "validators.",
+                if type(cfg) is ObjectNearTargetValidatorCfg:
+                    if cfg.kind != "object_near_target":
+                        raise ExpertProgramCompileError(
+                            "unsupported_validator",
+                            validator_path,
+                            "ObjectNearTargetValidatorCfg must use kind "
+                            "'object_near_target'.",
+                        )
+                    if cfg.target not in targets:
+                        raise ExpertProgramCompileError(
+                            "unknown_target",
+                            (*validator_path, "target"),
+                            f"Unknown target {cfg.target!r}.",
+                        )
+                    object_ref = self._resolve_scene(
+                        cfg.object,
+                        expected_types=(SceneObjectRef,),
+                        path=(*validator_path, "object"),
                     )
-                if cfg.target not in targets:
-                    raise ExpertProgramCompileError(
-                        "unknown_target",
-                        (*validator_path, "target"),
-                        f"Unknown target {cfg.target!r}.",
+                    validators.append(
+                        _ObjectNearTargetValidatorTemplate(
+                            cfg=ObjectNearTargetValidatorCfg(
+                                object=cfg.object,
+                                target=cfg.target,
+                                position_tolerance=cfg.position_tolerance,
+                                kind=cfg.kind,
+                            ),
+                            object=object_ref,
+                            target_id=cfg.target,
+                            source_path=validator_path,
+                        )
                     )
-                object_ref = self._resolve_scene(
-                    cfg.object,
-                    expected_types=(SceneObjectRef,),
-                    path=(*validator_path, "object"),
-                )
-                validators.append(
-                    _ValidatorTemplate(
-                        cfg=ObjectNearTargetValidatorCfg(
-                            object=cfg.object,
-                            target=cfg.target,
-                            position_tolerance=cfg.position_tolerance,
-                            kind=cfg.kind,
-                        ),
-                        object=object_ref,
-                        target_id=cfg.target,
-                        source_path=validator_path,
+                    continue
+                if type(cfg) is ArticulationJointPositionValidatorCfg:
+                    if cfg.kind != "articulation_joint_position":
+                        raise ExpertProgramCompileError(
+                            "unsupported_validator",
+                            validator_path,
+                            "ArticulationJointPositionValidatorCfg must use kind "
+                            "'articulation_joint_position'.",
+                        )
+                    articulation_ref = self._resolve_scene(
+                        cfg.articulation,
+                        expected_types=(SceneArticulationRef,),
+                        path=(*validator_path, "articulation"),
                     )
+                    validators.append(
+                        _ArticulationJointPositionValidatorTemplate(
+                            cfg=ArticulationJointPositionValidatorCfg(
+                                articulation=cfg.articulation,
+                                joint=cfg.joint,
+                                minimum_position=cfg.minimum_position,
+                                maximum_position=cfg.maximum_position,
+                                kind=cfg.kind,
+                            ),
+                            articulation=articulation_ref,
+                            source_path=validator_path,
+                        )
+                    )
+                    continue
+                raise ExpertProgramCompileError(
+                    "unsupported_validator",
+                    validator_path,
+                    f"Unsupported validator {type(cfg).__name__}.",
                 )
             steps = self._compile_node(
                 node.steps,
@@ -1803,12 +1665,6 @@ class ExpertProgramCompiler:
                 ),
                 source_path=path,
             )
-        if type(node) is BarrierCfg:
-            raise ExpertProgramCompileError(
-                "standalone_barrier",
-                path,
-                "Barrier nodes may only be owned by Parallel.",
-            )
         raise ExpertProgramCompileError(
             "unsupported_program_node",
             path,
@@ -1848,14 +1704,13 @@ class ExpertProgramCompiler:
         return MappingProxyType(compiled)
 
     def compile(self, config: ExpertProgramCfg) -> CompiledProgram:
-        """Compile one validated AST into a provider-free lazy program.
+        """Compile one validated AST into a bounded provider-free program.
 
         Args:
             config: Strict, supported-version Expert Program configuration.
 
         Returns:
-            Owned static templates whose iteration resolves repeat-local targets
-            and emits independent logical segments.
+            Immutable segments with repeat-local targets already resolved.
 
         Raises:
             ExpertProgramCompileError: If typed scene resolution or AST lowering
@@ -1863,12 +1718,12 @@ class ExpertProgramCompiler:
         """
         if type(config) is not ExpertProgramCfg:
             raise TypeError("config must be exactly ExpertProgramCfg.")
-        if config.schema_version not in SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS:
+        if config.schema_version != EXPERT_PROGRAM_SCHEMA_VERSION:
             raise ExpertProgramCompileError(
                 "unsupported_schema_version",
                 ("schema_version",),
-                "Supported Expert Program schema versions are "
-                f"{SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS}.",
+                "Expert Program schema_version must be exactly "
+                f"{EXPERT_PROGRAM_SCHEMA_VERSION}.",
             )
         targets = self._compile_targets(config.targets)
         root = self._compile_node(
@@ -1883,7 +1738,7 @@ class ExpertProgramCompiler:
             scene_registry=config.integration.scene_registry,
             runtime_preset=config.integration.runtime_preset,
         )
-        return CompiledProgram._create(
+        return _materialize_program(
             schema_version=config.schema_version,
             program_id=config.program_id,
             integration=integration,
@@ -1892,21 +1747,4 @@ class ExpertProgramCompiler:
         )
 
 
-__all__ = [
-    "CompiledBarrier",
-    "CompiledParallelBlock",
-    "CompiledParallelBranch",
-    "CompiledPostPolicy",
-    "CompiledProgram",
-    "CompiledProgramAnalysis",
-    "CompiledProgramCall",
-    "CompiledProgramSegment",
-    "CompiledProgramValidator",
-    "CompiledRepeatFrame",
-    "CompiledTargetSelection",
-    "ExpertProgramCompileError",
-    "ExpertProgramCompiler",
-    "ExpertProgramSceneResolver",
-    "MaterializedCompiledProgram",
-    "SceneRegistryProgramResolver",
-]
+__all__: list[str] = []

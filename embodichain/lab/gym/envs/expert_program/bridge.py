@@ -33,7 +33,9 @@ from typing import Any, Protocol, runtime_checkable
 
 import torch
 
-from embodichain.lab.gym.envs.demo import DemoSegment, ProcessedEnvAction
+from embodichain.lab.gym.envs._json import json_safe_copy as _json_safe_copy
+from embodichain.lab.gym.envs.demo import DemoSegment
+from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.sim.atomic_actions.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
@@ -56,6 +58,8 @@ from embodichain.lab.sim.skills.parallel_runtime import (
 )
 from embodichain.lab.sim.skills.runtime import SkillResult, SkillRuntime, SkillStatus
 from embodichain.lab.sim.types import EnvAction
+
+from .cfg import EXPERT_PROGRAM_SCHEMA_VERSION
 
 _SAFE_HOLD_ACTION_KINDS = frozenset(
     {"runtime_safe_hold", "runtime_wait_hold", "runtime_abort_safe_hold"}
@@ -133,26 +137,6 @@ class RuntimeTransportActionEncoder(Protocol):
 
 
 @runtime_checkable
-class AcceptedRuntimeCommandObserver(Protocol):
-    """Transactional observer of commands accepted by the buffered Gym sink.
-
-    Implementations may maintain runtime-local evidence state, but must not
-    control the robot or advance the environment. ``accepted`` is called only
-    after a complete frame was encoded and appended to the local buffer.
-    Cancellation and discard notifications are fail-closed reset boundaries.
-    """
-
-    def accepted(self, command: RuntimeCommandFrame) -> None:
-        """Record one independently owned accepted command frame."""
-
-    def cancelled(self, targets: tuple[RuntimeEndpointTarget, ...]) -> None:
-        """Clear state owned by the cancelled endpoint targets."""
-
-    def discarded(self) -> None:
-        """Clear every runtime-local state value after a buffer discard."""
-
-
-@runtime_checkable
 class CompiledProgramPort(Protocol):
     """Minimal provider-free compiled-program surface consumed by the bridge."""
 
@@ -223,11 +207,6 @@ class SegmentPostPolicyPort(Protocol):
     ) -> Iterable[Any]:
         """Yield holds until ``policy`` completes for the active rows only."""
 
-
-@runtime_checkable
-class SegmentPostPolicyMetadataPort(Protocol):
-    """Optional result trace supplied by a segment post-policy port."""
-
     def post_policy_metadata(
         self,
         policy: Any,
@@ -235,11 +214,6 @@ class SegmentPostPolicyMetadataPort(Protocol):
         segment: Any,
     ) -> Mapping[str, Any]:
         """Return JSON-safe metadata after one policy has run."""
-
-
-@runtime_checkable
-class SegmentPostPolicyResultPort(Protocol):
-    """Optional row-local success result supplied by a post-policy port."""
 
     def post_policy_result(self, policy: Any, *, segment: Any) -> Any:
         """Return one boolean or one boolean per environment row."""
@@ -259,11 +233,6 @@ class SegmentValidatorPort(Protocol):
 
     def validate(self, validator: Any, *, segment: Any) -> Any:
         """Return one boolean or one boolean per environment row."""
-
-
-@runtime_checkable
-class SegmentValidatorMetadataPort(Protocol):
-    """Optional result trace supplied by a segment validator port."""
 
     def validator_metadata(
         self,
@@ -290,11 +259,6 @@ class GymPlanningObservationProvider:
             raise TypeError("capture must be callable.")
         self._capture = capture
         self._latest: PlanningContext | None = None
-
-    @property
-    def latest(self) -> PlanningContext | None:
-        """Return the latest immutable planning context, if one was captured."""
-        return self._latest
 
     def observe(self, task_state: TaskState) -> PlanningContext:
         """Capture and retain one fresh planning context."""
@@ -603,17 +567,6 @@ class RuntimeCommandFrameEncoder:
         return self._base_qpos(env_ids)
 
 
-@dataclass(frozen=True, slots=True)
-class _BufferedAction:
-    """One owned action plus command-boundary provenance."""
-
-    action: ProcessedEnvAction
-
-    def snapshot(self) -> _BufferedAction:
-        """Return one independently owned buffered action."""
-        return _BufferedAction(self.action.snapshot())
-
-
 class BufferedGymCommandSink:
     """Runner command sink that buffers actions for the Gym demo generator.
 
@@ -625,26 +578,15 @@ class BufferedGymCommandSink:
         self,
         encoder: RuntimeCommandFrameEncoder,
         clock: EnvironmentStepClock,
-        *,
-        accepted_command_observer: AcceptedRuntimeCommandObserver | None = None,
     ) -> None:
         if not isinstance(encoder, RuntimeCommandFrameEncoder):
             raise TypeError("encoder must be a RuntimeCommandFrameEncoder.")
         if not isinstance(clock, EnvironmentStepClock):
             raise TypeError("clock must be an EnvironmentStepClock.")
-        if accepted_command_observer is not None and not isinstance(
-            accepted_command_observer,
-            AcceptedRuntimeCommandObserver,
-        ):
-            raise TypeError(
-                "accepted_command_observer must implement "
-                "AcceptedRuntimeCommandObserver or be None."
-            )
         self._encoder = encoder
         self._clock = clock
-        self._accepted_command_observer = accepted_command_observer
-        self._pending: deque[_BufferedAction] = deque()
-        self._last_emitted: ProcessedEnvAction | None = None
+        self._pending: deque[ControllerAction] = deque()
+        self._last_emitted: ControllerAction | None = None
         self._accepted_action_count = 0
 
     @property
@@ -682,17 +624,7 @@ class BufferedGymCommandSink:
             "active_mask": command.active_mask.detach().cpu().tolist(),
             "hold_duration": command.hold_duration.detach().cpu().tolist(),
         }
-        self._pending.append(
-            _BufferedAction(ProcessedEnvAction(value=action, metadata=metadata))
-        )
-        observer = self._accepted_command_observer
-        if observer is not None:
-            try:
-                observer.accepted(command.snapshot())
-            except Exception:
-                self._pending.clear()
-                self._discard_observer_state()
-                raise
+        self._pending.append(ControllerAction(value=action, metadata=metadata))
         self._accepted_action_count += 1
         return CommandAcknowledgement.accepted_ack("Buffered for the Gym step loop.")
 
@@ -712,9 +644,7 @@ class BufferedGymCommandSink:
                 [target.transport_id, target.target_id] for target in targets
             ],
         }
-        self._pending.append(
-            _BufferedAction(ProcessedEnvAction(value=action, metadata=metadata))
-        )
+        self._pending.append(ControllerAction(value=action, metadata=metadata))
         self._accepted_action_count += 1
         return CommandAcknowledgement.accepted_ack("Safe hold buffered for Gym.")
 
@@ -729,25 +659,17 @@ class BufferedGymCommandSink:
         if not all(isinstance(target, RuntimeEndpointTarget) for target in targets):
             raise TypeError("targets must contain RuntimeEndpointTarget values.")
         self._pending.clear()
-        observer = self._accepted_command_observer
-        if observer is not None:
-            try:
-                observer.cancelled(tuple(target.snapshot() for target in targets))
-            except Exception:
-                self._discard_observer_state()
-                raise
         return CommandAcknowledgement.accepted_ack("Buffered commands cancelled.")
 
     def discard_pending(self) -> None:
         """Discard actions that were accepted locally but never yielded."""
         self._pending.clear()
-        self._discard_observer_state()
 
     def drain_safe_stop_action(
         self,
         *,
-        fallback: ProcessedEnvAction | None = None,
-    ) -> ProcessedEnvAction | None:
+        fallback: ControllerAction | None = None,
+    ) -> ControllerAction | None:
         """Select one buffered safe hold and discard every other local action.
 
         This method is used only by the demo abort handshake. A runtime
@@ -755,7 +677,7 @@ class BufferedGymCommandSink:
         therefore an interrupted generator must explicitly surface the final
         safe hold to the executor while dropping stale motion commands.
         """
-        candidates: list[ProcessedEnvAction] = []
+        candidates: list[ControllerAction] = []
         for candidate in (self._last_emitted, fallback):
             if (
                 candidate is not None
@@ -764,33 +686,26 @@ class BufferedGymCommandSink:
             ):
                 candidates.append(candidate.snapshot())
         while self._pending:
-            candidate = self._pending.popleft().action
+            candidate = self._pending.popleft()
             if candidate.metadata.get("bridge_action_kind") in _SAFE_HOLD_ACTION_KINDS:
                 candidates.append(candidate.snapshot())
-        self._discard_observer_state()
         return None if not candidates else candidates[-1].snapshot()
 
-    def _discard_observer_state(self) -> None:
-        """Reset observer state after any fail-closed local discard."""
-        observer = self._accepted_command_observer
-        if observer is not None:
-            observer.discarded()
-
-    def pop(self) -> ProcessedEnvAction:
+    def pop(self) -> ControllerAction:
         """Pop the next accepted action and remember it as the active hold."""
         if not self._pending:
             raise RuntimeError("No buffered Gym command is available.")
-        action = self._pending.popleft().action.snapshot()
+        action = self._pending.popleft().snapshot()
         self._last_emitted = action.snapshot()
         return action
 
-    def wait_hold(self, env_ids: torch.Tensor) -> ProcessedEnvAction:
+    def wait_hold(self, env_ids: torch.Tensor) -> ControllerAction:
         """Return an owned hold action for one runtime waiting step."""
         if self._last_emitted is None:
             value = self._encoder.encode_idle_hold(env_ids)
         else:
             value = self._last_emitted.value
-        return ProcessedEnvAction(
+        return ControllerAction(
             value=value,
             metadata={"bridge_action_kind": "runtime_wait_hold"},
         )
@@ -804,7 +719,7 @@ class _SegmentLifecycle:
     result: SkillResult | ParallelSkillResult | None = None
     validation: torch.Tensor | None = None
     runtime: SequentialSkillRuntimePort | ParallelSkillRuntime | None = None
-    pending_action: ProcessedEnvAction | None = None
+    pending_action: ControllerAction | None = None
     actions_started: bool = False
     sink_acceptance_baseline: int | None = None
     yielded_action_count: int = 0
@@ -841,35 +756,6 @@ def _normalize_validation(
             f"{batch_size}."
         )
     return tensor.clone()
-
-
-def _json_safe_copy(value: Any, *, field_name: str) -> Any:
-    """Return an owned JSON value while rejecting lossy coercions."""
-    if value is None or type(value) in {bool, int, str}:
-        return value
-    if type(value) is float:
-        if not math.isfinite(value):
-            raise ValueError(f"{field_name} contains a non-finite float.")
-        return value
-    if isinstance(value, Mapping):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            if type(key) is not str or not key or key != key.strip():
-                raise ValueError(
-                    f"{field_name} mapping keys must be non-empty strings "
-                    "without outer whitespace."
-                )
-            result[key] = _json_safe_copy(
-                item,
-                field_name=f"{field_name}.{key}",
-            )
-        return result
-    if isinstance(value, (list, tuple)):
-        return [
-            _json_safe_copy(item, field_name=f"{field_name}[{index}]")
-            for index, item in enumerate(value)
-        ]
-    raise TypeError(f"{field_name} contains non-JSON value {type(value).__name__}.")
 
 
 def _runtime_result_metadata(
@@ -919,8 +805,14 @@ class AtomicDemoBridge:
         if not isinstance(program, CompiledProgramPort):
             raise TypeError("program must implement CompiledProgramPort.")
         _validate_identifier(program.program_id, field_name="program.program_id")
-        if type(program.schema_version) is not int or program.schema_version < 1:
-            raise ValueError("program.schema_version must be a positive integer.")
+        if (
+            type(program.schema_version) is not int
+            or program.schema_version != EXPERT_PROGRAM_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "program.schema_version must be exactly "
+                f"{EXPERT_PROGRAM_SCHEMA_VERSION}."
+            )
         if not isinstance(runtime, SequentialSkillRuntimePort):
             raise TypeError("runtime must implement SequentialSkillRuntimePort.")
         if not isinstance(command_sink, BufferedGymCommandSink):
@@ -953,11 +845,31 @@ class AtomicDemoBridge:
         self._parallel_safety_validator = parallel_safety_validator
         self._active_segment_id: str | None = None
         self._eligible_mask: torch.Tensor | None = None
+        self._program_completed = False
 
     @property
     def clock(self) -> EnvironmentStepClock:
         """Return the environment-step clock used by this bridge."""
         return self._clock
+
+    @property
+    def program_completed(self) -> bool:
+        """Return whether every compiled segment completed its full lifecycle."""
+        return self._program_completed
+
+    @property
+    def completion_mask(self) -> torch.Tensor:
+        """Return the final row-local program acceptance mask.
+
+        Raises:
+            RuntimeError: If the segment iterator has not completed normally.
+        """
+        if not self._program_completed or self._eligible_mask is None:
+            raise RuntimeError(
+                "Expert Program completion is unavailable before all segments "
+                "finish execution and validation."
+            )
+        return self._eligible_mask.clone()
 
     def iter_segments(self) -> Iterator[DemoSegment]:
         """Lazily adapt compiled program segments to ``DemoSegment`` values.
@@ -980,6 +892,9 @@ class AtomicDemoBridge:
                 failure_policy="row_independent",
             )
             self._require_consumed_segment_lifecycle(segment, lifecycle)
+        if self._eligible_mask is None:
+            raise DemoBridgeError("Compiled Expert Program produced no segments.")
+        self._program_completed = True
 
     def __iter__(self) -> Iterator[DemoSegment]:
         """Delegate iteration to :meth:`iter_segments`."""
@@ -1043,9 +958,9 @@ class AtomicDemoBridge:
         segment: Any,
         result: SkillResult | ParallelSkillResult,
         action_kind: str | None = None,
-    ) -> ProcessedEnvAction:
+    ) -> ControllerAction:
         """Own one action and attach stable program/runtime provenance."""
-        if isinstance(action, ProcessedEnvAction):
+        if isinstance(action, ControllerAction):
             value = action.value
             metadata = dict(action.metadata)
         else:
@@ -1063,13 +978,13 @@ class AtomicDemoBridge:
                 "runtime_call_index": getattr(result, "current_call_index", None),
             }
         )
-        return ProcessedEnvAction(value=value, metadata=metadata)
+        return ControllerAction(value=value, metadata=metadata)
 
     def _yield_and_advance(
         self,
-        action: ProcessedEnvAction,
+        action: ControllerAction,
         lifecycle: _SegmentLifecycle,
-    ) -> Iterator[ProcessedEnvAction]:
+    ) -> Iterator[ControllerAction]:
         """Yield once and advance only after explicit consumption acknowledgement."""
         if lifecycle.pending_action is not None:
             raise RuntimeError("A prior demo action is still awaiting acknowledgement.")
@@ -1084,7 +999,7 @@ class AtomicDemoBridge:
         self,
         segment: Any,
         lifecycle: _SegmentLifecycle,
-    ) -> Iterator[ProcessedEnvAction]:
+    ) -> Iterator[ControllerAction]:
         """Drive one semantic segment without bypassing the Gym step loop."""
         segment_id = segment.segment_id
         lifecycle.actions_started = True
@@ -1195,14 +1110,14 @@ class AtomicDemoBridge:
         self,
         segment: Any,
         lifecycle: _SegmentLifecycle,
-    ) -> Callable[..., Iterator[ProcessedEnvAction]]:
+    ) -> Callable[..., Iterator[ControllerAction]]:
         """Create the explicit executor-to-runtime cancellation handshake."""
 
         def abort(
             reason: str,
             *,
             last_action_consumed: bool,
-        ) -> Iterator[ProcessedEnvAction]:
+        ) -> Iterator[ControllerAction]:
             return self._abort_segment(
                 segment,
                 lifecycle,
@@ -1219,7 +1134,7 @@ class AtomicDemoBridge:
         *,
         reason: str,
         last_action_consumed: bool,
-    ) -> Iterator[ProcessedEnvAction]:
+    ) -> Iterator[ControllerAction]:
         """Abort one segment, surfacing a safe hold only after controller activity."""
         if type(reason) is not str or not reason:
             raise ValueError("abort reason must be a non-empty string.")
@@ -1377,7 +1292,7 @@ class AtomicDemoBridge:
         segment: Any,
         result: SkillResult | ParallelSkillResult,
         lifecycle: _SegmentLifecycle,
-    ) -> Iterator[ProcessedEnvAction]:
+    ) -> Iterator[ControllerAction]:
         """Route environment-aware post-policy actions through the same generator."""
         policies = tuple(segment.post_policies)
         if policies and self._post_policy_port is None:
@@ -1431,31 +1346,29 @@ class AtomicDemoBridge:
                     "result": None,
                 }
                 port = self._post_policy_port
-                policy_success = active_mask.clone()
-                if isinstance(port, SegmentPostPolicyResultPort):
-                    try:
-                        policy_success &= _normalize_validation(
-                            port.post_policy_result(policy, segment=segment),
-                            batch_size=result.env_ids.numel(),
-                            device=result.env_ids.device,
-                        )
-                    except Exception:
-                        if iteration_error is None:
-                            raise
+                try:
+                    policy_success = active_mask & _normalize_validation(
+                        port.post_policy_result(policy, segment=segment),
+                        batch_size=result.env_ids.numel(),
+                        device=result.env_ids.device,
+                    )
+                except Exception:
+                    if iteration_error is None:
+                        raise
+                    policy_success = active_mask.clone()
                 if lifecycle.post_policy_success is None:
                     lifecycle.post_policy_success = policy_success.clone()
                 else:
                     lifecycle.post_policy_success &= policy_success
                 trace["result_mask"] = policy_success.detach().cpu().tolist()
-                if isinstance(port, SegmentPostPolicyMetadataPort):
-                    try:
-                        trace["result"] = port.post_policy_metadata(
-                            policy,
-                            segment=segment,
-                        )
-                    except Exception:
-                        if iteration_error is None:
-                            raise
+                try:
+                    trace["result"] = port.post_policy_metadata(
+                        policy,
+                        segment=segment,
+                    )
+                except Exception:
+                    if iteration_error is None:
+                        raise
                 traces.append(
                     _json_safe_copy(
                         trace,
@@ -1514,12 +1427,10 @@ class AtomicDemoBridge:
                     "result_mask": validator_result.detach().cpu().tolist(),
                     "result": None,
                 }
-                port = self._validator_port
-                if isinstance(port, SegmentValidatorMetadataPort):
-                    trace["result"] = port.validator_metadata(
-                        validator,
-                        segment=segment,
-                    )
+                trace["result"] = self._validator_port.validator_metadata(
+                    validator,
+                    segment=segment,
+                )
                 validator_traces.append(
                     _json_safe_copy(
                         trace,
@@ -1550,25 +1461,4 @@ class AtomicDemoBridge:
         return validate
 
 
-__all__ = [
-    "AcceptedRuntimeCommandObserver",
-    "AtomicDemoBridge",
-    "BufferedGymCommandSink",
-    "CompiledProgramPort",
-    "CurrentQposProvider",
-    "DemoBridgeError",
-    "EnvironmentStepClock",
-    "EnvironmentStepTimingError",
-    "GymPlanningObservationProvider",
-    "JointPositionGymTransportEncoder",
-    "ParallelCommandSafetyValidator",
-    "RuntimeCommandFrameEncoder",
-    "RuntimeTransportActionEncoder",
-    "SegmentPostPolicyMetadataPort",
-    "SegmentPostPolicyPort",
-    "SegmentPostPolicyResultPort",
-    "SegmentValidatorMetadataPort",
-    "SegmentValidatorPort",
-    "SequentialSkillRuntimePort",
-    "UnsupportedRuntimeTransportError",
-]
+__all__: list[str] = []

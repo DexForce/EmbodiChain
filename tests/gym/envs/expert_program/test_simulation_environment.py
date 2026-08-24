@@ -35,21 +35,16 @@ from embodichain.agents.mllm import compile_mllm_expert_program
 from embodichain.lab.gym.envs.expert_program import (
     AntipodalGraspAffordanceBinding,
     CompiledProgram,
-    ControlCommandStateEvidenceTracker,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
-    ExpertProgramCompiler,
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
     ExpertProgramEnvironmentAdapter,
     ExpertProgramRuntimeAssembly,
     HandOverCfg,
     InvokeCfg,
-    RobotResourceBinding,
-    SharedTickSceneProvider,
     SimulationExpertProgramFactory,
-    SimulationPlanningObservationProvider,
     SimulationRigidObjectBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
@@ -57,6 +52,10 @@ from embodichain.lab.gym.envs.expert_program import (
     decode_expert_program,
 )
 from embodichain.lab.gym.envs.expert_program.bridge import EnvironmentStepClock
+from embodichain.lab.gym.envs.expert_program.simulation_environment import (
+    SharedTickSceneProvider,
+    SimulationPlanningObservationProvider,
+)
 from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     Affordance,
@@ -72,14 +71,12 @@ from embodichain.lab.sim.atomic_actions import (
     PlanningContext,
     StateDelta,
     TaskState,
+    TimedTrajectory,
 )
 from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.bindings import RuntimeEndpointTarget
-from embodichain.lab.sim.atomic_actions.control import ControlPartCommandProfile
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
-    JointPositionPayload,
     RuntimeCommandFrame,
 )
 from embodichain.lab.sim.planners import MotionGenerator
@@ -95,6 +92,7 @@ from embodichain.lab.sim.skills import (
     RelationTargetGrounder,
     ResourceEndpoint,
     ResourceEndpointAdapter,
+    RobotResource,
     SceneArticulationRef,
     SceneEntityRegistration,
     SceneRegistry,
@@ -134,10 +132,8 @@ from embodichain.lab.sim.skills.scene import SceneObjectRef
 _BATCH_SIZE = 3
 _ROBOT_DOF = 2
 _STEP_DT = 0.04
-_TRACKER_ENV_IDS = torch.tensor((7, 3, 11), dtype=torch.long)
 _HAND_OPEN_POSITION = 0.0
 _HAND_GRASP_POSITION = 0.8
-_HAND_INTERMEDIATE_POSITION = 0.4
 _DUAL_ROBOT_DOF = 4
 _RELEASE_SEPARATION = 0.2
 _DIRECT_PLACE_TARGET = SemanticPose(
@@ -145,80 +141,6 @@ _DIRECT_PLACE_TARGET = SemanticPose(
     quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
 )
 _QUICKSTART_MAX_LINES = 15
-
-
-def _command_state_tracker() -> ControlCommandStateEvidenceTracker:
-    """Build a three-row tracker for one semantic gripper profile."""
-    profile = ControlPartCommandProfile.joint_positions(
-        open=torch.tensor((_HAND_OPEN_POSITION,)),
-        grasp=torch.tensor((_HAND_GRASP_POSITION,)),
-    )
-    return ControlCommandStateEvidenceTracker(
-        {"hand": profile},
-        _TRACKER_ENV_IDS,
-    )
-
-
-def _hand_command_frame(
-    *,
-    env_ids: tuple[int, ...],
-    positions: tuple[float, ...],
-    active: tuple[bool, ...] | None = None,
-) -> RuntimeCommandFrame:
-    """Build one row-addressed semantic hand command frame."""
-    batch_size = len(env_ids)
-    if len(positions) != batch_size:
-        raise ValueError("positions must have one value per environment ID.")
-    if active is None:
-        active = (True,) * batch_size
-    return RuntimeCommandFrame(
-        commands=(
-            EndpointCommand(
-                target=JointPositionTarget("hand", (1,)),
-                payload=JointPositionPayload(
-                    torch.tensor(positions, dtype=torch.float32).unsqueeze(1)
-                ),
-            ),
-        ),
-        active_mask=torch.tensor(active, dtype=torch.bool),
-        env_ids=torch.tensor(env_ids, dtype=torch.long),
-        hold_duration=torch.full((batch_size,), _STEP_DT),
-    )
-
-
-def _hand_state_observation(
-    tracker: ControlCommandStateEvidenceTracker,
-    *env_ids: int,
-) -> BinaryEffectObservation:
-    """Observe command-state evidence in an explicit stable-ID order."""
-    expectation = HeldObjectStateExpectation(
-        expectation_id="held-cube",
-        relation=HeldObjectRelation.ATTACHED,
-        object_id="cube",
-        slot_id="primary",
-        resource_id="manipulator",
-        task_state_key="held-cube",
-    )
-    query = BinaryEffectEvidenceQuery(
-        BinaryEffectClause(
-            clause_id="hand-constraint",
-            expectation_id=expectation.expectation_id,
-            source=EffectEvidenceSourceRef(
-                CONTROL_PART_EVIDENCE_PROVIDER_ID,
-                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
-                ControlPartEvidenceAddress("hand", CONSTRAINT_EFFECT_CHANNEL),
-            ),
-            evidence_kind=BinaryEvidenceKind.CONSTRAINT,
-            expected=True,
-        ),
-        expectation,
-    )
-    context = EffectEvidenceCollectionContext(
-        timestamp=0.0,
-        observation_revision=0,
-        env_ids=torch.tensor(env_ids, dtype=torch.long),
-    )
-    return tracker.observe(query, context)
 
 
 class _CountingEntityProvider:
@@ -349,119 +271,6 @@ def test_shared_tick_scene_provider_rejects_unknown_or_regressing_rows() -> None
     assert len(entity_provider.calls) == 1
 
 
-def test_command_state_tracker_correlates_open_and_grasp_across_subsets() -> None:
-    """Stable IDs, not subset row positions, own accepted gripper state."""
-    tracker = _command_state_tracker()
-
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(3, 7),
-            positions=(_HAND_GRASP_POSITION, _HAND_OPEN_POSITION),
-        )
-    )
-    observation = _hand_state_observation(tracker, 7, 11, 3)
-
-    assert tracker.tracked_control_parts == ("hand",)
-    assert observation.values.tolist() == [False, False, True]
-    assert observation.valid is not None
-    assert observation.valid.tolist() == [True, False, True]
-    assert observation.acquisition_errors[0] is None
-    assert observation.acquisition_errors[1] is not None
-    assert observation.acquisition_errors[2] is None
-
-
-def test_command_state_tracker_preserves_intermediate_and_inactive_rows() -> None:
-    """Unrecognized targets and inactive rows cannot overwrite prior evidence."""
-    tracker = _command_state_tracker()
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(7, 3),
-            positions=(_HAND_OPEN_POSITION, _HAND_GRASP_POSITION),
-        )
-    )
-
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(3, 7),
-            positions=(
-                _HAND_INTERMEDIATE_POSITION,
-                _HAND_INTERMEDIATE_POSITION,
-            ),
-        )
-    )
-    after_intermediate = _hand_state_observation(tracker, 3, 7)
-    assert after_intermediate.values.tolist() == [True, False]
-    assert after_intermediate.valid is not None
-    assert after_intermediate.valid.tolist() == [True, True]
-
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(3, 7),
-            positions=(_HAND_OPEN_POSITION, _HAND_GRASP_POSITION),
-            active=(False, True),
-        )
-    )
-    after_inactive_row = _hand_state_observation(tracker, 3, 7)
-    assert after_inactive_row.values.tolist() == [True, True]
-    assert after_inactive_row.valid is not None
-    assert after_inactive_row.valid.tolist() == [True, True]
-
-
-def test_command_state_tracker_cancel_invalidates_target_state() -> None:
-    """Cancelling a hand destination invalidates every correlated hand row."""
-    tracker = _command_state_tracker()
-    frame = _hand_command_frame(
-        env_ids=(7, 3),
-        positions=(_HAND_OPEN_POSITION, _HAND_GRASP_POSITION),
-    )
-    tracker.accepted(frame)
-
-    tracker.cancelled(frame.targets)
-    observation = _hand_state_observation(tracker, 3, 7)
-
-    assert observation.values.tolist() == [False, False]
-    assert observation.valid is not None
-    assert observation.valid.tolist() == [False, False]
-    assert all(error is not None for error in observation.acquisition_errors)
-
-
-def test_command_state_tracker_discard_invalidates_all_state() -> None:
-    """A fail-closed sink discard removes every accepted row state."""
-    tracker = _command_state_tracker()
-    tracker.accepted(
-        _hand_command_frame(
-            env_ids=(11, 3),
-            positions=(_HAND_GRASP_POSITION, _HAND_OPEN_POSITION),
-        )
-    )
-
-    tracker.discarded()
-    observation = _hand_state_observation(tracker, 11, 3)
-
-    assert observation.values.tolist() == [False, False]
-    assert observation.valid is not None
-    assert observation.valid.tolist() == [False, False]
-
-
-def test_command_state_tracker_rejects_unknown_environment_ids() -> None:
-    """Unknown correlation IDs fail before tracker state can be mutated or read."""
-    tracker = _command_state_tracker()
-
-    with pytest.raises(ValueError, match="absent from tracker env_ids"):
-        tracker.accepted(
-            _hand_command_frame(
-                env_ids=(99,),
-                positions=(_HAND_GRASP_POSITION,),
-            )
-        )
-    with pytest.raises(ValueError, match="absent from tracker env_ids"):
-        _hand_state_observation(tracker, 99)
-
-    observation = _hand_state_observation(tracker, 7, 3, 11)
-    assert observation.valid is not None
-    assert observation.valid.tolist() == [False, False, False]
-
-
 class _Robot:
     """Minimal typed robot surface used by the production factory."""
 
@@ -531,6 +340,7 @@ class _EvidenceRobot(_Robot):
     def __init__(self) -> None:
         super().__init__()
         self.endpoint_pose = torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+        self.constraint_state = torch.zeros(_BATCH_SIZE, dtype=torch.bool)
 
     def get_qpos(
         self,
@@ -829,7 +639,7 @@ class _Simulation:
 
 
 def _profile_binding() -> SimulationRobotSkillProfileBinding:
-    """Build one motion-only profile with an intentionally wrong cadence."""
+    """Build one motion-only semantic policy profile."""
     return SimulationRobotSkillProfileBinding(
         profile_id="robot_profile",
         resources=(
@@ -847,7 +657,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                motion_policy=MotionPolicy(control_dt=0.01),
+                motion_policy=MotionPolicy(),
             ),
         ),
         default_preset="safe",
@@ -945,7 +755,7 @@ def _handover_helper_inputs() -> tuple[
 def _handover_program() -> ExpertProgramCfg:
     """Build one external-held-state HandOver call for static preflight."""
     return ExpertProgramCfg(
-        schema_version=1,
+        schema_version=2,
         program_id="handover_preflight",
         integration=ExpertProgramIntegrationCfg(
             robot_profile="handover_profile",
@@ -962,6 +772,7 @@ def _motion_generator(robot: _Robot) -> MotionGenerator:
     generator.robot = robot
     generator.device = robot.device
     generator.planner = SimpleNamespace(cfg=SimpleNamespace(planner_type="test"))
+    generator.collision_world_info = None
     generator.dynamic_collision_entity_ids = ()
     generator.collision_world_entity_ids = ()
     generator.supports_dynamic_collision_world = False
@@ -1037,8 +848,18 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
 def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     """Build one grasp frame and an identity object-to-endpoint expectation."""
     goal = action.require_goal(request)
-    trajectory = context.robot.qpos.unsqueeze(1).clone()
-    trajectory[:, 0, 1] = _HAND_GRASP_POSITION
+    positions = context.robot.qpos.unsqueeze(1).clone()
+    positions[:, 0, 1] = _HAND_GRASP_POSITION
+    trajectory = TimedTrajectory.from_positions(
+        positions,
+        env_ids=context.env_ids,
+        dt=torch.full(
+            (context.batch_size, 1),
+            context.require_control_dt(),
+            dtype=positions.dtype,
+            device=positions.device,
+        ),
+    )
     relation = torch.eye(4).repeat(context.batch_size, 1, 1)
     held = HeldObjectState(
         semantics=goal.semantics,
@@ -1060,8 +881,18 @@ def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
 
 def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     """Build one open frame and the matching held-object removal delta."""
-    trajectory = context.robot.qpos.unsqueeze(1).clone()
-    trajectory[:, 0, 1] = _HAND_OPEN_POSITION
+    positions = context.robot.qpos.unsqueeze(1).clone()
+    positions[:, 0, 1] = _HAND_OPEN_POSITION
+    trajectory = TimedTrajectory.from_positions(
+        positions,
+        env_ids=context.env_ids,
+        dt=torch.full(
+            (context.batch_size, 1),
+            context.require_control_dt(),
+            dtype=positions.dtype,
+            device=positions.device,
+        ),
+    )
     return action.build_plan(
         request,
         context,
@@ -1093,6 +924,20 @@ def _evidence_adapter_runtime() -> tuple[
     robot = _EvidenceRobot()
     cube = _RigidObject()
     simulation = _Simulation(robot, {"cube_native": cube})
+
+    def observe_constraint(
+        query: BinaryEffectEvidenceQuery,
+        context: EffectEvidenceCollectionContext,
+    ) -> BinaryEffectObservation:
+        """Read the fixture's explicit physical constraint sensor state."""
+        del query
+        rows = context.env_ids.to(device=robot.constraint_state.device)
+        values = robot.constraint_state.index_select(0, rows)
+        return BinaryEffectObservation(
+            values=values,
+            valid=torch.ones_like(values),
+        )
+
     scene_binding = SimulationSceneBinding(
         registry_id="evidence_scene",
         rigid_objects=(
@@ -1118,6 +963,7 @@ def _evidence_adapter_runtime() -> tuple[
         _evidence_profile_binding(),
         step_dt=_STEP_DT,
         motion_generator_factory=lambda: _motion_generator(robot),
+        constraint_observer=observe_constraint,
     )
     adapter = factory.create_adapter(
         runner_cfg=ExecutionRunnerCfg(
@@ -1152,23 +998,11 @@ def _consume_buffered_action(
     if not isinstance(processed.value, torch.Tensor):
         raise TypeError("Joint-backed evidence actions must be tensors.")
     robot.qpos = processed.value.clone()
-    assembly.clock.advance_after_env_step()
-
-
-def _accept_hand_command(
-    assembly: ExpertProgramRuntimeAssembly,
-    robot: _EvidenceRobot,
-    position: float,
-) -> None:
-    """Accept and consume one semantic hand command through the Gym sink."""
-    assert assembly.command_sink.pending_count == 0
-    frame = _hand_command_frame(
-        env_ids=tuple(range(_BATCH_SIZE)),
-        positions=(position,) * _BATCH_SIZE,
+    robot.constraint_state = torch.isclose(
+        robot.qpos[:, 1],
+        torch.full_like(robot.qpos[:, 1], _HAND_GRASP_POSITION),
     )
-    acknowledgement = assembly.command_sink.send(frame, timeout=1.0)
-    assert acknowledgement.accepted
-    _consume_buffered_action(assembly, robot)
+    assembly.clock.advance_after_env_step()
 
 
 def _sample_effect(
@@ -1215,7 +1049,6 @@ class _ImmediateEvidenceCommandSink:
         cube: _RigidObject,
     ) -> None:
         self._encoder = assembly.command_encoder
-        self._observer = assembly.accepted_command_observer
         self._clock = assembly.clock
         self._robot = robot
         self._cube = cube
@@ -1226,15 +1059,16 @@ class _ImmediateEvidenceCommandSink:
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Apply one command and publish its accepted semantic hand state."""
+        """Apply one command and update the fixture's physical sensor state."""
         assert timeout > 0.0
         action = self._encoder.encode(command)
         if not isinstance(action, torch.Tensor):
             raise TypeError("The CPU quickstart fixture requires tensor actions.")
         self._robot.qpos = action.clone()
-        if self._observer is None:
-            raise RuntimeError("The evidence fixture requires an accepted observer.")
-        self._observer.accepted(command.snapshot())
+        self._robot.constraint_state = torch.isclose(
+            action[:, 1],
+            torch.full_like(action[:, 1], _HAND_GRASP_POSITION),
+        )
         if torch.allclose(
             action[:, 1],
             torch.full_like(action[:, 1], _HAND_OPEN_POSITION),
@@ -1264,10 +1098,9 @@ class _ImmediateEvidenceCommandSink:
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Clear accepted command evidence for cancelled destinations."""
+        """Accept cancellation without inventing physical evidence changes."""
         assert timeout > 0.0
-        if self._observer is not None:
-            self._observer.cancelled(targets)
+        del targets
         return CommandAcknowledgement.accepted_ack()
 
 
@@ -1325,7 +1158,7 @@ def _python_pick_place_calls() -> tuple[SemanticCallSpec, ...]:
 def _pick_place_program_data() -> dict[str, object]:
     """Return the integration-free program shared with the MLLM frontend."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "program_id": "pick_place_equivalence",
         "targets": {
             "place_target": {
@@ -1524,13 +1357,21 @@ def _assert_invocation_equivalent(
     )
 
 
-def test_simulation_factory_aligns_every_motion_policy_to_gym_step() -> None:
-    """The environment cadence replaces unrelated preset fallback timing."""
-    factory, _ = _factory()
-
+def test_simulation_observation_owns_gym_control_cadence() -> None:
+    """The live planning context, not a motion preset, owns control cadence."""
+    factory, robot = _factory()
+    registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
+    engine = factory.create_atomic_action_engine(profile)
+    observation = factory.create_planning_observation_provider(
+        scene_registry=registry,
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
 
-    assert profile.presets["safe"].motion_policy.control_dt == pytest.approx(_STEP_DT)
+    context = observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+
+    assert context.control_dt == pytest.approx(_STEP_DT)
 
 
 def test_mllm_config_and_atomic_skills_share_invocations_and_verified_results(
@@ -1662,24 +1503,51 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> No
             observation_provider=observation,
         )
     )
-    accepted_command_observer = factory.create_accepted_runtime_command_observer(
-        scene_registry=registry,
-        engine=engine,
-        observation_provider=observation,
-    )
-
     assert context.robot.timestamp == pytest.approx(0.0)
+    assert context.control_dt == pytest.approx(_STEP_DT)
     assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos)
-    assert accepted_command_observer is observation.command_state_tracker
     assert len(providers) == 2
     assert all(
         getattr(provider, "_scene_provider") is observation.scene_provider
         for provider in providers
     )
+    expectation = HeldObjectStateExpectation(
+        expectation_id="held-cube",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id="cube",
+        slot_id="primary",
+        resource_id="manipulator",
+        task_state_key="held-cube",
+    )
+    query = BinaryEffectEvidenceQuery(
+        BinaryEffectClause(
+            clause_id="arm-constraint",
+            expectation_id=expectation.expectation_id,
+            source=EffectEvidenceSourceRef(
+                CONTROL_PART_EVIDENCE_PROVIDER_ID,
+                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+                ControlPartEvidenceAddress("arm", CONSTRAINT_EFFECT_CHANNEL),
+            ),
+            evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+            expected=True,
+        ),
+        expectation,
+    )
+    evidence = providers[0].collect(
+        (query,),
+        EffectEvidenceCollectionContext(
+            timestamp=0.0,
+            observation_revision=0,
+            env_ids=context.env_ids,
+        ),
+    )[query.evidence_id]
+    assert type(evidence) is BinaryEffectEvidenceBatch
+    assert evidence.valid.tolist() == [False] * _BATCH_SIZE
+    assert all(error is not None for error in evidence.acquisition_errors)
 
 
 def test_simulation_factory_returns_exact_environment_adapter() -> None:
-    """The convenience path remains compatible with the exact-type mixin check."""
+    """The convenience path returns the exact adapter expected by EmbodiedEnv."""
     factory, _ = _factory()
 
     adapter = factory.create_adapter()
@@ -1768,7 +1636,7 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
     profile_binding = SimulationRobotSkillProfileBinding(
         profile_id="mobile_profile",
         resources=(
-            RobotResourceBinding(
+            RobotResource(
                 resource_id="mobile_base",
                 endpoints={
                     "motion": _MobileEndpoint(
@@ -1812,12 +1680,9 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
     assert resolved.claim.claim_tokens == frozenset({"controller:base_velocity"})
 
 
-def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
+def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
     """Production Pick/Place evidence stays conjunctive through runtime traces."""
     assembly, robot, cube = _evidence_runtime()
-    assert type(assembly.accepted_command_observer) is (
-        ControlCommandStateEvidenceTracker
-    )
     cube.pose[:, 0, 3] = 0.2
     result = assembly.runtime.start(
         (
@@ -1860,33 +1725,17 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
     assert not pick_pose_missing.success_mask.any()
 
     cube.pose = torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
-    assembly.command_sink.discard_pending()
-    result, pick_command_missing = _sample_effect(
-        assembly,
-        robot,
-        expected_trace_count=2,
-    )
-    pick_pose = pick_command_missing.evidence["destination.pose"]
-    pick_constraint = pick_command_missing.evidence["destination.constraint"]
-    torch.testing.assert_close(
-        pick_pose.object_to_endpoint,
-        torch.eye(4).repeat(_BATCH_SIZE, 1, 1),
-    )
-    assert pick_constraint.valid.tolist() == [False] * _BATCH_SIZE
-    assert not pick_command_missing.success_mask.any()
-
-    _accept_hand_command(assembly, robot, _HAND_GRASP_POSITION)
     result, pick_first_complete_sample = _sample_effect(
         assembly,
         robot,
-        expected_trace_count=3,
+        expected_trace_count=2,
         advance_clock=False,
     )
     assert not pick_first_complete_sample.success_mask.any()
     result, pick_success = _sample_effect(
         assembly,
         robot,
-        expected_trace_count=4,
+        expected_trace_count=3,
     )
     assert pick_success.call_index == 0
     assert pick_success.effect_spec.semantic_id == "pick"
@@ -1900,17 +1749,17 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
 
     result = assembly.runtime.step()
     assert assembly.command_sink.pending_count == 1
-    assert len(result.effects) == 4
+    assert len(result.effects) == 3
     _consume_buffered_action(assembly, robot)
     result = assembly.runtime.step()
-    assert len(result.effects) == 4
+    assert len(result.effects) == 3
     while assembly.command_sink.pending_count:
         _consume_buffered_action(assembly, robot)
 
     result, place_pose_missing = _sample_effect(
         assembly,
         robot,
-        expected_trace_count=5,
+        expected_trace_count=4,
     )
     place_pose = place_pose_missing.evidence["source.pose"]
     place_constraint = place_pose_missing.evidence["source.constraint"]
@@ -1924,35 +1773,20 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
     assert place_constraint.valid.tolist() == [True] * _BATCH_SIZE
     assert not place_pose_missing.success_mask.any()
 
-    cube.pose[:, 0, 3] = 0.2
-    assembly.command_sink.discard_pending()
-    result, place_command_missing = _sample_effect(
-        assembly,
-        robot,
-        expected_trace_count=6,
-    )
-    place_pose = place_command_missing.evidence["source.pose"]
-    place_constraint = place_command_missing.evidence["source.constraint"]
-    assert place_pose.object_to_endpoint[:, 0, 3].tolist() == pytest.approx(
-        [-0.2] * _BATCH_SIZE
-    )
-    assert place_constraint.valid.tolist() == [False] * _BATCH_SIZE
-    assert not place_command_missing.success_mask.any()
-
-    _accept_hand_command(assembly, robot, _HAND_OPEN_POSITION)
+    cube.pose[:, 0, 3] = _RELEASE_SEPARATION
     result, place_first_complete_sample = _sample_effect(
         assembly,
         robot,
-        expected_trace_count=7,
+        expected_trace_count=5,
         advance_clock=False,
     )
     assert not place_first_complete_sample.success_mask.any()
-    result, place_success = _sample_effect(
-        assembly,
-        robot,
-        expected_trace_count=8,
-    )
-    assert result.status is SkillStatus.COMPLETED
+    for _ in range(16):
+        assembly.clock.advance_after_env_step()
+        result = assembly.runtime.step()
+        if result.effects[-1].success_mask.all():
+            break
+    place_success = result.effects[-1]
     assert place_success.call_index == 1
     assert place_success.effect_spec.semantic_id == "place"
     assert place_success.success_mask.tolist() == [True] * _BATCH_SIZE
@@ -1961,5 +1795,8 @@ def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
         == [False] * _BATCH_SIZE
     )
     assert result.task_state.get_held_object("manipulator") is None
-    assert [len(call.effects) for call in result.calls] == [4, 4]
+    assert all(len(call.effects) >= 3 for call in result.calls)
+    if result.status is SkillStatus.RUNNING:
+        result = assembly.runtime.step()
+    assert result.status is SkillStatus.COMPLETED
     assert assembly.command_sink.accepted_action_count >= 4

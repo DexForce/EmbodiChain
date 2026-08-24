@@ -124,25 +124,25 @@ _FRAMEWORK_CAPABILITIES = (
         "Typed goals, compilation, execution, and terminal effects are covered.",
     ),
     (
-        "Attach/release effect",
+        "Physical attach/release evidence",
         "framework-tested",
         "per-embodiment integration",
-        "Effects use accepted commands plus live object-to-endpoint pose evidence.",
+        "Effects require live constraint and object-to-endpoint pose evidence.",
     ),
     (
-        "OperateArticulation",
+        "Slide",
         "framework-tested",
         "per-embodiment integration",
-        "Typed articulation goals and execution contracts are covered.",
+        "Typed handle geometry, grasping, and axis-constrained motion are covered.",
     ),
     (
-        "Articulation effect",
+        "Articulation joint validator",
         "framework-tested",
-        "per-embodiment integration",
-        "Joint-state terminal effect validation is covered.",
+        "per-task integration",
+        "Measured joint-state application acceptance is covered.",
     ),
     (
-        "V1 sequential",
+        "Schema-v2 sequential",
         "framework-tested",
         "per-task integration",
         "Ordered call execution and failure propagation are covered.",
@@ -166,7 +166,7 @@ _FRAMEWORK_CAPABILITIES = (
         "Production registration must declare and validate its concrete contract.",
     ),
     (
-        "V2 parallel",
+        "Schema-v2 parallel",
         "framework-tested",
         "integration-required",
         "Fail-closed by default; production use requires an authoritative validator.",
@@ -179,19 +179,19 @@ _LANDED_INTEGRATIONS = (
         "UR5",
         "Cube Pick + Place",
         "Pick + Place(at)",
-        "attach/release",
-        "V1 sequential",
+        "two-finger constraint + pose relation",
+        "schema-v2 sequential",
         "checked in",
         "pending: one cycle passed; full three-cycle gate remains",
     ),
     (
         "CobotMagic",
         "Open Drawer",
-        "OperateArticulation",
-        "articulation effect",
-        "V1 sequential",
+        "Registered call -> Slide",
+        "articulation joint validator",
+        "schema-v2 sequential",
         "checked in",
-        "fixed-seed supported-simulation slow gate; not release-required",
+        "pending: rerun the supported-simulation validator gate",
     ),
 )
 
@@ -354,8 +354,8 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
         [
             "",
             (
-                "HandOver, Place relations (`on`/`inside`), Registered calls, and V2 "
-                "parallel are framework-tested but integration-required. They are "
+                "HandOver, Place relations (`on`/`inside`), and schema-v2 parallel "
+                "are framework-tested but integration-required. They are "
                 "intentionally not listed as checked-in integrations."
             ),
             "",
@@ -422,9 +422,9 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
             ),
             "",
             (
-                "No success-rate result or release gate is checked in yet. Open "
-                "Drawer has a single real-simulation smoke pass, while repeated Cube "
-                "still needs the tracking-threshold decision and three-cycle physical "
+                "No success-rate result or release gate is checked in yet. The "
+                "main-API migration requires a fresh supported-simulation Open Drawer "
+                "validator run, while repeated Cube still needs three-cycle physical "
                 "acceptance before a fixed-seed rate is meaningful."
             ),
             "",

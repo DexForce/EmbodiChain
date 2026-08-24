@@ -25,17 +25,11 @@ from typing import TypeAlias
 
 from embodichain.utils import configclass
 
-EXPERT_PROGRAM_SCHEMA_VERSION = 1
-"""Stable sequential Expert Program schema version."""
+EXPERT_PROGRAM_SCHEMA_VERSION = 2
+"""Only supported Expert Program schema version."""
 
-EXPERT_PROGRAM_SCHEMA_VERSION_V2 = 2
-"""Schema version adding deterministic ``Parallel`` and ``Barrier`` nodes."""
-
-SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS = (
-    EXPERT_PROGRAM_SCHEMA_VERSION,
-    EXPERT_PROGRAM_SCHEMA_VERSION_V2,
-)
-"""Exact schema revisions accepted by the strict decoder."""
+REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION = 1
+"""Schema version for opaque catalog-registered semantic-call payloads."""
 
 MAX_REPEAT_COUNT = 1_000
 """Maximum repeat count accepted by one Expert Program repeat node."""
@@ -382,60 +376,11 @@ class HandOverCfg:
 
 
 @configclass
-class OperateArticulationCfg:
-    """Declarative request to operate one articulated joint through a handle."""
-
-    articulation: str = MISSING
-    handle: str | None = None
-    target: str | None = None
-    target_position: float | None = None
-    target_displacement: float | None = None
-    resources: dict[str, str] = field(default_factory=dict)
-    kind: str = "operate_articulation"
-
-    def __post_init__(self) -> None:
-        """Require one named target or one complete explicit target pair."""
-        _validate_identifier(self.articulation, field_name="articulation")
-        if self.handle is not None:
-            _validate_identifier(self.handle, field_name="handle")
-        named = self.target is not None
-        explicit_position = self.target_position is not None
-        explicit_displacement = self.target_displacement is not None
-        if named:
-            _validate_identifier(self.target, field_name="target")
-            if explicit_position or explicit_displacement:
-                raise ValueError(
-                    "target is mutually exclusive with target_position and "
-                    "target_displacement."
-                )
-        elif not (explicit_position and explicit_displacement):
-            raise ValueError(
-                "OperateArticulation requires either target or the explicit "
-                "target_position and target_displacement pair."
-            )
-        else:
-            self.target_position = _validate_number(
-                self.target_position,
-                field_name="target_position",
-            )
-            self.target_displacement = _validate_number(
-                self.target_displacement,
-                field_name="target_displacement",
-            )
-        self.resources = _validate_resources(self.resources, field_name="resources")
-        _validate_kind(
-            self.kind,
-            expected="operate_articulation",
-            field_name="kind",
-        )
-
-
-@configclass
 class RegisteredSemanticCallCfg:
     """Safe declarative payload for one catalog-registered semantic call."""
 
     call_id: str = MISSING
-    schema_version: int = EXPERT_PROGRAM_SCHEMA_VERSION
+    schema_version: int = REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION
     arguments: dict[str, DeclarativeCfgValue] = field(default_factory=dict)
     resources: dict[str, str] = field(default_factory=dict)
     kind: str = "registered"
@@ -448,8 +393,14 @@ class RegisteredSemanticCallCfg:
                 "call_id must contain two or more lowercase identifier segments "
                 "separated by single dots."
             )
-        if type(self.schema_version) is not int or self.schema_version != 1:
-            raise ValueError("Registered call schema_version must be exactly 1.")
+        if (
+            type(self.schema_version) is not int
+            or self.schema_version != REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "Registered call schema_version must be exactly "
+                f"{REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION}."
+            )
         if type(self.arguments) is not dict:
             raise TypeError("arguments must be an exact dict.")
         arguments = _snapshot_declarative_value(
@@ -463,11 +414,7 @@ class RegisteredSemanticCallCfg:
 
 
 SemanticCallCfg: TypeAlias = (
-    PickCfg
-    | PlaceCfg
-    | HandOverCfg
-    | OperateArticulationCfg
-    | RegisteredSemanticCallCfg
+    PickCfg | PlaceCfg | HandOverCfg | RegisteredSemanticCallCfg
 )
 
 
@@ -516,7 +463,52 @@ class ObjectNearTargetValidatorCfg:
         )
 
 
-ValidatorCfg: TypeAlias = ObjectNearTargetValidatorCfg
+@configclass
+class ArticulationJointPositionValidatorCfg:
+    """Validate one articulation joint against an inclusive position interval."""
+
+    articulation: str = MISSING
+    joint: str = MISSING
+    minimum_position: float | None = None
+    maximum_position: float | None = None
+    kind: str = "articulation_joint_position"
+
+    def __post_init__(self) -> None:
+        """Validate joint identity, bounds, and discriminator."""
+        _validate_identifier(self.articulation, field_name="articulation")
+        _validate_identifier(self.joint, field_name="joint")
+        if self.minimum_position is None and self.maximum_position is None:
+            raise ValueError(
+                "At least one of minimum_position or maximum_position is required."
+            )
+        if self.minimum_position is not None:
+            self.minimum_position = _validate_number(
+                self.minimum_position,
+                field_name="minimum_position",
+            )
+        if self.maximum_position is not None:
+            self.maximum_position = _validate_number(
+                self.maximum_position,
+                field_name="maximum_position",
+            )
+        if (
+            self.minimum_position is not None
+            and self.maximum_position is not None
+            and self.minimum_position > self.maximum_position
+        ):
+            raise ValueError(
+                "minimum_position must be less than or equal to maximum_position."
+            )
+        _validate_kind(
+            self.kind,
+            expected="articulation_joint_position",
+            field_name="kind",
+        )
+
+
+ValidatorCfg: TypeAlias = (
+    ObjectNearTargetValidatorCfg | ArticulationJointPositionValidatorCfg
+)
 
 
 @configclass
@@ -643,25 +635,26 @@ class ParallelCfg:
 
 
 ProgramNodeCfg: TypeAlias = (
-    SequenceCfg | RepeatCfg | SegmentCfg | InvokeCfg | ParallelCfg | BarrierCfg
+    SequenceCfg | RepeatCfg | SegmentCfg | InvokeCfg | ParallelCfg
 )
 
 _SEMANTIC_CALL_TYPES = (
     PickCfg,
     PlaceCfg,
     HandOverCfg,
-    OperateArticulationCfg,
     RegisteredSemanticCallCfg,
 )
 _POST_POLICY_TYPES = (WaitStablePostCfg,)
-_VALIDATOR_TYPES = (ObjectNearTargetValidatorCfg,)
+_VALIDATOR_TYPES = (
+    ObjectNearTargetValidatorCfg,
+    ArticulationJointPositionValidatorCfg,
+)
 _PROGRAM_NODE_TYPES = (
     SequenceCfg,
     RepeatCfg,
     SegmentCfg,
     InvokeCfg,
     ParallelCfg,
-    BarrierCfg,
 )
 
 
@@ -677,7 +670,6 @@ def _validate_program(
     targets: dict[str, TargetCfg],
     depth: int,
     budget: list[int],
-    schema_version: int,
     inside_parallel: bool = False,
 ) -> int:
     """Validate references and return the statically expanded call count."""
@@ -693,12 +685,6 @@ def _validate_program(
         if type(call) is HandOverCfg and call.final_target is not None:
             _validate_target_reference(call.final_target.target, targets)
         return 1
-    if type(node) is BarrierCfg:
-        if schema_version < EXPERT_PROGRAM_SCHEMA_VERSION_V2:
-            raise ValueError("Barrier requires Expert Program schema version 2.")
-        if not inside_parallel:
-            raise ValueError("Barrier nodes may only be owned by Parallel.")
-        return 0
     if type(node) is SequenceCfg:
         expanded = sum(
             _validate_program(
@@ -706,7 +692,6 @@ def _validate_program(
                 targets=targets,
                 depth=depth + 1,
                 budget=budget,
-                schema_version=schema_version,
                 inside_parallel=inside_parallel,
             )
             for child in node.items
@@ -717,7 +702,6 @@ def _validate_program(
             targets=targets,
             depth=depth + 1,
             budget=budget,
-            schema_version=schema_version,
             inside_parallel=inside_parallel,
         )
     elif type(node) is SegmentCfg:
@@ -727,41 +711,30 @@ def _validate_program(
                 "nodes; wrap the Parallel node in one Segment instead."
             )
         for validator in node.validators:
-            _validate_target_reference(validator.target, targets)
+            if type(validator) is ObjectNearTargetValidatorCfg:
+                _validate_target_reference(validator.target, targets)
         expanded = _validate_program(
             node.steps,
             targets=targets,
             depth=depth + 1,
             budget=budget,
-            schema_version=schema_version,
             inside_parallel=inside_parallel,
         )
     elif type(node) is ParallelCfg:
-        if schema_version < EXPERT_PROGRAM_SCHEMA_VERSION_V2:
-            raise ValueError("Parallel requires Expert Program schema version 2.")
         if inside_parallel:
-            raise ValueError("Nested Parallel nodes are forbidden in schema version 2.")
+            raise ValueError("Nested Parallel nodes are forbidden.")
         branch_counts = tuple(
             _validate_program(
                 branch,
                 targets=targets,
                 depth=depth + 1,
                 budget=budget,
-                schema_version=schema_version,
                 inside_parallel=True,
             )
             for branch in node.branches
         )
         if any(count <= 0 for count in branch_counts):
             raise ValueError("Every Parallel branch must contain a semantic call.")
-        _validate_program(
-            node.barrier,
-            targets=targets,
-            depth=depth + 1,
-            budget=budget,
-            schema_version=schema_version,
-            inside_parallel=True,
-        )
         expanded = sum(branch_counts)
     else:  # pragma: no cover - exact construction prevents this branch
         raise TypeError("program must contain exact ProgramNodeCfg values.")
@@ -786,11 +759,10 @@ class ExpertProgramCfg:
         """Validate the complete static configuration and target graph."""
         if (
             type(self.schema_version) is not int
-            or self.schema_version not in SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS
+            or self.schema_version != EXPERT_PROGRAM_SCHEMA_VERSION
         ):
             raise ValueError(
-                "schema_version must be one of "
-                f"{SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS}."
+                "schema_version must be exactly " f"{EXPERT_PROGRAM_SCHEMA_VERSION}."
             )
         _validate_identifier(self.program_id, field_name="program_id")
         if type(self.integration) is not ExpertProgramIntegrationCfg:
@@ -813,45 +785,10 @@ class ExpertProgramCfg:
             targets=targets,
             depth=0,
             budget=[MAX_PROGRAM_NODES],
-            schema_version=self.schema_version,
         )
         if expanded <= 0:
             raise ValueError("program must contain at least one semantic call.")
         self.targets = targets
 
 
-__all__ = [
-    "BarrierCfg",
-    "CyclicPoseTargetCfg",
-    "DeclarativeCfgValue",
-    "EXPERT_PROGRAM_SCHEMA_VERSION",
-    "EXPERT_PROGRAM_SCHEMA_VERSION_V2",
-    "ExpertProgramCfg",
-    "ExpertProgramIntegrationCfg",
-    "HandOverCfg",
-    "InvokeCfg",
-    "MAX_DECLARATIVE_DEPTH",
-    "MAX_DECLARATIVE_NODES",
-    "MAX_EXPANDED_CALLS",
-    "MAX_PROGRAM_DEPTH",
-    "MAX_PROGRAM_NODES",
-    "MAX_REPEAT_COUNT",
-    "ObjectNearTargetValidatorCfg",
-    "OperateArticulationCfg",
-    "ParallelCfg",
-    "PickCfg",
-    "PlaceCfg",
-    "PoseCfg",
-    "PostPolicyCfg",
-    "ProgramNodeCfg",
-    "RegisteredSemanticCallCfg",
-    "RepeatCfg",
-    "SegmentCfg",
-    "SemanticCallCfg",
-    "SequenceCfg",
-    "SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS",
-    "TargetCfg",
-    "TargetRefCfg",
-    "ValidatorCfg",
-    "WaitStablePostCfg",
-]
+__all__: list[str] = []

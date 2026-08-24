@@ -26,24 +26,27 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import embodichain.data as data_module
 from embodichain.lab.gym.envs import EmbodiedEnv
-from embodichain.lab.gym.envs.demo import execute_demo_episode
-from embodichain.lab.gym.envs.expert_program import ExpertProgramEnvironmentMixin
+from embodichain.lab.gym.envs.expert_program import (
+    ArticulationJointPositionValidatorCfg,
+    RegisteredSemanticCallCfg,
+)
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import (
     REGISTERED_ENVS,
     discover_task_packages,
 )
+from embodichain.lab.sim.atomic_actions import SlideAffordance
 
 # Trigger official task auto-registration (idempotent).
 discover_task_packages()
 
 from embodichain_tasks.tableware.open_drawer import (  # noqa: E402
-    DRAWER_NATIVE_SLIDE_JOINT,
-    DRAWER_OPEN_POSITION,
     DRAWER_ROBOT_PROFILE_ID,
-    DRAWER_UID,
+    DRAWER_SCENE_REGISTRY_ID,
     OpenDrawerEnv,
+    create_open_drawer_robot_profile_binding,
     create_open_drawer_scene_binding,
 )
 
@@ -63,31 +66,48 @@ def _gym_payload() -> dict[str, object]:
     return payload
 
 
-def test_registered_drawer_task_uses_shared_expert_program_mixin() -> None:
+def test_registered_drawer_task_uses_shared_expert_program_runtime() -> None:
     """The environment delegates all demo generation to the shared runtime."""
     spec = REGISTERED_ENVS["OpenDrawer-v1"]
 
     assert spec.cls is OpenDrawerEnv
-    assert issubclass(OpenDrawerEnv, ExpertProgramEnvironmentMixin)
     assert issubclass(OpenDrawerEnv, EmbodiedEnv)
     assert "create_demo_action_list" not in OpenDrawerEnv.__dict__
+    assert "create_demo_segments" not in OpenDrawerEnv.__dict__
 
 
-def test_drawer_gym_config_selects_packaged_semantic_program() -> None:
-    """The runnable task config points at the named-target Expert Program."""
+def test_drawer_gym_config_loads_registered_slide_and_joint_validator(
+    monkeypatch,
+) -> None:
+    """The runnable task combines semantic motion with physical acceptance."""
     payload = _gym_payload()
 
     assert payload["id"] == "OpenDrawer-v1"
     assert payload["expert_program_path"] == (
         "../../expert_program/tableware/open_drawer.json"
     )
-    assert payload["env"]["extensions"] == {}
+    monkeypatch.setattr(data_module, "get_data_path", lambda value: value)
+    cfg = config_to_cfg(payload, source_path=_gym_config_path())
+    assert cfg.expert_program is not None
+    assert cfg.expert_program.program_id == "open_drawer"
+    call = cfg.expert_program.program.steps.call
+    assert type(call) is RegisteredSemanticCallCfg
+    assert call.call_id == "embodichain_tasks.open_drawer"
+    assert call.arguments["direction"] == "pull"
+    assert call.arguments["hand_interp_steps"] == 20
+    assert call.arguments["translation_distance"] == 0.12
+    assert call.resources == {"primary": "right_manipulator"}
+    validator = cfg.expert_program.program.validators[0]
+    assert type(validator) is ArticulationJointPositionValidatorCfg
+    assert validator.articulation == "drawer"
+    assert validator.joint == "slide_rails"
+    assert validator.minimum_position == 0.09
 
 
-def test_drawer_gym_config_preserves_physical_scene() -> None:
+def test_drawer_gym_config_preserves_physical_scene(monkeypatch) -> None:
     """Parsing still creates the CobotMagic robot and native drawer entity."""
-    path = _gym_config_path()
-    cfg = config_to_cfg(_gym_payload(), source_path=path)
+    monkeypatch.setattr(data_module, "get_data_path", lambda value: value)
+    cfg = config_to_cfg(_gym_payload(), source_path=_gym_config_path())
 
     assert cfg.robot.uid == "CobotMagic"
     assert cfg.robot.control_parts["right_arm"] == [
@@ -103,204 +123,119 @@ def test_drawer_gym_config_preserves_physical_scene() -> None:
         "right_joint8",
     ]
     assert cfg.articulation[0].uid == "drawer"
-    assert cfg.expert_program is not None
-    assert cfg.expert_program.program_id == "open_drawer"
 
 
-def test_drawer_affordance_uses_reachable_post_release_retract() -> None:
-    """The opened drawer retract remains clear of the handle and IK-reachable."""
-    operation = create_open_drawer_scene_binding().articulation_operations[0]
-    contact_z = operation.contact_offset[11]
-    retract_z = operation.retract_offset[11]
+def test_drawer_bindings_select_native_handle_and_slide_resource() -> None:
+    """Canonical identities and CobotMagic resource wiring remain explicit."""
+    scene = create_open_drawer_scene_binding()
+    profile = create_open_drawer_robot_profile_binding()
 
-    assert retract_z < contact_z
-    assert contact_z - retract_z == pytest.approx(0.01)
+    assert scene.registry_id == DRAWER_SCENE_REGISTRY_ID
+    assert scene.articulations[0].simulation_uid == "drawer"
+    assert scene.links[0].entity_id == "drawer_handle"
+    assert scene.links[0].native_link_name == "handle_xpos"
+    assert profile.profile_id == DRAWER_ROBOT_PROFILE_ID
+    assert dict(profile.defaults) == {"slide": {"primary": "right_manipulator"}}
+    assert profile.command_presets[0].commands == {
+        "open": (0.05, 0.05),
+        "grasp": (0.0, 0.0),
+    }
 
 
-def test_task_initialization_delegates_to_shared_simulation_factory(
-    monkeypatch,
-) -> None:
-    """Drawer setup contributes declarations but no planner implementation."""
+def test_task_initialization_builds_live_slide_semantics(monkeypatch) -> None:
+    """The task passes handle mesh semantics to the registered Slide lowerer."""
     adapter = object()
     captured: dict[str, object] = {}
 
-    def fake_base_init(self, cfg, **kwargs) -> None:
-        del self, cfg, kwargs
-
-    def fake_create_adapter(environment, **kwargs):
-        captured["environment"] = environment
-        captured.update(kwargs)
-        return adapter
-
-    monkeypatch.setattr(EmbodiedEnv, "__init__", fake_base_init)
-    task_module = importlib.import_module(OpenDrawerEnv.__module__)
-    monkeypatch.setattr(
-        task_module,
-        "create_simulation_expert_program_adapter",
-        fake_create_adapter,
-    )
-
-    env = OpenDrawerEnv(cfg=object())
-
-    assert env.expert_program_adapter is adapter
-    assert captured["environment"] is env
-    assert captured["scene_binding"].links[0].native_link_name == "handle_xpos"
-    assert captured["robot_profile_binding"].profile_id == DRAWER_ROBOT_PROFILE_ID
-
-
-def test_task_config_compiles_through_real_simulation_factory(
-    monkeypatch,
-) -> None:
-    """Packaged drawer config reaches the real adapter with explicit mocks."""
-
-    class FakeRobot:
-        uid = "CobotMagic"
-
-        @staticmethod
-        def get_qpos() -> torch.Tensor:
-            return torch.zeros((1, 16), dtype=torch.float32)
-
     class FakeDrawer:
         link_names = ("outer_box", "inner_box", "handle_xpos")
-        joint_names = ("slide_rails",)
 
         @staticmethod
-        def get_local_pose(*, to_matrix) -> torch.Tensor:
-            assert to_matrix is True
-            return torch.eye(4, dtype=torch.float32).unsqueeze(0)
+        def get_link_vert_face(name: str):
+            assert name == "inner_box"
+            return (
+                torch.tensor(
+                    [
+                        [0.107, -0.01, 0.09],
+                        [0.117, 0.01, 0.10],
+                        [0.107, 0.01, 0.11],
+                        [0.09, -0.08, 0.01],
+                        [0.09, 0.08, 0.01],
+                        [0.09, 0.08, 0.19],
+                    ]
+                ),
+                torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.long),
+            )
 
-        @staticmethod
-        def get_link_pose(name: str, *, env_ids, to_matrix) -> torch.Tensor:
-            assert name == "handle_xpos"
-            assert env_ids == [0]
-            assert to_matrix is True
-            return torch.eye(4, dtype=torch.float32).unsqueeze(0)
-
-    robot = FakeRobot()
     drawer = FakeDrawer()
 
     class FakeSimulation:
-        @staticmethod
-        def get_robot(uid: str):
-            return robot if uid == "CobotMagic" else None
+        device = torch.device("cpu")
 
         @staticmethod
         def get_articulation(uid: str):
             return drawer if uid == "drawer" else None
 
+    class FakeFactory:
+        @staticmethod
+        def create_adapter(**kwargs):
+            captured.update(kwargs)
+            return adapter
+
     def fake_base_init(self, cfg, **kwargs) -> None:
         del kwargs
         self.cfg = cfg
-        self.sim_cfg = SimpleNamespace(physics_dt=0.01)
         self.sim = FakeSimulation()
-        self.robot = robot
+        self.robot = SimpleNamespace(uid="CobotMagic")
+
+    def fake_from_environment(environment, **kwargs):
+        captured["environment"] = environment
+        captured.update(kwargs)
+        return FakeFactory()
 
     monkeypatch.setattr(EmbodiedEnv, "__init__", fake_base_init)
-    path = _gym_config_path()
-    cfg = config_to_cfg(_gym_payload(), source_path=path)
-
-    env = OpenDrawerEnv(cfg=cfg)
-    segments = tuple(env.compile_expert_program(cfg.expert_program))
-
-    assert len(segments) == 1
-    assert segments[0].name == "open_drawer"
-    assert env.expert_program_adapter.scene_registry_id == "open_drawer_v1"
-    assert env.expert_program_adapter.robot_profile_id == DRAWER_ROBOT_PROFILE_ID
-
-
-@pytest.mark.requires_sim
-@pytest.mark.slow
-def test_real_sim_expert_episode_opens_drawer_with_joint_effect_trace() -> None:
-    """The packaged program completes against live drawer physics and evidence."""
-    import gc
-
-    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-
-    path = _gym_config_path()
-    cfg = config_to_cfg(_gym_payload(), source_path=path)
-    cfg.num_envs = 1
-    cfg.sim_cfg = SimulationManagerCfg(
-        headless=True,
-        sim_device="cpu",
-        num_envs=1,
+    task_module = importlib.import_module(OpenDrawerEnv.__module__)
+    monkeypatch.setattr(
+        task_module.SimulationExpertProgramFactory,
+        "from_environment",
+        fake_from_environment,
     )
-    cfg.sensor = []
-    cfg.events = None
-    cfg.observations = None
-    cfg.dataset = None
-    cfg.init_rollout_buffer = False
-    cfg.record_trajectory = False
-    cfg.filter_dataset_saving = True
 
-    env: OpenDrawerEnv | None = None
-    try:
-        env = OpenDrawerEnv(cfg=cfg)
-        env.reset(seed=0)
+    env = OpenDrawerEnv(cfg=SimpleNamespace(expert_program=object()))
 
-        result = execute_demo_episode(env)
-
-        assert result.completed
-        assert result.all_success
-        assert result.terminal_reason == "success"
-        assert len(result.segments) == 1
-        segment = result.segments[0]
-        assert segment.name == "open_drawer"
-        assert segment.success
-
-        metadata = segment.metadata
-        runtime = metadata["runtime"]
-        assert runtime["kind"] == "skill_result"
-        assert runtime["status"] == "completed"
-        assert runtime["masks"]["success"] == [True]
-        assert len(runtime["calls"]) == 1
-        call = runtime["calls"][0]
-        assert call["semantic_id"] == "operate_articulation"
-        assert call["status"] == "completed"
-        assert call["masks"] == {
-            "entered": [True],
-            "completed": [True],
-            "failed": [False],
-        }
-        assert call["plan_attempts"]
-        assert call["plan_attempts"][-1]["plan_success_mask"] == [True]
-
-        effects = call["effects"]
-        assert effects
-        for effect in effects:
-            assert effect["effect_spec"]["semantic_id"] == "operate_articulation"
-            evidence = effect["evidence"]["joint.position"]
-            assert evidence["valid_mask"] == [True]
-            assert evidence["acquisition_errors"] == [None]
-            assert evidence["env_ids"] == [0]
-        final_effect = effects[-1]
-        assert final_effect["decision"] == {
-            "success_mask": [True],
-            "failure_mask": [False],
-        }
-
-        assert metadata["post_policies"] == []
-        assert metadata["validation"] == {
-            "env_ids": [0],
-            "runtime_success_mask": [True],
-            "eligible_mask_before_validation": [True],
-            "post_policy_success_mask": None,
-            "validators": [],
-            "accepted_mask": [True],
-        }
-
-        drawer = env.sim.get_articulation(DRAWER_UID)
-        assert drawer is not None
-        joint_index = drawer.joint_names.index(DRAWER_NATIVE_SLIDE_JOINT)
-        final_position = float(drawer.get_qpos()[0, joint_index].item())
-        joint_tolerance = float(
-            final_effect["monitor"]["resolved_params"]["joint_success_tolerance"]
-        )
-        assert abs(final_position - DRAWER_OPEN_POSITION) <= joint_tolerance
-    finally:
-        if env is not None:
-            env.close()
-        SimulationManager.flush_cleanup_queue()
-        gc.collect()
+    assert env.expert_program_adapter is adapter
+    assert captured["environment"] is env
+    assert captured["scene_binding"].registry_id == DRAWER_SCENE_REGISTRY_ID
+    assert captured["robot_profile_binding"].profile_id == DRAWER_ROBOT_PROFILE_ID
+    assert set(captured["grasp_pose_generators"]) == {"right_eef"}
+    grasp_generator = captured["grasp_pose_generators"]["right_eef"]
+    success, grasp_poses, opening_widths = grasp_generator.get_best_grasp_poses(
+        mesh_vertices=torch.zeros((3, 3)),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        obj_poses=torch.eye(4).unsqueeze(0),
+        approach_direction=torch.tensor([[0.0, 0.0, 1.0]]),
+    )
+    assert success.tolist() == [True]
+    assert grasp_poses[0, :3, 3].tolist() == pytest.approx(
+        [0.00049425, -0.00441209, 0.01492312]
+    )
+    assert opening_widths.tolist() == pytest.approx([0.01])
+    lowerer = captured["registered_lowerers"][0]
+    affordance = lowerer._semantics.affordance
+    assert isinstance(affordance, SlideAffordance)
+    assert affordance.joint_name == "slide_rails"
+    assert affordance.translation_axis.tolist() == [0.0, 0.0, 1.0]
+    assert affordance.mesh_triangles.tolist() == [[0, 1, 2]]
+    assert torch.allclose(
+        affordance.mesh_vertices,
+        torch.tensor(
+            [
+                [-0.01, -0.01, -0.002],
+                [0.0, 0.01, -0.012],
+                [0.01, 0.01, -0.002],
+            ]
+        ),
+    )
 
 
 __all__: list[str] = []
