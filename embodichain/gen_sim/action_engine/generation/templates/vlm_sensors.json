@@ -1,0 +1,58 @@
+[
+  {
+    "uid": "vlm_front",
+    "sensor_type": "Camera",
+    "width": 640,
+    "height": 480,
+    "intrinsics": [520, 520, 320, 240],
+    "enable_color": true,
+    "enable_depth": true,
+    "extrinsics": {
+      "eye": [-1.2, 0.0, 1.65],
+      "target": [0.0, 0.0, 0.75],
+      "up": [0.0, 0.0, 1.0]
+    }
+  },
+  {
+    "uid": "vlm_left",
+    "sensor_type": "Camera",
+    "width": 640,
+    "height": 480,
+    "intrinsics": [520, 520, 320, 240],
+    "enable_color": true,
+    "enable_depth": true,
+    "extrinsics": {
+      "eye": [0.0, 1.2, 1.65],
+      "target": [0.0, 0.0, 0.75],
+      "up": [0.0, 0.0, 1.0]
+    }
+  },
+  {
+    "uid": "vlm_rear",
+    "sensor_type": "Camera",
+    "width": 640,
+    "height": 480,
+    "intrinsics": [520, 520, 320, 240],
+    "enable_color": true,
+    "enable_depth": true,
+    "extrinsics": {
+      "eye": [1.2, 0.0, 1.65],
+      "target": [0.0, 0.0, 0.75],
+      "up": [0.0, 0.0, 1.0]
+    }
+  },
+  {
+    "uid": "vlm_right",
+    "sensor_type": "Camera",
+    "width": 640,
+    "height": 480,
+    "intrinsics": [520, 520, 320, 240],
+    "enable_color": true,
+    "enable_depth": true,
+    "extrinsics": {
+      "eye": [0.0, -1.2, 1.65],
+      "target": [0.0, 0.0, 0.75],
+      "up": [0.0, 0.0, 1.0]
+    }
+  }
+]
