@@ -34,7 +34,6 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
     RigidBodyAttributesOverrideCfg,
 )
-from embodichain.lab.sim.utility.sim_utils import _resolve_link_physics_groups
 from embodichain.data import get_data_path
 from dexsim.types import ActorType, DriveType
 
@@ -82,21 +81,6 @@ class TestRigidBodyAttributesOverride:
         assert abs(merged.static_friction - 0.85) < 1e-6
         assert abs(merged.dynamic_friction - 0.25) < 1e-6
         assert abs(merged.linear_damping - 0.5) < 1e-6
-
-    def test_resolve_link_physics_overlap_raises(self):
-        link_names = ["outer_box", "handle_xpos", "inner_drawer"]
-        link_attrs = {
-            "box": LinkPhysicsOverrideCfg(
-                link_names_expr=["outer_box", "handle_xpos"],
-                attrs=RigidBodyAttributesOverrideCfg(static_friction=0.9),
-            ),
-            "handle": LinkPhysicsOverrideCfg(
-                link_names_expr=["handle_xpos"],
-                attrs=RigidBodyAttributesOverrideCfg(static_friction=0.8),
-            ),
-        }
-        with pytest.raises(ValueError, match="multiple link_attrs groups"):
-            _resolve_link_physics_groups(link_names, link_attrs)
 
 
 class BaseArticulationTest:

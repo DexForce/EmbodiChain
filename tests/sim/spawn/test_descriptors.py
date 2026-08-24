@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import copy
+from dataclasses import fields, is_dataclass
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -53,6 +55,66 @@ from embodichain.lab.sim.spawn.usd import articulation_desc_from_usd
 pytestmark = pytest.mark.no_sim
 
 RESTITUTION = 0.25
+
+
+def _resolved_articulation_desc() -> ArticulationDesc:
+    source_inertia = np.ones(3, dtype=np.float32)
+    base = LinkDesc(
+        "base",
+        "",
+        np.eye(4, dtype=np.float32),
+        collisions=[CollisionDesc()],
+        rigid_body=RigidBodyPhysicsDesc.dynamic(
+            mass=0.5,
+            inertia=source_inertia,
+        ),
+    )
+    finger = LinkDesc(
+        "finger_left",
+        "base",
+        np.eye(4, dtype=np.float32),
+        collisions=[CollisionDesc()],
+        rigid_body=RigidBodyPhysicsDesc.dynamic(
+            mass=0.25,
+            inertia=source_inertia,
+        ),
+    )
+    return ArticulationDesc(
+        name="robot",
+        links=[base, finger],
+        joints=[
+            JointDesc(
+                "arm_joint",
+                "base",
+                "finger_left",
+                dexsim.engine.JointType.REVOLUTE,
+            )
+        ],
+        root_link_name="base",
+    )
+
+
+def _assert_property_tree_equal(actual: object, expected: object) -> None:
+    if isinstance(expected, np.ndarray):
+        np.testing.assert_array_equal(actual, expected)
+    elif is_dataclass(expected):
+        assert type(actual) is type(expected)
+        for field in fields(expected):
+            _assert_property_tree_equal(
+                getattr(actual, field.name),
+                getattr(expected, field.name),
+            )
+    elif isinstance(expected, dict):
+        assert actual.keys() == expected.keys()
+        for key, value in expected.items():
+            _assert_property_tree_equal(actual[key], value)
+    elif isinstance(expected, (list, tuple)):
+        assert type(actual) is type(expected)
+        assert len(actual) == len(expected)
+        for actual_item, expected_item in zip(actual, expected):
+            _assert_property_tree_equal(actual_item, expected_item)
+    else:
+        assert actual == expected
 
 
 @pytest.mark.parametrize(
@@ -152,7 +214,7 @@ def test_mesh_descriptor_passes_load_options_to_spawn() -> None:
     assert option.smooth == 45.0
 
 
-def test_articulation_descriptor_omits_restitution_for_mujoco_warp() -> None:
+def test_articulation_constructor_defers_newton_properties_until_configure() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
@@ -164,7 +226,17 @@ def test_articulation_descriptor_omits_restitution_for_mujoco_warp() -> None:
         newton_solver_type="mujoco_warp",
     )
 
-    assert descriptor.newton_collision.restitution is None
+    assert descriptor.newton_collision is None
+    assert descriptor.newton_drive is None
+
+    descriptor.links = _resolved_articulation_desc().links
+    descriptor.joints = _resolved_articulation_desc().joints
+    configure_articulation_desc(
+        descriptor,
+        cfg,
+        newton_solver_type="mujoco_warp",
+    )
+    assert descriptor.links[0].collisions[0].newton.restitution is None
 
 
 def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
@@ -174,8 +246,16 @@ def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
         drive_pros=JointDrivePropertiesCfg(drive_type="acceleration"),
     )
 
+    descriptor = articulation_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+    descriptor.links = _resolved_articulation_desc().links
+    descriptor.joints = _resolved_articulation_desc().joints
+
     with pytest.raises(NotImplementedError, match="acceleration-drive"):
-        articulation_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+        configure_articulation_desc(
+            descriptor,
+            cfg,
+            newton_solver_type="mujoco_warp",
+        )
 
 
 def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
@@ -208,56 +288,40 @@ def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
     descriptor = articulation_desc_from_cfg(cfg)
     assert descriptor.links == []
     assert descriptor.joints == []
-    assert not hasattr(descriptor, "link_overrides")
-    assert not hasattr(descriptor, "joint_overrides")
 
-    source_inertia = np.ones(3, dtype=np.float32)
-    descriptor.links = [
-        LinkDesc(
-            "base",
-            "",
-            np.eye(4, dtype=np.float32),
-            collisions=[CollisionDesc()],
-            rigid_body=RigidBodyPhysicsDesc.dynamic(
-                mass=0.5,
-                inertia=source_inertia,
-            ),
-            inertia_from_source=True,
-        ),
-        LinkDesc(
-            "finger_left",
-            "base",
-            np.eye(4, dtype=np.float32),
-            collisions=[CollisionDesc()],
-            rigid_body=RigidBodyPhysicsDesc.dynamic(
-                mass=0.25,
-                inertia=source_inertia,
-            ),
-            inertia_from_source=True,
-        ),
-    ]
-    descriptor.joints = [
-        JointDesc(
-            "arm_joint",
-            "base",
-            "finger_left",
-            dexsim.engine.JointType.REVOLUTE,
-        )
-    ]
-    descriptor.root_link_name = "base"
+    resolved = _resolved_articulation_desc()
+    descriptor.links = resolved.links
+    descriptor.joints = resolved.joints
+    descriptor.root_link_name = resolved.root_link_name
 
-    configure_articulation_desc(descriptor, cfg)
+    with (
+        patch.object(
+            descriptor,
+            "set_link_properties",
+            wraps=descriptor.set_link_properties,
+        ) as set_link_properties,
+        patch.object(
+            descriptor,
+            "set_joint_properties",
+            wraps=descriptor.set_joint_properties,
+        ) as set_joint_properties,
+    ):
+        configure_articulation_desc(descriptor, cfg)
+
+    assert set_link_properties.call_count == len(descriptor.links)
+    assert set_joint_properties.call_count == len(descriptor.joints)
 
     base = descriptor.get_link_desc("base")
     finger = descriptor.get_link_desc("finger_left")
     assert base.rigid_body.mass == 1.0
     assert base.collisions[0].dexsim.dynamic_friction == 0.4
-    np.testing.assert_array_equal(base.rigid_body.inertia, source_inertia)
-    assert base.inertia_from_source
+    np.testing.assert_array_equal(
+        base.rigid_body.inertia,
+        np.ones(3, dtype=np.float32),
+    )
     assert finger.rigid_body.mass == 2.0
     assert finger.collisions[0].newton.mu == 0.8
     assert finger.rigid_body.inertia is None
-    assert not finger.inertia_from_source
     assert finger.replace_inertial
 
     joint = descriptor.get_joint_desc("arm_joint")
@@ -268,6 +332,92 @@ def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
     assert joint.newton.target_ke == 10.0
     assert joint.lower_limit == -1.0
     assert joint.upper_limit == 1.0
+
+
+@pytest.mark.parametrize(
+    ("cfg", "error_type"),
+    [
+        (
+            ArticulationCfg(
+                uid="robot",
+                fpath="robot.urdf",
+                link_attrs={
+                    "missing": LinkPhysicsOverrideCfg(
+                        link_names_expr=["missing_.*"],
+                    )
+                },
+            ),
+            ValueError,
+        ),
+        (
+            ArticulationCfg(
+                uid="robot",
+                fpath="robot.urdf",
+                link_attrs={
+                    "first": LinkPhysicsOverrideCfg(
+                        link_names_expr=["finger_.*"],
+                        attrs=RigidBodyAttributesOverrideCfg(mass=2.0),
+                        replace_inertial=True,
+                    ),
+                    "second": LinkPhysicsOverrideCfg(
+                        link_names_expr=["finger_left"],
+                        attrs=RigidBodyAttributesOverrideCfg(mass=3.0),
+                    ),
+                },
+            ),
+            ValueError,
+        ),
+        (
+            ArticulationCfg(
+                uid="robot",
+                fpath="robot.urdf",
+                drive_pros=JointDrivePropertiesCfg(stiffness={"missing_.*": 10.0}),
+            ),
+            ValueError,
+        ),
+        (
+            ArticulationCfg(
+                uid="robot",
+                fpath="robot.urdf",
+                drive_pros=JointDrivePropertiesCfg(
+                    stiffness={"arm_.*": "not-a-number"}
+                ),
+            ),
+            TypeError,
+        ),
+        (
+            ArticulationCfg(
+                uid="robot",
+                fpath="robot.urdf",
+                qpos_limits={"arm_.*": [1.0, -1.0]},
+            ),
+            ValueError,
+        ),
+    ],
+    ids=[
+        "unmatched-link",
+        "overlapping-link-groups",
+        "unmatched-joint",
+        "non-numeric-joint-property",
+        "invalid-qpos-limit",
+    ],
+)
+def test_articulation_config_validation_failure_is_atomic(
+    cfg: ArticulationCfg,
+    error_type: type[Exception],
+) -> None:
+    descriptor = _resolved_articulation_desc()
+    before = copy.deepcopy(descriptor)
+
+    with pytest.raises(error_type):
+        configure_articulation_desc(descriptor, cfg)
+
+    _assert_property_tree_equal(descriptor, before)
+    finger = descriptor.get_link_desc("finger_left")
+    np.testing.assert_array_equal(
+        finger.rigid_body.inertia,
+        np.ones(3, dtype=np.float32),
+    )
 
 
 def test_usd_articulation_uses_the_same_exact_name_configuration() -> None:

@@ -223,20 +223,6 @@ def articulation_desc_from_cfg(
             "ArticulationCfg.use_usd_properties only applies to USD sources and "
             "is ignored for URDF articulations."
         )
-    if newton_solver_type is not None and (
-        cfg.min_position_iters != 4 or cfg.min_velocity_iters != 1
-    ):
-        logger.log_warning(
-            "Per-articulation solver iteration counts are not exposed by the "
-            "Newton Spawn facade and were not applied."
-        )
-    if newton_solver_type is not None and cfg.drive_pros.drive_type == "acceleration":
-        raise NotImplementedError(
-            "Newton Spawn does not have an exact acceleration-drive mode; "
-            "use drive_type='force' or drive_type='none'."
-        )
-
-    target_mode = {"force": 3, "none": 0}.get(cfg.drive_pros.drive_type)
     return ArticulationDesc(
         name=_articulation_uid(cfg.uid, str(path)),
         pose=_pose_from_cfg(cfg),
@@ -247,13 +233,6 @@ def articulation_desc_from_cfg(
         urdf_fix_root_link=bool(cfg.fix_base),
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
-        newton_drive=(
-            None if target_mode is None else NewtonJointDesc(target_mode=target_mode)
-        ),
-        newton_collision=_compile_newton_collision(
-            cfg.attrs,
-            newton_solver_type=newton_solver_type,
-        ),
     )
 
 
@@ -291,18 +270,26 @@ def configure_articulation_desc(
         )
     if _is_usd_path(cfg.fpath) and cfg.use_usd_properties:
         return desc
+    if newton_solver_type is not None and (
+        cfg.min_position_iters != 4 or cfg.min_velocity_iters != 1
+    ):
+        logger.log_warning(
+            "Per-articulation solver iteration counts are not exposed by the "
+            "Newton Spawn facade and were not applied."
+        )
+    if newton_solver_type is not None and cfg.drive_pros.drive_type == "acceleration":
+        raise NotImplementedError(
+            "Newton Spawn does not have an exact acceleration-drive mode; "
+            "use drive_type='force' or drive_type='none'."
+        )
 
-    rigid_body, collision = _compile_link_properties(
+    default_link_properties = _compile_link_properties(
         cfg.attrs,
         newton_solver_type=newton_solver_type,
     )
-    for link in desc.links:
-        desc.set_link_properties(
-            link.name,
-            rigid_body=rigid_body,
-            collision=collision,
-            replace_inertial=False,
-        )
+    link_properties = {
+        link.name: (*default_link_properties, False) for link in desc.links
+    }
 
     claimed_links: dict[str, str] = {}
     link_names = [link.name for link in desc.links]
@@ -323,35 +310,73 @@ def configure_articulation_desc(
                     f"{group_name!r}."
                 )
             claimed_links[link_name] = group_name
-            desc.set_link_properties(
-                link_name,
-                rigid_body=group_body,
-                collision=group_collision,
-                replace_inertial=group.replace_inertial,
+            link_properties[link_name] = (
+                group_body,
+                group_collision,
+                group.replace_inertial,
             )
 
-    _configure_joint_properties(desc, cfg)
+    joint_properties, joint_armatures, joint_limits = _compile_joint_properties(
+        desc,
+        cfg,
+    )
+
+    # Commit only after every regex, value, and limit has been validated. Each
+    # source-resolved item receives one exact-name update.
+    for link_name, (rigid_body, collision, replace_inertial) in link_properties.items():
+        desc.set_link_properties(
+            link_name,
+            rigid_body=rigid_body,
+            collision=collision,
+            replace_inertial=replace_inertial,
+        )
+    for joint_name, (dexsim, newton) in joint_properties.items():
+        lower_limit, upper_limit = joint_limits.get(joint_name, (None, None))
+        desc.set_joint_properties(
+            joint_name,
+            lower_limit=lower_limit,
+            upper_limit=upper_limit,
+            armature=joint_armatures.get(joint_name),
+            dexsim=dexsim,
+            newton=newton,
+        )
     return desc
 
 
-def _configure_joint_properties(
+def _compile_joint_properties(
     desc: ArticulationDesc,
     cfg: ArticulationCfg,
-) -> None:
+) -> tuple[
+    dict[str, tuple[DexsimJointDesc, NewtonJointDesc]],
+    dict[str, float],
+    dict[str, tuple[float, float]],
+]:
     joint_names = [joint.name for joint in desc.joints]
     drive_type = cfg.drive_pros.drive_type
-    dexsim_mode = {
-        "force": DriveType.FORCE,
-        "acceleration": DriveType.ACCELERATION,
-        "none": DriveType.NONE,
-    }[drive_type]
+    try:
+        dexsim_mode = {
+            "force": DriveType.FORCE,
+            "acceleration": DriveType.ACCELERATION,
+            "none": DriveType.NONE,
+        }[drive_type]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported joint drive type {drive_type!r}.") from exc
     newton_mode = {"force": 3, "none": 0}.get(drive_type)
-    for joint_name in joint_names:
-        desc.set_joint_properties(
-            joint_name,
-            dexsim=DexsimJointDesc(drive_mode=dexsim_mode),
-            newton=NewtonJointDesc(target_mode=newton_mode),
+    joint_properties = {
+        joint_name: (
+            DexsimJointDesc(drive_mode=dexsim_mode),
+            NewtonJointDesc(target_mode=newton_mode),
         )
+        for joint_name in joint_names
+    }
+    joint_armatures: dict[str, float] = {}
+    property_fields = {
+        "stiffness": ("stiffness", "target_ke"),
+        "damping": ("damping", "target_kd"),
+        "max_effort": ("max_force", "effort_limit"),
+        "max_velocity": ("max_velocity", "velocity_limit"),
+        "friction": ("joint_friction", "friction"),
+    }
 
     for property_name in (
         "stiffness",
@@ -383,8 +408,17 @@ def _configure_joint_properties(
                     f"Articulation drive rule for {joint_name!r} and "
                     f"{property_name!r} must contain a numeric value."
                 )
-            _set_joint_property(desc, joint_name, property_name, value)
+            scalar = float(value)
+            dexsim, newton = joint_properties[joint_name]
+            if property_name == "armature":
+                joint_armatures[joint_name] = scalar
+                newton.armature = scalar
+            else:
+                dexsim_field, newton_field = property_fields[property_name]
+                setattr(dexsim, dexsim_field, scalar)
+                setattr(newton, newton_field, scalar)
 
+    joint_limits: dict[str, tuple[float, float]] = {}
     if isinstance(cfg.qpos_limits, dict):
         indices, _, values = resolve_matching_names_values(
             cfg.qpos_limits,
@@ -397,49 +431,19 @@ def _configure_joint_properties(
                     f"qpos_limits for {joint_names[index]!r} must contain "
                     "[lower, upper]."
                 )
-            desc.set_joint_properties(
-                joint_names[index],
-                lower_limit=float(limit_values[0]),
-                upper_limit=float(limit_values[1]),
-            )
+            lower_limit, upper_limit = map(float, limit_values)
+            if not math.isfinite(lower_limit) or not math.isfinite(upper_limit):
+                raise ValueError(
+                    f"qpos_limits for {joint_names[index]!r} must be finite."
+                )
+            if lower_limit > upper_limit:
+                raise ValueError(
+                    f"qpos_limits for {joint_names[index]!r} has lower limit "
+                    f"{lower_limit} greater than upper limit {upper_limit}."
+                )
+            joint_limits[joint_names[index]] = (lower_limit, upper_limit)
 
-
-def _set_joint_property(
-    desc: ArticulationDesc,
-    joint_name: str,
-    property_name: str,
-    value: numbers.Number,
-) -> None:
-    scalar = float(value)
-    dexsim = DexsimJointDesc()
-    newton = NewtonJointDesc(target_mode=None)
-    armature = None
-    if property_name == "stiffness":
-        dexsim.stiffness = scalar
-        newton.target_ke = scalar
-    elif property_name == "damping":
-        dexsim.damping = scalar
-        newton.target_kd = scalar
-    elif property_name == "max_effort":
-        dexsim.max_force = scalar
-        newton.effort_limit = scalar
-    elif property_name == "max_velocity":
-        dexsim.max_velocity = scalar
-        newton.velocity_limit = scalar
-    elif property_name == "friction":
-        dexsim.joint_friction = scalar
-        newton.friction = scalar
-    elif property_name == "armature":
-        armature = scalar
-        newton.armature = scalar
-    else:
-        raise ValueError(f"Unsupported joint property {property_name!r}.")
-    desc.set_joint_properties(
-        joint_name,
-        armature=armature,
-        dexsim=dexsim,
-        newton=newton,
-    )
+    return joint_properties, joint_armatures, joint_limits
 
 
 def _compile_rigid_physics(

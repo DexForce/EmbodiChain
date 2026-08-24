@@ -117,14 +117,6 @@ def articulation_desc_from_usd(
         cfg.disable_self_collision = not desc.enable_self_collision
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
     else:
-        if (
-            newton_solver_type is not None
-            and cfg.drive_pros.drive_type == "acceleration"
-        ):
-            raise NotImplementedError(
-                "Newton Spawn does not have an exact acceleration-drive mode; "
-                "use drive_type='force' or drive_type='none'."
-            )
         desc.fixed_base = bool(cfg.fix_base)
         desc.enable_self_collision = not bool(cfg.disable_self_collision)
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")

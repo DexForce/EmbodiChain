@@ -101,6 +101,8 @@ def test_commit_resolves_and_configures_before_finalize() -> None:
 
     def finalize() -> object:
         events.append("finalize")
+        builder.is_finalized = True
+        builder.result = result
         return result
 
     builder.resolve_sources = resolve_sources
@@ -121,8 +123,8 @@ def test_commit_resolves_and_configures_before_finalize() -> None:
     )
 
     assert scene.commit() is result
+    scene.resolve_sources()
     assert events == ["resolve", "configure", "finalize"]
-    assert scene._assets["robot"].source_configured
 
 
 def test_dynamic_articulation_is_configured_before_backend_add() -> None:
@@ -157,7 +159,55 @@ def test_dynamic_articulation_is_configured_before_backend_add() -> None:
     )
 
     assert events == ["resolve", "configure", "add"]
-    assert scene._assets["robot"].source_configured
+
+
+def test_source_configuration_retries_failure_then_runs_only_once() -> None:
+    events: list[str] = []
+    descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
+    builder = SimpleNamespace(
+        is_finalized=False,
+        result=None,
+        replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
+        add_articulation=lambda value: value,
+    )
+
+    def resolve_sources() -> None:
+        events.append("resolve")
+        descriptor.links = [SimpleNamespace(name="base")]
+
+    attempts = 0
+
+    def configure(_value: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        events.append("configure")
+        if attempts == 1:
+            raise RuntimeError("configuration failed")
+
+    builder.resolve_sources = resolve_sources
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {}
+    scene.declare(
+        "articulation",
+        "robot",
+        descriptor,
+        configure_source=configure,
+    )
+
+    with pytest.raises(RuntimeError, match="configuration failed"):
+        scene.resolve_sources()
+    scene.resolve_sources()
+    scene.resolve_sources()
+
+    assert attempts == 2
+    assert events == [
+        "resolve",
+        "configure",
+        "resolve",
+        "configure",
+        "resolve",
+    ]
 
 
 class _RetryableArticulation(Articulation):

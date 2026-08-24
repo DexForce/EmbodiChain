@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import os
+import warnings as _warnings
+
 import dexsim
 import open3d as o3d
 
@@ -314,11 +316,28 @@ def _apply_link_physics_overrides(
         art.set_physical_attr(physical_attr, name, is_replace_inertial=replace_inertial)
 
 
-def default_articulation_clone_options() -> ObjectCloneOptions:
-    """Return clone options used when duplicating articulations across arenas."""
+def _warn_legacy_articulation_api(name: str) -> None:
+    _warnings.warn(
+        f"{name}() bypasses the Spawn ownership/configuration path and is "
+        "deprecated; declare the articulation through SimulationManager instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _default_articulation_clone_options() -> ObjectCloneOptions:
     options = ObjectCloneOptions()
     options.render.material = CloneStrategy.DEEP_COPY
     return options
+
+
+def default_articulation_clone_options() -> ObjectCloneOptions:
+    """Return legacy articulation clone options.
+
+    Deprecated: new scene code must use the Spawn declaration path.
+    """
+    _warn_legacy_articulation_api("default_articulation_clone_options")
+    return _default_articulation_clone_options()
 
 
 def default_rigid_object_clone_options() -> ObjectCloneOptions:
@@ -367,12 +386,16 @@ def spawn_articulation_entities(
     """Load one articulation prototype and clone it into additional arenas.
 
     DexSim configuration is applied once on the prototype before cloning.
+
+    Deprecated: use ``SimulationManager.add_articulation()`` or
+    ``SimulationManager.add_robot()``.
     """
+    _warn_legacy_articulation_api("spawn_articulation_entities")
     if cfg.uid is None:
         logger.log_error("Articulation uid must be set before spawning entities.")
 
     if clone_options is None:
-        clone_options = default_articulation_clone_options()
+        clone_options = _default_articulation_clone_options()
 
     source_env = env_list[0]
     prototype_name = f"{cfg.uid}_0"
@@ -380,7 +403,7 @@ def spawn_articulation_entities(
     prototype.set_name(prototype_name)
 
     if not cfg.use_usd_properties:
-        set_dexsim_articulation_cfg(prototype, cfg)
+        _set_dexsim_articulation_cfg(prototype, cfg)
 
     entities = [prototype]
     for env_idx in range(1, len(env_list)):
@@ -419,14 +442,19 @@ def spawn_usd_articulation_entities(
     cache_dir: str | None = None,
     clone_options: ObjectCloneOptions | None = None,
 ) -> list[Articulation]:
-    """Import one USD articulation prototype and clone it into additional arenas."""
+    """Import one USD articulation prototype and clone it into additional arenas.
+
+    Deprecated: use ``SimulationManager.add_articulation()`` or
+    ``SimulationManager.add_robot()``.
+    """
+    _warn_legacy_articulation_api("spawn_usd_articulation_entities")
     if cfg.uid is None:
         logger.log_error("Articulation uid must be set before spawning entities.")
     if len(env_list) == 0:
         return []
 
     if clone_options is None:
-        clone_options = default_articulation_clone_options()
+        clone_options = _default_articulation_clone_options()
 
     source_env = env_list[0]
     prototype_name = f"{cfg.uid}_0"
@@ -437,7 +465,7 @@ def spawn_usd_articulation_entities(
     prototype.set_name(prototype_name)
 
     if not cfg.use_usd_properties:
-        set_dexsim_articulation_cfg(prototype, cfg)
+        _set_dexsim_articulation_cfg(prototype, cfg)
 
     entities = [prototype]
     for env_idx in range(1, len(env_list)):
@@ -461,12 +489,21 @@ def set_dexsim_articulation_cfg(
     art: Articulation | SpawnedArticulation,
     cfg: ArticulationCfg,
 ) -> None:
-    """Apply EmbodiChain articulation cfg to a single DexSim articulation entity.
+    """Apply cfg through the deprecated raw DexSim articulation path.
 
     Args:
         art: DexSim articulation (or Newton skeleton carrier) to configure.
         cfg: EmbodiChain articulation configuration.
     """
+    _warn_legacy_articulation_api("set_dexsim_articulation_cfg")
+    _set_dexsim_articulation_cfg(art, cfg)
+
+
+def _set_dexsim_articulation_cfg(
+    art: Articulation | SpawnedArticulation,
+    cfg: ArticulationCfg,
+) -> None:
+    """Implement the retained legacy path for compatibility wrappers."""
 
     is_newton_art = hasattr(art, "dexsim_meta_links")
     lifecycle_state = getattr(getattr(art, "_mgr", None), "_lifecycle_state", None)

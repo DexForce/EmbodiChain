@@ -38,7 +38,6 @@ class _AssetDeclaration:
     descriptor: Any
     facade: Any | None
     source_configurator: Callable[[Any], None] | None = None
-    source_configured: bool = False
 
 
 class SpawnScene:
@@ -105,7 +104,7 @@ class SpawnScene:
             ):
                 self.builder.resolve_articulation_source(descriptor)
                 configure_source(descriptor)
-                declaration.source_configured = True
+                declaration.source_configurator = None
             add_name = {
                 "rigid_object": "add_object",
                 "articulation": "add_articulation",
@@ -125,10 +124,10 @@ class SpawnScene:
         self.builder.resolve_sources()
         for declaration in self._assets.values():
             configure = declaration.source_configurator
-            if configure is None or declaration.source_configured:
+            if configure is None:
                 continue
             configure(declaration.descriptor)
-            declaration.source_configured = True
+            declaration.source_configurator = None
 
     def track(
         self,

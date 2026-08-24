@@ -180,7 +180,6 @@ def main() -> None:
         physics_dt=1.0 / 100.0,
         physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer=args.renderer),
-        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(sim_cfg)
