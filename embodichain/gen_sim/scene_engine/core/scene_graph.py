@@ -27,6 +27,9 @@ __all__ = [
     "OrientationState",
     "PlanarRelationType",
     "SceneConstraintType",
+    "SceneGraph",
+    "SceneGraphNode",
+    "SceneGraphRelation",
     "SupportRelationType",
     "TABLE_OBJECT_ID",
     "TABLE_REGIONS",
@@ -279,8 +282,11 @@ class GeneratedSceneGraph:
 
         # Resolve chained planar parent inheritance before adding final relations.
         self._resolve_planar_parent_updates(planar_relation_updates)
-        for source_id, relation, target_id in planar_relation_updates:
+        # Clear stale relations before appending this batch so chained updates
+        # cannot remove a relation that an earlier update just requested.
+        for source_id in {source_id for source_id, _, _ in planar_relation_updates}:
             self._clear_incident_planar_relations(source_id)
+        for source_id, relation, target_id in planar_relation_updates:
             self.relations.append(
                 GeneratedSceneRelation(
                     source_id=source_id,
@@ -574,3 +580,11 @@ class GeneratedSceneGraph:
         if relation == "in_front_of":
             return "behind"
         return "in_front_of"
+
+
+# Preserve the pre-stack authoring names for callers already using the Scene
+# Engine edit API. The explicit ``Generated*`` names remain canonical for the
+# task-first pipeline and distinguish this graph from live simulator state.
+SceneGraph = GeneratedSceneGraph
+SceneGraphNode = GeneratedSceneNode
+SceneGraphRelation = GeneratedSceneRelation

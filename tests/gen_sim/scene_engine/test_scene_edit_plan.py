@@ -29,8 +29,8 @@ from embodichain.gen_sim.scene_engine.core.scene_edit_plan import (
     SceneEditPlan,
 )
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
-    GeneratedSceneGraph,
-    GeneratedSceneNode,
+    SceneGraph,
+    SceneGraphNode,
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_understanding import (
@@ -43,7 +43,7 @@ from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparat
 )
 
 
-def _scene_and_graph() -> tuple[Scene, GeneratedSceneGraph]:
+def _scene_and_graph() -> tuple[Scene, SceneGraph]:
     scene = Scene(
         objects=[
             SceneObject(
@@ -69,15 +69,15 @@ def _scene_and_graph() -> tuple[Scene, GeneratedSceneGraph]:
             ),
         ]
     )
-    scene_graph = GeneratedSceneGraph(
+    scene_graph = SceneGraph(
         nodes=[
-            GeneratedSceneNode(object_id="table", parent_id=None),
-            GeneratedSceneNode(
+            SceneGraphNode(object_id="table", parent_id=None),
+            SceneGraphNode(
                 object_id="book_001",
                 parent_id="table",
                 parent_relation="on",
             ),
-            GeneratedSceneNode(
+            SceneGraphNode(
                 object_id="orange_001",
                 parent_id="book_001",
                 parent_relation="on",
@@ -171,7 +171,7 @@ def test_scene_edit_parser_assigns_ids_to_same_category_adds_in_order() -> None:
                 "category": "orange",
                 "name": "small_orange",
                 "description": "A small round orange with a textured peel.",
-                "orientation_state": None,
+                "orientation_state": "lying",
             },
         ]
     }
@@ -184,6 +184,59 @@ def test_scene_edit_parser_assigns_ids_to_same_category_adds_in_order() -> None:
         "orange_002",
         "orange_003",
     ]
+    assert [operation.orientation_state for operation in operations] == [
+        None,
+        "lying",
+    ]
+
+
+@pytest.mark.parametrize(
+    "unsafe_category",
+    ["../outside", "cup/../outside", r"cup\\outside"],
+)
+def test_scene_edit_parser_rejects_path_traversal_add_categories(
+    unsafe_category: str,
+) -> None:
+    """Reject unsafe categories before generated IDs reach asset output paths."""
+    scene, _ = _scene_and_graph()
+    draft = {
+        "operations": [
+            {
+                "op": "add",
+                "object_id": None,
+                "target_id": None,
+                "relation": None,
+                "table_region": None,
+                "category": unsafe_category,
+                "name": "unsafe cup",
+                "description": "A small cup.",
+                "orientation_state": None,
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match="category must be lower-case"):
+        _parse_scene_edit_operations(draft, scene=scene)
+
+
+def test_scene_edit_plan_rejects_a_changed_move_orientation_state() -> None:
+    scene, scene_graph = _scene_and_graph()
+    scene_graph.node_by_id()["book_001"].orientation_state = "lying"
+
+    with pytest.raises(ValueError, match="may only preserve"):
+        SceneEditPlan(
+            scene=scene,
+            scene_graph=scene_graph,
+            operations=[
+                SceneEditOperation(
+                    op="move",
+                    object_id="book_001",
+                    target_id="table",
+                    relation="on",
+                    orientation_state="standing",
+                )
+            ],
+        )
 
 
 def test_scene_edit_plan_rejects_targets_outside_the_input_scene() -> None:
@@ -429,6 +482,7 @@ def test_scene_edit_graph_builder_adds_unpositioned_objects_on_the_table() -> No
                 category="cup",
                 name="green cup",
                 description="A small green ceramic cup.",
+                orientation_state="standing",
             )
         ],
     )
@@ -441,10 +495,12 @@ def test_scene_edit_graph_builder_adds_unpositioned_objects_on_the_table() -> No
     added_node = updated_scene_graph.node_by_id()["cup_001"]
     assert added_node.parent_id == "table"
     assert added_node.parent_relation == "on"
+    assert added_node.orientation_state == "standing"
 
 
 def test_scene_edit_graph_builder_updates_move_on_parent() -> None:
     scene, scene_graph = _scene_and_graph()
+    scene_graph.node_by_id()["orange_001"].orientation_state = "lying"
     plan = SceneEditPlan(
         scene=scene,
         scene_graph=scene_graph,
@@ -454,6 +510,7 @@ def test_scene_edit_graph_builder_updates_move_on_parent() -> None:
                 object_id="orange_001",
                 target_id="table",
                 relation="on",
+                orientation_state="lying",
             )
         ],
     )
@@ -464,6 +521,7 @@ def test_scene_edit_graph_builder_updates_move_on_parent() -> None:
     )
 
     assert updated_scene_graph.node_by_id()["orange_001"].parent_id == "table"
+    assert updated_scene_graph.node_by_id()["orange_001"].orientation_state == "lying"
 
 
 def test_scene_edit_graph_builder_adds_planar_relation_with_target_parent() -> None:

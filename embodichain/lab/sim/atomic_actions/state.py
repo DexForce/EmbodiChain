@@ -132,12 +132,7 @@ def _broadcast_joint_position(
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ArticulationJointState:
-    """Verified symbolic state for one named articulation joint.
-
-    ``position`` may describe one scalar joint or a multi-DoF joint. The
-    surrounding :class:`TaskState` supplies the stable articulation/joint key;
-    this value only owns row-local verified measurements and activity.
-    """
+    """Verified symbolic state for one named articulation joint."""
 
     position: torch.Tensor
     """Joint positions with shape ``(J,)`` or ``(B, J)``."""
@@ -371,7 +366,7 @@ class TaskState:
     """Device used by per-environment masks and relation tensors."""
 
     held_objects: Mapping[str, HeldObjectState] = field(default_factory=dict)
-    """Held-object relations keyed by stable logical task-state resource."""
+    """Single-manipulator held-object relations keyed by control resource."""
 
     coordinated_held_objects: Mapping[tuple[str, str], CoordinatedHeldObjectState] = (
         field(default_factory=dict)
@@ -413,7 +408,9 @@ class TaskState:
                     "CoordinatedHeldObjectState objects."
                 )
             normalized_coordinated[resources] = _normalize_coordinated_held(
-                value, batch_size=self.batch_size, device=device
+                value,
+                batch_size=self.batch_size,
+                device=device,
             )
 
         normalized_articulation: dict[tuple[str, str], ArticulationJointState] = {}
@@ -474,6 +471,22 @@ class TaskState:
         """Return the object held by ``resource``, if any."""
         return self.held_objects.get(resource)
 
+    def get_coordinated_held_object(
+        self,
+        first_resource: str,
+        second_resource: str,
+    ) -> CoordinatedHeldObjectState | None:
+        """Return the relation for an ordered resource pair, if any."""
+        return self.coordinated_held_objects.get((first_resource, second_resource))
+
+    def get_articulation_joint_state(
+        self,
+        articulation_id: str,
+        joint_id: str,
+    ) -> ArticulationJointState | None:
+        """Return verified state for one canonical articulation joint."""
+        return self.articulation_joints.get((articulation_id, joint_id))
+
     def held_object_mask(self, resource: str) -> torch.Tensor:
         """Return environments where ``resource`` holds an object.
 
@@ -520,22 +533,6 @@ class TaskState:
             assert other.env_mask is not None
             exclusive &= ~other.env_mask
         return exclusive
-
-    def get_coordinated_held_object(
-        self,
-        first_resource: str,
-        second_resource: str,
-    ) -> CoordinatedHeldObjectState | None:
-        """Return the relation for an ordered resource pair, if any."""
-        return self.coordinated_held_objects.get((first_resource, second_resource))
-
-    def get_articulation_joint_state(
-        self,
-        articulation_id: str,
-        joint_id: str,
-    ) -> ArticulationJointState | None:
-        """Return verified state for one canonical articulation joint."""
-        return self.articulation_joints.get((articulation_id, joint_id))
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -655,13 +652,7 @@ class EntityState:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ObservedArticulationJointState:
-    """Live measured state for one scene articulation joint.
-
-    This value belongs to :class:`SceneSnapshot`, not :class:`TaskState`.
-    ``ArticulationJointState`` records a verified symbolic effect after an
-    operation, while this class records the physical position used by online
-    grounding and recovery replans.
-    """
+    """Live measured state for one scene articulation joint."""
 
     position: torch.Tensor
     """Measured joint position with shape ``(J,)`` or ``(B, J)``."""
@@ -1025,16 +1016,16 @@ class PlanningContext:
         """Single-resource held-object relations."""
         return self.task.held_objects
 
-    def get_held_object(self, resource: str) -> HeldObjectState | None:
-        """Return the object held by ``resource``, if any."""
-        return self.task.get_held_object(resource)
-
     @property
     def coordinated_held_objects(
         self,
     ) -> Mapping[tuple[str, str], CoordinatedHeldObjectState]:
         """Coordinated held-object relations."""
         return self.task.coordinated_held_objects
+
+    def get_held_object(self, resource: str) -> HeldObjectState | None:
+        """Return the object held by ``resource``, if any."""
+        return self.task.get_held_object(resource)
 
     def get_coordinated_held_object(
         self,
@@ -1043,19 +1034,6 @@ class PlanningContext:
     ) -> CoordinatedHeldObjectState | None:
         """Return a coordinated held-object relation, if any."""
         return self.task.get_coordinated_held_object(first_resource, second_resource)
-
-    def require_control_dt(self) -> float:
-        """Return the explicit command period required for interpolation.
-
-        Raises:
-            ValueError: If the caller did not provide ``control_dt``.
-        """
-        if self.control_dt is None:
-            raise ValueError(
-                "This action performs interpolation and requires an explicit "
-                "PlanningContext.control_dt."
-            )
-        return self.control_dt
 
     @property
     def articulation_joints(
@@ -1071,6 +1049,19 @@ class PlanningContext:
     ) -> ArticulationJointState | None:
         """Return verified state for one canonical articulation joint."""
         return self.task.get_articulation_joint_state(articulation_id, joint_id)
+
+    def require_control_dt(self) -> float:
+        """Return the explicit command period required for interpolation.
+
+        Raises:
+            ValueError: If the caller did not provide ``control_dt``.
+        """
+        if self.control_dt is None:
+            raise ValueError(
+                "This action performs interpolation and requires an explicit "
+                "PlanningContext.control_dt."
+            )
+        return self.control_dt
 
     def project(
         self,

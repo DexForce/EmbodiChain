@@ -216,7 +216,11 @@ def test_scene_graph_initialization_uses_container_orientation_states(
     tmp_path: Path,
 ) -> None:
     class VLM:
+        def __init__(self) -> None:
+            self.user_prompt: str | None = None
+
         def complete(self, **_: object) -> str:
+            self.user_prompt = _["user_prompt"]  # type: ignore[assignment,index]
             return json.dumps(
                 {
                     "orientation_states": [
@@ -257,14 +261,81 @@ def test_scene_graph_initialization_uses_container_orientation_states(
         ]
     )
 
+    vlm = VLM()
+    scene_graph = scene_understanding._initialize_scene_graph_from_segmented_scene(
+        scene,
+        asset_mask_id_overlay_path=overlay_path,
+        vlm_client=vlm,  # type: ignore[arg-type]
+    )
+
+    assert json.loads(vlm.user_prompt or "{}") == {
+        "asset_ids": ["bottle_001", "book_001"],
+    }
+    assert scene_graph.node_by_id()["bottle_001"].orientation_state == "standing"
+    assert scene_graph.node_by_id()["book_001"].orientation_state == "lying"
+
+
+def test_scene_graph_initialization_retries_a_response_containing_table(
+    tmp_path: Path,
+) -> None:
+    class VLM:
+        def __init__(self) -> None:
+            self.responses = [
+                json.dumps(
+                    {
+                        "orientation_states": [
+                            {"object_id": "table", "orientation_state": None},
+                            {
+                                "object_id": "bottle_001",
+                                "orientation_state": "standing",
+                            },
+                        ]
+                    }
+                ),
+                json.dumps(
+                    {
+                        "orientation_states": [
+                            {
+                                "object_id": "bottle_001",
+                                "orientation_state": "standing",
+                            },
+                        ]
+                    }
+                ),
+            ]
+
+        def complete(self, **_: object) -> str:
+            return self.responses.pop(0)
+
+    overlay_path = tmp_path / "asset_masks_with_ids.png"
+    overlay_path.write_bytes(b"png")
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="wooden table",
+                description="A wooden table.",
+            ),
+            SceneObject(
+                id="bottle_001",
+                kind="asset",
+                category="bottle",
+                name="blue bottle",
+                description="A blue bottle.",
+            ),
+        ]
+    )
+
     scene_graph = scene_understanding._initialize_scene_graph_from_segmented_scene(
         scene,
         asset_mask_id_overlay_path=overlay_path,
         vlm_client=VLM(),  # type: ignore[arg-type]
+        json_max_attempts=2,
     )
 
     assert scene_graph.node_by_id()["bottle_001"].orientation_state == "standing"
-    assert scene_graph.node_by_id()["book_001"].orientation_state == "lying"
 
 
 def test_scene_graph_initialization_requires_asset_mask_id_overlay(

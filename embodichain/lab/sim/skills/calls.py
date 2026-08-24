@@ -27,7 +27,6 @@ from typing import ClassVar, TypeAlias
 
 import torch
 
-from embodichain.utils.math import matrix_from_quat
 from embodichain.lab.sim.atomic_actions import (
     DisjointResourceSlots,
     DisjointSlotEndpoints,
@@ -286,13 +285,25 @@ class SemanticPose:
             position = self._position.unsqueeze(0)
         else:
             position = self._position
-        output = torch.eye(
+        w, x, y, z = quaternion.unbind(dim=-1)
+        output = torch.zeros(
+            quaternion.shape[0],
+            4,
             4,
             dtype=quaternion.dtype,
             device=quaternion.device,
-        ).repeat(quaternion.shape[0], 1, 1)
-        output[:, :3, :3] = matrix_from_quat(quaternion)
+        )
+        output[:, 0, 0] = 1.0 - 2.0 * (y * y + z * z)
+        output[:, 0, 1] = 2.0 * (x * y - z * w)
+        output[:, 0, 2] = 2.0 * (x * z + y * w)
+        output[:, 1, 0] = 2.0 * (x * y + z * w)
+        output[:, 1, 1] = 1.0 - 2.0 * (x * x + z * z)
+        output[:, 1, 2] = 2.0 * (y * z - x * w)
+        output[:, 2, 0] = 2.0 * (x * z - y * w)
+        output[:, 2, 1] = 2.0 * (y * z + x * w)
+        output[:, 2, 2] = 1.0 - 2.0 * (x * x + y * y)
         output[:, :3, 3] = position
+        output[:, 3, 3] = 1.0
         return output[0] if was_unbatched else output
 
     def to_metadata(self) -> dict[str, object]:
@@ -441,23 +452,39 @@ class Place(SemanticCallSpec):
 
 @dataclass(frozen=True, slots=True, eq=False)
 class HandOver(SemanticCallSpec):
-    """Transfer a held object to another robot resource.
+    """Pick up, transfer, and place an object with two robot resources.
 
     Args:
-        object: Authoritative held-object reference.
+        object: Authoritative scene-object reference. The object must not
+            already be held when the unified action starts.
+        receiver: Optional second candidate resource ID. It is equivalent to
+            the ``destination`` resource slot and must agree with an explicit
+            map. The primitive chooses which candidate performs pickup from the
+            live object-to-root distances.
         final_target: Optional final object-space delivery pose.
-        resources: Optional ``source`` and ``destination`` resource overrides.
+        resources: Optional skill-local resource overrides.
     """
 
     call_kind: ClassVar[str] = "hand_over"
 
     object: SceneObjectRef
+    receiver: str | None = None
     final_target: SemanticPose | None = None
 
     def __post_init__(self) -> None:
         SemanticCallSpec.__post_init__(self)
         if type(self.object) is not SceneObjectRef:
             raise TypeError("HandOver.object must be a SceneObjectRef.")
+        resources = dict(self.resources)
+        if self.receiver is not None:
+            _validate_identifier(self.receiver, field_name="HandOver.receiver")
+            selected = resources.get("destination")
+            if selected is not None and selected != self.receiver:
+                raise ValueError(
+                    "HandOver.receiver conflicts with resources['destination']."
+                )
+            resources["destination"] = self.receiver
+        object.__setattr__(self, "resources", _snapshot_resources(resources))
         if self.final_target is not None:
             if type(self.final_target) is not SemanticPose:
                 raise TypeError("HandOver.final_target must be a SemanticPose or None.")
@@ -466,76 +493,6 @@ class HandOver(SemanticCallSpec):
                 "final_target",
                 self.final_target.snapshot(),
             )
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class OperateArticulation(SemanticCallSpec):
-    """Operate one registered articulation through a typed handle affordance.
-
-    Select either a named affordance target or an explicit absolute joint
-    position plus handle-relative displacement. Grounding captures the current
-    live joint position as the source of that declared stroke. Recovery
-    replans then combine the latest handle pose and joint position to execute
-    only the remaining signed displacement.
-
-    Args:
-        articulation: Authoritative articulation reference.
-        handle: Optional explicit operation affordance. Omission requests the
-            capability-scoped default registered on the articulation.
-        target: Optional target name registered by the affordance.
-        target_position: Explicit absolute desired joint position.
-        target_displacement: Explicit full signed operation displacement from
-            the joint position and handle pose captured during grounding.
-        resources: Optional skill-local resource overrides.
-    """
-
-    call_kind: ClassVar[str] = "operate_articulation"
-
-    articulation: SceneArticulationRef
-    handle: SceneAffordanceRef | None = None
-    target: str | None = None
-    target_position: float | None = None
-    target_displacement: float | None = None
-
-    def __post_init__(self) -> None:
-        SemanticCallSpec.__post_init__(self)
-        if type(self.articulation) is not SceneArticulationRef:
-            raise TypeError(
-                "OperateArticulation.articulation must be a SceneArticulationRef."
-            )
-        if self.handle is not None and type(self.handle) is not SceneAffordanceRef:
-            raise TypeError(
-                "OperateArticulation.handle must be a SceneAffordanceRef or None."
-            )
-        named = self.target is not None
-        explicit_position = self.target_position is not None
-        explicit_displacement = self.target_displacement is not None
-        if named:
-            _validate_identifier(
-                self.target,
-                field_name="OperateArticulation.target",
-            )
-            if explicit_position or explicit_displacement:
-                raise ValueError(
-                    "OperateArticulation.target is mutually exclusive with "
-                    "target_position and target_displacement."
-                )
-            return
-        if not (explicit_position and explicit_displacement):
-            raise ValueError(
-                "OperateArticulation requires either target or the explicit "
-                "target_position and target_displacement pair."
-            )
-        for field_name in ("target_position", "target_displacement"):
-            value = getattr(self, field_name)
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise TypeError(
-                    f"OperateArticulation.{field_name} must be a finite scalar."
-                )
-            normalized = float(value)
-            if not math.isfinite(normalized):
-                raise ValueError(f"OperateArticulation.{field_name} must be finite.")
-            object.__setattr__(self, field_name, normalized)
 
 
 DeclarativeValue: TypeAlias = (
@@ -679,6 +636,8 @@ class SemanticCallDescriptor:
     Args:
         call_id: Stable semantic call identifier.
         spec_type: Exact public call value type.
+        skill_id: Atomic skill identifier installed separately on an engine.
+        binding_contract: Robot-independent resource requirements.
         schema_version: Explicit configuration payload schema version.
         target_descriptor: Exact atomic goal/options/resource contract. It is
             inferred and non-overridable for curated calls and required for
@@ -687,6 +646,8 @@ class SemanticCallDescriptor:
 
     call_id: str
     spec_type: type[SemanticCallSpec]
+    skill_id: str | None = None
+    binding_contract: SkillBindingContract | None = None
     schema_version: int = 1
     target_descriptor: SkillDescriptor | None = None
 
@@ -696,14 +657,22 @@ class SemanticCallDescriptor:
             Pick,
             Place,
             HandOver,
-            OperateArticulation,
             RegisteredSemanticCall,
         ):
             raise TypeError(
-                "spec_type must be exactly Pick, Place, HandOver, "
-                "OperateArticulation, or RegisteredSemanticCall; extensions use "
-                "the registered payload contract rather than executable call "
-                "subclasses."
+                "spec_type must be exactly Pick, Place, HandOver, or "
+                "RegisteredSemanticCall; extensions use the registered payload "
+                "contract rather than executable call subclasses."
+            )
+        if self.skill_id is not None:
+            _validate_identifier(
+                self.skill_id,
+                field_name="SemanticCallDescriptor.skill_id",
+            )
+        if self.binding_contract is not None:
+            _validate_static_binding_contract(
+                self.binding_contract,
+                field_name="SemanticCallDescriptor.binding_contract",
             )
         if not isinstance(self.schema_version, int) or isinstance(
             self.schema_version, bool
@@ -725,8 +694,15 @@ class SemanticCallDescriptor:
         if self.spec_type is not RegisteredSemanticCall:
             expected = _builtin_call_target(self.spec_type)
             if (
-                self.target_descriptor is not None
-                and self.target_descriptor != expected
+                (self.skill_id is not None and self.skill_id != expected.skill_id)
+                or (
+                    self.binding_contract is not None
+                    and self.binding_contract != expected.binding_contract
+                )
+                or (
+                    self.target_descriptor is not None
+                    and self.target_descriptor != expected
+                )
             ):
                 raise ValueError(
                     f"Built-in semantic call {self.call_id!r} must target skill "
@@ -734,6 +710,8 @@ class SemanticCallDescriptor:
                     "Use RegisteredSemanticCall for extensions."
                 )
             object.__setattr__(self, "target_descriptor", expected)
+            object.__setattr__(self, "skill_id", expected.skill_id)
+            object.__setattr__(self, "binding_contract", expected.binding_contract)
         else:
             if self.target_descriptor is None:
                 raise TypeError(
@@ -748,14 +726,30 @@ class SemanticCallDescriptor:
                 or self.target_descriptor.binding_contract is None
             ):
                 raise ValueError(
-                    "Registered target_descriptor must be agent-visible and "
-                    "declare a binding contract."
+                    "Registered target_descriptor must be agent-visible and declare "
+                    "a binding contract."
                 )
+            if (
+                self.skill_id is not None
+                and self.target_descriptor.skill_id != self.skill_id
+            ) or (
+                self.binding_contract is not None
+                and self.target_descriptor.binding_contract != self.binding_contract
+            ):
+                raise ValueError(
+                    "Registered target_descriptor must match an explicitly supplied "
+                    "skill_id and binding_contract."
+                )
+            object.__setattr__(self, "skill_id", self.target_descriptor.skill_id)
+            object.__setattr__(
+                self,
+                "binding_contract",
+                self.target_descriptor.binding_contract,
+            )
         if self.spec_type is RegisteredSemanticCall and self.call_id in {
             Pick.call_kind,
             Place.call_kind,
             HandOver.call_kind,
-            OperateArticulation.call_kind,
             RegisteredSemanticCall.call_kind,
         }:
             raise ValueError(
@@ -763,20 +757,6 @@ class SemanticCallDescriptor:
             )
         if self.spec_type is RegisteredSemanticCall:
             _validate_registered_call_id(self.call_id)
-
-    @property
-    def skill_id(self) -> str:
-        """Return the atomic skill ID from the canonical target descriptor."""
-        assert self.target_descriptor is not None
-        return self.target_descriptor.skill_id
-
-    @property
-    def binding_contract(self) -> SkillBindingContract:
-        """Return the resource contract from the canonical target descriptor."""
-        assert self.target_descriptor is not None
-        contract = self.target_descriptor.binding_contract
-        assert contract is not None
-        return contract
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -838,7 +818,6 @@ class SemanticCallCatalog:
             Pick,
             Place,
             HandOver,
-            OperateArticulation,
             RegisteredSemanticCall,
         ):
             call_id = call.semantic_id
@@ -876,9 +855,6 @@ def _builtin_call_target(
     from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
         HandOver as HandOverAction,
     )
-    from embodichain.lab.sim.atomic_actions.primitives.operate_articulation import (
-        OperateArticulation as OperateArticulationAction,
-    )
     from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
     from embodichain.lab.sim.atomic_actions.primitives.place import Place as PlaceAction
 
@@ -886,7 +862,6 @@ def _builtin_call_target(
         Pick: PickUp.descriptor(),
         Place: PlaceAction.descriptor(),
         HandOver: HandOverAction.descriptor(),
-        OperateArticulation: OperateArticulationAction.descriptor(),
     }
     try:
         return targets[spec_type]
@@ -905,8 +880,10 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
         SemanticCallDescriptor(
             call_id=spec_type.call_kind,
             spec_type=spec_type,
+            skill_id=_builtin_call_target(spec_type).skill_id,
+            binding_contract=_builtin_call_target(spec_type).binding_contract,
         )
-        for spec_type in (Pick, Place, HandOver, OperateArticulation)
+        for spec_type in (Pick, Place, HandOver)
     )
     return SemanticCallCatalog(descriptors)
 
@@ -914,7 +891,6 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
 __all__ = [
     "DeclarativeValue",
     "HandOver",
-    "OperateArticulation",
     "Pick",
     "Place",
     "PlaceRelationTarget",

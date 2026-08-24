@@ -26,7 +26,6 @@ from embodichain.lab.gym.envs.expert_program.cfg import (
     ExpertProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
-    OperateArticulationCfg,
     PickCfg,
     PlaceCfg,
     ProgramNodeCfg,
@@ -60,7 +59,6 @@ _CURATED_CALL_TYPES = (
     PickCfg,
     PlaceCfg,
     HandOverCfg,
-    OperateArticulationCfg,
 )
 
 
@@ -86,7 +84,7 @@ def _iter_calls(
     raise ExpertProgramDecodeError(
         "mllm_program_node_not_allowed",
         (*path, "kind"),
-        "The MLLM frontend permits only Version 1 sequential program nodes.",
+        "The MLLM frontend permits only sequential schema Version 2 program nodes.",
     )
 
 
@@ -123,15 +121,15 @@ def _validate_mllm_policy(
         raise ExpertProgramDecodeError(
             "mllm_schema_version_not_allowed",
             ("schema_version",),
-            "The MLLM frontend permits only Expert Program schema Version 1.",
+            "The MLLM frontend permits only Expert Program schema Version 2.",
         )
     for call, path in _iter_calls(config.program, path=("program",)):
         if type(call) not in _CURATED_CALL_TYPES:
             raise ExpertProgramDecodeError(
                 "mllm_call_not_allowed",
                 (*path, "kind"),
-                "The MLLM frontend permits only curated pick, place, hand_over, "
-                "and operate_articulation calls.",
+                "The MLLM frontend permits only curated pick, place, and "
+                "hand_over calls.",
             )
         raw_call = _value_at_path(raw_payload, path)
         if type(raw_call) is not dict:
@@ -153,12 +151,6 @@ def _validate_mllm_policy(
                 (*path, "receiver"),
                 "MLLM responses cannot select a hand-over receiver resource.",
             )
-        if type(call) is OperateArticulationCfg and call.target is None:
-            raise ExpertProgramDecodeError(
-                "mllm_articulation_target_not_allowed",
-                (*path, "target_position"),
-                "MLLM articulation calls must select a host-declared named target.",
-            )
         if call.resources:
             raise ExpertProgramDecodeError(
                 "mllm_resource_override_not_allowed",
@@ -179,9 +171,9 @@ def decode_mllm_expert_program(
     The model response is a single plain JSON object containing
     ``schema_version``, ``program_id``, ``targets``, and ``program``. The trusted
     host supplies ``integration``; a response attempting to select its own
-    integration is rejected rather than silently overwritten. Version 1 curated
-    calls are the only admitted semantic surface, and robot resource overrides
-    are forbidden.
+    integration is rejected rather than silently overwritten. Only the
+    sequential subset of schema version 2 and curated built-in calls are
+    admitted, and robot resource overrides are forbidden.
 
     Args:
         response: Untrusted model response containing one plain JSON document.

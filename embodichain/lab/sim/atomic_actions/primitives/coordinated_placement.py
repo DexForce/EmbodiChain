@@ -25,15 +25,29 @@ import torch
 
 from embodichain.utils import logger
 
-from ..bindings import JointPositionTarget
-from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
-from ..core import AtomicAction
-from ..effects import StateDelta
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, TimedTrajectory, normalize_success_mask
-from ..policies import MotionPolicy
-from ..requirements import (
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
+from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
     SkillBindingContract,
@@ -43,14 +57,16 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     interpolate_hand_qpos,
     translate_pose_world,
 )
-from ._binding_contracts import make_manipulation_slot
-from ._helpers import (
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     plan_named_arm_trajectory,
-    repeat_qpos,
     require_shared_task_state_key,
+    repeat_qpos,
     resolve_batched_pose,
     resolve_object_target,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
 )
 
 
@@ -408,15 +424,6 @@ class CoordinatedPlacement(
             ],
             dim=1,
         )
-        involved_task_state_keys = {
-            resources.placing_task_state_key,
-            resources.support_task_state_key,
-        }
-        coordinated_removals = {
-            key: None
-            for key in state.task.coordinated_held_objects
-            if not involved_task_state_keys.isdisjoint(key)
-        }
         return self.build_plan(
             request,
             context,
@@ -514,17 +521,15 @@ class CoordinatedPlacement(
         support_task_state_key = resources.support_task_state_key
         placing_held_object = state.get_held_object(placing_task_state_key)
         if placing_held_object is None:
-            logger.log_error(
+            raise ValueError(
                 "CoordinatedPlacement requires an object held by placing "
-                f"task-state resource {placing_task_state_key!r}.",
-                ValueError,
+                f"task-state resource {placing_task_state_key!r}."
             )
         support_held_object = state.get_held_object(support_task_state_key)
         if support_held_object is None:
-            logger.log_error(
+            raise ValueError(
                 "CoordinatedPlacement requires an object held by support "
-                f"task-state resource {support_task_state_key!r}.",
-                ValueError,
+                f"task-state resource {support_task_state_key!r}."
             )
         placing_height_offset = (
             options.placing_height_offset

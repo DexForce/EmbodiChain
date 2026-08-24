@@ -31,7 +31,13 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optim
     ParentSurfaceLayoutOptimizerConfig,
     ParentSurfaceLayoutProblem,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
+    GravitySettleBody,
+    GravitySettler,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    measure_scene_object_z_up_world_aabb,
+    scene_object_y_up_layout,
     translate_scene_object_y_up_by_z_up_delta,
     update_scene_object_y_up_pose_from_z_up_support,
 )
@@ -170,7 +176,7 @@ class SceneLayoutConstructor:
                     scene_object=assets_by_id[root_id],
                     support_region_z=table.support_surface_z,
                     center_xy=solved_xy,
-                    clearance_m=0.00,  # Directly place on the support surface.
+                    clearance_m=0.02,  # Lift dynamic roots before gravity settling.
                 )
                 self._updated_object_ids.add(root_id)
             self._propagate_descendant_delta(
@@ -178,6 +184,47 @@ class SceneLayoutConstructor:
                 root_id=root_id,
                 delta_xy=delta_xy,
             )
+        self._settle_table_group_dynamic_roots(
+            layout_problem=layout_problem,
+            group=group,
+            assets_by_id=assets_by_id,
+        )
+
+    def _settle_table_group_dynamic_roots(
+        self,
+        *,
+        layout_problem: SceneLayoutProblem,
+        group: SceneLayoutGroup,
+        assets_by_id: dict[str, SceneObject],
+    ) -> None:
+        """Settle edited table roots while their unedited siblings stay fixed."""
+        dynamic_root_ids = set(group.child_ids) & layout_problem.layout_variable_ids
+        if not dynamic_root_ids:
+            return
+        table = layout_problem.post_edit_scene.table
+        if table is None:
+            raise ValueError("Table gravity settling requires a table.")
+
+        settled_pose_by_id = GravitySettler(
+            table_body=GravitySettleBody(
+                scene_object=table,
+                y_up_layout=scene_object_y_up_layout(table),
+            ),
+            participant_bodies=[
+                GravitySettleBody(
+                    scene_object=assets_by_id[child_id],
+                    y_up_layout=scene_object_y_up_layout(assets_by_id[child_id]),
+                )
+                for child_id in group.child_ids
+            ],
+            dynamic_asset_ids=dynamic_root_ids,
+            static_asset_ids=set(group.child_ids) - dynamic_root_ids,
+        ).settle()
+        self._apply_settled_dynamic_poses(
+            scene=layout_problem.post_edit_scene,
+            assets_by_id=assets_by_id,
+            settled_pose_by_id=settled_pose_by_id,
+        )
 
     def _propagate_descendant_delta(
         self,
@@ -242,7 +289,7 @@ class SceneLayoutConstructor:
                     scene_object=parent_surface_problem.assets_by_id[child_id],
                     support_region_z=parent_surface_problem.parent_top_z,
                     center_xy=solved_xy,
-                    clearance_m=0.00,  # Directly place on the parent's top surface.
+                    clearance_m=0.02,  # Leave the standard settling clearance.
                 )
                 self._updated_object_ids.add(child_id)
             self._propagate_descendant_delta(
@@ -250,6 +297,56 @@ class SceneLayoutConstructor:
                 root_id=child_id,
                 delta_xy=delta_xy,
             )
+        table = layout_problem.post_edit_scene.table
+        if table is None:
+            raise ValueError("Parent gravity settling requires a table.")
+        dynamic_child_ids = set(group.child_ids) & layout_problem.layout_variable_ids
+        settled_pose_by_id = (
+            self.parent_surface_layout_optimizer.settle_dynamic_children(
+                table=table,
+                parent=parent_surface_problem.assets_by_id[group.parent_id],
+                problem=parent_surface_problem,
+                dynamic_child_ids=dynamic_child_ids,
+            )
+        )
+        self._apply_settled_dynamic_poses(
+            scene=layout_problem.post_edit_scene,
+            assets_by_id=parent_surface_problem.assets_by_id,
+            settled_pose_by_id=settled_pose_by_id,
+        )
+
+    def _apply_settled_dynamic_poses(
+        self,
+        *,
+        scene: Scene,
+        assets_by_id: dict[str, SceneObject],
+        settled_pose_by_id: dict[str, dict[str, list[float]]],
+    ) -> None:
+        """Write dynamic y-up poses and preserve their descendants' XY frame."""
+        for object_id, settled_pose in settled_pose_by_id.items():
+            previous_center_xy = self._current_xy_by_id[object_id]
+            asset = assets_by_id[object_id]
+            asset.pos = settled_pose["pos"]
+            asset.rot = settled_pose["rot"]
+            # Later BFS groups must start from the settled z-up AABB center.
+            settled_aabb = measure_scene_object_z_up_world_aabb(scene_object=asset)
+            settled_center_xy = [
+                (settled_aabb[0][0] + settled_aabb[1][0]) / 2.0,
+                (settled_aabb[0][1] + settled_aabb[1][1]) / 2.0,
+            ]
+            asset.center_xy = settled_center_xy
+            self._current_xy_by_id[object_id] = settled_center_xy
+            self._updated_object_ids.add(object_id)
+            if previous_center_xy is not None:
+                # Existing descendants retain their relative XY placement after settling.
+                self._propagate_descendant_delta(
+                    scene=scene,
+                    root_id=object_id,
+                    delta_xy=[
+                        settled_center_xy[0] - previous_center_xy[0],
+                        settled_center_xy[1] - previous_center_xy[1],
+                    ],
+                )
 
     def _build_problem(self) -> SceneLayoutProblem:
         """Build post-edit objects and preserve formal-scene centers as seeds."""

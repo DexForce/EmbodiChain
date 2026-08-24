@@ -237,7 +237,7 @@ class EndpointBinding:
     adapter_id: str
     target: RuntimeEndpointTarget
     task_state_key: str | None = None
-    """Symbolic task-state key; direct-core defaults to ``target.target_id``."""
+    """Symbolic task-state key; defaults to ``target.target_id``."""
 
     tracking_channels: Mapping[str, EndpointTrackingChannelBinding] = field(
         default_factory=dict

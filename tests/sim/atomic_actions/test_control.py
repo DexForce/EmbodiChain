@@ -174,64 +174,6 @@ def test_control_profile_is_resolved_from_robot_control_part() -> None:
         )
 
 
-def test_direct_binding_shares_motion_task_state_key_across_slot_endpoints() -> None:
-    resolved = _binding(_services())
-
-    assert resolved.endpoint("primary", "motion").task_state_key == "arm"
-    assert resolved.endpoint("primary", "grasp").task_state_key == "arm"
-
-
-def test_direct_binding_accepts_explicit_stable_task_state_key() -> None:
-    resolved = _services().bind_control_parts(
-        _contract(),
-        {"primary": {"motion": "arm", "grasp": "hand"}},
-        task_state_keys={"primary": "logical_manipulator"},
-    )
-
-    assert {endpoint.task_state_key for endpoint in resolved.endpoints} == {
-        "logical_manipulator"
-    }
-
-
-def test_direct_binding_without_motion_requires_unambiguous_task_state_key() -> None:
-    contract = SkillBindingContract(
-        slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(endpoint_id="grasp"),
-                    SkillEndpointRequirement(endpoint_id="support"),
-                ),
-            ),
-        )
-    )
-    endpoints = {"primary": {"grasp": "hand", "support": "arm"}}
-    services = _services()
-
-    with pytest.raises(ValueError, match="no 'motion'.*task_state_keys"):
-        services.bind_control_parts(contract, endpoints)
-
-    resolved = services.bind_control_parts(
-        contract,
-        endpoints,
-        task_state_keys={"primary": "logical_manipulator"},
-    )
-    assert {endpoint.task_state_key for endpoint in resolved.endpoints} == {
-        "logical_manipulator"
-    }
-
-
-def test_direct_binding_requires_exact_task_state_key_slot_coverage() -> None:
-    services = _services()
-
-    with pytest.raises(ValueError, match="cover the binding slots exactly"):
-        services.bind_control_parts(
-            _contract(),
-            {"primary": {"motion": "arm", "grasp": "hand"}},
-            task_state_keys={},
-        )
-
-
 def test_invocation_override_replaces_only_resolved_endpoint_snapshot() -> None:
     services = _services()
     override_source = torch.full((2,), 0.4)

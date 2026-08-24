@@ -139,17 +139,6 @@ def _validate_nonempty_string(value: object, *, field_name: str) -> str:
     return value
 
 
-def _add_exception_note(error: BaseException, note: str) -> None:
-    """Attach an exception note on every supported Python version."""
-    add_note = getattr(error, "add_note", None)
-    if callable(add_note):
-        add_note(note)
-        return
-    notes = list(getattr(error, "__notes__", ()))
-    notes.append(note)
-    error.__notes__ = notes
-
-
 def _snapshot_string_tuple(
     values: object,
     *,
@@ -653,11 +642,10 @@ def collect_demo_success_trials(
             except BaseException as error:
                 body_error = error
                 if executor_error is not None:
-                    _add_exception_note(
-                        body_error,
+                    body_error.add_note(
                         "Episode executor also failed before benchmark measurement "
                         f"completed: {type(executor_error).__name__}: "
-                        f"{executor_error}",
+                        f"{executor_error}"
                     )
                 raise
             finally:
@@ -669,9 +657,9 @@ def collect_demo_success_trials(
                         f"{type(discard_error).__name__}: {discard_error}"
                     )
                     if body_error is not None:
-                        _add_exception_note(body_error, discard_note)
+                        body_error.add_note(discard_note)
                     elif executor_error is not None:
-                        _add_exception_note(executor_error, discard_note)
+                        executor_error.add_note(discard_note)
                         raise executor_error
                     else:
                         raise
@@ -1119,9 +1107,8 @@ def _close_gym_demo_success_environment(env: Any) -> None:
     except BaseException as error:
         if close_error is None:
             raise
-        _add_exception_note(
-            close_error,
-            "Simulation cleanup also failed: " f"{type(error).__name__}: {error}",
+        close_error.add_note(
+            "Simulation cleanup also failed: " f"{type(error).__name__}: {error}"
         )
     if close_error is not None:
         raise close_error
@@ -1175,10 +1162,9 @@ def run_gym_demo_success_benchmark(
         try:
             _flush_simulation_cleanup_queue()
         except BaseException as cleanup_error:
-            _add_exception_note(
-                factory_error,
+            factory_error.add_note(
                 "Benchmark environment construction cleanup also failed: "
-                f"{type(cleanup_error).__name__}: {cleanup_error}",
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
             )
         raise
     body_error: BaseException | None = None
@@ -1201,10 +1187,9 @@ def run_gym_demo_success_benchmark(
         except BaseException as cleanup_error:
             if body_error is None:
                 raise
-            _add_exception_note(
-                body_error,
+            body_error.add_note(
                 "Benchmark environment cleanup also failed: "
-                f"{type(cleanup_error).__name__}: {cleanup_error}",
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
             )
 
 

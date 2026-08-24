@@ -123,6 +123,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``control_dt.py``
 * ``pickup.py``
 * ``move_held_object.py``
+* ``pour.py``
 * ``place.py``
 * ``assemble.py``
 * ``press.py``
@@ -143,6 +144,7 @@ video under ``outputs/videos``:
    python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/control_dt.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/pour.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/assemble.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
 
@@ -307,6 +309,7 @@ must be resolved from the latest scene snapshot:
        EndEffectorPoseGoal,
        RecoveryPolicy,
        SceneEntityPose,
+       TrackingPolicy,
    )
 
    invocation = ActionInvocation(
@@ -320,8 +323,11 @@ must be resolved from the latest scene snapshot:
        ),
        recovery_policy=RecoveryPolicy(
            max_replans=3,
-           tracking_error_threshold=0.05,
            goal_translation_threshold=0.02,
+       ),
+       tracking_policy=TrackingPolicy.joint_position(
+           in_flight_max_abs_error=0.05,
+           terminal_max_abs_error=0.05,
        ),
    )
 
@@ -486,24 +492,16 @@ dependencies. Object-centric skills may additionally declare an explicit
 ``ObjectSemantics.entity_id`` when they ground an object pose from the same
 scene snapshot; for example, ``PickUp`` automatically tracks that ID. The
 legacy ``ObjectSemantics.entity`` live-pose fallback is deprecated and does not
-create a scene dependency. An ``ActionPlan`` may bound each dependency with
-``scene_dependency_monitor_until``. ``PickUp`` uses the exclusive end of
-``approach`` as that boundary; joint tracking and collision-world revision
-checks are unaffected.
-
-An action may give selected dependencies an exclusive waypoint cutoff through
-``ActionPlan.scene_dependency_monitor_until``. A dependency is monitored while
-the current waypoint index is smaller than its cutoff; ``0`` disables monitoring
-from the start, and an omitted dependency remains monitored for the whole
-action. Reaching the cutoff ignores every later pose change, not only motion
-caused by the skill. Built-in ``PickUp`` uses ``close.start`` for the grasped
-object, and ``OperateArticulation`` uses ``operate.start`` for the handle; their
-physical effect monitors are authoritative after those boundaries.
+create a scene dependency. An ``ActionPlan`` may bound dependency monitoring
+for every dependency with ``scene_dependency_end_segment`` or assign per-entity
+exclusive command-frame cutoffs with ``scene_dependency_monitor_until``.
+``PickUp`` uses the end of ``approach`` for its semantic object ID; joint
+tracking and collision-world revision checks are unaffected.
 
 Task-state effects
 ------------------
 
-Pick, place, handover, and coordinated skills declare attachment changes as a
+Pick, place, and coordinated skills declare attachment changes as a
 :class:`~embodichain.lab.sim.atomic_actions.StateDelta`. Planning does not commit
 those changes. During closed-loop execution, a non-empty effect requires a
 correlated per-environment verification result:

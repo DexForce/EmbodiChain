@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import (
     SceneEditOperation,
@@ -36,6 +37,8 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
 )
+
+_ADD_CATEGORY_PATTERN = re.compile(r"[a-z][a-z0-9_]*")
 
 _EDIT_SYSTEM_PROMPT = """You convert one user instruction into edits for an existing tabletop scene.
 
@@ -412,10 +415,9 @@ def _parse_scene_edit_operations(
         if op == "add":
             if object_id is not None:
                 raise ValueError("VLM add operations must set object_id to null.")
-            if category is None:
-                raise ValueError("VLM add operations must provide a category.")
+            category = _validated_add_category(category)
             # Add operation should generate new id here.
-            # Never believe the LLM could always generate a valid id.
+            # The validated category keeps generated IDs safe for asset output paths.
             object_id = _next_add_object_id(
                 category=category,
                 category_counts=category_counts,
@@ -465,6 +467,15 @@ def _optional_string(value: object, *, field_name: str) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Scene edit operation {field_name} must be a string or null.")
     return value.strip()
+
+
+def _validated_add_category(category: str | None) -> str:
+    """Return an add category that is safe to embed in a generated object ID."""
+    if category is None or _ADD_CATEGORY_PATTERN.fullmatch(category) is None:
+        raise ValueError(
+            "VLM add operation category must be lower-case singular snake_case."
+        )
+    return category
 
 
 def _optional_relation(value: object) -> str | None:

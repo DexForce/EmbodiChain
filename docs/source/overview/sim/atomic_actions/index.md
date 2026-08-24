@@ -89,8 +89,7 @@ The boundary is deliberate:
 | Scene observation | Registry-derived `SceneProvider` | Captures canonical ordered entities plus monotonic global or per-environment collision-world revisions |
 | Scheduling and controller lifecycle | `ExecutionRunner` | Observes only when due, dispatches timed commands, records acknowledgements, and performs safe stop |
 | Robot/simulator I/O | `ObservationProvider`, `EndpointCommandRouter`, `EndpointCommandTransport`, and `ExecutionClock` adapters | Isolates observation, per-controller command transport, and time/physics advancement from planning and session state |
-| Physical-effect evidence | Backend provider or application adapter | Acquires typed pose/contact/controller evidence without applying policy thresholds |
-| Effect decision and correlation | `EffectMonitor` plus the semantic runtime adapter, or an application verifier on the direct-core path | Interprets evidence, attaches the current request ID, and reports grasp, release, handover, or other symbolic effects |
+| Physical-effect verification | Semantic effect monitor and evidence collector | Verifies grasp, release, handover, and other symbolic effects; an application callback may add a stricter gate |
 
 `ExecutionRunner.step()` is non-blocking. Its convenience
 `run_until_blocked()` loop waits or advances simulation through an injected
@@ -107,8 +106,8 @@ state.
 The engine supports two first-class caller paths. An Action Agent or
 configuration-driven application can emit a semantic call for
 {class}`~embodichain.lab.sim.skills.SemanticSkillCompiler` and
-{class}`~embodichain.lab.sim.skills.SkillRuntime` to validate, ground,
-and convert into an `ActionInvocation`. A user can instead author the typed
+{class}`~embodichain.lab.sim.skills.SkillRuntime` to validate, ground, and
+convert into an `ActionInvocation`. A user can instead author the typed
 invocation directly in Python or load it from an application-owned
 configuration layer:
 
@@ -563,6 +562,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionStatus,
     RecoveryPolicy,
     SceneEntityPose,
+    TrackingPolicy,
 )
 
 moving_goal = ActionInvocation(
@@ -581,10 +581,13 @@ moving_goal = ActionInvocation(
     recovery_policy=RecoveryPolicy(
         max_replans=3,
         max_action_retries=2,
-        tracking_error_threshold=0.05,
         goal_translation_threshold=0.02,
         goal_rotation_threshold=0.087,
         action_timeout=30.0,
+    ),
+    tracking_policy=TrackingPolicy.joint_position(
+        in_flight_max_abs_error=0.05,
+        terminal_max_abs_error=0.05,
     ),
 )
 
@@ -770,16 +773,19 @@ should pass their fresh context explicitly.
 ```{attention}
 Automatic dynamic-goal invalidation is dependency-driven. A goal must contain a
 `SceneEntityPose`, or an object-centric primitive must explicitly declare the
-`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp` and the
-implicit-initial-pose path of coordinated pickup declare that dependency
-automatically. The deprecated live-entity fallback does not trigger
-scene-motion replanning.
+`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp`,
+`HandOver`, and the implicit-initial-pose path of coordinated pickup declare
+that dependency automatically. The deprecated live-entity fallback does not
+trigger scene-motion replanning.
 
-`ActionPlan.scene_dependency_monitor_until` may bound each dependency to an
-exclusive command-frame index. `PickUp` stops monitoring its object after the
-`approach` segment is dispatched so contact-, close-, and lift-induced movement
-does not trigger a false replan. Joint-tracking and collision-world checks
-remain active.
+An `ActionPlan.scene_dependency_end_segment` may bound monitoring to the
+reversible portion of a staged action for every dependency.
+`ActionPlan.scene_dependency_monitor_until` may also assign individual
+dependencies exclusive command-frame cutoffs. Omitted dependencies remain
+monitored for the whole action unless the global segment boundary applies.
+`PickUp` stops monitoring its semantic object ID after `approach` is dispatched
+so contact-, close-, and lift-induced object movement does not trigger a false
+replan. Joint-tracking and collision-world checks remain active.
 
 Dynamic collision invalidation is provider-driven. Only registered,
 pose-updatable collision entities are supported; adding/removing obstacles or
@@ -789,7 +795,7 @@ changing their geometry requires rebuilding the planner world.
 ## Planning success versus physical success
 
 `ActionPlan.plan_success` only means a valid command plan was produced for an
-environment row. Pick, place, handover, and coordinated skills also return an
+environment row. Pick, place, and coordinated skills also return an
 uncommitted `StateDelta` describing the attachment state expected after
 execution.
 
@@ -797,10 +803,11 @@ execution.
 Multi-arm grasps use multiple entries that share the same `ObjectSemantics`;
 there is no parallel coordinated-attachment representation to synchronize.
 Consumers query per-environment active and exclusive-hold masks from that one
-map. A single-arm transport, release, or handover row fails safely while a
-second manipulator still holds the same semantic object or live entity.
+map. A single-arm transport or release row fails safely while a second
+manipulator still holds the same semantic object or live entity. The unified
+`HandOver` action instead requires both candidate arms to start unoccupied.
 
-At the terminal waypoint, an `ExecutionSession` requests an external,
+At the terminal waypoint, an `ExecutionSession` requests an external
 correlated per-environment result before committing a non-empty effect:
 
 ```python
@@ -832,11 +839,11 @@ retry, so a delayed result cannot commit a newer attempt.
 
 Every result also classifies failed rows with `invalidation_mask` and
 `retry_mask`, both subsets of `failure_mask`. Invalidation applies the
-request's core-owned removal-only `failure_invalidation`; the verifier cannot
-inject replacement state. Retry is valid only when the same invocation's
-physical preconditions remain satisfied. Failed rows outside `retry_mask`
-enter external recovery, and unresolved evidence at the action deadline removes
-covered active verified state before recovery.
+request's core-owned, removal-only `failure_invalidation`; the verifier cannot
+inject replacement state. Retry is valid only while the same invocation's
+physical preconditions remain satisfied. Other failed rows enter external
+recovery, and unresolved evidence at the deadline removes covered active
+verified state before recovery.
 
 `request.deadline` is expressed in the robot-observation timestamp domain.
 `RecoveryPolicy.action_timeout` covers both trajectory execution and the
@@ -846,69 +853,32 @@ its `effect_result`: schedule another call using `wait_duration`, re-read the
 current request, and submit a result for that current ID. Partial resolution and
 row deactivation can also replace the request before the delayed result arrives.
 
-The semantic layer provides a reusable verifier kernel for the curated
-`Pick`, `Place`, and `HandOver` calls. A
-{class}`~embodichain.lab.sim.skills.SemanticEffectSpec` binds the canonical
-object and expected attach/detach relations to concrete runtime endpoints. Its
-fresh per-call {class}`~embodichain.lab.sim.skills.EffectMonitor` consumes
-backend-neutral {class}`~embodichain.lab.sim.skills.PoseRelationEvidenceBatch`
-values and returns an uncorrelated
-{class}`~embodichain.lab.sim.skills.EffectMonitorDecision`. The semantic runtime
-must validate that decision, attach the *current* request ID, and pass the
-result to the runner in the same due observation cycle.
+The semantic compiler installs segment-scoped held-object guards and blocking
+physical-effect gates for curated manipulation calls. A guard observes a
+negative invariant before a due command and, on proven attachment loss,
+applies an action-authorized removal-only `StateDelta` before retry or
+`RECOVERY_REQUIRED`. A gate blocks entry to a named segment until the positive
+physical transition is verified. While unresolved, the waypoint cursor stays
+fixed and the preceding command is replayed for the synchronized active cohort,
+preserving gripper preload or open intent. Gate success unlocks motion without
+committing `TaskState`; terminal verification remains authoritative.
 
-This split is deliberate: the evidence provider owns physical observation,
-the monitor owns thresholds and hysteresis, and `ExecutionSession` remains the
-only owner of deadlines, retries, partial-row commits, and verified
-`TaskState`. A request-mask shrink keeps monitor history for remaining rows via
-`attempt_generation`; a replacement plan or retry increments that generation
-and resets the history. Evidence exactly at the deadline is valid, while a due
-observation after the deadline is handled by session timeout without invoking
-the verifier.
-
-The curated semantic runtime also installs segment-scoped, negative held-object
-guards for named trajectory segments. Before a due command is
-dispatched, `ExecutionRunner` passes a fresh observation and the current
-`HeldObjectGuardRequest` to its synchronous guard verifier. Each request has a
-single-use verification ID, the active waypoint/segment identity, and the
-action-owned symbolic key/object identities that may be invalidated. A
-contradictory result must name that canonical object and carry a removal-only
-`StateDelta`; `ExecutionSession` applies that delta to only the failed rows
-before retrying or emitting `RECOVERY_REQUIRED`.
-Unavailable or unresolved evidence does not count as a physical contradiction,
-and the guard verifier is not invoked after the authoritative action deadline.
-
-The curated `Pick`, `Place`, and `HandOver` paths additionally install blocking
-positive-effect gates at named trajectory-segment entries. Pick must verify the
-destination attachment before `lift`, Place must verify source detachment before
-`retract`, and HandOver must verify the destination attachment before source
-`release`. The compiler creates a monitor instance for each gate independently
-from both the terminal monitor and negative held-object guard.
-
-`ExecutionSession` exposes a correlated `PhaseEffectGateRequest` at the segment
-boundary. While its result remains unresolved, the waypoint cursor does not
-advance and the preceding command is replayed for the complete synchronized
-active cohort. This preserves gripper preload or open intent instead of
-replacing it with an observed-position hold. A successful
-`PhaseEffectGateResult` only unlocks the segment; it does not commit
-`TaskState`. Contradiction uses the enclosing action's bounded retry policy,
-request IDs are single-use, and the action deadline covers all polling. Calling
-`run_until_blocked()` without a gate verifier returns this boundary for an
-external verifier.
-
-The guards and gates are observational. Neither a monitor nor the runtime
-creates a simulator attachment, freezes an object, or overrides its pose.
-Workflow-level re-acquisition remains a separate recovery policy.
+Pick gates attachment before `lift`, and Place gates detachment before
+`retract`. The unified HandOver action gates source pickup before
+`pickup_transport`, destination pickup before `handover_release`, and source
+release before `place`; source- and destination-held guards cover the motion
+segments that depend on those relations. Each boundary owns an independent
+monitor and correlated request ID. These checks are observational and never
+create simulator attachments, freeze objects, or override poses.
 
 ## Action Agent integration
 
 An MLLM should not construct `ActionInvocation` by copying arbitrary JSON into
 runtime objects. The `embodichain.lab.sim.skills` package provides the semantic
 boundary: stable call descriptors, immutable call values, scene/profile
-manifests, a compiler, and a runtime facade. The agent selects among
-the `SemanticCallCatalog` descriptors and supplies declarative object-centric
-values; the compiler performs validation and grounding before the atomic engine
-sees the request:
+manifests, a compiler, and a runtime facade. The agent selects from the semantic
+call catalog and supplies declarative object-centric values; the compiler
+performs validation and grounding before the atomic engine sees the request:
 
 ```text
 MLLM / application SemanticCallSpec
@@ -929,12 +899,14 @@ installed version-matched lowerer. Invocation IDs and monotonic revisions
 correlate compatible in-flight updates with planner diagnostics and execution
 events without mutating a request implicitly.
 
-The semantic runtime is also useful without an agent. `start()` and `step()`
-provide the non-blocking path, while `run()` is the synchronous convenience.
-An analysis window may include future calls while `execution_prefix_length`
-limits physical execution to a verified prefix. Call-local recovery remains
-owned by `ExecutionRunner`; automatic task-level route replacement is not
-provided by this layer.
+The semantic runtime is also useful without an agent. `run()` executes one
+known workflow and preserves verified state for a later workflow submitted at a
+terminal result boundary. Call-local recovery remains owned by
+`ExecutionRunner`; `SkillRuntime` performs terminal symbolic reconciliation and
+may use a bounded `WorkflowRecoveryPolicy` to retry from verified state or run
+a real semantic Pick before retrying the failed call. See
+{doc}`../semantic_skills` for the complete compiler/runtime and dynamic-task
+contract.
 
 ## Extending the module
 
@@ -963,7 +935,7 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 ## Further reading
 
 - {doc}`../scene_registry` — canonical scene identity, snapshots, and collision integration
-- {doc}`robot_skill_profiles` — semantic calls, resource binding, and runtime presets
+- {doc}`../semantic_skills` — semantic calls, compilation, runtime execution, and dynamic task boundaries
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples

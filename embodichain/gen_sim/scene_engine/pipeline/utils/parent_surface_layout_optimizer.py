@@ -25,9 +25,14 @@ from scipy.optimize import minimize
 
 from embodichain.gen_sim.scene_engine.core.scene_graph import GeneratedSceneRelation
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
+    GravitySettleBody,
+    GravitySettler,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
     load_scene_object_z_up_mesh,
     measure_scene_object_z_up_world_aabb,
+    scene_object_y_up_layout,
 )
 
 if TYPE_CHECKING:
@@ -184,6 +189,46 @@ class ParentSurfaceLayoutOptimizer:
             solved_root_xy_by_id=solved_child_xy_by_id,
             config=self.config,
         )
+
+    def settle_dynamic_children(
+        self,
+        *,
+        table: SceneObject,
+        parent: SceneObject,
+        problem: ParentSurfaceLayoutProblem,
+        dynamic_child_ids: set[str],
+    ) -> dict[str, dict[str, list[float]]]:
+        """Settle variable children against their parent and fixed siblings.
+
+        Children must already have been placed 2cm above ``parent`` by the
+        caller. The physical table remains mandatory, while the parent and
+        unedited siblings become kinematic collision bodies for this pass.
+        """
+        child_ids = set(problem.child_ids)
+        if not dynamic_child_ids.issubset(child_ids):
+            raise ValueError("Only parent-surface children may be dynamic.")
+        if not dynamic_child_ids:
+            return {}
+        participant_ids = {parent.id, *child_ids}
+        if parent.id in child_ids:
+            raise ValueError("A parent-surface group cannot contain its parent.")
+        return GravitySettler(
+            table_body=GravitySettleBody(
+                scene_object=table,
+                y_up_layout=scene_object_y_up_layout(table),
+            ),
+            participant_bodies=[
+                GravitySettleBody(
+                    scene_object=problem.assets_by_id[object_id],
+                    y_up_layout=scene_object_y_up_layout(
+                        problem.assets_by_id[object_id]
+                    ),
+                )
+                for object_id in participant_ids
+            ],
+            dynamic_asset_ids=dynamic_child_ids,
+            static_asset_ids=participant_ids - dynamic_child_ids,
+        ).settle()
 
 
 class _LayoutInfeasibleError(ValueError):

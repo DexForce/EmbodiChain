@@ -20,8 +20,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
-    GeneratedSceneGraph,
-    GeneratedSceneNode,
+    SceneGraph,
+    SceneGraphNode,
 )
 from embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation import (
     _scene_graph_based_calibration,
@@ -62,16 +62,16 @@ def _z_up_rotation_from_y_up_layout(layout: dict[str, object]) -> np.ndarray:
 
 
 def test_scene_graph_calibration_makes_standing_asset_vertical() -> None:
-    scene_graph = GeneratedSceneGraph(
+    scene_graph = SceneGraph(
         nodes=[
-            GeneratedSceneNode(object_id="table", parent_id=None),
-            GeneratedSceneNode(
+            SceneGraphNode(object_id="table", parent_id=None),
+            SceneGraphNode(
                 object_id="bottle_001",
                 parent_id="table",
                 parent_relation="on",
                 orientation_state="standing",
             ),
-            GeneratedSceneNode(
+            SceneGraphNode(
                 object_id="book_001",
                 parent_id="table",
                 parent_relation="on",

@@ -91,11 +91,10 @@ interfaces instead of accumulating adapters around the current implementation.
 
 ### 2.3 Canonical runtime naming
 
-The current #492 head contains `SemanticSkillRuntime`, while downstream #496
-defines the intended canonical `SkillRuntime`. Before adapting #536 and #537,
-these implementations must be consolidated into one public runtime. This plan
-uses `SkillRuntime` as the conceptual name; the exact final class name is less
-important than having exactly one implementation and one ownership boundary.
+The runtime has been consolidated into the single public `SkillRuntime`.
+Simulation construction, component construction, synchronous execution, and
+step-wise execution all use that implementation; GenSim adapters must not add
+another runtime wrapper or ownership boundary.
 
 ## 3. Target architecture
 

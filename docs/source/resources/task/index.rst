@@ -32,9 +32,9 @@ Environment catalog
    * - Reinforcement learning
      - ``PushCubeRL``
      - ``embodichain_tasks/configs/agents/rl/push_cube/gym_config.json``
-   * - Multi-segment
-     - ``MultiSegmentsCubePickPlace-v1``
-     - ``embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json``
+   * - Expert Program
+     - ``ExpertProgramRepeatedPickPlace-v1``
+     - ``embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json``
    * - Special
      - ``SimpleTask-v1``
      - ``embodichain_tasks/configs/gym/special/simple_task_ur10.json``
@@ -50,9 +50,9 @@ Environment catalog
    * - Tableware
      - ``MatchObjectContainer-v1``
      - ``embodichain_tasks/configs/gym/match_object_container/cobot_magic_3cam.json``
-   * - Tableware
-     - ``OpenDrawer-v1``
-     - ``embodichain_tasks/configs/gym/open_drawer/cobot_magic_3cam.json``
+   * - Expert Program
+     - ``ExpertProgramOpenDrawer-v1``
+     - ``embodichain_tasks/configs/gym/expert_program/open_drawer.json``
    * - Tableware
      - ``PlaceObjectDrawer-v1``
      - ``embodichain_tasks/configs/gym/place_object_drawer/cobot_magic_3cam.json``

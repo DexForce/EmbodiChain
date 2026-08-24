@@ -129,13 +129,13 @@ class ConfiguredHandOverPoseProvider(HandOverPoseProvider):
         del call, context, bound
         return HandOverPoseTargets(
             middle=SemanticObjectTarget(
-                SemanticPose(
+                pose=SemanticPose(
                     position=self.middle_position,
                     quaternion_wxyz=self.middle_quaternion_wxyz,
                 )
             ),
             final=SemanticObjectTarget(
-                SemanticPose(
+                pose=SemanticPose(
                     position=self.final_position,
                     quaternion_wxyz=self.final_quaternion_wxyz,
                 )

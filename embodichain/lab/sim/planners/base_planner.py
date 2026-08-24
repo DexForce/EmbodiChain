@@ -233,9 +233,6 @@ class BasePlanner(ABC):
     waypoint count.
     """
 
-    supports_collision_world_updates: bool = False
-    """Whether per-plan dynamic obstacle poses can update the collision world."""
-
     supports_joint_trajectory_validation: bool = False
     """Whether exact joint samples can be checked against bounds/collisions."""
 

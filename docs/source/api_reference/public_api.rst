@@ -12,6 +12,9 @@ summaries here from the canonical Python docstrings.
 embodichain.agents.mllm.expert_program
 --------------------------------------
 
+Strict MLLM entry points that inject host-owned integration settings before
+decoding and compiling the constrained Expert Program schema surface.
+
 .. currentmodule:: embodichain.agents.mllm.expert_program
 
 .. autosummary::
@@ -74,6 +77,9 @@ embodichain.gen_sim.scene_engine.core.scene_graph
    GeneratedSceneGraph
    GeneratedSceneNode
    GeneratedSceneRelation
+   SceneGraph
+   SceneGraphNode
+   SceneGraphRelation
    OrientationState
    PlanarRelationType
    SceneConstraintType
@@ -176,7 +182,6 @@ embodichain.lab.gym.envs.demo
    DemoEpisodeResult
    DemoSegment
    DemoSegmentResult
-   ProcessedEnvAction
    execute_demo_episode
    resolve_demo_segments
 
@@ -190,255 +195,14 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
-embodichain.lab.gym.envs.expert_program.bridge
-------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.bridge
-
-.. autosummary::
-
-   AcceptedRuntimeCommandObserver
-   AtomicDemoBridge
-   BufferedGymCommandSink
-   CompiledProgramPort
-   CurrentQposProvider
-   DemoBridgeError
-   EnvironmentStepClock
-   EnvironmentStepTimingError
-   GymPlanningObservationProvider
-   JointPositionGymTransportEncoder
-   ParallelCommandSafetyValidator
-   RuntimeCommandFrameEncoder
-   RuntimeTransportActionEncoder
-   SegmentPostPolicyMetadataPort
-   SegmentPostPolicyPort
-   SegmentPostPolicyResultPort
-   SegmentValidatorMetadataPort
-   SegmentValidatorPort
-   SequentialSkillRuntimePort
-   UnsupportedRuntimeTransportError
-
-embodichain.lab.gym.envs.expert_program.catalog
--------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.catalog
-
-.. autosummary::
-
-   ExpertProgramIntegrationCatalog
-   IntegrationFingerprintMismatch
-   SimulationExpertProgramRegistration
-
-embodichain.lab.gym.envs.expert_program.cfg
----------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.cfg
-
-.. autosummary::
-
-   BarrierCfg
-   CyclicPoseTargetCfg
-   DeclarativeCfgValue
-   EXPERT_PROGRAM_SCHEMA_VERSION
-   EXPERT_PROGRAM_SCHEMA_VERSION_V2
-   ExpertProgramCfg
-   ExpertProgramIntegrationCfg
-   HandOverCfg
-   InvokeCfg
-   MAX_DECLARATIVE_DEPTH
-   MAX_DECLARATIVE_NODES
-   MAX_EXPANDED_CALLS
-   MAX_PROGRAM_DEPTH
-   MAX_PROGRAM_NODES
-   MAX_REPEAT_COUNT
-   ObjectNearTargetValidatorCfg
-   OperateArticulationCfg
-   ParallelCfg
-   PickCfg
-   PlaceCfg
-   PoseCfg
-   PostPolicyCfg
-   ProgramNodeCfg
-   RegisteredSemanticCallCfg
-   RepeatCfg
-   SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS
-   SegmentCfg
-   SemanticCallCfg
-   SequenceCfg
-   TargetCfg
-   TargetRefCfg
-   ValidatorCfg
-   WaitStablePostCfg
-
-embodichain.lab.gym.envs.expert_program.compiler
---------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.compiler
-
-.. autosummary::
-
-   CompiledBarrier
-   CompiledParallelBlock
-   CompiledParallelBranch
-   CompiledPostPolicy
-   CompiledProgram
-   CompiledProgramAnalysis
-   CompiledProgramCall
-   CompiledProgramSegment
-   CompiledProgramValidator
-   CompiledRepeatFrame
-   CompiledTargetSelection
-   ExpertProgramCompileError
-   ExpertProgramCompiler
-   ExpertProgramSceneResolver
-   MaterializedCompiledProgram
-   SceneRegistryProgramResolver
-
-embodichain.lab.gym.envs.expert_program.decoder
--------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.decoder
-
-.. autosummary::
-
-   ConfigPath
-   ConfigPathPart
-   ExpertProgramConfigError
-   ExpertProgramDecodeError
-   ExpertProgramValidationContext
-   ExpertProgramValidationError
-   SceneReferenceRole
-   decode_expert_program
-   decode_semantic_call
-   encode_semantic_call
-   render_config_path
-   validate_expert_program
-
-embodichain.lab.gym.envs.expert_program.environment
------------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.environment
-
-.. autosummary::
-
-   AcceptedRuntimeCommandObserverFactory
-   ExpertProgramEnvironmentAdapter
-   ExpertProgramEnvironmentFactory
-   ExpertProgramEnvironmentMixin
-   ExpertProgramRuntimeAssembly
-   PlanningObservationPort
-   SkillRuntimeAssemblyPort
-
-embodichain.lab.gym.envs.expert_program.extensions
-----------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.extensions
-
-.. autosummary::
-
-   EndpointAdapterDeclaration
-   ParallelCommandSafetyValidatorFactory
-   ParallelSafetyDeclaration
-   RuntimeTransportDeclaration
-   StandardExtensionDeclarations
-   VersionedKey
-   build_standard_extension_declarations
-   declare_endpoint_adapter
-   declare_parallel_safety_factory
-   declare_runtime_transport
-   validate_immutable_extension_declaration
-
-embodichain.lab.gym.envs.expert_program.loader
-------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.loader
-
-.. autosummary::
-
-   MAX_EXPERT_PROGRAM_BYTES
-   load_expert_program
-   loads_expert_program_json
-   parse_expert_program_json
-
-embodichain.lab.gym.envs.expert_program.simulation
-----------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation
-
-.. autosummary::
-
-   AntipodalGraspAffordanceBinding
-   ArticulationOperationAffordanceBinding
-   ArticulationOperationTargetBinding
-   ControlPartCommandPreset
-   ContainerAffordanceBinding
-   ControlPartEndpointBinding
-   ControlPartResourceBinding
-   RobotResourceBinding
-   SimulationArticulationBinding
-   SimulationArticulationLinkBinding
-   SimulationResourceEndpointBinding
-   SimulationRigidObjectBinding
-   SimulationRobotResourceBinding
-   SimulationRobotSkillProfileBinding
-   SimulationSceneBinding
-   SupportSurfaceAffordanceBinding
-
-embodichain.lab.gym.envs.expert_program.simulation_environment
-----------------------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_environment
-
-.. autosummary::
-
-   ControlCommandStateEvidenceTracker
-   MotionGeneratorFactory
-   SharedTickSceneProvider
-   SimulationExpertProgramEnvironment
-   SimulationExpertProgramFactory
-   SimulationPlanningObservationProvider
-   create_simulation_expert_program_adapter
-
-embodichain.lab.gym.envs.expert_program.simulation_policies
--------------------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_policies
-
-.. autosummary::
-
-   SimulationSegmentPolicyPort
-   default_simulation_settle_presets
-
-embodichain.lab.gym.envs.expert_program.simulation_parallel_safety
-------------------------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_parallel_safety
-
-.. autosummary::
-
-   CuroboParallelCommandSafetyValidator
-   CuroboParallelSafetyValidatorFactory
-
 embodichain.lab.gym.envs.expert_program.simulation_handover
-------------------------------------------------------------
+-----------------------------------------------------------
 
 .. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_handover
 
 .. autosummary::
 
    ConfiguredHandOverPoseProvider
-
-embodichain.lab.gym.envs.settling
----------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.settling
-
-.. autosummary::
-
-   DynamicSettleMonitor
-   DynamicSettleMonitorCfg
-   DynamicSettleSample
-   DynamicSettleState
 
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
@@ -630,84 +394,29 @@ embodichain.lab.sim.atomic_actions
    ActionPlanningServices
    Affordance
    AntipodalAffordance
-   ArticulationJointState
-   ArticulationOperationAffordance
-   ArticulationOperationTarget
    AssembleAffordance
-   BASE_POSE_CHANNEL
    BUILTIN_ACTION_TYPES
    CoordinatedPickmentOptions
    CoordinatedPlacementOptions
    DynamicCollisionMode
-   EndpointTrackingChannelBinding
-   EndpointTrackingFeedbackAddress
    EntityState
-   EffectVerificationRequirement
-   EffectVerificationResult
-   EffectExpectationResult
    EffectVerifier
-   ExecutionPlanAttempt
-   FeedbackTerminalAcceptance
    GRASP_COMMAND
-   InFlightTrackingPolicy
-   JOINT_POSITION_CHANNEL
-   JointPositionTrackingEvaluator
-   JointPositionTrackingMetric
-   JointPositionTrackingProjector
-   JointPositionTrackingState
    HandOverOptions
-   HeldObjectGuardVerifier
    InteractionPoints
    MoveEndEffectorOptions
    MoveHeldObjectOptions
    MoveJointsOptions
    ObjectActionGoal
-   ObservedArticulationJointState
    OPEN_COMMAND
-   OperateArticulation
-   OperateArticulationGoal
-   OperateArticulationOptions
    PickUpOptions
    PlaceOptions
-   PhaseEffectGateVerifier
-   PlanningContextTrackingFeedbackProvider
-   PoseTrackingEvaluator
-   PoseTrackingMetric
-   PoseTrackingState
    PoseGoalValue
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    RunnerStepCallback
    SceneProvider
-   SceneArticulationOperationGeometry
    SceneSnapshotSupplier
-   TimedTerminalAcceptance
-   TimedTrackingSequence
-   TerminalAcceptance
-   TrackingCommandProjector
-   TrackingEvaluation
-   TrackingEvaluatorRegistry
-   TrackingFeedbackAddress
-   TrackingFeedbackBatch
-   TrackingFeedbackProvider
-   TrackingFeedbackProviderRegistry
-   TrackingFeedbackSourceRef
-   TrackingFrame
-   TrackingMetricCfg
-   TrackingMetricEvaluator
-   TrackingPolicy
-   TrackingProjectorRef
-   TrackingProjectorRegistry
-   TrackingRuntime
-   TrackingSetpoint
-   TrackingState
-   WHOLE_BODY_POSE_CHANNEL
-   WholeBodyPoseTrackingEvaluator
-   WholeBodyPoseTrackingMetric
-   WholeBodyPoseTrackingState
-   get_registered_actions
-   register_action
-   unregister_action
 
 embodichain.lab.sim.atomic_actions.affordance
 ---------------------------------------------
@@ -718,13 +427,16 @@ embodichain.lab.sim.atomic_actions.affordance
 
    Affordance
    AntipodalAffordance
-   ArticulationOperationAffordance
-   ArticulationOperationTarget
+   AxisAlignAffordance
    SlideAffordance
    PressAffordance
    TwistAffordance
    InteractionPoints
    AssembleAffordance
+
+.. automodule:: embodichain.lab.sim.atomic_actions.affordance
+   :members:
+   :no-index:
 
 embodichain.lab.sim.atomic_actions.bindings
 -------------------------------------------
@@ -789,9 +501,9 @@ embodichain.lab.sim.atomic_actions.execution
 
 .. autosummary::
 
+   EffectExpectationResult
    EffectVerificationRequest
    EffectVerificationResult
-   EffectExpectationResult
    ExecutionEvent
    ExecutionEventKind
    ExecutionPlanAttempt
@@ -810,15 +522,17 @@ embodichain.lab.sim.atomic_actions.goals
 
 .. autosummary::
 
-   ActionGoal
    ObjectActionGoal
    PoseGoalValue
-   SceneArticulationOperationGeometry
    SceneEntityPose
    collect_scene_dependencies
    resolve_pose_goal
    validate_pose_goal
    validate_pose_tensor
+
+.. automodule:: embodichain.lab.sim.atomic_actions.goals
+   :members:
+   :no-index:
 
 embodichain.lab.sim.atomic_actions.invocation
 ---------------------------------------------
@@ -844,7 +558,6 @@ embodichain.lab.sim.atomic_actions.plans
    ActionPlan
    CompiledTrajectory
    EffectVerificationRequirement
-   ExecutionFeedbackMode
    PlannerDiagnostics
    TimedTrajectory
    TrajectorySegment
@@ -869,20 +582,6 @@ embodichain.lab.sim.atomic_actions.primitives
 .. autosummary::
 
    BUILTIN_ACTION_TYPES
-   OperateArticulation
-   OperateArticulationGoal
-   OperateArticulationOptions
-
-embodichain.lab.sim.atomic_actions.primitives.operate_articulation
------------------------------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives.operate_articulation
-
-.. autosummary::
-
-   OperateArticulation
-   OperateArticulationGoal
-   OperateArticulationOptions
 
 embodichain.lab.sim.atomic_actions.requirements
 -----------------------------------------------
@@ -978,61 +677,15 @@ embodichain.lab.sim.atomic_actions.state
 .. autosummary::
 
    EntityState
-   ArticulationJointState
-   CoordinatedHeldObjectState
    HeldObjectState
-   ObservedArticulationJointState
    PlanningContext
    RobotObservation
    SceneSnapshot
    TaskState
 
-embodichain.lab.sim.atomic_actions.tracking
--------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.atomic_actions.tracking
-
-.. autosummary::
-
-   BASE_POSE_CHANNEL
-   FeedbackTerminalAcceptance
-   InFlightTrackingPolicy
-   JOINT_POSITION_CHANNEL
-   JointPositionTrackingEvaluator
-   JointPositionTrackingMetric
-   JointPositionTrackingProjector
-   JointPositionTrackingState
-   EndpointTrackingChannelBinding
-   EndpointTrackingFeedbackAddress
-   PlanningContextTrackingFeedbackProvider
-   PoseTrackingEvaluator
-   PoseTrackingMetric
-   PoseTrackingState
-   TerminalAcceptance
-   TimedTerminalAcceptance
-   TimedTrackingSequence
-   TrackingChannelId
-   TrackingCommandProjector
-   TrackingEvaluation
-   TrackingEvaluatorRegistry
-   TrackingFeedbackAddress
-   TrackingFeedbackBatch
-   TrackingFeedbackProvider
-   TrackingFeedbackProviderRegistry
-   TrackingFeedbackSourceRef
-   TrackingFrame
-   TrackingMetricCfg
-   TrackingMetricEvaluator
-   TrackingPolicy
-   TrackingProjectorRef
-   TrackingProjectorRegistry
-   TrackingRuntime
-   TrackingSetpoint
-   TrackingState
-   WHOLE_BODY_POSE_CHANNEL
-   WholeBodyPoseTrackingEvaluator
-   WholeBodyPoseTrackingMetric
-   WholeBodyPoseTrackingState
+.. automodule:: embodichain.lab.sim.atomic_actions.state
+   :members:
+   :no-index:
 
 embodichain.lab.sim.atomic_actions.trajectory_ops
 -------------------------------------------------
@@ -1351,7 +1004,6 @@ embodichain.lab.sim.skills.calls
 
    DeclarativeValue
    HandOver
-   OperateArticulation
    Pick
    Place
    PlaceRelationTarget
@@ -1362,6 +1014,10 @@ embodichain.lab.sim.skills.calls
    SemanticPose
    builtin_semantic_call_catalog
 
+.. automodule:: embodichain.lab.sim.skills.calls
+   :members:
+   :no-index:
+
 embodichain.lab.sim.skills.compiler
 -----------------------------------
 
@@ -1370,10 +1026,10 @@ embodichain.lab.sim.skills.compiler
 .. autosummary::
 
    AnalyzedSemanticCall
-   GroundedSemanticCall
+   ContainerRelationTargetGrounder
    GroundedHeldObjectGuard
    GroundedPhaseEffectGate
-   ContainerRelationTargetGrounder
+   GroundedSemanticCall
    HandOverPoseProvider
    HandOverPoseTargets
    HeldObjectGuardBaseline
@@ -1386,90 +1042,8 @@ embodichain.lab.sim.skills.compiler
    SemanticObjectTarget
    SemanticRelationTarget
    SemanticSkillCompiler
-   SupportSurfaceRelationTargetGrounder
    SemanticWorkflow
-
-embodichain.lab.sim.skills.effects
-----------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.effects
-
-.. autosummary::
-
-   ArticulationJointStateExpectation
-   BinaryEffectClause
-   BinaryEffectEvidenceBatch
-   BinaryEvidenceKind
-   COMPOSITE_EFFECT_MONITOR_ID
-   COMPOSITE_EFFECT_MONITOR_REVISION
-   CONSTRAINT_EFFECT_CHANNEL
-   CONTACT_EFFECT_CHANNEL
-   CONTROL_PART_EVIDENCE_PROVIDER_ID
-   CONTROL_PART_EVIDENCE_PROVIDER_REVISION
-   CompositeEffectMonitor
-   CompositeEffectMonitorCfg
-   CompositeEffectMonitorFactory
-   ControlPartEvidenceAddress
-   CoordinatedHeldObjectCleanupExpectation
-   EffectClause
-   EffectEvidenceAddress
-   EffectEvidenceBatch
-   EffectEvidenceSourceRef
-   EffectExpectationDecision
-   EffectExpectationDecision
-   EffectMonitor
-   EffectMonitorDecision
-   EffectMonitorFactory
-   EffectMonitorParam
-   EffectMonitorRef
-   EffectMonitorRegistry
-   EffectStateExpectation
-   FORCE_EFFECT_CHANNEL
-   HeldObjectRelation
-   HeldObjectStateExpectation
-   JOINT_STATE_EFFECT_CHANNEL
-   JointStateEffectClause
-   JointStateEvidenceBatch
-   POSE_RELATION_EFFECT_CHANNEL
-   PoseRelationClause
-   PoseRelationEvidenceBatch
-   PoseRelationExpectation
-   ScalarEffectClause
-   ScalarEffectEvidenceBatch
-   ScalarEvidenceKind
-   ScalarExpectation
-   SemanticEffectKind
-   SemanticEffectSpec
-   SymbolicStateDomain
-   SymbolicStateKey
-
-embodichain.lab.sim.skills.evidence
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.evidence
-
-.. autosummary::
-
-   ArticulationJointObservationCallback
-   BinaryEffectEvidenceQuery
-   BinaryEffectObservation
-   BinaryObservationCallback
-   ControlPartRobotEvidenceSource
-   ControlPartSimulationEvidenceProvider
-   EffectEvidenceCollectionContext
-   EffectEvidenceCollector
-   EffectEvidenceProvider
-   EffectEvidenceProviderRegistry
-   EffectEvidenceQuery
-   EffectEvidenceQueryValue
-   JointStateEvidenceQuery
-   JointStateObservation
-   PoseRelationEvidenceQuery
-   ScalarEffectEvidenceQuery
-   ScalarEffectObservation
-   ScalarObservationCallback
-   SceneArticulationEvidenceProvider
-   build_effect_evidence_queries
+   SupportSurfaceRelationTargetGrounder
 
 embodichain.lab.sim.skills.integration
 --------------------------------------
@@ -1487,40 +1061,37 @@ embodichain.lab.sim.skills.integration
    SemanticIntegrationManifest
    SemanticValidationError
 
-embodichain.lab.sim.skills.parallel
+.. automodule:: embodichain.lab.sim.skills.integration
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.effects
+----------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.effects
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.evidence
 -----------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.parallel
+.. automodule:: embodichain.lab.sim.skills.evidence
+   :members:
+   :no-index:
 
-.. autosummary::
+embodichain.lab.sim.skills.parallel
+------------------------------------
 
-   ParallelBarrierUpdate
-   ParallelBranchPlan
-   ParallelConflictError
-   ParallelStateConflictError
-   ParallelTimingError
-   ParallelTimingPolicy
-   align_parallel_commands
-   merge_parallel_effects
-   resolve_parallel_barrier
-   validate_parallel_claims
+.. automodule:: embodichain.lab.sim.skills.parallel
+   :members:
+   :no-index:
 
 embodichain.lab.sim.skills.parallel_runtime
--------------------------------------------
+--------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.parallel_runtime
-
-.. autosummary::
-
-   ParallelBranchRuntime
-   ParallelBranchStaticAnalysis
-   ParallelCommandSafetyValidator
-   ParallelLaneCommandSink
-   ParallelRuntimeBranch
-   ParallelSafetyError
-   ParallelSkillResult
-   ParallelSkillRuntime
-   analyze_parallel_branches
+.. automodule:: embodichain.lab.sim.skills.parallel_runtime
+   :members:
+   :no-index:
 
 embodichain.lab.sim.skills.profiles
 -----------------------------------
@@ -1545,33 +1116,15 @@ embodichain.lab.sim.skills.profiles
    RobotResource
    RobotSkillProfile
    SkillPolicyPreset
-   WorkflowRecoveryPolicy
    UnsupportedSkillError
+   WorkflowRecoveryPolicy
 
 embodichain.lab.sim.skills.runtime
 ----------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.runtime
-
-.. autosummary::
-
-   AtomicSkills
-   EffectEvidenceCollectorPort
-   ResolvedCorePolicyTrace
-   SkillCallTrace
-   SkillEndpointBindingTrace
-   SkillEndpointTrackingChannelTrace
-   SkillEffectTrace
-   SkillFailure
-   SkillPlanAttemptTrace
-   SkillResult
-   SkillRuntime
-   SkillRuntimeProvider
-   SkillScene
-   SkillStatus
-   SkillWorkflowRecoveryRole
-   SkillWorkflowRecoveryTrace
-   task_state_to_metadata
+.. automodule:: embodichain.lab.sim.skills.runtime
+   :members:
+   :no-index:
 
 embodichain.lab.sim.skills.scene
 --------------------------------
@@ -1580,12 +1133,10 @@ embodichain.lab.sim.skills.scene
 
 .. autosummary::
 
-   ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
-   ArticulationJointEvidenceAddress
-   ContainerAffordance
-   SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID
-   SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION
-   SceneArticulationJointStateProvider
+   AmbiguousSceneAffordanceError
+   GRASP_AFFORDANCE_CAPABILITY
+   PLACE_IN_AFFORDANCE_CAPABILITY
+   PLACE_ON_AFFORDANCE_CAPABILITY
    RegistrySceneProvider
    SceneAffordanceRef
    SceneArticulationRef
@@ -1600,13 +1151,11 @@ embodichain.lab.sim.skills.scene
    SceneLinkRef
    SceneObjectRef
    SceneRegistry
-   AmbiguousSceneAffordanceError
-   GRASP_AFFORDANCE_CAPABILITY
-   PLACE_IN_AFFORDANCE_CAPABILITY
-   PLACE_ON_AFFORDANCE_CAPABILITY
-   PLACEMENT_TARGET_AFFORDANCE_REVISION
-   SupportSurfaceAffordance
    UnsupportedSceneAffordanceError
+
+.. automodule:: embodichain.lab.sim.skills.scene
+   :members:
+   :no-index:
 
 embodichain.lab.sim.solvers.neural_ik_solver
 --------------------------------------------
@@ -2102,16 +1651,6 @@ embodichain.toolkits.acd.urdf_modifider
 
    URDFModifider
 
-embodichain.toolkits.graspkit.pg_grasp.antipodal_generator
-----------------------------------------------------------
-
-.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.antipodal_generator
-
-.. autosummary::
-
-   GraspGenerator
-   GraspGeneratorCfg
-
 embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler
 --------------------------------------------------------
 
@@ -2237,18 +1776,6 @@ embodichain.workspace_cache_cli
 
    main
 
-embodichain.utils
------------------
-
-.. currentmodule:: embodichain.utils
-
-.. autosummary::
-
-   GLOBAL_SEED
-   is_configclass
-   resolve_config_path
-   set_seed
-
 embodichain_tasks.configs
 -------------------------
 
@@ -2258,26 +1785,53 @@ embodichain_tasks.configs
 
    get_config_path
 
-embodichain_tasks.multi_segments
+embodichain_tasks.expert_program
 --------------------------------
 
-.. currentmodule:: embodichain_tasks.multi_segments
+Declarative task references that bind packaged Expert Programs to live
+simulation scenes, robot skill profiles, and atomic actions.
+
+.. currentmodule:: embodichain_tasks.expert_program
 
 .. autosummary::
 
-   MultiSegmentsCubePickPlaceEnv
+   ExpertProgramOpenDrawerEnv
+   ExpertProgramRepeatedPickPlaceEnv
+   HandOverEnv
 
-embodichain_tasks.multi_segments.cube_pick_place
-------------------------------------------------
+embodichain_tasks.expert_program.hand_over
+------------------------------------------
 
-.. currentmodule:: embodichain_tasks.multi_segments.cube_pick_place
+.. currentmodule:: embodichain_tasks.expert_program.hand_over
 
 .. autosummary::
 
-   MultiSegmentsCubePickPlaceEnv
-   CUBE_EXPERT_PROGRAM_REGISTRATION
-   create_cube_robot_profile_binding
-   create_cube_scene_binding
+   HandOverEnv
+   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
+   HAND_OVER_POSE_PROVIDER
+   create_hand_over_robot_profile_binding
+   create_hand_over_scene_binding
+
+embodichain_tasks.expert_program.open_drawer
+--------------------------------------------
+
+.. currentmodule:: embodichain_tasks.expert_program.open_drawer
+
+.. autosummary::
+
+   ExpertProgramOpenDrawerEnv
+
+embodichain_tasks.expert_program.repeated_pick_place
+----------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.expert_program.repeated_pick_place
+
+.. autosummary::
+
+   ExpertProgramRepeatedPickPlaceEnv
+   REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
+   create_repeated_pick_place_robot_profile_binding
+   create_repeated_pick_place_scene_binding
 
 embodichain_tasks.rl
 --------------------
@@ -2325,29 +1879,6 @@ embodichain_tasks.special.stay_still_save
 
    StayStillSaveEnv
 
-embodichain_tasks.tableware
----------------------------
-
-.. currentmodule:: embodichain_tasks.tableware
-
-.. autosummary::
-
-   HandOverEnv
-   OpenDrawerEnv
-
-embodichain_tasks.tableware.hand_over
--------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.hand_over
-
-.. autosummary::
-
-   HandOverEnv
-   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
-   HAND_OVER_POSE_PROVIDER
-   create_hand_over_robot_profile_binding
-   create_hand_over_scene_binding
-
 embodichain_tasks.tableware.blocks_ranking_rgb
 ----------------------------------------------
 
@@ -2374,18 +1905,6 @@ embodichain_tasks.tableware.match_object_container
 .. autosummary::
 
    MatchObjectContainerEnv
-
-embodichain_tasks.tableware.open_drawer
----------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.open_drawer
-
-.. autosummary::
-
-   OpenDrawerEnv
-   OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION
-   create_open_drawer_robot_profile_binding
-   create_open_drawer_scene_binding
 
 embodichain_tasks.tableware.place_object_drawer
 -----------------------------------------------

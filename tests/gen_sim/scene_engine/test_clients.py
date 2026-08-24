@@ -207,7 +207,7 @@ def test_image_generation_client_posts_prompt_and_writes_png(
             return _Response(
                 {},
                 content=png_bytes,
-                headers={"content-type": "image/png", "x-generation-seed": "17"},
+                headers={"content-type": "image/png"},
             )
 
     session = ImageGenerationSession(get_payload={"ok": True})
@@ -223,7 +223,6 @@ def test_image_generation_client_posts_prompt_and_writes_png(
     output_path = client.generate_image_by_prompt(
         prompt="a red mug on a wooden table",
         output_path=tmp_path / "generated.png",
-        seed=17,
     )
 
     assert output_path.read_bytes() == png_bytes
@@ -231,10 +230,7 @@ def test_image_generation_client_posts_prompt_and_writes_png(
     assert session.post_call["url"] == (
         "http://image-generation/generate_image_by_prompt"
     )
-    assert session.post_call["json"] == {
-        "prompt": "a red mug on a wooden table",
-        "seed": 17,
-    }
+    assert session.post_call["json"] == {"prompt": "a red mug on a wooden table"}
 
 
 def test_image_generation_client_rejects_non_png_response(tmp_path: Path) -> None:
@@ -339,7 +335,6 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
                 {
                     "ok": True,
                     "result": {
-                        "seed": 23,
                         "objects": [
                             {
                                 "name": "cup",
@@ -348,7 +343,7 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
                                 "translation": [0, 0, 0],
                                 "scale": [1, 1, 1],
                             }
-                        ],
+                        ]
                     },
                 }
             )
@@ -375,11 +370,9 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
         image_path=image_path,
         object_masks=[("cup", mask_path)],
         output_root=tmp_path / "output",
-        seed=23,
     )
 
     assert objects[0]["mesh"] == "/results/cup.glb"
     assert session.post_call is not None
     assert session.post_call["url"] == "http://geometry/objects"
-    assert session.post_call["data"] == {"seed": "23"}
     assert (tmp_path / "output/cup.glb").read_bytes() == b"glTF-mesh"
