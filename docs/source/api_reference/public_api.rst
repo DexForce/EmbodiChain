@@ -43,6 +43,31 @@ embodichain.data_pipeline.depth_video
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
 
+embodichain.gen_sim.scene_engine.core.scene_edit_plan
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.core.scene_edit_plan
+
+Validated scene-edit values describe add, move, and delete requests without
+mutating the pre-edit scene or its relation graph.
+
+.. autosummary::
+
+   SceneEditOperation
+   SceneEditPlan
+
+embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
+-----------------------------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
+
+Asset preparation generates SimReady geometry only for objects introduced by
+scene-edit add operations.
+
+.. autosummary::
+
+   prepare_scene_edit_assets
+
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------
 

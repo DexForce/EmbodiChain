@@ -35,7 +35,24 @@ SceneEditOperationType = Literal["add", "move", "delete"]
 
 @dataclass(frozen=True)
 class SceneEditOperation:
-    """One normalized edit operation produced from an LLM edit draft."""
+    """Describe one normalized add, move, or delete operation.
+
+    Attributes:
+        op: Operation kind. Add creates a new object, move repositions an
+            existing object, and delete removes an existing object.
+        object_id: Existing object ID for move/delete, or the generated ID for
+            an added object.
+        target_id: Optional existing scene object used as the spatial target.
+        relation: Spatial relation between the edited object and ``target_id``.
+        table_region: Optional named tabletop region. It is valid only when the
+            target is the table and the relation is ``"on"``.
+        category: Semantic category required for an added object.
+        name: Human-readable name required for an added object.
+        description: Generation prompt and semantic description required for
+            an added object.
+        orientation_state: Optional standing or lying intent for an added
+            object. Move operations may only preserve the existing state.
+    """
 
     op: SceneEditOperationType
     object_id: str | None = None
@@ -64,7 +81,22 @@ class SceneEditOperation:
 
 @dataclass
 class SceneEditPlan:
-    """Validated operations against one immutable pre-edit scene state."""
+    """Validate edit operations against one pre-edit scene state.
+
+    Construction validates every object reference and rejects conflicting
+    operations without mutating the supplied scene or scene graph.
+
+    Attributes:
+        scene: Scene state that exists before the edit is applied.
+        scene_graph: Pre-edit support and spatial-relation graph. Its node IDs
+            must match the scene object IDs.
+        operations: Normalized operations in application order.
+
+    Raises:
+        ValueError: If scene IDs are inconsistent, an operation has invalid
+            fields or references, edits conflict, or a deletion would orphan a
+            support descendant.
+    """
 
     scene: Scene
     scene_graph: SceneGraph
