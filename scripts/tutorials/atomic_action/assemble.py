@@ -63,6 +63,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -254,8 +255,6 @@ def run_assemble_demo(
     can_semantics = create_antipodal_semantics(
         can,
         label="soda_can",
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
     )
     motion_gen = create_curobo_motion_generator(robot)
     left_open, left_close = get_hand_open_close_qpos(
@@ -299,6 +298,12 @@ def run_assemble_demo(
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,
                 grasp=left_close,
+            )
+        },
+        grasp_pose_generators={
+            "left_hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
             )
         },
     )

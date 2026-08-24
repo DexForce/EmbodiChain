@@ -62,8 +62,8 @@ from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
     DemoSegment,
     DemoSegmentResult,
-    ProcessedEnvAction,
 )
+from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
@@ -85,6 +85,7 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs.expert_program import (
         CompiledProgram,
         ExpertProgramCfg,
+        ExpertProgramEnvironmentAdapter,
     )
     from embodichain.lab.gym.envs.expert_program.bridge import AtomicDemoBridge
 
@@ -325,6 +326,7 @@ class EmbodiedEnv(BaseEnv):
     def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
         self.affordance_datas = {}
         self.action_bank = None
+        self._active_expert_program_bridge: AtomicDemoBridge | None = None
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -523,6 +525,7 @@ class EmbodiedEnv(BaseEnv):
             The reset observation and info dictionary.
         """
         obs, info = super().reset(seed=seed, options=options)
+        self._active_expert_program_bridge = None
         if options is None or "reset_ids" not in options:
             reset_ids = torch.arange(self.num_envs, device=self.device)
         else:
@@ -1365,33 +1368,23 @@ class EmbodiedEnv(BaseEnv):
         ].copy_(truncateds.to(buffer_device), non_blocking=True)
 
     def _normalize_demo_action(
-        self, action: EnvAction | ProcessedEnvAction
-    ) -> EnvAction | ProcessedEnvAction:
+        self, action: EnvAction | ControllerAction
+    ) -> EnvAction | ControllerAction:
         """Normalize one raw action or preserve a controller-ready envelope."""
-        if isinstance(action, ProcessedEnvAction):
-            value = action.value
-            if value.ndim == 0:
-                raise ValueError(
-                    "Processed demo actions must have a leading environment "
-                    "dimension."
-                )
-            if value.shape[0] != self.num_envs:
-                raise ValueError(
-                    "Processed demo action batch size must match num_envs."
-                )
+        if isinstance(action, ControllerAction):
             return action.snapshot()
         expected_dim = int(np.prod(self.single_action_space.shape))
         return self._normalize_demo_action_tensor(action, expected_dim)
 
     def _mask_demo_action(
         self,
-        action: EnvAction | ProcessedEnvAction,
+        action: EnvAction | ControllerAction,
         active_mask: Sequence[bool],
-    ) -> EnvAction | ProcessedEnvAction:
+    ) -> EnvAction | ControllerAction:
         """Accept an asynchronously completed vector-demo action.
 
         Raw actions may still require :class:`ActionManager` preprocessing, so
-        the actual hold/no-op substitution is applied to the processed command
+        the actual hold/no-op substitution is applied to the controller command
         in :meth:`_preprocess_action`. Subclasses with a specialized safe action
         may override this hook and return a replacement raw action.
 
@@ -1405,8 +1398,72 @@ class EmbodiedEnv(BaseEnv):
         self._set_demo_active_mask(active_mask)
         return action
 
-    def _mask_processed_demo_action(self, action: EnvAction) -> EnvAction:
-        """Replace inactive processed commands with a safe hold or no-op."""
+    def _prepare_controller_action(self, action: EnvAction) -> EnvAction:
+        """Validate and normalize one command at the robot-control boundary.
+
+        Both raw actions emitted by ``ActionManager`` and explicit
+        :class:`ControllerAction` values pass through this method exactly once.
+        Controller tensors must use a supported command key, match the vector
+        environment batch, and target either active joints or the full robot.
+
+        Args:
+            action: Candidate controller command.
+
+        Returns:
+            A controller command whose tensors are on the environment device.
+
+        Raises:
+            TypeError: If the action or one of its commands has an invalid type.
+            ValueError: If its keys, batch, dimensions, or values are invalid.
+        """
+        supported_keys = ("qpos", "qvel", "qf")
+        active_dim = len(self.active_joint_ids)
+        full_dim = int(self.robot.get_qpos().shape[-1])
+
+        def prepare_command(command: torch.Tensor, key: str) -> torch.Tensor:
+            if not isinstance(command, torch.Tensor):
+                raise TypeError(f"Controller {key} command must be a torch.Tensor.")
+            if not command.is_floating_point():
+                raise TypeError(f"Controller {key} command must be floating point.")
+            if command.dim() != 2 or command.shape[0] != self.num_envs:
+                raise ValueError(
+                    f"Controller {key} command must have shape (num_envs, D); "
+                    f"received {tuple(command.shape)} for {self.num_envs} environments."
+                )
+            if command.shape[1] not in {active_dim, full_dim}:
+                raise ValueError(
+                    f"Controller {key} command has dim {command.shape[1]}; expected "
+                    f"active-joint dim {active_dim} or full robot dim {full_dim}."
+                )
+            return command.to(self.device)
+
+        if isinstance(action, torch.Tensor):
+            return prepare_command(action, "qpos")
+        if not isinstance(action, TensorDict):
+            raise TypeError(
+                "Controller action must be a torch.Tensor or TensorDict, "
+                f"got {type(action).__name__}."
+            )
+        if tuple(action.batch_size) != (self.num_envs,):
+            raise ValueError(
+                "Controller TensorDict batch size must match num_envs; "
+                f"received {tuple(action.batch_size)} for {self.num_envs} environments."
+            )
+        keys = tuple(action.keys())
+        control_keys = tuple(key for key in supported_keys if key in action)
+        if not control_keys:
+            raise ValueError(
+                "Controller TensorDict must contain at least one of "
+                f"{list(supported_keys)}; received keys {list(keys)}."
+            )
+
+        prepared = action.clone().to(self.device)
+        for key in control_keys:
+            prepared[key] = prepare_command(prepared[key], key)
+        return prepared
+
+    def _mask_controller_demo_action(self, action: EnvAction) -> EnvAction:
+        """Replace inactive controller commands with a safe hold or no-op."""
         active_mask = self._demo_active_mask
         if bool(active_mask.all()):
             return action
@@ -1430,13 +1487,13 @@ class EmbodiedEnv(BaseEnv):
         active_qpos = measured_qpos[:, self.active_joint_ids]
 
         def qpos_replacement(value: torch.Tensor) -> torch.Tensor:
-            """Select the measured qpos layout matching the processed command."""
+            """Select the measured qpos layout matching the controller command."""
             if value.shape[1:] == active_qpos.shape[1:]:
                 return active_qpos
             if value.shape[1:] == measured_qpos.shape[1:]:
                 return measured_qpos
             raise ValueError(
-                "Cannot construct a qpos hold command for processed demo action "
+                "Cannot construct a qpos hold command for controller demo action "
                 f"shape {tuple(value.shape)}; measured active/full layouts are "
                 f"{tuple(active_qpos.shape)} and {tuple(measured_qpos.shape)}."
             )
@@ -1445,7 +1502,7 @@ class EmbodiedEnv(BaseEnv):
             return replace_rows(action, qpos_replacement(action), "qpos")
         if not isinstance(action, TensorDict):
             raise TypeError(
-                "Processed demo actions must be torch.Tensor or TensorDict, "
+                "Controller demo actions must be torch.Tensor or TensorDict, "
                 f"got {type(action).__name__}."
             )
 
@@ -1462,7 +1519,7 @@ class EmbodiedEnv(BaseEnv):
             masked_action[key] = replace_rows(value, replacement, key)
         if not supported_key:
             raise ValueError(
-                "Cannot mask a processed demo TensorDict without qpos, qvel, or qf."
+                "Cannot mask a controller demo TensorDict without qpos, qvel, or qf."
             )
         return masked_action
 
@@ -1601,7 +1658,7 @@ class EmbodiedEnv(BaseEnv):
             if command.shape[-1] == full_dim:
                 return command[..., self.active_joint_ids].to(self.device)
             raise ValueError(
-                f"Processed {key} action has dim {command.shape[-1]}; expected "
+                f"Controller {key} action has dim {command.shape[-1]}; expected "
                 f"active-joint dim {active_dim} or full robot dim {full_dim}."
             )
 
@@ -1680,21 +1737,22 @@ class EmbodiedEnv(BaseEnv):
                 eval_dict[key] = value
         return eval_dict
 
-    def _preprocess_action(self, action: EnvAction | ProcessedEnvAction) -> EnvAction:
-        """Apply raw preprocessing once and stash the executed controller action."""
-        is_processed = isinstance(action, ProcessedEnvAction)
-        if is_processed:
+    def _preprocess_action(self, action: EnvAction | ControllerAction) -> EnvAction:
+        """Resolve one raw or controller-ready action for robot control."""
+        is_controller_action = isinstance(action, ControllerAction)
+        if is_controller_action:
             action = action.value
         if self._traj_buffer is not None:
             self._traj_raw_action = (
                 action.clone() if hasattr(action, "clone") else action
             )
-        if self.action_manager is not None and not is_processed:
+        if self.action_manager is not None and not is_controller_action:
             action = self.action_manager.process_action(action, mode="pre")
-        elif not is_processed:
+        elif not is_controller_action:
             action = super()._preprocess_action(action)
+        action = self._prepare_controller_action(action)
         if getattr(self, "_demo_no_auto_reset", False):
-            action = self._mask_processed_demo_action(action)
+            action = self._mask_controller_demo_action(action)
         return action
 
     def _postprocess_action(self, action):
@@ -1898,16 +1956,37 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
+    @property
+    def expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
+        """Return the explicit adapter used by declarative expert programs.
+
+        Environments that configure :attr:`EmbodiedEnvCfg.expert_program`
+        override this property and return their reusable adapter.
+        """
+        raise NotImplementedError(
+            "An environment with cfg.expert_program must expose "
+            "expert_program_adapter."
+        )
+
+    def _checked_expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
+        """Return the exact configured adapter before touching live providers."""
+        from embodichain.lab.gym.envs.expert_program import (
+            ExpertProgramEnvironmentAdapter,
+        )
+
+        adapter = self.expert_program_adapter
+        if type(adapter) is not ExpertProgramEnvironmentAdapter:
+            raise TypeError(
+                "expert_program_adapter must be exactly "
+                "ExpertProgramEnvironmentAdapter."
+            )
+        return adapter
+
     def compile_expert_program(
         self,
         program: ExpertProgramCfg,
     ) -> CompiledProgram:
-        """Compile a configured Expert Program through explicit scene providers.
-
-        Declarative environments override this hook to supply their authoritative
-        scene registry/resolver to :class:`ExpertProgramCompiler`. Keeping the
-        provider boundary explicit prevents the base environment from inferring
-        identities or scanning mutable simulator internals.
+        """Compile a configured Expert Program through the explicit adapter.
 
         Args:
             program: Strict Expert Program configuration attached to ``cfg``.
@@ -1915,24 +1994,14 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Provider-free compiled program ready for runtime assembly.
 
-        Raises:
-            NotImplementedError: If an environment enables ``expert_program``
-                without supplying the compiler/provider integration.
         """
-        raise NotImplementedError(
-            "An environment with cfg.expert_program must implement "
-            "compile_expert_program() using an explicit scene resolver."
-        )
+        return self._checked_expert_program_adapter().compile(program)
 
     def create_expert_program_bridge(
         self,
         program: CompiledProgram,
     ) -> AtomicDemoBridge:
-        """Create the Gym demo bridge through explicit runtime-port factories.
-
-        Declarative environments override this hook to assemble ``SkillRuntime``
-        and Gym-aware command/clock/post-policy/validator ports. The returned
-        bridge must emit commands through normal ``env.step()`` processing.
+        """Create the Gym demo bridge through the explicit adapter.
 
         Args:
             program: Compiled provider-free Expert Program.
@@ -1940,13 +2009,38 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Atomic demo bridge whose segments are consumed lazily.
 
-        Raises:
-            NotImplementedError: If no explicit runtime factory is available.
         """
-        raise NotImplementedError(
-            "An environment with cfg.expert_program must implement "
-            "create_expert_program_bridge() using explicit runtime ports."
-        )
+        return self._checked_expert_program_adapter().create_bridge(program)
+
+    def is_task_success(self, **kwargs: Any) -> torch.Tensor:
+        """Return completed Expert Program acceptance or legacy task success.
+
+        Expert Program success is published only after its bridge has consumed
+        every segment lifecycle, including post-policies and validators.
+
+        Args:
+            **kwargs: Compatibility keywords forwarded for non-Expert tasks.
+
+        Returns:
+            Per-environment task-success mask.
+        """
+        expert_program = getattr(getattr(self, "cfg", None), "expert_program", None)
+        if expert_program is None:
+            return super().is_task_success(**kwargs)
+        bridge = self._active_expert_program_bridge
+        if bridge is None or not bridge.program_completed:
+            return torch.zeros(
+                self.num_envs,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        completion = bridge.completion_mask
+        if completion.dtype != torch.bool or completion.shape != (self.num_envs,):
+            raise ValueError(
+                "Expert Program completion mask must be bool with one value per "
+                "environment."
+            )
+        return completion.to(device=self.device)
 
     def create_demo_segments(self, *args, **kwargs) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -1969,6 +2063,7 @@ class EmbodiedEnv(BaseEnv):
         if expert_program is not None:
             compiled_program = self.compile_expert_program(expert_program)
             bridge = self.create_expert_program_bridge(compiled_program)
+            self._active_expert_program_bridge = bridge
             return bridge.iter_segments()
 
         actions = self.create_demo_action_list(*args, **kwargs)

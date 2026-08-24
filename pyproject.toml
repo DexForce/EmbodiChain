@@ -97,6 +97,7 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "requires_sim: marks tests that require a real simulation backend",
+    "subprocess_sim: marks tests whose simulation is isolated to a child process",
     "no_sim: marks mock-only tests that must not initialize a simulation backend",
     "requires_tasks: marks tests that require installed task-package discovery",
     "gpu: marks tests that execute CUDA/GPU code (run serially)",

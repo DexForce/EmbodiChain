@@ -29,29 +29,37 @@ from embodichain.utils.math import (
     pose_inv,
 )
 
-from ._helpers import (
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     require_shared_task_state_key,
     resolve_object_target,
 )
-from ._binding_contracts import make_manipulation_slot
-from ..bindings import JointPositionTarget
-from ..control import GRASP_COMMAND, JointPositionCommand
-from ..core import AtomicAction
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, TimedTrajectory
-from ..requirements import (
-    CARTESIAN_POSE_CAPABILITY,
-    DisjointSlotEndpoints,
-    FORWARD_KINEMATICS_CAPABILITY,
-    GRASP_CAPABILITY,
-    SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    JointPositionCommand,
 )
-from ..state import PlanningContext
-from ..trajectory_ops import build_pose_plan_states
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.requirements import (
+    CARTESIAN_POSE_CAPABILITY,
+    FORWARD_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -153,7 +161,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             return self.failed_plan(
                 request,
                 context,
-                message="Held object is not exclusive to the task-state resource.",
+                message="Held object is not exclusive to the control part.",
             )
         object_target_pose = resolve_object_target(
             resolve_pose_goal(

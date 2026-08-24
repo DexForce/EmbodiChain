@@ -150,6 +150,9 @@ Choosing Where to Start
 - Use :doc:`atomic_actions/robot_skill_profiles` when semantic skills should
   resolve robot resources and policy presets from reusable embodiment
   configuration.
+- Use :doc:`semantic_skills` when an application or agent should issue
+  robot-independent object-centric calls and retain verified state across
+  dynamic task segments.
 - Use :doc:`atomic_actions/expert_programs` when a task should declare semantic
   calls, settling, validation, or parallel barriers from JSON/YAML without
   implementing task-local motion generation.
@@ -179,4 +182,5 @@ See Also
    solvers/index
    planners/index
    scene_registry.md
+   semantic_skills.md
    atomic_actions/index

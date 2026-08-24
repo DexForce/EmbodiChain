@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import math
 from typing import TYPE_CHECKING
@@ -186,34 +186,6 @@ class ExecutionPlanAttempt:
 
     def snapshot(self) -> ExecutionPlanAttempt:
         """Return an independently owned plan-attempt trace."""
-        return ExecutionPlanAttempt(
-            attempt_generation=self.attempt_generation,
-            event_kind=self.event_kind,
-            planned_at=self.planned_at,
-            invocation_index=self.invocation_index,
-            planned_mask=self.planned_mask,
-            action_retry_counts=self.action_retry_counts,
-            replan_counts=self.replan_counts,
-            request=self.request,
-            plan=self.plan,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class _ExecutionPlanAttemptRecord:
-    """Session-private plan reference converted to an owned public snapshot."""
-
-    attempt_generation: int
-    event_kind: ExecutionEventKind
-    planned_at: float
-    invocation_index: int
-    planned_mask: torch.Tensor
-    action_retry_counts: tuple[int, ...]
-    replan_counts: tuple[int, ...]
-    request: ResolvedActionRequest
-    plan: ActionPlan
-
-    def snapshot(self) -> ExecutionPlanAttempt:
         return ExecutionPlanAttempt(
             attempt_generation=self.attempt_generation,
             event_kind=self.event_kind,
@@ -1022,7 +994,7 @@ class ExecutionSession:
         self._satisfied_phase_effect_gates: set[str] = set()
         self._reported_phase_effect_gates: set[str] = set()
         self._next_phase_effect_gate_verification_id = 0
-        self._plan_attempt_records: list[_ExecutionPlanAttemptRecord] = []
+        self._plan_attempts: list[ExecutionPlanAttempt] = []
         self._status = (
             ExecutionStatus.RUNNING if self._eligible.any() else ExecutionStatus.FAILED
         )
@@ -1256,7 +1228,6 @@ class ExecutionSession:
             replacement_plan,
             ExecutionEventKind.INVOCATION_REVISED,
         )
-
         requests = list(self._requests)
         requests[self._invocation_index] = replacement
         self._requests = tuple(requests)
@@ -1328,7 +1299,7 @@ class ExecutionSession:
         recovery replan, or whole-action retry appends a new generation instead
         of replacing earlier scene/collision evidence.
         """
-        return tuple(record.snapshot() for record in self._plan_attempt_records)
+        return tuple(attempt.snapshot() for attempt in self._plan_attempts)
 
     def trajectory_segment(self, name: str) -> TrajectorySegment:
         """Return named segment metadata for the active action plan.
@@ -1468,16 +1439,7 @@ class ExecutionSession:
                 return self._tick_result(command=None, events=events)
             assert self._plan is not None
         if not self._pending.any():
-            command, hold_targets, completion_events = self._finish_action(
-                self._pending,
-                None,
-            )
-            events.extend(completion_events)
-            return self._tick_result(
-                command=command,
-                hold_targets=hold_targets,
-                events=events,
-            )
+            return self._finish_action_tick(self._pending, None, events)
 
         if self._pending_effect is not None:
             execution_mask = (
@@ -1541,28 +1503,14 @@ class ExecutionSession:
                 if self._status is not ExecutionStatus.RUNNING:
                     return self._tick_result(command=None, events=events)
                 if not self._pending.any():
-                    command, hold_targets, completion_events = self._finish_action(
-                        self._pending,
-                        None,
-                    )
-                    events.extend(completion_events)
-                    return self._tick_result(
-                        command=command,
-                        hold_targets=hold_targets,
-                        events=events,
-                    )
+                    return self._finish_action_tick(self._pending, None, events)
                 assert self._plan is not None
                 effect_result = None
             else:
-                command, hold_targets, completion_events = self._finish_action(
+                return self._finish_action_tick(
                     execution_mask,
                     effect_result,
-                )
-                events.extend(completion_events)
-                return self._tick_result(
-                    command=command,
-                    hold_targets=hold_targets,
-                    events=events,
+                    events,
                 )
 
         if self._effect_failures.any():
@@ -1589,16 +1537,7 @@ class ExecutionSession:
             if self._status is not ExecutionStatus.RUNNING:
                 return self._tick_result(command=None, events=events)
             if not self._pending.any():
-                command, hold_targets, completion_events = self._finish_action(
-                    self._pending,
-                    None,
-                )
-                events.extend(completion_events)
-                return self._tick_result(
-                    command=command,
-                    hold_targets=hold_targets,
-                    events=events,
-                )
+                return self._finish_action_tick(self._pending, None, events)
             assert self._plan is not None
 
         plan = self._plan
@@ -1607,33 +1546,23 @@ class ExecutionSession:
         events.extend(recovery_events)
         if self._status is not ExecutionStatus.RUNNING:
             return self._tick_result(command=None, events=events)
-        if recovery_events:
+        if recovery_events and any(
+            event.kind
+            in {
+                ExecutionEventKind.REPLANNED,
+                ExecutionEventKind.RECOVERY_EXHAUSTED,
+                ExecutionEventKind.TRACKING_FEEDBACK_FAILED,
+            }
+            for event in recovery_events
+        ):
             assert self._plan is not None
             plan = self._plan
             execution_mask = self._pending & self._plan.plan_success
         if not self._pending.any():
-            command, hold_targets, completion_events = self._finish_action(
-                self._pending,
-                None,
-            )
-            events.extend(completion_events)
-            return self._tick_result(
-                command=command,
-                hold_targets=hold_targets,
-                events=events,
-            )
+            return self._finish_action_tick(self._pending, None, events)
 
         if not execution_mask.any():
-            command, hold_targets, completion_events = self._finish_action(
-                execution_mask,
-                None,
-            )
-            events.extend(completion_events)
-            return self._tick_result(
-                command=command,
-                hold_targets=hold_targets,
-                events=events,
-            )
+            return self._finish_action_tick(execution_mask, None, events)
 
         phase_gate_request = self._phase_effect_gate_request()
         if phase_gate_request is not None:
@@ -1709,11 +1638,24 @@ class ExecutionSession:
                 assert self._plan is not None
                 plan = self._plan
                 execution_mask = self._pending & plan.plan_success
+                if not self._pending.any():
+                    return self._finish_action_tick(self._pending, None, events)
                 if plan.commands.frame_count > 0 and execution_mask.any():
                     command = self._command_at(plan, 0, execution_mask)
                     self._waypoint_index = 1
                     return self._tick_result(command=command, events=events)
-                terminal_pending.zero_()
+                events.append(
+                    self._event(
+                        ExecutionEventKind.TRAJECTORY_COMPLETED,
+                        execution_mask,
+                        "Replanned action has no executable command frame.",
+                    )
+                )
+                return self._finish_action_tick(
+                    execution_mask,
+                    effect_result,
+                    events=events,
+                )
         else:  # pragma: no cover - TrackingPolicy validates exact alternatives
             raise AssertionError(
                 f"Unsupported terminal acceptance {type(terminal).__name__}."
@@ -1748,6 +1690,19 @@ class ExecutionSession:
             )
         )
 
+        return self._finish_action_tick(
+            execution_mask,
+            effect_result,
+            events=events,
+        )
+
+    def _finish_action_tick(
+        self,
+        execution_mask: torch.Tensor,
+        effect_result: EffectVerificationResult | None,
+        events: list[ExecutionEvent],
+    ) -> ExecutionTick:
+        """Finish the active action and construct its tick result."""
         command, hold_targets, completion_events = self._finish_action(
             execution_mask,
             effect_result,
@@ -1782,13 +1737,7 @@ class ExecutionSession:
             raise ValueError("Collision-world revisions must be monotonic.")
         if not torch.equal(context.env_ids, self._context.env_ids):
             raise ValueError("Execution tick env_ids must remain stable and ordered.")
-        return PlanningContext(
-            robot=context.robot,
-            task=self._task_state,
-            scene=context.scene,
-            env_ids=context.env_ids,
-            control_dt=context.control_dt,
-        )
+        return replace(context, task=self._task_state)
 
     def _plan_current(
         self,
@@ -1815,7 +1764,8 @@ class ExecutionSession:
         }
         replacement_destinations = frozenset(replacement_targets)
         replacement_tracking_routes = self._tracking_routes(plan)
-        self._validate_destination_continuity(plan, event_kind)
+        if not destination_continuity_validated:
+            self._validate_destination_continuity(plan, event_kind)
         self._validate_tracking_continuity(plan, event_kind)
         self._validate_phase_effect_gates(plan)
         if (
@@ -1854,21 +1804,21 @@ class ExecutionSession:
         self._satisfied_phase_effect_gates.clear()
         self._reported_phase_effect_gates.clear()
         planned_mask = self._pending & plan.plan_success
-        self._plan_attempt_records.append(
-            _ExecutionPlanAttemptRecord(
+        self._plan_attempts.append(
+            ExecutionPlanAttempt(
                 attempt_generation=self._attempt_generation,
                 event_kind=event_kind,
                 planned_at=context.robot.timestamp,
                 invocation_index=self._invocation_index,
-                planned_mask=planned_mask.clone(),
+                planned_mask=planned_mask,
                 action_retry_counts=tuple(
                     int(value) for value in self._action_retries.detach().cpu().tolist()
                 ),
                 replan_counts=tuple(
                     int(value) for value in self._replans.detach().cpu().tolist()
                 ),
-                request=self._requests[self._invocation_index].snapshot(),
-                plan=plan.snapshot(),
+                request=self._requests[self._invocation_index],
+                plan=plan,
             )
         )
         self._queued_events.append(
@@ -2320,12 +2270,7 @@ class ExecutionSession:
                 self._task_state = self._plan.expected_effects.apply(
                     self._task_state, verified
                 )
-                self._context = PlanningContext(
-                    robot=self._context.robot,
-                    task=self._task_state,
-                    scene=self._context.scene,
-                    env_ids=self._context.env_ids,
-                )
+                self._context = replace(self._context, task=self._task_state)
             self._pending &= ~verified
         if unresolved.any():
             if made_progress:
@@ -2510,8 +2455,13 @@ class ExecutionSession:
         """Detect and describe material scene-dependency invalidation."""
         dependencies = plan.scene_dependencies
         changed = torch.zeros_like(self._eligible)
+        dependency_end = plan.scene_dependency_end_segment
         if (
             not dependencies
+            or (
+                dependency_end is not None
+                and self._waypoint_index >= plan.segment(dependency_end).stop
+            )
             or self._context.scene.version == self._planned_scene.version
         ):
             return changed, None

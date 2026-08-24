@@ -50,16 +50,10 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.objects import Articulation
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
-    AntipodalSamplerCfg,
-    GraspGeneratorCfg,
-)
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
-)
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
+    create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -115,19 +109,11 @@ def create_drawer(
     return drawer
 
 
-def create_drawer_semantics(
-    drawer: Articulation,
-    *,
-    n_sample: int,
-    force_reannotate: bool,
-) -> ObjectSemantics:
+def create_drawer_semantics(drawer: Articulation) -> ObjectSemantics:
     """Create sampled-grasp translation semantics for the drawer handle.
 
     Args:
         drawer: Drawer articulation that owns the target handle link.
-        n_sample: Number of antipodal surface samples.
-        force_reannotate: Whether to ignore a cached grasp annotation.
-
     Returns:
         Pure target-local semantics for the handle's pull/push affordance.
     """
@@ -144,24 +130,6 @@ def create_drawer_semantics(
                 dtype=torch.float32,
                 device=drawer.device,
             ),
-            generator_cfg=GraspGeneratorCfg(
-                antipodal_sampler_cfg=AntipodalSamplerCfg(
-                    n_sample=n_sample,
-                    max_length=0.1,
-                    min_length=0.003,
-                ),
-                is_partial_annotate=False,
-                is_filter_ground_collision=False,
-            ),
-            gripper_collision_cfg=GripperCollisionCfg(
-                max_open_length=0.1,
-                finger_length=0.1,
-                y_thickness=0.04,
-                root_z_width=0.096,
-                open_check_margin=0.03,
-                point_sample_dense=0.012,
-            ),
-            force_reannotate=force_reannotate,
         ),
     )
 
@@ -220,11 +188,7 @@ def main() -> None:
     drawer = create_drawer(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     motion_gen = create_toppra_motion_generator(robot)
-    semantics = create_drawer_semantics(
-        drawer,
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
-    )
+    semantics = create_drawer_semantics(drawer)
     affordance = semantics.affordance
     assert isinstance(affordance, SlideAffordance)
     if not args.no_vis_eef_axis:
@@ -240,6 +204,12 @@ def main() -> None:
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
                 grasp=hand_close,
+            )
+        },
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
             )
         },
     )

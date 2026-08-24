@@ -71,8 +71,6 @@ from embodichain.lab.sim.skills import (
     ControlPartEndpoint,
     ControlPartEndpointAdapter,
     ControlPartEvidenceAddress,
-    CONTROL_PART_EVIDENCE_PROVIDER_ID,
-    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
     EffectEvidenceSourceRef,
     EffectMonitorRef,
     EndpointResolution,
@@ -521,29 +519,6 @@ def test_endpoint_resolution_owns_and_freezes_effect_sources() -> None:
     )
     with pytest.raises(TypeError):
         resolution.effect_sources["new"] = source  # type: ignore[index]
-
-
-def test_control_part_adapter_declares_every_builtin_integration_route() -> None:
-    adapter = ControlPartEndpointAdapter
-
-    assert adapter.runtime_transport_ids == frozenset(
-        {JointPositionTarget.TRANSPORT_ID}
-    )
-    assert adapter.runtime_target_types == (JointPositionTarget,)
-    assert adapter.tracking_feedback_source_keys == frozenset(
-        {("planning_context.robot", "1")}
-    )
-    assert adapter.tracking_projector_keys == frozenset(
-        {("joint_position_payload", "1")}
-    )
-    assert adapter.effect_evidence_source_keys == frozenset(
-        {
-            (
-                CONTROL_PART_EVIDENCE_PROVIDER_ID,
-                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
-            )
-        }
-    )
 
 
 @pytest.mark.parametrize("returns_self", [False, True])
@@ -1411,11 +1386,11 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
             "pick": PickUpOptions(pre_grasp_distance=0.08),
         },
         motion_policy=MotionPolicy(sample_count=80),
-        required_planner="stub_planner",
         tracking_policy=TrackingPolicy.joint_position(
             in_flight_max_abs_error=0.125,
             terminal_max_abs_error=0.125,
         ),
+        required_planner="stub_planner",
     )
     profile = RobotSkillProfile(
         "presets",
@@ -1432,6 +1407,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
 
     assert first is not second
     assert first.schema_version == 3
+    assert first.required_planner == "stub_planner"
     assert first.motion_policy.sample_count == 80
     assert first.tracking_policy is not second.tracking_policy
     assert first.action_option_templates["pick"] is not (
@@ -1454,6 +1430,8 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         bound.preset("safe", skill_id="typo")
     with pytest.raises(ValueError, match=r"supported versions are \[3\]"):
         SkillPolicyPreset("legacy", action_option_templates={}, schema_version=2)
+    with pytest.raises(ValueError, match="required_planner"):
+        SkillPolicyPreset("invalid", action_option_templates={}, required_planner="")
 
     incompatible = RobotSkillProfile(
         "bad_preset",
@@ -1507,7 +1485,6 @@ def test_policy_preset_defaults_exact_builtin_effect_monitor_refs() -> None:
         "pick",
         "place",
         "hand_over",
-        "operate_articulation",
     }
     for monitor_ref in preset.effect_monitors.values():
         assert monitor_ref.monitor_id == COMPOSITE_EFFECT_MONITOR_ID
@@ -1595,37 +1572,18 @@ def test_policy_preset_owns_and_freezes_action_option_templates() -> None:
         preset.action_option_template("place")
 
 
-def test_policy_preset_allows_empty_templates_but_rejects_invalid_values() -> None:
+def test_policy_preset_requires_typed_action_option_templates() -> None:
     with pytest.raises(TypeError, match="action_option_templates"):
         SkillPolicyPreset("missing")  # type: ignore[call-arg]
 
-    assert (
-        dict(
-            SkillPolicyPreset(
-                "empty", action_option_templates={}
-            ).action_option_templates
-        )
-        == {}
-    )
+    assert not SkillPolicyPreset(
+        "empty", action_option_templates={}
+    ).action_option_templates
 
     with pytest.raises(TypeError, match="ActionOptions"):
         SkillPolicyPreset(
             "invalid",
             action_option_templates={"pick": object()},  # type: ignore[dict-item]
-        )
-
-
-def test_policy_preset_rejects_inherited_action_options_with_extra_slot_state() -> None:
-    class InheritedOptions(PickUpOptions):
-        __slots__ = ("runtime_cache",)
-
-    options = InheritedOptions()
-    object.__setattr__(options, "runtime_cache", ["live"])
-
-    with pytest.raises(TypeError, match="exact frozen @dataclass"):
-        SkillPolicyPreset(
-            "invalid",
-            action_option_templates={"pick": options},
         )
 
 

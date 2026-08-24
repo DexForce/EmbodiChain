@@ -32,14 +32,12 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
 )
 from embodichain.lab.gym.envs.expert_program.cfg import (
     EXPERT_PROGRAM_SCHEMA_VERSION,
-    EXPERT_PROGRAM_SCHEMA_VERSION_V2,
     BarrierCfg,
     CyclicPoseTargetCfg,
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
     InvokeCfg,
     ObjectNearTargetValidatorCfg,
-    OperateArticulationCfg,
     ParallelCfg,
     PickCfg,
     PlaceCfg,
@@ -52,14 +50,11 @@ from embodichain.lab.gym.envs.expert_program.cfg import (
 )
 from embodichain.lab.gym.envs.expert_program.environment import (
     ExpertProgramEnvironmentAdapter,
-    ExpertProgramEnvironmentMixin,
     PlanningObservationPort,
-    SkillRuntimeAssemblyPort,
 )
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
-    ArticulationOperationAffordance,
-    ArticulationOperationTarget,
     AtomicActionEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
@@ -68,22 +63,20 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     JOINT_POSITION_CAPABILITY,
+    HandOverOptions,
     MotionPolicy,
-    OperateArticulationOptions,
     PickUpOptions,
-    PlanningContext,
     PlaceOptions,
+    PlanningContext,
     RobotObservation,
     TaskState,
 )
 from embodichain.lab.sim.skills import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
     GRASP_AFFORDANCE_CAPABILITY,
     ControlPartEndpoint,
     RobotResource,
     RobotSkillProfile,
     SceneAffordanceRef,
-    SceneArticulationRef,
     SceneCollisionRole,
     SceneCollisionWorldMode,
     SceneEntityRegistration,
@@ -207,125 +200,13 @@ def _robot_profile(
                 action_option_templates={
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
+                    "hand_over": HandOverOptions(),
                 },
                 motion_policy=safe_motion_policy,
             )
         },
         default_preset="safe",
     )
-
-
-def _parallel_articulation_scene_registry() -> SceneRegistry:
-    """Build one drawer whose exact joint key is statically discoverable."""
-    drawer = SceneArticulationRef("drawer")
-    handle = SceneAffordanceRef("drawer_handle")
-    return SceneRegistry(
-        (
-            SceneEntityRegistration(
-                ref=drawer,
-                state_provider=_PoseProvider(),
-                semantic_type="drawer",
-                default_affordances={
-                    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY: handle
-                },
-            ),
-            SceneEntityRegistration(
-                ref=handle,
-                state_provider=_PoseProvider(),
-                parent=drawer,
-                native_name="handle",
-                affordance=ArticulationOperationAffordance(
-                    joint_id="drawer_slide",
-                    operation_axis=torch.tensor((1.0, 0.0, 0.0)),
-                    semantic_targets={
-                        "open": ArticulationOperationTarget(
-                            target_position=0.4,
-                            displacement=0.35,
-                        )
-                    },
-                ),
-                affordance_capabilities=frozenset(
-                    {ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY}
-                ),
-                affordance_revision="drawer-operation-v1",
-            ),
-        )
-    )
-
-
-def _parallel_articulation_profile() -> RobotSkillProfile:
-    """Build two physically disjoint resources that can address one drawer."""
-
-    def resource(resource_id: str) -> RobotResource:
-        return RobotResource(
-            resource_id=resource_id,
-            endpoints={
-                "motion": ControlPartEndpoint(
-                    control_part=f"{resource_id}_arm",
-                    capabilities=frozenset(
-                        {CARTESIAN_POSE_CAPABILITY, JOINT_POSITION_CAPABILITY}
-                    ),
-                ),
-                "interaction": ControlPartEndpoint(
-                    control_part=f"{resource_id}_hand",
-                    capabilities=frozenset({GRASP_CAPABILITY}),
-                ),
-            },
-        )
-
-    return RobotSkillProfile(
-        profile_id="parallel_articulation_robot",
-        resources={
-            "left": resource("left"),
-            "right": resource("right"),
-        },
-        command_profiles={
-            hand: ControlPartCommandProfile.joint_positions(
-                open=torch.tensor((0.0,)),
-                grasp=torch.tensor((1.0,)),
-            )
-            for hand in ("left_hand", "right_hand")
-        },
-        presets={
-            "safe": SkillPolicyPreset(
-                "safe",
-                action_option_templates={
-                    "operate_articulation": OperateArticulationOptions(),
-                },
-            )
-        },
-        default_preset="safe",
-    )
-
-
-def _parallel_articulation_engine(
-    profile: RobotSkillProfile,
-) -> AtomicActionEngine:
-    """Build the disjoint four-control-part engine used only for preflight."""
-    robot = Mock()
-    robot.device = torch.device("cpu")
-    robot.dof = 4
-    robot.control_parts = {
-        "left_arm": object(),
-        "left_hand": object(),
-        "right_arm": object(),
-        "right_hand": object(),
-    }
-    robot.get_qpos.return_value = torch.zeros(_BATCH_SIZE, robot.dof)
-    robot.get_qvel.return_value = torch.zeros(_BATCH_SIZE, robot.dof)
-    joint_ids = {
-        "left_arm": [0],
-        "left_hand": [1],
-        "right_arm": [2],
-        "right_hand": [3],
-    }
-    robot.get_joint_ids.side_effect = lambda name: joint_ids[name]
-    robot.get_solver.return_value = object()
-    generator = Mock()
-    generator.robot = robot
-    generator.device = torch.device("cpu")
-    generator.planner.cfg.planner_type = "fake_planner"
-    return AtomicActionEngine(generator, skill_profile=profile)
 
 
 def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
@@ -401,6 +282,7 @@ class _FakeEnvironmentFactory:
                     env_ids=env_ids,
                 ),
                 env_ids=env_ids,
+                control_dt=clock.step_dt,
             )
 
         return GymPlanningObservationProvider(capture)
@@ -416,28 +298,6 @@ class _FakeEnvironmentFactory:
         del scene_registry, engine, observation_provider
         self.calls["evidence"] += 1
         return ()
-
-
-class _ParallelArticulationFactory(_FakeEnvironmentFactory):
-    """Expose two robot resources and one shared articulation write target."""
-
-    scene_registry_id = "parallel_articulation_scene"
-    robot_profile_id = "parallel_articulation_robot"
-
-    def create_scene_registry(self) -> SceneRegistry:
-        self.calls["scene"] += 1
-        return _parallel_articulation_scene_registry()
-
-    def create_robot_skill_profile(self) -> RobotSkillProfile:
-        self.calls["profile"] += 1
-        return _parallel_articulation_profile()
-
-    def create_atomic_action_engine(
-        self,
-        profile: RobotSkillProfile,
-    ) -> AtomicActionEngine:
-        self.calls["engine"] += 1
-        return _parallel_articulation_engine(profile)
 
 
 class _DynamicCollisionFactory(_FakeEnvironmentFactory):
@@ -472,7 +332,7 @@ class _DynamicCollisionFactory(_FakeEnvironmentFactory):
         return engine
 
 
-class _FakeDeclarativeEnvironment(ExpertProgramEnvironmentMixin):
+class _FakeDeclarativeEnvironment(EmbodiedEnv):
     """Environment surface requiring no task-level motion implementation."""
 
     def __init__(self, adapter: ExpertProgramEnvironmentAdapter) -> None:
@@ -521,6 +381,19 @@ class _PresetCheckingPostPolicyPort:
         del policy, segment, active_mask
         raise AssertionError("Preflight must not request post-policy actions.")
 
+    def post_policy_result(self, policy: object, *, segment: object) -> bool:
+        del policy, segment
+        return True
+
+    def post_policy_metadata(
+        self,
+        policy: object,
+        *,
+        segment: object,
+    ) -> dict[str, object]:
+        del policy, segment
+        return {}
+
 
 def _program(
     *,
@@ -548,7 +421,6 @@ def _program(
 def _program_with_later_parallel_conflict() -> ExpertProgramCfg:
     """Build an early sequential call followed by conflicting branch claims."""
     return _program(
-        schema_version=EXPERT_PROGRAM_SCHEMA_VERSION_V2,
         node=SequenceCfg(
             items=(
                 InvokeCfg(call=PickCfg(object="cube")),
@@ -603,40 +475,11 @@ def _program_with_later_segment_hooks(
     )
 
 
-def _parallel_articulation_program() -> ExpertProgramCfg:
-    """Operate one joint from disjoint resources in two parallel branches."""
-    return ExpertProgramCfg(
-        schema_version=EXPERT_PROGRAM_SCHEMA_VERSION_V2,
-        program_id="conflicting_drawer_operations",
-        integration=ExpertProgramIntegrationCfg(
-            robot_profile="parallel_articulation_robot",
-            scene_registry="parallel_articulation_scene",
-            runtime_preset="safe",
-        ),
-        targets={},
-        program=ParallelCfg(
-            branches=tuple(
-                InvokeCfg(
-                    call=OperateArticulationCfg(
-                        articulation="drawer",
-                        target="open",
-                        resources={"primary": resource_id},
-                    )
-                )
-                for resource_id in ("left", "right")
-            ),
-            barrier=BarrierCfg(name="drawer_join"),
-        ),
-    )
-
-
-def test_mixin_compiles_and_assembles_bridge_without_task_motion_code() -> None:
+def test_embodied_env_delegates_compilation_and_bridge_assembly() -> None:
     """One adapter property implements both EmbodiedEnv integration hooks."""
     factory = _FakeEnvironmentFactory()
     adapter = ExpertProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
     env = _FakeDeclarativeEnvironment(adapter)
-
-    assert isinstance(adapter, SkillRuntimeAssemblyPort)
 
     compiled = env.compile_expert_program(_program())
 
@@ -832,29 +675,6 @@ def test_later_parallel_claim_conflict_fails_during_whole_program_preflight() ->
     with pytest.raises(ValueError, match="overlapping resource claims"):
         adapter.create_bridge(compiled)
 
-    assert factory.observation_samples == 0
-
-
-def test_parallel_symbolic_write_conflict_fails_before_observation_or_action() -> None:
-    factory = _ParallelArticulationFactory()
-    adapter = ExpertProgramEnvironmentAdapter(
-        factory,
-        step_dt=_STEP_DT,
-        parallel_safety_validator=_AcceptParallelSafety(),
-    )
-    compiled = adapter.compile(_parallel_articulation_program())
-    materialized = compiled.materialize()
-    parallel_block = tuple(materialized.iter_segments())[0].parallel_block
-    assert parallel_block is not None
-    expected_path = parallel_block.branches[1].source_path
-
-    with pytest.raises(SemanticValidationError) as error:
-        adapter.create_bridge(compiled)
-
-    diagnostic = error.value.diagnostic
-    assert diagnostic.code == "parallel_symbolic_write_conflict"
-    assert diagnostic.path == expected_path
-    assert "articulation_joint['drawer', 'drawer_slide']" in diagnostic.message
     assert factory.observation_samples == 0
 
 

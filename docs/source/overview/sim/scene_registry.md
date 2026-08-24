@@ -334,6 +334,6 @@ core by hand. The list form derives obstacle names from each object's `uid` (or
 an `obstacle_<index>` fallback). It is not the registry-backed path and does not
 provide alias normalization or registry/provider/planner construction checks.
 
-See {doc}`atomic_actions/robot_skill_profiles` for manifest and semantic-call
-integration, {doc}`atomic_actions/index` for snapshot grounding and recovery semantics, and
+See {doc}`semantic_skills` for manifest and semantic-call integration,
+{doc}`atomic_actions/index` for snapshot grounding and recovery semantics, and
 {doc}`planners/curobo_planner` for cuRobo world representation and frame details.

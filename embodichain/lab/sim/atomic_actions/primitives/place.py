@@ -26,17 +26,21 @@ import torch
 
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
-from ._helpers import (
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     require_shared_task_state_key,
     resolve_object_target,
 )
-from ..affordance import AssembleAffordance
-from ..bindings import JointPositionTarget
-from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
-from ..core import AtomicAction
-from ..effects import StateDelta
-from ..goals import (
+from embodichain.lab.sim.atomic_actions.affordance import AssembleAffordance
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
     PoseGoalValue,
     SceneEntityPose,
     resolve_pose_goal,
@@ -246,7 +250,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             return self.failed_plan(
                 request,
                 context,
-                message="Place requires an exclusive held-object relation.",
+                message="Held object is shared with another control part.",
             )
         if place_xpos.dim() == 3:
             place_xpos = place_xpos.unsqueeze(1)
@@ -331,9 +335,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         full[:, n_down_actual + n_open :, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
         coordinated_updates = {
-            key: None
-            for key in state.task.coordinated_held_objects
-            if task_state_key in key
+            key: None for key in state.coordinated_held_objects if task_state_key in key
         }
         return self.build_plan(
             request,
@@ -366,8 +368,6 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         Args:
             target: Either an explicit EEF pose target or an assembly target.
             state: World state carrying the held-object transform.
-            task_state_key: Stable logical resource used for held-object state.
-
         Returns:
             Place EEF poses with shape ``(num_envs, 4, 4)`` or
             ``(num_envs, n_waypoint, 4, 4)``.
@@ -395,8 +395,6 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         Args:
             target: Assembly target carrying the base/assemble affordance.
             state: World state carrying the held-object transform.
-            task_state_key: Stable logical resource used for held-object state.
-
         Returns:
             Place EEF poses with shape ``(num_envs, 4, 4)``.
 

@@ -32,13 +32,20 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 
-from ._helpers import arm_qpos_from_state, require_shared_task_state_key
-from ..affordance import AntipodalAffordance
-from ..bindings import JointPositionTarget
-from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
-from ..core import AtomicAction, ObjectSemantics
-from ..effects import StateDelta
-from ..goals import (
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    require_shared_task_state_key,
+)
+from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
     ObjectActionGoal,
     PoseGoalValue,
     _resolve_object_pose,
@@ -391,7 +398,6 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        control_part = manipulator.control_part
         state = context
         sem = target.semantics
         object_pose = _resolve_object_pose(
@@ -415,6 +421,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 object_pose,
                 start_arm_qpos,
                 manipulator,
+                end_effector.target_id,
                 options,
                 approach_direction,
             )
@@ -468,9 +475,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
         coordinated_updates = {
-            key: None
-            for key in state.task.coordinated_held_objects
-            if task_state_key in key
+            key: None for key in state.coordinated_held_objects if task_state_key in key
         }
         return self.build_plan(
             request,
@@ -486,6 +491,9 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 coordinated_held_object_updates=coordinated_updates,
             ),
             segment_lengths=segment_lengths,
+            # Once the approach is dispatched the object can move because of
+            # contact or grasping. That self-induced motion must not look like
+            # an external dynamic-goal update.
             scene_dependency_monitor_until=(
                 {}
                 if sem.entity_id is None
@@ -499,25 +507,42 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         object_pose: torch.Tensor,
         start_qpos: torch.Tensor,
         manipulator: JointPositionTarget,
+        grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        affordance = semantics.affordance
+        if not isinstance(affordance, AntipodalAffordance):
+            raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
+        generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        obj_longest_axis = None
+        is_positive_part = True
+        if options.pick_object_part != "center":
+            obj_longest_axis = torch.tensor(
+                [0.0, 0.0, 1.0],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            is_positive_part = options.pick_object_part == "top"
         grasp_cost_fn = None
         if options.rotate_upright is not None:
-            grasp_cost_fn = lambda object_pose, grasp_poses, costs: (
+            grasp_cost_fn = lambda candidate_object_pose, grasp_poses, costs: (
                 self._upright_grasp_costs(
                     semantics,
-                    object_pose,
+                    candidate_object_pose,
                     grasp_poses,
                     costs,
                     options,
                 )
             )
-        grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
+        grasp_poses_result = generator.get_valid_grasp_poses(
+            mesh_vertices=affordance.mesh_vertices,
+            mesh_triangles=affordance.mesh_triangles,
             obj_poses=object_pose,
             approach_direction=approach_direction,
-            object_part=options.pick_object_part,
-            grasp_cost_fn=grasp_cost_fn,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
+            pose_cost_fn=grasp_cost_fn,
         )
         num_envs = object_pose.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
@@ -797,11 +822,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             torch.full_like(costs, torch.inf),
         )
 
-        vertices = semantics.geometry.get("mesh_vertices")
+        affordance = semantics.affordance
+        if not isinstance(affordance, AntipodalAffordance):
+            return adjusted
+        vertices = affordance.mesh_vertices
         if vertices is None:
             return adjusted
-        vertices = torch.as_tensor(
-            vertices,
+        vertices = vertices.to(
             dtype=grasp_poses.dtype,
             device=grasp_poses.device,
         )
@@ -839,6 +866,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         self,
         options: PickUpOptions,
     ) -> torch.Tensor:
+        """Return the configured non-zero object-local upright direction."""
         direction = options.obj_upright_direction
         if direction is None:
             direction = torch.tensor([0, 0, 1], dtype=torch.float32)

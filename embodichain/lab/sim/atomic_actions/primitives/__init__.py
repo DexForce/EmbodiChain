@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from ..core import AtomicAction
+from .axis_align import AxisAlign, AxisAlignGoal, AxisAlignOptions
 from .coordinated_pickment import (
     CoordinatedPickGoal,
     CoordinatedPickment,
@@ -29,7 +30,7 @@ from .coordinated_placement import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
 )
-from .hand_over import HandOver, HandOverOptions
+from .hand_over import HandOver, HandOverGoal, HandOverOptions
 from .move_end_effector import (
     EndEffectorPoseGoal,
     MoveEndEffector,
@@ -41,14 +42,10 @@ from .move_held_object import (
     MoveHeldObjectOptions,
 )
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
-from .operate_articulation import (
-    OperateArticulation,
-    OperateArticulationGoal,
-    OperateArticulationOptions,
-)
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import Press, PressGoal, PressOptions
+from .pour import Pour, PourGoal, PourOptions
 from .slide import (
     Slide,
     SlideGoal,
@@ -60,20 +57,24 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
     MoveJoints,
     PickUp,
+    AxisAlign,
     MoveHeldObject,
     Place,
+    Pour,
     Press,
     Slide,
     Twist,
     CoordinatedPickment,
     CoordinatedPlacement,
     HandOver,
-    OperateArticulation,
 )
 """Built-in action implementations instantiated once per action engine."""
 
 __all__ = [
     "AssembleGoal",
+    "AxisAlign",
+    "AxisAlignGoal",
+    "AxisAlignOptions",
     "BUILTIN_ACTION_TYPES",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
@@ -84,6 +85,7 @@ __all__ = [
     "EndEffectorPoseGoal",
     "GraspGoal",
     "HandOver",
+    "HandOverGoal",
     "HandOverOptions",
     "HeldObjectPoseGoal",
     "JointPositionGoal",
@@ -93,14 +95,14 @@ __all__ = [
     "MoveHeldObjectOptions",
     "MoveJoints",
     "MoveJointsOptions",
-    "OperateArticulation",
-    "OperateArticulationGoal",
-    "OperateArticulationOptions",
     "PickUp",
     "PickUpOptions",
     "Place",
     "PlaceGoal",
     "PlaceOptions",
+    "Pour",
+    "PourGoal",
+    "PourOptions",
     "Press",
     "PressGoal",
     "PressOptions",

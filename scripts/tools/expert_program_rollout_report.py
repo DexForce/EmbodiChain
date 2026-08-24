@@ -98,9 +98,9 @@ _TASK_SIZE_SPECS = (
         baseline_bytes=23_912,
         baseline_blob="1965563b060d1fc889f03ad13d47655c2edcd99b",
         source_paths=(
-            "embodichain_tasks/embodichain_tasks/multi_segments/cube_pick_place.py",
-            "embodichain_tasks/configs/expert_program/multi_segments/"
-            "repeated_cube_pick_place.yaml",
+            "embodichain_tasks/embodichain_tasks/expert_program/"
+            "repeated_pick_place.py",
+            "embodichain_tasks/configs/expert_program/repeated_pick_place.yaml",
         ),
     ),
     _TaskSizeSpec(
@@ -109,8 +109,8 @@ _TASK_SIZE_SPECS = (
         baseline_bytes=8_833,
         baseline_blob="3b4cbdc09537098b4f109d46efb8785b88f31ce1",
         source_paths=(
-            "embodichain_tasks/embodichain_tasks/tableware/open_drawer.py",
-            "embodichain_tasks/configs/expert_program/tableware/open_drawer.json",
+            "embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py",
+            "embodichain_tasks/configs/expert_program/open_drawer.yaml",
         ),
     ),
 )
@@ -124,25 +124,25 @@ _FRAMEWORK_CAPABILITIES = (
         "Typed goals, compilation, execution, and terminal effects are covered.",
     ),
     (
-        "Attach/release effect",
+        "Physical attach/release evidence",
         "framework-tested",
         "per-embodiment integration",
-        "Effects use accepted commands plus live object-to-endpoint pose evidence.",
+        "Effects require live constraint and object-to-endpoint pose evidence.",
     ),
     (
-        "OperateArticulation",
+        "Slide",
         "framework-tested",
         "per-embodiment integration",
-        "Typed articulation goals and execution contracts are covered.",
+        "Typed handle geometry, grasping, and axis-constrained motion are covered.",
     ),
     (
-        "Articulation effect",
+        "Articulation joint validator",
         "framework-tested",
-        "per-embodiment integration",
-        "Joint-state terminal effect validation is covered.",
+        "per-task integration",
+        "Measured joint-state application acceptance is covered.",
     ),
     (
-        "V1 sequential",
+        "Schema-v2 sequential",
         "framework-tested",
         "per-task integration",
         "Ordered call execution and failure propagation are covered.",
@@ -150,14 +150,14 @@ _FRAMEWORK_CAPABILITIES = (
     (
         "HandOver",
         "framework-tested",
-        "per-embodiment integration",
-        "Coordinated effects and bounded recovery are covered.",
+        "integration-required",
+        "No landed task integration is claimed by this report.",
     ),
     (
         "Place relation (on/inside)",
         "framework-tested",
-        "per-scene integration",
-        "Standard support/container target-frame bindings install exact grounders.",
+        "integration-required",
+        "Embodiment frames and relation validators must be supplied.",
     ),
     (
         "Registered call",
@@ -166,10 +166,10 @@ _FRAMEWORK_CAPABILITIES = (
         "Production registration must declare and validate its concrete contract.",
     ),
     (
-        "V2 parallel",
+        "Schema-v2 parallel",
         "framework-tested",
         "integration-required",
-        "Joint/cuRobo validation is available; physical parallel acceptance remains.",
+        "Fail-closed by default; production use requires an authoritative validator.",
     ),
 )
 
@@ -179,28 +179,19 @@ _LANDED_INTEGRATIONS = (
         "UR5",
         "Cube Pick + Place",
         "Pick + Place(at)",
-        "attach/release",
-        "V1 sequential",
+        "pose relation + dual-finger contact constraint",
+        "schema-v2 sequential",
         "checked in",
-        "fixed-seed three-cycle and physical-loss recovery slow gates",
+        "seed 0 three-cycle and physical-loss recovery slow gates passed",
     ),
     (
-        "CobotMagic",
+        "UR5",
         "Open Drawer",
-        "OperateArticulation",
-        "articulation effect",
-        "V1 sequential",
+        "Registered call -> Slide",
+        "articulation joint validator",
+        "schema-v2 sequential",
         "checked in",
-        "fixed-seed supported-simulation slow gate; not release-required",
-    ),
-    (
-        "Dual UR5 + PGI",
-        "HandOver",
-        "Pick + HandOver",
-        "attach/transfer",
-        "V1 sequential",
-        "checked in",
-        "three consecutive supported-simulation contact-dynamics runs",
+        "seed 0 regression passed; broader multi-seed gate remains",
     ),
 )
 
@@ -307,8 +298,9 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
         "",
         (
             "This is a deterministic, static Phase 8 snapshot of checked-in "
-            "framework and integration code. It does not run simulation, report "
-            "physical acceptance, or certify production readiness for an embodiment."
+            "framework and integration code. Rendering does not run simulation; "
+            "physical-acceptance entries summarize checked-in regression gates and "
+            "do not certify release readiness for an embodiment."
         ),
         "",
         "## Framework Contract Matrix",
@@ -338,7 +330,7 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
             "## Checked-in Integration Matrix",
             "",
             (
-                "Only the checked-in vertical slices below are classified as "
+                "Only the two checked-in vertical slices below are classified as "
                 "integration/production code. Physical acceptance is tracked "
                 "separately."
             ),
@@ -363,13 +355,13 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
         [
             "",
             (
-                "Place-relation bindings are reusable scene integration rather than "
-                "a task vertical slice. Registered calls and V2 parallel remain "
-                "integration-required; physical parallel acceptance is still open."
+                "HandOver, Place relations (`on`/`inside`), and schema-v2 parallel "
+                "are framework-tested but integration-required. They are "
+                "intentionally not listed as checked-in integrations."
             ),
             "",
             (
-                "The checked-in environment classes have zero task-local motion or "
+                "Both checked-in environment classes have zero task-local motion or "
                 "demo-generation overrides; "
                 "`test_task_classes_do_not_override_motion_or_demo_generation` "
                 "keeps that structural metric at zero."
@@ -385,11 +377,17 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
             ),
             "",
             (
-                "Baseline identity: Cube uses Git blob "
-                f"`{_TASK_SIZE_SPECS[0].baseline_blob}` and Drawer uses Git blob "
-                f"`{_TASK_SIZE_SPECS[1].baseline_blob}` at each task's Python path "
-                "listed in the current-source column. Blob IDs remain stable across "
-                "stack rebases."
+                "Baseline identity: Cube uses legacy Git blob "
+                f"`{_TASK_SIZE_SPECS[0].baseline_blob}` and Drawer uses legacy Git "
+                f"blob `{_TASK_SIZE_SPECS[1].baseline_blob}`. Current Python paths "
+                "point to the consolidated canonical integrations; blob IDs remain "
+                "stable across stack rebases."
+            ),
+            "",
+            (
+                "Current totals include only the canonical environment "
+                "implementations and their declarative programs; removed legacy "
+                "modules are not counted."
             ),
             "",
             (
@@ -431,10 +429,11 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
             ),
             "",
             (
-                "No multi-seed success-rate or release gate is checked in yet. Open "
-                "Drawer has a real-simulation smoke pass; repeated Cube has a "
-                "fixed-seed three-cycle pass plus physical-loss/re-acquisition gate; "
-                "and HandOver has three consecutive contact-dynamics runs."
+                "The supported-simulation Open Drawer seed-0 regression is checked "
+                "in and passes locally; no multi-seed success-rate or release gate "
+                "is checked in yet. Repeated Cube has a seed-0 three-cycle pass plus "
+                "a physical-loss/reacquisition pass backed by dual-finger contact "
+                "evidence; broader multi-seed qualification remains open."
             ),
             "",
             "## Drift Check",

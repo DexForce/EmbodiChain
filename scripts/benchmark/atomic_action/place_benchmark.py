@@ -36,6 +36,7 @@ from scripts.benchmark.atomic_action.common import (
     build_single_action_leaderboard,
     build_video_output_path,
     create_antipodal_object_semantics,
+    create_benchmark_grasp_pose_generator,
     create_benchmark_object,
     describe_object_preset,
     ensure_repo_root,
@@ -182,14 +183,13 @@ def _prepare_held_state(
         MotionPolicy,
     )
     from scripts.tutorials.atomic_action.place import (
-        build_grasp_generator_cfg,
-        build_gripper_collision_cfg,
         get_hand_open_close_qpos,
         initialize_pre_pick_robot_pose,
     )
 
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
+    pickup_args = _make_pickup_args(args, object_preset, profile)
     atomic_engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
@@ -198,13 +198,13 @@ def _prepare_held_state(
                 grasp=hand_close,
             )
         },
+        grasp_pose_generators={
+            "hand": create_benchmark_grasp_pose_generator(pickup_args)
+        },
     )
     semantics = create_antipodal_object_semantics(
         obj=obj,
         preset=object_preset,
-        args=_make_pickup_args(args, object_preset, profile),
-        build_gripper_collision_cfg=build_gripper_collision_cfg,
-        build_grasp_generator_cfg=build_grasp_generator_cfg,
     )
     result = atomic_engine.compile(
         (

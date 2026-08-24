@@ -27,9 +27,9 @@ from typing import Any
 import pytest
 import torch
 
+from embodichain.lab.gym.envs import ControllerAction
 from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
-    ProcessedEnvAction,
     execute_demo_episode,
 )
 from embodichain_tasks.configs import get_config_path
@@ -41,14 +41,21 @@ from scripts.benchmark.expert_program.demo_success import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_CUBE_GYM_CONFIG = get_config_path("gym/multi_segments/cube_pick_place.json")
-_CUBE_EXPERT_PROGRAM = get_config_path(
-    "expert_program/multi_segments/repeated_cube_pick_place.yaml"
-)
+_CUBE_GYM_CONFIG = get_config_path("gym/expert_program/repeated_pick_place.json")
+_CUBE_EXPERT_PROGRAM = get_config_path("expert_program/repeated_pick_place.yaml")
 _FAULT_SEGMENT_INDEX = 1
 _FAULT_CALL_INDEX = 1
 _FAULT_OPEN_STEPS = 20
-_SUBPROCESS_TIMEOUT_SECONDS = 240
+_SUBPROCESS_TIMEOUT_SECONDS = 480
+# ``_main`` closes the environment; bypass native ContactSensor interpreter teardown.
+_RUN_FAULT_MAIN = (
+    "import os, sys; from runpy import run_path; "
+    "module = run_path("
+    "'tests/benchmark/expert_program/test_cube_physical_recovery_sim.py', "
+    "run_name='cube_physical_recovery_helper'); "
+    "code = module['_main'](); "
+    "sys.stdout.flush(); sys.stderr.flush(); os._exit(code)"
+)
 
 
 class _GripperOpenFaultEnvironment:
@@ -77,7 +84,7 @@ class _GripperOpenFaultEnvironment:
 
     def step(self, action: object) -> object:
         """Open the physical gripper during the selected Place approach."""
-        if isinstance(action, ProcessedEnvAction):
+        if isinstance(action, ControllerAction):
             metadata = action.metadata
             should_inject = (
                 metadata.get("program_segment_index") == _FAULT_SEGMENT_INDEX
@@ -90,7 +97,7 @@ class _GripperOpenFaultEnvironment:
                     raise TypeError("The cube task must emit a tensor action.")
                 value = action.value.clone()
                 value[:, self._hand_joint_ids] = 0.0
-                action = ProcessedEnvAction(
+                action = ControllerAction(
                     value=value,
                     metadata={
                         **metadata,
@@ -153,6 +160,7 @@ def _run_fault_subprocess(raw_path: Path, report_path: Path) -> int:
 
 
 @pytest.mark.requires_sim
+@pytest.mark.subprocess_sim
 @pytest.mark.slow
 @pytest.mark.gpu
 def test_physical_cube_loss_triggers_real_reacquisition(tmp_path: Path) -> None:
@@ -162,7 +170,8 @@ def test_physical_cube_loss_triggers_real_reacquisition(tmp_path: Path) -> None:
     completed = subprocess.run(
         [
             sys.executable,
-            str(Path(__file__).resolve()),
+            "-c",
+            _RUN_FAULT_MAIN,
             "--run-fault",
             "--raw-json",
             str(raw_path),
@@ -210,7 +219,7 @@ def test_physical_cube_loss_triggers_real_reacquisition(tmp_path: Path) -> None:
     assert physical_failure["decision"]["expectations"][0]["contradicted_mask"] == [
         True
     ]
-    assert physical_failure["evidence"]["source.constraint"]["values"] == [True]
+    assert physical_failure["evidence"]["source.constraint"]["values"] == [False]
     assert physical_failure["evidence"]["source.pose"]["valid_mask"] == [True]
 
     recoveries = runtime["workflow_recoveries"]

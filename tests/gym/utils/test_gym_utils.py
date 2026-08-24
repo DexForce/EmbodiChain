@@ -40,10 +40,10 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.utils.utility import load_config, save_config
-from embodichain_tasks.multi_segments.cube_pick_place import (
-    CUBE_EXPERT_PROGRAM_REGISTRATION,
-    CUBE_ROBOT_PROFILE_ID,
-    CUBE_SCENE_REGISTRY_ID,
+from embodichain_tasks.expert_program.repeated_pick_place import (
+    REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION as CUBE_EXPERT_PROGRAM_REGISTRATION,
+    ROBOT_PROFILE_ID as CUBE_ROBOT_PROFILE_ID,
+    SCENE_REGISTRY_ID as CUBE_SCENE_REGISTRY_ID,
 )
 
 
@@ -519,7 +519,7 @@ class TestConfigToCfgFromFile:
     def _minimal_gym_config() -> dict[str, object]:
         """Return a minimal config that reaches the generic parser."""
         return {
-            "id": "MultiSegmentsCubePickPlace-v1",
+            "id": "ExpertProgramRepeatedPickPlace-v1",
             "env": {},
             "robot": {
                 "class_type": "URRobot",
@@ -532,7 +532,7 @@ class TestConfigToCfgFromFile:
     def _expert_program_payload() -> dict[str, object]:
         """Return one minimal strict Expert Program payload."""
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "program_id": "configured_pick",
             "integration": {
                 "robot_profile": CUBE_ROBOT_PROFILE_ID,
@@ -682,12 +682,9 @@ class TestConfigToCfgFromFile:
         save_config(program_path, self._expert_program_payload())
         config = self._minimal_gym_config()
         config["expert_program_path"] = str(program_path)
-        generator_cfg = CUBE_EXPERT_PROGRAM_REGISTRATION.scene_binding.antipodal_grasps[
-            0
-        ].generator_cfg
-        assert generator_cfg is not None
-        sampler_cfg = generator_cfg.antipodal_sampler_cfg
-        monkeypatch.setattr(sampler_cfg, "n_sample", sampler_cfg.n_sample + 1)
+        binding = CUBE_EXPERT_PROGRAM_REGISTRATION.scene_binding.rigid_objects[0]
+        original_semantic_type = binding.semantic_type
+        object.__setattr__(binding, "semantic_type", "changed_cube")
         loader_calls: list[str] = []
 
         def unexpected_load(path, **kwargs):
@@ -697,8 +694,11 @@ class TestConfigToCfgFromFile:
 
         monkeypatch.setattr(loader, "load_expert_program", unexpected_load)
 
-        with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
-            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        try:
+            with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+                config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        finally:
+            object.__setattr__(binding, "semantic_type", original_semantic_type)
 
         assert loader_calls == []
 

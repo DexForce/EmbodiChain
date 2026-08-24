@@ -78,7 +78,7 @@ class PhaseEffectGateRequirement:
         )
 
 
-def _goal_snapshot_memo(goal: ActionGoal) -> dict[int, object]:
+def _goal_snapshot_memo(goal: object) -> dict[int, object]:
     """Return deepcopy memo entries for live goal references and runtime caches."""
     memo: dict[int, object] = {}
     visited: set[int] = set()

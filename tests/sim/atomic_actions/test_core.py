@@ -286,7 +286,7 @@ def test_action_plan_owns_explicit_effect_verification_requirement() -> None:
         env_ids=torch.tensor([4], dtype=torch.long),
         frame_count=1,
     )
-    requirement = EffectVerificationRequirement(kind="articulation.joint_progress")
+    requirement = EffectVerificationRequirement(kind="physical.effect")
 
     plan = _action_plan(commands, effect_verification=requirement)
     requirement_snapshot = plan.effect_verification
@@ -1005,6 +1005,25 @@ def test_command_target_authorization_rejects_custom_claim_conflicts() -> None:
         _DependencyAction._authorize_command_targets(
             request,
             TimedCommandSequence(frames=(frame,), env_ids=context.env_ids),
+        )
+
+
+def test_action_plan_rejects_unknown_scene_dependency_end_segment() -> None:
+    plan = _action_plan(
+        _command_sequence(
+            env_ids=torch.tensor([0, 1], dtype=torch.long),
+            frame_count=2,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="scene_dependency_end_segment must name an ActionPlan segment",
+    ):
+        replace(
+            plan,
+            scene_dependencies=("target",),
+            scene_dependency_end_segment="approach",
         )
 
 

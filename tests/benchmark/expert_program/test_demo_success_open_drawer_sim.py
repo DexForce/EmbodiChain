@@ -25,17 +25,15 @@ import sys
 
 import pytest
 
-from embodichain_tasks.configs import get_config_path
 from scripts.benchmark.expert_program.demo_success import (
     aggregate_demo_success_trials,
     load_raw_trials,
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_OPEN_DRAWER_GYM_CONFIG = get_config_path("gym/open_drawer/cobot_magic_3cam.json")
-_OPEN_DRAWER_EXPERT_PROGRAM = get_config_path(
-    "expert_program/tableware/open_drawer.json"
-)
+_TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
+_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "gym/expert_program/open_drawer.json"
+_OPEN_DRAWER_EXPERT_PROGRAM = _TASK_CONFIG_ROOT / "expert_program/open_drawer.yaml"
 _CASE_ID = "open_drawer_live"
 _SEED = 0
 _NUM_ENVS = 1
@@ -47,7 +45,7 @@ _RUN_PUBLIC_MAIN = (
 
 
 def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
-    """Write a camera-free copy of the packaged live-physics configuration."""
+    """Write a deterministic copy of the canonical live-physics config."""
     payload = json.loads(_OPEN_DRAWER_GYM_CONFIG.read_text(encoding="utf-8"))
     if type(payload) is not dict:
         raise TypeError("The packaged OpenDrawer Gym config must be a JSON object.")
@@ -55,8 +53,6 @@ def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
     if type(env_config) is not dict:
         raise TypeError("The packaged OpenDrawer env config must be a JSON object.")
 
-    # Cameras and their recording event are orthogonal to drawer physics and make
-    # this CPU regression unnecessarily renderer-sensitive.
     payload["sensor"] = []
     env_config["events"] = {}
     env_config["observations"] = {}
@@ -142,15 +138,19 @@ def test_live_open_drawer_benchmark_writes_successful_decodable_artifacts(
     assert isinstance(calls, list)
     assert len(calls) == 1
     call = calls[0]
-    assert call["semantic_id"] == "operate_articulation"
+    assert call["semantic_id"] == "embodichain_tasks.open_drawer"
+    assert call["skill_id"] == "slide"
     assert call["status"] == "completed"
-    effects = call["effects"]
-    assert isinstance(effects, list)
-    assert effects
-    for effect in effects:
-        evidence = effect["evidence"]["joint.position"]
-        assert evidence["valid_mask"] == [True]
-        assert evidence["acquisition_errors"] == [None]
+    assert call["effects"] == []
+    validation = segment["metadata"]["validation"]
+    assert validation["accepted_mask"] == [True]
+    validators = validation["validators"]
+    assert len(validators) == 1
+    assert validators[0]["kind"] == "articulation_joint_position"
+    assert validators[0]["result_mask"] == [True]
+    assert validators[0]["result"]["joint"] == "cabinet_to_drawer"
+    assert validators[0]["result"]["minimum_position"] == pytest.approx(0.10)
+    assert validators[0]["result"]["accepted_mask"] == [True]
 
     aggregates = aggregate_demo_success_trials(decoded_trials)
     assert len(aggregates.success_and_metrics) == 1

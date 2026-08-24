@@ -519,6 +519,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         diagnostics: PlannerDiagnostics | None = None,
         segment_lengths: Mapping[str, int] | None = None,
         scene_dependency_monitor_until: Mapping[str, int] | None = None,
+        scene_dependency_end_segment: str | None = None,
     ) -> ActionPlan:
         """Build a validated action plan for a primitive implementation.
 
@@ -541,6 +542,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 than its bound. ``0`` disables monitoring immediately; omitted
                 dependencies remain monitored for the full action. Once the bound
                 is reached, all pose changes for that entity are ignored.
+            scene_dependency_end_segment: Optional last segment during which
+                scene motion may invalidate and replan the action for every
+                dependency.
 
         Returns:
             Side-effect-free action plan.
@@ -580,6 +584,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             diagnostics=diagnostics,
             segment_lengths=segment_lengths,
             scene_dependency_monitor_until=scene_dependency_monitor_until,
+            scene_dependency_end_segment=scene_dependency_end_segment,
             joint_trajectory=timed,
         )
 
@@ -596,6 +601,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         diagnostics: PlannerDiagnostics | None = None,
         segment_lengths: Mapping[str, int] | None = None,
         scene_dependency_monitor_until: Mapping[str, int] | None = None,
+        scene_dependency_end_segment: str | None = None,
         joint_trajectory: TimedTrajectory | None = None,
     ) -> ActionPlan:
         """Build a plan from transport-neutral runtime command frames.
@@ -621,6 +627,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 its bound. ``0`` disables monitoring immediately; omitted
                 dependencies remain monitored for the full action. Once the bound
                 is reached, all pose changes for that entity are ignored.
+            scene_dependency_end_segment: Optional last segment during which
+                scene motion may invalidate and replan the action for every
+                dependency.
             joint_trajectory: Optional joint trajectory retained for offline
                 compilation and inspection.
 
@@ -675,6 +684,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 if scene_dependency_monitor_until is None
                 else scene_dependency_monitor_until
             ),
+            scene_dependency_end_segment=scene_dependency_end_segment,
             collision_world_sensitive=self._uses_collision_world(request, context),
             replannable=replannable,
             expected_effects=expected_effects or StateDelta(),

@@ -65,7 +65,7 @@ def _invoke(call: dict[str, object]) -> dict[str, object]:
 def _model_data(
     call: dict[str, object] | None = None,
     *,
-    schema_version: int = 1,
+    schema_version: int = 2,
     program: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the integration-free JSON envelope exposed to the model."""
@@ -82,7 +82,7 @@ def _model_data(
 def _model_json(
     call: dict[str, object] | None = None,
     *,
-    schema_version: int = 1,
+    schema_version: int = 2,
     program: dict[str, object] | None = None,
 ) -> str:
     """Serialize one integration-free model response."""
@@ -200,7 +200,7 @@ def test_decoder_rejects_model_controlled_integration() -> None:
     assert error.value.path == ("integration",)
 
 
-def test_decoder_rejects_version_two_parallel_program() -> None:
+def test_decoder_rejects_parallel_program() -> None:
     parallel = {
         "kind": "parallel",
         "branches": [
@@ -212,11 +212,22 @@ def test_decoder_rejects_version_two_parallel_program() -> None:
 
     with pytest.raises(ExpertProgramDecodeError) as error:
         decode_mllm_expert_program(
-            _model_json(schema_version=2, program=parallel),
+            _model_json(program=parallel),
             integration=_integration(),
         )
 
-    assert error.value.code == "mllm_schema_version_not_allowed"
+    assert error.value.code == "mllm_program_node_not_allowed"
+    assert error.value.path == ("program", "kind")
+
+
+def test_decoder_rejects_unsupported_schema_version() -> None:
+    with pytest.raises(ExpertProgramDecodeError) as error:
+        decode_mllm_expert_program(
+            _model_json(schema_version=1),
+            integration=_integration(),
+        )
+
+    assert error.value.code == "unsupported_schema_version"
     assert error.value.path == ("schema_version",)
 
 
@@ -251,13 +262,8 @@ def test_decoder_rejects_registered_semantic_calls() -> None:
         {
             "kind": "hand_over",
             "object": "cube",
+            "receiver": "right",
             "resources": {"destination": "right"},
-        },
-        {
-            "kind": "operate_articulation",
-            "articulation": "drawer",
-            "target": "open",
-            "resources": {"primary": "left"},
         },
     ],
 )
@@ -283,7 +289,7 @@ def test_decoder_allows_explicit_empty_resources() -> None:
     assert config.program.call.resources == {}  # type: ignore[union-attr]
 
 
-def test_decoder_rejects_removed_handover_receiver_alias() -> None:
+def test_decoder_rejects_handover_receiver_resource_selection() -> None:
     with pytest.raises(ExpertProgramDecodeError) as error:
         decode_mllm_expert_program(
             _model_json(
@@ -296,41 +302,8 @@ def test_decoder_rejects_removed_handover_receiver_alias() -> None:
             integration=_integration(),
         )
 
-    assert error.value.code == "unknown_field"
+    assert error.value.code == "mllm_resource_override_not_allowed"
     assert error.value.path == ("program", "call", "receiver")
-
-
-def test_decoder_rejects_explicit_articulation_motion_target() -> None:
-    with pytest.raises(ExpertProgramDecodeError) as error:
-        decode_mllm_expert_program(
-            _model_json(
-                {
-                    "kind": "operate_articulation",
-                    "articulation": "drawer",
-                    "target_position": 1_000_000.0,
-                    "target_displacement": 1_000_000.0,
-                }
-            ),
-            integration=_integration(),
-        )
-
-    assert error.value.code == "mllm_articulation_target_not_allowed"
-    assert error.value.path == ("program", "call", "target_position")
-
-
-def test_decoder_allows_named_articulation_target() -> None:
-    config = decode_mllm_expert_program(
-        _model_json(
-            {
-                "kind": "operate_articulation",
-                "articulation": "drawer",
-                "target": "open",
-            }
-        ),
-        integration=_integration(),
-    )
-
-    assert config.program.call.target == "open"  # type: ignore[union-attr]
 
 
 @pytest.mark.parametrize(
@@ -360,7 +333,7 @@ def test_decoder_reuses_executable_free_value_validation(
     ("response", "code"),
     [
         ("```json\n{}\n```", "invalid_json"),
-        ('{"schema_version": 1, "schema_version": 1}', "duplicate_json_key"),
+        ('{"schema_version": 2, "schema_version": 2}', "duplicate_json_key"),
         ('{"schema_version": NaN}', "non_finite_number"),
         ('{"schema_version": 1e400}', "non_finite_number"),
     ],
@@ -428,5 +401,5 @@ def test_compile_frontend_rejects_unknown_scene_reference() -> None:
             integration=_integration(),
         )
 
-    assert error.value.code == "unknown_scene_reference"
+    assert error.value.code == "scene_resolution_failed"
     assert error.value.path == ("program", "call", "object")
