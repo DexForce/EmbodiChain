@@ -25,6 +25,8 @@ from uuid import uuid4
 
 import torch
 
+from embodichain.toolkits.graspkit import GraspPoseGenerator
+
 from .bindings import ActionBinding, EndpointBinding, JointPositionTarget
 from .control import ActionControlOverrides, ControlPartCommandProfile
 from .core import resolve_runtime_device
@@ -40,12 +42,18 @@ if TYPE_CHECKING:
 
 
 class ActionPlanningServices:
-    """Planning resources exclusively owned by one atomic-action engine."""
+    """Engine-scoped registry of planning services used by atomic actions.
+
+    The registry itself belongs to one engine. Grasp generators are retained by
+    reference so a composition root can reuse an already prepared standalone
+    service (and its geometry cache) in direct and atomic-action call paths.
+    """
 
     def __init__(
         self,
         motion_generator: MotionGenerator,
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
     ) -> None:
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
@@ -53,6 +61,9 @@ class ActionPlanningServices:
         self._binding_owner_id = uuid4().hex
         self._control_profiles = self._snapshot_control_profiles(
             {} if control_profiles is None else control_profiles
+        )
+        self._grasp_pose_generators = self._snapshot_grasp_pose_generators(
+            {} if grasp_pose_generators is None else grasp_pose_generators
         )
 
     @property
@@ -84,6 +95,58 @@ class ActionPlanningServices:
                 for name, profile in self._control_profiles.items()
             }
         )
+
+    @property
+    def grasp_pose_generators(self) -> Mapping[str, GraspPoseGenerator]:
+        """Return grasp-pose services keyed by runtime endpoint target ID."""
+        return MappingProxyType(dict(self._grasp_pose_generators))
+
+    def grasp_pose_generator(self, target_id: str) -> GraspPoseGenerator:
+        """Resolve the generator installed for one grasp endpoint target.
+
+        Args:
+            target_id: Runtime target ID, normally a robot control-part name.
+
+        Returns:
+            The installed standalone grasp-pose generator.
+
+        Raises:
+            KeyError: If no generator is installed for ``target_id``.
+        """
+        try:
+            return self._grasp_pose_generators[target_id]
+        except KeyError as exc:
+            raise KeyError(
+                f"No grasp-pose generator is installed for endpoint target "
+                f"{target_id!r}; available targets are "
+                f"{sorted(self._grasp_pose_generators)}."
+            ) from exc
+
+    @staticmethod
+    def _snapshot_grasp_pose_generators(
+        values: Mapping[str, GraspPoseGenerator],
+    ) -> dict[str, GraspPoseGenerator]:
+        """Validate an endpoint-to-generator service mapping."""
+        if not isinstance(values, Mapping):
+            raise TypeError("grasp_pose_generators must be a mapping or None.")
+        generators: dict[str, GraspPoseGenerator] = {}
+        for target_id, generator in values.items():
+            if (
+                type(target_id) is not str
+                or not target_id
+                or target_id != target_id.strip()
+            ):
+                raise ValueError(
+                    "grasp_pose_generators keys must be non-empty strings "
+                    "without outer whitespace."
+                )
+            if not isinstance(generator, GraspPoseGenerator):
+                raise TypeError(
+                    "grasp_pose_generators values must be GraspPoseGenerator "
+                    "instances."
+                )
+            generators[target_id] = generator
+        return generators
 
     @property
     def planner_name(self) -> str:
