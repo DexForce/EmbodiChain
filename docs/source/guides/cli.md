@@ -59,64 +59,18 @@ The generated output contains the canonical source mesh under ``asset_source/``,
 
 ---
 
+(cli-preview-asset)=
 ## Preview Asset
 
-Preview a USD or mesh asset in the simulation without writing code.
+Load one or more USD, mesh, or URDF assets without writing a simulation script:
 
 ```bash
-# Preview a rigid object
-embodichain preview-asset \
-    --asset_path /path/to/sugar_box.usda \
-    --asset_type rigid \
-    --preview
-
-# Preview an articulation
-embodichain preview-asset \
-    --asset_path /path/to/robot.usd \
-    --asset_type articulation \
-    --preview
-
-# Headless check (no render window)
-embodichain preview-asset \
-    --asset_path /path/to/asset.usda \
-    --headless
-
-# Control articulation joints in Viser
-embodichain preview-asset \
-    --asset_path /path/to/robot.urdf \
-    --viser
+embodichain preview-asset --asset_path /path/to/robot.urdf --viser
 ```
 
-### Arguments
-
-| Argument | Default | Description |
-|---|---|---|
-| ``--asset_path`` | *(required)* | One or more asset paths (``.usd``/``.usda``/``.usdc``/``.obj``/``.stl``/``.glb``/``.urdf``) |
-| ``--asset_type`` | ``rigid`` | Asset type: ``rigid`` or ``articulation``. URDF files are auto-detected as articulation. |
-| ``--uid`` | *(from filename)* | Unique identifier for the asset in the scene |
-| ``--init_pos X Y Z`` | ``0 0 0.5`` | Initial position |
-| ``--init_rot RX RY RZ`` | ``0 0 0`` | Initial rotation in degrees |
-| ``--body_type`` | ``kinematic`` | Body type for rigid objects: ``dynamic``, ``kinematic``, or ``static`` |
-| ``--use_usd_properties`` | ``False`` | Use physical properties from the USD file |
-| ``--fix_base`` | ``True`` | Fix the base of articulations |
-| ``--sim_device`` | ``cpu`` | Simulation device |
-| ``--headless`` | ``False`` | Run without rendering window |
-| ``--renderer`` | ``hybrid`` | Renderer backend: ``hybrid``, ``fast-rt``, or ``rt`` |
-| ``--preview`` | ``False`` | Enter interactive embed mode after loading |
-| ``--joint-control`` / ``--no-joint-control`` | ``True`` | Enable or disable articulation joint controls in Viser previews |
-
-The Viser articulation panel displays rotational joints in degrees and
-prismatic joints in meters. It excludes mimic joints, leaves articulations with
-unsupported multi-DOF mappings read-only, and provides per-articulation reset
-buttons. The native DexSim window does not yet expose these controls.
-
-### Preview Mode
-
-When ``--preview`` is enabled, an interactive REPL is available:
-
-- **``p``** — enter an IPython embed session with ``sim`` and ``asset`` in scope
-- **``s <N>``** — step the simulation *N* times (default 10)
-- **``q``** — quit
+Run `embodichain preview-asset --help` for the authoritative option list. See
+{doc}`preview_asset` for visualization modes, multi-asset placement, Viser
+joint controls, the interactive terminal, and worked examples.
 
 ---
 
@@ -355,7 +309,7 @@ simulator:
 
 ```bash
 embodichain preview_lerobot_data \
-    outputs/lerobot/multi_segments \
+    outputs/lerobot/expert_program \
     --latest \
     --episode 0 \
     --expect-segments 3
@@ -395,7 +349,7 @@ embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/trai
 
 # Multi-GPU distributed training
 torchrun --nproc_per_node=2 -m embodichain train-rl \
-    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.yaml \
+    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json \
     --distributed
 ```
 

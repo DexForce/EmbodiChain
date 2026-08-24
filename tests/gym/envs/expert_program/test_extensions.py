@@ -25,7 +25,6 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.expert_program import (
-    RobotResourceBinding,
     SimulationExpertProgramRegistration,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
@@ -45,6 +44,8 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
     RuntimeCommandPayload,
 )
 from embodichain.lab.sim.skills import (
+    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
     ControlPartEndpoint,
     ControlPartEndpointAdapter,
     EndpointResolution,
@@ -262,6 +263,17 @@ class _MobileSafetyFactory:
         return _SafetyValidator()
 
 
+class _ControlPartEvidenceFactory:
+    """Stateless declaration for the exact built-in evidence route."""
+
+    provider_id: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_ID
+    revision: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+    def create(self, **kwargs: object) -> object:
+        del kwargs
+        raise AssertionError("Declaration tests must not create live providers.")
+
+
 def _custom_profile(*, include_tool: bool = False) -> RobotSkillProfile:
     """Return a pure provider-free profile with exact custom endpoint types."""
     endpoints: dict[str, ResourceEndpoint] = {
@@ -304,6 +316,44 @@ def test_parallel_safety_transport_coverage_must_match_registration() -> None:
             endpoint_adapters=(_MobileAdapter(),),
             runtime_transports=(_MobileTransport(),),
             parallel_safety_factory=MismatchedSafetyFactory(),
+        )
+
+
+def test_control_part_evidence_factory_requires_exact_builtin_route() -> None:
+    """The standard factory cannot attach control-part evidence to custom routes."""
+    with pytest.raises(ValueError, match="requires a registered ControlPartEndpoint"):
+        build_standard_extension_declarations(
+            profile=_custom_profile(),
+            endpoint_adapters=(_MobileAdapter(),),
+            runtime_transports=(_MobileTransport(),),
+            parallel_safety_factory=None,
+            control_part_evidence_factory=_ControlPartEvidenceFactory(),
+        )
+
+    class WrongRouteFactory(_ControlPartEvidenceFactory):
+        provider_id: ClassVar[str] = "test.wrong_evidence"
+
+    control_part_profile = RobotSkillProfile(
+        profile_id="joint",
+        resources={
+            "hand": RobotResource(
+                resource_id="hand",
+                endpoints={
+                    "grasp": ControlPartEndpoint(
+                        control_part="hand",
+                        capabilities=frozenset(),
+                    )
+                },
+            )
+        },
+    )
+    with pytest.raises(ValueError, match="exact built-in route"):
+        build_standard_extension_declarations(
+            profile=control_part_profile,
+            endpoint_adapters=(),
+            runtime_transports=(),
+            parallel_safety_factory=None,
+            control_part_evidence_factory=WrongRouteFactory(),
         )
 
 
@@ -520,7 +570,7 @@ def test_runtime_transport_tuple_order_changes_registration_fingerprint() -> Non
     profile_binding = SimulationRobotSkillProfileBinding(
         profile_id="custom",
         resources=(
-            RobotResourceBinding(
+            RobotResource(
                 resource_id="custom",
                 endpoints={
                     "motion": _MobileEndpoint(capabilities=frozenset()),

@@ -61,5 +61,3 @@ completed episodes rather than episodes per parallel environment.
 - It is recommended to manage all experiment parameters via JSON or YAML config files for reproducibility and tuning.
 - Supports multi-environment and event extension to improve training flexibility.
 - Logging and checkpoint management help with experiment tracking and recovery.
-
----

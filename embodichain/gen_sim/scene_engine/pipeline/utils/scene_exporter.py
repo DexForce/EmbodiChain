@@ -26,6 +26,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.utils.logger import log_info
 
@@ -46,12 +47,16 @@ class SceneExporter:
         self,
         *,
         scene: Scene,
+        scene_graph: SceneGraph,
         output_root: str | Path,
     ) -> None:
         self.scene = scene
+        self.scene_graph = scene_graph
         self.output_root = Path(output_root).expanduser().resolve()
         self.export_root = self.output_root / "scene_export"
         self.scene_config_path: Path | None = None
+        self.scene_graph_path: Path | None = None
+        self.scene_json_path: Path | None = None
 
     def export(self) -> Path:
         """Write a scene-only config and copy SimReady GLBs into ``mesh_assets``.
@@ -72,6 +77,9 @@ class SceneExporter:
         object_ids = [scene_object.id for scene_object in scene_objects]
         if len(set(object_ids)) != len(object_ids):
             raise ValueError("Scene export requires unique table and asset ids.")
+        self.scene_graph.validate()
+        if set(self.scene_graph.node_by_id()) != set(object_ids):
+            raise ValueError("Scene graph nodes must match exported scene object ids.")
 
         exported_entries = {
             scene_object.id: self._copy_scene_object_to_assets(
@@ -106,6 +114,23 @@ class SceneExporter:
             encoding="utf-8",
         )
         log_info(f"Exported scene config: {self.scene_config_path}")
+        self.scene_graph_path = self.export_root / "scene_graph.json"
+        self.scene_graph_path.write_text(
+            json.dumps(self.scene_graph.to_dict(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        log_info(f"Exported scene graph: {self.scene_graph_path}")
+        self.scene_json_path = self.export_root / "scene.json"
+        self.scene_json_path.write_text(
+            json.dumps(self.scene.to_dict(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        log_info(f"Exported scene JSON: {self.scene_json_path}")
+        # Remove only assets absent from the completed scene export.
+        self._remove_stale_mesh_assets(
+            mesh_assets_root=mesh_assets_root,
+            object_ids=set(object_ids),
+        )
         return self.scene_config_path
 
     @staticmethod
@@ -135,8 +160,27 @@ class SceneExporter:
             )
         destination_glb_path = mesh_assets_root / object_id / f"{object_id}.glb"
         destination_glb_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_glb_path, destination_glb_path)
+        # Imported assets already live at their export destination.
+        if not destination_glb_path.is_file() or not source_glb_path.samefile(
+            destination_glb_path
+        ):
+            shutil.copy2(source_glb_path, destination_glb_path)
         return destination_glb_path.relative_to(mesh_assets_root.parent).as_posix()
+
+    @staticmethod
+    def _remove_stale_mesh_assets(
+        *,
+        mesh_assets_root: Path,
+        object_ids: set[str],
+    ) -> None:
+        """Remove copied asset directories that no longer belong to the scene."""
+        for asset_root in mesh_assets_root.iterdir():
+            if asset_root.name in object_ids:
+                continue
+            if asset_root.is_dir():
+                shutil.rmtree(asset_root)
+            else:
+                asset_root.unlink()
 
     @staticmethod
     def _scene_object_config(
@@ -166,6 +210,8 @@ class SceneExporter:
 
         return {
             "uid": scene_object.id,
+            "category": scene_object.category,
+            "name": scene_object.name,
             "description": scene_object.description,
             "shape": {
                 "shape_type": "Mesh",
@@ -179,6 +225,10 @@ class SceneExporter:
             # Do not permute this scale: it belongs to the original y-up GLB,
             # which SimulationManager itself converts to z-up.
             "body_scale": scale_y_up,
+            "center_xy": scene_object.center_xy,
+            "support_surface_z": scene_object.support_surface_z,
+            "support_contour_xy": scene_object.support_contour_xy,
+            "support_optimization_rect_xy": scene_object.support_optimization_rect_xy,
             "max_convex_hull_num": scene_object.physics.max_convex_hull_num,
         }
 

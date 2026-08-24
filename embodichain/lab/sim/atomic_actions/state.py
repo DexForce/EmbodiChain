@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -27,6 +28,16 @@ import torch
 
 if TYPE_CHECKING:
     from .core import ObjectSemantics
+
+
+def _same_physical_object(
+    first: ObjectSemantics,
+    second: ObjectSemantics,
+) -> bool:
+    """Return whether two semantic records identify one physical object."""
+    from .core import _same_object_identity
+
+    return _same_object_identity(first, second)
 
 
 def _resolve_runtime_device(device: torch.device | str) -> torch.device:
@@ -45,7 +56,7 @@ def _validate_pose(value: torch.Tensor, name: str) -> int | None:
         return None
     if value.dim() != 3 or value.shape[-2:] != (4, 4) or value.shape[0] == 0:
         raise ValueError(
-            f"{name} must have shape (4, 4) or (n_envs, 4, 4), "
+            f"{name} must have shape (4, 4) or (num_envs, 4, 4), "
             f"got {tuple(value.shape)}."
         )
     return int(value.shape[0])
@@ -121,12 +132,7 @@ def _broadcast_joint_position(
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ArticulationJointState:
-    """Verified symbolic state for one named articulation joint.
-
-    ``position`` may describe one scalar joint or a multi-DoF joint. The
-    surrounding :class:`TaskState` supplies the stable articulation/joint key;
-    this value only owns row-local verified measurements and activity.
-    """
+    """Verified symbolic state for one named articulation joint."""
 
     position: torch.Tensor
     """Joint positions with shape ``(J,)`` or ``(B, J)``."""
@@ -360,7 +366,7 @@ class TaskState:
     """Device used by per-environment masks and relation tensors."""
 
     held_objects: Mapping[str, HeldObjectState] = field(default_factory=dict)
-    """Held-object relations keyed by stable logical task-state resource."""
+    """Single-manipulator held-object relations keyed by control resource."""
 
     coordinated_held_objects: Mapping[tuple[str, str], CoordinatedHeldObjectState] = (
         field(default_factory=dict)
@@ -402,7 +408,9 @@ class TaskState:
                     "CoordinatedHeldObjectState objects."
                 )
             normalized_coordinated[resources] = _normalize_coordinated_held(
-                value, batch_size=self.batch_size, device=device
+                value,
+                batch_size=self.batch_size,
+                device=device,
             )
 
         normalized_articulation: dict[tuple[str, str], ArticulationJointState] = {}
@@ -479,6 +487,53 @@ class TaskState:
         """Return verified state for one canonical articulation joint."""
         return self.articulation_joints.get((articulation_id, joint_id))
 
+    def held_object_mask(self, resource: str) -> torch.Tensor:
+        """Return environments where ``resource`` holds an object.
+
+        Args:
+            resource: Manipulator control-resource name.
+
+        Returns:
+            Owned boolean mask with shape ``(batch_size,)``. Missing resources
+            produce an all-false mask.
+        """
+        held = self.get_held_object(resource)
+        if held is None:
+            return torch.zeros(
+                self.batch_size,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        assert held.env_mask is not None
+        return held.env_mask.clone()
+
+    def exclusive_held_object_mask(self, resource: str) -> torch.Tensor:
+        """Return environments where only ``resource`` holds its object.
+
+        Object identity is established by the exact semantic record or by a
+        shared non-null simulation entity. Labels and structural equality are
+        deliberately ignored because distinct physical objects may look alike.
+
+        Args:
+            resource: Manipulator control-resource name.
+
+        Returns:
+            Owned boolean mask with shape ``(batch_size,)``.
+        """
+        held = self.get_held_object(resource)
+        if held is None:
+            return self.held_object_mask(resource)
+
+        exclusive = self.held_object_mask(resource)
+        for other_resource, other in self.held_objects.items():
+            if other_resource == resource:
+                continue
+            if not _same_physical_object(held.semantics, other.semantics):
+                continue
+            assert other.env_mask is not None
+            exclusive &= ~other.env_mask
+        return exclusive
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class RobotObservation:
@@ -496,7 +551,7 @@ class RobotObservation:
             raise ValueError("RobotObservation.timestamp must be non-negative.")
         if not isinstance(self.qpos, torch.Tensor) or self.qpos.dim() != 2:
             raise ValueError(
-                "RobotObservation.qpos must have shape (n_envs, robot_dof)."
+                "RobotObservation.qpos must have shape (num_envs, robot_dof)."
             )
         if self.qpos.shape[0] == 0 or self.qpos.shape[1] == 0:
             raise ValueError("RobotObservation.qpos dimensions must be non-zero.")
@@ -597,13 +652,7 @@ class EntityState:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ObservedArticulationJointState:
-    """Live measured state for one scene articulation joint.
-
-    This value belongs to :class:`SceneSnapshot`, not :class:`TaskState`.
-    ``ArticulationJointState`` records a verified symbolic effect after an
-    operation, while this class records the physical position used by online
-    grounding and recovery replans.
-    """
+    """Live measured state for one scene articulation joint."""
 
     position: torch.Tensor
     """Measured joint position with shape ``(J,)`` or ``(B, J)``."""
@@ -896,6 +945,8 @@ class PlanningContext:
     task: TaskState
     scene: SceneSnapshot
     env_ids: torch.Tensor
+    control_dt: float | None = None
+    """Explicit command period used by action-owned interpolation."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.robot, RobotObservation):
@@ -940,6 +991,14 @@ class PlanningContext:
             raise ValueError("env_ids and robot tensors must share a device.")
         if torch.unique(self.env_ids).numel() != self.env_ids.numel():
             raise ValueError("env_ids must be unique.")
+        if self.control_dt is not None:
+            if isinstance(self.control_dt, bool) or not isinstance(
+                self.control_dt, (int, float)
+            ):
+                raise TypeError("control_dt must be a real number or None.")
+            if not math.isfinite(self.control_dt) or self.control_dt <= 0.0:
+                raise ValueError("control_dt must be finite and greater than zero.")
+            object.__setattr__(self, "control_dt", float(self.control_dt))
         object.__setattr__(self, "env_ids", self.env_ids.clone())
 
     @property
@@ -991,6 +1050,19 @@ class PlanningContext:
         """Return verified state for one canonical articulation joint."""
         return self.task.get_articulation_joint_state(articulation_id, joint_id)
 
+    def require_control_dt(self) -> float:
+        """Return the explicit command period required for interpolation.
+
+        Raises:
+            ValueError: If the caller did not provide ``control_dt``.
+        """
+        if self.control_dt is None:
+            raise ValueError(
+                "This action performs interpolation and requires an explicit "
+                "PlanningContext.control_dt."
+            )
+        return self.control_dt
+
     def project(
         self,
         *,
@@ -1011,6 +1083,7 @@ class PlanningContext:
             task=task,
             scene=self.scene,
             env_ids=self.env_ids,
+            control_dt=self.control_dt,
         )
 
 

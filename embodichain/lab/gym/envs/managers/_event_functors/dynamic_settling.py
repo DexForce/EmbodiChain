@@ -223,23 +223,6 @@ def _measure_settle_speeds(
     return samples
 
 
-def _settle_samples_are_stable(
-    samples: Sequence[DynamicSettleSample],
-    linear_velocity_threshold: float,
-    angular_velocity_threshold: float,
-) -> bool:
-    """Return whether every measured body is finite and below both thresholds."""
-    stable = []
-    for sample in samples:
-        stable.append(
-            torch.isfinite(sample.linear_speed)
-            & torch.isfinite(sample.angular_speed)
-            & (sample.linear_speed <= linear_velocity_threshold)
-            & (sample.angular_speed <= angular_velocity_threshold)
-        )
-    return bool(torch.cat([value.reshape(-1) for value in stable]).all().item())
-
-
 def _format_settle_timeout(
     samples: Sequence[DynamicSettleSample],
     env_ids: torch.Tensor,

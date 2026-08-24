@@ -21,7 +21,6 @@ from __future__ import annotations
 from .calls import (
     DeclarativeValue,
     HandOver,
-    OperateArticulation,
     Pick,
     Place,
     PlaceRelationTarget,
@@ -176,7 +175,6 @@ from .profiles import (
     WorkflowRecoveryPolicy,
 )
 from .scene import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
     ContainerAffordance,
     PLACEMENT_TARGET_AFFORDANCE_REVISION,
     SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
@@ -208,6 +206,7 @@ from .runtime import (
     AtomicSkills,
     EffectEvidenceCollectorPort,
     ResolvedCorePolicyTrace,
+    SemanticEffectVerifier,
     SkillCallTrace,
     SkillEndpointBindingTrace,
     SkillEndpointTrackingChannelTrace,
@@ -225,7 +224,6 @@ from .runtime import (
 )
 
 __all__ = [
-    "ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY",
     "AmbiguousSceneAffordanceError",
     "AmbiguousSkillBindingError",
     "AnalyzedSemanticCall",
@@ -302,7 +300,6 @@ __all__ = [
     "PLACE_ON_AFFORDANCE_CAPABILITY",
     "PLACEMENT_TARGET_AFFORDANCE_REVISION",
     "PathPart",
-    "OperateArticulation",
     "ParallelBarrierUpdate",
     "ParallelBranchStaticAnalysis",
     "ParallelBranchRuntime",
@@ -371,6 +368,7 @@ __all__ = [
     "SemanticCallSpec",
     "SemanticDiagnostic",
     "SemanticEffectDependency",
+    "SemanticEffectVerifier",
     "SemanticEffectKind",
     "SemanticEffectSpec",
     "SymbolicStateDomain",

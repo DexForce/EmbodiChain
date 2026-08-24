@@ -29,21 +29,19 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
     MotionPolicy,
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
+    add_tutorial_robot,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
-    make_top_down_eef_pose,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -66,26 +64,27 @@ def main() -> None:
     """Move the robot end effector through two pose waypoints."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
-    motion_gen = create_toppra_motion_generator(robot)
+    robot = add_tutorial_robot(sim, args.robot)
+    motion_gen = create_curobo_motion_generator(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
 
-    poses = torch.stack(
-        [
-            make_top_down_eef_pose(
-                torch.tensor([0.30, -0.20, 0.36], device=sim.device)
-            ),
-            make_top_down_eef_pose(torch.tensor([0.45, 0.10, 0.30], device=sim.device)),
-        ]
+    start_pose = robot.compute_fk(
+        robot.get_qpos(name="arm"), name="arm", to_matrix=True
+    )[0]
+    poses = start_pose.unsqueeze(0).repeat(2, 1, 1)
+    poses[:, :3, 3] += torch.tensor(
+        [[-0.08, -0.08, 0.08], [0.04, 0.12, 0.04]],
+        dtype=poses.dtype,
+        device=poses.device,
     )
-    n_envs = robot.get_qpos().shape[0]
+    num_envs = robot.get_qpos().shape[0]
     if not args.no_vis_eef_axis:
         for name, pose in zip(("target", "side"), poses, strict=True):
             draw_axis_marker(
                 sim,
                 f"move_end_effector_{name}_axis",
-                broadcast_pose_batch(pose, num_envs=n_envs),
+                broadcast_pose_batch(pose, num_envs=num_envs),
             )
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the robot, then press Enter to plan MoveEndEffector..."
@@ -93,16 +92,17 @@ def main() -> None:
 
     compiled = engine.compile(
         (
-            ActionInvocation(
-                skill_id="move_end_effector",
-                goal=EndEffectorPoseGoal(broadcast_waypoint_pose_batch(poses, n_envs)),
-                binding=engine.bind_control_parts(
-                    "move_end_effector",
-                    {"primary": {"motion": "arm"}},
+            engine.make_invocation(
+                "move_end_effector",
+                EndEffectorPoseGoal(broadcast_waypoint_pose_batch(poses, num_envs)),
+                control_parts={"primary": {"motion": "arm"}},
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=MOVE_SAMPLE_INTERVAL,
                 ),
-                motion_policy=MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveEndEffector demo trajectory.")

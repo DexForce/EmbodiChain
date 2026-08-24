@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Strict JSON/YAML-value decoder for Expert Program schema versions 1 and 2."""
+"""Strict JSON/YAML-value decoder for Expert Program schema version 2."""
 
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ from collections.abc import Callable
 from typing import Literal, Protocol, TypeAlias, runtime_checkable
 
 from .cfg import (
+    ArticulationJointPositionValidatorCfg,
     BarrierCfg,
     EXPERT_PROGRAM_SCHEMA_VERSION,
-    EXPERT_PROGRAM_SCHEMA_VERSION_V2,
     MAX_PROGRAM_DEPTH,
     MAX_REPEAT_COUNT,
     CyclicPoseTargetCfg,
@@ -35,7 +35,6 @@ from .cfg import (
     HandOverCfg,
     InvokeCfg,
     ObjectNearTargetValidatorCfg,
-    OperateArticulationCfg,
     ParallelCfg,
     PickCfg,
     PlaceCfg,
@@ -47,7 +46,6 @@ from .cfg import (
     SegmentCfg,
     SemanticCallCfg,
     SequenceCfg,
-    SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS,
     TargetCfg,
     TargetRefCfg,
     ValidatorCfg,
@@ -509,7 +507,6 @@ def _decode_call(
             "pick",
             "place",
             "hand_over",
-            "operate_articulation",
             "registered",
         ),
     )
@@ -597,72 +594,6 @@ def _decode_call(
             final_target=final_target,
             resources=resources,
         )  # type: ignore[return-value]
-    if kind == "operate_articulation":
-        _validate_fields(
-            mapping,
-            allowed=frozenset(
-                {
-                    "kind",
-                    "articulation",
-                    "handle",
-                    "target",
-                    "target_position",
-                    "target_displacement",
-                    "resources",
-                }
-            ),
-            required=frozenset({"kind", "articulation"}),
-            path=path,
-        )
-        handle = mapping.get("handle")
-        target = mapping.get("target")
-        if handle is not None:
-            handle = _expect_identifier(handle, path=(*path, "handle"))
-        if target is not None:
-            target = _expect_identifier(target, path=(*path, "target"))
-        target_position = mapping.get("target_position")
-        target_displacement = mapping.get("target_displacement")
-        for field_name, value in (
-            ("target_position", target_position),
-            ("target_displacement", target_displacement),
-        ):
-            if value is not None and type(value) not in (int, float):
-                raise _error(
-                    "invalid_number",
-                    (*path, field_name),
-                    f"{field_name} must be a finite number, not bool.",
-                )
-        named = target is not None
-        explicit_position = target_position is not None
-        explicit_displacement = target_displacement is not None
-        if named and (explicit_position or explicit_displacement):
-            raise _error(
-                "conflicting_articulation_target",
-                path,
-                "target is mutually exclusive with target_position and "
-                "target_displacement.",
-            )
-        if not named and not (explicit_position and explicit_displacement):
-            raise _error(
-                "incomplete_articulation_target",
-                path,
-                "Specify target or both target_position and target_displacement.",
-            )
-        return _construct(
-            OperateArticulationCfg,
-            path=path,
-            kind=kind,
-            articulation=_expect_identifier(
-                mapping["articulation"],
-                path=(*path, "articulation"),
-            ),
-            handle=handle,
-            target=target,
-            target_position=target_position,
-            target_displacement=target_displacement,
-            resources=resources,
-        )  # type: ignore[return-value]
-
     _validate_fields(
         mapping,
         allowed=frozenset(
@@ -726,8 +657,48 @@ def _decode_validator(
     kind = _expect_discriminator(
         mapping,
         path=path,
-        supported=("object_near_target",),
+        supported=("object_near_target", "articulation_joint_position"),
     )
+    if kind == "articulation_joint_position":
+        _validate_fields(
+            mapping,
+            allowed=frozenset(
+                {
+                    "kind",
+                    "articulation",
+                    "joint",
+                    "minimum_position",
+                    "maximum_position",
+                }
+            ),
+            required=frozenset({"kind", "articulation", "joint"}),
+            path=path,
+        )
+        minimum = mapping.get("minimum_position")
+        maximum = mapping.get("maximum_position")
+        for field_name, bound in (
+            ("minimum_position", minimum),
+            ("maximum_position", maximum),
+        ):
+            if bound is not None and type(bound) not in (int, float):
+                raise _error(
+                    "invalid_number",
+                    (*path, field_name),
+                    f"{field_name} must be a finite number, not bool.",
+                )
+        return _construct(
+            ArticulationJointPositionValidatorCfg,
+            path=path,
+            kind=kind,
+            articulation=_expect_identifier(
+                mapping["articulation"],
+                path=(*path, "articulation"),
+            ),
+            joint=_expect_identifier(mapping["joint"], path=(*path, "joint")),
+            minimum_position=minimum,
+            maximum_position=maximum,
+        )  # type: ignore[return-value]
+
     _validate_fields(
         mapping,
         allowed=frozenset({"kind", "object", "target", "position_tolerance"}),
@@ -758,15 +729,48 @@ def _decode_validator(
     )  # type: ignore[return-value]
 
 
+def _decode_barrier(value: object, *, path: ConfigPath) -> BarrierCfg:
+    """Decode the synchronization metadata owned by one parallel node."""
+    mapping = _expect_mapping(value, path=path)
+    kind = _expect_discriminator(mapping, path=path, supported=("barrier",))
+    _validate_fields(
+        mapping,
+        allowed=frozenset({"kind", "name", "timeout_steps", "failure_policy"}),
+        required=frozenset({"kind", "name"}),
+        path=path,
+    )
+    timeout_steps = mapping.get("timeout_steps", 1_000)
+    if type(timeout_steps) is not int or timeout_steps <= 0:
+        raise _error(
+            "invalid_barrier_timeout",
+            (*path, "timeout_steps"),
+            "Barrier timeout_steps must be a positive integer.",
+        )
+    failure_policy = mapping.get("failure_policy", "fail_fast")
+    if failure_policy != "fail_fast":
+        raise _error(
+            "unsupported_failure_policy",
+            (*path, "failure_policy"),
+            "Barrier failure_policy must be exactly 'fail_fast'.",
+        )
+    return _construct(
+        BarrierCfg,
+        path=path,
+        kind=kind,
+        name=_expect_identifier(mapping["name"], path=(*path, "name")),
+        timeout_steps=timeout_steps,
+        failure_policy=failure_policy,
+    )  # type: ignore[return-value]
+
+
 def _decode_program_node(
     value: object,
     *,
     path: ConfigPath,
     target_ids: frozenset[str],
     depth: int,
-    schema_version: int,
 ) -> ProgramNodeCfg:
-    """Recursively decode one bounded versioned program node."""
+    """Recursively decode one bounded schema-version-2 program node."""
     if depth > MAX_PROGRAM_DEPTH:
         raise _error(
             "program_too_deep",
@@ -774,13 +778,10 @@ def _decode_program_node(
             "Program AST exceeds the configured nesting depth.",
         )
     mapping = _expect_mapping(value, path=path)
-    supported_kinds = ["sequence", "repeat", "segment", "invoke"]
-    if schema_version >= EXPERT_PROGRAM_SCHEMA_VERSION_V2:
-        supported_kinds.extend(("parallel", "barrier"))
     kind = _expect_discriminator(
         mapping,
         path=path,
-        supported=tuple(supported_kinds),
+        supported=("sequence", "repeat", "segment", "invoke", "parallel"),
     )
     if kind == "sequence":
         _validate_fields(
@@ -795,7 +796,6 @@ def _decode_program_node(
                 path=(*path, "items", index),
                 target_ids=target_ids,
                 depth=depth + 1,
-                schema_version=schema_version,
             )
             for index, item in enumerate(
                 _expect_list(mapping["items"], path=(*path, "items"))
@@ -831,7 +831,6 @@ def _decode_program_node(
                 path=(*path, "body"),
                 target_ids=target_ids,
                 depth=depth + 1,
-                schema_version=schema_version,
             ),
         )  # type: ignore[return-value]
     if kind == "segment":
@@ -870,7 +869,6 @@ def _decode_program_node(
                 path=(*path, "steps"),
                 target_ids=target_ids,
                 depth=depth + 1,
-                schema_version=schema_version,
             ),
             post=post,
             validators=validators,
@@ -893,19 +891,10 @@ def _decode_program_node(
                 (*path, "branches"),
                 "Parallel requires at least two branches.",
             )
-        barrier = _decode_program_node(
+        barrier = _decode_barrier(
             mapping["barrier"],
             path=(*path, "barrier"),
-            target_ids=target_ids,
-            depth=depth + 1,
-            schema_version=schema_version,
         )
-        if type(barrier) is not BarrierCfg:
-            raise _error(
-                "parallel_barrier_required",
-                (*path, "barrier"),
-                "Parallel.barrier must be an explicit barrier node.",
-            )
         return _construct(
             ParallelCfg,
             path=path,
@@ -916,42 +905,11 @@ def _decode_program_node(
                     path=(*path, "branches", index),
                     target_ids=target_ids,
                     depth=depth + 1,
-                    schema_version=schema_version,
                 )
                 for index, branch in enumerate(branches_values)
             ),
             barrier=barrier,
         )  # type: ignore[return-value]
-    if kind == "barrier":
-        _validate_fields(
-            mapping,
-            allowed=frozenset({"kind", "name", "timeout_steps", "failure_policy"}),
-            required=frozenset({"kind", "name"}),
-            path=path,
-        )
-        timeout_steps = mapping.get("timeout_steps", 1_000)
-        if type(timeout_steps) is not int or timeout_steps <= 0:
-            raise _error(
-                "invalid_barrier_timeout",
-                (*path, "timeout_steps"),
-                "Barrier timeout_steps must be a positive integer.",
-            )
-        failure_policy = mapping.get("failure_policy", "fail_fast")
-        if failure_policy != "fail_fast":
-            raise _error(
-                "unsupported_failure_policy",
-                (*path, "failure_policy"),
-                "Barrier failure_policy must be exactly 'fail_fast'.",
-            )
-        return _construct(
-            BarrierCfg,
-            path=path,
-            kind=kind,
-            name=_expect_identifier(mapping["name"], path=(*path, "name")),
-            timeout_steps=timeout_steps,
-            failure_policy=failure_policy,
-        )  # type: ignore[return-value]
-
     _validate_fields(
         mapping,
         allowed=frozenset({"kind", "call"}),
@@ -987,7 +945,6 @@ def _walk_program(
     elif type(node) is ParallelCfg:
         for index, branch in enumerate(node.branches):
             values.extend(_walk_program(branch, path=(*path, "branches", index)))
-        values.extend(_walk_program(node.barrier, path=(*path, "barrier")))
     return values
 
 
@@ -1073,20 +1030,6 @@ def validate_expert_program(
                         role="object_or_affordance",
                         path=(*call_path, "inside"),
                     )
-            if type(call) is OperateArticulationCfg:
-                _call_context(
-                    context.validate_scene_reference,
-                    call.articulation,
-                    role="articulation",
-                    path=(*call_path, "articulation"),
-                )
-                if call.handle is not None:
-                    _call_context(
-                        context.validate_scene_reference,
-                        call.handle,
-                        role="affordance",
-                        path=(*call_path, "handle"),
-                    )
         elif type(node) is SegmentCfg:
             for index, post in enumerate(node.post):
                 post_path = (*path, "post", index)
@@ -1108,12 +1051,20 @@ def validate_expert_program(
                     validator,
                     path=validator_path,
                 )
-                _call_context(
-                    context.validate_scene_reference,
-                    validator.object,
-                    role="object",
-                    path=(*validator_path, "object"),
-                )
+                if type(validator) is ObjectNearTargetValidatorCfg:
+                    _call_context(
+                        context.validate_scene_reference,
+                        validator.object,
+                        role="object",
+                        path=(*validator_path, "object"),
+                    )
+                elif type(validator) is ArticulationJointPositionValidatorCfg:
+                    _call_context(
+                        context.validate_scene_reference,
+                        validator.articulation,
+                        role="articulation",
+                        path=(*validator_path, "articulation"),
+                    )
 
 
 def decode_expert_program(
@@ -1123,9 +1074,8 @@ def decode_expert_program(
 ) -> ExpertProgramCfg:
     """Decode untrusted JSON/YAML-shaped values into strict versioned config.
 
-    Schema versions 1 and 2 are supported. Version 2 adds deterministic
-    parallel blocks with explicit barriers while preserving the Version 1
-    sequential nodes and semantic calls.
+    Only schema version 2 is supported. It contains sequential nodes plus
+    deterministic parallel blocks with explicit barriers.
 
     Args:
         data: Exact JSON-compatible mapping produced by a trusted parser.
@@ -1159,13 +1109,13 @@ def decode_expert_program(
     schema_version = mapping["schema_version"]
     if (
         type(schema_version) is not int
-        or schema_version not in SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS
+        or schema_version != EXPERT_PROGRAM_SCHEMA_VERSION
     ):
         raise _error(
             "unsupported_schema_version",
             ("schema_version",),
-            "Supported schema versions are "
-            f"{list(SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS)}.",
+            "Expert Program schema_version must be exactly "
+            f"{EXPERT_PROGRAM_SCHEMA_VERSION}.",
         )
 
     integration_mapping = _expect_mapping(
@@ -1209,7 +1159,6 @@ def decode_expert_program(
         path=("program",),
         target_ids=target_ids,
         depth=0,
-        schema_version=schema_version,
     )
     config = _construct(
         ExpertProgramCfg,
@@ -1226,15 +1175,4 @@ def decode_expert_program(
     return config
 
 
-__all__ = [
-    "ConfigPath",
-    "ConfigPathPart",
-    "ExpertProgramConfigError",
-    "ExpertProgramDecodeError",
-    "ExpertProgramValidationContext",
-    "ExpertProgramValidationError",
-    "SceneReferenceRole",
-    "decode_expert_program",
-    "render_config_path",
-    "validate_expert_program",
-]
+__all__: list[str] = []

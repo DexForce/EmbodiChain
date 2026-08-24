@@ -20,14 +20,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-import math
 from types import MappingProxyType
 from typing import Any, Literal
 
 import torch
-from tensordict import TensorDict
 
-from embodichain.lab.sim.types import EnvAction
+from ._json import json_safe_copy as _json_safe_copy
 
 __all__ = [
     "DEMO_ANNOTATION_KEYS",
@@ -35,7 +33,6 @@ __all__ = [
     "DemoEpisodeResult",
     "DemoSegment",
     "DemoSegmentResult",
-    "ProcessedEnvAction",
     "execute_demo_episode",
     "resolve_demo_segments",
 ]
@@ -54,69 +51,6 @@ DEMO_ANNOTATION_KEYS = (
     "truncated",
 )
 """Per-frame annotation keys stored in expert rollout buffers."""
-
-
-def _json_safe_copy(value: Any, *, field_name: str) -> Any:
-    """Return an owned JSON value without implicit type coercion."""
-    if value is None or type(value) in {bool, int, str}:
-        return value
-    if type(value) is float:
-        if not math.isfinite(value):
-            raise ValueError(f"{field_name} contains a non-finite float.")
-        return value
-    if isinstance(value, Mapping):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            if type(key) is not str or not key or key != key.strip():
-                raise ValueError(
-                    f"{field_name} mapping keys must be non-empty strings "
-                    "without outer whitespace."
-                )
-            result[key] = _json_safe_copy(
-                item,
-                field_name=f"{field_name}.{key}",
-            )
-        return result
-    if isinstance(value, (list, tuple)):
-        return [
-            _json_safe_copy(item, field_name=f"{field_name}[{index}]")
-            for index, item in enumerate(value)
-        ]
-    raise TypeError(f"{field_name} contains non-JSON value {type(value).__name__}.")
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class ProcessedEnvAction:
-    """Owned controller-ready action that must still pass through ``env.step``.
-
-    Semantic runtimes and demonstration bridges may already have produced the
-    action-manager output (for example, a full joint-position command assembled
-    from typed runtime endpoints). Wrapping it prevents the environment from
-    applying the pre-action transform a second time while retaining the normal
-    simulation, manager, recorder, reward, and dataset step lifecycle.
-
-    Args:
-        value: Controller-ready tensor or ``TensorDict``.
-        metadata: JSON-compatible provenance attached by the producer. The
-            environment does not interpret this mapping.
-    """
-
-    value: EnvAction
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.value, (torch.Tensor, TensorDict)):
-            raise TypeError("value must be a torch.Tensor or TensorDict.")
-        if not isinstance(self.metadata, Mapping):
-            raise TypeError("metadata must be a mapping.")
-        owned_value = self.value.clone()
-        owned_metadata = _json_safe_copy(self.metadata, field_name="metadata")
-        object.__setattr__(self, "value", owned_value)
-        object.__setattr__(self, "metadata", MappingProxyType(owned_metadata))
-
-    def snapshot(self) -> ProcessedEnvAction:
-        """Return an independently owned processed-action envelope."""
-        return ProcessedEnvAction(value=self.value, metadata=self.metadata)
 
 
 @dataclass(frozen=True)

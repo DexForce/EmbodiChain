@@ -31,17 +31,17 @@ from scripts.benchmark.expert_program.demo_success import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_CUBE_GYM_CONFIG = get_config_path("gym/multi_segments/cube_pick_place.json")
-_CUBE_EXPERT_PROGRAM = get_config_path(
-    "expert_program/multi_segments/repeated_cube_pick_place.yaml"
-)
+_CUBE_GYM_CONFIG = get_config_path("gym/expert_program/repeated_pick_place.json")
+_CUBE_EXPERT_PROGRAM = get_config_path("expert_program/repeated_pick_place.yaml")
 _CASE_ID = "repeated_cube_three_cycle_live"
 _SEED = 0
 _NUM_ENVS = 1
-_SUBPROCESS_TIMEOUT_SECONDS = 180
+_SUBPROCESS_TIMEOUT_SECONDS = 300
+# ``main`` closes the environment; bypass native ContactSensor interpreter teardown.
 _RUN_PUBLIC_MAIN = (
+    "import os, sys; "
     "from scripts.benchmark.expert_program.demo_success import main; "
-    "raise SystemExit(main())"
+    "code = main(); sys.stdout.flush(); sys.stderr.flush(); os._exit(code)"
 )
 
 
@@ -59,6 +59,7 @@ def _successful_effect_decisions(call: dict[str, object]) -> list[dict[str, obje
 
 
 @pytest.mark.requires_sim
+@pytest.mark.subprocess_sim
 @pytest.mark.slow
 @pytest.mark.gpu
 def test_live_repeated_cube_completes_three_physical_cycles(

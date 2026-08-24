@@ -237,7 +237,7 @@ class EndpointBinding:
     adapter_id: str
     target: RuntimeEndpointTarget
     task_state_key: str | None = None
-    """Symbolic task-state key; direct-core defaults to ``target.target_id``."""
+    """Symbolic task-state key; defaults to ``target.target_id``."""
 
     tracking_channels: Mapping[str, EndpointTrackingChannelBinding] = field(
         default_factory=dict
@@ -388,7 +388,7 @@ class EndpointBinding:
         self,
         name: str,
         *,
-        n_envs: int,
+        num_envs: int,
         device: torch.device | str,
         dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
@@ -403,7 +403,7 @@ class EndpointBinding:
                 "JointPositionCommand."
             )
         return command.resolve(
-            n_envs=n_envs,
+            num_envs=num_envs,
             control_dof=len(target.joint_ids),
             device=device,
             dtype=dtype,

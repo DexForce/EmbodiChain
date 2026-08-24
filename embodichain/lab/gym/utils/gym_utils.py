@@ -489,18 +489,15 @@ def config_to_cfg(
 
         env_spec = get_env_spec(config["id"])
         registration = env_spec.expert_program_registration
-        if registration is None:
-            raise ValueError(
-                f"Environment {config['id']!r} does not register an Expert "
-                "Program integration catalog."
-            )
-        registration.assert_unchanged()
+        if registration is not None:
+            registration.assert_unchanged()
         expert_program = load_expert_program(
             expert_program_path_text,
             base_dir=expert_program_base_dir,
-            validation_context=registration.catalog,
+            validation_context=(None if registration is None else registration.catalog),
         )
-        registration.catalog.preflight(expert_program)
+        if registration is not None:
+            registration.catalog.preflight(expert_program)
         env_cfg.expert_program = expert_program
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
