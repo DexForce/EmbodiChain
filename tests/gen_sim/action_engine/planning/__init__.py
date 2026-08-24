@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generative simulation tests."""
+"""Action Engine planning tests."""
 
 from __future__ import annotations
 

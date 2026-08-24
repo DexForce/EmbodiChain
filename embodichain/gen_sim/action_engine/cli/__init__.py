@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generative simulation tests."""
+"""Command-line entry points for Action Engine generation and execution."""
 
 from __future__ import annotations
 

@@ -14,8 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generative simulation tests."""
+"""Stable deterministic compiler API."""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .core import compile_task_agent
+from .v2 import (
+    compile_task_agent_v2,
+    execution_program_to_seed_graph,
+    seed_graph_to_execution_program,
+)
+
+__all__ = [
+    "compile_task_agent",
+    "compile_task_agent_v2",
+    "execution_program_to_seed_graph",
+    "seed_graph_to_execution_program",
+]

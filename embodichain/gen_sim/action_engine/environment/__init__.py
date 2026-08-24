@@ -14,8 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generative simulation tests."""
+"""Tracked Action Engine environment package."""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .agent_env import ACTION_ENGINE_ENV_ID, ActionEngineEnv
+
+__all__ = ["ACTION_ENGINE_ENV_ID", "ActionEngineEnv"]

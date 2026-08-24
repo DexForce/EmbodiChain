@@ -14,8 +14,21 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generative simulation tests."""
+"""Resolve semantic Action Engine arms to physical robot control parts."""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from typing import Any
+
+__all__ = ["arm_control_part"]
+
+
+def arm_control_part(env: Any, arm: str) -> str:
+    """Return the physical arm control part for a semantic arm name."""
+    if arm not in {"left_arm", "right_arm"}:
+        raise ValueError(f"Expected a semantic arm, got {arm!r}.")
+    if hasattr(env, "get_agent_arm_control_part"):
+        part = env.get_agent_arm_control_part(arm == "left_arm")
+        if part:
+            return str(part)
+    return arm

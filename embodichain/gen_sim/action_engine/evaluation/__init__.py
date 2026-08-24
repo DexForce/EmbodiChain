@@ -14,8 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generative simulation tests."""
+"""Strict offline/online comparison utilities."""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .ab import ABExecutionResult, run_strict_ab, state_digest
+
+__all__ = [
+    "ABExecutionResult",
+    "run_strict_ab",
+    "state_digest",
+]
