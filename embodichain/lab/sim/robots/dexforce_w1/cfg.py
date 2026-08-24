@@ -345,7 +345,9 @@ if __name__ == "__main__":
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
-    config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4, physics_cfg=NewtonPhysicsCfg())
+    config = SimulationManagerCfg(
+        headless=True, device="cpu", num_envs=4, physics_cfg=NewtonPhysicsCfg()
+    )
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
@@ -355,5 +357,7 @@ if __name__ == "__main__":
     sim.update(step=1)
     print("DexforceW1 robot added to the simulation.", flush=True)
     sim.open_window()
-    from IPython import embed; embed()  # noqa: E702
+    from IPython import embed
+
+    embed()  # noqa: E702
     sim.destroy()
