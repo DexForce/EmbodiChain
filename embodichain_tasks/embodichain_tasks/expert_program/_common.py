@@ -38,7 +38,7 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     MotionPolicy,
-    RecoveryPolicy,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.skills import SkillPolicyPreset
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
@@ -186,8 +186,9 @@ def create_ur5_skill_profile_binding(
             SkillPolicyPreset(
                 "safe",
                 motion_policy=MotionPolicy(sample_count=sample_count),
-                recovery_policy=RecoveryPolicy(
-                    tracking_error_threshold=DEFAULT_TRACKING_ERROR_THRESHOLD,
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=DEFAULT_TRACKING_ERROR_THRESHOLD,
+                    terminal_max_abs_error=DEFAULT_TRACKING_ERROR_THRESHOLD,
                 ),
             ),
         ),

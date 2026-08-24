@@ -449,7 +449,6 @@ embodichain.lab.sim.atomic_actions.plans
    ActionPlan
    CompiledTrajectory
    EffectVerificationRequirement
-   ExecutionFeedbackMode
    PlannerDiagnostics
    TimedTrajectory
    TrajectorySegment

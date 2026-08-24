@@ -141,9 +141,6 @@ class RecoveryPolicy:
     max_action_retries: int = 2
     """Maximum whole-action retries after planning, execution, or effect failure."""
 
-    tracking_error_threshold: float = 0.05
-    """Joint tracking-error threshold in radians."""
-
     goal_translation_threshold: float = 0.02
     """Dynamic-goal translation threshold in metres."""
 
@@ -159,7 +156,6 @@ class RecoveryPolicy:
         if self.max_action_retries < 0:
             raise ValueError("max_action_retries must be non-negative.")
         threshold_fields = (
-            "tracking_error_threshold",
             "goal_translation_threshold",
             "goal_rotation_threshold",
             "action_timeout",

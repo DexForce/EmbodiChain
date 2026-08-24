@@ -166,7 +166,7 @@ class _TraceAction(AtomicAction[_TraceGoal, ActionOptions]):
 
 
 class _TraceObservationProvider:
-    """Move one scene dependency after the first installed command frame."""
+    """Move the scene once and report accepted commands as observed state."""
 
     def __init__(self, clock: EnvironmentStepClock) -> None:
         self.clock = clock
@@ -178,7 +178,10 @@ class _TraceObservationProvider:
         pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
         if replanned_scene:
             pose[:, 0, 3] = 0.25
-        qpos = torch.zeros(BATCH_SIZE, ROBOT_DOF)
+        qpos = torch.full(
+            (BATCH_SIZE, ROBOT_DOF),
+            float(min(max(self.calls - 1, 0), 3)),
+        )
         timestamp = self.clock.now()
         return PlanningContext(
             robot=RobotObservation(

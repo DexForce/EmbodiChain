@@ -45,6 +45,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     PlanningContext,
     RecoveryPolicy,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.skills import (
@@ -230,10 +231,11 @@ def create_robot_profile(
                 ),
                 # Retrying after either gripper has changed ownership is not
                 # safe without reconciling the physical attachment first.
-                recovery_policy=RecoveryPolicy(
-                    max_action_retries=0,
-                    tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+                    terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
                 ),
+                recovery_policy=RecoveryPolicy(max_action_retries=0),
             ),
         },
         default_preset="hand_over",

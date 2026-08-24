@@ -309,6 +309,7 @@ must be resolved from the latest scene snapshot:
        EndEffectorPoseGoal,
        RecoveryPolicy,
        SceneEntityPose,
+       TrackingPolicy,
    )
 
    invocation = ActionInvocation(
@@ -322,8 +323,11 @@ must be resolved from the latest scene snapshot:
        ),
        recovery_policy=RecoveryPolicy(
            max_replans=3,
-           tracking_error_threshold=0.05,
            goal_translation_threshold=0.02,
+       ),
+       tracking_policy=TrackingPolicy.joint_position(
+           in_flight_max_abs_error=0.05,
+           terminal_max_abs_error=0.05,
        ),
    )
 

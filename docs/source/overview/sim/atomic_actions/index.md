@@ -562,6 +562,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionStatus,
     RecoveryPolicy,
     SceneEntityPose,
+    TrackingPolicy,
 )
 
 moving_goal = ActionInvocation(
@@ -580,10 +581,13 @@ moving_goal = ActionInvocation(
     recovery_policy=RecoveryPolicy(
         max_replans=3,
         max_action_retries=2,
-        tracking_error_threshold=0.05,
         goal_translation_threshold=0.02,
         goal_rotation_threshold=0.087,
         action_timeout=30.0,
+    ),
+    tracking_policy=TrackingPolicy.joint_position(
+        in_flight_max_abs_error=0.05,
+        terminal_max_abs_error=0.05,
     ),
 )
 

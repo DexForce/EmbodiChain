@@ -32,6 +32,7 @@ from embodichain.lab.sim.atomic_actions import (
     HandOverGoal,
     HandOverOptions,
     PlanningContext,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.skills import (
     GRASP_AFFORDANCE_CAPABILITY,
@@ -196,14 +197,14 @@ def test_place_tutorial_profile_owns_single_arm_binding_and_policies() -> None:
         "primary": "primary_manipulator"
     }
     assert dict(profile.skill_presets) == {"pick_up": "pick", "place": "place"}
-    assert (
-        profile.presets["pick"].recovery_policy.tracking_error_threshold
-        == PLACE_TRACKING_ERROR_THRESHOLD
+    assert profile.presets["pick"].tracking_policy == TrackingPolicy.joint_position(
+        in_flight_max_abs_error=PLACE_TRACKING_ERROR_THRESHOLD,
+        terminal_max_abs_error=PLACE_TRACKING_ERROR_THRESHOLD,
     )
     assert profile.presets["place"].recovery_policy.max_action_retries == 0
-    assert (
-        profile.presets["place"].recovery_policy.tracking_error_threshold
-        == PLACE_TRACKING_ERROR_THRESHOLD
+    assert profile.presets["place"].tracking_policy == TrackingPolicy.joint_position(
+        in_flight_max_abs_error=PLACE_TRACKING_ERROR_THRESHOLD,
+        terminal_max_abs_error=PLACE_TRACKING_ERROR_THRESHOLD,
     )
 
 

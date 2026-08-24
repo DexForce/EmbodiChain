@@ -52,6 +52,7 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     SimulationExecutionAdapter,
     TaskState,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -303,9 +304,12 @@ def main() -> None:
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             max_action_retries=1,
-            tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
             goal_translation_threshold=GOAL_TRANSLATION_THRESHOLD,
             action_timeout=30.0,
+        ),
+        tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+            terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
         ),
         skill_options=PickUpOptions(
             pre_grasp_distance=0.15,

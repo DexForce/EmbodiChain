@@ -36,7 +36,6 @@ embodichain.lab.sim.atomic_actions
       TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
-      ExecutionFeedbackMode
       ActionPlan
       CompiledTrajectory
 
@@ -127,6 +126,7 @@ embodichain.lab.sim.atomic_actions
    :hidden:
 
    embodichain.lab.sim.atomic_actions.primitives
+   embodichain.lab.sim.atomic_actions.tracking
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
 
@@ -244,9 +244,6 @@ Planning and state
    :members:
 
 .. autoclass:: TimedCommandSequence
-   :members:
-
-.. autoclass:: ExecutionFeedbackMode
    :members:
 
 .. autoclass:: ActionPlan

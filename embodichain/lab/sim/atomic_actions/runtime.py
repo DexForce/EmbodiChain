@@ -35,6 +35,14 @@ from .requirements import (
     DisjointSlotEndpoints,
     SkillBindingContract,
 )
+from .tracking import (
+    JOINT_POSITION_CHANNEL,
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
+    TrackingFeedbackSourceRef,
+    TrackingProjectorRef,
+    TrackingRuntime,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -53,12 +61,19 @@ class ActionPlanningServices:
         self,
         motion_generator: MotionGenerator,
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        tracking_runtime: TrackingRuntime | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
     ) -> None:
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
         self._binding_owner_id = uuid4().hex
+        if tracking_runtime is not None and not isinstance(
+            tracking_runtime,
+            TrackingRuntime,
+        ):
+            raise TypeError("tracking_runtime must be a TrackingRuntime or None.")
+        self._tracking_runtime = tracking_runtime or TrackingRuntime.with_builtins()
         self._control_profiles = self._snapshot_control_profiles(
             {} if control_profiles is None else control_profiles
         )
@@ -85,6 +100,11 @@ class ActionPlanningServices:
     def binding_owner_id(self) -> str:
         """Return the opaque identity required by this engine's bindings."""
         return self._binding_owner_id
+
+    @property
+    def tracking_runtime(self) -> TrackingRuntime:
+        """Return the engine-owned typed tracking runtime."""
+        return self._tracking_runtime
 
     @property
     def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
@@ -293,14 +313,32 @@ class ActionPlanningServices:
                         f"Endpoint {slot_id}.{endpoint_id} requires command {name!r} "
                         f"of type {command_type.__name__}."
                     )
+            target = JointPositionTarget(control_part, joint_ids)
             resolved.append(
                 EndpointBinding(
                     slot_id=slot_id,
                     endpoint_id=endpoint_id,
                     resource_id=f"direct.{slot_id}",
                     adapter_id="control_part",
-                    target=JointPositionTarget(control_part, joint_ids),
+                    target=target,
                     task_state_key=resolved_task_state_keys[slot_id],
+                    tracking_channels={
+                        JOINT_POSITION_CHANNEL: EndpointTrackingChannelBinding(
+                            channel_id=JOINT_POSITION_CHANNEL,
+                            source=TrackingFeedbackSourceRef(
+                                provider_id="planning_context.robot",
+                                revision="1",
+                                address=EndpointTrackingFeedbackAddress(
+                                    target=target,
+                                    channel_id=JOINT_POSITION_CHANNEL,
+                                ),
+                            ),
+                            projector=TrackingProjectorRef(
+                                projector_id="joint_position_payload",
+                                revision="1",
+                            ),
+                        )
+                    },
                     capabilities=requirement.capabilities,
                     commands=commands,
                     claim_tokens=frozenset({f"robot.control_part:{control_part}"}),
