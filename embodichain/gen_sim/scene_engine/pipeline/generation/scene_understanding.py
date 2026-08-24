@@ -145,23 +145,34 @@ Examples:
 Return JSON only, with exactly one key: assignments. It must be null or an
 array of asset_id and mask_index objects. Do not include Markdown or any other
 text."""
-_ORIENTATION_STATE_SYSTEM_PROMPT = """You inspect an outlined tabletop-scene image.
-Each visible asset has an outline and an ID label. Determine whether each listed
-asset is standing, lying, or unknown in the image.
+_INITIAL_SCENE_GRAPH_SYSTEM_PROMPT = """You inspect an outlined tabletop-scene image.
+Each visible asset has an outline and an ID label. Build a support graph for the
+listed assets and determine each asset's image-observed orientation state.
 
-Use a non-null state only for an elongated object with a clear primary long axis.
-Use "standing" when its primary axis is approximately vertical to the tabletop.
-Use "lying" when its primary axis is approximately parallel to the tabletop.
+Every asset must have exactly one direct support parent with relation "on".
+Use "table" when the asset directly rests on the table. Use another supplied
+asset ID only when the image clearly shows the asset resting directly on that
+asset's top surface. Do not infer an on relationship from 2D overlap alone.
+When the direct support parent is uncertain, use "table". The table is a fixed
+support ID, not an output node: never include it in nodes.
+
+Use a non-null orientation_state only for an elongated object with a clear
+primary long axis. Use "standing" when that axis is approximately vertical to
+the tabletop, and "lying" when it is approximately parallel to the tabletop.
 Use null for every object without a clear primary long axis or when uncertain.
+The orientation state describes the asset itself and is independent of its
+support parent.
 
-Return JSON only, with exactly this schema. Include every supplied asset ID
-exactly once. Never include the table or any ID that was not supplied:
-{
-  "orientation_states": [
-    {"object_id": "bottle_001", "orientation_state": "standing"},
-    {"object_id": "book_001", "orientation_state": null}
-  ]
-}"""
+Examples:
+- A bottle directly on the table is upright:
+  {"nodes": [{"object_id": "bottle_001", "parent_id": "table", "parent_relation": "on", "orientation_state": "standing"}]}
+- A pen lies flat on a book, and the book is on the table:
+  {"nodes": [{"object_id": "book_001", "parent_id": "table", "parent_relation": "on", "orientation_state": null}, {"object_id": "pen_001", "parent_id": "book_001", "parent_relation": "on", "orientation_state": "lying"}]}
+- A round cup directly on the table has no reliable long axis:
+  {"nodes": [{"object_id": "cup_001", "parent_id": "table", "parent_relation": "on", "orientation_state": null}]}
+
+Return JSON only, with exactly one key: nodes. Include every supplied asset ID
+exactly once and no unknown IDs. Do not include Markdown or any other text."""
 
 
 def understand_scene(
@@ -227,7 +238,7 @@ def _initialize_scene_graph_from_segmented_scene(
     vlm_client: OpenAICompatibleVLM,
     json_max_attempts: int = 3,
 ) -> SceneGraph:
-    """Build the initial graph assuming every segmented asset rests on the table."""
+    """Build the initial image-observed support graph for segmented assets."""
     # Get simplified scene info for VLM.
     scene_info = _simplify_scene_info_for_graph_initialization(scene=scene)
     resolved_asset_mask_id_overlay_path = _validate_image_path(
@@ -235,25 +246,12 @@ def _initialize_scene_graph_from_segmented_scene(
     )
     if scene.table is None:
         raise ValueError("Cannot initialize a scene graph without a table.")
-    orientation_states_by_id = _query_orientation_states(
+    # Return a validated scene graph.
+    return _query_initial_scene_graph(
         scene_info=scene_info,
         asset_mask_id_overlay_path=resolved_asset_mask_id_overlay_path,
         vlm_client=vlm_client,
         json_max_attempts=json_max_attempts,
-    )
-    return SceneGraph(
-        nodes=[
-            SceneGraphNode(object_id=TABLE_OBJECT_ID, parent_id=None),
-            *[
-                SceneGraphNode(
-                    object_id=asset.id,
-                    parent_id=TABLE_OBJECT_ID,
-                    parent_relation="on",  # semi-hard-code.
-                    orientation_state=orientation_states_by_id[asset.id],
-                )
-                for asset in scene.assets
-            ],
-        ],
     )
 
 
@@ -263,91 +261,117 @@ def _simplify_scene_info_for_graph_initialization(
 ) -> dict[str, object]:
     """Return the object metadata needed to initialize an image-based graph."""
     return {
-        "asset_ids": [asset.id for asset in scene.assets],
+        "assets": [
+            {
+                "id": asset.id,
+                "category": asset.category,
+                "name": asset.name,
+                "description": asset.description,
+            }
+            for asset in scene.assets
+        ],
     }
 
 
-def _query_orientation_states(
+def _query_initial_scene_graph(
     *,
     scene_info: dict[str, object],
     asset_mask_id_overlay_path: Path,
     vlm_client: OpenAICompatibleVLM,
     json_max_attempts: int,
-) -> dict[str, str | None]:
-    """Return validated image-observed orientation states keyed by asset ID."""
+) -> SceneGraph:
+    """Return one validated image-observed support graph."""
     if json_max_attempts < 1:
         raise ValueError("json_max_attempts must be at least 1.")
     last_validation_error: ValueError | None = None
     for _ in range(json_max_attempts):
+        # Get response.
         response_text = vlm_client.complete(
             image_path=asset_mask_id_overlay_path,
-            system_prompt=_ORIENTATION_STATE_SYSTEM_PROMPT,
+            system_prompt=_INITIAL_SCENE_GRAPH_SYSTEM_PROMPT,
             user_prompt=json.dumps(scene_info, ensure_ascii=False),
         )
         try:
-            return _parse_orientation_states_response(
+            # Validate.
+            return _parse_initial_scene_graph_response(
                 response_text=response_text,
-                asset_ids=scene_info["asset_ids"],
+                assets=scene_info["assets"],
             )
         except ValueError as exc:
             last_validation_error = exc
     assert last_validation_error is not None
     raise ValueError(
-        "VLM returned invalid orientation-state JSON after "
+        "VLM returned invalid initial scene-graph JSON after "
         f"{json_max_attempts} attempts: {last_validation_error}"
     ) from last_validation_error
 
 
-def _parse_orientation_states_response(
+def _parse_initial_scene_graph_response(
     *,
     response_text: str,
-    asset_ids: object,
-) -> dict[str, str | None]:
-    """Parse a complete VLM orientation-state response for known asset IDs."""
-    if not isinstance(asset_ids, list) or not all(
-        isinstance(object_id, str) for object_id in asset_ids
+    assets: object,
+) -> SceneGraph:
+    """Parse a complete VLM support graph response for known scene assets."""
+    if not isinstance(assets, list) or not all(
+        isinstance(asset, dict) and isinstance(asset.get("id"), str) for asset in assets
     ):
-        raise ValueError("Scene graph initialization requires string asset IDs.")
+        raise ValueError("Scene graph initialization requires assets with string ids.")
+    asset_ids = [asset["id"] for asset in assets]
     json_text = _strip_json_code_fence(response_text)
     try:
         payload = json.loads(json_text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"VLM response is not valid JSON: {exc.msg}") from exc
-    if not isinstance(payload, dict) or set(payload) != {"orientation_states"}:
-        raise ValueError("VLM JSON must contain exactly the key: orientation_states.")
-    states_value = payload["orientation_states"]
-    if not isinstance(states_value, list):
-        raise ValueError("VLM JSON key orientation_states must be an array.")
+    if not isinstance(payload, dict) or set(payload) != {"nodes"}:
+        raise ValueError("VLM JSON must contain exactly the key: nodes.")
+    nodes_value = payload["nodes"]
+    if not isinstance(nodes_value, list):
+        raise ValueError("VLM JSON key nodes must be an array.")
 
-    orientation_states_by_id: dict[str, str | None] = {}
-    for index, state_value in enumerate(states_value):
-        if not isinstance(state_value, dict) or set(state_value) != {
+    nodes_by_id: dict[str, SceneGraphNode] = {}
+    for index, node_value in enumerate(nodes_value):
+        if not isinstance(node_value, dict) or set(node_value) != {
             "object_id",
+            "parent_id",
+            "parent_relation",
             "orientation_state",
         }:
             raise ValueError(
-                "VLM JSON orientation_states["
-                f"{index}] must contain exactly object_id and orientation_state."
+                "VLM JSON nodes["
+                f"{index}] must contain exactly object_id, parent_id, "
+                "parent_relation, and orientation_state."
             )
-        object_id = state_value["object_id"]
-        orientation_state = state_value["orientation_state"]
+        object_id = node_value["object_id"]
+        parent_id = node_value["parent_id"]
+        parent_relation = node_value["parent_relation"]
+        orientation_state = node_value["orientation_state"]
         if not isinstance(object_id, str) or not object_id:
-            raise ValueError(
-                f"VLM JSON orientation_states[{index}].object_id is invalid."
-            )
+            raise ValueError(f"VLM JSON nodes[{index}].object_id is invalid.")
+        if not isinstance(parent_id, str) or not parent_id:
+            raise ValueError(f"VLM JSON nodes[{index}].parent_id is invalid.")
+        if parent_relation != "on":
+            raise ValueError(f"VLM JSON nodes[{index}].parent_relation is invalid.")
         if orientation_state not in {None, "standing", "lying"}:
-            raise ValueError(
-                f"VLM JSON orientation_states[{index}].orientation_state is invalid."
-            )
-        if object_id in orientation_states_by_id:
-            raise ValueError(f"VLM JSON repeats orientation state for {object_id!r}.")
-        orientation_states_by_id[object_id] = orientation_state
-
-    if set(orientation_states_by_id) != set(asset_ids):
-        raise ValueError(
-            "VLM JSON orientation states must match all supplied asset IDs."
+            raise ValueError(f"VLM JSON nodes[{index}].orientation_state is invalid.")
+        if object_id in nodes_by_id:
+            raise ValueError(f"VLM JSON repeats scene graph node for {object_id!r}.")
+        nodes_by_id[object_id] = SceneGraphNode(
+            object_id=object_id,
+            parent_id=parent_id,
+            parent_relation=parent_relation,
+            orientation_state=orientation_state,
         )
-    return orientation_states_by_id
+
+    if set(nodes_by_id) != set(asset_ids):
+        raise ValueError(
+            "VLM JSON scene graph nodes must match all supplied asset IDs."
+        )
+    return SceneGraph(
+        nodes=[
+            SceneGraphNode(object_id=TABLE_OBJECT_ID, parent_id=None),
+            *(nodes_by_id[asset_id] for asset_id in asset_ids),
+        ]
+    )
 
 
 def _analyze_image_objects(
