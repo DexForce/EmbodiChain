@@ -478,8 +478,8 @@ class NewtonCollisionAttributesCfg:
 
     Mirrors :class:`dexsim.spawn.descs.NewtonCollisionDesc` (which in turn
     mirrors ``newton.ModelBuilder.ShapeConfig``), so the resolver can overlay
-    these fields by name. All fields default to ``None`` meaning "keep the
-    Newton backend default".
+    these fields by name. Margin and gap default to ``0.001 m``; the remaining
+    optional fields use ``None`` to keep the Newton backend default.
 
     The backend-neutral quantities (sliding friction, restitution,
     enable-collision) live on :class:`RigidBodyAttributesCfg` and are projected
@@ -504,9 +504,9 @@ class NewtonCollisionAttributesCfg:
     """Rolling friction coefficient."""
 
     # -- Solver-agnostic shape-config fields --
-    margin: float | None = None
+    margin: float | None = 0.001
     """Contact margin (shapes within this distance are considered in contact)."""
-    gap: float | None = None
+    gap: float | None = 0.001
     """Contact gap (rest distance between shapes)."""
     is_solid: bool | None = None
     """Whether the shape is solid (vs. hollow) for mass computation."""

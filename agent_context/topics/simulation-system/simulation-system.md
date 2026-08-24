@@ -71,7 +71,9 @@ entities immediately, so articulation metadata and render nodes are available
 before finalization. Newton still builds its model once at `prepare()`.
 `prepare()` is idempotent and remains the common runtime-readiness boundary:
 Default/CUDA calls `World.init_gpu_physics()` directly after Spawn finalization,
-while Newton finalization already produces a ready runtime.
+while Newton finalization produces a ready model/runtime. Newton CUDA Graph
+capture is deferred until the first fixed-timestep update and is repeated
+automatically after a runtime model mutation invalidates the captured graph.
 
 Lights and sensors remain render resources owned directly by EmbodiChain;
 physical scene topology is owned by DexSim Spawn. `SimulationManager.update()`
@@ -104,6 +106,9 @@ lifecycle, scene ownership, or cross-module flow.
 `SimulationManagerCfg` owns window size, headless mode, rendering, GPU/CPU
 selection, arena count and spacing, physics timestep, physics and GPU-memory
 settings, recording, profiling, and browser visualization.
+
+EmbodiChain-authored Newton collision shapes use a default margin and gap of
+`0.001 m` each unless an object-specific Newton collision config overrides them.
 
 `EnvCfg` embeds `SimulationManagerCfg` and supplies the control-to-physics
 step ratio. CLI and task config loaders may override runtime fields before

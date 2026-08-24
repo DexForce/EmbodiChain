@@ -292,14 +292,18 @@ def _compile_newton_collision(
     sdf_resolution: int = 0,
     newton_solver_type: str | None = None,
 ) -> NewtonCollisionDesc:
-    # ``None`` means "leave the backend default untouched". Initializing every
-    # field avoids accidentally authoring NewtonCollisionDesc's convenience
-    # defaults when the EmbodiChain Newton sub-config did not set them.
+    # Author the Spawn margin/gap defaults while leaving the remaining optional
+    # Newton fields untouched unless EmbodiChain explicitly configures them.
+    defaults = NewtonCollisionDesc()
     values = {field.name: None for field in fields(NewtonCollisionDesc)}
+    values["margin"] = defaults.margin
+    values["gap"] = defaults.gap
     if attrs.newton is not None:
         for name in values:
             if hasattr(attrs.newton, name):
-                values[name] = getattr(attrs.newton, name)
+                value = getattr(attrs.newton, name)
+                if value is not None:
+                    values[name] = value
     if "mu" in values:
         values["mu"] = float(attrs.dynamic_friction)
     solver_contact_fields = NEWTON_CONTACT_SOLVER_FIELDS.get(newton_solver_type)
