@@ -17,14 +17,44 @@
 from __future__ import annotations
 
 import os
-import torch
-import pytest
-import numpy as np
+from pathlib import Path
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
+import numpy as np
+import pytest
+import torch
+
 from embodichain.data import get_data_path
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.solvers.null_space_posture_task import NullSpacePostureTask
+from embodichain.lab.sim.solvers.pink_solver import PinkSolverCfg
+
+PLANAR_URDF = """<?xml version="1.0"?>
+<robot name="pink_test">
+  <link name="base"/><link name="link1"/><link name="link2"/><link name="tool"/>
+  <joint name="joint1" type="revolute">
+    <parent link="base"/><child link="link1"/><origin xyz="0 0 0"/>
+    <axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="10" velocity="2"/>
+  </joint>
+  <joint name="joint2" type="revolute">
+    <parent link="link1"/><child link="link2"/><origin xyz="0.5 0 0"/>
+    <axis xyz="0 0 1"/><limit lower="-3.14" upper="3.14" effort="10" velocity="2"/>
+  </joint>
+  <joint name="tool_fixed" type="fixed">
+    <parent link="link2"/><child link="tool"/><origin xyz="0.5 0 0"/>
+  </joint>
+</robot>
+"""
+
+OFFSET_PLANAR_URDF = PLANAR_URDF.replace(
+    '<link name="base"/>',
+    '<link name="world"/><link name="base"/>'
+    '<joint name="base_fixed" type="fixed">'
+    '<parent link="world"/><child link="base"/>'
+    '<origin xyz="0.2 -0.3 0.4" rpy="0 0 0.5"/>'
+    "</joint>",
+)
 
 
 # Base test class for differential solver
@@ -129,6 +159,252 @@ class BaseSolverTest:
         """Clean up resources after each test method."""
         self.sim.destroy()
         SimulationManager.flush_cleanup_queue()
+
+
+class TestPinkSolverUnit:
+    """Exercise PinkSolver without a live simulation."""
+
+    @staticmethod
+    def _make_solver(urdf_path: Path, *, max_iterations: int = 200):
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            max_iterations=max_iterations,
+            pos_eps=1e-5,
+            rot_eps=1e-5,
+            show_ik_warnings=False,
+        )
+        tcp = np.eye(4)
+        tcp[0, 3] = 0.1
+        cfg.tcp = tcp
+        return cfg.init_solver(num_envs=2, device=torch.device("cpu"))
+
+    def test_batch_ik_reconstructs_tcp_targets(self, tmp_path: Path):
+        """Test batch solving and removal of TCP from controlled-frame targets."""
+        solver = self._make_solver(tmp_path / "planar.urdf")
+        truth = torch.tensor([[0.4, -0.2], [-0.5, 0.3]], dtype=torch.float32)
+        targets = solver.get_fk(truth)
+
+        success, solutions = solver.get_ik(targets, torch.zeros_like(truth))
+
+        assert torch.all(success)
+        assert solutions.shape == (2, 1, 2)
+        reconstructed = solver.get_fk(solutions[:, 0])
+        assert torch.allclose(reconstructed, targets, atol=1e-4, rtol=1e-4)
+
+    def test_non_convergence_returns_per_target_seed(self, tmp_path: Path):
+        """Test failed targets are reported and preserve their individual seeds."""
+        solver = self._make_solver(
+            tmp_path / "planar_unreachable.urdf", max_iterations=1
+        )
+        seeds = torch.tensor([[0.1, -0.1], [-0.2, 0.2]], dtype=torch.float32)
+        targets = torch.eye(4).repeat(2, 1, 1)
+        targets[:, :3, 3] = torch.tensor([[10.0, 0.0, 0.0], [0.0, 10.0, 0.0]])
+
+        success, solutions = solver.get_ik(targets, seeds)
+
+        assert not torch.any(success)
+        assert solutions.shape == (2, 1, 2)
+        assert torch.allclose(solutions[:, 0], seeds)
+
+    def test_single_batched_seed_is_broadcast(self, tmp_path: Path):
+        """Test a ``(1, dof)`` seed can initialize a target batch."""
+        solver = self._make_solver(tmp_path / "planar_seed_broadcast.urdf")
+        truth = torch.tensor([[0.4, -0.2], [-0.5, 0.3]], dtype=torch.float32)
+        targets = solver.get_fk(truth)
+
+        success, solutions = solver.get_ik(targets, torch.zeros(1, 2))
+
+        assert torch.all(success)
+        assert solutions.shape == (2, 1, 2)
+
+    def test_zero_cost_frame_axes_do_not_block_convergence(self, tmp_path: Path):
+        """Test unconstrained task axes are excluded from residual checks."""
+        pink = pytest.importorskip("pink")
+        urdf_path = tmp_path / "planar_axis_costs.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        frame_task = pink.tasks.FrameTask(
+            frame="tool",
+            position_cost=[1.0, 0.0, 1.0],
+            orientation_cost=0.0,
+        )
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            variable_input_tasks=[frame_task],
+            is_only_position_constraint=True,
+            show_ik_warnings=False,
+        )
+        solver = cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+        target = solver.get_fk(torch.zeros(1, 2))
+        target[:, 1, 3] += 10.0
+
+        success, solution = solver.get_ik(target, torch.zeros(1, 2))
+
+        assert torch.all(success)
+        assert torch.allclose(solution[:, 0], torch.zeros(1, 2))
+
+    def test_invalid_tcp_update_is_transactional(self, tmp_path: Path):
+        """Test a singular TCP is rejected without replacing the active TCP."""
+        solver = self._make_solver(tmp_path / "planar_tcp.urdf")
+        previous_tcp = solver.get_tcp().copy()
+
+        with pytest.raises(np.linalg.LinAlgError):
+            solver.set_tcp(np.zeros((4, 4)))
+
+        assert np.array_equal(solver.get_tcp(), previous_tcp)
+
+    def test_ik_targets_are_relative_to_configured_root(self, tmp_path: Path):
+        """Test an upstream URDF offset does not leak into root-relative IK."""
+        urdf_path = tmp_path / "offset_planar.urdf"
+        urdf_path.write_text(OFFSET_PLANAR_URDF, encoding="utf-8")
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            show_ik_warnings=False,
+        )
+        solver = cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+        truth = torch.tensor([[0.35, -0.25]], dtype=torch.float32)
+        target = solver.get_fk(truth)
+
+        success, solution = solver.get_ik(target, torch.zeros_like(truth))
+
+        assert torch.all(success)
+        assert torch.allclose(
+            solver.get_fk(solution[:, 0]), target, atol=1e-4, rtol=1e-4
+        )
+        assert torch.allclose(solver._get_fk(truth[0]), target[0], atol=1e-5, rtol=1e-5)
+
+    def test_effective_limits_are_synchronized_with_pink(self, tmp_path: Path):
+        """Test user and runtime robot limits tighten the Pinocchio model."""
+        urdf_path = tmp_path / "planar_limits.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint2", "joint1"],
+            root_link_name="base",
+            end_link_name="tool",
+            user_qpos_limits=[[-0.4, -0.3], [0.5, 0.6]],
+            show_ik_warnings=False,
+        )
+        solver = cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+
+        assert np.allclose(solver.robot.model.lowerPositionLimit, [-0.3, -0.4])
+        assert np.allclose(solver.robot.model.upperPositionLimit, [0.6, 0.5])
+
+        solver.update_with_robot_limit(
+            torch.tensor([[-0.2, 0.25], [-0.1, 0.3]], dtype=torch.float32)
+        )
+
+        assert np.allclose(solver.robot.model.lowerPositionLimit, [-0.1, -0.2])
+        assert np.allclose(solver.robot.model.upperPositionLimit, [0.3, 0.25])
+
+        assert solver.set_qpos_limits([-0.05, -0.15], [0.2, 0.2])
+        assert np.allclose(solver.robot.model.lowerPositionLimit, [-0.15, -0.05])
+        assert np.allclose(solver.robot.model.upperPositionLimit, [0.2, 0.2])
+
+        with pytest.raises(ValueError, match="shape"):
+            solver.update_with_robot_limit(torch.zeros(2, 3))
+
+    def test_initial_posture_is_projected_into_effective_limits(self, tmp_path: Path):
+        """Test default seeds and posture targets cannot start outside user limits."""
+        urdf_path = tmp_path / "planar_initial_limits.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        posture_task = NullSpacePostureTask(cost=1e-3)
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            user_qpos_limits=[[0.2, 0.3], [0.5, 0.6]],
+            fixed_input_tasks=[posture_task],
+            show_ik_warnings=False,
+        )
+        solver = cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+
+        assert np.allclose(solver.init_qpos, [0.2, 0.3])
+        assert np.allclose(solver.fixed_input_tasks[0].target_q, [0.2, 0.3])
+        _, seeds = solver._normalize_inputs(torch.eye(4), None)
+        assert np.allclose(seeds, [[0.2, 0.3]])
+
+    def test_invalid_adaptive_controls_are_rejected(self, tmp_path: Path):
+        """Test invalid convergence controls fail during solver initialization."""
+        urdf_path = tmp_path / "planar_invalid.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            damping_decay=1.1,
+        )
+
+        with pytest.raises(ValueError, match="damping_decay"):
+            cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+
+    def test_null_space_posture_task_is_integrated(self, tmp_path: Path):
+        """Test posture targets, all-joint defaults, and QP integration."""
+        urdf_path = tmp_path / "planar_posture.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        posture_task = NullSpacePostureTask(cost=1e-3)
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            fixed_input_tasks=[posture_task],
+            show_ik_warnings=False,
+        )
+        solver = cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+        solver_posture_task = solver.fixed_input_tasks[0]
+
+        solver.update_null_space_joint_targets(np.array([0.3, -0.2]))
+        solver.pink_cfg.update(np.zeros(2))
+
+        assert np.allclose(
+            solver_posture_task.compute_error(solver.pink_cfg), [-0.3, 0.2]
+        )
+        assert np.allclose(
+            solver_posture_task.compute_jacobian(solver.pink_cfg), np.eye(2)
+        )
+        hessian, gradient = solver_posture_task.compute_qp_objective(solver.pink_cfg)
+        assert hessian.shape == (2, 2)
+        assert gradient.shape == (2,)
+        assert np.all(np.isfinite(hessian))
+        assert np.all(np.isfinite(gradient))
+
+        selected_task = NullSpacePostureTask(cost=1.0, controlled_joints=["joint2"])
+        selected_task.set_target(np.array([0.3, -0.2]))
+        assert np.allclose(selected_task.compute_error(solver.pink_cfg), [0.0, 0.2])
+        assert np.allclose(
+            selected_task.compute_jacobian(solver.pink_cfg), np.diag([0.0, 1.0])
+        )
+
+        projected_task = NullSpacePostureTask(cost=1.0, controlled_frames=["tool"])
+        projected_task.set_target(np.array([0.3, -0.2]))
+        projector = projected_task.compute_jacobian(solver.pink_cfg)
+        frame_jacobian = solver.pink_cfg.get_frame_jacobian("tool")
+        assert np.linalg.norm(frame_jacobian @ projector) < 1e-10
+
+    def test_null_space_posture_task_rejects_unknown_entities(self, tmp_path: Path):
+        """Test invalid joint and frame selectors fail with useful errors."""
+        solver = self._make_solver(tmp_path / "planar_unknown.urdf")
+        joint_task = NullSpacePostureTask(cost=1.0, controlled_joints=["missing"])
+        joint_task.set_target(np.zeros(2))
+        with pytest.raises(ValueError, match="Unknown controlled joints"):
+            joint_task.compute_error(solver.pink_cfg)
+
+        frame_task = NullSpacePostureTask(cost=1.0, controlled_frames=["missing"])
+        frame_task.set_target(np.zeros(2))
+        with pytest.raises(ValueError, match="Unknown controlled frames"):
+            frame_task.compute_jacobian(solver.pink_cfg)
 
 
 @pytest.mark.skip(reason="Skipping Pink tests temporarily")

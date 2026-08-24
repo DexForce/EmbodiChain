@@ -13,24 +13,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+"""Null-space posture task for Pink inverse kinematics."""
 
+from __future__ import annotations
+
+from typing import Any
 
 import numpy as np
-from typing import List, Union, TYPE_CHECKING
-from embodichain.utils import logger
 
+_OPTIONAL_IMPORT_ERROR: ImportError | None = None
 try:
     import pinocchio as pin
-except ImportError:
-    logger.log_warning("pinocchio not installed. Install with `pip install pin==2.7.0`")
+except ImportError as exc:
+    pin = None
+    _OPTIONAL_IMPORT_ERROR = exc
 
 try:
     from pink.configuration import Configuration
     from pink.tasks import Task
-except ImportError:
-    logger.log_warning(
-        "pin-pink not installed. Install with `pip install pin-pink==3.4.0`"
-    )
+except ImportError as exc:
+    Configuration = Any
+    Task = object
+    _OPTIONAL_IMPORT_ERROR = exc
+
+__all__ = ["NullSpacePostureTask"]
 
 
 class NullSpacePostureTask(Task):
@@ -51,7 +57,7 @@ class NullSpacePostureTask(Task):
 
     .. math::
 
-        \mathbf{e}(\mathbf{q}) = \mathbf{M} \cdot (\mathbf{q}^* - \mathbf{q})
+        \mathbf{e}(\mathbf{q}) = \mathbf{M} \cdot (\mathbf{q} \ominus \mathbf{q}^*)
 
     where:
         - :math:`\mathbf{q}^*` is the target joint configuration
@@ -91,7 +97,7 @@ class NullSpacePostureTask(Task):
 
     .. math::
 
-        \left\| \mathbf{N}(\mathbf{q}) \mathbf{v} + \mathbf{M} \cdot (\mathbf{q}^* - \mathbf{q}) \right\|_{W_{\text{posture}}}^2
+        \left\| \mathbf{N}(\mathbf{q}) \mathbf{v} + \mathbf{M} \cdot (\mathbf{q} \ominus \mathbf{q}^*) \right\|_{W_{\text{posture}}}^2
 
     This formulation allows the robot to maintain a desired posture while respecting the constraints
     imposed by higher priority tasks (e.g., end-effector positioning).
@@ -124,12 +130,18 @@ class NullSpacePostureTask(Task):
             controlled_joints: Joint names to control in the posture task. If None or
                 empty, all actuated joints are controlled.
         """
+        if _OPTIONAL_IMPORT_ERROR is not None:
+            raise ImportError(
+                "NullSpacePostureTask requires Pinocchio and pin-pink; "
+                "install the Pink solver extras."
+            ) from _OPTIONAL_IMPORT_ERROR
         super().__init__(cost=cost, gain=gain, lm_damping=lm_damping)
         self.target_q: np.ndarray | None = None
-        self.controlled_frames: list[str] = controlled_frames or []
-        self.controlled_joints: list[str] = controlled_joints or []
-        self._joint_mask: np.ndarray | None = None
+        self.controlled_frames: list[str] = list(controlled_frames or [])
+        self.controlled_joints: list[str] = list(controlled_joints or [])
+        self._velocity_mask: np.ndarray | None = None
         self._frame_names: list[str] | None = None
+        self._mapped_model: Any | None = None
 
     def __repr__(self) -> str:
         """Human-readable representation of the task."""
@@ -147,19 +159,28 @@ class NullSpacePostureTask(Task):
         Args:
             configuration: Robot configuration containing the model and joint information.
         """
-        # Create joint mask for full configuration size
-        self._joint_mask = np.zeros(configuration.model.nq)
+        model = configuration.model
+        self._velocity_mask = np.zeros(model.nv)
+        available_joints = set(model.names.tolist()[1:])
+        unknown_joints = set(self.controlled_joints).difference(available_joints)
+        if unknown_joints:
+            raise ValueError(f"Unknown controlled joints: {sorted(unknown_joints)}")
 
-        # Create dictionary for joint names to indices (exclude root joint)
-        joint_names = configuration.model.names.tolist()[1:]
+        selected_joints = set(self.controlled_joints) or available_joints
+        for joint_id in range(1, model.njoints):
+            if model.names[joint_id] not in selected_joints:
+                continue
+            joint = model.joints[joint_id]
+            self._velocity_mask[joint.idx_v : joint.idx_v + joint.nv] = 1.0
 
-        # Build joint mask efficiently
-        for i, joint_name in enumerate(joint_names):
-            if joint_name in self.controlled_joints:
-                self._joint_mask[i] = 1.0
+        available_frames = {frame.name for frame in model.frames}
+        unknown_frames = set(self.controlled_frames).difference(available_frames)
+        if unknown_frames:
+            raise ValueError(f"Unknown controlled frames: {sorted(unknown_frames)}")
 
         # Cache frame names for performance
         self._frame_names = list(self.controlled_frames)
+        self._mapped_model = model
 
     def set_target(self, target_q: np.ndarray) -> None:
         """Set target posture configuration.
@@ -170,7 +191,10 @@ class NullSpacePostureTask(Task):
                 floating-base coordinates (although they have no effect on the
                 posture task since only actuated joints are controlled).
         """
-        self.target_q = target_q.copy()
+        target = np.asarray(target_q, dtype=float)
+        if target.ndim != 1 or not np.isfinite(target).all():
+            raise ValueError("target_q must be a finite one-dimensional array")
+        self.target_q = target.copy()
 
     def set_target_from_configuration(self, configuration: Configuration) -> None:
         """Set target posture from a robot configuration.
@@ -188,26 +212,31 @@ class NullSpacePostureTask(Task):
 
         .. math::
 
-            \mathbf{e}(\mathbf{q}) = \mathbf{M} \cdot (\mathbf{q}^* - \mathbf{q})
+            \mathbf{e}(\mathbf{q}) = \mathbf{M} \cdot (\mathbf{q} \ominus \mathbf{q}^*)
 
-        where :math:`\mathbf{M}` is the joint selection mask and :math:`\mathbf{q}^* - \mathbf{q}`
-        is computed using Pinocchio's difference function to handle joint angle wrapping.
+        where :math:`\mathbf{M}` is the joint selection mask and the configuration
+        difference is computed by Pinocchio to handle joint manifolds and wrapping.
 
         Args:
             configuration: Robot configuration :math:`\mathbf{q}`.
 
         Returns:
-            Posture task error :math:`\mathbf{e}(\mathbf{q})` with the same dimension
-            as the configuration vector, but with zeros for non-controlled joints.
+            Posture task error in the model tangent space, with zeros for
+            non-controlled joint velocities.
 
         Raises:
             ValueError: If no posture target has been set.
         """
         if self.target_q is None:
             raise ValueError("No posture target has been set. Call set_target() first.")
+        if self.target_q.shape != (configuration.model.nq,):
+            raise ValueError(
+                "Posture target shape does not match the model configuration: "
+                f"expected ({configuration.model.nq},), got {self.target_q.shape}"
+            )
 
         # Initialize joint mapping if needed
-        if self._joint_mask is None:
+        if self._mapped_model is not configuration.model:
             self._build_joint_mapping(configuration)
 
         # Compute configuration difference using Pinocchio's difference function
@@ -219,7 +248,7 @@ class NullSpacePostureTask(Task):
         )
 
         # Apply pre-computed joint mask to select only controlled joints
-        return self._joint_mask * err
+        return self._velocity_mask * err
 
     def compute_jacobian(self, configuration: Configuration) -> np.ndarray:
         r"""Compute the null space projector Jacobian.
@@ -244,16 +273,16 @@ class NullSpacePostureTask(Task):
             configuration: Robot configuration :math:`\mathbf{q}`.
 
         Returns:
-            Null space projector matrix :math:`\mathbf{N}(\mathbf{q})` with dimensions
-            :math:`n_q \times n_q` where :math:`n_q` is the number of configuration variables.
+            Masked null-space projector with shape ``(nv, nv)``.
         """
         # Initialize joint mapping if needed
-        if self._frame_names is None:
+        if self._mapped_model is not configuration.model:
             self._build_joint_mapping(configuration)
 
         # If no frame tasks are defined, return identity matrix (no null space projection)
         if not self._frame_names:
-            return np.eye(configuration.model.nq)
+            projector = np.eye(configuration.model.nv)
+            return self._velocity_mask[:, None] * projector
 
         # Get Jacobians for all frame tasks and combine them
         J_frame_tasks = [
@@ -263,8 +292,7 @@ class NullSpacePostureTask(Task):
         J_combined = np.concatenate(J_frame_tasks, axis=0)
 
         # Compute null space projector: N = I - J^+ * J
-        N_combined = (
+        projector = (
             np.eye(J_combined.shape[1]) - np.linalg.pinv(J_combined) @ J_combined
         )
-
-        return N_combined
+        return self._velocity_mask[:, None] * projector

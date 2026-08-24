@@ -14,126 +14,120 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import os
-import torch
-import numpy as np
-from typing import List, Tuple, Union, TYPE_CHECKING
-from embodichain.utils import logger
+"""Task-space inverse kinematics powered by Pink and Pinocchio."""
 
+from __future__ import annotations
+
+import os
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+import torch
+
+from embodichain.lab.sim.solvers import BaseSolver, SolverCfg
 from embodichain.lab.sim.utility.import_utils import (
     lazy_import_pinocchio,
     lazy_import_pink,
 )
 from embodichain.lab.sim.utility.solver_utils import (
     build_reduced_pinocchio_robot,
-    compute_pinocchio_fk,
 )
-
 from embodichain.utils import configclass, logger
-from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
-
-from embodichain.utils.string import (
-    is_regular_expression,
-    resolve_matching_names_values,
-)
 
 if TYPE_CHECKING:
-    from typing import Self
+    import pink
+
+__all__ = ["PinkSolver", "PinkSolverCfg"]
 
 
 @configclass
 class PinkSolverCfg(SolverCfg):
-    """Configuration for Pink IK Solver."""
+    """Configure the Pink task-space IK solver."""
 
     class_type: str = "PinkSolver"
 
-    # Solver iteration parameters
-    pos_eps: float = 5e-4  # Tolerance for convergence for position
-    rot_eps: float = 5e-4  # Tolerance for convergence for rotation
-    max_iterations: int = 1000  # Maximum number of iterations for the solver
-    dt: float = 0.1  # Time step for numerical integration
-    damp: float = 1e-6  # Damping factor to prevent numerical instability
+    pos_eps: float = 5e-4
+    """Position convergence tolerance in metres."""
 
-    # Constraint configuration
-    is_only_position_constraint: bool = (
-        False  # Whether to only consider position constraints
-    )
+    rot_eps: float = 5e-4
+    """Orientation convergence tolerance in radians."""
 
-    # Path to the mesh files associated with the robot. These files are also loaded by Pinocchio's `robot_wrapper.BuildFromURDF`.
+    max_iterations: int = 1000
+    """Maximum number of differential-IK iterations."""
+
+    dt: float = 0.1
+    """Integration timestep in seconds."""
+
+    damp: float = 1e-6
+    """Initial isotropic QP damping."""
+
+    is_only_position_constraint: bool = False
+    """Stop once position converges without requiring orientation convergence."""
+
     mesh_path: str | None = None
+    """Optional directory containing URDF mesh assets."""
 
-    # A list of tasks for the Pink IK controller. These tasks are controllable by the env action.
-    # These tasks can be used to control the pose of a frame or the angles of joints.
-    # For more details, visit: https://github.com/stephane-caron/pink
-    variable_input_tasks: list["pink.tasks.FrameTask"] | None = None
+    variable_input_tasks: list["pink.tasks.Task"] | None = None
+    """Tasks whose first frame target is updated by :meth:`PinkSolver.get_ik`."""
 
-    # A list of tasks for the Pink IK controller. These tasks are fixed and not controllable by the env action.
-    # These tasks can be used to fix the pose of a frame or the angles of joints to a desired configuration.
-    # For more details, visit: https://github.com/stephane-caron/pink
-    fixed_input_tasks: list["pink.tasks.FrameTask"] | None = None
+    fixed_input_tasks: list["pink.tasks.Task"] | None = None
+    """Tasks initialized once and kept fixed during IK calls."""
 
-    # Show warning if IK solver fails to find a solution.
     show_ik_warnings: bool = True
+    """Log solver exceptions and non-convergence warnings."""
 
-    # If True, the Pink IK solver will fail and raise an error if any joint limit is violated during optimization.
-    # PinkSolver will handle the error by setting the last joint positions.
-    # If False, the solver will ignore joint limit violations and return the closest solution found.
     fail_on_joint_limit_violation: bool = True
+    """Enable Pink's joint-limit safety break."""
 
-    # Solver options:
-    # "clarabel": High-performance SOCP solver written in Rust.
-    #   - Suitable for large-scale problems.
-    #   - Fast and supports sparse matrices.
-    #
-    # "ecos": Efficient SOCP solver for small to medium-scale problems.
-    #   - Fast and memory-efficient.
-    #
-    # "osqp": Quadratic programming solver based on ADMM.
-    #   - Ideal for sparse and large-scale QP problems.
-    #   - Numerically stable and widely used in robotics/control.
-    #
-    # "proxqp": C++ solver for dense and sparse QP problems.
-    #   - Optimized for real-time applications.
-    #
-    # "scs": Solver for linear cone programming and SOCP.
-    #   - Suitable for large-scale problems with low precision requirements.
-    #
-    # "daqp": Specialized QP solver for real-time and embedded systems.
-    #   - Designed for fast and reliable quadratic programming.
-    solver_type = "osqp"
+    solver_type: str = "osqp"
+    """QP backend passed to :func:`pink.solve_ik`."""
 
-    def init_solver(self, **kwargs) -> "PinkSolver":
-        """Initialize the solver with the configuration.
+    stagnation_tolerance: float = 1e-10
+    """Minimum accepted objective improvement before an iteration stagnates."""
+
+    stagnation_iterations: int = 8
+    """Consecutive stagnant iterations before terminating."""
+
+    max_backtracks: int = 4
+    """Maximum damping/backtracking retries for a non-improving step."""
+
+    damping_growth: float = 10.0
+    """Multiplier applied after a rejected step."""
+
+    damping_decay: float = 0.5
+    """Multiplier applied after an accepted step."""
+
+    max_damping: float = 1e6
+    """Upper bound for adaptive damping."""
+
+    def init_solver(self, **kwargs: Any) -> PinkSolver:
+        """Create a Pink solver and apply the configured TCP.
 
         Args:
-            **kwargs: Additional keyword arguments that may be used for solver initialization.
+            **kwargs: Arguments forwarded to :class:`PinkSolver`.
 
         Returns:
-            PinkSolver: An initialized solver instance.
+            Initialized Pink solver.
         """
-
         solver = PinkSolver(cfg=self, **kwargs)
-
-        # Set the Tool Center Point (TCP) for the solver
         solver.set_tcp(self._get_tcp_as_numpy())
-
         return solver
 
 
 class PinkSolver(BaseSolver):
-    """Standalone implementation of Pink IK Solver."""
+    """Iterative task-space IK with adaptive damping and convergence checks."""
 
-    def __init__(self, cfg: PinkSolverCfg, **kwargs):
-        """Initialize the solver with the configuration.
+    def __init__(self, cfg: PinkSolverCfg, **kwargs: Any) -> None:
+        """Initialize Pinocchio, Pink, task state, and joint ordering.
 
         Args:
-            **kwargs: Additional keyword arguments that may be used for solver initialization.
-
-        Returns:
-            PinkSolver: An initialized solver instance.
+            cfg: Pink solver configuration.
+            **kwargs: Arguments forwarded to :class:`BaseSolver`.
         """
+        self.cfg = cfg
+        self._validate_cfg()
         super().__init__(cfg=cfg, **kwargs)
-
         self.pin = lazy_import_pinocchio()
         self.pink = lazy_import_pink()
 
@@ -141,238 +135,504 @@ class PinkSolver(BaseSolver):
             NullSpacePostureTask,
         )
 
-        self.tcp = cfg.tcp
-
-        if cfg.mesh_path is None:
-            urdf_dir = os.path.dirname(cfg.urdf_path)
-            cfg.mesh_path = urdf_dir
-
-        # Initialize robot model
+        mesh_path = cfg.mesh_path or os.path.dirname(cfg.urdf_path)
         self.entire_robot = self.pin.RobotWrapper.BuildFromURDF(
-            self.cfg.urdf_path, self.cfg.mesh_path, root_joint=None
+            cfg.urdf_path, mesh_path, root_joint=None
         )
-
-        self.pink_joint_names = self.entire_robot.model.names.tolist()[
-            1:
-        ]  # Exclude 'universe' joint
-
-        self.pink_dof = (
-            self.entire_robot.model.njoints - 1
-        )  # Degrees of freedom of robot joints
-
-        # Get reduced robot model
         self.robot = build_reduced_pinocchio_robot(self.entire_robot, self.joint_names)
-
-        # Initialize Pink configuration
-        self.pink_cfg = self.pink.configuration.Configuration(
+        self.pink_cfg = self.pink.Configuration(
             self.robot.model, self.robot.data, self.robot.q0
         )
+        self.init_qpos = np.asarray(self.robot.q0, dtype=float).copy()
+        self.pin.framesForwardKinematics(
+            self.robot.model, self.robot.data, self.init_qpos
+        )
+        if self.root_link_name is None:
+            self._root_to_world = np.eye(4)
+        else:
+            root_frame_id = self.robot.model.getFrameId(self.root_link_name)
+            if root_frame_id >= self.robot.model.nframes:
+                raise ValueError(
+                    f"Root link name '{self.root_link_name}' is not in the Pink model"
+                )
+            self._root_to_world = np.asarray(
+                self.robot.data.oMf[root_frame_id].homogeneous, dtype=float
+            ).copy()
+        self._world_to_root = np.linalg.inv(self._root_to_world)
+        self._end_frame_id = self.robot.model.getFrameId(self.end_link_name)
+        if self._end_frame_id >= self.robot.model.nframes:
+            raise ValueError(
+                f"End link name '{self.end_link_name}' is not in the Pink model"
+            )
 
-        if self.cfg.variable_input_tasks is None:
-            self.cfg.variable_input_tasks = [
+        if cfg.variable_input_tasks is None:
+            orientation_cost = 0.0 if cfg.is_only_position_constraint else 1.0
+            self.variable_input_tasks: list[Any] = [
                 self.pink.tasks.FrameTask(
-                    frame=self.cfg.end_link_name,  # Frame name (use actual frame name from URDF)
-                    position_cost=1.0,  # Position cost weight
-                    orientation_cost=1.0,  # Orientation cost weight
+                    frame=cfg.end_link_name,
+                    position_cost=1.0,
+                    orientation_cost=orientation_cost,
                 )
             ]
+        else:
+            self.variable_input_tasks = list(cfg.variable_input_tasks)
+        self.fixed_input_tasks: list[Any] = list(cfg.fixed_input_tasks or [])
+        self.tasks = self.variable_input_tasks + self.fixed_input_tasks
+        self._frame_tasks = [
+            task
+            for task in self.variable_input_tasks
+            if isinstance(task, self.pink.tasks.FrameTask)
+        ]
+        if not self._frame_tasks:
+            raise ValueError("variable_input_tasks must contain at least one FrameTask")
+        self._frame_task_ids = {id(task) for task in self._frame_tasks}
+        self._target_task = self._frame_tasks[0]
 
-        if self.cfg.fixed_input_tasks is None:
-            self.cfg.fixed_input_tasks = []
-
-        # Set default targets for tasks
-        for task in self.cfg.variable_input_tasks:
-            if isinstance(task, NullSpacePostureTask):
-                task.set_target(self.init_qpos)
-                continue
-            task.set_target_from_configuration(self.pink_cfg)
-        for task in self.cfg.fixed_input_tasks:
-            task.set_target_from_configuration(self.pink_cfg)
-
-        # Create joint name mappings if provided
-        if self.cfg.joint_names:
-            pink_joint_names = self.robot.model.names.tolist()[
-                1:
-            ]  # Exclude 'universe' joint
-            self.dexsim_to_pink_ordering = [
-                self.cfg.joint_names.index(pink_joint)
-                for pink_joint in pink_joint_names
-            ]
-            self.pink_to_dexsim_ordering = [
-                pink_joint_names.index(isaac_joint)
-                for isaac_joint in self.cfg.joint_names
-            ]
+        pink_joint_names = self.robot.model.names.tolist()[1:]
+        if self.joint_names:
+            missing = set(self.joint_names).difference(pink_joint_names)
+            if missing:
+                raise ValueError(f"Pink model is missing joints: {sorted(missing)}")
+            self.dexsim_to_pink_ordering = np.asarray(
+                [self.joint_names.index(name) for name in pink_joint_names], dtype=int
+            )
+            self.pink_to_dexsim_ordering = np.asarray(
+                [pink_joint_names.index(name) for name in self.joint_names], dtype=int
+            )
         else:
             self.dexsim_to_pink_ordering = None
             self.pink_to_dexsim_ordering = None
 
-    def reorder_array(
-        self, input_array: List[float], reordering_array: List[int]
-    ) -> List[float]:
-        """Reorder array elements based on provided indices.
+        if self.robot.model.nq != self.dof or self.robot.model.nv != self.dof:
+            raise ValueError(
+                "PinkSolver currently requires one configuration and velocity "
+                "coordinate per controlled joint"
+            )
+        self._urdf_model_lower = np.asarray(
+            self.robot.model.lowerPositionLimit, dtype=float
+        ).copy()
+        self._urdf_model_upper = np.asarray(
+            self.robot.model.upperPositionLimit, dtype=float
+        ).copy()
+        self._sync_effective_limits()
+        self.init_qpos = self._project_model_limits(self.init_qpos)
+        self.pink_cfg.update(self.init_qpos)
+
+        for task in self.variable_input_tasks:
+            if isinstance(task, NullSpacePostureTask):
+                task.set_target(self.init_qpos)
+            else:
+                task.set_target_from_configuration(self.pink_cfg)
+        for task in self.fixed_input_tasks:
+            if isinstance(task, NullSpacePostureTask):
+                task.set_target(self.init_qpos)
+            else:
+                task.set_target_from_configuration(self.pink_cfg)
+
+        self._tcp_inverse = np.linalg.inv(np.asarray(self.tcp_xpos, dtype=float))
+
+    def _validate_cfg(self) -> None:
+        """Validate numerical controls before constructing optional dependencies."""
+        if not self.cfg.joint_names:
+            raise ValueError("joint_names must contain at least one controlled joint")
+        if not self.cfg.end_link_name:
+            raise ValueError("end_link_name must be configured")
+        positive = {
+            "pos_eps": self.cfg.pos_eps,
+            "rot_eps": self.cfg.rot_eps,
+            "max_iterations": self.cfg.max_iterations,
+            "dt": self.cfg.dt,
+            "stagnation_iterations": self.cfg.stagnation_iterations,
+            "damping_growth": self.cfg.damping_growth,
+            "max_damping": self.cfg.max_damping,
+        }
+        for name, value in positive.items():
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        if not np.isfinite(self.cfg.damp) or self.cfg.damp < 0:
+            raise ValueError("damp must be finite and non-negative")
+        if (
+            not np.isfinite(self.cfg.stagnation_tolerance)
+            or self.cfg.stagnation_tolerance < 0
+        ):
+            raise ValueError("stagnation_tolerance must be finite and non-negative")
+        for name in ("max_iterations", "stagnation_iterations", "max_backtracks"):
+            value = getattr(self.cfg, name)
+            if not isinstance(value, (int, np.integer)):
+                raise ValueError(f"{name} must be an integer")
+        if self.cfg.max_backtracks < 0:
+            raise ValueError("max_backtracks must be non-negative")
+        if self.cfg.damping_growth <= 1:
+            raise ValueError("damping_growth must be greater than 1")
+        if not 0 < self.cfg.damping_decay <= 1:
+            raise ValueError("damping_decay must be in the range (0, 1]")
+        if self.cfg.max_damping < self.cfg.damp:
+            raise ValueError("max_damping must be greater than or equal to damp")
+
+    def set_tcp(self, xpos: np.ndarray) -> None:
+        """Set the TCP and refresh its inverse used for IK targets.
 
         Args:
-            input_array: Array to reorder
-            reordering_array: Indices for reordering
+            xpos: Homogeneous end-frame-to-TCP transform.
+        """
+        tcp = np.asarray(xpos, dtype=float)
+        if tcp.shape != (4, 4) or not np.isfinite(tcp).all():
+            raise ValueError("TCP must be a finite 4x4 homogeneous matrix")
+        tcp_inverse = np.linalg.inv(tcp)
+        super().set_tcp(tcp)
+        self._tcp_inverse = tcp_inverse
+
+    def update_with_robot_limit(self, robot_qpos_limits: torch.Tensor) -> None:
+        """Intersect robot limits and synchronize them with Pink.
+
+        Args:
+            robot_qpos_limits: Joint limits in simulator order with shape
+                ``(dof, 2)``.
+        """
+        limits = torch.as_tensor(
+            robot_qpos_limits, dtype=torch.float32, device=self.device
+        )
+        if limits.shape != (self.dof, 2):
+            raise ValueError(
+                f"robot_qpos_limits must have shape ({self.dof}, 2), "
+                f"got {tuple(limits.shape)}"
+            )
+        if not torch.isfinite(limits).all() or torch.any(limits[:, 0] > limits[:, 1]):
+            raise ValueError("robot_qpos_limits must be finite and ordered")
+        super().update_with_robot_limit(limits)
+        self._sync_effective_limits()
+
+    def set_qpos_limits(
+        self,
+        lower_qpos_limits: list[float] | np.ndarray | torch.Tensor,
+        upper_qpos_limits: list[float] | np.ndarray | torch.Tensor,
+    ) -> bool:
+        """Set simulator-ordered limits and synchronize an initialized Pink model.
+
+        Args:
+            lower_qpos_limits: Lower limit for every controlled joint.
+            upper_qpos_limits: Upper limit for every controlled joint.
 
         Returns:
-            Reordered array
+            Whether the limits were accepted.
         """
-        return [input_array[i] for i in reordering_array]
+        updated = super().set_qpos_limits(lower_qpos_limits, upper_qpos_limits)
+        if updated and hasattr(self, "_urdf_model_lower"):
+            self._sync_effective_limits()
+        return updated
 
-    def update_null_space_joint_targets(self, current_qpos: np.ndarray):
-        """Update the null space joint targets.
+    def _sync_effective_limits(self) -> None:
+        """Apply configured and robot-synchronized limits to the Pink model."""
+        lower = self._urdf_model_lower.copy()
+        upper = self._urdf_model_upper.copy()
+        if self.lower_qpos_limits is not None:
+            configured_lower = self._to_pink_order(
+                self.lower_qpos_limits.detach().cpu().numpy()
+            )
+            lower = np.maximum(lower, configured_lower)
+        if self.upper_qpos_limits is not None:
+            configured_upper = self._to_pink_order(
+                self.upper_qpos_limits.detach().cpu().numpy()
+            )
+            upper = np.minimum(upper, configured_upper)
+        if np.any(lower > upper):
+            raise ValueError("Effective Pink joint limits have an empty intersection")
+        self._model_lower = lower
+        self._model_upper = upper
+        self.robot.model.lowerPositionLimit[:] = lower
+        self.robot.model.upperPositionLimit[:] = upper
 
-        This method updates the target joint positions for null space posture tasks based on the current
-        joint configuration. This is useful for maintaining desired joint configurations when the primary
-        task allows redundancy.
+    @staticmethod
+    def reorder_array(
+        input_array: Sequence[float], reordering_array: Sequence[int]
+    ) -> np.ndarray:
+        """Reorder an array with an index mapping.
 
         Args:
-            current_qpos: The current joint positions of shape (num_joints,).
+            input_array: Values to reorder.
+            reordering_array: Source indices in output order.
+
+        Returns:
+            Reordered NumPy array.
+        """
+        return np.asarray(input_array)[np.asarray(reordering_array, dtype=int)]
+
+    def update_null_space_joint_targets(
+        self, current_qpos: torch.Tensor | np.ndarray
+    ) -> None:
+        """Update all null-space posture targets.
+
+        Args:
+            current_qpos: Joint target in simulator ordering.
         """
         from embodichain.lab.sim.solvers.null_space_posture_task import (
             NullSpacePostureTask,
         )
 
-        for task in self.cfg.variable_input_tasks:
+        if isinstance(current_qpos, torch.Tensor):
+            current_qpos = current_qpos.detach().cpu().numpy()
+        target = self._to_pink_order(np.asarray(current_qpos, dtype=float))
+        if target.shape != (self.dof,) or not np.isfinite(target).all():
+            raise ValueError(
+                f"current_qpos must be a finite vector with shape ({self.dof},)"
+            )
+        for task in self.tasks:
             if isinstance(task, NullSpacePostureTask):
-                task.set_target(current_qpos)
+                task.set_target(target)
+
+    def _normalize_inputs(
+        self,
+        target_xpos: torch.Tensor | np.ndarray,
+        qpos_seed: torch.Tensor | np.ndarray | None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Normalize targets and seeds into matched CPU batches."""
+        targets = np.asarray(
+            (
+                target_xpos.detach().cpu().numpy()
+                if isinstance(target_xpos, torch.Tensor)
+                else target_xpos
+            ),
+            dtype=float,
+        )
+        if targets.shape == (4, 4):
+            targets = targets[None]
+        if targets.ndim != 3 or targets.shape[1:] != (4, 4):
+            raise ValueError(
+                f"target_xpos must have shape (4, 4) or (N, 4, 4), got {targets.shape}"
+            )
+        if not np.isfinite(targets).all():
+            raise ValueError("target_xpos must contain only finite values")
+
+        if qpos_seed is None:
+            initial_seed = self._to_output_order(self.init_qpos)
+            seeds = np.broadcast_to(initial_seed, (targets.shape[0], self.dof)).copy()
+        else:
+            seeds = np.asarray(
+                (
+                    qpos_seed.detach().cpu().numpy()
+                    if isinstance(qpos_seed, torch.Tensor)
+                    else qpos_seed
+                ),
+                dtype=float,
+            )
+            if seeds.shape == (self.dof,):
+                seeds = np.broadcast_to(seeds, (targets.shape[0], self.dof)).copy()
+            if seeds.ndim == 3 and seeds.shape[1] == 1:
+                seeds = seeds[:, 0]
+            if seeds.shape == (1, self.dof) and targets.shape[0] != 1:
+                seeds = np.broadcast_to(seeds, (targets.shape[0], self.dof)).copy()
+            if seeds.shape != (targets.shape[0], self.dof):
+                raise ValueError(
+                    f"qpos_seed must have shape ({self.dof},) or "
+                    f"({targets.shape[0]}, {self.dof}), got {seeds.shape}"
+                )
+            if not np.isfinite(seeds).all():
+                raise ValueError("qpos_seed must contain only finite values")
+        return targets, seeds
+
+    def _to_pink_order(self, qpos: np.ndarray) -> np.ndarray:
+        """Convert simulator joint order to the reduced Pink model order."""
+        if self.dexsim_to_pink_ordering is None:
+            return qpos.copy()
+        return qpos[self.dexsim_to_pink_ordering]
+
+    def _to_output_order(self, qpos: np.ndarray) -> np.ndarray:
+        """Convert Pink model joint order to simulator order."""
+        if self.pink_to_dexsim_ordering is None:
+            return qpos.copy()
+        return qpos[self.pink_to_dexsim_ordering]
+
+    def _project_model_limits(self, qpos: np.ndarray) -> np.ndarray:
+        """Project Euclidean configurations into finite Pinocchio limits."""
+        if self.robot.model.nq != self.robot.model.nv:
+            return qpos
+        lower = np.where(np.isfinite(self._model_lower), self._model_lower, -np.inf)
+        upper = np.where(np.isfinite(self._model_upper), self._model_upper, np.inf)
+        return np.clip(qpos, lower, upper)
+
+    def _set_target(self, target_xpos: np.ndarray) -> None:
+        """Set the controlled frame target, removing TCP when appropriate."""
+        frame_target = self._root_to_world @ target_xpos
+        if self._target_task.frame == self.end_link_name:
+            frame_target = frame_target @ self._tcp_inverse
+        self._target_task.set_target(self.pin.SE3(frame_target))
+
+    def _task_metrics(self) -> tuple[float, float, float]:
+        """Return full task objective and frame-task convergence errors."""
+        objective = 0.0
+        position_error = 0.0
+        orientation_error = 0.0
+        for task in self.tasks:
+            error = np.asarray(task.compute_error(self.pink_cfg), dtype=float)
+            cost = 1.0 if task.cost is None else np.asarray(task.cost, dtype=float)
+            weighted = cost * float(task.gain) * error
+            objective += 0.5 * float(weighted @ weighted)
+            if id(task) in self._frame_task_ids:
+                cost_vector = np.broadcast_to(cost, error.shape)
+                active_position = cost_vector[:3] > 0.0
+                active_orientation = cost_vector[3:] > 0.0
+                position_error = max(
+                    position_error,
+                    float(np.linalg.norm(error[:3][active_position])),
+                )
+                orientation_error = max(
+                    orientation_error,
+                    float(np.linalg.norm(error[3:][active_orientation])),
+                )
+        return objective, position_error, orientation_error
+
+    def _converged(self, position_error: float, orientation_error: float) -> bool:
+        """Return whether configured task tolerances are satisfied."""
+        if position_error > self.cfg.pos_eps:
+            return False
+        return (
+            self.cfg.is_only_position_constraint
+            or orientation_error <= self.cfg.rot_eps
+        )
+
+    def _solve_one(
+        self, target_xpos: np.ndarray, qpos_seed: np.ndarray
+    ) -> tuple[bool, np.ndarray]:
+        """Solve one target with adaptive damping and backtracking."""
+        self._set_target(target_xpos)
+        pink_seed = self._to_pink_order(qpos_seed)
+        self.pink_cfg.update(self._project_model_limits(pink_seed))
+        damping = self.cfg.damp
+        damping_floor = min(
+            self.cfg.max_damping,
+            max(self.cfg.damp, float(np.sqrt(np.finfo(float).eps))),
+        )
+        stagnant = 0
+
+        for _ in range(self.cfg.max_iterations):
+            objective, position_error, orientation_error = self._task_metrics()
+            if self._converged(position_error, orientation_error):
+                return True, self._to_output_order(np.asarray(self.pink_cfg.q))
+
+            base_q = np.asarray(self.pink_cfg.q).copy()
+            accepted = False
+            for backtrack in range(self.cfg.max_backtracks + 1):
+                try:
+                    velocity = self.pink.solve_ik(
+                        configuration=self.pink_cfg,
+                        tasks=self.tasks,
+                        damping=damping,
+                        dt=self.cfg.dt,
+                        solver=self.cfg.solver_type,
+                        safety_break=self.cfg.fail_on_joint_limit_violation,
+                    )
+                except Exception:
+                    self.pink_cfg.update(base_q)
+                    raise
+                scale = 0.5**backtrack
+                candidate = self.pin.integrate(
+                    self.robot.model, base_q, velocity * self.cfg.dt * scale
+                )
+                self.pink_cfg.update(self._project_model_limits(candidate))
+                candidate_objective, _, _ = self._task_metrics()
+                if candidate_objective < objective:
+                    improvement = objective - candidate_objective
+                    accepted = True
+                    damping = max(self.cfg.damp, damping * self.cfg.damping_decay)
+                    stagnant = (
+                        stagnant + 1
+                        if improvement <= self.cfg.stagnation_tolerance
+                        else 0
+                    )
+                    break
+                self.pink_cfg.update(base_q)
+                damping = min(
+                    max(damping * self.cfg.damping_growth, damping_floor),
+                    self.cfg.max_damping,
+                )
+
+            if not accepted:
+                stagnant += 1
+            if stagnant >= self.cfg.stagnation_iterations:
+                break
+
+        _, position_error, orientation_error = self._task_metrics()
+        success = self._converged(position_error, orientation_error)
+        return success, self._to_output_order(np.asarray(self.pink_cfg.q))
 
     def get_ik(
         self,
-        target_xpos: torch.Tensor | np.ndarray | None,
+        target_xpos: torch.Tensor | np.ndarray,
         qpos_seed: torch.Tensor | np.ndarray | None = None,
         return_all_solutions: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute target joint positions using inverse kinematics.
+        """Solve one or more target poses sequentially.
 
         Args:
-            target_pose (torch.Tensor | np.ndarray | None): Target end-effector pose
-            qpos_seed (torch.Tensor | np.ndarray | None): Seed joint positions
-            return_all_solutions (bool, optional): Whether to return all IK solutions or just the best one. Defaults to False.
-            **kwargs: Additional keyword arguments for future extensions.
+            target_xpos: Target TCP pose with shape ``(4, 4)`` or
+                ``(N, 4, 4)``.
+            qpos_seed: Joint seed with shape ``(dof,)``, ``(N, dof)``, or
+                ``(N, 1, dof)``. A single seed is broadcast over the batch.
+            return_all_solutions: Accepted for solver-interface compatibility;
+                Pink returns one locally optimal solution per target.
+            **kwargs: Reserved for future solver options.
 
         Returns:
-            Target joint positions. (n_sample, 1, dof) of float.
+            A success tensor with shape ``(N,)`` and joint solutions with shape
+            ``(N, 1, dof)``. Failed targets return their corresponding seeds.
         """
-        if qpos_seed is None:
-            qpos_seed = np.zeros(self.dof)
-
-        if isinstance(qpos_seed, torch.Tensor):
-            qpos_seed = qpos_seed.detach().cpu().numpy()
-        if qpos_seed.ndim > 1:
-            qpos_seed = qpos_seed.flatten()
-
-        if target_xpos.ndim == 2:
-            target_xpos = target_xpos.unsqueeze(0)
-        if isinstance(target_xpos, torch.Tensor):
-            target_xpos = target_xpos.detach().cpu().numpy()
-
-        if target_xpos.shape == (1, 4, 4):
-            target_xpos = target_xpos[0]
-
-        if target_xpos.shape == (4, 4):
-            xpos = self.pin.SE3(target_xpos)
-        else:
-            raise ValueError(
-                f"target_xpos shape {target_xpos.shape} not supported for SE3 construction."
-            )
-
-        self.cfg.variable_input_tasks[0].set_target(xpos)
-
-        # Handle joint ordering if mapping provided
-        if self.dexsim_to_pink_ordering:
-            qpos_pink = np.array(
-                self.reorder_array(qpos_seed, self.dexsim_to_pink_ordering)
-            )
-        else:
-            qpos_pink = np.array(qpos_seed)
-
-        # Update configuration with current joint positions
-        self.pink_cfg.update(qpos_pink)
-
-        tasks = self.cfg.variable_input_tasks + self.cfg.fixed_input_tasks
-
-        try:
-            num_iter = 1 if self.cfg.max_iterations == 1 else self.cfg.max_iterations
-
-            for i in range(num_iter):
-                # Solve IK to get joint velocities
-                velocity = self.pink.solve_ik(
-                    configuration=self.pink_cfg,
-                    tasks=tasks,
-                    damping=self.cfg.damp,
-                    dt=self.cfg.dt,
-                    solver=self.cfg.solver_type,
-                    safety_break=self.cfg.fail_on_joint_limit_violation,
-                )
-                self.pink_cfg.integrate_inplace(velocity, self.cfg.dt)
-                err = self.cfg.variable_input_tasks[0].compute_error(self.pink_cfg)
-
-                # Compute joint position changes
-                # Update joint positions
-                # delta_q = velocity * self.cfg.dt
-                # self.pink_cfg.update(delta_q)
-                # logger.log_warning(f"Iteration {i}, error: {err}, delta_q: {delta_q}")
-                pos_achieved = np.linalg.norm(err[:3]) <= self.cfg.pos_eps
-
-                if self.cfg.is_only_position_constraint:
-                    if pos_achieved:
-                        break
-                else:
-                    ori_achieved = np.linalg.norm(err[3:]) <= self.cfg.rot_eps
-                    if pos_achieved and ori_achieved:
-                        break
-
-        # except NoSolutionFound as e:
-        except (AssertionError, Exception) as e:
-            # Print warning and return the current joint positions as the target
-            # Not using omni.log since its not available in CI during docs build
-            if self.cfg.show_ik_warnings:
-                logger.log_warning(
-                    "Warning: IK quadratic solver could not find a solution! Did not update the target joint"
-                    f" positions.\nError: {e}"
-                )
-            return torch.tensor(False, dtype=torch.bool), torch.tensor(
-                qpos_seed, device=self.device, dtype=torch.float32
-            )
-
-        qpos = torch.tensor(
-            self.pink_cfg.q[self.pink_to_dexsim_ordering],
-            device=self.device,
-            dtype=torch.float32,
-        )
-
+        del kwargs
+        targets, seeds = self._normalize_inputs(target_xpos, qpos_seed)
+        success = np.zeros(targets.shape[0], dtype=bool)
+        solutions = seeds.copy()
+        for index, (target, seed) in enumerate(zip(targets, seeds)):
+            try:
+                solved, candidate = self._solve_one(target, seed)
+                success[index] = solved
+                if solved:
+                    solutions[index] = candidate
+                elif self.cfg.show_ik_warnings:
+                    logger.log_warning(
+                        f"Pink IK did not converge for target index {index}; returning its seed."
+                    )
+            except Exception as exc:
+                if self.cfg.show_ik_warnings:
+                    logger.log_warning(
+                        f"Pink IK failed for target index {index}; returning its seed. Error: {exc}"
+                    )
         if return_all_solutions:
             logger.log_warning(
-                "return_all_solutions=True is not supported in DifferentialSolver. Returning the best solution only."
+                "return_all_solutions=True is not supported by PinkSolver; "
+                "returning one local solution per target."
             )
-
-        # Add the velocity changes to the current joint positions to get the target joint positions
-        # target_qpos = torch.add(
-        #     qvel_dexsim,
-        #     torch.tensor(joint_seed, device=self.device, dtype=torch.float32),
-        # )
-        dof = qpos.shape[-1]
-        qpos = qpos.reshape(-1, 1, dof)
-        return torch.tensor(True, dtype=torch.bool), qpos
+        success_tensor = torch.as_tensor(success, dtype=torch.bool, device=self.device)
+        solution_tensor = torch.as_tensor(
+            solutions, dtype=torch.float32, device=self.device
+        ).unsqueeze(1)
+        return success_tensor, solution_tensor
 
     def _get_fk(
         self,
-        qpos: torch.Tensor | np.ndarray | None,
-        **kwargs,
-    ) -> torch.tensor:
-        """Compute the forward kinematics for the robot given joint positions.
+        qpos: torch.Tensor | np.ndarray,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        """Compute Pinocchio FK for one configuration.
 
         Args:
-            qpos (torch.Tensor | np.ndarray | None): Joint positions, shape should be (nq,).
-            **kwargs: Additional keyword arguments (not used).
+            qpos: Joint configuration in simulator ordering.
+            **kwargs: Reserved for solver-interface compatibility.
 
         Returns:
-            torch.Tensor: The homogeneous transformation matrix (4x4) of the end-effector (after applying TCP).
+            Homogeneous TCP pose.
         """
-        result = compute_pinocchio_fk(
-            self.pin, self.robot, qpos, self.end_link_name, self.tcp_xpos
+        del kwargs
+        if isinstance(qpos, torch.Tensor):
+            qpos = qpos.detach().cpu().numpy()
+        configuration = np.asarray(qpos, dtype=float).squeeze()
+        if configuration.shape != (self.dof,) or not np.isfinite(configuration).all():
+            raise ValueError(f"qpos must be a finite vector with shape ({self.dof},)")
+        configuration = self._to_pink_order(configuration)
+        self.pin.framesForwardKinematics(
+            self.robot.model, self.robot.data, configuration
         )
-        return torch.from_numpy(result)
+        end_to_world = np.asarray(
+            self.robot.data.oMf[self._end_frame_id].homogeneous, dtype=float
+        )
+        result = self._world_to_root @ end_to_world @ self.tcp_xpos
+        return torch.as_tensor(result, dtype=torch.float32, device=self.device)

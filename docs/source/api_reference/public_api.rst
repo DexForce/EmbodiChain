@@ -1050,6 +1050,25 @@ embodichain.lab.sim.solvers.neural_ik_solver
    NeuralIKSolverCfg
    NeuralIKSolver
 
+embodichain.lab.sim.solvers.null_space_posture_task
+---------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.null_space_posture_task
+
+.. autosummary::
+
+   NullSpacePostureTask
+
+embodichain.lab.sim.solvers.pink_solver
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.pink_solver
+
+.. autosummary::
+
+   PinkSolver
+   PinkSolverCfg
+
 embodichain.lab.sim.solvers.srs_solver
 --------------------------------------
 

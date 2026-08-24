@@ -146,6 +146,20 @@ class RobotCfg(ArticulationCfg):
 - `variable_input_tasks` / `fixed_input_tasks`: lists of `pink.tasks.FrameTask` for QP optimisation.
 - `mesh_path`: path for Pinocchio URDF mesh loading.
 - `show_ik_warnings` / `fail_on_joint_limit_violation`: error-handling behaviour.
+- Supports single-pose and sequential batch IK while preserving one seed per
+  target and returning a consistent `(N,)`, `(N, 1, dof)` result contract.
+- End-effector targets are interpreted as TCP poses; the configured TCP is
+  removed before setting the controlled Pink frame target. Targets remain
+  relative to `root_link_name` even when that link is offset from the URDF root.
+- Convergence is checked across all variable frame tasks. Maximum-iteration,
+  stagnation, and solver-exception exits report failure and preserve the
+  corresponding input seed.
+- Adaptive controls (`stagnation_tolerance`, `stagnation_iterations`,
+  `max_backtracks`, `damping_growth`, `damping_decay`, and `max_damping`)
+  reject non-improving steps, increase regularization, and terminate stalled
+  solves early.
+- Effective limits intersect URDF, user-configured, and runtime robot limits,
+  then synchronize the result into the reduced Pinocchio model in Pink order.
 
 ### SRSSolver-specific
 
@@ -177,10 +191,13 @@ batches for IK multi-start:
 A `pink.tasks.Task` subclass for posture control in the null space of
 higher-priority tasks.
 
-- Error: `e(q) = M · (q* − q)` where `M` is a joint-selection mask.
+- Error: a Pinocchio manifold difference masked in tangent space (`nv`), with
+  an empty joint selection meaning all actuated joints.
 - Jacobian: null-space projector `N(q) = I − J_primary⁺ · J_primary`.
-- Used exclusively with `PinkSolver` for multi-task QP IK (e.g., controlling
-  posture while satisfying end-effector constraints).
+- Add it to either `variable_input_tasks` or `fixed_input_tasks`; PinkSolver
+  initializes it, includes it in QP solving and backtracking objectives, and
+  updates its simulator-ordered target through
+  `update_null_space_joint_targets()`.
 
 ---
 
