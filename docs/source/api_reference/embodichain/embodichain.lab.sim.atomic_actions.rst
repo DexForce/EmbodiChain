@@ -2,6 +2,8 @@ embodichain.lab.sim.atomic_actions
 ==================================
 
 .. automodule:: embodichain.lab.sim.atomic_actions
+   :members:
+   :no-index:
 
    .. rubric:: Planning contracts
 
@@ -72,6 +74,9 @@ embodichain.lab.sim.atomic_actions
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
+      EffectVerificationRequirement
+      EffectVerificationResult
+      ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind
       ExecutionStatus
@@ -315,6 +320,18 @@ Engine and execution
    :members:
 
 .. autoclass:: ExecutionStatus
+   :members:
+
+.. autoclass:: EffectVerificationRequest
+   :members:
+
+.. autoclass:: EffectVerificationRequirement
+   :members:
+
+.. autoclass:: EffectVerificationResult
+   :members:
+
+.. autoclass:: ExecutionPlanAttempt
    :members:
 
 Semantic objects and helpers

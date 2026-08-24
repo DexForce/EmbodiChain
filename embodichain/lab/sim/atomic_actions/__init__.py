@@ -57,17 +57,24 @@ from .effects import StateDelta
 from .engine import AtomicActionEngine
 from .execution import (
     EffectVerificationRequest,
+    EffectVerificationResult,
     ExecutionEvent,
     ExecutionEventKind,
+    ExecutionPlanAttempt,
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
 )
-from .goals import ObjectActionGoal, PoseGoalValue, SceneEntityPose
+from .goals import (
+    ObjectActionGoal,
+    PoseGoalValue,
+    SceneEntityPose,
+)
 from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
     CompiledTrajectory,
+    EffectVerificationRequirement,
     ExecutionFeedbackMode,
     PlannerDiagnostics,
     TimedTrajectory,
@@ -163,8 +170,11 @@ from .sim_adapter import (
     SimulationExecutionAdapter,
 )
 from .state import (
+    ArticulationJointState,
+    CoordinatedHeldObjectState,
     EntityState,
     HeldObjectState,
+    ObservedArticulationJointState,
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
@@ -180,6 +190,7 @@ __all__ = [
     "ActionPlanningServices",
     "Affordance",
     "AntipodalAffordance",
+    "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
     "AxisAlign",
@@ -199,6 +210,7 @@ __all__ = [
     "CommandSink",
     "ControlCommand",
     "ControlPartCommandProfile",
+    "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentOptions",
@@ -215,11 +227,14 @@ __all__ = [
     "EndpointCommandTransport",
     "EntityState",
     "EffectVerificationRequest",
+    "EffectVerificationRequirement",
+    "EffectVerificationResult",
     "EffectVerifier",
     "ExecutionClock",
     "ExecutionFeedbackMode",
     "ExecutionEvent",
     "ExecutionEventKind",
+    "ExecutionPlanAttempt",
     "ExecutionRunner",
     "ExecutionRunnerCfg",
     "ExecutionSession",
@@ -253,6 +268,7 @@ __all__ = [
     "ObjectSemantics",
     "OPEN_COMMAND",
     "ObservationProvider",
+    "ObservedArticulationJointState",
     "PickUp",
     "PickUpOptions",
     "Place",

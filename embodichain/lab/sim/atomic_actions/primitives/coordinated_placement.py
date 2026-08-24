@@ -60,6 +60,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     plan_named_arm_trajectory,
+    require_shared_task_state_key,
     repeat_qpos,
     resolve_batched_pose,
     resolve_object_target,
@@ -138,6 +139,8 @@ class CoordinatedPlacementOptions(ActionOptions):
 class _CoordinatedPlacementResources:
     """Invocation-bound control parts and compatible hand commands."""
 
+    placing_task_state_key: str
+    support_task_state_key: str
     placing_arm: JointPositionTarget
     support_arm: JointPositionTarget
     placing_hand: JointPositionTarget
@@ -191,6 +194,21 @@ class CoordinatedPlacement(
         support_arm = support_motion.require_target(JointPositionTarget)
         placing_hand = placing_grasp.require_target(JointPositionTarget)
         support_hand = support_grasp.require_target(JointPositionTarget)
+        placing_task_state_key = require_shared_task_state_key(
+            placing_motion,
+            placing_grasp,
+            participant="CoordinatedPlacement placing participant",
+        )
+        support_task_state_key = require_shared_task_state_key(
+            support_motion,
+            support_grasp,
+            participant="CoordinatedPlacement support participant",
+        )
+        if placing_task_state_key == support_task_state_key:
+            raise ValueError(
+                "CoordinatedPlacement placing and support participants must "
+                "use different task_state_key values."
+            )
         if placing_arm.control_part == support_arm.control_part:
             raise ValueError(
                 "CoordinatedPlacement placing and support roles must use "
@@ -202,6 +220,8 @@ class CoordinatedPlacement(
                 "different end-effector control parts."
             )
         return _CoordinatedPlacementResources(
+            placing_task_state_key=placing_task_state_key,
+            support_task_state_key=support_task_state_key,
             placing_arm=placing_arm,
             support_arm=support_arm,
             placing_hand=placing_hand,
@@ -253,8 +273,8 @@ class CoordinatedPlacement(
             support_held_object,
         ) = self._resolve_target(target, state, resources, options)
         eligible = context.task.exclusive_held_object_mask(
-            resources.placing_arm.control_part
-        ) & context.task.exclusive_held_object_mask(resources.support_arm.control_part)
+            resources.placing_task_state_key
+        ) & context.task.exclusive_held_object_mask(resources.support_task_state_key)
         if not eligible.any():
             logger.log_warning(
                 "CoordinatedPlacement requires two exclusively held objects."
@@ -415,10 +435,10 @@ class CoordinatedPlacement(
             ),
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.placing_arm.control_part: (
+                    resources.placing_task_state_key: (
                         None if release else placing_held_object
                     ),
-                    resources.support_arm.control_part: support_held_object,
+                    resources.support_task_state_key: support_held_object,
                 },
             ),
             segment_lengths={
@@ -497,19 +517,19 @@ class CoordinatedPlacement(
         HeldObjectState,
         HeldObjectState,
     ]:
-        placing_control_part = resources.placing_arm.control_part
-        support_control_part = resources.support_arm.control_part
-        placing_held_object = state.get_held_object(placing_control_part)
+        placing_task_state_key = resources.placing_task_state_key
+        support_task_state_key = resources.support_task_state_key
+        placing_held_object = state.get_held_object(placing_task_state_key)
         if placing_held_object is None:
             raise ValueError(
-                "CoordinatedPlacement requires an object held by placing control "
-                f"part {placing_control_part!r}."
+                "CoordinatedPlacement requires an object held by placing "
+                f"task-state resource {placing_task_state_key!r}."
             )
-        support_held_object = state.get_held_object(support_control_part)
+        support_held_object = state.get_held_object(support_task_state_key)
         if support_held_object is None:
             raise ValueError(
-                "CoordinatedPlacement requires an object held by support control "
-                f"part {support_control_part!r}."
+                "CoordinatedPlacement requires an object held by support "
+                f"task-state resource {support_task_state_key!r}."
             )
         placing_height_offset = (
             options.placing_height_offset

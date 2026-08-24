@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 from typing import Union, Any, Dict
@@ -155,26 +157,13 @@ class PointCloudVisualizer(BaseVisualizer):
         if self.sim_manager is None:
             raise ValueError("sim_manager is required for 'sim_manager' backend")
 
-        # Get simulation environment
-        env = self.sim_manager.get_env()
-        if env is None:
-            raise RuntimeError("Simulation manager has no active simulation")
-
-        # Create point cloud name
         pcd_name = f"workspace_pcd_{self.control_part_name or 'default'}"
-
-        # Create point cloud in simulation
-        pcd_handle = env.create_point_cloud(name=pcd_name)
-        pcd_handle.add_points(points)
-        pcd_handle.set_colors(colors)
-        pcd_handle.set_point_size(point_size)
-
-        logger.log_info(
-            f"Created point cloud '{pcd_name}' with {len(points)} points "
-            f"(point_size={point_size})"
+        return self.sim_manager.visualize_point_cloud(
+            points=points,
+            colors=colors,
+            point_size=point_size,
+            name=pcd_name,
         )
-
-        return pcd_handle
 
     def _create_viser_point_cloud(
         self, points: np.ndarray, colors: np.ndarray, point_size: float

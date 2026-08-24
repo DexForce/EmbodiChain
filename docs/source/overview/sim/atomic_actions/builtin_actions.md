@@ -246,8 +246,8 @@ entity as a recovery dependency.
 | `Place.xpos` | yes | yes |
 | `CoordinatedPickGoal.object_target_pose` / `object_initial_pose` | yes | yes |
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
-| `PickUp.grasp_xpos` | yes | yes |
-| `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `PickUp.grasp_xpos` | yes | yes; monitored through `approach` only |
+| `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; monitored through `approach` only |
 | `AxisAlign.grasp_xpos` | yes | yes |
 | `AxisAlign` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
 | `HandOverGoal.target_pose` | yes | yes |
@@ -400,7 +400,11 @@ bound motion target.
 `grasp_xpos` may be `(4, 4)`, `(B, 4, 4)`, or a `SceneEntityPose`. A scene
 reference resolves the latest grasp pose and registers its entity as a recovery
 dependency, so material target motion invalidates and replans an executing
-`PickUp`. When omitted, the action samples valid affordance grasps, evaluates
+`PickUp` while its `approach` segment is active. Once approach has been
+dispatched, dependency monitoring stops: contact-, close-, and lift-induced
+object motion must not be misclassified as an external target update. Tracking
+and collision-world checks remain active independently. When `grasp_xpos` is
+omitted, the action samples valid affordance grasps, evaluates
 reachability, and stores the selected `object_to_eef` transform in the expected
 held-object state. Later object-centric skills reuse that transform.
 

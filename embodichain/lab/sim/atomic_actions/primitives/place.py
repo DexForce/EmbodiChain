@@ -28,6 +28,7 @@ from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
+    require_shared_task_state_key,
     resolve_object_target,
 )
 from embodichain.lab.sim.atomic_actions.affordance import AssembleAffordance
@@ -212,11 +213,15 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         target = request.goal
         options = request.skill_options
         binding = request.binding
-        motion_target = binding.endpoint("primary", "motion").require_target(
-            JointPositionTarget
-        )
+        motion = binding.endpoint("primary", "motion")
         grasp = binding.endpoint("primary", "grasp")
+        motion_target = motion.require_target(JointPositionTarget)
         grasp_target = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="Place primary participant",
+        )
         control_part = motion_target.control_part
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
@@ -233,14 +238,14 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             dtype=context.robot.qpos.dtype,
         )
         state = context
-        held_mask = context.task.held_object_mask(control_part)
-        exclusive_mask = context.task.exclusive_held_object_mask(control_part)
+        held_mask = context.task.held_object_mask(task_state_key)
+        exclusive_mask = context.task.exclusive_held_object_mask(task_state_key)
         eligible = (
             exclusive_mask
             if isinstance(target, AssembleGoal)
             else ~held_mask | exclusive_mask
         )
-        place_xpos = self._resolve_place_xpos(target, state, control_part)
+        place_xpos = self._resolve_place_xpos(target, state, task_state_key)
         if not eligible.any():
             return self.failed_plan(
                 request,
@@ -329,6 +334,9 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         full[:, n_down_actual + n_open :, arm_joint_ids] = back_arm
         full[:, n_down_actual + n_open :, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
+        coordinated_updates = {
+            key: None for key in state.coordinated_held_objects if task_state_key in key
+        }
         return self.build_plan(
             request,
             context,
@@ -338,7 +346,10 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 env_ids=context.env_ids,
                 step_dt=context.require_control_dt(),
             ),
-            expected_effects=StateDelta(held_object_updates={control_part: None}),
+            expected_effects=StateDelta(
+                held_object_updates={task_state_key: None},
+                coordinated_held_object_updates=coordinated_updates,
+            ),
             segment_lengths={
                 "approach": n_down_actual,
                 "release": n_open,
@@ -350,14 +361,13 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         self,
         target: PlaceGoal | AssembleGoal,
         state: PlanningContext,
-        control_part: str,
+        task_state_key: str,
     ) -> torch.Tensor:
         """Resolve the place EEF poses from a typed target.
 
         Args:
             target: Either an explicit EEF pose target or an assembly target.
             state: World state carrying the held-object transform.
-
         Returns:
             Place EEF poses with shape ``(num_envs, 4, 4)`` or
             ``(num_envs, n_waypoint, 4, 4)``.
@@ -368,13 +378,13 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 num_envs=self.num_envs,
                 device=self.device,
             )
-        return self._resolve_assemble_place_xpos(target, state, control_part)
+        return self._resolve_assemble_place_xpos(target, state, task_state_key)
 
     def _resolve_assemble_place_xpos(
         self,
         target: AssembleGoal,
         state: PlanningContext,
-        control_part: str,
+        task_state_key: str,
     ) -> torch.Tensor:
         """Derive the place EEF pose from an assembly affordance.
 
@@ -385,18 +395,17 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         Args:
             target: Assembly target carrying the base/assemble affordance.
             state: World state carrying the held-object transform.
-
         Returns:
             Place EEF poses with shape ``(num_envs, 4, 4)``.
 
         Raises:
             ValueError: If no held object or base-pose source is available.
         """
-        held = state.get_held_object(control_part)
+        held = state.get_held_object(task_state_key)
         if held is None:
             raise ValueError(
-                "Place with AssembleGoal requires an object held by control "
-                f"part {control_part!r} (run PickUp first)."
+                "Place with AssembleGoal requires an object held by task-state "
+                f"resource {task_state_key!r} (run PickUp first)."
             )
         affordance = target.affordance
         if target.base_pose is not None:

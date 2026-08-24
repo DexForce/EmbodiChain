@@ -36,8 +36,8 @@ payloads, and transports without adding fixed resource categories to the core.
 +---------------+----------------+    +---------------+----------------+
                 |                                     |
                 v                                     |
- semantic adapter: schema validation,                 |
- SceneRegistry grounding, endpoint binding            |
+ SemanticSkillCompiler / SemanticSkillRuntime:         |
+ schema validation, SceneRegistry grounding, binding  |
                 |                                     |
                 +------------------+------------------+
                                    |
@@ -88,7 +88,7 @@ The boundary is deliberate:
 | Scene observation | Registry-derived `SceneProvider` | Captures canonical ordered entities plus monotonic global or per-environment collision-world revisions |
 | Scheduling and controller lifecycle | `ExecutionRunner` | Observes only when due, dispatches timed commands, records acknowledgements, and performs safe stop |
 | Robot/simulator I/O | `ObservationProvider`, `EndpointCommandRouter`, `EndpointCommandTransport`, and `ExecutionClock` adapters | Isolates observation, per-controller command transport, and time/physics advancement from planning and session state |
-| Physical-effect verification | Application observer | Verifies grasp, release, handover, and other symbolic effects |
+| Physical-effect verification | Semantic effect monitor and evidence collector | Verifies grasp, release, handover, and other symbolic effects; an application callback may add a stricter gate |
 
 `ExecutionRunner.step()` is non-blocking. Its convenience
 `run_until_blocked()` loop waits or advances simulation through an injected
@@ -102,10 +102,13 @@ state.
 
 ### Caller entry points
 
-The engine supports two first-class caller paths. An Action Agent emits a
-semantic skill call that an adapter validates, grounds, and converts into an
-`ActionInvocation`. A user can instead author the typed invocation directly in
-Python or load it from an application-owned configuration layer:
+The engine supports two first-class caller paths. An Action Agent or
+configuration-driven application can emit a semantic call for
+{class}`~embodichain.lab.sim.skills.SemanticSkillCompiler` and
+{class}`~embodichain.lab.sim.skills.SkillRuntime` to validate, ground, and
+convert into an `ActionInvocation`. A user can instead author the typed
+invocation directly in Python or load it from an application-owned
+configuration layer:
 
 ```python
 binding = engine.bind_control_parts(
@@ -437,9 +440,11 @@ an older custom action by renaming its implementation to `_plan()`.
 | `AtomicAction.plan(request, context)` | `AtomicActionEngine` | Binds the current collision scene into a copied policy, then delegates to `_plan()` |
 | `AtomicAction._plan(request, context)` | Atomic-action implementer | Consumes the prepared immutable `ResolvedActionRequest` and returns an `ActionPlan` |
 | `engine.plan_action(action, invocation, context)` | Extension or isolated test | Temporarily binds and plans an unregistered action instance; built-in parameter variants should use invocation `skill_options` instead |
+| `engine.start(invocations, context, eligible_mask=...)` | Runtime orchestrator | Starts a session whose owned row cohort can only shrink across action barriers and recovery |
 | `session.revise_current(invocation)` | Manually ticked runtime orchestrator | Replaces the active logical call with a newer same-destination revision and replans from the latest observed context |
 | `runner.revise_current(invocation)` | Runner-driven runtime orchestrator or Action Agent | Snapshots a revision, preserves the current frame deadline, then replans from a fresh due-time observation |
-| `runner.step(effect_success=...)` | Non-blocking controller integration | Observes and routes a `RuntimeCommandFrame` only when it is due |
+| `runner.deactivate_rows(mask, reason=...)` | Runner-driven runtime orchestrator | Permanently removes rows and refreshes the runner's cached effect request; prefer it over direct session mutation |
+| `runner.step(effect_result=..., effect_verifier=...)` | Non-blocking controller integration | Observes only when due; accepts either an asynchronous correlated result or a synchronous verifier, never both |
 | `runner.run_until_blocked(...)` | Simple blocking application or tutorial | Advances the injected clock until terminal or external effect verification is required |
 | `runner.cancel(reason)` | Explicit safe stop | Requests controller cancellation followed by an observed-position hold |
 
@@ -620,6 +625,16 @@ unknown or incompatible transport cannot cause partial dispatch. Cancellation,
 observation/session exceptions, and negative acknowledgements enter a
 best-effort cancel-then-hold path for every armed runtime target.
 
+Pass an owned `eligible_mask` to `engine.start()` when only a subset of rows may
+enter the invocation sequence. This cohort is sticky: eligibility can only
+shrink across action barriers and replans. Later failures outside the atomic
+runtime should call `runner.deactivate_rows(mask, reason=...)`; the operation is
+idempotent, the next command neutralizes changed rows, and removing the final
+eligible row fails and terminates the session. When effect verification is
+pending, deactivation narrows the request and assigns a new
+`verification_id`. Do not mutate `session` directly while its runner owns
+scheduling, because the runner must refresh its cached effect boundary.
+
 The engine authorizes every emitted command against the immutable target and
 physical claims in the resolved binding. A command cannot address an unbound
 destination, substitute target metadata, or overlap another endpoint's joints
@@ -758,6 +773,15 @@ Automatic dynamic-goal invalidation is dependency-driven. A goal must contain a
 that dependency automatically. The deprecated live-entity fallback does not
 trigger scene-motion replanning.
 
+An `ActionPlan.scene_dependency_end_segment` may bound monitoring to the
+reversible portion of a staged action for every dependency.
+`ActionPlan.scene_dependency_monitor_until` may also assign individual
+dependencies exclusive command-frame cutoffs. Omitted dependencies remain
+monitored for the whole action unless the global segment boundary applies.
+`PickUp` stops monitoring its semantic object ID after `approach` is dispatched
+so contact-, close-, and lift-induced object movement does not trigger a false
+replan. Joint-tracking and collision-world checks remain active.
+
 Dynamic collision invalidation is provider-driven. Only registered,
 pose-updatable collision entities are supported; adding/removing obstacles or
 changing their geometry requires rebuilding the planner world.
@@ -779,47 +803,74 @@ manipulator still holds the same semantic object or live entity. The unified
 `HandOver` action instead requires both candidate arms to start unoccupied.
 
 At the terminal waypoint, an `ExecutionSession` requests an external
-per-environment verification mask before committing a non-empty effect:
+correlated per-environment result before committing a non-empty effect:
 
 ```python
+from embodichain.lab.sim.atomic_actions import EffectVerificationResult
+
 tick = session.tick(latest_context)
 if tick.pending_effect is not None:
-    effect_success = verify_grasp_or_release()
-    tick = session.tick(latest_context, effect_success=effect_success)
+    request = tick.pending_effect
+    success_mask, failure_mask = verify_grasp_or_release(request.env_mask)
+    effect_result = EffectVerificationResult(
+        verification_id=request.verification_id,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+    )
+    tick = session.tick(latest_context, effect_result=effect_result)
 ```
 
 This prevents a collision-free or well-tracked command plan from being
 misreported as a successful grasp or release. The typed
 `EffectVerificationRequest` persists on subsequent ticks while waiting;
-`EFFECT_VERIFICATION_REQUIRED` remains a one-time observability event.
+`EFFECT_VERIFICATION_REQUIRED` remains a one-time observability event. Success
+and failure masks are disjoint subsets of the request mask; omitted request rows
+remain unresolved. Request IDs change after mask shrinkage or whole-action
+retry, so a delayed result cannot commit a newer attempt.
+
+`request.deadline` is expressed in the robot-observation timestamp domain.
+`RecoveryPolicy.action_timeout` covers both trajectory execution and the
+terminal effect wait; a retry invalidates the old request ID. With
+`ExecutionRunner.step()`, a call made before the next due cycle does not consume
+its `effect_result`: schedule another call using `wait_duration`, re-read the
+current request, and submit a result for that current ID. Partial resolution and
+row deactivation can also replace the request before the delayed result arrives.
 
 ## Action Agent integration
 
 An MLLM should not construct `ActionInvocation` by copying arbitrary JSON into
-runtime objects. An adapter should expose stable `SkillDescriptor` metadata and
-agent-facing goal schemas, validate the semantic call, resolve object references
-and embodiment capabilities, then produce the typed invocation:
+runtime objects. The `embodichain.lab.sim.skills` package provides the semantic
+boundary: stable call descriptors, immutable call values, scene/profile
+manifests, a compiler, and a runtime facade. The agent selects from the semantic
+call catalog and supplies declarative object-centric values; the compiler
+performs validation and grounding before the atomic engine sees the request:
 
 ```text
-MLLM SkillCallSpec
-    -> schema validation
-    -> object / scene grounding
-    -> participant and endpoint capability binding
-    -> safe skill-option selection
-    -> semantic command selection (never raw qpos)
-    -> ActionInvocation
-    -> AtomicActionEngine
-    -> ActionPlan / execution events
+MLLM / application SemanticCallSpec
+    -> SemanticCallCatalog discovery
+    -> SemanticIntegrationManifest validation
+    -> SemanticSkillCompiler.analyze()
+       object / affordance / resource / effect-flow validation
+    -> SemanticSkillCompiler.ground(latest_context)
+       participant binding + safe options + ActionInvocation
+    -> SemanticSkillRuntime / AtomicActionEngine
+    -> verified task state + structured execution events
 ```
 
-The adapter may expose a curated subset of `OptionsType`, but engine-only
-profiles, `JointPositionCommand` payloads, planner instances, and concrete joint
-groups should remain outside the MLLM schema. If the agent needs an
-object-specific grasp mode, it should choose a semantic command or capability;
-the grounding layer turns that choice into `ActionControlOverrides`. Invocation
-IDs and monotonic revisions correlate updated agent decisions with planner
-diagnostics and execution events, providing structured feedback for the next
-decision without mutating an in-flight request implicitly.
+Engine-only profiles, `JointPositionCommand` payloads, planner instances, live
+objects, and concrete joint groups remain outside semantic call payloads. A
+registered extension accepts only declarative data and requires an explicitly
+installed version-matched lowerer. Invocation IDs and monotonic revisions
+correlate compatible in-flight updates with planner diagnostics and execution
+events without mutating a request implicitly.
+
+The semantic runtime is also useful without an agent. `run()` executes one
+known workflow and preserves verified state for a later workflow submitted at a
+terminal result boundary. Call-local recovery remains owned by
+`ExecutionRunner`; automatic skill replacement or symbolic-state reconciliation
+after a terminal failure is intentionally not provided. See
+{doc}`../semantic_skills` for the complete compiler/runtime and dynamic-task
+contract.
 
 ## Extending the module
 
@@ -848,6 +899,7 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 ## Further reading
 
 - {doc}`../scene_registry` — canonical scene identity, snapshots, and collision integration
+- {doc}`../semantic_skills` — semantic calls, compilation, runtime execution, and dynamic task boundaries
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples

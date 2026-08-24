@@ -318,6 +318,10 @@ embodichain.lab.sim.atomic_actions.affordance
    InteractionPoints
    AssembleAffordance
 
+.. automodule:: embodichain.lab.sim.atomic_actions.affordance
+   :members:
+   :no-index:
+
 embodichain.lab.sim.atomic_actions.bindings
 -------------------------------------------
 
@@ -382,8 +386,10 @@ embodichain.lab.sim.atomic_actions.execution
 .. autosummary::
 
    EffectVerificationRequest
+   EffectVerificationResult
    ExecutionEvent
    ExecutionEventKind
+   ExecutionPlanAttempt
    ExecutionSession
    ExecutionStatus
    ExecutionTick
@@ -402,6 +408,10 @@ embodichain.lab.sim.atomic_actions.goals
    resolve_pose_goal
    validate_pose_goal
    validate_pose_tensor
+
+.. automodule:: embodichain.lab.sim.atomic_actions.goals
+   :members:
+   :no-index:
 
 embodichain.lab.sim.atomic_actions.invocation
 ---------------------------------------------
@@ -425,6 +435,7 @@ embodichain.lab.sim.atomic_actions.plans
 
    ActionPlan
    CompiledTrajectory
+   EffectVerificationRequirement
    ExecutionFeedbackMode
    PlannerDiagnostics
    TimedTrajectory
@@ -548,6 +559,10 @@ embodichain.lab.sim.atomic_actions.state
    RobotObservation
    SceneSnapshot
    TaskState
+
+.. automodule:: embodichain.lab.sim.atomic_actions.state
+   :members:
+   :no-index:
 
 embodichain.lab.sim.atomic_actions.trajectory_ops
 -------------------------------------------------
@@ -857,6 +872,99 @@ embodichain.lab.sim.sim_manager
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
+embodichain.lab.sim.skills.calls
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.calls
+
+.. autosummary::
+
+   DeclarativeValue
+   HandOver
+   Pick
+   Place
+   PlaceRelationTarget
+   RegisteredSemanticCall
+   SemanticCallCatalog
+   SemanticCallDescriptor
+   SemanticCallSpec
+   SemanticPose
+   builtin_semantic_call_catalog
+
+.. automodule:: embodichain.lab.sim.skills.calls
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.compiler
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.compiler
+
+.. autosummary::
+
+   AnalyzedSemanticCall
+   GroundedSemanticCall
+   HandOverPoseProvider
+   HandOverPoseTargets
+   RelationTargetGrounder
+   RegisteredSemanticLowerer
+   SemanticEffectDependency
+   SemanticEffectKind
+   SemanticHandOverTarget
+   SemanticLowering
+   SemanticObjectTarget
+   SemanticRelationTarget
+   SemanticSkillCompiler
+   SemanticWorkflow
+
+embodichain.lab.sim.skills.integration
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.integration
+
+.. autosummary::
+
+   BoundSemanticCall
+   LinkedSemanticCall
+   PathPart
+   SceneEntityManifest
+   SceneManifest
+   SemanticDiagnostic
+   SemanticIntegrationManifest
+   SemanticValidationError
+
+.. automodule:: embodichain.lab.sim.skills.integration
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.effects
+----------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.effects
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.evidence
+-----------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.evidence
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.parallel
+------------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.parallel
+   :members:
+   :no-index:
+
+embodichain.lab.sim.skills.parallel_runtime
+--------------------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.parallel_runtime
+   :members:
+   :no-index:
+
 embodichain.lab.sim.skills.profiles
 -----------------------------------
 
@@ -882,6 +990,13 @@ embodichain.lab.sim.skills.profiles
    SkillPolicyPreset
    UnsupportedSkillError
 
+embodichain.lab.sim.skills.runtime
+----------------------------------
+
+.. automodule:: embodichain.lab.sim.skills.runtime
+   :members:
+   :no-index:
+
 embodichain.lab.sim.skills.scene
 --------------------------------
 
@@ -889,6 +1004,10 @@ embodichain.lab.sim.skills.scene
 
 .. autosummary::
 
+   AmbiguousSceneAffordanceError
+   GRASP_AFFORDANCE_CAPABILITY
+   PLACE_IN_AFFORDANCE_CAPABILITY
+   PLACE_ON_AFFORDANCE_CAPABILITY
    RegistrySceneProvider
    SceneAffordanceRef
    SceneArticulationRef
@@ -896,12 +1015,18 @@ embodichain.lab.sim.skills.scene
    SceneCollisionWorldMode
    SceneDynamics
    SceneEntityRef
+   SceneEntityMetadata
    SceneEntityRegistration
    SceneEntityStateProvider
    SceneGeometryProvider
    SceneLinkRef
    SceneObjectRef
    SceneRegistry
+   UnsupportedSceneAffordanceError
+
+.. automodule:: embodichain.lab.sim.skills.scene
+   :members:
+   :no-index:
 
 embodichain.lab.sim.solvers.neural_ik_solver
 --------------------------------------------

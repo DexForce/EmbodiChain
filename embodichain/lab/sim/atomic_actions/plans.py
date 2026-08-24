@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
@@ -364,8 +365,17 @@ class PlannerDiagnostics:
     def __post_init__(self) -> None:
         if not isinstance(self.backend, str) or not self.backend:
             raise ValueError("PlannerDiagnostics.backend must be non-empty.")
-        object.__setattr__(self, "messages", tuple(self.messages))
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        if not isinstance(self.metadata, Mapping):
+            raise TypeError("PlannerDiagnostics.metadata must be a mapping.")
+        messages = tuple(self.messages)
+        if not all(type(message) is str for message in messages):
+            raise TypeError("PlannerDiagnostics.messages must contain strings.")
+        object.__setattr__(self, "messages", messages)
+        object.__setattr__(
+            self,
+            "metadata",
+            MappingProxyType(deepcopy(dict(self.metadata))),
+        )
 
 
 class ExecutionFeedbackMode(str, Enum):
@@ -373,6 +383,36 @@ class ExecutionFeedbackMode(str, Enum):
 
     JOINT_POSITION = "joint_position"
     TIMED = "timed"
+
+
+@dataclass(frozen=True, slots=True)
+class EffectVerificationRequirement:
+    """Explicit physical-effect verification independent of symbolic state.
+
+    Presence of this value on an :class:`ActionPlan` forces a terminal effect
+    boundary even when the plan declares no :class:`StateDelta`. The open
+    ``kind`` identifier lets an external runtime select an appropriate
+    verifier without placing backend-specific callbacks in the core plan.
+
+    Args:
+        kind: Stable, non-empty discriminator for the physical effect.
+    """
+
+    kind: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.kind) is not str
+            or not self.kind
+            or self.kind != self.kind.strip()
+        ):
+            raise ValueError(
+                "kind must be a non-empty string without outer whitespace."
+            )
+
+    def snapshot(self) -> EffectVerificationRequirement:
+        """Return an independently owned requirement value."""
+        return EffectVerificationRequirement(kind=self.kind)
 
 
 @dataclass(frozen=True, slots=True)
@@ -417,6 +457,17 @@ class ActionPlan:
     An action owns one timed command sequence and one recovery boundary. Named
     :class:`TrajectorySegment` values describe semantic structure within that
     sequence without implying independent planning or recovery boundaries.
+
+    Attributes:
+        scene_dependency_monitor_until: Optional exclusive waypoint-index upper
+            bounds for individual ``scene_dependencies``. An entity is monitored
+            while the current waypoint index is smaller than its bound; ``0``
+            disables monitoring immediately, while an omitted entity remains
+            monitored for the action's full execution. Once the bound is reached,
+            all pose changes for that entity are ignored, regardless of whether
+            they were caused by the action or by an external disturbance.
+        scene_dependency_end_segment: Optional last segment during which scene
+            motion may invalidate and replan the action for every dependency.
     """
 
     skill_id: str
@@ -430,9 +481,12 @@ class ActionPlan:
     joint_trajectory: TimedTrajectory | None = None
     segments: tuple[TrajectorySegment, ...] = ()
     scene_dependencies: tuple[str, ...] = ()
+    scene_dependency_monitor_until: Mapping[str, int] = field(default_factory=dict)
+    scene_dependency_end_segment: str | None = None
     collision_world_sensitive: bool = False
     replannable: bool = True
     expected_effects: StateDelta = field(default_factory=StateDelta)
+    effect_verification: EffectVerificationRequirement | None = None
     invocation_id: str | None = None
     invocation_revision: int = 0
 
@@ -639,13 +693,37 @@ class ActionPlan:
             raise ValueError(
                 "scene_dependencies must contain unique non-empty entity ids."
             )
+        waypoint_count = self.commands.frame_count
+        monitor_until = dict(self.scene_dependency_monitor_until)
+        if not set(monitor_until).issubset(dependencies):
+            raise ValueError(
+                "scene_dependency_monitor_until keys must be scene dependencies."
+            )
+        for entity_id, waypoint_index in monitor_until.items():
+            if (
+                type(entity_id) is not str
+                or not entity_id
+                or type(waypoint_index) is not int
+                or not 0 <= waypoint_index <= waypoint_count
+            ):
+                raise ValueError(
+                    "scene_dependency_monitor_until must map non-empty entity IDs "
+                    "to waypoint indices within the command sequence."
+                )
         if not isinstance(self.collision_world_sensitive, bool):
             raise TypeError("collision_world_sensitive must be a bool.")
         if not isinstance(self.replannable, bool):
             raise TypeError("replannable must be a bool.")
         if not isinstance(self.expected_effects, StateDelta):
             raise TypeError("expected_effects must be a StateDelta.")
-        waypoint_count = self.commands.frame_count
+        if (
+            self.effect_verification is not None
+            and type(self.effect_verification) is not EffectVerificationRequirement
+        ):
+            raise TypeError(
+                "effect_verification must be exactly "
+                "EffectVerificationRequirement or None."
+            )
         segments = tuple(self.segments)
         if not all(isinstance(segment, TrajectorySegment) for segment in segments):
             raise TypeError("segments must contain only TrajectorySegment values.")
@@ -670,6 +748,21 @@ class ActionPlan:
                 "ActionPlan segments must cover the command sequence exactly without "
                 "gaps or overlaps."
             )
+        dependency_end = self.scene_dependency_end_segment
+        if dependency_end is not None:
+            if not isinstance(dependency_end, str) or not dependency_end:
+                raise ValueError(
+                    "scene_dependency_end_segment must be a non-empty segment "
+                    "name or None."
+                )
+            if dependency_end not in names:
+                raise ValueError(
+                    "scene_dependency_end_segment must name an ActionPlan segment."
+                )
+            if not dependencies:
+                raise ValueError(
+                    "scene_dependency_end_segment requires scene_dependencies."
+                )
         object.__setattr__(self, "plan_success", self.plan_success.clone())
         object.__setattr__(self, "commands", self.commands.snapshot())
         object.__setattr__(
@@ -682,13 +775,77 @@ class ActionPlan:
             ),
         )
         object.__setattr__(self, "planned_collision_world_revision", revisions)
+        object.__setattr__(
+            self,
+            "diagnostics",
+            PlannerDiagnostics(
+                backend=self.diagnostics.backend,
+                messages=self.diagnostics.messages,
+                metadata=self.diagnostics.metadata,
+            ),
+        )
         object.__setattr__(self, "scene_dependencies", dependencies)
+        object.__setattr__(
+            self,
+            "scene_dependency_monitor_until",
+            MappingProxyType(monitor_until),
+        )
         object.__setattr__(self, "segments", segments)
+        object.__setattr__(
+            self,
+            "effect_verification",
+            (
+                None
+                if self.effect_verification is None
+                else self.effect_verification.snapshot()
+            ),
+        )
 
     @property
     def success_all(self) -> bool:
         """Whether every environment row planned successfully."""
         return bool(self.plan_success.all().item())
+
+    def snapshot(self) -> ActionPlan:
+        """Return an independently owned inspection snapshot of this plan.
+
+        Runtime tracing and visualization need access to the exact plan that
+        reached an execution boundary without being able to mutate the live
+        session.  Reconstructing the value through the public constructor also
+        re-applies every plan invariant and snapshots all tensor-owning nested
+        contracts.
+
+        Returns:
+            A validated plan with independently owned tensor storage.
+        """
+        return ActionPlan(
+            skill_id=self.skill_id,
+            plan_success=self.plan_success,
+            commands=self.commands,
+            recovery_policy=self.recovery_policy,
+            planned_scene_version=self.planned_scene_version,
+            planned_collision_world_revision=self.planned_collision_world_revision,
+            diagnostics=self.diagnostics,
+            feedback_mode=self.feedback_mode,
+            joint_trajectory=self.joint_trajectory,
+            segments=self.segments,
+            scene_dependencies=self.scene_dependencies,
+            scene_dependency_monitor_until=self.scene_dependency_monitor_until,
+            scene_dependency_end_segment=self.scene_dependency_end_segment,
+            collision_world_sensitive=self.collision_world_sensitive,
+            replannable=self.replannable,
+            expected_effects=self.expected_effects,
+            effect_verification=self.effect_verification,
+            invocation_id=self.invocation_id,
+            invocation_revision=self.invocation_revision,
+        )
+
+    @property
+    def requires_effect_verification(self) -> bool:
+        """Whether execution must verify a terminal physical effect."""
+        return (
+            self.effect_verification is not None or not self.expected_effects.is_empty
+        )
 
     def segment(self, name: str) -> TrajectorySegment:
         """Return a named trajectory segment.
@@ -770,6 +927,7 @@ class CompiledTrajectory:
 __all__ = [
     "ActionPlan",
     "CompiledTrajectory",
+    "EffectVerificationRequirement",
     "ExecutionFeedbackMode",
     "PlannerDiagnostics",
     "TimedTrajectory",
