@@ -101,7 +101,7 @@ class TestExpertProgramOpenDrawerEnv:
     """Registration, registered lowering, and success-boundary tests."""
 
     def test_registered_as_a_separate_reference_environment(self) -> None:
-        """The Slide-based task coexists with the original Open Drawer task."""
+        """The canonical Drawer environment is the only exported integration."""
         from embodichain_tasks.expert_program import __all__
 
         assert "ExpertProgramOpenDrawerEnv" in __all__
@@ -109,7 +109,6 @@ class TestExpertProgramOpenDrawerEnv:
         assert spec.cls is ExpertProgramOpenDrawerEnv
         assert spec.max_episode_steps == 600
         assert issubclass(ExpertProgramOpenDrawerEnv, EmbodiedEnv)
-        assert "OpenDrawer-v1" in REGISTERED_ENVS
 
     def test_gym_config_loads_the_slide_open_drawer_program(
         self, monkeypatch: pytest.MonkeyPatch

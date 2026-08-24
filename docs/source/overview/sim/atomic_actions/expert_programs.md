@@ -34,8 +34,8 @@ The repeated-cube task is configured entirely as semantic calls:
 schema_version: 2
 program_id: repeated_cube_pick_place
 integration:
-  robot_profile: ur5_parallel_gripper_v1
-  scene_registry: multi_segments_cube_v1
+  robot_profile: expert_program_ur5_pick_place
+  scene_registry: expert_program_repeated_pick_place
   runtime_preset: safe
 targets:
   drop_pose:

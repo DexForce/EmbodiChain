@@ -14,10 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Expert tasks whose demonstrations are planned and executed in segments."""
-
 from __future__ import annotations
 
-from .cube_pick_place import MultiSegmentsCubePickPlaceEnv
-
-__all__ = ["MultiSegmentsCubePickPlaceEnv"]
+__all__: list[str] = []

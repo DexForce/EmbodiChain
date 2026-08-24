@@ -28,19 +28,18 @@ from scripts.tools.expert_program_rollout_report import (
 
 EXPECTED_CURRENT_COUNTS = {
     # Each tuple is (raw LF bytes, raw file bytes) for the explicit task pair.
-    "Cube": (237, 7_785),
-    "Drawer": (411, 15_204),
+    "Cube": (166, 5_645),
+    "Drawer": (348, 12_600),
 }
 
 EXPECTED_SOURCE_PATHS = {
     "Cube": (
-        "embodichain_tasks/embodichain_tasks/multi_segments/cube_pick_place.py",
-        "embodichain_tasks/configs/expert_program/multi_segments/"
-        "repeated_cube_pick_place.yaml",
+        "embodichain_tasks/embodichain_tasks/expert_program/" "repeated_pick_place.py",
+        "embodichain_tasks/configs/expert_program/repeated_pick_place.yaml",
     ),
     "Drawer": (
-        "embodichain_tasks/embodichain_tasks/tableware/open_drawer.py",
-        "embodichain_tasks/configs/expert_program/tableware/open_drawer.json",
+        "embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py",
+        "embodichain_tasks/configs/expert_program/open_drawer.yaml",
     ),
 }
 

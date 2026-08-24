@@ -43,19 +43,6 @@ from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
 )
 from embodichain.lab.sim.atomic_actions import TrackingPolicy
-from embodichain.lab.sim.skills import (
-    BinaryEffectClause,
-    BinaryEffectEvidenceQuery,
-    BinaryEvidenceKind,
-    CONSTRAINT_EFFECT_CHANNEL,
-    CONTROL_PART_EVIDENCE_PROVIDER_ID,
-    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
-    ControlPartEvidenceAddress,
-    EffectEvidenceCollectionContext,
-    EffectEvidenceSourceRef,
-    HeldObjectRelation,
-    HeldObjectStateExpectation,
-)
 
 # Trigger official task auto-registration (idempotent).
 discover_task_packages()
@@ -64,65 +51,17 @@ from embodichain_tasks.expert_program import (  # noqa: E402
     ExpertProgramRepeatedPickPlaceEnv,
 )
 from embodichain_tasks.expert_program._common import (  # noqa: E402
-    GRIPPER_FINGER_LINKS,
     create_ur5_skill_profile_binding,
 )
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_EXPECTED_PGI_FINGER_LINKS = (
-    "gripper_finger1_link_1",
-    "gripper_finger2_link_1",
-)
-
-
-class _ContactSensorStub:
-    """Return one owned contact snapshot for evidence tests."""
-
-    def __init__(self, user_ids: torch.Tensor, is_valid: torch.Tensor) -> None:
-        self._data = {"user_ids": user_ids, "is_valid": is_valid}
-        self.update_count = 0
-
-    def update(self) -> None:
-        """Record that the observation refreshed the physical sensor."""
-        self.update_count += 1
-
-    def get_data(self) -> dict[str, torch.Tensor]:
-        """Return the configured contact tensors."""
-        return self._data
-
-
-def _grasp_constraint_query() -> BinaryEffectEvidenceQuery:
-    """Build the exact constraint query emitted by Pick/Place monitoring."""
-    expectation = HeldObjectStateExpectation(
-        "held",
-        HeldObjectRelation.ATTACHED,
-        "cube",
-        "primary",
-        "manipulator",
-        "manipulator",
-    )
-    source = EffectEvidenceSourceRef(
-        CONTROL_PART_EVIDENCE_PROVIDER_ID,
-        CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
-        ControlPartEvidenceAddress("hand", CONSTRAINT_EFFECT_CHANNEL),
-    )
-    return BinaryEffectEvidenceQuery(
-        BinaryEffectClause(
-            "constraint",
-            "held",
-            source,
-            BinaryEvidenceKind.CONSTRAINT,
-            True,
-        ),
-        expectation,
-    )
 
 
 class TestExpertProgramRepeatedPickPlaceEnv:
-    """Registration, program structure, and physical evidence tests."""
+    """Registration, program structure, and integration tests."""
 
     def test_registered_as_a_separate_reference_environment(self) -> None:
-        """The Expert Program task coexists with the imperative comparison."""
+        """Only the canonical Expert Program Gym ID is registered."""
         from embodichain_tasks.expert_program import __all__
 
         assert "ExpertProgramRepeatedPickPlaceEnv" in __all__
@@ -130,7 +69,7 @@ class TestExpertProgramRepeatedPickPlaceEnv:
         assert spec.cls is ExpertProgramRepeatedPickPlaceEnv
         assert spec.max_episode_steps == 1200
         assert issubclass(ExpertProgramRepeatedPickPlaceEnv, EmbodiedEnv)
-        assert "MultiSegmentsCubePickPlace-v1" in REGISTERED_ENVS
+        assert "MultiSegmentsCubePickPlace-v1" not in REGISTERED_ENVS
 
     def test_gym_config_loads_the_declarative_three_cycle_program(self) -> None:
         """The runnable config resolves a strict source-relative program."""
@@ -144,13 +83,11 @@ class TestExpertProgramRepeatedPickPlaceEnv:
         assert config["expert_program_path"] == (
             "../../expert_program/repeated_pick_place.yaml"
         )
-        assert config["sensor"][0]["sensor_type"] == "ContactSensor"
+        assert config["sensor"] == []
+        assert config["env"]["dataset"]["lerobot"]["params"]["save_path"] == (
+            "outputs/lerobot/expert_program"
+        )
         assert "extensions" not in config["env"]
-        configured_links = config["sensor"][0]["articulation_cfg_list"][0][
-            "link_name_list"
-        ]
-        assert GRIPPER_FINGER_LINKS == _EXPECTED_PGI_FINGER_LINKS
-        assert configured_links == list(_EXPECTED_PGI_FINGER_LINKS)
 
         cfg = config_to_cfg(config, source_path=config_path)
         program = cfg.expert_program
@@ -215,42 +152,11 @@ class TestExpertProgramRepeatedPickPlaceEnv:
             terminal_max_abs_error=0.1,
         )
 
-    def test_constraint_observer_requires_both_finger_contacts(self) -> None:
-        """A logical grasp is never inferred from commands or one finger."""
-        env = object.__new__(ExpertProgramRepeatedPickPlaceEnv)
-        env.sim = SimpleNamespace(device=torch.device("cpu"))
-        env._num_envs = 2
-        env._cube_user_ids = torch.tensor([[10], [20]])
-        env._finger_user_ids = (
-            torch.tensor([[11], [21]]),
-            torch.tensor([[12], [22]]),
+    def test_task_has_no_task_local_constraint_observer(self) -> None:
+        """The reference task does not own contact-based effect evidence."""
+        assert "_observe_grasp_constraint" not in (
+            ExpertProgramRepeatedPickPlaceEnv.__dict__
         )
-        sensor = _ContactSensorStub(
-            user_ids=torch.tensor(
-                [
-                    [[10, 11], [12, 10], [0, 0]],
-                    [[20, 21], [20, 99], [0, 0]],
-                ]
-            ),
-            is_valid=torch.tensor(
-                [[True, True, False], [True, True, False]],
-            ),
-        )
-        env._contact_sensor = sensor
-
-        observation = env._observe_grasp_constraint(
-            _grasp_constraint_query(),
-            EffectEvidenceCollectionContext(
-                timestamp=1.0,
-                observation_revision=2,
-                env_ids=torch.tensor([0, 1], dtype=torch.long),
-            ),
-        )
-
-        assert sensor.update_count == 1
-        assert observation.values.tolist() == [True, False]
-        assert observation.valid is not None
-        assert observation.valid.tolist() == [True, True]
 
     def test_task_does_not_reimplement_program_acceptance(self) -> None:
         """The standard bridge validator is the sole task-success boundary."""

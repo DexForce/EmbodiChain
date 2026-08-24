@@ -26,8 +26,8 @@ Only the two checked-in vertical slices below are classified as integration/prod
 
 | Embodiment | Task | Skill contract | Terminal effect | Program schema | Code status | Physical acceptance |
 | --- | --- | --- | --- | --- | --- | --- |
-| UR5 | Cube Pick + Place | Pick + Place(at) | two-finger constraint + pose relation | schema-v2 sequential | checked in | pending: one cycle passed; full three-cycle gate remains |
-| CobotMagic | Open Drawer | Registered call -> Slide | articulation joint validator | schema-v2 sequential | checked in | pending: rerun the supported-simulation validator gate |
+| UR5 | Cube Pick + Place | Pick + Place(at) | pose relation; no task-local constraint observer | schema-v2 sequential | checked in | blocked: install grasp evidence before a physical gate |
+| UR5 | Open Drawer | Registered call -> Slide | articulation joint validator | schema-v2 sequential | checked in | seed 0 regression passed; broader multi-seed gate remains |
 
 HandOver, Place relations (`on`/`inside`), and schema-v2 parallel are framework-tested but integration-required. They are intentionally not listed as checked-in integrations.
 
@@ -37,21 +37,23 @@ Both checked-in environment classes have zero task-local motion or demo-generati
 
 The baseline is a fixed, manually recorded pre-migration snapshot: Cube is 598 lines / 23912 bytes and Drawer is 245 lines / 8833 bytes. The tool does not inspect Git history. Current values are recomputed only from the four explicit files in the table.
 
-Baseline identity: Cube uses Git blob `1965563b060d1fc889f03ad13d47655c2edcd99b` and Drawer uses Git blob `3b4cbdc09537098b4f109d46efb8785b88f31ce1` at each task's Python path listed in the current-source column. Blob IDs remain stable across stack rebases.
+Baseline identity: Cube uses legacy Git blob `1965563b060d1fc889f03ad13d47655c2edcd99b` and Drawer uses legacy Git blob `3b4cbdc09537098b4f109d46efb8785b88f31ce1`. Current Python paths point to the consolidated canonical integrations; blob IDs remain stable across stack rebases.
+
+Current totals include only the canonical environment implementations and their declarative programs; removed legacy modules are not counted.
 
 Counting rule: `lines` is the number of raw LF (`0x0A`) bytes; `bytes` is the raw on-disk byte length. Counts are summed per task without normalizing encoding or line endings.
 
 | Task | Baseline lines | Current lines | Line delta | Baseline bytes | Current bytes | Byte delta | Current source files |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Cube | 598 | 237 | -361 (-60.4%) | 23912 | 7785 | -16127 (-67.4%) | `embodichain_tasks/embodichain_tasks/multi_segments/cube_pick_place.py`<br>`embodichain_tasks/configs/expert_program/multi_segments/repeated_cube_pick_place.yaml` |
-| Drawer | 245 | 411 | +166 (+67.8%) | 8833 | 15204 | +6371 (+72.1%) | `embodichain_tasks/embodichain_tasks/tableware/open_drawer.py`<br>`embodichain_tasks/configs/expert_program/tableware/open_drawer.json` |
-| Total | 843 | 648 | -195 (-23.1%) | 32745 | 22989 | -9756 (-29.8%) | the four files above |
+| Cube | 598 | 166 | -432 (-72.2%) | 23912 | 5645 | -18267 (-76.4%) | `embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py`<br>`embodichain_tasks/configs/expert_program/repeated_pick_place.yaml` |
+| Drawer | 245 | 348 | +103 (+42.0%) | 8833 | 12600 | +3767 (+42.6%) | `embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py`<br>`embodichain_tasks/configs/expert_program/open_drawer.yaml` |
+| Total | 843 | 514 | -329 (-39.0%) | 32745 | 18245 | -14500 (-44.3%) | the four files above |
 
 ## Demo Success Measurement
 
 `scripts/benchmark/expert_program/demo_success.py` executes each fixed seed exactly once, always discards the episode buffer, and counts executor exceptions as failed rows. It writes raw JSON plus a three-table Markdown report. Its CLI supports offline raw-JSON re-aggregation and an explicit `--run-simulation` mode that constructs one standard Gym environment from Gym and Expert Program configurations.
 
-No success-rate result or release gate is checked in yet. The main-API migration requires a fresh supported-simulation Open Drawer validator run, while repeated Cube still needs three-cycle physical acceptance before a fixed-seed rate is meaningful.
+The supported-simulation Open Drawer seed-0 regression is checked in and passes locally; no multi-seed success-rate or release gate is checked in yet. Repeated Cube needs an environment-qualified grasp-evidence provider before a physical rate is meaningful.
 
 ## Drift Check
 

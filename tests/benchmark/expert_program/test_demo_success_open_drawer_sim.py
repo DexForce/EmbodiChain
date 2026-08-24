@@ -32,10 +32,8 @@ from scripts.benchmark.expert_program.demo_success import (
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
-_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "gym/open_drawer/cobot_magic_3cam.json"
-_OPEN_DRAWER_EXPERT_PROGRAM = (
-    _TASK_CONFIG_ROOT / "expert_program/tableware/open_drawer.json"
-)
+_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "gym/expert_program/open_drawer.json"
+_OPEN_DRAWER_EXPERT_PROGRAM = _TASK_CONFIG_ROOT / "expert_program/open_drawer.yaml"
 _CASE_ID = "open_drawer_live"
 _SEED = 0
 _NUM_ENVS = 1
@@ -47,7 +45,7 @@ _RUN_PUBLIC_MAIN = (
 
 
 def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
-    """Write a camera-free copy of the packaged live-physics configuration."""
+    """Write a deterministic copy of the canonical live-physics config."""
     payload = json.loads(_OPEN_DRAWER_GYM_CONFIG.read_text(encoding="utf-8"))
     if type(payload) is not dict:
         raise TypeError("The packaged OpenDrawer Gym config must be a JSON object.")
@@ -55,8 +53,6 @@ def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
     if type(env_config) is not dict:
         raise TypeError("The packaged OpenDrawer env config must be a JSON object.")
 
-    # Cameras and their recording event are orthogonal to drawer physics and make
-    # this CPU regression unnecessarily renderer-sensitive.
     payload["sensor"] = []
     env_config["events"] = {}
     env_config["observations"] = {}
@@ -152,8 +148,8 @@ def test_live_open_drawer_benchmark_writes_successful_decodable_artifacts(
     assert len(validators) == 1
     assert validators[0]["kind"] == "articulation_joint_position"
     assert validators[0]["result_mask"] == [True]
-    assert validators[0]["result"]["joint"] == "slide_rails"
-    assert validators[0]["result"]["minimum_position"] == pytest.approx(0.09)
+    assert validators[0]["result"]["joint"] == "cabinet_to_drawer"
+    assert validators[0]["result"]["minimum_position"] == pytest.approx(0.10)
     assert validators[0]["result"]["accepted_mask"] == [True]
 
     aggregates = aggregate_demo_success_trials(decoded_trials)
