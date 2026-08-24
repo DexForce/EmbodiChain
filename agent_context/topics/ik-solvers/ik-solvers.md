@@ -151,7 +151,29 @@ class RobotCfg(ArticulationCfg):
 
 - `dh_params`, `link_lengths`, `rotation_directions`, `T_b_ob`, `T_e_oe`: kinematic model params.
 - `sort_ik`: whether to rank solutions by distance to seed.
+- `search_mode`: `"seeded"` computes the seed's geometric shoulder-elbow-wrist
+  arm angle and searches redundancy angles radially around it; `"full"`
+  samples the complete `[-pi, pi)` interval.
+- `redundancy_step`: angular increment used by seed-centered search.
+- Requesting all solutions always uses full-space redundancy sampling.
+- CPU and CUDA derive the reference plane in the base frame and use the same
+  signed arm-angle and periodic nearest-solution formulas.
+- Candidate revolute angles are shifted by integer multiples of `2*pi` into
+  the configured joint limits, choosing the representation nearest the seed.
+- Runtime `set_tcp()` and `set_ik_nearest_weight()` calls synchronize the CPU
+  and Warp analytical-backend caches immediately.
+- CPU target/reference-plane geometry is precomputed per target and elbow
+  branch. CUDA derives target/config/angle indices directly from the Warp
+  thread id, and all-solution sorting uses device-side tensor sorting rather
+  than a serial quadratic Warp sort.
+- Warp arm-angle and IK scratch arrays are reused by shape within a solver
+  instance to avoid repeated device allocations during steady-state calls.
+- Periodic-equivalent all-solutions candidates are deduplicated before return.
 - Requires `num_envs` in `init_solver()`.
+
+Focused performance and accuracy validation is available at
+`scripts/benchmark/robotics/kinematic_solver/srs_solver.py`; it compares CPU
+and available CUDA backends in seeded and full redundancy-search modes.
 
 ### OPWSolver-specific
 

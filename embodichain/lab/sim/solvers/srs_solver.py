@@ -16,26 +16,26 @@
 
 from __future__ import annotations
 
-import torch
-import numpy as np
-import warp as wp
 from itertools import product
-from typing import Union, Tuple, Any, Literal, TYPE_CHECKING
-from embodichain.utils import configclass, logger
-from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
+from typing import TYPE_CHECKING, Literal
 
-from embodichain.utils.warp.kinematics.srs_solver import (
-    transform_pose_kernel,
-    compute_ik_kernel,
-    sort_ik_kernel,
-    nearest_ik_kernel,
-    check_success_kernel,
-)
+import numpy as np
+import torch
+import warp as wp
+
+from embodichain.lab.sim.solvers import BaseSolver, SolverCfg
+from embodichain.utils import configclass, logger
 from embodichain.utils.device_utils import standardize_device_string
+from embodichain.utils.warp.kinematics.srs_solver import (
+    check_success_kernel,
+    compute_arm_angle_kernel,
+    compute_ik_kernel,
+    nearest_ik_kernel,
+    transform_pose_kernel,
+)
 
 if TYPE_CHECKING:
-    from typing import Self
-    from embodichain.lab.sim.robots.dexforce_w1.params import W1ArmKineParams
+    pass
 
 
 __all__ = ["SRSSolver", "SRSSolverCfg"]
@@ -67,6 +67,16 @@ class SRSSolverCfg(SolverCfg):
 
     num_samples: int = 100
     """Number of samples for elbow angle during IK computation."""
+
+    search_mode: Literal["seeded", "full"] = "seeded"
+    """Redundancy search strategy.
+
+    ``"seeded"`` searches the seed arm angle first and then expands radially;
+    ``"full"`` samples the complete ``[-pi, pi)`` interval.
+    """
+
+    redundancy_step: float = np.pi / 18.0
+    """Angular step in radians for seed-centered redundancy search."""
 
     sort_ik: bool = True
     """Whether to sort IK solutions based on proximity to seed joint positions."""
@@ -122,6 +132,92 @@ class _BaseSRSSolverImpl:
         self.link_lengths_np = np.asarray(self.cfg.link_lengths)
         self.rotation_directions_np = np.asarray(self.cfg.rotation_directions)
 
+        if self.cfg.num_samples < 1:
+            raise ValueError("num_samples must be at least 1")
+        if self.cfg.search_mode not in ("seeded", "full"):
+            raise ValueError("search_mode must be 'seeded' or 'full'")
+        if not np.isfinite(self.cfg.redundancy_step) or self.cfg.redundancy_step <= 0:
+            raise ValueError("redundancy_step must be finite and positive")
+
+    def _sample_elbow_angles(
+        self,
+        qpos_seed: torch.Tensor,
+        *,
+        force_full: bool = False,
+    ) -> torch.Tensor:
+        """Build redundancy samples for every target.
+
+        Seeded sampling follows a radial order ``0, +step, -step, ...`` so a
+        nearby redundancy branch is evaluated before distant branches.
+        """
+        batch_size = qpos_seed.shape[0]
+        if force_full or self.cfg.search_mode == "full":
+            samples = torch.arange(
+                self.cfg.num_samples,
+                dtype=qpos_seed.dtype,
+                device=self.device,
+            )
+            samples = -torch.pi + samples * (2.0 * torch.pi / self.cfg.num_samples)
+            return samples.unsqueeze(0).expand(batch_size, -1).contiguous()
+
+        offsets = [0.0]
+        layer = 1
+        while len(offsets) < self.cfg.num_samples:
+            offset = layer * self.cfg.redundancy_step
+            if offset > np.pi + 1e-12:
+                break
+            offsets.append(offset)
+            # +pi and -pi normalize to the same angle, so keep only one.
+            if offset < np.pi - 1e-12 and len(offsets) < self.cfg.num_samples:
+                offsets.append(-offset)
+            layer += 1
+        offset_tensor = torch.tensor(offsets, dtype=qpos_seed.dtype, device=self.device)
+        seed_arm_angles = self._get_seed_arm_angles(qpos_seed)
+        angles = seed_arm_angles.unsqueeze(1) + offset_tensor.unsqueeze(0)
+        return torch.remainder(angles + torch.pi, 2.0 * torch.pi) - torch.pi
+
+    def _get_seed_arm_angles(self, qpos_seed: torch.Tensor) -> torch.Tensor:
+        """Compute geometric arm angles for seed joint configurations."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _wrap_to_limits(
+        joints: np.ndarray,
+        limits: np.ndarray,
+        seed: np.ndarray,
+    ) -> np.ndarray | None:
+        """Map revolute joints to equivalent values inside limits near the seed."""
+        wrapped = np.empty_like(joints)
+        two_pi = 2.0 * np.pi
+        for index, value in enumerate(joints):
+            lower, upper = limits[index]
+            k_min = int(np.ceil((lower - value) / two_pi))
+            k_max = int(np.floor((upper - value) / two_pi))
+            if k_min > k_max:
+                return None
+            nearest_k = int(np.rint((seed[index] - value) / two_pi))
+            nearest_k = min(max(nearest_k, k_min), k_max)
+            wrapped[index] = value + nearest_k * two_pi
+        return wrapped
+
+    @staticmethod
+    def _deduplicate_solutions(
+        solutions: torch.Tensor, tolerance: float = 1e-5
+    ) -> torch.Tensor:
+        """Remove periodic-equivalent solutions while preserving their order."""
+        if solutions.shape[0] < 2:
+            return solutions
+        unique_indices: list[int] = []
+        for index in range(solutions.shape[0]):
+            if not unique_indices:
+                unique_indices.append(index)
+                continue
+            diff = solutions[index] - solutions[unique_indices]
+            wrapped_diff = torch.atan2(torch.sin(diff), torch.cos(diff))
+            if not torch.any(torch.amax(torch.abs(wrapped_diff), dim=1) <= tolerance):
+                unique_indices.append(index)
+        return solutions[unique_indices]
+
 
 class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
     """CPU implementation of the SRS inverse kinematics solver."""
@@ -138,13 +234,6 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         self.configs = [
             np.array([x, y, z]) for x, y, z in product([1.0, -1.0], repeat=3)
         ]
-
-        # Generate a set of elbow angles sampled uniformly from -π to π.
-        # The number of samples is determined by self.cfg.num_samples.
-        # These angles are used for searching possible IK solutions.
-        self.elbow_angles = torch.linspace(
-            -torch.pi, torch.pi, self.cfg.num_samples, device=self.device
-        )
 
         # Convert ik_nearest_weight to a tensor for efficient computation.
         self.ik_nearest_weight_tensor = torch.tensor(
@@ -189,6 +278,70 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
 
         return pose
 
+    def _get_model_fk(
+        self, target_joint: np.ndarray, end_joint_index: int = 6
+    ) -> np.ndarray:
+        """Compute DH-model FK without base, end-effector, or TCP transforms."""
+        pose = np.eye(4)
+        for index in range(end_joint_index + 1):
+            d, alpha, a, theta_offset = self.dh_params[index]
+            theta = (
+                theta_offset + target_joint[index] * self.rotation_directions_np[index]
+            )
+            pose = pose @ self._dh_transform(d, alpha, a, theta)
+        return pose
+
+    def _get_seed_arm_angles(self, qpos_seed: torch.Tensor) -> torch.Tensor:
+        """Compute seed arm angles from shoulder-elbow-wrist geometry."""
+        arm_angles = np.zeros(qpos_seed.shape[0], dtype=np.float32)
+        for target_index, seed in enumerate(qpos_seed.detach().cpu().numpy()):
+            full_pose = self._get_model_fk(seed)
+            elbow_pose = self._get_model_fk(seed, end_joint_index=2)
+            shoulder = np.array([0.0, 0.0, self.link_lengths_np[0]])
+            wrist_offset = np.array([0.0, 0.0, self.dh_params_np[6, 0]])
+            wrist = full_pose[:3, 3] - full_pose[:3, :3] @ wrist_offset
+            shoulder_to_wrist = wrist - shoulder
+            distance = np.linalg.norm(shoulder_to_wrist)
+            if distance < 1e-10:
+                continue
+
+            elbow_model = (
+                self.dh_params_np[3, 3] + seed[3] * self.rotation_directions_np[3]
+            )
+            elbow_config = -1.0 if elbow_model < 0.0 else 1.0
+            _, _, reference_joints = self._compute_reference_plane(
+                full_pose, elbow_config
+            )
+            if reference_joints is None:
+                continue
+
+            reference_pose = np.eye(4)
+            for index in range(3):
+                reference_pose = reference_pose @ self._dh_transform(
+                    self.dh_params_np[index, 0],
+                    self.dh_params_np[index, 1],
+                    self.dh_params_np[index, 2],
+                    reference_joints[index],
+                )
+
+            axis = shoulder_to_wrist / distance
+            reference_upper = reference_pose[:3, 3] - shoulder
+            actual_upper = elbow_pose[:3, 3] - shoulder
+            reference_radial = reference_upper - axis * np.dot(reference_upper, axis)
+            actual_radial = actual_upper - axis * np.dot(actual_upper, axis)
+            reference_norm = np.linalg.norm(reference_radial)
+            actual_norm = np.linalg.norm(actual_radial)
+            if reference_norm < 1e-10 or actual_norm < 1e-10:
+                continue
+
+            reference_radial /= reference_norm
+            actual_radial /= actual_norm
+            arm_angles[target_index] = np.arctan2(
+                np.dot(axis, np.cross(reference_radial, actual_radial)),
+                np.dot(reference_radial, actual_radial),
+            )
+        return torch.from_numpy(arm_angles).to(self.device)
+
     def _calculate_arm_joint_angles(
         self,
         P26: np.ndarray,
@@ -220,7 +373,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             logger.log_debug("Elbow singularity. End effector at limit.")
             return False
 
-        joints[3] = elbow_config * np.arccos(elbow_cos_angle)
+        joints[3] = elbow_config * np.arccos(np.clip(elbow_cos_angle, -1.0, 1.0))
 
         if abs(P26[2]) > 1e-6:
             joints[0] = np.arctan2(P26[1], P26[0])
@@ -228,7 +381,8 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             joints[0] = 0
 
         euclidean_norm = np.hypot(P26[0], P26[1])
-        angle_phi = np.arccos((d_se**2 + norm_P26**2 - d_ew**2) / (2 * d_se * norm_P26))
+        angle_phi_cos = (d_se**2 + norm_P26**2 - d_ew**2) / (2 * d_se * norm_P26)
+        angle_phi = np.arccos(np.clip(angle_phi_cos, -1.0, 1.0))
         joints[1] = np.arctan2(euclidean_norm, P26[2]) + elbow_config * angle_phi
 
         return True
@@ -308,27 +462,28 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         ):
             return None, None, None
 
-        T34_v = self._dh_transform(
-            dh_params[3, 0], dh_params[3, 1], dh_params[3, 2], joint_angles[3]
-        )
-        P34_v = T34_v[:3, 3]
-
-        norm_P34_P02 = np.linalg.norm(P34_v - P02)
-        if norm_P34_P02 > 1e-6:
-            v1 = (P34_v - P02) / norm_P34_P02
-        else:
-            v1 = np.zeros_like(P34_v - P02)
-        v2 = (P06 - P02) / np.linalg.norm(P06 - P02)
-        plane_normal = np.cross(v1, v2)
-
-        base_to_elbow_rotation = np.eye(3)
+        base_to_elbow_pose = np.eye(4)
         for i in range(3):
             T = self._dh_transform(
                 dh_params[i, 0], dh_params[i, 1], dh_params[i, 2], joint_angles[i]
             )
-            base_to_elbow_rotation = base_to_elbow_rotation @ T[:3, :3]
+            base_to_elbow_pose = base_to_elbow_pose @ T
 
-        return plane_normal, base_to_elbow_rotation, joint_angles
+        reference_upper = base_to_elbow_pose[:3, 3] - P02
+        shoulder_to_wrist = P06 - P02
+        upper_norm = np.linalg.norm(reference_upper)
+        wrist_norm = np.linalg.norm(shoulder_to_wrist)
+        if upper_norm < 1e-10 or wrist_norm < 1e-10:
+            return None, None, None
+        plane_normal = np.cross(
+            reference_upper / upper_norm, shoulder_to_wrist / wrist_norm
+        )
+        plane_norm = np.linalg.norm(plane_normal)
+        if plane_norm < 1e-10:
+            return None, None, None
+        plane_normal /= plane_norm
+
+        return plane_normal, base_to_elbow_pose[:3, :3], joint_angles
 
     def _process_all_solutions(
         self,
@@ -336,7 +491,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         qpos_seed: torch.Tensor,
         valid_mask: torch.Tensor,
         success_tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns all valid IK solutions (optionally sorted).
 
         Args:
@@ -350,18 +505,32 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             torch.Tensor: The IK solutions tensor (sorted if specified).
         """
         if self.cfg.sort_ik:
-            weighted_diff = (
-                ik_qpos_tensor - qpos_seed.unsqueeze(1)
-            ) * self.ik_nearest_weight_tensor
-            distances = torch.norm(weighted_diff, dim=2)
+            diff = ik_qpos_tensor - qpos_seed.unsqueeze(1)
+            wrapped_diff = torch.atan2(torch.sin(diff), torch.cos(diff))
+            distances = torch.sum(
+                wrapped_diff.square() * self.ik_nearest_weight_tensor, dim=2
+            )
             distances[~valid_mask] = float("inf")
             sorted_indices = torch.argsort(distances, dim=1)
             sorted_ik_qpos_tensor = torch.gather(
                 ik_qpos_tensor, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, 7)
             )
-            return success_tensor, sorted_ik_qpos_tensor
-        else:
-            return success_tensor, ik_qpos_tensor
+            sorted_valid_mask = torch.gather(valid_mask, 1, sorted_indices)
+            ik_qpos_tensor = sorted_ik_qpos_tensor
+            valid_mask = sorted_valid_mask
+        valid_qpos = [
+            self._deduplicate_solutions(ik_qpos_tensor[index][valid_mask[index]])
+            for index in range(ik_qpos_tensor.shape[0])
+        ]
+        max_solutions = max(solution.shape[0] for solution in valid_qpos)
+        compact_qpos = torch.zeros(
+            (ik_qpos_tensor.shape[0], max_solutions, 7),
+            dtype=ik_qpos_tensor.dtype,
+            device=self.device,
+        )
+        for index, solution in enumerate(valid_qpos):
+            compact_qpos[index, : solution.shape[0]] = solution
+        return success_tensor, compact_qpos
 
     def _process_single_solution(
         self,
@@ -369,7 +538,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         qpos_seed: torch.Tensor,
         valid_mask: torch.Tensor,
         success_tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns the nearest valid IK solution (optionally sorted).
 
         Args:
@@ -384,10 +553,11 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         """
         num_targets = ik_qpos_tensor.shape[0]
         if self.cfg.sort_ik:
-            weighted_diff = (
-                ik_qpos_tensor - qpos_seed.unsqueeze(1)
-            ) * self.ik_nearest_weight_tensor
-            distances = torch.norm(weighted_diff, dim=2)
+            diff = ik_qpos_tensor - qpos_seed.unsqueeze(1)
+            wrapped_diff = torch.atan2(torch.sin(diff), torch.cos(diff))
+            distances = torch.sum(
+                wrapped_diff.square() * self.ik_nearest_weight_tensor, dim=2
+            )
             mask = success_tensor.unsqueeze(1) & valid_mask
             distances[~mask] = float("inf")
             nearest_indices = torch.argmin(distances, dim=1)
@@ -410,6 +580,10 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         target_pose: np.ndarray | torch.Tensor,
         nsparam: float,
         config: np.ndarray,
+        qpos_seed: np.ndarray,
+        prepared: (
+            tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None
+        ) = None,
     ) -> tuple[bool, np.ndarray | None]:
         """
         Computes the inverse kinematics for a given target pose, normalization parameter, and configuration.
@@ -446,23 +620,20 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         link_lengths = self.cfg.link_lengths
         rotation_directions = self.cfg.rotation_directions
 
-        # Transform target pose
-        target_xpos = (
-            self.T_b_ob_inv_np @ target_pose @ self.tcp_inv_np @ self.T_e_oe_inv_np
-        )
-        P_target = target_xpos[:3, 3]
-        R_target = target_xpos[:3, :3]
-        P02 = np.array([0, 0, link_lengths[0]])  # Base to shoulder
-        P67 = np.array([0, 0, dh_params[6, 0]])  # Hand to end-effector
-        P06 = P_target - R_target @ P67
-        P26 = P06 - P02
-
-        # Calculate joint angles
-        joints = np.zeros(dof)
-        if not self._calculate_arm_joint_angles(
-            P26, elbow_config, joints, link_lengths
-        ):
-            return False, None
+        if prepared is None:
+            target_xpos = (
+                self.T_b_ob_inv_np @ target_pose @ self.tcp_inv_np @ self.T_e_oe_inv_np
+            )
+            P_target = target_xpos[:3, 3]
+            R_target = target_xpos[:3, :3]
+            P02 = np.array([0, 0, link_lengths[0]])
+            P67 = np.array([0, 0, dh_params[6, 0]])
+            P26 = P_target - R_target @ P67 - P02
+            _, R03_o, joints = self._compute_reference_plane(target_xpos, elbow_config)
+            if R03_o is None or joints is None:
+                return False, None
+        else:
+            target_xpos, R_target, P26, R03_o, joints = prepared
 
         # Calculate transformations
         T34 = self._dh_transform(
@@ -470,19 +641,12 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         )
         R34 = T34[:3, :3]
 
-        # Calculate reference plane
-        V_v_to_sew, R03_o, joint_v = self._compute_reference_plane(
-            target_xpos, config[1]
-        )
-        if V_v_to_sew is None:
-            return False, None
-
         # Calculate shoulder joint rotation matrices
         usw = P26 / np.linalg.norm(P26)
         skew_usw = self._skew(usw)
         angle_psi = nsparam
-        s_psi = wp.sin(angle_psi)
-        c_psi = wp.cos(angle_psi)
+        s_psi = np.sin(angle_psi)
+        c_psi = np.cos(angle_psi)
 
         # Calculate rotation matrix R03
         A_s = skew_usw @ R03_o
@@ -492,7 +656,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
 
         # Calculate shoulder joint angles
         angle1 = np.arctan2(R03[1, 1] * shoulder_config, R03[0, 1] * shoulder_config)
-        angle2 = np.arccos(R03[2, 1]) * shoulder_config
+        angle2 = np.arccos(np.clip(R03[2, 1], -1.0, 1.0)) * shoulder_config
         angle3 = np.arctan2(-R03[2, 2] * shoulder_config, -R03[2, 0] * shoulder_config)
 
         # Calculate wrist joint angles
@@ -502,7 +666,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         R47 = A_w * s_psi + B_w * c_psi + C_w
 
         angle5 = np.arctan2(R47[1, 2] * wrist_config, R47[0, 2] * wrist_config)
-        angle6 = np.arccos(R47[2, 2]) * wrist_config
+        angle6 = np.arccos(np.clip(R47[2, 2], -1.0, 1.0)) * wrist_config
         angle7 = np.arctan2(R47[2, 1] * wrist_config, -R47[2, 0] * wrist_config)
 
         joints_output[0] = (angle1 - dh_params[0, 3]) * rotation_directions[0]
@@ -513,12 +677,10 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         joints_output[5] = (angle6 - dh_params[5, 3]) * rotation_directions[5]
         joints_output[6] = (angle7 - dh_params[6, 3]) * rotation_directions[6]
 
-        # Check if the calculated joint angles are within the limits
-        in_range = (joints_output >= self.qpos_limits_np[:, 0]) & (
-            joints_output <= self.qpos_limits_np[:, 1]
+        joints_output = self._wrap_to_limits(
+            joints_output, self.qpos_limits_np, qpos_seed
         )
-
-        if not np.all(in_range):
+        if joints_output is None:
             return False, None
 
         return True, joints_output
@@ -529,7 +691,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         qpos_seed: torch.Tensor,
         return_all_solutions: bool = False,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute inverse kinematics (IK) for the given target pose using CPU.
 
@@ -542,29 +704,74 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Success flag and joint positions.
         """
+        target_xpos = target_xpos.to(self.device, dtype=torch.float32).view(-1, 4, 4)
         num_targets = target_xpos.shape[0]
         # Validate and normalize qpos_seed
         if qpos_seed is None:
             qpos_seed = torch.zeros(
                 (target_xpos.shape[0], 7), dtype=torch.float32, device=self.device
             )
+        else:
+            qpos_seed = (
+                qpos_seed.to(self.device, dtype=torch.float32)
+                .reshape(num_targets, -1, 7)[:, 0]
+                .contiguous()
+            )
 
         # Prepare to collect results
-        max_possible_solutions = len(self.elbow_angles) * len(self.configs)
+        elbow_angles = self._sample_elbow_angles(
+            qpos_seed, force_full=return_all_solutions
+        ).cpu()
+        max_possible_solutions = elbow_angles.shape[1] * len(self.configs)
         all_solutions = np.zeros(
             (num_targets, max_possible_solutions, 7), dtype=np.float32
         )
         solution_counts = np.zeros(num_targets, dtype=np.int32)
+        qpos_seed_np = qpos_seed.detach().cpu().numpy()
+        target_xpos_np = target_xpos.detach().cpu().numpy()
 
         # Iterate over target poses
         for target_idx, xpos in enumerate(target_xpos):
+            transformed = (
+                self.T_b_ob_inv_np
+                @ target_xpos_np[target_idx]
+                @ self.tcp_inv_np
+                @ self.T_e_oe_inv_np
+            )
+            rotation = transformed[:3, :3]
+            shoulder = np.array([0.0, 0.0, self.link_lengths_np[0]])
+            wrist_offset = np.array([0.0, 0.0, self.dh_params_np[6, 0]])
+            shoulder_to_wrist = transformed[:3, 3] - rotation @ wrist_offset - shoulder
+            prepared_by_elbow = {}
+            for elbow_config in (1.0, -1.0):
+                _, reference_rotation, reference_joints = self._compute_reference_plane(
+                    transformed, elbow_config
+                )
+                if reference_rotation is not None and reference_joints is not None:
+                    prepared_by_elbow[elbow_config] = (
+                        transformed,
+                        rotation,
+                        shoulder_to_wrist,
+                        reference_rotation,
+                        reference_joints,
+                    )
             sol_idx = 0
-            for psi in self.elbow_angles:
+            for psi in elbow_angles[target_idx]:
                 for config in self.configs:
-                    success, qpos = self._get_each_ik(xpos, psi.item(), config)
+                    prepared = prepared_by_elbow.get(config[1])
+                    if prepared is None:
+                        continue
+                    success, qpos = self._get_each_ik(
+                        xpos,
+                        psi.item(),
+                        config,
+                        qpos_seed_np[target_idx],
+                        prepared,
+                    )
                     if success:
                         fk_xpos = self._get_fk(qpos)
-                        if np.allclose(fk_xpos, xpos, atol=1e-4):
+                        target_np = xpos.detach().cpu().numpy()
+                        if np.linalg.norm(fk_xpos - target_np) <= 1e-4:
                             all_solutions[target_idx, sol_idx, :] = qpos
                             sol_idx += 1
             solution_counts[target_idx] = sol_idx
@@ -598,7 +805,9 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
                     all_solutions[target_idx, :count]
                 ).to(self.device, dtype=qpos_seed.dtype)
 
-        valid_mask = ik_qpos_tensor.abs().sum(dim=2) > 0  # (num_targets, max_solutions)
+        valid_mask = torch.arange(max_solutions, device=self.device).unsqueeze(
+            0
+        ) < torch.from_numpy(solution_counts).to(self.device).unsqueeze(1)
         success_tensor = torch.from_numpy(has_solution).to(self.device)
         if return_all_solutions:
             return self._process_all_solutions(
@@ -649,78 +858,48 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
             self.configs, dtype=wp.vec3, device=standardize_device_string(self.device)
         )
 
-        # Generate a set of elbow angles sampled uniformly from -π to π.
-        # The number of samples is determined by self.cfg.num_samples.
-        # These angles are used for searching possible IK solutions.
-        joint_reference_limits = [-wp.pi, wp.pi]
-        self.elbow_angles = np.linspace(
-            joint_reference_limits[0], joint_reference_limits[1], self.cfg.num_samples
-        ).tolist()
-
-        # Convert elbow angles to Warp array for CUDA computation.
-        self.elbow_angles_wp = wp.array(
-            self.elbow_angles,
+        self.ik_nearest_weight_wp = wp.array(
+            self.cfg.ik_nearest_weight,
             dtype=float,
             device=standardize_device_string(self.device),
         )
+        self._temporary_workspace: dict[tuple[int, str], wp.array] = {}
 
-    def _sort_ik_solutions(
-        self, qpos_out_wp, success_wp, qpos_seed, num_targets, num_configs, num_angles
-    ):
-        """
-        Sort IK solutions based on weighted distance.
+    def _temporary_array(self, count: int, dtype: type, name: str) -> wp.array:
+        """Return a zeroed reusable Warp scratch array."""
+        key = (count, name)
+        array = self._temporary_workspace.get(key)
+        if array is None:
+            array = wp.zeros(
+                count,
+                dtype=dtype,
+                device=standardize_device_string(self.device),
+            )
+            self._temporary_workspace[key] = array
+        else:
+            array.zero_()
+        return array
 
-        Args:
-            qpos_out_wp: Warp array of IK solutions (shape: [num_targets * num_configs * num_angles, 7]).
-            success_wp: Warp array of validity flags (shape: [num_targets * num_configs * num_angles]).
-            qpos_seed: Warp array of seed positions (shape: [num_targets, 7]).
-            num_targets: Number of targets.
-            num_configs: Number of configurations.
-            num_angles: Number of angles.
-
-        Returns:
-            Tuple[wp.array, wp.array]: Sorted IK solutions and their validity flags.
-        """
-        N = num_targets
-        N_SOL = num_configs * num_angles
-        DOF = 7
-
-        sorted_ik_solutions = wp.zeros(
-            N * N_SOL * DOF, dtype=float, device=standardize_device_string(self.device)
-        )
-        sorted_ik_valid_flags = wp.zeros(
-            N * N_SOL, dtype=int, device=standardize_device_string(self.device)
-        )
-        distances = wp.zeros(
-            N * N_SOL, dtype=float, device=standardize_device_string(self.device)
-        )
-        indices = wp.zeros(
-            N * N_SOL, dtype=int, device=standardize_device_string(self.device)
-        )
-
+    def _get_seed_arm_angles(self, qpos_seed: torch.Tensor) -> torch.Tensor:
+        """Compute seed arm angles with the Warp geometric implementation."""
+        batch_size = qpos_seed.shape[0]
+        arm_angles_wp = self._temporary_array(batch_size, float, "arm_angles")
+        success_wp = self._temporary_array(batch_size, int, "arm_angle_success")
         wp.launch(
-            kernel=sort_ik_kernel,
-            dim=num_targets,
+            kernel=compute_arm_angle_kernel,
+            dim=batch_size,
             inputs=[
-                qpos_out_wp,
-                success_wp,
-                qpos_seed,
-                wp.array(
-                    self.cfg.ik_nearest_weight,
-                    dtype=float,
-                    device=standardize_device_string(self.device),
-                ),
-                distances,
-                indices,
-                N_SOL,
+                wp.from_torch(qpos_seed.contiguous().flatten()),
+                self.dh_params_wp,
+                self.link_lengths_wp,
+                self.rotation_directions_wp,
             ],
-            outputs=[
-                sorted_ik_solutions,
-                sorted_ik_valid_flags,
-            ],
+            outputs=[arm_angles_wp, success_wp],
             device=standardize_device_string(self.device),
         )
-        return sorted_ik_solutions, sorted_ik_valid_flags
+        arm_angles = wp.to_torch(arm_angles_wp)
+        success = wp.to_torch(success_wp).bool()
+        return torch.where(success, arm_angles, torch.zeros_like(arm_angles))
 
     def _nearest_ik_solution(
         self, qpos_out_wp, success_wp, qpos_seed, num_targets, num_configs, num_angles
@@ -761,11 +940,7 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
                 qpos_out_wp,
                 success_wp,
                 qpos_seed.flatten(),
-                wp.array(
-                    self.cfg.ik_nearest_weight,
-                    dtype=float,
-                    device=standardize_device_string(self.device),
-                ),
+                self.ik_nearest_weight_wp,
                 N_SOL,
             ],
             outputs=[
@@ -784,7 +959,7 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
         num_targets: int,
         num_configs: int,
         num_angles: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Process and return all valid IK solutions.
 
@@ -801,36 +976,35 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
         """
         num_per_target = num_configs * num_angles
 
+        ik_solutions_tensor = wp.to_torch(qpos_out_wp).view(
+            num_targets, num_per_target, 7
+        )
+        ik_valid_flags_tensor = (
+            wp.to_torch(success_wp).view(num_targets, num_per_target).bool()
+        )
         if self.cfg.sort_ik:
-            sorted_ik_solutions, sorted_ik_valid_flags = self._sort_ik_solutions(
-                qpos_out_wp,
-                success_wp,
-                qpos_seed.flatten(),
-                num_targets,
-                num_configs,
-                num_angles,
+            diff = ik_solutions_tensor - qpos_seed.unsqueeze(1)
+            wrapped_diff = torch.atan2(torch.sin(diff), torch.cos(diff))
+            weights = torch.as_tensor(
+                self.cfg.ik_nearest_weight,
+                dtype=ik_solutions_tensor.dtype,
+                device=self.device,
             )
-
-            ik_solutions_tensor = wp.to_torch(sorted_ik_solutions).view(
-                num_targets, num_per_target, 7
+            distances = torch.sum(wrapped_diff.square() * weights, dim=-1)
+            distances.masked_fill_(~ik_valid_flags_tensor, float("inf"))
+            indices = torch.argsort(distances, dim=1)
+            ik_solutions_tensor = torch.gather(
+                ik_solutions_tensor, 1, indices.unsqueeze(-1).expand(-1, -1, 7)
             )
-            ik_valid_flags_tensor = (
-                wp.to_torch(sorted_ik_valid_flags)
-                .view(num_targets, num_per_target)
-                .bool()
-            )
-        else:
-            ik_solutions_tensor = wp.to_torch(qpos_out_wp).view(
-                num_targets, num_per_target, 7
-            )
-            ik_valid_flags_tensor = (
-                wp.to_torch(success_wp).view(num_targets, num_per_target).bool()
-            )
+            ik_valid_flags_tensor = torch.gather(ik_valid_flags_tensor, 1, indices)
 
         success_flags = ik_valid_flags_tensor.any(dim=1)
 
         valid_qpos_list = [
-            ik_solutions_tensor[i][ik_valid_flags_tensor[i]] for i in range(num_targets)
+            self._deduplicate_solutions(
+                ik_solutions_tensor[i][ik_valid_flags_tensor[i]]
+            )
+            for i in range(num_targets)
         ]
         max_solutions = max(q.shape[0] for q in valid_qpos_list)
         valid_qpos_tensor = torch.zeros(
@@ -851,7 +1025,7 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
         num_targets: int,
         num_configs: int,
         num_angles: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Process and return the nearest valid IK solution for each target.
 
@@ -956,58 +1130,43 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
 
     def _compute_ik_solutions(
         self,
-        combinations_wp: wp.array,
         xpos_wp: wp.array,
+        qpos_seed: torch.Tensor,
         qpos_out_wp: wp.array,
         success_wp: wp.array,
         num_combinations: int,
+        num_configs: int,
+        num_angles: int,
     ) -> None:
         """
         Compute IK solutions using the provided combinations.
 
         Args:
-            combinations_wp: Warp array of combinations for parallel processing.
             xpos_wp: Transformed target poses.
             qpos_out_wp: Output array for joint positions.
             success_wp: Output array for success flags.
             num_combinations: Total number of combinations to process.
         """
         # Temporary arrays
-        res_arm_angles = wp.zeros(
-            num_combinations, dtype=int, device=standardize_device_string(self.device)
+        res_arm_angles = self._temporary_array(num_combinations, int, "res_arm_angles")
+        joints_arm = self._temporary_array(num_combinations, wp.vec4, "joints_arm")
+        res_plane_normal = self._temporary_array(
+            num_combinations, int, "res_plane_normal"
         )
-        joints_arm = wp.zeros(
-            num_combinations,
-            dtype=wp.vec4,
-            device=standardize_device_string(self.device),
+        plane_normal = self._temporary_array(num_combinations, wp.vec3, "plane_normal")
+        base_to_elbow_rotation = self._temporary_array(
+            num_combinations, wp.mat33, "base_to_elbow_rotation"
         )
-        res_plane_normal = wp.zeros(
-            num_combinations, dtype=int, device=standardize_device_string(self.device)
-        )
-        plane_normal = wp.zeros(
-            num_combinations,
-            dtype=wp.vec3,
-            device=standardize_device_string(self.device),
-        )
-        base_to_elbow_rotation = wp.zeros(
-            num_combinations,
-            dtype=wp.mat33,
-            device=standardize_device_string(self.device),
-        )
-        joints_plane = wp.zeros(
-            num_combinations,
-            dtype=wp.vec4,
-            device=standardize_device_string(self.device),
-        )
+        joints_plane = self._temporary_array(num_combinations, wp.vec4, "joints_plane")
 
         # Launch kernel to compute IK solutions
         wp.launch(
             kernel=compute_ik_kernel,
             dim=num_combinations,
             inputs=(
-                combinations_wp,
                 xpos_wp,
                 self.elbow_angles_wp,
+                wp.from_torch(qpos_seed.contiguous().flatten()),
                 self.qpos_limits_wp,
                 self.configs_wp,
                 self.dh_params_wp,
@@ -1019,6 +1178,8 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
                 plane_normal,
                 base_to_elbow_rotation,
                 joints_plane,
+                num_configs,
+                num_angles,
             ),
             outputs=[success_wp, qpos_out_wp],
             device=standardize_device_string(self.device),
@@ -1030,7 +1191,7 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
         qpos_seed: torch.Tensor,
         return_all_solutions: bool = False,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute inverse kinematics (IK) for the given target pose.
 
@@ -1043,7 +1204,7 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
             Tuple[torch.Tensor, torch.Tensor]: Success flag and joint positions.
         """
         # Prepare inputs
-        target_xpos = target_xpos.to(self.device)
+        target_xpos = target_xpos.to(self.device, dtype=torch.float32)
         target_xpos = target_xpos.view(-1, 4, 4)
         target_xpos_wp = wp.from_torch(target_xpos, dtype=wp.mat44)
 
@@ -1068,39 +1229,28 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
 
         # Define configurations and angles
         if qpos_seed is None:
-            qpos_seed = wp.zeros(
+            qpos_seed = torch.zeros(
                 (target_xpos.shape[0], 7),
-                dtype=float,
-                device=standardize_device_string(self.device),
+                dtype=target_xpos.dtype,
+                device=self.device,
             )
-            # TODO: Currently, full-space sampling is used to temporarily address situations
-            # where joint space discontinuities or solution failures occur in different user scenarios.
-            # Future plans include reducing the sampling space and adjusting the configuration.
-            #
-            # self.configs = [wp.vec3(*np.sign(qpos_seed[[1, 3, 5]].cpu().numpy()))]
+        else:
+            qpos_seed = (
+                qpos_seed.to(self.device, dtype=torch.float32)
+                .reshape(target_xpos.shape[0], -1, 7)[:, 0]
+                .contiguous()
+            )
 
         # Prepare output arrays
         num_targets = target_xpos_wp.shape[0]
         num_configs = len(self.configs)
-        num_angles = len(self.elbow_angles)
+        elbow_angles = self._sample_elbow_angles(
+            qpos_seed, force_full=return_all_solutions
+        ).contiguous()
+        num_angles = elbow_angles.shape[1]
+        self.elbow_angles_wp = wp.from_torch(elbow_angles.flatten())
         # num_solutions = num_configs * num_angles
         num_combinations = num_targets * num_configs * num_angles
-
-        # Generate combinations for parallel processing
-        combinations_np = np.stack(
-            np.meshgrid(
-                np.arange(num_targets),
-                np.arange(num_configs),
-                np.arange(num_angles),
-                indexing="ij",
-            ),
-            axis=-1,
-        ).reshape(-1, 3)
-        combinations_wp = wp.array(
-            combinations_np,
-            dtype=wp.vec3,
-            device=standardize_device_string(self.device),
-        )
 
         # Output arrays
         qpos_out_wp = wp.zeros(
@@ -1114,7 +1264,13 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
 
         # Compute IK solutions
         self._compute_ik_solutions(
-            combinations_wp, xpos_wp, qpos_out_wp, success_wp, num_combinations
+            xpos_wp,
+            qpos_seed,
+            qpos_out_wp,
+            success_wp,
+            num_combinations,
+            num_configs,
+            num_angles,
         )
 
         # Check for successful solutions
@@ -1145,7 +1301,7 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
             return (
                 torch.zeros(num_targets, dtype=torch.bool, device=self.device),
                 torch.zeros(
-                    (num_targets, num_targets, 7),
+                    (num_targets, 7),
                     dtype=torch.float32,
                     device=self.device,
                 ),
@@ -1185,7 +1341,7 @@ class SRSSolver(BaseSolver):
         fk_dict = self.pk_serial_chain.forward_kinematics(
             th=torch.zeros(7, dtype=torch.float32, device=self.device), end_only=False
         )
-        root_tf = fk_dict[list(fk_dict.keys())[0]]
+        root_tf = fk_dict[next(iter(fk_dict))]
         self.root_base_xpos = root_tf.get_matrix().cpu().numpy()
 
         # Initialize implementation based on device
@@ -1205,6 +1361,32 @@ class SRSSolver(BaseSolver):
             device=standardize_device_string(self.device),
         )
 
+    def set_tcp(self, xpos: np.ndarray) -> None:
+        """Set TCP and synchronize the analytical backend caches."""
+        super().set_tcp(xpos)
+        if hasattr(self, "impl"):
+            self.impl.tcp_xpos = self.tcp_xpos.copy()
+            self.impl.tcp_inv_np = np.linalg.inv(self.tcp_xpos)
+            if isinstance(self.impl, _CUDASRSSolverImpl):
+                self.impl.tcp_inv_wp = wp.mat44(*self.impl.tcp_inv_np.flatten())
+
+    def set_ik_nearest_weight(
+        self, ik_weight: np.ndarray, joint_ids: np.ndarray | None = None
+    ) -> bool:
+        """Set nearest-solution weights and synchronize backend caches."""
+        success = super().set_ik_nearest_weight(ik_weight, joint_ids)
+        if not success or not hasattr(self, "impl"):
+            return success
+        weights = torch.as_tensor(
+            self.ik_nearest_weight, dtype=torch.float32, device=self.device
+        )
+        self.cfg.ik_nearest_weight = weights.detach().cpu().numpy().copy()
+        if isinstance(self.impl, _CPUSRSSolverImpl):
+            self.impl.ik_nearest_weight_tensor = weights
+        else:
+            self.impl.ik_nearest_weight_wp = wp.from_torch(weights.contiguous())
+        return True
+
     def update_with_robot_limit(self, robot_qpos_limits):
         super().update_with_robot_limit(robot_qpos_limits)
         self._update_impl_qpos_limits()
@@ -1215,7 +1397,7 @@ class SRSSolver(BaseSolver):
         qpos_seed: torch.Tensor = None,
         return_all_solutions: bool = False,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute inverse kinematics (IK) for the given target pose.
 

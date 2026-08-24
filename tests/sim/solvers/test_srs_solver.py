@@ -17,25 +17,25 @@
 from __future__ import annotations
 
 import os
+
 import torch
 
 torch._dynamo.config.cache_size_limit = 128  # recompile_limit
-import pytest
 import numpy as np
+import pytest
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
 from embodichain.data import get_data_path
-
-from embodichain.lab.sim.solvers.srs_solver import SRSSolver, SRSSolverCfg
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RobotCfg
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.robots.dexforce_w1.params import (
+    W1ArmKineParams,
+)
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
 )
-from embodichain.lab.sim.robots.dexforce_w1.params import (
-    W1ArmKineParams,
-)
+from embodichain.lab.sim.solvers.srs_solver import SRSSolver, SRSSolverCfg
 
 
 class BaseSolverTest:
@@ -57,7 +57,7 @@ class BaseSolverTest:
 
             cfg = SRSSolverCfg()
             cfg.joint_names = [
-                f"{'LEFT' if arm_side == DexforceW1ArmSide.LEFT else 'RIGHT'}_J{i+1}"
+                f"{'LEFT' if arm_side == DexforceW1ArmSide.LEFT else 'RIGHT'}_J{i + 1}"
                 for i in range(7)
             ]
             cfg.end_link_name = (
@@ -75,6 +75,7 @@ class BaseSolverTest:
             cfg.T_b_ob = arm_params.T_b_ob
             cfg.link_lengths = arm_params.link_lengths
             cfg.rotation_directions = arm_params.rotation_directions
+            cfg.ik_nearest_weight = np.array([2.0, 2.0, 2.0, 0.0, 1.0, 1.0, 1.0])
 
             self.solver[arm_name] = SRSSolver(cfg=cfg, num_envs=1, device=device)
 
@@ -101,9 +102,9 @@ class BaseSolverTest:
 
         ik_xpos = self.solver[arm_name].get_fk(qpos=ik_qpos[:, 0, :])
 
-        assert torch.allclose(
-            fk_xpos, ik_xpos, atol=1e-3, rtol=1e-3
-        ), f"FK and IK results do not match for {arm_name}"
+        assert torch.allclose(fk_xpos, ik_xpos, atol=1e-3, rtol=1e-3), (
+            f"FK and IK results do not match for {arm_name}"
+        )
 
     def test_update_with_robot_limit_intersects_existing_solver_limits(self):
         """Test robot limit sync only tightens solver limits and never widens them."""
@@ -174,6 +175,73 @@ class BaseSolverTest:
             atol=1e-5,
         ), "FAIL: robot sync did not tighten solver upper_qpos_limits"
 
+    def test_seeded_redundancy_sampling_expands_around_geometric_arm_angle(self):
+        """Test redundancy samples expand around the seed's geometric arm angle."""
+        solver = self.solver[next(iter(self.solver))]
+        seed = torch.tensor(
+            [[0.15, -0.35, 0.40, -0.70, 0.20, 0.30, -0.15]],
+            dtype=torch.float32,
+            device=solver.device,
+        )
+
+        seed_arm_angle = solver.impl._get_seed_arm_angles(seed)
+        angles = solver.impl._sample_elbow_angles(seed)
+
+        step = solver.cfg.redundancy_step
+        expected = torch.stack(
+            (
+                seed_arm_angle,
+                seed_arm_angle + step,
+                seed_arm_angle - step,
+            ),
+            dim=1,
+        )
+        expected = torch.remainder(expected + torch.pi, 2.0 * torch.pi) - torch.pi
+        assert torch.allclose(angles[:, :3], expected, atol=1e-6)
+        assert angles.shape[1] <= solver.cfg.num_samples
+        assert torch.all(angles >= -torch.pi)
+        assert torch.all(angles < torch.pi)
+        wrapped_delta = torch.atan2(
+            torch.sin(angles[:, :, None] - angles[:, None, :]),
+            torch.cos(angles[:, :, None] - angles[:, None, :]),
+        ).abs()
+        diagonal = torch.eye(
+            angles.shape[1], dtype=torch.bool, device=solver.device
+        ).unsqueeze(0)
+        assert torch.all(wrapped_delta.masked_fill(diagonal, torch.inf) > 1e-6)
+
+    def test_periodic_joint_values_wrap_inside_limits_near_seed(self):
+        """Test equivalent revolute values are retained instead of rejected."""
+        solver = self.solver[next(iter(self.solver))]
+        joints = np.array([-3.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        limits = np.array([[3.0, 3.2]] + [[-1.0, 1.0]] * 6)
+        seed = np.array([3.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        wrapped = solver.impl._wrap_to_limits(joints, limits, seed)
+
+        assert wrapped is not None
+        assert np.isclose(wrapped[0], -3.2 + 2.0 * np.pi)
+        assert np.all(wrapped >= limits[:, 0])
+        assert np.all(wrapped <= limits[:, 1])
+
+    def test_runtime_tcp_and_weight_updates_reach_backend(self):
+        """Test mutable solver settings synchronize analytical backend caches."""
+        solver = self.solver[next(iter(self.solver))]
+        tcp = np.eye(4)
+        tcp[:3, 3] = np.array([0.01, -0.02, 0.03])
+        weights = np.arange(1.0, 8.0)
+
+        solver.set_tcp(tcp)
+        assert np.allclose(solver.impl.tcp_inv_np, np.linalg.inv(tcp))
+
+        assert solver.set_ik_nearest_weight(weights)
+        assert np.allclose(solver.cfg.ik_nearest_weight, weights)
+        if solver.device.type == "cpu":
+            assert torch.allclose(
+                solver.impl.ik_nearest_weight_tensor.cpu(),
+                torch.from_numpy(weights).float(),
+            )
+
     @classmethod
     def teardown_class(cls):
         if cls.solver is not None:
@@ -210,10 +278,10 @@ class BaseRobotSolverTest:
         cfg_dict = {
             "fpath": urdf,
             "control_parts": {
-                "left_arm": [f"LEFT_J{i+1}" for i in range(7)],
-                "right_arm": [f"RIGHT_J{i+1}" for i in range(7)],
+                "left_arm": [f"LEFT_J{i + 1}" for i in range(7)],
+                "right_arm": [f"RIGHT_J{i + 1}" for i in range(7)],
                 "torso": ["ANKLE", "KNEE", "BUTTOCK", "WAIST"],
-                "head": [f"NECK{i+1}" for i in range(2)],
+                "head": [f"NECK{i + 1}" for i in range(2)],
             },
             "drive_pros": {
                 "stiffness": {
@@ -303,9 +371,9 @@ class BaseRobotSolverTest:
         else:
             ik_xpos = self.robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
 
-        assert torch.allclose(
-            fk_xpos, ik_xpos, atol=1e-4, rtol=1e-4
-        ), f"FK and IK results do not match for {arm_name}"
+        assert torch.allclose(fk_xpos, ik_xpos, atol=1e-4, rtol=1e-4), (
+            f"FK and IK results do not match for {arm_name}"
+        )
 
         # test for failed xpos
         invalid_pose = torch.tensor(
@@ -341,6 +409,61 @@ class TestSRSCPUSolver(BaseSolverTest):
 class TestSRSCUDASolver(BaseSolverTest):
     def setup_method(self):
         self.setup_solver(solver_type="SRSSolver", device="cuda")
+
+    def test_cpu_cuda_backend_parity(self):
+        """Test CPU and CUDA select equivalent solutions for identical inputs."""
+        sample_qpos = torch.tensor(
+            [
+                [0.15, -0.35, 0.25, -0.70, 0.20, 0.30, -0.15],
+                [-0.20, 0.25, -0.30, -0.55, 0.35, -0.20, 0.10],
+            ],
+            dtype=torch.float32,
+        )
+
+        for cuda_solver in self.solver.values():
+            cpu_solver = cuda_solver.cfg.init_solver(
+                num_envs=sample_qpos.shape[0], device=torch.device("cpu")
+            )
+            cuda_seed = sample_qpos.to(cuda_solver.device)
+            target = cuda_solver.get_fk(cuda_seed)
+
+            cuda_arm_angle = cuda_solver.impl._get_seed_arm_angles(cuda_seed)
+            cpu_arm_angle = cpu_solver.impl._get_seed_arm_angles(sample_qpos)
+            arm_angle_delta = torch.atan2(
+                torch.sin(cuda_arm_angle.cpu() - cpu_arm_angle.cpu()),
+                torch.cos(cuda_arm_angle.cpu() - cpu_arm_angle.cpu()),
+            )
+            assert torch.allclose(
+                arm_angle_delta,
+                torch.zeros_like(arm_angle_delta),
+                atol=1e-4,
+                rtol=1e-4,
+            )
+
+            cuda_success, cuda_qpos = cuda_solver.get_ik(target, cuda_seed)
+            cpu_success, cpu_qpos = cpu_solver.get_ik(target.cpu(), sample_qpos)
+
+            assert torch.equal(cuda_success.cpu(), cpu_success.cpu())
+            assert torch.all(cuda_success)
+
+            cuda_solution = cuda_qpos[:, 0].cpu()
+            cpu_solution = cpu_qpos[:, 0].cpu()
+            wrapped_delta = torch.atan2(
+                torch.sin(cuda_solution - cpu_solution),
+                torch.cos(cuda_solution - cpu_solution),
+            )
+            assert torch.allclose(
+                wrapped_delta,
+                torch.zeros_like(wrapped_delta),
+                atol=1e-4,
+                rtol=1e-4,
+            )
+
+            cuda_reconstructed = cuda_solver.get_fk(cuda_qpos[:, 0]).cpu()
+            cpu_reconstructed = cpu_solver.get_fk(cpu_qpos[:, 0]).cpu()
+            assert torch.allclose(
+                cuda_reconstructed, cpu_reconstructed, atol=1e-4, rtol=1e-4
+            )
 
 
 class TestSRSCPURobotSolver(BaseRobotSolverTest):
