@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
+from typing import TypeAlias
 
 from embodichain.lab.sim.skills.calls import (
     DeclarativeValue,
@@ -46,6 +47,7 @@ from .cfg import (
     REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION,
     MAX_EXPANDED_CALLS,
     MAX_REPEAT_COUNT,
+    ArticulationJointPositionValidatorCfg,
     BarrierCfg,
     CyclicPoseTargetCfg,
     ExpertProgramCfg,
@@ -236,7 +238,7 @@ class CompiledPostPolicy:
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledProgramValidator:
+class CompiledObjectNearTargetValidator:
     """Owned validator config with canonical object and resolved target pose."""
 
     cfg: ObjectNearTargetValidatorCfg
@@ -268,6 +270,50 @@ class CompiledProgramValidator:
         )
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
         object.__setattr__(self, "target_pose", self.target_pose.snapshot())
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledArticulationJointPositionValidator:
+    """Owned joint-position validator with its canonical articulation."""
+
+    cfg: ArticulationJointPositionValidatorCfg
+    articulation: SceneArticulationRef
+    source_path: ConfigPath
+
+    def __post_init__(self) -> None:
+        if type(self.cfg) is not ArticulationJointPositionValidatorCfg:
+            raise TypeError(
+                "cfg must be exactly ArticulationJointPositionValidatorCfg."
+            )
+        if type(self.articulation) is not SceneArticulationRef:
+            raise TypeError("articulation must be exactly SceneArticulationRef.")
+        if type(self.source_path) is not tuple:
+            raise TypeError("source_path must be a ConfigPath tuple.")
+        object.__setattr__(
+            self,
+            "cfg",
+            ArticulationJointPositionValidatorCfg(
+                articulation=self.cfg.articulation,
+                joint=self.cfg.joint,
+                minimum_position=self.cfg.minimum_position,
+                maximum_position=self.cfg.maximum_position,
+                kind=self.cfg.kind,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "articulation",
+            _copy_scene_ref(self.articulation),
+        )
+
+
+CompiledProgramValidator: TypeAlias = (
+    CompiledObjectNearTargetValidator | CompiledArticulationJointPositionValidator
+)
+_COMPILED_VALIDATOR_TYPES = (
+    CompiledObjectNearTargetValidator,
+    CompiledArticulationJointPositionValidator,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,8 +418,8 @@ class CompiledProgramSegment:
             raise TypeError("repeat_frames must contain CompiledRepeatFrame values.")
         if not all(type(value) is CompiledPostPolicy for value in post):
             raise TypeError("post_policies must contain CompiledPostPolicy values.")
-        if not all(type(value) is CompiledProgramValidator for value in validators):
-            raise TypeError("validators must contain CompiledProgramValidator values.")
+        if not all(type(value) in _COMPILED_VALIDATOR_TYPES for value in validators):
+            raise TypeError("validators must contain compiled validator values.")
         if type(self.implicit) is not bool:
             raise TypeError("implicit must be a bool.")
         if self.implicit and (post or validators):
@@ -503,11 +549,23 @@ class _PostTemplate:
 
 
 @dataclass(frozen=True, slots=True)
-class _ValidatorTemplate:
+class _ObjectNearTargetValidatorTemplate:
     cfg: ObjectNearTargetValidatorCfg
     object: SceneObjectRef
     target_id: str
     source_path: ConfigPath
+
+
+@dataclass(frozen=True, slots=True)
+class _ArticulationJointPositionValidatorTemplate:
+    cfg: ArticulationJointPositionValidatorCfg
+    articulation: SceneArticulationRef
+    source_path: ConfigPath
+
+
+_ValidatorTemplate: TypeAlias = (
+    _ObjectNearTargetValidatorTemplate | _ArticulationJointPositionValidatorTemplate
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -853,20 +911,33 @@ def _iter_segments(
     )
     validators: list[CompiledProgramValidator] = []
     for validator in template.validators:
-        target_pose, selection = _resolve_target(
-            validator.target_id,
-            targets=targets,
-            repeat_frames=repeat_frames,
-        )
-        validators.append(
-            CompiledProgramValidator(
-                cfg=validator.cfg,
-                object=validator.object,
-                target_pose=target_pose,
-                target_selection=selection,
-                source_path=validator.source_path,
+        if type(validator) is _ObjectNearTargetValidatorTemplate:
+            target_pose, selection = _resolve_target(
+                validator.target_id,
+                targets=targets,
+                repeat_frames=repeat_frames,
             )
-        )
+            validators.append(
+                CompiledObjectNearTargetValidator(
+                    cfg=validator.cfg,
+                    object=validator.object,
+                    target_pose=target_pose,
+                    target_selection=selection,
+                    source_path=validator.source_path,
+                )
+            )
+        elif type(validator) is _ArticulationJointPositionValidatorTemplate:
+            validators.append(
+                CompiledArticulationJointPositionValidator(
+                    cfg=validator.cfg,
+                    articulation=validator.articulation,
+                    source_path=validator.source_path,
+                )
+            )
+        else:
+            raise TypeError(
+                f"Unsupported internal validator template {type(validator).__name__}."
+            )
     segment = CompiledProgramSegment(
         segment_index=state.segment_index,
         segment_id=_segment_identity(
@@ -1444,39 +1515,70 @@ class ExpertProgramCompiler:
             validators: list[_ValidatorTemplate] = []
             for index, cfg in enumerate(node.validators):
                 validator_path = (*path, "validators", index)
-                if (
-                    type(cfg) is not ObjectNearTargetValidatorCfg
-                    or cfg.kind != "object_near_target"
-                ):
-                    raise ExpertProgramCompileError(
-                        "unsupported_validator",
-                        validator_path,
-                        "Supported schemas accept only exact object_near_target "
-                        "validators.",
+                if type(cfg) is ObjectNearTargetValidatorCfg:
+                    if cfg.kind != "object_near_target":
+                        raise ExpertProgramCompileError(
+                            "unsupported_validator",
+                            validator_path,
+                            "ObjectNearTargetValidatorCfg must use kind "
+                            "'object_near_target'.",
+                        )
+                    if cfg.target not in targets:
+                        raise ExpertProgramCompileError(
+                            "unknown_target",
+                            (*validator_path, "target"),
+                            f"Unknown target {cfg.target!r}.",
+                        )
+                    object_ref = self._resolve_scene(
+                        cfg.object,
+                        expected_types=(SceneObjectRef,),
+                        path=(*validator_path, "object"),
                     )
-                if cfg.target not in targets:
-                    raise ExpertProgramCompileError(
-                        "unknown_target",
-                        (*validator_path, "target"),
-                        f"Unknown target {cfg.target!r}.",
+                    validators.append(
+                        _ObjectNearTargetValidatorTemplate(
+                            cfg=ObjectNearTargetValidatorCfg(
+                                object=cfg.object,
+                                target=cfg.target,
+                                position_tolerance=cfg.position_tolerance,
+                                kind=cfg.kind,
+                            ),
+                            object=object_ref,
+                            target_id=cfg.target,
+                            source_path=validator_path,
+                        )
                     )
-                object_ref = self._resolve_scene(
-                    cfg.object,
-                    expected_types=(SceneObjectRef,),
-                    path=(*validator_path, "object"),
-                )
-                validators.append(
-                    _ValidatorTemplate(
-                        cfg=ObjectNearTargetValidatorCfg(
-                            object=cfg.object,
-                            target=cfg.target,
-                            position_tolerance=cfg.position_tolerance,
-                            kind=cfg.kind,
-                        ),
-                        object=object_ref,
-                        target_id=cfg.target,
-                        source_path=validator_path,
+                    continue
+                if type(cfg) is ArticulationJointPositionValidatorCfg:
+                    if cfg.kind != "articulation_joint_position":
+                        raise ExpertProgramCompileError(
+                            "unsupported_validator",
+                            validator_path,
+                            "ArticulationJointPositionValidatorCfg must use kind "
+                            "'articulation_joint_position'.",
+                        )
+                    articulation_ref = self._resolve_scene(
+                        cfg.articulation,
+                        expected_types=(SceneArticulationRef,),
+                        path=(*validator_path, "articulation"),
                     )
+                    validators.append(
+                        _ArticulationJointPositionValidatorTemplate(
+                            cfg=ArticulationJointPositionValidatorCfg(
+                                articulation=cfg.articulation,
+                                joint=cfg.joint,
+                                minimum_position=cfg.minimum_position,
+                                maximum_position=cfg.maximum_position,
+                                kind=cfg.kind,
+                            ),
+                            articulation=articulation_ref,
+                            source_path=validator_path,
+                        )
+                    )
+                    continue
+                raise ExpertProgramCompileError(
+                    "unsupported_validator",
+                    validator_path,
+                    f"Unsupported validator {type(cfg).__name__}.",
                 )
             steps = self._compile_node(
                 node.steps,

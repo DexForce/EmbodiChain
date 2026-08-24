@@ -23,6 +23,7 @@ import math
 import pytest
 
 from embodichain.lab.gym.envs.expert_program import (
+    ArticulationJointPositionValidatorCfg,
     CyclicPoseTargetCfg,
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
@@ -70,6 +71,7 @@ def test_every_public_schema_value_uses_configclass() -> None:
         RegisteredSemanticCallCfg,
         WaitStablePostCfg,
         ObjectNearTargetValidatorCfg,
+        ArticulationJointPositionValidatorCfg,
         InvokeCfg,
         SequenceCfg,
         RepeatCfg,
@@ -204,3 +206,26 @@ def test_segment_owns_post_policy_and_validator_sequences() -> None:
     assert segment.validators == (
         ObjectNearTargetValidatorCfg(object="cube", target="drop_pose"),
     )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({}, "At least one"),
+        (
+            {"minimum_position": 0.2, "maximum_position": 0.1},
+            "less than or equal",
+        ),
+    ],
+)
+def test_articulation_joint_validator_requires_an_ordered_bound(
+    kwargs: dict[str, object],
+    message: str,
+) -> None:
+    """A joint validator must define one non-empty inclusive interval."""
+    with pytest.raises(ValueError, match=message):
+        ArticulationJointPositionValidatorCfg(
+            articulation="drawer",
+            joint="cabinet_to_drawer",
+            **kwargs,
+        )

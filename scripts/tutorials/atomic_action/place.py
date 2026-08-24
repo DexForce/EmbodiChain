@@ -48,6 +48,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -136,12 +137,16 @@ def main() -> None:
                 grasp=hand_close,
             )
         },
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
+            )
+        },
     )
     semantics = create_antipodal_semantics(
         obj,
         label="cube",
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
     )
     place_poses = make_place_eef_poses(sim.device)
     if not args.no_vis_eef_axis:

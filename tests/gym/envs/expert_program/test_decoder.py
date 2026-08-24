@@ -23,6 +23,7 @@ from copy import deepcopy
 import pytest
 
 from embodichain.lab.gym.envs.expert_program import (
+    ArticulationJointPositionValidatorCfg,
     ConfigPath,
     ExpertProgramDecodeError,
     ExpertProgramIntegrationCfg,
@@ -141,6 +142,29 @@ def test_decoder_builds_owned_repeated_cube_ast() -> None:
     assert type(place) is PlaceCfg
     assert place.at == TargetRefCfg(target="drop_pose")
     assert config.targets["drop_pose"].values[0].position[0] == pytest.approx(0.45)
+
+
+def test_decoder_supports_articulation_joint_position_validator() -> None:
+    """Joint bounds decode without requiring an unrelated pose target."""
+    data = _program_data()
+    segment = data["program"]["body"]
+    segment["validators"] = [
+        {
+            "kind": "articulation_joint_position",
+            "articulation": "drawer",
+            "joint": "cabinet_to_drawer",
+            "minimum_position": 0.10,
+        }
+    ]
+
+    config = decode_expert_program(data)
+
+    validator = config.program.body.validators[0]
+    assert type(validator) is ArticulationJointPositionValidatorCfg
+    assert validator.articulation == "drawer"
+    assert validator.joint == "cabinet_to_drawer"
+    assert validator.minimum_position == pytest.approx(0.10)
+    assert validator.maximum_position is None
 
 
 def test_decoder_supports_every_builtin_semantic_call() -> None:

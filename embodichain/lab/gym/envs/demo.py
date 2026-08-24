@@ -24,9 +24,6 @@ from types import MappingProxyType
 from typing import Any, Literal
 
 import torch
-from tensordict import TensorDict
-
-from embodichain.lab.sim.types import EnvAction
 
 from ._json import json_safe_copy as _json_safe_copy
 
@@ -36,7 +33,6 @@ __all__ = [
     "DemoEpisodeResult",
     "DemoSegment",
     "DemoSegmentResult",
-    "ProcessedEnvAction",
     "execute_demo_episode",
     "resolve_demo_segments",
 ]
@@ -55,40 +51,6 @@ DEMO_ANNOTATION_KEYS = (
     "truncated",
 )
 """Per-frame annotation keys stored in expert rollout buffers."""
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class ProcessedEnvAction:
-    """Owned controller-ready action that must still pass through ``env.step``.
-
-    Semantic runtimes and demonstration bridges may already have produced the
-    action-manager output (for example, a full joint-position command assembled
-    from typed runtime endpoints). Wrapping it prevents the environment from
-    applying the pre-action transform a second time while retaining the normal
-    simulation, manager, recorder, reward, and dataset step lifecycle.
-
-    Args:
-        value: Controller-ready tensor or ``TensorDict``.
-        metadata: JSON-compatible provenance attached by the producer. The
-            environment does not interpret this mapping.
-    """
-
-    value: EnvAction
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.value, (torch.Tensor, TensorDict)):
-            raise TypeError("value must be a torch.Tensor or TensorDict.")
-        if not isinstance(self.metadata, Mapping):
-            raise TypeError("metadata must be a mapping.")
-        owned_value = self.value.clone()
-        owned_metadata = _json_safe_copy(self.metadata, field_name="metadata")
-        object.__setattr__(self, "value", owned_value)
-        object.__setattr__(self, "metadata", MappingProxyType(owned_metadata))
-
-    def snapshot(self) -> ProcessedEnvAction:
-        """Return an independently owned processed-action envelope."""
-        return ProcessedEnvAction(value=self.value, metadata=self.metadata)
 
 
 @dataclass(frozen=True)

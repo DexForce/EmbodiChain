@@ -37,8 +37,6 @@
                 [-0.40, 0.48, 0.10],
                 [-0.42, -0.08, 0.10]
             ],
-            "grasp_samples": 10000,
-            "force_reannotate": false,
             "grasp_hold_steps": 45,
             "settle_min_steps": 15,
             "settle_max_steps": 80,

@@ -27,6 +27,7 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
+from ..grasping import GraspPoseGenerator
 from ..atomic_actions.bindings import EndpointBinding
 from ..atomic_actions.engine import AtomicActionEngine
 from ..atomic_actions.execution import (
@@ -1423,6 +1424,7 @@ class SkillRuntime:
         motion_generator: object,
         scene_registry: SceneRegistry,
         robot_profile: object,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         call_catalog: object | None = None,
         effect_verifier: SemanticEffectVerifier | None = None,
         registered_lowerers: Iterable[object] = (),
@@ -1484,6 +1486,7 @@ class SkillRuntime:
         engine = AtomicActionEngine(
             motion_generator,
             control_profiles=robot_profile.action_control_profiles(),
+            grasp_pose_generators=grasp_pose_generators,
         )
         manifest = SemanticIntegrationManifest(
             scene=SceneManifest.from_registry(scene_registry),

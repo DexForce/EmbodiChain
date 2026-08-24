@@ -65,6 +65,8 @@ class TestMultiSegmentsCubePickPlaceEnv:
         assert config["id"] == "MultiSegmentsCubePickPlace-v1"
         assert config["env"]["extensions"]["num_cycles"] == 3
         assert config["env"]["extensions"]["grasp_hold_steps"] == 45
+        assert "grasp_samples" not in config["env"]["extensions"]
+        assert "force_reannotate" not in config["env"]["extensions"]
         assert len(config["env"]["extensions"]["place_positions"]) == 2
         assert config["rigid_object"][0]["uid"] == "cube"
         assert config["robot"]["class_type"] == "URRobot"

@@ -23,6 +23,7 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
       demo
       expert_program
       managers
+      types
       wrapper
 
 .. toctree::
@@ -55,6 +56,19 @@ Environment Classes
     :members:
     :exclude-members: __init__, class_type
 
+Controller-ready Actions
+------------------------
+
+``ControllerAction`` marks commands that already crossed the raw-policy
+preprocessing boundary. The environment validates these commands and skips
+``ActionManager`` terms in ``pre`` mode while retaining the normal Gym step and
+``post`` processing lifecycle.
+
+.. currentmodule:: embodichain.lab.gym.envs.types
+
+.. autoclass:: ControllerAction
+    :members:
+
 Demonstration Episodes
 ----------------------
 
@@ -66,9 +80,6 @@ segment spans.
 .. currentmodule:: embodichain.lab.gym.envs.demo
 
 .. autoclass:: DemoSegment
-    :members:
-
-.. autoclass:: ProcessedEnvAction
     :members:
 
 .. autoclass:: DemoSegmentResult

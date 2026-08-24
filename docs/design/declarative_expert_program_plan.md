@@ -1,12 +1,14 @@
 # Declarative Expert Programs and the Unified Semantic Skill Runtime
 
-- Status: Expert Program runtime implemented on the current branch; integration
-  and physical task qualification remain in progress
+- Status: Expert Program runtime and two official reference integrations
+  implemented on the current branch; one-episode simulator smoke qualification
+  passes for both references, while broader multi-seed qualification remains
+  in progress
 - Main baseline: `origin/main@df06818a` (semantic runtime and parallel foundation,
   merged through [PR #496](https://github.com/DexForce/EmbodiChain/pull/496))
 - Current branch: `feat/declarative-expert-program-runtime`
   ([PR #497](https://github.com/DexForce/EmbodiChain/pull/497))
-- Last updated: 2026-08-22
+- Last updated: 2026-08-23
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
 
@@ -94,6 +96,7 @@ converge at `SemanticCallSpec` and use the same `SemanticSkillCompiler`,
 | Physical evidence and effect decisions | typed evidence providers and `EffectMonitor` |
 | Gym action buffering and step handshake | `AtomicDemoBridge` and the demo executor |
 | Settling between calls and task acceptance | segment post-policy and validator ports |
+| Final Expert Program task success | completed bridge acceptance mask exposed by `EmbodiedEnv` |
 | Dataset segment metadata | `DemoSegment` / `DemoSegmentResult` |
 
 The layers are intentionally one-way. Gym frontend types must not be imported
@@ -145,6 +148,13 @@ a standalone `ProgramNodeCfg`. A parallel block:
 Supported built-in call configs are `PickCfg`, `PlaceCfg`, and `HandOverCfg`.
 `RegisteredSemanticCallCfg` is the explicit catalog extension boundary.
 
+Supported segment validators are:
+
+- `ObjectNearTargetValidatorCfg`, which compares a bound rigid object's
+  measured position with a resolved program target; and
+- `ArticulationJointPositionValidatorCfg`, which compares one explicitly named
+  articulation joint with an inclusive lower and/or upper position bound.
+
 ### 5.3 Safety and boundedness
 
 The decoder and config constructors enforce:
@@ -170,14 +180,16 @@ scene, profile, policy, and validator IDs without touching live state.
 schema_version: 2
 program_id: repeated_cube_pick_place
 integration:
-  robot_profile: ur5_parallel_gripper_v1
-  scene_registry: multi_segments_cube_v1
+  robot_profile: expert_program_ur5_pick_place
+  scene_registry: expert_program_repeated_pick_place
   runtime_preset: safe
 targets:
   drop_pose:
     kind: cyclic_pose
     values:
       - position: [-0.40, 0.48, 0.10]
+        quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
+      - position: [-0.42, -0.08, 0.10]
         quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
 program:
   kind: repeat
@@ -189,12 +201,16 @@ program:
       kind: sequence
       items:
         - kind: invoke
-          call: {kind: pick, object: cube}
+          call:
+            kind: pick
+            object: cube
+            resources: {primary: manipulator}
         - kind: invoke
           call:
             kind: place
             object: cube
             at: {kind: target_ref, target: drop_pose}
+            resources: {primary: manipulator}
     post:
       - {kind: wait_stable, entity: cube, preset: rigid_object}
     validators:
@@ -203,6 +219,11 @@ program:
         target: drop_pose
         position_tolerance: 0.12
 ```
+
+This is the packaged program at
+`embodichain_tasks/configs/expert_program/repeated_pick_place.yaml`; its
+integration IDs are matched exactly by the reference environment rather than
+being inferred from simulator names.
 
 ## 6. Compilation
 
@@ -263,6 +284,13 @@ The adapter validates integration IDs, compiles against a provider-free scene
 manifest, recreates fresh live providers for execution, performs semantic and
 parallel preflight, and constructs one `AtomicDemoBridge`.
 
+For an enabled Expert Program, `EmbodiedEnv.is_task_success()` is false until
+the bridge's segment iterator finishes normally. Normal completion publishes
+the bridge's final row-local eligibility mask after runtime results,
+post-policies, and every segment validator have been combined. Reset first lets
+`BaseEnv` consume that result for dataset saving and then clears the completed
+bridge, so a stale program result cannot leak into the next episode.
+
 ### 7.3 Timing
 
 The Gym control cadence belongs to the live `PlanningContext.control_dt`, which
@@ -295,13 +323,40 @@ fabricate verified task state.
 ### 7.5 Demo execution
 
 `AtomicDemoBridge` never calls `env.step()` itself. It yields owned
-`ProcessedEnvAction` values through lazy `DemoSegment` iterables. The shared
+`ControllerAction` values through lazy `DemoSegment` iterables. The shared
 demo executor performs the environment step, advances the bridge clock only
 after consumption, and records completion metadata.
 
 The buffered sink owns only unconsumed Gym actions and safe-stop handshakes. It
 does not publish evidence or maintain a redundant wrapper around each buffered
 action.
+
+### 7.6 Official reference task integrations
+
+The current branch adds two independent task examples under
+`embodichain_tasks.expert_program`. They are comparisons, not replacements:
+`MultiSegmentsCubePickPlace-v1` and `OpenDrawer-v1` retain their existing IDs,
+implementations, and configurations.
+
+| Environment ID | Declarative path | Atomic path | Application acceptance |
+|---|---|---|---|
+| `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; a `ContactSensor` reports a grasp constraint only when the cube contacts both gripper fingers | standard `object_near_target` validator checks the measured cube position against the selected cyclic target |
+| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call with a strict executable-free payload | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal` and `SlideOptions` for the live drawer-handle link | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
+
+Both configurations load their Expert Program through the top-level
+`expert_program_path`, bind the same UR5 parallel-gripper embodiment explicitly,
+and consume commands through the normal `env.step()` demo path. The Open Drawer
+example deliberately does not add an atomic articulation effect to `Slide`:
+`Slide` completion means motion completion, while drawer opening remains an
+application-level observation. Both examples use shared built-in settling
+presets (`rigid_object` and `articulation` respectively), and neither task class
+reimplements `is_task_success()`.
+
+A fully generic `DeclarativeExpertProgramEnv` is intentionally deferred. The
+two task classes still own concrete scene assets, sensors/evidence providers,
+robot-profile assembly, and Open Drawer's registered `Slide` lowerer. This step
+standardizes only lifecycle and policy behavior that is independent of those
+composition choices.
 
 ## 8. Parallel execution
 
@@ -339,9 +394,37 @@ There is no duplicate generic `RobotResourceBinding` or protocol hierarchy.
 Custom endpoint kinds extend the core `ResourceEndpoint`/adapter contract and
 provide a matching Gym runtime transport.
 
+Grasp-pose generation is a planning service, not scene data and not a
+`MotionGenerator` feature. The shared hierarchy is:
+
+```text
+GraspPoseGenerator
+└── ParallelJawGraspPoseGenerator
+    └── AntipodalGraspPoseGenerator
+```
+
+`ParallelJawGripperModelCfg` owns physical two-finger geometry;
+`AntipodalGraspPoseGeneratorCfg` owns sampling/ranking behavior;
+`ParallelJawGraspCollisionCfg` owns collision policy; and
+`GraspAnnotationCfg` owns region-selection/cache refresh. A concrete product
+name such as `dh_pgi_140_80` appears only as a gripper-model `model_id`, never
+in a public class name.
+
+The service accepts target-local mesh tensors per call, so a handwritten
+environment can call it directly before using `MotionGenerator`. Atomic-action
+and Expert Program paths install the same instance on
+`ActionPlanningServices`, keyed by the grasp endpoint's runtime `target_id`.
+`AntipodalAffordance` and `AntipodalGraspAffordanceBinding` therefore retain
+only target geometry. The reference Gym configurations no longer carry grasp
+sampling or annotation settings in `env.extensions`. A handwritten Gym task
+may instead accept a generator through its constructor; the legacy
+multi-segment cube example uses that direct injection seam and otherwise builds
+the same typed standalone default at its composition root.
+
 Articulation/link registry data and joint evidence remain reusable. Drawer-like
 tasks should lower semantic intent through `Slide` and verify the observed
-articulation result at the application boundary. The removed
+articulation result through a segment validator at the application boundary.
+The removed
 `OperateArticulation` experiment duplicated an existing motion primitive and
 incorrectly bundled task completion into that primitive.
 
@@ -364,10 +447,14 @@ pre-merge experimental surfaces requires compatibility.
 | Generic simulation resource-binding protocols and wrapper | core `RobotResource`; retain only control-part convenience binding |
 | Factory-wide cloning of motion presets to inject `control_dt` | `PlanningContext.control_dt` from the environment clock |
 | Duplicate JSON-safe metadata copier | one private Gym JSON ownership helper |
-| Single-field buffered-action wrapper | `deque[ProcessedEnvAction]` directly |
+| Single-field buffered-action wrapper | `deque[ControllerAction]` directly |
 | Unused observation/provider properties and settling predicate | direct owning APIs and shared `DynamicSettleMonitor` |
 | Optional post-policy/result/metadata protocol variants | one complete `SegmentPostPolicyPort` and one complete `SegmentValidatorPort` |
+| Task-local articulation settling configuration | shared built-in `articulation` settling preset |
+| Task-local success thresholds, joint indices, and `is_task_success()` methods | declarative segment validators plus completed bridge acceptance on `EmbodiedEnv` |
 | Repeated public exports from every implementation submodule | curated `embodichain.lab.gym.envs.expert_program` entry point |
+| Grasp generator/config/runtime state on scene affordances | endpoint-owned `GraspPoseGenerator` service plus target-local affordance mesh |
+| Grasp sampling and annotation flags in Gym `extensions` | typed generator/model/collision/annotation configuration at planning-service assembly |
 
 The following similar-looking layers are retained because they have different
 trust or lifecycle ownership:
@@ -411,22 +498,37 @@ Implemented on the current branch:
 - cross-segment look-ahead and branch-aware semantic preflight;
 - direct `EmbodiedEnv` adapter integration and CLI/config loading;
 - lazy `env.step()` demo bridge, completion metadata, abort/safe-hold handshake;
-- shared dynamic settling and object-near-target validation;
+- completed-bridge acceptance exposed as the standard Expert Program task
+  success state on `EmbodiedEnv`;
+- shared `rigid_object` and `articulation` dynamic-settling presets;
+- shared object-near-target and articulation-joint-position validation;
 - simulation scene/profile/evidence factories;
 - canonical `SkillRuntime` integration and fail-closed parallel coordinator;
+- official `ExpertProgramRepeatedPickPlace-v1` integration with a packaged
+  three-cycle program, cyclic targets, rigid-object settling, segment
+  validation, and two-finger physical contact evidence;
+- official `ExpertProgramOpenDrawer-v1` integration with a strict registered
+  call lowered to `Slide`, shared articulation settling, and declarative
+  measured passive-joint application acceptance;
 - focused unit and fake-port coverage for schema, compiler, bridge, environment,
-  evidence, timing, recovery metadata, and parallel failure cases.
+  evidence, timing, recovery metadata, parallel failure cases, and both task
+  reference integrations;
+- one-episode Viser simulator smoke runs for both official references, each
+  reaching its declarative acceptance boundary and committing the episode.
 
-Still required before claiming task-level completion:
+Still required before claiming task-level physical completion:
 
-- one supported simulation integration with authoritative physical evidence for
-  a complete repeated pick/place program;
-- full three-cycle repeated-cube success and dataset metadata inspection;
-- reusable semantic `Slide` lowering plus Open Drawer application verification;
+- repeat both simulator qualifications across controlled seeds and the intended
+  randomization envelope, then inspect persisted segment/dataset metadata;
 - an environment-qualified parallel physical-safety validator before migrating
   PourWater or any other concurrent task;
 - separate frontend and task-migration work for model-produced programs;
 - measured capability parity before any Action Bank removal decision.
+
+`DeclarativeExpertProgramEnv` construction is also outside this step. Before it
+can replace these task composition roots, scene assets, sensors/evidence,
+robot-profile selection, affordance extraction, and registered lowerers need
+their own complete declarative declarations and factories.
 
 ## 13. Validation surface
 
@@ -436,6 +538,8 @@ Focused validation for changes in this design should include:
 - `tests/gym/envs/test_demo.py` and
   `tests/gym/envs/test_embodied_env_expert_program.py`;
 - `tests/gym/envs/test_settling.py`;
+- `tests/gym/envs/tasks/test_expert_program_repeated_pick_place.py` and
+  `tests/gym/envs/tasks/test_expert_program_open_drawer.py`;
 - `tests/sim/skills/test_runtime.py` and parallel-runtime tests;
 - semantic tutorial tests;
 - CLI/config-path tests;
@@ -445,3 +549,19 @@ Acceptance requires more than passing fake-port tests: a real environment must
 demonstrate command consumption through `env.step()`, live effect evidence,
 settling, validation, row-local outcomes, safe cancellation, and deterministic
 metadata.
+
+The 2026-08-23 smoke surface used:
+
+```bash
+embodichain run-env \
+  --gym_config embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json \
+  --viser --max_episodes 1
+
+embodichain run-env \
+  --gym_config embodichain_tasks/configs/gym/expert_program/open_drawer.json \
+  --viser --max_episodes 1
+```
+
+Both commands completed with exit status 0 and committed one episode. These
+runs establish end-to-end smoke coverage, not statistical robustness across
+random seeds.

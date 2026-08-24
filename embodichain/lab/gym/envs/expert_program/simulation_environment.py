@@ -97,6 +97,7 @@ from .simulation import (
 from .simulation_policies import SimulationSegmentPolicyPort
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.grasping import GraspPoseGenerator
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
 
@@ -430,6 +431,8 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         motion_generator_factory: Optional fresh-generator factory.  It is
             mutually exclusive with ``planner_cfg`` and intended for custom
             planners and isolated tests.
+        grasp_pose_generators: Standalone grasp-pose services keyed by grasp
+            endpoint target ID, normally a robot control-part name.
         endpoint_adapters: Explicit adapters for non-built-in resource endpoint
             types.
         settle_presets: Optional named segment settling policies.
@@ -455,6 +458,7 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         step_dt: float,
         planner_cfg: BasePlannerCfg | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         endpoint_adapters: (
             Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
         ) = None,
@@ -483,6 +487,10 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
             motion_generator_factory
         ):
             raise TypeError("motion_generator_factory must be callable or None.")
+        if grasp_pose_generators is not None and not isinstance(
+            grasp_pose_generators, Mapping
+        ):
+            raise TypeError("grasp_pose_generators must be a mapping or None.")
         if endpoint_adapters is not None and not isinstance(endpoint_adapters, Mapping):
             raise TypeError("endpoint_adapters must be a mapping or None.")
         for name, callback in (
@@ -519,6 +527,9 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         self._step_dt = _positive_finite(step_dt, field_name="step_dt")
         self._planner_cfg = selected_planner_cfg
         self._motion_generator_factory = motion_generator_factory
+        self._grasp_pose_generators = (
+            {} if grasp_pose_generators is None else dict(grasp_pose_generators)
+        )
         self._endpoint_adapters = (
             None if endpoint_adapters is None else dict(endpoint_adapters)
         )
@@ -560,6 +571,7 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         robot_profile_binding: SimulationRobotSkillProfileBinding,
         planner_cfg: BasePlannerCfg | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         endpoint_adapters: (
             Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
         ) = None,
@@ -588,6 +600,7 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
             step_dt=step_dt,
             planner_cfg=planner_cfg,
             motion_generator_factory=motion_generator_factory,
+            grasp_pose_generators=grasp_pose_generators,
             endpoint_adapters=endpoint_adapters,
             settle_presets=settle_presets,
             translation_threshold=translation_threshold,
@@ -645,6 +658,7 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
             )
         return AtomicActionEngine(
             motion_generator,
+            grasp_pose_generators=self._grasp_pose_generators,
             skill_profile=profile,
             endpoint_adapters=self._endpoint_adapters,
         )
@@ -775,6 +789,7 @@ def create_simulation_expert_program_adapter(
     robot_profile_binding: SimulationRobotSkillProfileBinding,
     planner_cfg: BasePlannerCfg | None = None,
     motion_generator_factory: MotionGeneratorFactory | None = None,
+    grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
     endpoint_adapters: (
         Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
     ) = None,
@@ -808,6 +823,8 @@ def create_simulation_expert_program_adapter(
         robot_profile_binding: Typed robot resource and policy declaration.
         planner_cfg: Optional planner configuration owned by the factory.
         motion_generator_factory: Optional factory for one fresh motion generator.
+        grasp_pose_generators: Standalone grasp-pose services keyed by grasp
+            endpoint target ID.
         endpoint_adapters: Optional exact-type custom endpoint adapters.
         relation_grounders: Explicit typed relation-target grounders.
         handover_pose_providers: Explicit embodiment-owned handover pose providers.
@@ -830,6 +847,7 @@ def create_simulation_expert_program_adapter(
         robot_profile_binding=robot_profile_binding,
         planner_cfg=planner_cfg,
         motion_generator_factory=motion_generator_factory,
+        grasp_pose_generators=grasp_pose_generators,
         endpoint_adapters=endpoint_adapters,
         settle_presets=settle_presets,
         translation_threshold=translation_threshold,

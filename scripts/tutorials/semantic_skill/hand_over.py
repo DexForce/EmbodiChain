@@ -80,6 +80,7 @@ from scripts.tutorials.atomic_action.scenario_utils import settle_object
 from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
+    create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -433,8 +434,6 @@ def create_handover_application(
     object_semantics = create_antipodal_semantics(
         obj,
         label="handover object",
-        n_sample=n_sample,
-        force_reannotate=force_reannotate,
     )
     registry, _ = create_graspable_object_registry(
         simulation,
@@ -456,12 +455,20 @@ def create_handover_application(
             target_descriptor=AtomicHandOver.descriptor(),
         )
     )
+    grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=n_sample,
+        force_refresh=force_reannotate,
+    )
     return SkillRuntime.from_simulation(
         simulation=simulation,
         robot=robot,
         motion_generator=create_toppra_motion_generator(robot),
         scene_registry=registry,
         robot_profile=profile,
+        grasp_pose_generators={
+            "left_hand": grasp_pose_generator,
+            "right_hand": grasp_pose_generator,
+        },
         call_catalog=call_catalog,
         effect_verifier=create_handover_effect_verifier(
             obj,

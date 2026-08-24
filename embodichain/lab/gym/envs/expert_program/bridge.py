@@ -33,8 +33,9 @@ from typing import Any, Protocol, runtime_checkable
 
 import torch
 
-from embodichain.lab.gym.envs.demo import DemoSegment, ProcessedEnvAction
 from embodichain.lab.gym.envs._json import json_safe_copy as _json_safe_copy
+from embodichain.lab.gym.envs.demo import DemoSegment
+from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.sim.atomic_actions.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
@@ -584,8 +585,8 @@ class BufferedGymCommandSink:
             raise TypeError("clock must be an EnvironmentStepClock.")
         self._encoder = encoder
         self._clock = clock
-        self._pending: deque[ProcessedEnvAction] = deque()
-        self._last_emitted: ProcessedEnvAction | None = None
+        self._pending: deque[ControllerAction] = deque()
+        self._last_emitted: ControllerAction | None = None
         self._accepted_action_count = 0
 
     @property
@@ -623,7 +624,7 @@ class BufferedGymCommandSink:
             "active_mask": command.active_mask.detach().cpu().tolist(),
             "hold_duration": command.hold_duration.detach().cpu().tolist(),
         }
-        self._pending.append(ProcessedEnvAction(value=action, metadata=metadata))
+        self._pending.append(ControllerAction(value=action, metadata=metadata))
         self._accepted_action_count += 1
         return CommandAcknowledgement.accepted_ack("Buffered for the Gym step loop.")
 
@@ -643,7 +644,7 @@ class BufferedGymCommandSink:
                 [target.transport_id, target.target_id] for target in targets
             ],
         }
-        self._pending.append(ProcessedEnvAction(value=action, metadata=metadata))
+        self._pending.append(ControllerAction(value=action, metadata=metadata))
         self._accepted_action_count += 1
         return CommandAcknowledgement.accepted_ack("Safe hold buffered for Gym.")
 
@@ -667,8 +668,8 @@ class BufferedGymCommandSink:
     def drain_safe_stop_action(
         self,
         *,
-        fallback: ProcessedEnvAction | None = None,
-    ) -> ProcessedEnvAction | None:
+        fallback: ControllerAction | None = None,
+    ) -> ControllerAction | None:
         """Select one buffered safe hold and discard every other local action.
 
         This method is used only by the demo abort handshake. A runtime
@@ -676,7 +677,7 @@ class BufferedGymCommandSink:
         therefore an interrupted generator must explicitly surface the final
         safe hold to the executor while dropping stale motion commands.
         """
-        candidates: list[ProcessedEnvAction] = []
+        candidates: list[ControllerAction] = []
         for candidate in (self._last_emitted, fallback):
             if (
                 candidate is not None
@@ -690,7 +691,7 @@ class BufferedGymCommandSink:
                 candidates.append(candidate.snapshot())
         return None if not candidates else candidates[-1].snapshot()
 
-    def pop(self) -> ProcessedEnvAction:
+    def pop(self) -> ControllerAction:
         """Pop the next accepted action and remember it as the active hold."""
         if not self._pending:
             raise RuntimeError("No buffered Gym command is available.")
@@ -698,13 +699,13 @@ class BufferedGymCommandSink:
         self._last_emitted = action.snapshot()
         return action
 
-    def wait_hold(self, env_ids: torch.Tensor) -> ProcessedEnvAction:
+    def wait_hold(self, env_ids: torch.Tensor) -> ControllerAction:
         """Return an owned hold action for one runtime waiting step."""
         if self._last_emitted is None:
             value = self._encoder.encode_idle_hold(env_ids)
         else:
             value = self._last_emitted.value
-        return ProcessedEnvAction(
+        return ControllerAction(
             value=value,
             metadata={"bridge_action_kind": "runtime_wait_hold"},
         )
@@ -718,7 +719,7 @@ class _SegmentLifecycle:
     result: SkillResult | ParallelSkillResult | None = None
     validation: torch.Tensor | None = None
     runtime: SequentialSkillRuntimePort | ParallelSkillRuntime | None = None
-    pending_action: ProcessedEnvAction | None = None
+    pending_action: ControllerAction | None = None
     actions_started: bool = False
     sink_acceptance_baseline: int | None = None
     yielded_action_count: int = 0
@@ -844,11 +845,31 @@ class AtomicDemoBridge:
         self._parallel_safety_validator = parallel_safety_validator
         self._active_segment_id: str | None = None
         self._eligible_mask: torch.Tensor | None = None
+        self._program_completed = False
 
     @property
     def clock(self) -> EnvironmentStepClock:
         """Return the environment-step clock used by this bridge."""
         return self._clock
+
+    @property
+    def program_completed(self) -> bool:
+        """Return whether every compiled segment completed its full lifecycle."""
+        return self._program_completed
+
+    @property
+    def completion_mask(self) -> torch.Tensor:
+        """Return the final row-local program acceptance mask.
+
+        Raises:
+            RuntimeError: If the segment iterator has not completed normally.
+        """
+        if not self._program_completed or self._eligible_mask is None:
+            raise RuntimeError(
+                "Expert Program completion is unavailable before all segments "
+                "finish execution and validation."
+            )
+        return self._eligible_mask.clone()
 
     def iter_segments(self) -> Iterator[DemoSegment]:
         """Lazily adapt compiled program segments to ``DemoSegment`` values.
@@ -871,6 +892,9 @@ class AtomicDemoBridge:
                 failure_policy="row_independent",
             )
             self._require_consumed_segment_lifecycle(segment, lifecycle)
+        if self._eligible_mask is None:
+            raise DemoBridgeError("Compiled Expert Program produced no segments.")
+        self._program_completed = True
 
     def __iter__(self) -> Iterator[DemoSegment]:
         """Delegate iteration to :meth:`iter_segments`."""
@@ -934,9 +958,9 @@ class AtomicDemoBridge:
         segment: Any,
         result: SkillResult | ParallelSkillResult,
         action_kind: str | None = None,
-    ) -> ProcessedEnvAction:
+    ) -> ControllerAction:
         """Own one action and attach stable program/runtime provenance."""
-        if isinstance(action, ProcessedEnvAction):
+        if isinstance(action, ControllerAction):
             value = action.value
             metadata = dict(action.metadata)
         else:
@@ -954,13 +978,13 @@ class AtomicDemoBridge:
                 "runtime_call_index": getattr(result, "current_call_index", None),
             }
         )
-        return ProcessedEnvAction(value=value, metadata=metadata)
+        return ControllerAction(value=value, metadata=metadata)
 
     def _yield_and_advance(
         self,
-        action: ProcessedEnvAction,
+        action: ControllerAction,
         lifecycle: _SegmentLifecycle,
-    ) -> Iterator[ProcessedEnvAction]:
+    ) -> Iterator[ControllerAction]:
         """Yield once and advance only after explicit consumption acknowledgement."""
         if lifecycle.pending_action is not None:
             raise RuntimeError("A prior demo action is still awaiting acknowledgement.")
@@ -975,7 +999,7 @@ class AtomicDemoBridge:
         self,
         segment: Any,
         lifecycle: _SegmentLifecycle,
-    ) -> Iterator[ProcessedEnvAction]:
+    ) -> Iterator[ControllerAction]:
         """Drive one semantic segment without bypassing the Gym step loop."""
         segment_id = segment.segment_id
         lifecycle.actions_started = True
@@ -1086,14 +1110,14 @@ class AtomicDemoBridge:
         self,
         segment: Any,
         lifecycle: _SegmentLifecycle,
-    ) -> Callable[..., Iterator[ProcessedEnvAction]]:
+    ) -> Callable[..., Iterator[ControllerAction]]:
         """Create the explicit executor-to-runtime cancellation handshake."""
 
         def abort(
             reason: str,
             *,
             last_action_consumed: bool,
-        ) -> Iterator[ProcessedEnvAction]:
+        ) -> Iterator[ControllerAction]:
             return self._abort_segment(
                 segment,
                 lifecycle,
@@ -1110,7 +1134,7 @@ class AtomicDemoBridge:
         *,
         reason: str,
         last_action_consumed: bool,
-    ) -> Iterator[ProcessedEnvAction]:
+    ) -> Iterator[ControllerAction]:
         """Abort one segment, surfacing a safe hold only after controller activity."""
         if type(reason) is not str or not reason:
             raise ValueError("abort reason must be a non-empty string.")
@@ -1268,7 +1292,7 @@ class AtomicDemoBridge:
         segment: Any,
         result: SkillResult | ParallelSkillResult,
         lifecycle: _SegmentLifecycle,
-    ) -> Iterator[ProcessedEnvAction]:
+    ) -> Iterator[ControllerAction]:
         """Route environment-aware post-policy actions through the same generator."""
         policies = tuple(segment.post_policies)
         if policies and self._post_policy_port is None:

@@ -45,9 +45,21 @@ recompute private sample splits in callers.
 
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
 instance, which contains its robot, one `MotionGenerator`/planner backend, and
-its direct control-part command-profile snapshot. It also issues an opaque
-binding-owner ID, so an `ActionBinding` cannot cross engine instances. It does
-not own a timing fallback. Planner results with positions require explicit `dt`;
+its direct control-part command-profile snapshot. It may also contain
+standalone `GraspPoseGenerator` services keyed by grasp endpoint runtime target
+ID. These services are siblings of `MotionGenerator`, not motion-generator
+features: direct callers may use them without atomic actions, while `PickUp`,
+`HandOver`, `Slide`, and `CoordinatedPickment` resolve them through their bound
+grasp endpoints. `AntipodalAffordance` owns target-local mesh geometry only.
+The toolkit exposes `AntipodalGraspPoseGenerator` as its sole antipodal
+generator entry point; mesh-specific sampling, annotation, collision, and
+on-disk cache state live behind a private backend rather than a second public
+generator/configuration pair.
+The engine-scoped registry retains generator instances by reference, so a
+composition root may reuse an already prepared service in a handwritten
+environment. The engine also issues an opaque binding-owner ID, so an
+`ActionBinding` cannot cross engine instances. It does not own a timing
+fallback. Planner results with positions require explicit `dt`;
 `duration` is derived from it. Actions must pass a complete `TimedTrajectory` to
 `build_plan()`. Environment-backed integrations put `BaseEnv.step_dt` on
 `PlanningContext.control_dt` when action-owned interpolation needs a cadence.

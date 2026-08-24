@@ -29,28 +29,10 @@ from tensordict import TensorDict
 from embodichain.lab.gym.envs.demo import (
     DemoSegment,
     DemoSegmentResult,
-    ProcessedEnvAction,
     execute_demo_episode,
 )
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
-
-
-def test_processed_env_action_owns_value_and_metadata() -> None:
-    value = torch.tensor([[1.0, 2.0]])
-    metadata = {"semantic_id": "pick", "segments": ["approach"]}
-
-    action = ProcessedEnvAction(value=value, metadata=metadata)
-    value.zero_()
-    metadata["segments"].append("close")
-    snapshot = action.snapshot()
-
-    assert action.value.tolist() == [[1.0, 2.0]]
-    assert dict(action.metadata) == {
-        "semantic_id": "pick",
-        "segments": ["approach"],
-    }
-    assert snapshot is not action
-    assert snapshot.value is not action.value
+from embodichain.lab.gym.envs.types import ControllerAction
 
 
 def test_demo_segment_result_owns_json_safe_lifecycle_metadata() -> None:
@@ -87,30 +69,87 @@ def test_demo_segment_result_rejects_non_json_metadata() -> None:
         )
 
 
-def test_embodied_env_skips_preprocessing_for_processed_action() -> None:
+def _controller_action_env() -> EmbodiedEnv:
     env = object.__new__(EmbodiedEnv)
     env._num_envs = 2
     env._traj_buffer = None
-    env.action_manager = Mock()
+    env.action_manager = Mock(
+        process_action=Mock(side_effect=lambda action, mode: action)
+    )
     env._demo_no_auto_reset = False
-    action = ProcessedEnvAction(value=torch.ones(2, 3))
+    env.active_joint_ids = [0, 1, 2]
+    env.robot = Mock()
+    env.robot.get_qpos.return_value = torch.zeros(2, 3)
+    env.sim = Mock(device=torch.device("cpu"))
+    return env
+
+
+def test_embodied_env_skips_preprocessing_for_controller_action() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(value=torch.ones(2, 3))
 
     normalized = env._normalize_demo_action(action)
-    processed = env._preprocess_action(normalized)
+    controller = env._preprocess_action(normalized)
 
-    assert isinstance(normalized, ProcessedEnvAction)
+    assert isinstance(normalized, ControllerAction)
     assert normalized is not action
-    assert torch.equal(processed, action.value)
+    assert torch.equal(controller, action.value)
     env.action_manager.process_action.assert_not_called()
 
 
-def test_embodied_env_validates_processed_action_batch_size() -> None:
-    env = object.__new__(EmbodiedEnv)
-    env._num_envs = 2
-    action = ProcessedEnvAction(value=torch.ones(1, 3))
+def test_embodied_env_preprocesses_raw_action_before_controller_validation() -> None:
+    env = _controller_action_env()
+    raw_action = torch.ones(2, 3)
 
-    with pytest.raises(ValueError, match="batch size"):
-        env._normalize_demo_action(action)
+    controller = env._preprocess_action(raw_action)
+
+    assert torch.equal(controller, raw_action)
+    env.action_manager.process_action.assert_called_once_with(raw_action, mode="pre")
+
+
+def test_embodied_env_applies_post_terms_to_controller_action() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(value=torch.ones(2, 3))
+
+    controller = env._preprocess_action(action)
+    env._postprocess_action(controller)
+
+    env.action_manager.process_action.assert_called_once_with(controller, mode="post")
+
+
+def test_embodied_env_validates_controller_action_batch_size() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(value=torch.ones(1, 3))
+
+    with pytest.raises(ValueError, match=r"shape \(num_envs, D\)"):
+        env._preprocess_action(action)
+
+
+def test_embodied_env_rejects_unsupported_controller_action_key() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(
+        value=TensorDict({"eef_pose": torch.ones(2, 7)}, batch_size=[2])
+    )
+
+    with pytest.raises(ValueError, match="must contain at least one"):
+        env._preprocess_action(action)
+
+
+def test_embodied_env_preserves_controller_action_auxiliary_fields() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(
+        value=TensorDict(
+            {
+                "qpos": torch.ones(2, 3),
+                "ik_success": torch.tensor([True, False]),
+            },
+            batch_size=[2],
+        )
+    )
+
+    controller = env._preprocess_action(action)
+
+    assert torch.equal(controller["ik_success"], torch.tensor([True, False]))
 
 
 class _SegmentedEnv:
@@ -845,11 +884,11 @@ class _ActionMaskStub:
     _demo_active_mask = torch.tensor([False, True])
 
 
-def test_processed_qpos_action_holds_inactive_row() -> None:
+def test_controller_qpos_action_holds_inactive_row() -> None:
     """Inactive qpos-controlled rows hold their measured joint position."""
     env = _ActionMaskStub()
 
-    masked = EmbodiedEnv._mask_processed_demo_action(
+    masked = EmbodiedEnv._mask_controller_demo_action(
         env, torch.tensor([[9.0, 9.0], [8.0, 8.0]])
     )
 
@@ -857,12 +896,12 @@ def test_processed_qpos_action_holds_inactive_row() -> None:
     assert torch.allclose(masked[1], torch.tensor([8.0, 8.0]))
 
 
-def test_processed_qpos_action_supports_full_robot_layout() -> None:
+def test_controller_qpos_action_supports_full_robot_layout() -> None:
     """A full-DOF IK command holds measured full qpos for inactive rows."""
     env = _ActionMaskStub()
     env.active_joint_ids = [0]
 
-    masked = EmbodiedEnv._mask_processed_demo_action(
+    masked = EmbodiedEnv._mask_controller_demo_action(
         env, torch.tensor([[9.0, 9.0], [8.0, 8.0]])
     )
 
@@ -901,7 +940,7 @@ def test_full_dof_hold_is_sliced_before_active_joint_step() -> None:
         batch_size=[2],
     )
 
-    masked = EmbodiedEnv._mask_processed_demo_action(env, action)
+    masked = EmbodiedEnv._mask_controller_demo_action(env, action)
     applied = EmbodiedEnv._step_action(env, masked)
 
     assert torch.allclose(
@@ -912,14 +951,14 @@ def test_full_dof_hold_is_sliced_before_active_joint_step() -> None:
     assert applied["qpos"].shape == (2, 2)
 
 
-def test_processed_velocity_action_zeros_inactive_row() -> None:
+def test_controller_velocity_action_zeros_inactive_row() -> None:
     """Inactive velocity-controlled rows receive a no-op command."""
     env = _ActionMaskStub()
     action = TensorDict(
         {"qvel": torch.tensor([[9.0, 9.0], [8.0, 8.0]])}, batch_size=[2]
     )
 
-    masked = EmbodiedEnv._mask_processed_demo_action(env, action)
+    masked = EmbodiedEnv._mask_controller_demo_action(env, action)
 
     assert torch.equal(masked["qvel"][0], torch.zeros(2))
     assert torch.equal(masked["qvel"][1], torch.tensor([8.0, 8.0]))

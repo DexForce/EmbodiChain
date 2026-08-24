@@ -26,6 +26,7 @@ import torch
 
 from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramCompiler,
+    SimulationArticulationBinding,
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
     decode_expert_program,
@@ -40,6 +41,7 @@ from embodichain.lab.gym.envs.expert_program.simulation_policies import (
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import EntityState
 from embodichain.lab.sim.skills.scene import (
+    SceneArticulationRef,
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
@@ -93,18 +95,38 @@ class _Robot:
         return self.qpos.clone()
 
 
-class _Simulation:
-    """Resolve only one explicitly selected native rigid object."""
+class _Articulation:
+    """Small articulation double with one measured prismatic joint."""
 
-    def __init__(self, entity: _RigidObject) -> None:
+    joint_names = ("cabinet_to_drawer",)
+
+    def __init__(self, qpos: torch.Tensor) -> None:
+        self._qpos = qpos
+        self.body_data = SimpleNamespace(
+            body_link_vel=torch.zeros(qpos.shape[0], 1, 6),
+        )
+
+    def get_qpos(self) -> torch.Tensor:
+        """Return the configured batched joint state."""
+        return self._qpos.clone()
+
+
+class _Simulation:
+    """Resolve only explicitly selected native test entities."""
+
+    def __init__(
+        self,
+        entity: _RigidObject | None = None,
+        articulation: _Articulation | None = None,
+    ) -> None:
         self.entity = entity
+        self.articulation = articulation
 
     def get_rigid_object(self, uid: str) -> _RigidObject | None:
         return self.entity if uid == "native_cube" else None
 
-    def get_articulation(self, uid: str) -> None:
-        del uid
-        return None
+    def get_articulation(self, uid: str) -> _Articulation | None:
+        return self.articulation if uid == "native_drawer" else None
 
 
 def _compiled_segment(*, settle_preset: str = "fast"):
@@ -170,6 +192,53 @@ def _compiled_segment(*, settle_preset: str = "fast"):
     return next(compiled.iter_segments())
 
 
+def _compiled_articulation_segment():
+    """Compile one standard joint-position validator."""
+    payload = {
+        "schema_version": 2,
+        "program_id": "joint_policy_test",
+        "integration": {
+            "robot_profile": "test_robot",
+            "scene_registry": "test_scene",
+            "runtime_preset": "safe",
+        },
+        "targets": {},
+        "program": {
+            "kind": "segment",
+            "name": "open_drawer",
+            "steps": {
+                "kind": "invoke",
+                "call": {
+                    "kind": "registered",
+                    "call_id": "example.slide",
+                    "schema_version": 1,
+                    "arguments": {},
+                },
+            },
+            "validators": [
+                {
+                    "kind": "articulation_joint_position",
+                    "articulation": "drawer",
+                    "joint": "cabinet_to_drawer",
+                    "minimum_position": 0.10,
+                }
+            ],
+        },
+    }
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneArticulationRef("drawer"),
+                state_provider=_StaticStateProvider(),
+            ),
+        )
+    )
+    compiled = ExpertProgramCompiler.from_scene_registry(registry).compile(
+        decode_expert_program(payload)
+    )
+    return next(compiled.iter_segments())
+
+
 def _port(
     positions: torch.Tensor,
     *,
@@ -210,6 +279,26 @@ def test_port_implements_complete_bridge_policy_protocols() -> None:
     assert isinstance(port, SegmentPostPolicyPort)
     assert isinstance(port, SegmentValidatorPort)
     assert port.settle_preset_ids == ("fast",)
+
+
+def test_default_settle_presets_cover_rigid_objects_and_articulations() -> None:
+    """Common entity kinds require no task-local settling configuration."""
+    articulation = _Articulation(torch.zeros(2, 1))
+    port = SimulationSegmentPolicyPort(
+        _Simulation(articulation=articulation),
+        _Robot(torch.zeros(2, 2)),
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            articulations=(
+                SimulationArticulationBinding(
+                    entity_id="drawer",
+                    simulation_uid="native_drawer",
+                ),
+            ),
+        ),
+    )
+
+    assert port.settle_preset_ids == ("rigid_object", "articulation")
 
 
 def test_pure_preflight_validates_hooks_without_reading_live_state() -> None:
@@ -408,6 +497,43 @@ def test_object_near_target_validates_rows_independently() -> None:
     assert metadata["position_tolerance"] == 0.05
     assert metadata["position_error"] == pytest.approx([0.01, 0.20])
     assert metadata["accepted_mask"] == [True, False]
+
+
+def test_articulation_joint_position_validates_measured_rows() -> None:
+    """The joint validator applies its inclusive bound to each simulator row."""
+    segment = _compiled_articulation_segment()
+    articulation = _Articulation(
+        torch.tensor([[0.11], [0.09], [float("nan")]], dtype=torch.float32)
+    )
+    robot = _Robot(torch.zeros(3, 2))
+    port = SimulationSegmentPolicyPort(
+        _Simulation(articulation=articulation),
+        robot,
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            articulations=(
+                SimulationArticulationBinding(
+                    entity_id="drawer",
+                    simulation_uid="native_drawer",
+                ),
+            ),
+        ),
+    )
+
+    validator = segment.validators[0]
+    result = port.validate(validator, segment=segment)
+    metadata = port.validator_metadata(validator, segment=segment)
+
+    assert result.tolist() == [True, False, False]
+    assert metadata["kind"] == "articulation_joint_position"
+    assert metadata["articulation_id"] == "drawer"
+    assert metadata["joint"] == "cabinet_to_drawer"
+    assert metadata["minimum_position"] == pytest.approx(0.10)
+    assert metadata["maximum_position"] is None
+    assert metadata["joint_position"][:2] == pytest.approx([0.11, 0.09])
+    assert metadata["joint_position"][2] is None
+    assert metadata["accepted_mask"] == [True, False, False]
+    json.dumps(metadata, allow_nan=False, sort_keys=True)
 
 
 def test_policy_port_rejects_unbound_native_entities_and_foreign_members() -> None:

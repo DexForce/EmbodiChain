@@ -55,6 +55,7 @@ from scripts.tutorials.atomic_action.scenario_utils import (
 from scripts.tutorials.atomic_action.tutorial_utils import (
     TutorialRobot,
     create_antipodal_semantics,
+    create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -184,9 +185,7 @@ def run_handover_demo(
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
     publish_tutorial_scene(sim, args)
-    object_semantics = create_antipodal_semantics(
-        obj, label="handover", n_sample=10000, force_reannotate=False
-    )
+    object_semantics = create_antipodal_semantics(obj, label="handover")
     motion_gen = create_toppra_motion_generator(robot)
 
     left_open, left_close = get_hand_open_close_qpos(
@@ -237,6 +236,10 @@ def run_handover_demo(
             [0.0, 707106781, -707106781], dtype=torch.float32
         ),
     )
+    grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=10_000,
+        force_refresh=False,
+    )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
@@ -248,6 +251,10 @@ def run_handover_demo(
                 open=right_open,
                 grasp=right_close,
             ),
+        },
+        grasp_pose_generators={
+            "left_hand": grasp_pose_generator,
+            "right_hand": grasp_pose_generator,
         },
     )
     wait_for_user = prepare_tutorial_scene(

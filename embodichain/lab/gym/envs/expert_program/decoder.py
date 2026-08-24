@@ -24,6 +24,7 @@ from collections.abc import Callable
 from typing import Literal, Protocol, TypeAlias, runtime_checkable
 
 from .cfg import (
+    ArticulationJointPositionValidatorCfg,
     BarrierCfg,
     EXPERT_PROGRAM_SCHEMA_VERSION,
     MAX_PROGRAM_DEPTH,
@@ -656,8 +657,48 @@ def _decode_validator(
     kind = _expect_discriminator(
         mapping,
         path=path,
-        supported=("object_near_target",),
+        supported=("object_near_target", "articulation_joint_position"),
     )
+    if kind == "articulation_joint_position":
+        _validate_fields(
+            mapping,
+            allowed=frozenset(
+                {
+                    "kind",
+                    "articulation",
+                    "joint",
+                    "minimum_position",
+                    "maximum_position",
+                }
+            ),
+            required=frozenset({"kind", "articulation", "joint"}),
+            path=path,
+        )
+        minimum = mapping.get("minimum_position")
+        maximum = mapping.get("maximum_position")
+        for field_name, bound in (
+            ("minimum_position", minimum),
+            ("maximum_position", maximum),
+        ):
+            if bound is not None and type(bound) not in (int, float):
+                raise _error(
+                    "invalid_number",
+                    (*path, field_name),
+                    f"{field_name} must be a finite number, not bool.",
+                )
+        return _construct(
+            ArticulationJointPositionValidatorCfg,
+            path=path,
+            kind=kind,
+            articulation=_expect_identifier(
+                mapping["articulation"],
+                path=(*path, "articulation"),
+            ),
+            joint=_expect_identifier(mapping["joint"], path=(*path, "joint")),
+            minimum_position=minimum,
+            maximum_position=maximum,
+        )  # type: ignore[return-value]
+
     _validate_fields(
         mapping,
         allowed=frozenset({"kind", "object", "target", "position_tolerance"}),
@@ -1010,12 +1051,20 @@ def validate_expert_program(
                     validator,
                     path=validator_path,
                 )
-                _call_context(
-                    context.validate_scene_reference,
-                    validator.object,
-                    role="object",
-                    path=(*validator_path, "object"),
-                )
+                if type(validator) is ObjectNearTargetValidatorCfg:
+                    _call_context(
+                        context.validate_scene_reference,
+                        validator.object,
+                        role="object",
+                        path=(*validator_path, "object"),
+                    )
+                elif type(validator) is ArticulationJointPositionValidatorCfg:
+                    _call_context(
+                        context.validate_scene_reference,
+                        validator.articulation,
+                        role="articulation",
+                        path=(*validator_path, "articulation"),
+                    )
 
 
 def decode_expert_program(

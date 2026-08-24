@@ -62,6 +62,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     create_antipodal_semantics,
     create_curobo_motion_generator,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -299,8 +300,6 @@ def create_place_application(
     object_semantics = create_antipodal_semantics(
         obj,
         label="cube",
-        n_sample=n_sample,
-        force_reannotate=force_reannotate,
     )
     registry, _ = create_graspable_object_registry(
         simulation,
@@ -315,6 +314,12 @@ def create_place_application(
         motion_generator=create_curobo_motion_generator(robot),
         scene_registry=registry,
         robot_profile=create_robot_profile(hand_open, hand_grasp),
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=n_sample,
+                force_refresh=force_reannotate,
+            )
+        },
         effect_verifier=create_place_effect_verifier(obj, robot, hand_open),
         control_dt=TRAJECTORY_SIM_STEPS * simulation.sim_config.physics_dt,
     )

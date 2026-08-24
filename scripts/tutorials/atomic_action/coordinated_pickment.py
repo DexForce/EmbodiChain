@@ -66,6 +66,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
+    create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -380,9 +381,6 @@ def run_coordinated_pickment_demo(
     object_semantics = create_antipodal_semantics(
         obj,
         label=preset.label,
-        n_sample=args.n_sample,
-        # n_sample = 1000,
-        force_reannotate=args.force_reannotate,
     )
     left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
     motion_gen = create_toppra_motion_generator(robot)
@@ -406,6 +404,10 @@ def run_coordinated_pickment_demo(
         left_to_right_arm_direction=left_to_right_arm_direction,
         middle_empty_ratio=0.7,
     )
+    grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=args.n_sample,
+        force_refresh=args.force_reannotate,
+    )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
@@ -417,6 +419,10 @@ def run_coordinated_pickment_demo(
                 open=right_open,
                 grasp=right_close,
             ),
+        },
+        grasp_pose_generators={
+            "left_hand": grasp_pose_generator,
+            "right_hand": grasp_pose_generator,
         },
     )
     target_pose = build_object_target_pose(

@@ -61,10 +61,6 @@ from embodichain.lab.sim.skills.scene import (
     SceneObjectRef,
     SceneRegistry,
 )
-from embodichain.toolkits.graspkit.pg_grasp import GraspGeneratorCfg
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
-)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -272,9 +268,6 @@ class AntipodalGraspAffordanceBinding:
     aliases: tuple[str, ...] = ()
     relative_pose: tuple[float, ...] = _IDENTITY_POSE
     mesh_env_id: int = 0
-    generator_cfg: GraspGeneratorCfg | None = None
-    gripper_collision_cfg: GripperCollisionCfg | None = None
-    force_reannotate: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("entity_id", "object_id", "native_name", "revision"):
@@ -295,26 +288,6 @@ class AntipodalGraspAffordanceBinding:
             or self.mesh_env_id < 0
         ):
             raise ValueError("mesh_env_id must be a non-negative integer.")
-        if self.generator_cfg is not None and not isinstance(
-            self.generator_cfg,
-            GraspGeneratorCfg,
-        ):
-            raise TypeError("generator_cfg must be GraspGeneratorCfg or None.")
-        if self.gripper_collision_cfg is not None and not isinstance(
-            self.gripper_collision_cfg,
-            GripperCollisionCfg,
-        ):
-            raise TypeError(
-                "gripper_collision_cfg must be GripperCollisionCfg or None."
-            )
-        if not isinstance(self.force_reannotate, bool):
-            raise TypeError("force_reannotate must be a bool.")
-        object.__setattr__(self, "generator_cfg", deepcopy(self.generator_cfg))
-        object.__setattr__(
-            self,
-            "gripper_collision_cfg",
-            deepcopy(self.gripper_collision_cfg),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,9 +415,6 @@ def _antipodal_affordance(
     return AntipodalAffordance(
         mesh_vertices=vertices,
         mesh_triangles=triangles,
-        generator_cfg=deepcopy(binding.generator_cfg),
-        gripper_collision_cfg=deepcopy(binding.gripper_collision_cfg),
-        force_reannotate=binding.force_reannotate,
     )
 
 

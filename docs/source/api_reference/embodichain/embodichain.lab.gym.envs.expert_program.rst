@@ -6,6 +6,7 @@ embodichain.lab.gym.envs.expert_program
    .. autosummary::
 
       AntipodalGraspAffordanceBinding
+      ArticulationJointPositionValidatorCfg
       AtomicDemoBridge
       BarrierCfg
       BufferedGymCommandSink
@@ -127,6 +128,9 @@ barrier is owned by the enclosing parallel node.
    :members:
 
 .. autoclass:: ObjectNearTargetValidatorCfg
+   :members:
+
+.. autoclass:: ArticulationJointPositionValidatorCfg
    :members:
 
 .. autofunction:: load_expert_program

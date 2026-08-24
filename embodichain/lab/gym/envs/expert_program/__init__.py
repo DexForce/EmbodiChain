@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from .cfg import (
     EXPERT_PROGRAM_SCHEMA_VERSION,
+    ArticulationJointPositionValidatorCfg,
     BarrierCfg,
     CyclicPoseTargetCfg,
     ExpertProgramCfg,
@@ -98,6 +99,7 @@ from .simulation_policies import SimulationSegmentPolicyPort
 
 __all__ = [
     "AntipodalGraspAffordanceBinding",
+    "ArticulationJointPositionValidatorCfg",
     "AtomicDemoBridge",
     "BarrierCfg",
     "BufferedGymCommandSink",

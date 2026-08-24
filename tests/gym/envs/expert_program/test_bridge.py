@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 import torch
 
-from embodichain.lab.gym.envs.demo import ProcessedEnvAction, execute_demo_episode
+from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.gym.envs.expert_program.bridge import (
     AtomicDemoBridge,
     BufferedGymCommandSink,
@@ -35,6 +35,7 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
     UnsupportedRuntimeTransportError,
 )
 import embodichain.lab.gym.envs.expert_program.bridge as bridge_module
+from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.sim.atomic_actions.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
@@ -991,7 +992,7 @@ def test_buffered_sink_buffers_command_hold_and_cancel_without_stepping() -> Non
     assert acknowledgement.accepted
     assert sink.pending_count == 1
     action = sink.pop()
-    assert isinstance(action, ProcessedEnvAction)
+    assert isinstance(action, ControllerAction)
     assert action.metadata["bridge_action_kind"] == "runtime_command"
     assert clock.step_index == 0
 
@@ -1029,6 +1030,28 @@ def test_atomic_demo_bridge_is_lazy_and_waits_with_hold_actions() -> None:
     assert runtime.status is SkillStatus.COMPLETED
     assert runtime.cancel_count == 0
     assert demo_segment.validator().tolist() == [True, True]
+
+
+def test_bridge_publishes_completion_only_after_normal_program_exhaustion() -> None:
+    """Task success cannot observe a partial segment lifecycle as completion."""
+    bridge, _, _ = _bridge(duration=STEP_DT)
+    segments = iter(bridge.iter_segments())
+
+    demo_segment = next(segments)
+    assert bridge.program_completed is False
+    with pytest.raises(RuntimeError, match="before all segments"):
+        bridge.completion_mask
+
+    tuple(demo_segment.actions)
+    assert demo_segment.validator().tolist() == [True, True]
+    assert bridge.program_completed is False
+
+    with pytest.raises(StopIteration):
+        next(segments)
+    assert bridge.program_completed is True
+    completion = bridge.completion_mask
+    completion[0] = False
+    assert bridge.completion_mask.tolist() == [True, True]
 
 
 def test_closing_without_abort_handshake_fails_loudly_and_does_not_ack() -> None:
@@ -1188,7 +1211,7 @@ class _BridgeExecutorEnv:
         )
         self.raise_first_step = raise_first_step
         self.num_envs = BATCH_SIZE
-        self.steps: list[ProcessedEnvAction] = []
+        self.steps: list[ControllerAction] = []
         self._demo_no_auto_reset = False
 
     @property
@@ -1198,8 +1221,8 @@ class _BridgeExecutorEnv:
     def create_demo_segments(self):
         return self.bridge.iter_segments()
 
-    def step(self, action: ProcessedEnvAction):
-        assert isinstance(action, ProcessedEnvAction)
+    def step(self, action: ControllerAction):
+        assert isinstance(action, ControllerAction)
         self.steps.append(action.snapshot())
         if self.raise_first_step and len(self.steps) == 1:
             raise RuntimeError("simulated environment failure")
@@ -1218,9 +1241,9 @@ class _BridgeExecutorEnv:
 
     def _mask_demo_action(
         self,
-        action: ProcessedEnvAction,
+        action: ControllerAction,
         active_mask: tuple[bool, ...],
-    ) -> ProcessedEnvAction:
+    ) -> ControllerAction:
         del active_mask
         return action.snapshot()
 

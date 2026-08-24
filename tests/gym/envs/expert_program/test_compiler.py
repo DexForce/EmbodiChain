@@ -24,6 +24,7 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.expert_program import (
+    ArticulationJointPositionValidatorCfg,
     CyclicPoseTargetCfg,
     CompiledProgram,
     ExpertProgramCfg,
@@ -320,6 +321,39 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
         _assert_pose_equal(validator.target_pose, place.call.at)
         assert validator.target_selection == place.target_selections[0]
         assert segment.post_policies[0].entity == SceneObjectRef("cube")
+    assert provider.calls == 0
+
+
+def test_compiler_resolves_articulation_joint_validator_provider_free() -> None:
+    """Compilation owns the bounds and resolves only the articulation ID."""
+    registry, provider = _scene_registry()
+    config = _program(
+        SegmentCfg(
+            name="open_drawer",
+            steps=InvokeCfg(
+                call=RegisteredSemanticCallCfg(
+                    call_id="example.slide",
+                    arguments={},
+                )
+            ),
+            validators=(
+                ArticulationJointPositionValidatorCfg(
+                    articulation="arm",
+                    joint="drawer_slide",
+                    minimum_position=0.10,
+                ),
+            ),
+        )
+    )
+
+    compiled = ExpertProgramCompiler.from_scene_registry(registry).compile(config)
+    segment = next(compiled.iter_segments())
+    validator = segment.validators[0]
+
+    assert validator.articulation == SceneArticulationRef("arm")
+    assert validator.cfg.joint == "drawer_slide"
+    assert validator.cfg.minimum_position == pytest.approx(0.10)
+    assert validator.cfg.maximum_position is None
     assert provider.calls == 0
 
 

@@ -89,10 +89,12 @@ def cli(argv: Sequence[str] | None = None) -> None:
     import torch
     import trimesh
 
+    from embodichain.lab.sim.grasping import ParallelJawGripperModelCfg
     from embodichain.toolkits.graspkit.pg_grasp import (
-        AntipodalSamplerCfg,
-        GraspGenerator,
-        GraspGeneratorCfg,
+        AntipodalGraspPoseGenerator,
+        AntipodalGraspPoseGeneratorCfg,
+        GraspAnnotationCfg,
+        ParallelJawGraspCollisionCfg,
     )
     from embodichain.utils.logger import log_info
 
@@ -102,19 +104,20 @@ def cli(argv: Sequence[str] | None = None) -> None:
     vertices = torch.tensor(mesh.vertices, dtype=torch.float32, device=args.device)
     triangles = torch.tensor(mesh.faces, dtype=torch.int64, device=args.device)
 
-    # Build configuration
-    sampler_cfg = AntipodalSamplerCfg(
-        n_sample=args.n_sample,
-        max_length=args.max_length,
-        min_length=args.min_length,
+    generator = AntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(
+            model_id="annotation_parallel_jaw",
+            min_opening_width=args.min_length,
+            max_opening_width=args.max_length,
+        ),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=args.n_sample),
+        collision_cfg=ParallelJawGraspCollisionCfg(opening_margin=0.0),
+        annotation_cfg=GraspAnnotationCfg(
+            selection_mode="interactive",
+            viser_port=args.viser_port,
+            force_refresh=True,
+        ),
     )
-    cfg = GraspGeneratorCfg(
-        viser_port=args.viser_port,
-        antipodal_sampler_cfg=sampler_cfg,
-    )
-
-    # Create generator and run annotation
-    generator = GraspGenerator(vertices=vertices, triangles=triangles, cfg=cfg)
     log_info(
         "Annotate the grasp region in the browser window:\n"
         f"  1. Open http://localhost:{args.viser_port}\n"
@@ -122,7 +125,10 @@ def cli(argv: Sequence[str] | None = None) -> None:
         "  3. Click 'Confirm Selection' to finish",
         color="green",
     )
-    hit_point_pairs = generator.annotate()
+    hit_point_pairs = generator.prepare_mesh(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+    )
 
     log_info(
         f"Annotation complete. {hit_point_pairs.shape[0]} antipodal pairs cached.",

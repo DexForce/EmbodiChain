@@ -463,7 +463,52 @@ class ObjectNearTargetValidatorCfg:
         )
 
 
-ValidatorCfg: TypeAlias = ObjectNearTargetValidatorCfg
+@configclass
+class ArticulationJointPositionValidatorCfg:
+    """Validate one articulation joint against an inclusive position interval."""
+
+    articulation: str = MISSING
+    joint: str = MISSING
+    minimum_position: float | None = None
+    maximum_position: float | None = None
+    kind: str = "articulation_joint_position"
+
+    def __post_init__(self) -> None:
+        """Validate joint identity, bounds, and discriminator."""
+        _validate_identifier(self.articulation, field_name="articulation")
+        _validate_identifier(self.joint, field_name="joint")
+        if self.minimum_position is None and self.maximum_position is None:
+            raise ValueError(
+                "At least one of minimum_position or maximum_position is required."
+            )
+        if self.minimum_position is not None:
+            self.minimum_position = _validate_number(
+                self.minimum_position,
+                field_name="minimum_position",
+            )
+        if self.maximum_position is not None:
+            self.maximum_position = _validate_number(
+                self.maximum_position,
+                field_name="maximum_position",
+            )
+        if (
+            self.minimum_position is not None
+            and self.maximum_position is not None
+            and self.minimum_position > self.maximum_position
+        ):
+            raise ValueError(
+                "minimum_position must be less than or equal to maximum_position."
+            )
+        _validate_kind(
+            self.kind,
+            expected="articulation_joint_position",
+            field_name="kind",
+        )
+
+
+ValidatorCfg: TypeAlias = (
+    ObjectNearTargetValidatorCfg | ArticulationJointPositionValidatorCfg
+)
 
 
 @configclass
@@ -600,7 +645,10 @@ _SEMANTIC_CALL_TYPES = (
     RegisteredSemanticCallCfg,
 )
 _POST_POLICY_TYPES = (WaitStablePostCfg,)
-_VALIDATOR_TYPES = (ObjectNearTargetValidatorCfg,)
+_VALIDATOR_TYPES = (
+    ObjectNearTargetValidatorCfg,
+    ArticulationJointPositionValidatorCfg,
+)
 _PROGRAM_NODE_TYPES = (
     SequenceCfg,
     RepeatCfg,
@@ -663,7 +711,8 @@ def _validate_program(
                 "nodes; wrap the Parallel node in one Segment instead."
             )
         for validator in node.validators:
-            _validate_target_reference(validator.target, targets)
+            if type(validator) is ObjectNearTargetValidatorCfg:
+                _validate_target_reference(validator.target, targets)
         expanded = _validate_program(
             node.steps,
             targets=targets,

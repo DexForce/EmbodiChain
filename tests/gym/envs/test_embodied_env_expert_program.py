@@ -21,6 +21,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 from embodichain.lab.gym.envs.demo import DemoSegment
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
@@ -55,6 +56,9 @@ def _uninitialized_env(cls: type[EmbodiedEnv], expert_program: object) -> Embodi
     """Create an environment instance without starting simulation."""
     env = object.__new__(cls)
     env.cfg = SimpleNamespace(expert_program=expert_program)
+    env.sim = SimpleNamespace(device=torch.device("cpu"))
+    env._num_envs = 2
+    env._active_expert_program_bridge = None
     return env
 
 
@@ -82,6 +86,7 @@ def test_create_demo_segments_uses_explicit_compiler_and_bridge_hooks() -> None:
     assert bridge.iteration_count == 1
     assert env.compiled_input is program
     assert env.bridge_input is compiled_program
+    assert env._active_expert_program_bridge is bridge
 
 
 def test_configured_program_requires_explicit_adapter() -> None:
@@ -90,3 +95,28 @@ def test_configured_program_requires_explicit_adapter() -> None:
 
     with pytest.raises(NotImplementedError, match="expert_program_adapter"):
         env.create_demo_segments()
+
+
+def test_expert_program_success_is_false_before_normal_bridge_completion() -> None:
+    """A configured program never inherits the base environment's true default."""
+    env = _uninitialized_env(EmbodiedEnv, object())
+
+    assert env.is_task_success().tolist() == [False, False]
+
+    env._active_expert_program_bridge = SimpleNamespace(program_completed=False)
+    assert env.is_task_success().tolist() == [False, False]
+
+
+def test_expert_program_success_uses_the_completed_bridge_mask() -> None:
+    """Normal bridge completion publishes its row-local validator acceptance."""
+    env = _uninitialized_env(EmbodiedEnv, object())
+    env._active_expert_program_bridge = SimpleNamespace(
+        program_completed=True,
+        completion_mask=torch.tensor([True, False]),
+    )
+
+    success = env.is_task_success()
+
+    assert success.dtype == torch.bool
+    assert success.device == env.device
+    assert success.tolist() == [True, False]

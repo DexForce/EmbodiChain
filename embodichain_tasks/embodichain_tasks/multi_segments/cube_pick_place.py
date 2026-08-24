@@ -44,6 +44,7 @@ from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.atomic_actions import AtomicActionEngine, ObjectSemantics
+    from embodichain.lab.sim.grasping import GraspPoseGenerator
     from embodichain.lab.sim.objects import RigidObject
 
 __all__ = ["MultiSegmentsCubePickPlaceEnv"]
@@ -65,6 +66,39 @@ GRIPPER_FINGER_LENGTH = 0.12
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
+
+
+def _create_default_grasp_pose_generator() -> GraspPoseGenerator:
+    """Create the task's typed, standalone parallel-jaw grasp service."""
+    from embodichain.lab.sim.grasping import ParallelJawGripperModelCfg
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGenerator,
+        AntipodalGraspPoseGeneratorCfg,
+        GraspAnnotationCfg,
+        ParallelJawGraspCollisionCfg,
+    )
+
+    return AntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(
+            model_id="dh_pgi_140_80",
+            min_opening_width=0.005,
+            max_opening_width=GRIPPER_MAX_OPEN_WIDTH,
+            finger_length=GRIPPER_FINGER_LENGTH,
+            finger_width=GRIPPER_Y_THICKNESS,
+            finger_thickness=0.01,
+            palm_depth=GRIPPER_ROOT_Z_WIDTH,
+        ),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=10_000),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            opening_margin=0.002,
+            point_sample_density=0.012,
+            filter_ground_collision=False,
+        ),
+        annotation_cfg=GraspAnnotationCfg(
+            selection_mode="whole_mesh",
+            viser_port=11801,
+        ),
+    )
 
 
 def _create_default_robot_cfg() -> URRobotCfg:
@@ -144,8 +178,6 @@ def _create_default_env_cfg() -> EmbodiedEnvCfg:
     cfg.extensions = {
         "num_cycles": DEFAULT_NUM_CYCLES,
         "place_positions": [list(position) for position in DEFAULT_PLACE_POSITIONS],
-        "grasp_samples": 10000,
-        "force_reannotate": False,
         "grasp_hold_steps": DEFAULT_GRASP_HOLD_STEPS,
         "settle_min_steps": 15,
         "settle_max_steps": 80,
@@ -170,7 +202,30 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
     PLACE_SAMPLE_INTERVAL = 120
     HAND_INTERP_STEPS = 12
 
-    def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        cfg: EmbodiedEnvCfg | None = None,
+        *,
+        grasp_pose_generator: GraspPoseGenerator | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the task with an optional standalone grasp service.
+
+        Args:
+            cfg: Gym environment and scene configuration.
+            grasp_pose_generator: Optional service override for direct Python
+                assembly. When omitted, the task creates its typed antipodal
+                parallel-jaw default outside the Gym ``extensions`` payload.
+            **kwargs: Additional base-environment arguments.
+        """
+        if grasp_pose_generator is not None:
+            from embodichain.lab.sim.grasping import GraspPoseGenerator
+
+            if not isinstance(grasp_pose_generator, GraspPoseGenerator):
+                raise TypeError(
+                    "grasp_pose_generator must be a GraspPoseGenerator or None."
+                )
+        self._grasp_pose_generator = grasp_pose_generator
         if cfg is None:
             cfg = _create_default_env_cfg()
 
@@ -179,8 +234,6 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
         self.place_positions = self._validate_place_positions(
             extensions.get("place_positions", DEFAULT_PLACE_POSITIONS)
         )
-        self.grasp_samples = int(extensions.get("grasp_samples", 10000))
-        self.force_reannotate = bool(extensions.get("force_reannotate", False))
         self.grasp_hold_steps = int(
             extensions.get("grasp_hold_steps", DEFAULT_GRASP_HOLD_STEPS)
         )
@@ -205,8 +258,6 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
         # JSON-native list/scalar types supplied by the launcher.
         self.num_cycles = int(self.num_cycles)
         self.place_positions = self._validate_place_positions(self.place_positions)
-        self.grasp_samples = int(self.grasp_samples)
-        self.force_reannotate = bool(self.force_reannotate)
         self.grasp_hold_steps = int(self.grasp_hold_steps)
         self.settle_min_steps = int(self.settle_min_steps)
         self.settle_max_steps = int(self.settle_max_steps)
@@ -241,8 +292,6 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
         """Validate task settings before allocating a simulation."""
         if self.num_cycles < 1:
             raise ValueError("num_cycles must be at least 1.")
-        if self.grasp_samples < 1:
-            raise ValueError("grasp_samples must be at least 1.")
         if self.grasp_hold_steps < 0:
             raise ValueError("grasp_hold_steps must be non-negative.")
         if not 0 <= self.settle_min_steps <= self.settle_max_steps:
@@ -281,6 +330,8 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
         motion_generator = MotionGenerator(
             cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
         )
+        if self._grasp_pose_generator is None:
+            self._grasp_pose_generator = _create_default_grasp_pose_generator()
         self._action_engine: AtomicActionEngine = AtomicActionEngine(
             motion_generator,
             control_profiles={
@@ -289,6 +340,7 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
                     grasp=hand_close_qpos,
                 )
             },
+            grasp_pose_generators={"hand": self._grasp_pose_generator},
         )
         self._cube_semantics: ObjectSemantics = self._create_cube_semantics()
 
@@ -297,13 +349,6 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
         from embodichain.lab.sim.atomic_actions import (
             AntipodalAffordance,
             ObjectSemantics,
-        )
-        from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
-            AntipodalSamplerCfg,
-            GraspGeneratorCfg,
-        )
-        from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-            GripperCollisionCfg,
         )
 
         vertices = self._cube.get_vertices(env_ids=[0], scale=True)[0]
@@ -314,25 +359,6 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
             affordance=AntipodalAffordance(
                 mesh_vertices=vertices,
                 mesh_triangles=triangles,
-                gripper_collision_cfg=GripperCollisionCfg(
-                    max_open_length=GRIPPER_MAX_OPEN_WIDTH,
-                    finger_length=GRIPPER_FINGER_LENGTH,
-                    y_thickness=GRIPPER_Y_THICKNESS,
-                    root_z_width=GRIPPER_ROOT_Z_WIDTH,
-                    open_check_margin=0.002,
-                    point_sample_dense=0.012,
-                ),
-                generator_cfg=GraspGeneratorCfg(
-                    viser_port=11801,
-                    antipodal_sampler_cfg=AntipodalSamplerCfg(
-                        n_sample=self.grasp_samples,
-                        max_length=GRIPPER_MAX_OPEN_WIDTH,
-                        min_length=0.005,
-                    ),
-                    is_partial_annotate=False,
-                    is_filter_ground_collision=False,
-                ),
-                force_reannotate=self.force_reannotate,
             ),
             entity=self._cube,
         )
