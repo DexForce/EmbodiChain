@@ -243,10 +243,12 @@ class TestAntipodalAffordance:
         assert positive_result is expected_result
         assert negative_result is expected_result
         assert center_result is expected_result
-        assert torch.all(positive_kwargs["origin_points_"][:, 0] > 0.0)
-        assert torch.all(negative_kwargs["origin_points_"][:, 0] < 0.0)
-        assert positive_kwargs["origin_points_"].shape[0] == 2
-        assert negative_kwargs["origin_points_"].shape[0] == 2
+        torch.testing.assert_close(
+            positive_kwargs["origin_points_"][:, 0], torch.tensor([0.75])
+        )
+        torch.testing.assert_close(
+            negative_kwargs["origin_points_"][:, 0], torch.tensor([-0.75])
+        )
         assert center_kwargs["origin_points_"].shape[0] == 4
 
     def test_best_grasp_poses_casts_approach_direction_to_generator_device(self):
