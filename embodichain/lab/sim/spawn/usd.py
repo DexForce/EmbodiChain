@@ -23,7 +23,6 @@ from dataclasses import replace
 from dexsim.spawn import (
     ArticulationDesc,
     MaterialDesc,
-    NewtonJointDesc,
     ObjectDesc,
     RenderDesc,
 )
@@ -32,6 +31,8 @@ from dexsim.types import ActorType
 from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
 from embodichain.lab.sim.spawn.descriptors import (
     _compile_dexsim_collision,
+    _compile_joint_overrides,
+    _compile_link_override,
     _compile_newton_collision,
     _compile_rigid_physics,
     _compile_visual_material,
@@ -97,6 +98,7 @@ def articulation_desc_from_usd(
     *,
     per_env: bool = True,
     source_path: str | None = None,
+    newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
     """Select the sole articulation in a USD stage."""
     path = source_path or cfg.fpath
@@ -117,17 +119,37 @@ def articulation_desc_from_usd(
         cfg.disable_self_collision = not desc.enable_self_collision
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
     else:
+        if (
+            newton_solver_type is not None
+            and cfg.drive_pros.drive_type == "acceleration"
+        ):
+            raise NotImplementedError(
+                "Newton Spawn does not have an exact acceleration-drive mode; "
+                "use drive_type='force' or drive_type='none'."
+            )
         desc.fixed_base = bool(cfg.fix_base)
         desc.enable_self_collision = not bool(cfg.disable_self_collision)
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
-        target_mode = {"force": 3, "none": 0}.get(cfg.drive_pros.drive_type)
-        if target_mode is not None:
-            for joint in desc.joints:
-                joint.newton = (
-                    NewtonJointDesc(target_mode=target_mode)
-                    if joint.newton is None
-                    else replace(joint.newton, target_mode=target_mode)
-                )
+        joint_defaults, joint_overrides = _compile_joint_overrides(cfg)
+        desc.link_defaults = _compile_link_override(
+            name="link_defaults",
+            patterns=(),
+            attrs=cfg.attrs,
+            replace_inertial=False,
+            newton_solver_type=newton_solver_type,
+        )
+        desc.link_overrides = [
+            _compile_link_override(
+                name=group_name,
+                patterns=tuple(group.link_names_expr),
+                attrs=group.attrs.merged_cfg(cfg.attrs),
+                replace_inertial=group.replace_inertial,
+                newton_solver_type=newton_solver_type,
+            )
+            for group_name, group in (cfg.link_attrs or {}).items()
+        ]
+        desc.joint_defaults = joint_defaults
+        desc.joint_overrides = joint_overrides
     return desc, materials
 
 

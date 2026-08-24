@@ -18,7 +18,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
 import pytest
+
+from dexsim.spawn import ArticulationDesc
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -29,10 +34,12 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg
+from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     rigid_desc_from_cfg,
 )
+from embodichain.lab.sim.spawn.usd import articulation_desc_from_usd
 
 pytestmark = pytest.mark.no_sim
 
@@ -211,3 +218,53 @@ def test_articulation_descriptor_compiles_source_resolved_overrides() -> None:
     assert joint_rule.newton.target_ke == 10.0
     assert joint_rule.lower_limit == -1.0
     assert joint_rule.upper_limit == 1.0
+
+
+def test_usd_articulation_descriptor_compiles_the_same_source_overrides() -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.usd",
+        use_usd_properties=False,
+        attrs=RigidBodyAttributesCfg(mass=1.0),
+        link_attrs={
+            "fingers": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyAttributesOverrideCfg(mass=2.0),
+            )
+        },
+        drive_pros=JointDrivePropertiesCfg(stiffness={"arm_.*": 10.0}),
+    )
+    source = ArticulationDesc(name="source")
+
+    with patch(
+        "embodichain.lab.sim.spawn.usd._parse_singleton",
+        return_value=(SimpleNamespace(materials={}), source),
+    ):
+        descriptor, _ = articulation_desc_from_usd(
+            cfg,
+            newton_solver_type="mujoco_warp",
+        )
+
+    assert descriptor.link_defaults.rigid_body.mass == 1.0
+    assert descriptor.link_overrides[0].patterns == ("finger_.*",)
+    assert descriptor.link_overrides[0].rigid_body.mass == 2.0
+    assert descriptor.joint_overrides[0].patterns == ("arm_.*",)
+    assert descriptor.joint_overrides[0].dexsim.stiffness == 10.0
+    assert descriptor.joint_overrides[0].newton.target_ke == 10.0
+
+
+def test_spawn_post_config_only_applies_render_uv() -> None:
+    render_body = Mock()
+    entity = Mock()
+    entity.get_render_body.return_value = render_body
+    articulation = object.__new__(Articulation)
+    articulation.cfg = SimpleNamespace(compute_uv=True)
+    articulation._entities = [entity]
+    articulation.__dict__["link_names"] = ["base"]
+    articulation._set_default_joint_drive = Mock()
+
+    articulation._apply_spawn_config()
+
+    articulation._set_default_joint_drive.assert_not_called()
+    entity.get_render_body.assert_called_once_with("base")
+    render_body.set_projective_uv.assert_called_once_with()

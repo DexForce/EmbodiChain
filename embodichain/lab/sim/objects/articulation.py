@@ -562,9 +562,17 @@ class Articulation(BatchEntity):
             if spawn_result is None:
                 self._set_default_joint_drive()
 
-        # Apply configured qpos limits if provided. This replaces the asset
-        # limits as the baseline and allows expanding the allowed range.
-        if self.cfg.qpos_limits is not None:
+        # Regex limits for Spawn-owned URDF and authored USD articulations are
+        # already source-resolved by DexSim. Array limits, and USD assets that
+        # explicitly retain source properties, still require this post-bind
+        # runtime path because they are not declaration-time name rules.
+        is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
+        qpos_limits_are_source_resolved = (
+            spawn_result is not None
+            and isinstance(self.cfg.qpos_limits, dict)
+            and not (is_usd_source and self.cfg.use_usd_properties)
+        )
+        if self.cfg.qpos_limits is not None and not qpos_limits_are_source_resolved:
             if isinstance(self.cfg.qpos_limits, dict):
                 indices, _, values = resolve_matching_names_values(
                     self.cfg.qpos_limits, self.joint_names
@@ -588,7 +596,6 @@ class Articulation(BatchEntity):
                 self.set_qpos_limits(qpos_limits)
 
         self.pk_chain = None
-        is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
         if self.cfg.build_pk_chain and not is_usd_source:
             self.pk_chain = create_pk_chain(
                 urdf_path=self.cfg.fpath, device=self.device
@@ -713,89 +720,20 @@ class Articulation(BatchEntity):
         self.__dict__.update(bound.__dict__)
 
     def _apply_spawn_config(self) -> None:
-        """Apply render configuration that requires finalized source metadata.
+        """Apply render-only configuration requiring finalized source metadata.
 
         Link physics and joint-drive regex overlays are part of the typed
         :class:`dexsim.spawn.ArticulationDesc` and are applied by DexSim while
         loading the source, before either physics backend is finalized.
         """
-        is_usd = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
-        use_source_properties = is_usd and self.cfg.use_usd_properties
-        if use_source_properties:
+        if not self.cfg.compute_uv:
             return
 
-        self._set_default_joint_drive()
-        if not self.body_data.is_newton_backend:
-            return
-
-        self._apply_configured_link_masses()
-
-        if self.cfg.compute_uv:
-            for entity in self._entities:
-                for link_name in self.link_names:
-                    render_body = entity.get_render_body(link_name)
-                    if render_body is not None:
-                        render_body.set_projective_uv()
-
-        logger.log_warning(
-            f"Spawn articulation {self.uid!r}: TODO: non-mass link physics "
-            "attributes are not exposed by the Newton Spawn facade."
-        )
-
-    def _apply_configured_link_masses(self) -> None:
-        """Apply configured masses after source link names are available."""
-        base_mass = self.cfg.attrs.mass
-        groups = self.cfg.link_attrs or {}
-        if base_mass is None and not any(
-            group.attrs.mass is not None for group in groups.values()
-        ):
-            return
-        if self.body_data.is_newton_backend:
-            logger.log_warning(
-                f"Spawn articulation {self.uid!r}: Newton link-mass overrides "
-                "require retained-desc support and were not applied."
-            )
-            return
-
-        masses = self.get_mass()
-        mass_changed = False
-        if base_mass is not None:
-            if base_mass == 0:
-                logger.log_warning(
-                    f"Spawn articulation {self.uid!r}: density-derived mass is "
-                    "not exposed by the Spawn facade and was not applied."
-                )
-            else:
-                masses.fill_(float(base_mass))
-                mass_changed = True
-
-        claimed: set[str] = set()
-        for group in groups.values():
-            if group.attrs.mass is None:
-                continue
-            if group.attrs.mass == 0:
-                logger.log_warning(
-                    f"Spawn articulation {self.uid!r}: density-derived per-link "
-                    "mass is not exposed by the Spawn facade and was not applied."
-                )
-                continue
-            matched_indices, matched_names = resolve_matching_names(
-                keys=group.link_names_expr,
-                list_of_strings=self.link_names,
-            )
-            overlap = claimed.intersection(matched_names)
-            if overlap:
-                raise ValueError(
-                    "Articulation link mass override groups overlap for links "
-                    f"{sorted(overlap)}."
-                )
-            claimed.update(matched_names)
-            masses[:, matched_indices] = float(group.attrs.mass)
-            mass_changed = True
-
-        if mass_changed:
-            self.set_mass(masses, self.link_names)
-            self.default_link_masses = self.get_mass()
+        for entity in self._entities:
+            for link_name in self.link_names:
+                render_body = entity.get_render_body(link_name)
+                if render_body is not None:
+                    render_body.set_projective_uv()
 
     def __str__(self) -> str:
         if self.is_declared:

@@ -2327,6 +2327,7 @@ class SimulationManager:
             descriptor, materials = articulation_desc_from_usd(
                 cfg,
                 per_env=True,
+                newton_solver_type=self._active_newton_solver_type,
             )
             self._spawn_scene.builder.materials.update(materials)
         else:
