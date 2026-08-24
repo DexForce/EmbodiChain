@@ -238,6 +238,58 @@ embodichain.gen_sim.scene_engine.core.scene_edit_plan
    SceneEditOperation
    SceneEditPlan
 
+embodichain.gen_sim.scene_engine.errors
+---------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.errors
+
+Scene service failures preserve typed preparation and materialization errors
+across the Task Engine boundary.
+
+.. autosummary::
+
+   SceneServiceError
+
+embodichain.gen_sim.scene_engine.pipeline
+-----------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline
+
+The public authoring boundary separates deterministic scene analysis from
+side-effecting materialization for generated and edited scenes.
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.api
+---------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.api
+
+Versioned blueprint artifacts and analyze/materialize operations provide the
+implementation-level Scene Engine authoring contract.
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
 embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 -------------------------------------------------------------------------------
 
