@@ -9,6 +9,19 @@ covered by a more focused API-reference page. Prefer curated pages for APIs
 that need deeper explanations or examples. Sphinx obtains signatures and
 summaries here from the canonical Python docstrings.
 
+embodichain.agents.mllm.expert_program
+--------------------------------------
+
+Strict MLLM entry points that inject host-owned integration settings before
+decoding and compiling the constrained Expert Program schema surface.
+
+.. currentmodule:: embodichain.agents.mllm.expert_program
+
+.. autosummary::
+
+   compile_mllm_expert_program
+   decode_mllm_expert_program
+
 embodichain.data.assets.planner_assets
 --------------------------------------
 
@@ -42,31 +55,6 @@ embodichain.data_pipeline.depth_video
    DEPTH_METER_UNIT
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
-
-embodichain.gen_sim.scene_engine.core.scene_edit_plan
------------------------------------------------------
-
-.. currentmodule:: embodichain.gen_sim.scene_engine.core.scene_edit_plan
-
-Validated scene-edit values describe add, move, and delete requests without
-mutating the pre-edit scene or its relation graph.
-
-.. autosummary::
-
-   SceneEditOperation
-   SceneEditPlan
-
-embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
------------------------------------------------------------------------------
-
-.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
-
-Asset preparation generates SimReady geometry only for objects introduced by
-scene-edit add operations.
-
-.. autosummary::
-
-   prepare_scene_edit_assets
 
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------
@@ -1704,7 +1692,7 @@ embodichain_tasks.expert_program.open_drawer
    ExpertProgramOpenDrawerEnv
 
 embodichain_tasks.expert_program.repeated_pick_place
----------------------------------------------------
+----------------------------------------------------
 
 .. currentmodule:: embodichain_tasks.expert_program.repeated_pick_place
 

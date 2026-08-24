@@ -50,8 +50,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessorConfig,
 )
 
-__all__ = ["prepare_scene_edit_assets"]
-
 
 @dataclass(frozen=True)
 class _AddedAssetInfo:
@@ -72,38 +70,7 @@ def prepare_scene_edit_assets(
     image_segmentation_client: ImageSegmentationClient,
     vlm_client: OpenAICompatibleVLM | None = None,
 ) -> list[SceneObject]:
-    """Generate canonical SimReady assets for a scene edit's add operations.
-
-    Move-only and delete-only plans return immediately without modifying an
-    existing asset-preparation directory. For add operations, the function
-    generates and segments one image per object, creates coarse geometry,
-    processes it into SimReady geometry, and resets the returned objects to
-    identity edit-time poses.
-
-    Args:
-        scene_edit_plan: Validated edit plan whose add operations define the
-            objects to generate.
-        output_root: Scene Engine output root. Intermediate artifacts are
-            written below ``scene_editing/asset_preparation``.
-        image_generation_client: Client used to render object images from the
-            operation descriptions.
-        geometry_generation_client: Client used to create coarse GLB geometry
-            from each generated image and mask.
-        image_segmentation_client: Client used to isolate the generated object
-            in each image.
-        vlm_client: Optional VLM used by SimReady processing to estimate asset
-            scale and orientation.
-
-    Returns:
-        Added ``SceneObject`` assets in edit-plan order, or an empty list when
-        the plan contains no add operations.
-
-    Raises:
-        ValueError: If add metadata or generated image, mask, and geometry
-            mappings are incomplete or inconsistent.
-        FileNotFoundError: If geometry generation does not produce an expected
-            GLB file.
-    """
+    """Prepare and return SimReady assets required by add operations."""
     # Prepare descriptions for all newly added objects.
     added_asset_descriptions = _collect_added_asset_descriptions(scene_edit_plan)
     # Skip asset generation when the edit plan only moves or deletes existing objects.
