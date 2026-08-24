@@ -18,6 +18,4 @@
 
 from __future__ import annotations
 
-from .open_drawer import OpenDrawerEnv
-
-__all__ = ["OpenDrawerEnv"]
+__all__: list[str] = []

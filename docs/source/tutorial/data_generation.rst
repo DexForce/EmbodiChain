@@ -229,11 +229,11 @@ Dataset folders are automatically numbered, which makes it easy to run repeated 
 In a practical workflow, the output of this stage is the synthesized dataset itself. Later training scripts typically consume these saved LeRobot episodes instead of regenerating trajectories each time.
 
 
-Multi-Segment UR5 Example
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Repeated Pick-and-Place Expert Program Example
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The repository includes a complete repeated pick-and-place example at
-``embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json``. It uses
+``embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json``. It uses
 the specified UR5 robot and parallel gripper to pick up the same cube and place
 it three times in one episode. No separate action-bank config is required.
 
@@ -247,7 +247,7 @@ Generate one episode with:
 .. code-block:: bash
 
    embodichain run-env \
-       --gym_config embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json \
+       --gym_config embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json \
        --headless \
        --device cuda \
        --max_episodes 1
@@ -257,8 +257,8 @@ execution. The config writes an auto-numbered dataset below:
 
 .. code-block:: text
 
-   outputs/lerobot/multi_segments/
-   `-- ur5_multi_segments_three_cycle_cube_pick_place_NNN/
+   outputs/lerobot/expert_program/
+   `-- ur5_expert_program_repeated_pick_place_NNN/
 
 The example has no configured camera sensor and sets ``use_videos`` to
 ``false``. Its dataset therefore contains robot state, action, task, subtask,
@@ -301,7 +301,7 @@ generated auto-numbered dataset:
 .. code-block:: bash
 
    embodichain preview_lerobot_data \
-       outputs/lerobot/multi_segments \
+       outputs/lerobot/expert_program \
        --latest \
        --episode 0 \
        --expect-segments 3
@@ -371,8 +371,8 @@ must be the exact auto-numbered dataset directory:
 .. code-block:: bash
 
    lerobot-dataset-viz \
-       --repo-id DexForce/ur5_multi_segments_three_cycle_cube_pick_place_000 \
-       --root outputs/lerobot/multi_segments/ur5_multi_segments_three_cycle_cube_pick_place_000 \
+       --repo-id DexForce/ur5_expert_program_repeated_pick_place_000 \
+       --root outputs/lerobot/expert_program/ur5_expert_program_repeated_pick_place_000 \
        --mode local \
        --episode-index 0 \
        --num-workers 0
@@ -391,14 +391,14 @@ To create a portable Rerun recording without opening a viewer, add
 .. code-block:: bash
 
    lerobot-dataset-viz \
-       --repo-id DexForce/ur5_multi_segments_three_cycle_cube_pick_place_000 \
-       --root outputs/lerobot/multi_segments/ur5_multi_segments_three_cycle_cube_pick_place_000 \
+       --repo-id DexForce/ur5_expert_program_repeated_pick_place_000 \
+       --root outputs/lerobot/expert_program/ur5_expert_program_repeated_pick_place_000 \
        --episode-index 0 \
        --num-workers 0 \
        --save 1 \
        --output-dir outputs/lerobot/previews
 
-   rerun outputs/lerobot/previews/DexForce_ur5_multi_segments_three_cycle_cube_pick_place_000_episode_0.rrd
+   rerun outputs/lerobot/previews/DexForce_ur5_expert_program_repeated_pick_place_000_episode_0.rrd
 
 ``--save 1`` disables automatic viewer spawning and writes the ``.rrd`` file;
 the second command opens that saved recording. You can validate the container

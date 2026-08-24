@@ -47,10 +47,6 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 
-GRIPPER_FINGER_LINKS = (
-    "gripper_finger1_link_1",
-    "gripper_finger2_link_1",
-)
 DH_PGI_140_80_GRIPPER_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgi_140_80",
     min_opening_width=0.005,

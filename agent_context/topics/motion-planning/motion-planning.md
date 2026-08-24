@@ -190,11 +190,12 @@ Grasp-pose generation is a sibling planning service, not a
 `MotionGenerator` feature. `embodichain.toolkits.graspkit` owns its standalone
 contract and the `pg_grasp` implementation without importing `embodichain.lab`.
 Atomic actions and Expert Program install a generator instance in
-`AtomicActionEngine`; the non-atomic reference environment
-`embodichain_tasks/embodichain_tasks/multi_segments/cube_pick_place.py` calls
-the same generator directly, then feeds the selected end-effector poses into
-four explicit `MotionGenerator.generate()` phases. That task deliberately does
-not create an `AtomicActionEngine`.
+`AtomicActionEngine`. The canonical repeated pick/place environment lives at
+`embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py` and
+creates the production simulation adapter; its factory owns the
+`AtomicActionEngine`, selected `MotionGenerator`, and grasp-pose generator.
+`ExpertProgramRepeatedPickPlace-v1` is the only registered task ID for that
+integration; there is no second compatibility package or direct-planning path.
 
 `MotionGenOptions` fields:
 

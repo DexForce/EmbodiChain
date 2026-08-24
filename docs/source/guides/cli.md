@@ -309,7 +309,7 @@ simulator:
 
 ```bash
 embodichain preview_lerobot_data \
-    outputs/lerobot/multi_segments \
+    outputs/lerobot/expert_program \
     --latest \
     --episode 0 \
     --expect-segments 3

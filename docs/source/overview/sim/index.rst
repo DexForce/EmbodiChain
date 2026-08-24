@@ -153,6 +153,9 @@ Choosing Where to Start
 - Use :doc:`semantic_skills` when an application or agent should issue
   robot-independent object-centric calls and retain verified state across
   dynamic task segments.
+- Use :doc:`atomic_actions/expert_programs` when a task should declare semantic
+  calls, settling, validation, or parallel barriers from JSON/YAML without
+  implementing task-local motion generation.
 - Use :doc:`atomic actions <atomic_actions/index>` when building scripted manipulation from reusable
   motion primitives.
 
