@@ -73,6 +73,7 @@ class Robot(Articulation):
         cfg: RobotCfg,
         entities: List[_Articulation],
         device: torch.device = torch.device("cpu"),
+        urdf_inertial_properties: list[dict[str, tuple]] | None = None,
     ) -> None:
 
         self._entities = entities
@@ -94,7 +95,7 @@ class Robot(Articulation):
         if self.cfg.control_parts:
             self._init_control_parts(self.cfg.control_parts)
 
-        super().__init__(cfg, entities, device)
+        super().__init__(cfg, entities, device, urdf_inertial_properties)
 
         if self.cfg.solver_cfg:
             self.init_solver(self.cfg.solver_cfg)

@@ -56,13 +56,13 @@ from .workspace.cfg import RobotWorkspaceCfg
 # :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`). Assigning a
 # concrete renderer here (e.g. in test fixtures) forces that renderer and takes
 # precedence over auto-selection.
-DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt", "raster"] = "auto"
 
 
 @configclass
 class RenderCfg:
-    renderer: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
-    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'rt'.
+    renderer: Literal["auto", "hybrid", "fast-rt", "rt", "raster"] = "auto"
+    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', 'rt', and 'raster'.
 
     Note:
     - 'auto' selects a default renderer based on the detected GPU: RTX-series cards use
@@ -72,6 +72,18 @@ class RenderCfg:
         providing a balance between performance and visual quality.
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
     - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
+    - 'raster' is pure rasterization with no OptiX ray-tracing structures. Use it for
+        physics-only workloads (e.g. large-batch RL training) where ray-traced meshes
+        would otherwise exhaust GPU memory.
+
+    .. attention::
+        DexSim initializes its PBR material system process-wide from the
+        renderer of the first created ``World``, and ``Renderer.RASTER`` skips
+        that initialization, so ``create_pbr_material`` returns ``None`` under
+        'raster'. :meth:`SimulationManager.create_visual_material` tolerates
+        this and returns ``None`` (materials are visual-only). Asset (URDF /
+        mesh) loading and physics stepping are unaffected, but visual
+        randomization functors are unavailable under 'raster'.
     """
 
     spp: int = 1
@@ -100,6 +112,8 @@ class RenderCfg:
             return Renderer.FASTRT
         elif self.renderer == "rt":
             return Renderer.OFFLINERT
+        elif self.renderer == "raster":
+            return Renderer.RASTER
         elif self.renderer == "auto":
             # 'auto' is normally resolved by the SimulationManager before this is
             # called. If it reaches here (e.g. used standalone), fall back safely.
@@ -110,7 +124,7 @@ class RenderCfg:
             return Renderer.HYBRID
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', 'rt', or 'raster'."
             )
 
     def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
@@ -143,6 +157,9 @@ class PhysicsCfg:
     enable_ccd: bool = False
     """Enable continuous collision detection (CCD) for fast-moving objects."""
 
+    cache_material: bool = True
+    """Share identical physics materials and detach them on mutation."""
+
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
     
@@ -166,6 +183,7 @@ class PhysicsCfg:
             "enable_ccd": self.enable_ccd,
             "enable_enhanced_determinism": False,
             "enable_friction_every_iteration": True,
+            "cache_material": self.cache_material,
         }
         return args
 
@@ -341,6 +359,7 @@ class RigidBodyAttributesCfg:
         attr.sleep_threshold = self.sleep_threshold
         attr.restitution = self.restitution
         attr.enable_ccd = self.enable_ccd
+        attr.enable_collision = self.enable_collision
         attr.max_linear_velocity = self.max_linear_velocity
         attr.max_angular_velocity = self.max_angular_velocity
         attr.max_depenetration_velocity = self.max_depenetration_velocity
@@ -1633,6 +1652,13 @@ class ArticulationCfg(ObjectBaseCfg):
 
     disable_self_collision: bool = True
     """Whether to enable or disable self-collisions."""
+
+    read_urdf_inertia: bool = False
+    """Whether the URDF loader should use explicit link mass and inertia data.
+
+    This option applies only to URDF assets. When disabled, DexSim derives mass
+    properties from collision geometry.
+    """
 
     init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
     """Initial joint positions of the articulation.

@@ -27,15 +27,36 @@ from tensordict import TensorDict
 
 from embodichain.learning.rl.utils import (
     dict_to_tensordict,
-    flatten_dict_observation,
+    flatten_observation_groups,
 )
 
 __all__ = ["evaluate_episodes"]
 
 
-def _flat_observation(observation: Any, device: torch.device) -> torch.Tensor:
-    tensor_dict = dict_to_tensordict(observation, device)
-    return flatten_dict_observation(tensor_dict)
+def _policy_input(
+    observation: Any,
+    policy: torch.nn.Module,
+    device: torch.device,
+) -> TensorDict:
+    """Build actor and optional privileged critic inputs for evaluation."""
+    observation_td = dict_to_tensordict(observation, device)
+    policy_module = getattr(policy, "module", policy)
+    fields = {
+        "obs": flatten_observation_groups(
+            observation_td,
+            getattr(policy_module, "actor_obs_groups", None),
+        )
+    }
+    if getattr(policy_module, "uses_separate_critic_obs", False):
+        fields["critic_obs"] = flatten_observation_groups(
+            observation_td,
+            getattr(policy_module, "critic_obs_groups", None),
+        )
+    return TensorDict(
+        fields,
+        batch_size=observation_td.batch_size,
+        device=device,
+    )
 
 
 def _action_for_env(env: Any, action: torch.Tensor) -> Any:
@@ -106,12 +127,7 @@ def evaluate_episodes(
     try:
         observation, _ = env.reset(seed=seed)
         while len(returns) < num_episodes:
-            flat_observation = _flat_observation(observation, device)
-            policy_input = TensorDict(
-                {"obs": flat_observation},
-                batch_size=[num_envs],
-                device=device,
-            )
+            policy_input = _policy_input(observation, policy, device)
             policy_output = policy.get_action(policy_input, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(
                 _action_for_env(env, policy_output["action"])

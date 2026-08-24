@@ -16,8 +16,14 @@
 
 """RL helper utilities: algorithm config, optimizers, and observation helpers."""
 
+from __future__ import annotations
+
 from .config import AlgorithmCfg, LRSchedulerCfg, OptimizerCfg
-from .helper import dict_to_tensordict, flatten_dict_observation
+from .helper import (
+    dict_to_tensordict,
+    flatten_dict_observation,
+    flatten_observation_groups,
+)
 from .optimizer import (
     bind_scheduler_horizon,
     build_lr_scheduler,
@@ -40,6 +46,7 @@ __all__ = [
     "coerce_optimizer_cfg",
     "dict_to_tensordict",
     "flatten_dict_observation",
+    "flatten_observation_groups",
     "get_registered_lr_scheduler_names",
     "get_registered_optimizer_names",
     "scheduler_needs_horizon",

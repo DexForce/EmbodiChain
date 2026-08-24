@@ -28,8 +28,12 @@ import wandb
 from torch.utils.tensorboard import SummaryWriter
 from copy import deepcopy
 
-from embodichain.learning.rl.models import build_policy, get_registered_policy_names
-from embodichain.learning.rl.models import build_mlp_from_cfg
+from embodichain.learning.rl.models import (
+    build_mlp_from_cfg,
+    build_policy,
+    get_registered_policy_names,
+    resolve_policy_obs_groups,
+)
 from embodichain.learning.rl.algo import (
     RolloutKind,
     build_algo,
@@ -41,7 +45,10 @@ from embodichain.learning.rl.differentiable_trainer import (
 )
 from embodichain.learning.rl.env import build_learning_env
 from embodichain.learning.rl.routing import get_trainer_class
-from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
+from embodichain.learning.rl.utils import (
+    dict_to_tensordict,
+    flatten_observation_groups,
+)
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.registration import (
@@ -482,8 +489,17 @@ def train_from_config(
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
     sample_obs, _ = env.reset()
     sample_obs_td = dict_to_tensordict(sample_obs, device)
-    obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
-    flat_obs_space = env.flattened_observation_space
+    actor_obs_groups, critic_obs_groups = resolve_policy_obs_groups(policy_block)
+    actor_obs_dim = flatten_observation_groups(
+        sample_obs_td,
+        actor_obs_groups,
+    ).shape[-1]
+    uses_separate_critic_obs = actor_obs_groups != critic_obs_groups
+    critic_obs_dim = (
+        flatten_observation_groups(sample_obs_td, critic_obs_groups).shape[-1]
+        if uses_separate_critic_obs
+        else actor_obs_dim
+    )
 
     # Create evaluation environment only if enabled
     eval_env = None
@@ -520,16 +536,17 @@ def train_from_config(
                 "ActorCritic requires 'actor' and 'critic' definitions in JSON (policy.actor / policy.critic)."
             )
 
-        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
-        critic = build_mlp_from_cfg(critic_cfg, obs_dim, 1)
+        actor = build_mlp_from_cfg(actor_cfg, actor_obs_dim, action_dim)
+        critic = build_mlp_from_cfg(critic_cfg, critic_obs_dim, 1)
 
         policy = build_policy(
             policy_block,
-            flat_obs_space,
+            actor_obs_dim,
             env.action_space,
             device,
             actor=actor,
             critic=critic,
+            critic_obs_space=(critic_obs_dim if uses_separate_critic_obs else None),
         )
     elif policy_name.lower() == "actor_only":
         actor_cfg = policy_block.get("actor")
@@ -538,11 +555,11 @@ def train_from_config(
                 "ActorOnly requires 'actor' definition in JSON (policy.actor)."
             )
 
-        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+        actor = build_mlp_from_cfg(actor_cfg, actor_obs_dim, action_dim)
 
         policy = build_policy(
             policy_block,
-            flat_obs_space,
+            actor_obs_dim,
             env.action_space,
             device,
             actor=actor,

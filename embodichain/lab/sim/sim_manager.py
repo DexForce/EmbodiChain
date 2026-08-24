@@ -91,6 +91,7 @@ from embodichain.lab.sim.cfg import (
     RigidConstraintCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
+from embodichain.lab.sim.utility.sim_utils import _capture_urdf_inertial_properties
 from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
@@ -155,8 +156,43 @@ class SimulationManagerCfg:
     num_envs: int = 1
     """The number of parallel environments (arenas) to simulate."""
 
+    clone_urdf_articulations: bool = True
+    """Load a URDF once and clone its articulation into the other arenas.
+
+    Disable this only when a loader-specific behavior requires each arena to
+    parse the URDF independently.
+    """
+
+    clone_urdf_render_bodies: bool = True
+    """Whether cloned URDF articulations include per-link render bodies."""
+
+    clone_usd_articulations: bool = True
+    """Import a USD articulation once and clone it into the other arenas."""
+
+    clone_usd_render_bodies: bool = True
+    """Whether cloned USD articulations include per-link render bodies."""
+
+    enable_default_ground_collision: bool = True
+    """Whether the global default plane participates in physics collisions.
+
+    Vectorized tasks with one local ground per arena should disable this to
+    avoid overlapping ground shapes and a scene-wide broadphase plane.
+    """
+
+    default_ground_static_friction: float = 0.9
+    """Static friction coefficient of the global default plane."""
+
+    default_ground_dynamic_friction: float = 0.9
+    """Dynamic friction coefficient of the global default plane."""
+
+    default_ground_restitution: float = 0.0
+    """Restitution coefficient of the global default plane."""
+
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
+
+    center_arena_grid: bool = False
+    """Whether the vectorized arena grid is centered around the world origin."""
 
     physics_dt: float = 1.0 / 100.0
     """The time step for the physics simulation."""
@@ -290,6 +326,11 @@ class SimulationManager:
 
         # Initialize warp runtime context before creating the world.
         wp.init()
+
+        # DexSim creates the physics scene inside World construction. Configure
+        # global physics options first so the new scene receives these values.
+        dexsim.set_physics_config(**sim_config.physics_config.to_dexsim_args())
+        dexsim.set_physics_gpu_memory_config(**sim_config.gpu_memory_config.to_dict())
         self._world: dexsim.World = dexsim.World(world_config)
 
         self._window: Windows | None = None
@@ -318,9 +359,6 @@ class SimulationManager:
 
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
-
-        dexsim.set_physics_config(**sim_config.physics_config.to_dexsim_args())
-        dexsim.set_physics_gpu_memory_config(**sim_config.gpu_memory_config.to_dict())
 
         self._is_initialized_gpu_physics = False
         self._ps = self._world.get_physics_scene()
@@ -440,7 +478,7 @@ class SimulationManager:
 
         Args:
             renderer: The renderer to set. One of ``"auto"``, ``"hybrid"``,
-                ``"fast-rt"``, or ``"rt"``. When ``"auto"``, the renderer is
+                ``"fast-rt"``, ``"rt"``, or ``"raster"``. When ``"auto"``, the renderer is
                 resolved immediately from the detected GPU via
                 :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`.
             gpu_id: The CUDA device index to query when ``renderer="auto"``.
@@ -451,7 +489,7 @@ class SimulationManager:
         from embodichain.lab.sim import cfg
         from embodichain.lab.sim.utility.render_utils import select_default_renderer
 
-        valid = {"auto", "hybrid", "fast-rt", "rt"}
+        valid = {"auto", "hybrid", "fast-rt", "rt", "raster"}
         if renderer not in valid:
             logger.log_error(
                 f"Invalid renderer '{renderer}'. Must be one of {sorted(valid)}."
@@ -1027,12 +1065,19 @@ class SimulationManager:
             return
 
         scene_grid_length = int(np.ceil(np.sqrt(num)))
+        grid_origin = (
+            0.5 * (scene_grid_length - 1) * space
+            if self.sim_config.center_arena_grid
+            else 0.0
+        )
 
         for i in range(num):
             arena = self._env.add_arena(f"arena_{i}")
 
             id_x, id_y = i % scene_grid_length, i // scene_grid_length
-            arena.set_root_node_position([id_x * space, id_y * space, 0])
+            arena.set_root_node_position(
+                [id_x * space - grid_origin, id_y * space - grid_origin, 0]
+            )
             self._arenas.append(arena)
 
     def set_indirect_lighting(self, name: str) -> None:
@@ -1071,16 +1116,18 @@ class SimulationManager:
             0, default_length, repeat_uv_size, repeat_uv_size
         )
         self._default_plane.set_name("default_plane")
-        plane_collision = self._env.create_cube(
-            default_length, default_length, default_length / 10
-        )
-        plane_collision.set_visible(False)
-        plane_collision_pose = np.eye(4, dtype=float)
-        plane_collision_pose[2, 3] = -default_length / 20 - 0.001
-        plane_collision.set_local_pose(plane_collision_pose)
-        plane_collision.add_rigidbody(ActorType.KINEMATIC, RigidBodyShape.CONVEX)
-
-        # TODO: add default physics attributes for the plane.
+        if self.sim_config.enable_default_ground_collision:
+            plane_attr = PhysicalAttr()
+            plane_attr.static_friction = self.sim_config.default_ground_static_friction
+            plane_attr.dynamic_friction = (
+                self.sim_config.default_ground_dynamic_friction
+            )
+            plane_attr.restitution = self.sim_config.default_ground_restitution
+            self._default_plane.add_rigidbody(
+                ActorType.STATIC,
+                RigidBodyShape.PLANE,
+                plane_attr,
+            )
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -1110,8 +1157,9 @@ class SimulationManager:
             )
         )
 
-        self._default_plane.set_material(mat.get_instance("plane_mat").mat)
-        self._visual_materials[mat_name] = mat
+        if mat is not None:
+            self._default_plane.set_material(mat.get_instance("plane_mat").mat)
+            self._visual_materials[mat_name] = mat
 
     def set_ground_plane_visibility(self, visible: bool) -> None:
         """_summary_
@@ -1329,7 +1377,8 @@ class SimulationManager:
 
         if cfg.shape.visual_material:
             mat = self.create_visual_material(cfg.shape.visual_material)
-            rigid_obj.set_visual_material(mat, update_default=True)
+            if mat is not None:
+                rigid_obj.set_visual_material(mat, update_default=True)
 
         self._rigid_objects[uid] = rigid_obj
         self.notify_visualization_topology_changed()
@@ -1834,40 +1883,31 @@ class SimulationManager:
 
         env_list = [self._env] if len(self._arenas) == 0 else self._arenas
         obj_list = []
+        urdf_inertial_properties = None
 
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
-            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
-            if len(env_list) > 1:
-                logger.log_error(f"Currently not supporting multiple arenas for USD.")
-            env = self._env
-            results = env.import_from_usd_file(
-                cfg.fpath, return_object=True, cache_dir=self._convex_decomp_dir
+            obj_list = self._load_usd_articulations(
+                cfg.fpath,
+                env_list,
+                cache_dir=self._convex_decomp_dir,
             )
-            # print("USD import results:", results)
-
-            articulations_found = []
-            for key, value in results.items():
-                if isinstance(value, dexsim.engine.Articulation):
-                    articulations_found.append(value)
-
-            if len(articulations_found) == 0:
-                logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
-            elif len(articulations_found) > 1:
-                logger.log_error(
-                    f"Multiple articulations found in USD file {cfg.fpath}. "
-                )
-            elif len(articulations_found) == 1:
-                obj_list.append(articulations_found[0])
         else:
             # non-usd file does not support this option, will be forced set False to avoid potential issues.
             cfg.use_usd_properties = False
 
-            for env in env_list:
-                art = env.load_urdf(cfg.fpath)
-                obj_list.append(art)
+            obj_list, urdf_inertial_properties = self._load_urdf_articulations(
+                cfg.fpath,
+                env_list,
+                read_inertia=cfg.read_urdf_inertia,
+            )
 
-        articulation = Articulation(cfg=cfg, entities=obj_list, device=self.device)
+        articulation = Articulation(
+            cfg=cfg,
+            entities=obj_list,
+            device=self.device,
+            urdf_inertial_properties=urdf_inertial_properties,
+        )
 
         self._articulations[uid] = articulation
         self.notify_visualization_topology_changed()
@@ -1931,43 +1971,155 @@ class SimulationManager:
 
         env_list = [self._env] if len(self._arenas) == 0 else self._arenas
         obj_list = []
+        urdf_inertial_properties = None
 
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
-            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
-            if len(env_list) > 1:
-                logger.log_error(f"Currently not supporting multiple arenas for USD.")
-            env = self._env
-            results = env.import_from_usd_file(cfg.fpath, return_object=True)
-            # print("USD import results:", results)
-
-            articulations_found = []
-            for key, value in results.items():
-                if isinstance(value, dexsim.engine.Articulation):
-                    articulations_found.append(value)
-
-            if len(articulations_found) == 0:
-                logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
-            elif len(articulations_found) > 1:
-                logger.log_error(
-                    f"Multiple articulations found in USD file {cfg.fpath}. "
-                )
-            elif len(articulations_found) == 1:
-                obj_list.append(articulations_found[0])
+            obj_list = self._load_usd_articulations(cfg.fpath, env_list)
         else:
             # non-usd file does not support this option, will be forced set False to avoid potential issues.
             cfg.use_usd_properties = False
 
-            for env in env_list:
-                art = env.load_urdf(cfg.fpath)
-                obj_list.append(art)
+            obj_list, urdf_inertial_properties = self._load_urdf_articulations(
+                cfg.fpath,
+                env_list,
+                read_inertia=cfg.read_urdf_inertia,
+            )
 
-        robot = Robot(cfg=cfg, entities=obj_list, device=self.device)
+        robot = Robot(
+            cfg=cfg,
+            entities=obj_list,
+            device=self.device,
+            urdf_inertial_properties=urdf_inertial_properties,
+        )
 
         self._robots[uid] = robot
         self.notify_visualization_topology_changed()
 
         return robot
+
+    def _load_usd_articulations(
+        self,
+        fpath: str,
+        env_list: list[dexsim.environment.Arena],
+        *,
+        cache_dir: str | None = None,
+    ) -> list[dexsim.engine.Articulation]:
+        """Import one USD articulation and replicate it across arenas."""
+        source_arena = env_list[0]
+        import_kwargs: dict[str, object] = {"return_object": True}
+        if cache_dir is not None:
+            import_kwargs["cache_dir"] = cache_dir
+        results = source_arena.import_from_usd_file(fpath, **import_kwargs)
+        articulations = [
+            value
+            for value in results.values()
+            if isinstance(value, dexsim.engine.Articulation)
+        ]
+        if len(articulations) != 1:
+            raise RuntimeError(
+                f"USD file {fpath!r} must contain one articulation; "
+                f"found {len(articulations)}."
+            )
+
+        source = articulations[0]
+        if len(env_list) == 1:
+            return articulations
+        if not self.sim_config.clone_usd_articulations:
+            for arena in env_list[1:]:
+                results = arena.import_from_usd_file(fpath, **import_kwargs)
+                imported = [
+                    value
+                    for value in results.values()
+                    if isinstance(value, dexsim.engine.Articulation)
+                ]
+                if len(imported) != 1:
+                    raise RuntimeError(
+                        f"USD file {fpath!r} must contain one articulation; "
+                        f"found {len(imported)}."
+                    )
+                articulations.append(imported[0])
+            return articulations
+
+        source_name = source.get_name()
+        clone_options = dexsim.types.ObjectCloneOptions()
+        clone_options.render.clone_render = self.sim_config.clone_usd_render_bodies
+        for index, target_arena in enumerate(env_list[1:], start=1):
+            target_name = f"{source_name}_{target_arena.get_name()}_{index}"
+            clone = source_arena.clone_articulation_to(
+                source_name,
+                target_arena,
+                target_name,
+                clone_options,
+            )
+            if clone is None:
+                raise RuntimeError(
+                    f"Failed to clone articulation {source_name!r} into "
+                    f"arena {target_arena.get_name()!r}."
+                )
+            articulations.append(clone)
+        return articulations
+
+    def _load_urdf_articulations(
+        self,
+        fpath: str,
+        env_list: list[dexsim.environment.Arena],
+        *,
+        read_inertia: bool = False,
+    ) -> tuple[list[dexsim.engine.Articulation], list[dict[str, tuple]] | None]:
+        """Load one URDF template and replicate it across arenas."""
+        source_arena = env_list[0]
+        source = source_arena.load_urdf(fpath, read_inertia=read_inertia)
+        articulations = [source]
+        inertial_properties = (
+            [self._capture_articulation_inertial_properties(source)]
+            if read_inertia
+            else None
+        )
+
+        if len(env_list) == 1 or not self.sim_config.clone_urdf_articulations:
+            for arena in env_list[1:]:
+                articulation = arena.load_urdf(fpath, read_inertia=read_inertia)
+                articulations.append(articulation)
+                if inertial_properties is not None:
+                    inertial_properties.append(
+                        self._capture_articulation_inertial_properties(articulation)
+                    )
+            return articulations, inertial_properties
+
+        source_name = source.get_name()
+        clone_options = dexsim.types.ObjectCloneOptions()
+        clone_options.render.clone_render = self.sim_config.clone_urdf_render_bodies
+        for index, target_arena in enumerate(env_list[1:], start=1):
+            target_name = f"{source_name}_{target_arena.get_name()}_{index}"
+            clone = source_arena.clone_articulation_to(
+                source_name,
+                target_arena,
+                target_name,
+                clone_options,
+            )
+            if clone is None:
+                raise RuntimeError(
+                    f"Failed to clone articulation {source_name!r} into "
+                    f"arena {target_arena.get_name()!r}."
+                )
+            articulations.append(clone)
+            if inertial_properties is not None:
+                inertial_properties.append(deepcopy(inertial_properties[0]))
+
+        return articulations, inertial_properties
+
+    @staticmethod
+    def _capture_articulation_inertial_properties(
+        articulation: dexsim.engine.Articulation,
+    ) -> dict[str, tuple]:
+        """Capture each link's authored URDF inertial properties after loading."""
+        return {
+            link_name: _capture_urdf_inertial_properties(
+                articulation.get_physical_body(link_name)
+            )
+            for link_name in articulation.get_link_names()
+        }
 
     def get_robot(self, uid: str) -> Robot | None:
         """Get a Robot by its unique ID.
@@ -3031,14 +3183,24 @@ class SimulationManager:
         )
         return True
 
-    def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial:
+    def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial | None:
         """Create a visual material with given configuration.
 
         Args:
             cfg (VisualMaterialCfg): configuration for the visual material.
 
         Returns:
-            VisualMaterial: the created visual material instance handle.
+            VisualMaterial: the created visual material instance handle, or
+                ``None`` when the active renderer does not support programmatic
+                PBR materials (see note below).
+
+        Note:
+            DexSim initializes its PBR material system process-wide from the
+            renderer of the first created ``World``, and ``Renderer.RASTER``
+            skips that initialization, so ``create_pbr_material`` returns
+            ``None`` under RASTER. Materials are visual-only, so this is not an
+            error: callers must tolerate a ``None`` return (physics-only
+            workloads such as headless RL training do not need materials).
         """
 
         if cfg.uid in self._visual_materials:
@@ -3048,6 +3210,13 @@ class SimulationManager:
             return self._visual_materials[cfg.uid]
 
         mat: Material = self._env.create_pbr_material(cfg.uid, True)
+        if mat is None:
+            logger.log_warning(
+                f"Visual material '{cfg.uid}' could not be created: the active "
+                "renderer does not support programmatic PBR materials "
+                "(e.g. RASTER). Skipping; the object will use default visuals."
+            )
+            return None
         visual_mat = VisualMaterial(cfg, mat)
 
         self._visual_materials[cfg.uid] = visual_mat

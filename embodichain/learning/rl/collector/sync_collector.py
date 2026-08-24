@@ -21,7 +21,10 @@ from typing import Callable
 import torch
 from tensordict import TensorDict
 
-from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
+from embodichain.learning.rl.utils import (
+    dict_to_tensordict,
+    flatten_observation_groups,
+)
 from .base import BaseCollector
 
 __all__ = ["SyncCollector"]
@@ -41,6 +44,18 @@ class SyncCollector(BaseCollector):
         self.policy = policy
         self.device = device
         self.reset_every_rollout = reset_every_rollout
+        policy_module = getattr(policy, "module", policy)
+        self.actor_obs_groups = getattr(policy_module, "actor_obs_groups", None)
+        self.critic_obs_groups = getattr(policy_module, "critic_obs_groups", None)
+        self.uses_separate_critic_obs = bool(
+            getattr(policy_module, "uses_separate_critic_obs", False)
+        )
+        self.critic_obs_dim = getattr(policy_module, "critic_obs_dim", None)
+        self.obs_dim = getattr(policy_module, "obs_dim", None)
+        self.action_dim = getattr(policy_module, "action_dim", None)
+        self.distribution_param_dim = getattr(
+            policy_module, "distribution_param_dim", None
+        )
         self._supports_shared_rollout = hasattr(self.env, "set_rollout_buffer")
         self.obs_td = self._reset_env()
 
@@ -68,11 +83,16 @@ class SyncCollector(BaseCollector):
         if self._supports_shared_rollout:
             self.env.set_rollout_buffer(rollout)
 
-        initial_obs = flatten_dict_observation(self.obs_td)
+        initial_obs, initial_critic_obs = self._model_observations(self.obs_td)
         rollout["obs"][:, 0] = initial_obs
+        if initial_critic_obs is not None:
+            rollout["critic_obs"][:, 0] = initial_critic_obs
         for step_idx in range(num_steps):
+            step_fields = {"obs": rollout["obs"][:, step_idx]}
+            if self.uses_separate_critic_obs:
+                step_fields["critic_obs"] = rollout["critic_obs"][:, step_idx]
             step_td = TensorDict(
-                {"obs": rollout["obs"][:, step_idx]},
+                step_fields,
                 batch_size=[rollout.batch_size[0]],
                 device=self.device,
             )
@@ -95,7 +115,11 @@ class SyncCollector(BaseCollector):
                     terminated=terminated,
                     truncated=truncated,
                 )
-            rollout["obs"][:, step_idx + 1] = flatten_dict_observation(next_obs_td)
+            actor_obs, critic_obs = self._model_observations(next_obs_td)
+            rollout["obs"][:, step_idx + 1] = actor_obs
+            if critic_obs is not None:
+                rollout["critic_obs"][:, step_idx + 1] = critic_obs
+            self._update_policy_normalization(actor_obs, critic_obs)
 
             if on_step_callback is not None:
                 on_step_callback(rollout[:, step_idx], env_info)
@@ -107,9 +131,11 @@ class SyncCollector(BaseCollector):
 
     def _attach_final_value(self, rollout: TensorDict) -> None:
         """Populate the bootstrap value for the final observed state."""
-        final_obs = rollout["obs"][:, -1]
+        final_fields = {"obs": rollout["obs"][:, -1]}
+        if self.uses_separate_critic_obs:
+            final_fields["critic_obs"] = rollout["critic_obs"][:, -1]
         last_next_td = TensorDict(
-            {"obs": final_obs},
+            final_fields,
             batch_size=[rollout.batch_size[0]],
             device=self.device,
         )
@@ -120,12 +146,50 @@ class SyncCollector(BaseCollector):
         obs, _ = self.env.reset()
         return dict_to_tensordict(obs, self.device)
 
+    def _model_observations(
+        self,
+        observation: TensorDict,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Build actor and optional privileged critic observations."""
+        actor_obs = flatten_observation_groups(
+            observation,
+            self.actor_obs_groups,
+        )
+        if not self.uses_separate_critic_obs:
+            return actor_obs, None
+        critic_obs = flatten_observation_groups(
+            observation,
+            self.critic_obs_groups,
+        )
+        return actor_obs, critic_obs
+
     def _to_action_dict(self, action: torch.Tensor) -> TensorDict | torch.Tensor:
         am = getattr(self.env, "action_manager", None)
         if am is None:
             return action
         else:
             return am.convert_policy_action_to_env_action(action)
+
+    def _update_policy_normalization(
+        self,
+        actor_obs: torch.Tensor,
+        critic_obs: torch.Tensor | None,
+    ) -> None:
+        """Update optional policy observation normalizers from the next state."""
+        policy_module = getattr(self.policy, "module", self.policy)
+        update = getattr(policy_module, "update_normalization", None)
+        if update is None:
+            return
+        fields = {"obs": actor_obs}
+        if critic_obs is not None:
+            fields["critic_obs"] = critic_obs
+        update(
+            TensorDict(
+                fields,
+                batch_size=[actor_obs.shape[0]],
+                device=self.device,
+            )
+        )
 
     def _write_step(
         self,
@@ -137,6 +201,13 @@ class SyncCollector(BaseCollector):
         rollout["action"][:, step_idx] = step_td["action"]
         rollout["sample_log_prob"][:, step_idx] = step_td["sample_log_prob"]
         rollout["value"][:, step_idx] = step_td["value"]
+        for name in ("action_mean", "action_std"):
+            if name in rollout.keys():
+                if name not in step_td.keys():
+                    raise KeyError(
+                        f"policy must return '{name}' for adaptive PPO scheduling"
+                    )
+                rollout[name][:, step_idx] = step_td[name]
 
     def _write_env_step(
         self,
@@ -156,8 +227,8 @@ class SyncCollector(BaseCollector):
     def _validate_rollout(self, rollout: TensorDict, num_steps: int) -> None:
         """Validate rollout layout expected by the collector."""
         expected_shapes = {
-            "obs": (self.env.num_envs, num_steps + 1, self.policy.obs_dim),
-            "action": (self.env.num_envs, num_steps + 1, self.policy.action_dim),
+            "obs": (self.env.num_envs, num_steps + 1, self.obs_dim),
+            "action": (self.env.num_envs, num_steps + 1, self.action_dim),
             "sample_log_prob": (self.env.num_envs, num_steps + 1),
             "value": (self.env.num_envs, num_steps + 1),
             "reward": (self.env.num_envs, num_steps + 1),
@@ -165,6 +236,19 @@ class SyncCollector(BaseCollector):
             "terminated": (self.env.num_envs, num_steps + 1),
             "truncated": (self.env.num_envs, num_steps + 1),
         }
+        if self.uses_separate_critic_obs:
+            expected_shapes["critic_obs"] = (
+                self.env.num_envs,
+                num_steps + 1,
+                self.critic_obs_dim,
+            )
+        if all(name in rollout.keys() for name in ("action_mean", "action_std")):
+            for name in ("action_mean", "action_std"):
+                expected_shapes[name] = (
+                    self.env.num_envs,
+                    num_steps + 1,
+                    self.distribution_param_dim,
+                )
         for key, expected_shape in expected_shapes.items():
             actual_shape = tuple(rollout[key].shape)
             if actual_shape != expected_shape:

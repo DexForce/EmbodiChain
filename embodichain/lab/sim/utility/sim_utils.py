@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import dexsim
 import open3d as o3d
@@ -165,6 +167,25 @@ def _apply_link_physics_overrides(
             group_cfg.attrs.mass is not None
         )
         art.set_physical_attr(physical_attr, name, is_replace_inertial=replace_inertial)
+
+
+def _capture_urdf_inertial_properties(physical_body) -> tuple:
+    """Capture URDF mass, center-of-mass pose, and principal inertia."""
+    cmass_position, cmass_quaternion = physical_body.get_cmass_local_pose()
+    return (
+        physical_body.get_mass(),
+        np.array(cmass_position, dtype=np.float32, copy=True),
+        np.array(cmass_quaternion, dtype=np.float32, copy=True),
+        np.maximum(physical_body.get_mass_space_inertia_tensor(), 1e-4),
+    )
+
+
+def _apply_urdf_inertial_properties(physical_body, properties: tuple) -> None:
+    """Restore captured URDF inertial properties to a native physics body."""
+    mass, cmass_position, cmass_quaternion, inertia = properties
+    physical_body.set_mass(mass)
+    physical_body.set_cmass_local_pose(cmass_position, cmass_quaternion)
+    physical_body.set_mass_space_inertia_tensor(inertia)
 
 
 def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) -> None:

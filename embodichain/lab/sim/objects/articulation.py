@@ -59,6 +59,7 @@ from embodichain.utils.math import (
     matrix_from_euler,
 )
 from embodichain.lab.sim.utility.sim_utils import (
+    _apply_urdf_inertial_properties,
     get_dexsim_drive_type,
     set_dexsim_articulation_cfg,
 )
@@ -584,6 +585,7 @@ class Articulation(BatchEntity):
         cfg: ArticulationCfg,
         entities: List[_Articulation] = None,
         device: torch.device = torch.device("cpu"),
+        urdf_inertial_properties: list[dict[str, tuple]] | None = None,
     ) -> None:
         # Initialize world and physics scene
         self._world = dexsim.default_world()
@@ -735,6 +737,15 @@ class Articulation(BatchEntity):
 
         # set default collision filter
         self._set_default_collision_filter()
+
+        if urdf_inertial_properties is not None:
+            for entity, entity_properties in zip(
+                self._entities, urdf_inertial_properties
+            ):
+                for link_name, properties in entity_properties.items():
+                    _apply_urdf_inertial_properties(
+                        entity.get_physical_body(link_name), properties
+                    )
 
         # flag for collision visible node existence
         self._has_collision_visible_node_dict = dict()

@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
@@ -39,9 +41,14 @@ class ActorOnly(Policy):
         action_dim: int,
         device: torch.device,
         actor: nn.Module,
-    ):
+        actor_obs_groups: Sequence[str] | None = None,
+    ) -> None:
         super().__init__()
         self.obs_dim = obs_dim
+        self.actor_obs_dim = obs_dim
+        self.actor_obs_groups = (
+            None if actor_obs_groups is None else tuple(actor_obs_groups)
+        )
         self.action_dim = action_dim
         self.device = device
 

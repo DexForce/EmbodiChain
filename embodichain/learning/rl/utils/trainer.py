@@ -104,10 +104,16 @@ class Trainer:
         num_envs = getattr(self.env, "num_envs", None)
         if num_envs is None:
             raise RuntimeError("Env must expose num_envs for trainer statistics.")
-        obs_dim = getattr(self.policy, "obs_dim", None)
-        action_dim = getattr(self.policy, "action_dim", None)
+        policy_module = getattr(self.policy, "module", self.policy)
+        obs_dim = getattr(policy_module, "obs_dim", None)
+        action_dim = getattr(policy_module, "action_dim", None)
         if obs_dim is None or action_dim is None:
             raise RuntimeError("Policy must expose obs_dim and action_dim.")
+        critic_obs_dim = (
+            getattr(policy_module, "critic_obs_dim", None)
+            if getattr(policy_module, "uses_separate_critic_obs", False)
+            else None
+        )
 
         self.buffer = RolloutBuffer(
             num_envs=num_envs,
@@ -115,6 +121,12 @@ class Trainer:
             obs_dim=obs_dim,
             action_dim=action_dim,
             device=self.device,
+            critic_obs_dim=critic_obs_dim,
+            distribution_param_dim=getattr(
+                policy_module,
+                "distribution_param_dim",
+                None,
+            ),
         )
         self.collector = SyncCollector(
             env=self.env,
