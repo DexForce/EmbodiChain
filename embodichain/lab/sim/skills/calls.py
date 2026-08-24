@@ -452,12 +452,15 @@ class Place(SemanticCallSpec):
 
 @dataclass(frozen=True, slots=True, eq=False)
 class HandOver(SemanticCallSpec):
-    """Transfer a held object to another robot resource.
+    """Pick up, transfer, and place an object with two robot resources.
 
     Args:
-        object: Authoritative held-object reference.
-        receiver: Optional destination resource ID. It is equivalent to the
-            ``destination`` resource slot and must agree with an explicit map.
+        object: Authoritative scene-object reference. The object must not
+            already be held when the unified action starts.
+        receiver: Optional second candidate resource ID. It is equivalent to
+            the ``destination`` resource slot and must agree with an explicit
+            map. The primitive chooses which candidate performs pickup from the
+            live object-to-root distances.
         final_target: Optional final object-space delivery pose.
         resources: Optional skill-local resource overrides.
     """

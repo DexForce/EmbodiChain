@@ -324,6 +324,7 @@ embodichain.lab.sim.atomic_actions.affordance
 
    Affordance
    AntipodalAffordance
+   AxisAlignAffordance
    SlideAffordance
    PressAffordance
    TwistAffordance

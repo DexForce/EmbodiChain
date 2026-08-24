@@ -483,12 +483,22 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         if not isinstance(affordance, AntipodalAffordance):
             raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        obj_longest_axis = None
+        is_positive_part = True
+        if options.pick_object_part != "center":
+            obj_longest_axis = torch.tensor(
+                [0.0, 0.0, 1.0],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            is_positive_part = options.pick_object_part == "top"
         grasp_poses_result = generator.get_valid_grasp_poses(
             mesh_vertices=affordance.mesh_vertices,
             mesh_triangles=affordance.mesh_triangles,
             obj_poses=object_pose,
             approach_direction=approach_direction,
-            object_part=options.pick_object_part,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
         )
         num_envs = object_pose.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)

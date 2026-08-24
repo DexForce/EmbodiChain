@@ -122,9 +122,10 @@ class GraspPoseGenerator(ABC):
         mesh_triangles: torch.Tensor,
         obj_poses: torch.Tensor,
         approach_direction: torch.Tensor,
-        object_part: str = "center",
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return candidate poses and ranking costs for every object pose."""
+        """Return candidates, optionally restricted to one projected axis end."""
 
     @abstractmethod
     def get_best_grasp_poses(
