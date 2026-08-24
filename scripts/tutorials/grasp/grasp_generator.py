@@ -33,8 +33,8 @@ from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.data import get_data_path
-from embodichain.lab.sim.grasping import ParallelJawGripperModelCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from dexsim.utility.path import get_resources_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (

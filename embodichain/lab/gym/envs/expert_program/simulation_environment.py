@@ -97,9 +97,9 @@ from .simulation import (
 from .simulation_policies import SimulationSegmentPolicyPort
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.grasping import GraspPoseGenerator
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 
 MotionGeneratorFactory = Callable[[], MotionGenerator]

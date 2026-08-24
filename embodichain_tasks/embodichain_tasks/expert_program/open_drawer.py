@@ -71,7 +71,7 @@ HANDLE_ENTITY_ID = "drawer_handle"
 HANDLE_LINK_NAME = "large_handle_bar"
 ROBOT_PROFILE_ID = "expert_program_ur5_slide"
 SCENE_REGISTRY_ID = "expert_program_open_drawer"
-DEFAULT_MOTION_SAMPLE_COUNT = 140
+SAFE_MOTION_SAMPLE_COUNT = 140
 DEFAULT_GRASP_SAMPLES = 10_000
 DEFAULT_TRANSLATION_AXIS = (0.0, 1.0, 0.0)
 
@@ -221,10 +221,6 @@ class ExpertProgramOpenDrawerEnv(EmbodiedEnv):
             cfg.expert_program = load_bundled_expert_program(PROGRAM_FILENAME)
 
         extensions = self._extensions(cfg.extensions)
-        motion_sample_count = _positive_int(
-            extensions.get("motion_sample_count", DEFAULT_MOTION_SAMPLE_COUNT),
-            field_name="motion_sample_count",
-        )
         translation_axis = _axis(
             extensions.get("translation_axis", DEFAULT_TRANSLATION_AXIS)
         )
@@ -286,7 +282,7 @@ class ExpertProgramOpenDrawerEnv(EmbodiedEnv):
         profile_binding = create_ur5_skill_profile_binding(
             self.robot,
             profile_id=ROBOT_PROFILE_ID,
-            sample_count=motion_sample_count,
+            sample_count=SAFE_MOTION_SAMPLE_COUNT,
             skill_ids=("slide",),
         )
         factory = SimulationExpertProgramFactory.from_environment(

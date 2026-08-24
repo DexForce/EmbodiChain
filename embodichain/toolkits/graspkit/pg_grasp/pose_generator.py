@@ -24,7 +24,7 @@ from typing import Literal
 
 import torch
 
-from embodichain.lab.sim.grasping import (
+from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
 )

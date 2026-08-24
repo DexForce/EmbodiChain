@@ -18,9 +18,43 @@ manipulation utilities that can be used independently of the simulation loop.
 GraspKit — Parallel-Gripper Grasp Sampling
 -------------------------------------------
 
-The ``embodichain.toolkits.graspkit.pg_grasp`` module provides a reusable
-antipodal implementation of the generic parallel-jaw grasp-pose service. The
-pipeline consists of three stages:
+The :mod:`embodichain.toolkits.graspkit` package owns the standalone
+grasp-pose service contracts. The toolkit does not import
+:mod:`embodichain.lab`, so the same generator instance can be called directly
+or installed in a higher-level planning runtime.
+
+.. currentmodule:: embodichain.toolkits.graspkit
+
+.. autosummary::
+   :nosignatures:
+
+   GraspPoseGenerator
+   ParallelJawGraspPoseGenerator
+   ParallelJawGripperModelCfg
+
+.. autoclass:: GraspPoseGenerator
+   :members:
+
+.. autoclass:: ParallelJawGraspPoseGenerator
+   :members:
+
+.. autoclass:: ParallelJawGripperModelCfg
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. currentmodule:: embodichain.toolkits.graspkit.pose_generator
+
+.. autosummary::
+   :nosignatures:
+
+   GraspPoseGenerator
+   ParallelJawGraspPoseGenerator
+   ParallelJawGripperModelCfg
+
+The :mod:`embodichain.toolkits.graspkit.pg_grasp` module provides a reusable
+antipodal implementation of these contracts. The pipeline consists of three
+stages:
 
 1. **Antipodal sampling** — Surface points are uniformly sampled on the mesh and rays are cast to find antipodal point pairs on opposite sides.
 2. **Pose construction** — For each antipodal pair, a 6-DoF grasp frame is built aligned with the approach direction.
@@ -38,6 +72,9 @@ collision state remain private implementation details.
 .. autosummary::
    :nosignatures:
 
+   GraspPoseGenerator
+   ParallelJawGraspPoseGenerator
+   ParallelJawGripperModelCfg
    AntipodalGraspPoseGenerator
    AntipodalGraspPoseGeneratorCfg
    ParallelJawGraspCollisionCfg

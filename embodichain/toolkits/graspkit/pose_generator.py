@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Common contracts for grasp-pose generation services."""
+"""Backend-neutral contracts for standalone grasp-pose generators."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _positive_finite(value: float, *, field_name: str) -> float:
 class ParallelJawGripperModelCfg:
     """Physical geometry shared by parallel-jaw grasp generators.
 
-    ``model_id`` names one concrete end-effector model or calibration.  Product
+    ``model_id`` names one concrete end-effector model or calibration. Product
     names belong in that value (for example ``"dh_pgi_140_80"``), not in the
     generator class hierarchy.
     """
@@ -109,10 +109,9 @@ class ParallelJawGripperModelCfg:
 class GraspPoseGenerator(ABC):
     """Standalone service that generates grasp poses from target geometry.
 
-    The contract deliberately has no dependency on Gym, atomic actions, or
-    Expert Program.  A handwritten environment may call it directly, while an
-    :class:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine` may install
-    the same service beside its motion generator.
+    The contract has no dependency on Gym, simulation, atomic actions, or
+    Expert Program. Application code may call it directly or install the same
+    service instance alongside a motion generator in a higher-level runtime.
     """
 
     @abstractmethod

@@ -88,7 +88,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.atomic_actions.goals import collect_scene_dependencies
 from embodichain.lab.sim.common import BatchEntity
-from embodichain.lab.sim.grasping import (
+from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
 )

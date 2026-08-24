@@ -18,13 +18,15 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
 import torch
 
 from embodichain.toolkits.graspkit import pg_grasp
-from embodichain.lab.sim.grasping import (
+from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
@@ -142,8 +144,35 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
 
 def test_package_exposes_only_the_unified_generator_api() -> None:
     assert "AntipodalGraspPoseGenerator" in pg_grasp.__all__
+    assert "GraspPoseGenerator" in pg_grasp.__all__
+    assert "ParallelJawGripperModelCfg" in pg_grasp.__all__
     assert "GraspGenerator" not in pg_grasp.__all__
     assert "GraspGeneratorCfg" not in pg_grasp.__all__
+
+
+def test_graspkit_does_not_import_lab() -> None:
+    """The standalone toolkit must not import EmbodiChain's lab layer."""
+    graspkit_root = (
+        Path(__file__).resolve().parents[2] / "embodichain" / "toolkits" / "graspkit"
+    )
+    forbidden_imports: list[str] = []
+    for source_path in graspkit_root.rglob("*.py"):
+        tree = ast.parse(source_path.read_text(), filename=str(source_path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                module_names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                module_names = [node.module]
+            else:
+                continue
+            forbidden_imports.extend(
+                f"{source_path.relative_to(graspkit_root)}:{module_name}"
+                for module_name in module_names
+                if module_name == "embodichain.lab"
+                or module_name.startswith("embodichain.lab.")
+            )
+
+    assert forbidden_imports == []
 
 
 def test_prepare_mesh_reuses_backend_and_returns_owned_pairs(

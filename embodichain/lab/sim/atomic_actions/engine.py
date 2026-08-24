@@ -33,7 +33,6 @@ from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.grasping import GraspPoseGenerator
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
     from embodichain.lab.sim.skills import (
@@ -42,6 +41,7 @@ if TYPE_CHECKING:
         ResourceEndpointAdapter,
         RobotSkillProfile,
     )
+    from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession
 

@@ -27,7 +27,8 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
-from ..grasping import GraspPoseGenerator
+from embodichain.toolkits.graspkit import GraspPoseGenerator
+
 from ..atomic_actions.bindings import EndpointBinding
 from ..atomic_actions.engine import AtomicActionEngine
 from ..atomic_actions.execution import (

@@ -125,10 +125,7 @@ class TestExpertProgramOpenDrawerEnv:
         assert config["expert_program_path"] == "../../expert_program/open_drawer.yaml"
         assert config["articulation"][0]["uid"] == "drawer"
         assert config["articulation"][0]["drive_pros"]["drive_type"] == "none"
-        assert set(config["env"]["extensions"]) == {
-            "motion_sample_count",
-            "translation_axis",
-        }
+        assert set(config["env"]["extensions"]) == {"translation_axis"}
 
         monkeypatch.setattr(data_module, "get_data_path", lambda value: value)
         cfg = config_to_cfg(config, source_path=config_path)

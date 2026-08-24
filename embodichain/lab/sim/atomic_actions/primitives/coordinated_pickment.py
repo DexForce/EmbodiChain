@@ -23,7 +23,7 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.grasping import ParallelJawGraspPoseGenerator
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 

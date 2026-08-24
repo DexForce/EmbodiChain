@@ -386,6 +386,8 @@ topics:
       - embodichain/lab/sim/planners/neural_planner.py
       - embodichain/lab/sim/planners/utils.py
       - embodichain/lab/sim/skills/scene.py
+      - embodichain/toolkits/graspkit/pose_generator.py
+      - embodichain_tasks/embodichain_tasks/multi_segments/cube_pick_place.py
     related_topics:
       - simulation-system
       - robot-system
@@ -758,7 +760,8 @@ topics:
       - embodichain/lab/sim/atomic_actions/trajectory_ops.py
       - embodichain/lab/sim/atomic_actions/primitives/
       - embodichain/lab/sim/atomic_actions/__init__.py
-      - embodichain/lab/sim/grasping/
+      - embodichain/toolkits/graspkit/__init__.py
+      - embodichain/toolkits/graspkit/pose_generator.py
       - embodichain/toolkits/graspkit/pg_grasp/pose_generator.py
       - embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py
       - embodichain/lab/sim/skills/scene.py

@@ -28,9 +28,9 @@ import pytest
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.grasping import ParallelJawGripperModelCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path

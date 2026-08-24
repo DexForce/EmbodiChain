@@ -25,7 +25,7 @@ from uuid import uuid4
 
 import torch
 
-from embodichain.lab.sim.grasping import GraspPoseGenerator
+from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 from .bindings import ActionBinding, EndpointBinding, JointPositionTarget
 from .control import ActionControlOverrides, ControlPartCommandProfile

@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import torch
@@ -58,15 +57,8 @@ CUBE_GRASP_ENTITY_ID = "cube_grasp"
 CONTACT_SENSOR_UID = "grasp_contacts"
 ROBOT_PROFILE_ID = "expert_program_ur5_pick_place"
 SCENE_REGISTRY_ID = "expert_program_repeated_pick_place"
-DEFAULT_MOTION_SAMPLE_COUNT = 120
+SAFE_MOTION_SAMPLE_COUNT = 120
 DEFAULT_GRASP_SAMPLES = 10_000
-
-
-def _positive_int(value: object, *, field_name: str) -> int:
-    """Return one exact positive integer."""
-    if type(value) is not int or value < 1:
-        raise ValueError(f"{field_name} must be a positive integer.")
-    return value
 
 
 @register_env(ENV_ID, max_episode_steps=1200)
@@ -91,18 +83,12 @@ class ExpertProgramRepeatedPickPlaceEnv(EmbodiedEnv):
             **kwargs: Additional arguments forwarded to :class:`EmbodiedEnv`.
 
         Raises:
-            TypeError: If task extensions or the contact sensor are invalid.
-            ValueError: If numeric task settings or actor IDs are invalid.
+            TypeError: If the contact sensor is invalid.
+            ValueError: If native actor IDs are invalid.
             RuntimeError: If the configured cube is absent from the live scene.
         """
         if cfg.expert_program is None:
             cfg.expert_program = load_bundled_expert_program(PROGRAM_FILENAME)
-
-        extensions = self._extensions(cfg.extensions)
-        motion_sample_count = _positive_int(
-            extensions.get("motion_sample_count", DEFAULT_MOTION_SAMPLE_COUNT),
-            field_name="motion_sample_count",
-        )
 
         super().__init__(cfg, **kwargs)
 
@@ -147,7 +133,7 @@ class ExpertProgramRepeatedPickPlaceEnv(EmbodiedEnv):
         profile_binding = create_ur5_skill_profile_binding(
             self.robot,
             profile_id=ROBOT_PROFILE_ID,
-            sample_count=motion_sample_count,
+            sample_count=SAFE_MOTION_SAMPLE_COUNT,
             skill_ids=("pick_up", "place"),
         )
         self._expert_program_adapter = create_simulation_expert_program_adapter(
@@ -157,15 +143,6 @@ class ExpertProgramRepeatedPickPlaceEnv(EmbodiedEnv):
             grasp_pose_generators={HAND_CONTROL_PART: grasp_pose_generator},
             constraint_observer=self._observe_grasp_constraint,
         )
-
-    @staticmethod
-    def _extensions(value: object) -> Mapping[str, object]:
-        """Return the task extension mapping without accepting loose values."""
-        if value is None:
-            return {}
-        if not isinstance(value, Mapping):
-            raise TypeError("cfg.extensions must be a mapping.")
-        return value
 
     def _reshape_user_ids(self, value: object, *, owner: str) -> torch.Tensor:
         """Normalize native actor IDs to ``(num_envs, actors_per_env)``."""

@@ -40,8 +40,8 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     RecoveryPolicy,
 )
-from embodichain.lab.sim.grasping import ParallelJawGripperModelCfg
 from embodichain.lab.sim.skills import SkillPolicyPreset
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot

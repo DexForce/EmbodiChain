@@ -89,7 +89,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     import torch
     import trimesh
 
-    from embodichain.lab.sim.grasping import ParallelJawGripperModelCfg
+    from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGenerator,
         AntipodalGraspPoseGeneratorCfg,

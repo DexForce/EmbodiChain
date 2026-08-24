@@ -51,10 +51,15 @@ ID. These services are siblings of `MotionGenerator`, not motion-generator
 features: direct callers may use them without atomic actions, while `PickUp`,
 `HandOver`, `Slide`, and `CoordinatedPickment` resolve them through their bound
 grasp endpoints. `AntipodalAffordance` owns target-local mesh geometry only.
-The toolkit exposes `AntipodalGraspPoseGenerator` as its sole antipodal
-generator entry point; mesh-specific sampling, annotation, collision, and
-on-disk cache state live behind a private backend rather than a second public
-generator/configuration pair.
+`embodichain.toolkits.graspkit` owns the backend-neutral
+`GraspPoseGenerator`, `ParallelJawGraspPoseGenerator`, and gripper-model
+contracts. The toolkit has no dependency on `embodichain.lab`; simulation,
+atomic actions, Expert Program, and handwritten environments are consumers of
+the same service API. Its `pg_grasp` package exposes
+`AntipodalGraspPoseGenerator` as the sole antipodal generator entry point;
+mesh-specific sampling, annotation, collision, and on-disk cache state live
+behind a private backend rather than a second public generator/configuration
+pair.
 The engine-scoped registry retains generator instances by reference, so a
 composition root may reuse an already prepared service in a handwritten
 environment. The engine also issues an opaque binding-owner ID, so an

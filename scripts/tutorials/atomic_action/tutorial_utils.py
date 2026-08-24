@@ -35,7 +35,6 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.cfg import LightCfg, MarkerCfg, RenderCfg, RobotCfg
-from embodichain.lab.sim.grasping import ParallelJawGripperModelCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.planners import (
     CuroboPlannerCfg,
@@ -51,6 +50,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     GraspAnnotationCfg,
     ParallelJawGraspCollisionCfg,
 )
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.utils import logger
 
 RECORD_WIDTH = 640

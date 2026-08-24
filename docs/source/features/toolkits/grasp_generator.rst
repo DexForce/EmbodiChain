@@ -80,9 +80,9 @@ Annotating and computing grasp poses
 Grasp generation is performed by
 :class:`~embodichain.toolkits.graspkit.pg_grasp.AntipodalGraspPoseGenerator`.
 It implements the robot-independent
-:class:`~embodichain.lab.sim.grasping.GraspPoseGenerator` contract and the
+:class:`~embodichain.toolkits.graspkit.GraspPoseGenerator` contract and the
 shared
-:class:`~embodichain.lab.sim.grasping.ParallelJawGraspPoseGenerator` base for
+:class:`~embodichain.toolkits.graspkit.ParallelJawGraspPoseGenerator` base for
 two-finger parallel-jaw grippers.
 
 The generator owns the gripper model, algorithm, collision, and annotation
@@ -121,7 +121,7 @@ Configuration
 
 Configuration ownership is split by meaning:
 
-* :class:`~embodichain.lab.sim.grasping.ParallelJawGripperModelCfg` describes
+* :class:`~embodichain.toolkits.graspkit.ParallelJawGripperModelCfg` describes
   physical opening limits, finger dimensions, and palm depth. A concrete EEF
   name belongs only in its ``model_id``.
 * :class:`~embodichain.toolkits.graspkit.pg_grasp.AntipodalGraspPoseGeneratorCfg`

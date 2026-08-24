@@ -606,7 +606,7 @@ def create_benchmark_grasp_pose_generator(
     args: argparse.Namespace,
 ):
     """Create the endpoint-owned parallel-jaw service used by benchmarks."""
-    from embodichain.lab.sim.grasping import ParallelJawGripperModelCfg
+    from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGeneratorCfg,
         GraspAnnotationCfg,

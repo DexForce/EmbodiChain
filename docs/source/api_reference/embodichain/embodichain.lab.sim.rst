@@ -110,14 +110,6 @@ Sensors
 
    embodichain.lab.sim.sensors
 
-Grasp-Pose Services
--------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   embodichain.lab.sim.grasping
-
 Robot Configurations
 --------------------
 

@@ -144,7 +144,7 @@ class TestExpertProgramRepeatedPickPlaceEnv:
             "../../expert_program/repeated_pick_place.yaml"
         )
         assert config["sensor"][0]["sensor_type"] == "ContactSensor"
-        assert set(config["env"]["extensions"]) == {"motion_sample_count"}
+        assert "extensions" not in config["env"]
         configured_links = config["sensor"][0]["articulation_cfg_list"][0][
             "link_name_list"
         ]

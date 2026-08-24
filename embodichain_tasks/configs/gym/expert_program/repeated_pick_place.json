@@ -31,10 +31,7 @@
                 }
             }
         },
-        "dataset": {},
-        "extensions": {
-            "motion_sample_count": 120
-        }
+        "dataset": {}
     },
     "robot": {
         "class_type": "URRobot",

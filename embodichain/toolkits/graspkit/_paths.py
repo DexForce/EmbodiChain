@@ -14,18 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Robot-independent grasp-pose generation contracts."""
+"""Private cache locations owned by the standalone grasp toolkit."""
 
 from __future__ import annotations
 
-from .base import (
-    GraspPoseGenerator,
-    ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
+from pathlib import Path
+
+CONVEX_DECOMPOSITION_CACHE_DIR = (
+    Path.home() / ".cache" / "embodichain_cache" / "convex_decomposition"
 )
 
-__all__ = [
-    "GraspPoseGenerator",
-    "ParallelJawGraspPoseGenerator",
-    "ParallelJawGripperModelCfg",
-]
+__all__: list[str] = []
