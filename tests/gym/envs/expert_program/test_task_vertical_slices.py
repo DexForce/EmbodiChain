@@ -42,19 +42,16 @@ from embodichain.lab.sim.skills.runtime import SkillResult, SkillStatus
 from embodichain.lab.sim.skills.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
-    SceneCollisionRole,
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
 )
-from embodichain_tasks.multi_segments import cube_pick_place as cube_task
-from embodichain_tasks.tableware import open_drawer as drawer_task
+from embodichain_tasks.expert_program import open_drawer as drawer_task
+from embodichain_tasks.expert_program import repeated_pick_place as cube_task
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_REPEATED_CUBE_PROGRAM = Path(
-    "expert_program/multi_segments/repeated_cube_pick_place.yaml"
-)
-_OPEN_DRAWER_PROGRAM = Path("expert_program/tableware/open_drawer.json")
+_REPEATED_CUBE_PROGRAM = Path("expert_program/repeated_pick_place.yaml")
+_OPEN_DRAWER_PROGRAM = Path("expert_program/open_drawer.yaml")
 _LIFECYCLE_BATCH_SIZE = 2
 _LIFECYCLE_ROBOT_DOF = 3
 _LIFECYCLE_STEP_DT = 0.02
@@ -325,7 +322,7 @@ def _drawer_compiler() -> ExpertProgramCompiler:
             SceneEntityRegistration(
                 ref=SceneAffordanceRef("drawer_handle"),
                 parent=drawer,
-                native_name="handle_xpos",
+                native_name="large_handle_bar",
                 affordance=Affordance(),
                 relative_pose=torch.eye(4),
             ),
@@ -338,8 +335,8 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
     """The packaged cube task expands to three independently scoped cycles."""
     config = decode_expert_program(_read_payload(_REPEATED_CUBE_PROGRAM))
 
-    assert config.integration.scene_registry == cube_task.CUBE_SCENE_REGISTRY_ID
-    assert config.integration.robot_profile == cube_task.CUBE_ROBOT_PROFILE_ID
+    assert config.integration.scene_registry == cube_task.SCENE_REGISTRY_ID
+    assert config.integration.robot_profile == cube_task.ROBOT_PROFILE_ID
 
     segments = tuple(_cube_compiler().compile(config))
 
@@ -519,8 +516,8 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     payload = _read_payload(_OPEN_DRAWER_PROGRAM)
     config = decode_expert_program(payload)
 
-    assert config.integration.scene_registry == drawer_task.DRAWER_SCENE_REGISTRY_ID
-    assert config.integration.robot_profile == drawer_task.DRAWER_ROBOT_PROFILE_ID
+    assert config.integration.scene_registry == drawer_task.SCENE_REGISTRY_ID
+    assert config.integration.robot_profile == drawer_task.ROBOT_PROFILE_ID
 
     segments = tuple(_drawer_compiler().compile(config))
 
@@ -533,15 +530,15 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     assert dict(call.arguments) == {
         "handle": "drawer_handle",
         "direction": "pull",
-        "hand_interp_steps": 20,
+        "hand_interp_steps": 12,
         "approach_distance": 0.10,
-        "translation_distance": 0.12,
+        "translation_distance": 0.18,
     }
-    assert dict(call.resources) == {"primary": "right_manipulator"}
+    assert dict(call.resources) == {"primary": "manipulator"}
     validator = segments[0].validators[0].cfg
     assert validator.articulation == "drawer"
-    assert validator.joint == "slide_rails"
-    assert validator.minimum_position == 0.09
+    assert validator.joint == "cabinet_to_drawer"
+    assert validator.minimum_position == 0.10
 
 
 def test_task_classes_do_not_override_motion_or_demo_generation() -> None:
@@ -551,45 +548,21 @@ def test_task_classes_do_not_override_motion_or_demo_generation() -> None:
         "create_demo_segments",
         "_generate_eef_motion",
         "_initialize_atomic_actions",
+        "_observe_grasp_constraint",
         "_plan_pick_place_cycle",
     }
 
     for env_type in (
-        cube_task.MultiSegmentsCubePickPlaceEnv,
-        drawer_task.OpenDrawerEnv,
+        cube_task.ExpertProgramRepeatedPickPlaceEnv,
+        drawer_task.ExpertProgramOpenDrawerEnv,
     ):
         assert forbidden_overrides.isdisjoint(env_type.__dict__)
 
 
-def test_cube_task_reuses_the_production_physical_evidence_integration() -> None:
-    """The migrated task shares the reference task's scene/profile IDs."""
-    from embodichain_tasks.expert_program.repeated_pick_place import (
-        ExpertProgramRepeatedPickPlaceEnv,
-    )
-
-    assert issubclass(
-        cube_task.MultiSegmentsCubePickPlaceEnv,
-        ExpertProgramRepeatedPickPlaceEnv,
-    )
-    assert cube_task.CUBE_SCENE_REGISTRY_ID == "expert_program_repeated_pick_place"
-    assert cube_task.CUBE_ROBOT_PROFILE_ID == "expert_program_ur5_pick_place"
-
-
-def test_drawer_task_declares_native_link_and_slide_resource() -> None:
-    """Drawer motion grounds through a native link and the built-in Slide skill."""
-    scene = drawer_task.create_open_drawer_scene_binding()
-    profile = drawer_task.create_open_drawer_robot_profile_binding()
-
-    assert scene.registry_id == drawer_task.DRAWER_SCENE_REGISTRY_ID
-    assert scene.articulations[0].collision_role is SceneCollisionRole.NONE
-    assert scene.links[0].entity_id == "drawer_handle"
-    assert scene.links[0].native_link_name == "handle_xpos"
-    assert profile.profile_id == drawer_task.DRAWER_ROBOT_PROFILE_ID
-    assert dict(profile.defaults) == {"slide": {"primary": "right_manipulator"}}
-    assert profile.command_presets[0].commands == {
-        "open": (0.05, 0.05),
-        "grasp": (0.0, 0.0),
-    }
+def test_cube_task_declares_the_canonical_scene_and_profile_ids() -> None:
+    """The repeated task owns one canonical scene/profile integration."""
+    assert cube_task.SCENE_REGISTRY_ID == "expert_program_repeated_pick_place"
+    assert cube_task.ROBOT_PROFILE_ID == "expert_program_ur5_pick_place"
 
 
 def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:

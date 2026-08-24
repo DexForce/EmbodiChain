@@ -1,9 +1,9 @@
 # Declarative Expert Programs and the Unified Semantic Skill Runtime
 
 - Status: Expert Program runtime, strict frontend, and two official reference
-  integrations are on `main`; this branch migrates the existing cube and Open
-  Drawer task IDs and adds deterministic rollout measurement. Broader
-  multi-seed qualification remains in progress.
+  integrations are on `main`; this branch removes the duplicate cube task,
+  migrates Open Drawer, and adds deterministic rollout measurement. Broader
+  physical qualification remains in progress.
 - Main baseline: `origin/main@b7404d29` (strict Expert Program frontend, merged
   through [PR #498](https://github.com/DexForce/EmbodiChain/pull/498))
 - Current branch: `feat/expert-program-rollout-validation`
@@ -333,14 +333,14 @@ action.
 
 ### 7.6 Official reference task integrations
 
-The current branch adds two independent task examples under
-`embodichain_tasks.expert_program`. They are comparisons, not replacements:
-`MultiSegmentsCubePickPlace-v1` and `OpenDrawer-v1` retain their existing IDs,
-implementations, and configurations.
+The current branch keeps both canonical task examples under
+`embodichain_tasks.expert_program`. The repeated cube task has one Gym ID and
+implementation; its former compatibility package and ID are removed. Open
+Drawer likewise has one canonical integration, `ExpertProgramOpenDrawer-v1`.
 
 | Environment ID | Declarative path | Atomic path | Application acceptance |
 |---|---|---|---|
-| `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; a `ContactSensor` reports a grasp constraint only when the cube contacts both gripper fingers | standard `object_near_target` validator checks the measured cube position against the selected cyclic target |
+| `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; the task installs no contact or constraint observer | standard `object_near_target` validator checks the measured cube position against the selected cyclic target; physical rollout remains unqualified without grasp evidence |
 | `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call with a strict executable-free payload | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal` and `SlideOptions` for the live drawer-handle link | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
 
 Both configurations load their Expert Program through the top-level
@@ -417,9 +417,9 @@ and Expert Program paths install the same instance on
 `AntipodalAffordance` and `AntipodalGraspAffordanceBinding` therefore retain
 only target geometry. The reference Gym configurations no longer carry grasp
 sampling or annotation settings in `env.extensions`. A handwritten Gym task
-may instead accept a generator through its constructor; the legacy
-multi-segment cube example uses that direct injection seam and otherwise builds
-the same typed standalone default at its composition root.
+may instead accept a generator through its constructor. The repeated cube
+reference installs the shared generator through the production Expert Program
+adapter and has no second handwritten planning path.
 
 Articulation/link registry data and joint evidence remain reusable. Drawer-like
 tasks should lower semantic intent through `Slide` and verify the observed
@@ -506,20 +506,22 @@ Implemented on the current branch:
 - canonical `SkillRuntime` integration and fail-closed parallel coordinator;
 - official `ExpertProgramRepeatedPickPlace-v1` integration with a packaged
   three-cycle program, cyclic targets, rigid-object settling, segment
-  validation, and two-finger physical contact evidence;
+  validation, and no task-local contact or constraint observer;
 - official `ExpertProgramOpenDrawer-v1` integration with a strict registered
   call lowered to `Slide`, shared articulation settling, and declarative
   measured passive-joint application acceptance;
 - focused unit and fake-port coverage for schema, compiler, bridge, environment,
   evidence, timing, recovery metadata, parallel failure cases, and both task
   reference integrations;
-- one-episode Viser simulator smoke runs for both official references, each
-  reaching its declarative acceptance boundary and committing the episode.
+- one-episode Viser simulator smoke coverage for Open Drawer, reaching its
+  declarative acceptance boundary and committing the episode.
 
 Still required before claiming task-level physical completion:
 
-- repeat both simulator qualifications across controlled seeds and the intended
-  randomization envelope, then inspect persisted segment/dataset metadata;
+- install an environment-qualified grasp-evidence provider before claiming
+  physical completion for repeated cube;
+- repeat the Open Drawer simulator qualification across controlled seeds and
+  the intended randomization envelope, then inspect persisted metadata;
 - an environment-qualified parallel physical-safety validator before migrating
   PourWater or any other concurrent task;
 - separate frontend and task-migration work for model-produced programs;
@@ -550,13 +552,9 @@ demonstrate command consumption through `env.step()`, live effect evidence,
 settling, validation, row-local outcomes, safe cancellation, and deterministic
 metadata.
 
-The 2026-08-23 smoke surface used:
+The retained supported-simulation smoke surface is:
 
 ```bash
-embodichain run-env \
-  --gym_config embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json \
-  --viser --max_episodes 1
-
 embodichain run-env \
   --gym_config embodichain_tasks/configs/gym/expert_program/open_drawer.json \
   --viser --max_episodes 1
@@ -566,6 +564,6 @@ The deterministic capability matrix, migration-size snapshot, and demo-success
 artifact contract are maintained in
 [`expert_program_rollout_report.md`](expert_program_rollout_report.md).
 
-Both commands completed with exit status 0 and committed one episode. These
-runs establish end-to-end smoke coverage, not statistical robustness across
-random seeds.
+The Open Drawer command completed with exit status 0 and committed one episode.
+Repeated cube retains structural coverage but no longer claims a physical
+success run because its task-local grasp-evidence observer was removed.
