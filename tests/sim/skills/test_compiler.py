@@ -38,11 +38,11 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     GraspGoal,
+    HandOverGoal,
     HandOverOptions,
     HeldObjectState,
     MotionPolicy,
     ObjectSemantics,
-    OperateArticulationOptions,
     PickUp,
     PickUpOptions,
     PlaceGoal,
@@ -130,13 +130,12 @@ _MOTION_CAPABILITIES = frozenset(
 _PICK_TARGET = PickUp.descriptor()
 
 
-def _action_option_templates(*, registered: bool = False) -> dict[str, object]:
-    """Return complete exact option declarations for the selected catalog."""
-    templates: dict[str, object] = {
+def _action_option_templates(*, registered: bool = False) -> dict[str, ActionOptions]:
+    """Return complete exact options for the test semantic catalog."""
+    templates: dict[str, ActionOptions] = {
         "pick": PickUpOptions(),
         "place": PlaceOptions(),
         "hand_over": HandOverOptions(),
-        "operate_articulation": OperateArticulationOptions(),
     }
     if registered:
         templates["vendor.inspect"] = PickUpOptions()
@@ -227,7 +226,7 @@ class _InspectLowerer(RegisteredSemanticLowerer):
                     geometry={},
                     entity_id="cube",
                 )
-            ),
+            )
         )
 
 
@@ -236,7 +235,7 @@ class _DerivedGraspGoal(GraspGoal):
 
 
 class _SubclassOutputLowerer(RegisteredSemanticLowerer):
-    """Try to bypass exact goal or preset-owned options contracts."""
+    """Try to bypass exact target contracts with executable subclasses."""
 
     call_id: ClassVar[str] = "vendor.inspect"
     schema_version: ClassVar[int] = 1
@@ -260,9 +259,7 @@ class _SubclassOutputLowerer(RegisteredSemanticLowerer):
             entity_id="cube",
         )
         if self.output == "goal":
-            return SemanticLowering(
-                goal=_DerivedGraspGoal(semantics=semantics),
-            )
+            return SemanticLowering(goal=_DerivedGraspGoal(semantics=semantics))
         return SemanticLowering(
             goal=GraspGoal(semantics=semantics),
             skill_options=PickUpOptions(pre_grasp_distance=0.99),
@@ -287,13 +284,13 @@ class _DualCenterHandOverProvider(HandOverPoseProvider):
         del call, context, bound
         self.calls += 1
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(pose=SceneEntityPose("table_top")),
-            final=SemanticObjectTarget(
+            middle=SemanticObjectTarget(
                 pose=SemanticPose(
                     (0.5, 0.0, 0.4),
                     (1.0, 0.0, 0.0, 0.0),
                 )
             ),
+            final=SemanticObjectTarget(pose=SceneEntityPose("table_top")),
         )
 
 
@@ -812,22 +809,6 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
         profile=_dual_profile(),
         handover_pose_providers=(provider,),
     )
-    pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
-    pick = compiler.ground(
-        pick_workflow,
-        0,
-        _context(registry, robot_dof=4),
-    )
-    semantics = pick.invocation.goal.semantics
-    object_to_source = torch.eye(4).repeat(2, 1, 1)
-    object_to_source[:, 0, 3] = 0.08
-    context = _held_context(
-        registry,
-        semantics,
-        object_to_source,
-        task_state_key="left",
-        robot_dof=4,
-    )
     workflow = compiler.analyze((HandOver(object=SceneObjectRef("cube")),))
 
     assert workflow.calls[0].symbolic_writes == frozenset(
@@ -836,12 +817,12 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
             SymbolicStateKey.held_object("right"),
         }
     )
-    grounded = compiler.ground(workflow, 0, context)
+    grounded = compiler.ground(workflow, 0, _context(registry, robot_dof=4))
 
     spec = grounded.effect_spec
     assert spec is not None
     assert spec.semantic_id == "hand_over"
-    assert spec.effect_kind is SemanticEffectKind.TRANSFER
+    assert spec.effect_kind is SemanticEffectKind.RELEASE
     assert tuple(relation.expectation_id for relation in spec.state_expectations) == (
         "source",
         "destination",
@@ -853,29 +834,19 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
     assert source.slot_id == "source"
     assert source.resource_id == "left"
     assert source.task_state_key == "left"
-    source_pose, source_constraint, destination_pose, destination_constraint = (
-        spec.clauses
-    )
-    assert isinstance(source_pose, PoseRelationClause)
-    assert source_pose.expectation is PoseRelationExpectation.SEPARATED
-    assert source_pose.baseline_object_to_endpoint is not None
-    torch.testing.assert_close(
-        source_pose.baseline_object_to_endpoint,
-        object_to_source,
-    )
+    source_constraint, destination_constraint = spec.clauses
     assert isinstance(source_constraint, BinaryEffectClause)
     assert source_constraint.expected is False
     assert isinstance(destination, HeldObjectStateExpectation)
-    assert destination.relation is HeldObjectRelation.ATTACHED
+    assert destination.relation is HeldObjectRelation.DETACHED
     assert destination.object_id == "cube"
     assert destination.slot_id == "destination"
     assert destination.resource_id == "right"
     assert destination.task_state_key == "right"
-    assert isinstance(destination_pose, PoseRelationClause)
-    assert destination_pose.expectation is PoseRelationExpectation.MATCHED
-    assert destination_pose.baseline_object_to_endpoint is None
     assert isinstance(destination_constraint, BinaryEffectClause)
-    assert destination_constraint.expected is True
+    assert destination_constraint.expected is False
+    assert type(grounded.invocation.goal) is HandOverGoal
+    assert type(grounded.invocation.skill_options) is HandOverOptions
 
 
 def test_registered_call_without_monitor_has_no_effect_contract() -> None:
@@ -912,7 +883,6 @@ def test_registered_call_without_monitor_has_no_effect_contract() -> None:
     assert options.pre_grasp_distance == 0.07
     assert len(lowerer.option_templates) == 1
     assert lowerer.option_templates[0] is not options
-    assert type(lowerer.option_templates[0]) is PickUpOptions
     assert factory.calls == 0
 
 
@@ -1090,6 +1060,7 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
         object_pose: torch.Tensor,
         start_qpos: torch.Tensor,
         manipulator: object,
+        grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1118,16 +1089,9 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
     assert captured[1][0, 0, 3].item() == pytest.approx(0.9)
 
 
-def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> None:
+def test_handover_uses_profile_selected_provider_for_unified_goal() -> None:
     registry, providers = _scene_registry()
-    templates = _action_option_templates()
-    templates["hand_over"] = HandOverOptions(
-        receive_pick_object_part="top",
-        pre_grasp_distance=0.06,
-    )
-    profile = _dual_profile(
-        preset=_preset("safe", action_option_templates=templates),
-    )
+    profile = _dual_profile()
     manifest = SemanticIntegrationManifest(
         scene=SceneManifest.from_registry(registry),
         robot_profile=profile,
@@ -1140,84 +1104,22 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
         relation_grounders=(_FrameRelationGrounder(),),
         handover_pose_providers=(provider,),
     )
-    final_target = SemanticPose(
-        (0.8, 0.0, 0.4),
-        (1.0, 0.0, 0.0, 0.0),
-    )
-    workflow = compiler.analyze(
-        (
-            Pick(object=SceneObjectRef("cube")),
-            HandOver(
-                object=SceneObjectRef("cube"),
-                final_target=final_target,
-            ),
-            Place(
-                object=SceneObjectRef("cube"),
-                on=SceneObjectRef("table"),
-                resources={"primary": "right"},
-            ),
-        )
-    )
+    workflow = compiler.analyze((HandOver(object=SceneObjectRef("cube")),))
 
     assert provider.calls == 0
     assert [scene_provider.calls for scene_provider in providers] == [0, 0]
-    assert len(workflow.calls[0].downstream_object_targets) == 1
-    pick = compiler.ground(workflow, 0, _context(registry, robot_dof=4))
+    assert workflow.calls[0].downstream_object_targets == ()
+    handover = compiler.ground(workflow, 0, _context(registry, robot_dof=4))
     assert provider.calls == 1
-    pick_options = pick.invocation.skill_options
-    assert type(pick_options) is PickUpOptions
-    assert type(pick_options.downstream_object_target_poses[0]) is SceneEntityPose
-    assert pick_options.downstream_object_target_poses[0].entity_id == "table_top"
-
-    held_context = _held_context(
-        registry,
-        pick.invocation.goal.semantics,
-        torch.eye(4).repeat(2, 1, 1),
-        task_state_key="left",
-        robot_dof=4,
-    )
-    handover = compiler.ground(workflow, 1, held_context)
-    assert provider.calls == 2
+    goal = handover.invocation.goal
+    assert type(goal) is HandOverGoal
+    assert type(goal.target_pose) is SceneEntityPose
+    assert goal.target_pose.entity_id == "table_top"
     options = handover.invocation.skill_options
     assert type(options) is HandOverOptions
-    assert options.receive_pick_object_part == "top"
-    assert options.pre_grasp_distance == 0.06
-    assert type(options.middle_object_pose) is SceneEntityPose
-    assert options.middle_object_pose.entity_id == "table_top"
-    assert options.final_object_pose[0, 3].item() == pytest.approx(0.8)
     request = engine.resolve(handover.invocation)
     action = engine.actions["hand_over"]
-    assert action._scene_dependencies(request) == ("table_top",)
-    action._resolve_start_qpos = Mock(  # type: ignore[method-assign]
-        return_value=(torch.zeros(2, 1), torch.zeros(2, 1))
-    )
-    captured: list[torch.Tensor] = []
-    original_resolve_matrix = action._resolve_matrix
-
-    def capture_middle(matrix: torch.Tensor, name: str) -> torch.Tensor:
-        if name == "middle_object_pose":
-            captured.append(matrix.clone())
-            raise RuntimeError("captured target")
-        return original_resolve_matrix(matrix, name)
-
-    action._resolve_matrix = capture_middle  # type: ignore[method-assign]
-    with pytest.raises(RuntimeError, match="captured target"):
-        engine.plan_request(request, held_context)
-    moved_table_pose = torch.eye(4).repeat(2, 1, 1)
-    moved_table_pose[:, 0, 3] = 0.9
-    providers[1].pose = moved_table_pose
-    moved_context = _held_context(
-        registry,
-        pick.invocation.goal.semantics,
-        torch.eye(4).repeat(2, 1, 1),
-        task_state_key="left",
-        robot_dof=4,
-    )
-    with pytest.raises(RuntimeError, match="captured target"):
-        engine.plan_request(request, moved_context)
-
-    assert captured[0][0, 0, 3].item() == pytest.approx(0.6)
-    assert captured[1][0, 0, 3].item() == pytest.approx(0.9)
+    assert action._scene_dependencies(request) == ("cube", "table_top")
 
 
 def test_handover_requires_profile_selection_and_installed_provider() -> None:

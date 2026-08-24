@@ -154,9 +154,7 @@ def test_segment_may_wrap_one_parallel_block() -> None:
     assert len(segment.calls) == 4
 
 
-def test_materialized_analysis_stops_sequential_lookahead_at_parallel_barriers() -> (
-    None
-):
+def test_compiled_analysis_stops_sequential_lookahead_at_parallel_barriers() -> None:
     config = _config(
         SequenceCfg(
             items=(
@@ -167,7 +165,7 @@ def test_materialized_analysis_stops_sequential_lookahead_at_parallel_barriers()
         )
     )
 
-    program = _compiler().compile(config).materialize()
+    program = _compiler().compile(config)
     analyses = program.preflight_analyses()
 
     assert [analysis.kind for analysis in analyses] == [

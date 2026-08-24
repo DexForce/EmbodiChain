@@ -40,6 +40,7 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     EndpointCommand,
     EntityState,
+    ExecutionRunnerCfg,
     JointPositionPayload,
     JointPositionTarget,
     MotionPolicy,
@@ -204,6 +205,7 @@ class _TraceObservationProvider:
                 ),
             ),
             env_ids=ENV_IDS,
+            control_dt=STEP_DT,
         )
 
 
@@ -298,9 +300,8 @@ class _TraceCompiler(SemanticSkillCompiler):
             goal=_TraceGoal(),
             binding=binding,
             motion_policy=MotionPolicy(
-                planner="completion_trace_planner",
+                strategy="motion_gen",
                 sample_count=9,
-                control_dt=STEP_DT,
             ),
             recovery_policy=RecoveryPolicy(
                 max_replans=2,
@@ -318,6 +319,7 @@ class _TraceCompiler(SemanticSkillCompiler):
                     schema_version=1,
                     motion_policy=invocation.motion_policy,
                     recovery_policy=invocation.recovery_policy,
+                    runner_cfg=ExecutionRunnerCfg(),
                 ),
             )
         )

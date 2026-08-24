@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields, is_dataclass, replace
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 import hashlib
 import json
@@ -32,7 +32,6 @@ import torch
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
-    ArticulationOperationAffordance,
     AtomicActionEngine,
     EndpointTrackingFeedbackAddress,
     GRASP_CAPABILITY,
@@ -45,7 +44,6 @@ from embodichain.lab.sim.atomic_actions.tracking import (
     TrackingRuntime,
 )
 from embodichain.lab.sim.skills import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
     CONTACT_EFFECT_CHANNEL,
     CONSTRAINT_EFFECT_CHANNEL,
     ControlPartEndpoint,
@@ -57,7 +55,6 @@ from embodichain.lab.sim.skills import (
     POSE_RELATION_EFFECT_CHANNEL,
     BoundRobotSkillProfile,
     HandOverPoseProvider,
-    OperateArticulation,
     Place,
     RelationTargetGrounder,
     RobotSkillProfile,
@@ -72,8 +69,6 @@ from embodichain.lab.sim.skills import (
     SceneRegistry,
     SemanticCallCatalog,
     SemanticIntegrationManifest,
-    SemanticValidationError,
-    SkillPolicyPreset,
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.skills.effects import (
@@ -89,7 +84,6 @@ from embodichain.lab.sim.skills.parallel_runtime import (
 from .cfg import (
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
-    OperateArticulationCfg,
     PostPolicyCfg,
     RegisteredSemanticCallCfg,
     SemanticCallCfg,
@@ -97,9 +91,7 @@ from .cfg import (
 )
 from .compiler import (
     CompiledProgram,
-    ExpertProgramCompileError,
     ExpertProgramCompiler,
-    ExpertProgramSceneResolver,
 )
 from .decoder import (
     ConfigPath,
@@ -422,123 +414,6 @@ def _validate_standard_tracking_metrics(profile: RobotSkillProfile) -> None:
                     ) from exc
 
 
-def _declared_articulation_operation_targets(
-    scene_binding: SimulationSceneBinding,
-) -> dict[str, frozenset[str]]:
-    """Derive named operation-target IDs from the task-owned scene binding."""
-    return {
-        binding.entity_id: frozenset(binding.semantic_targets)
-        for binding in scene_binding.articulation_operations
-    }
-
-
-def _snapshot_articulation_operation_targets(
-    values: Mapping[str, frozenset[str]],
-    *,
-    scene: SceneManifest,
-) -> Mapping[str, frozenset[str]]:
-    """Own and cross-check provider-free named articulation targets."""
-    if not isinstance(values, Mapping):
-        raise TypeError("articulation_operation_targets must be a mapping.")
-    normalized: dict[str, frozenset[str]] = {}
-    for affordance_id, target_ids in values.items():
-        _exact_identifier(
-            affordance_id,
-            field_name="articulation operation affordance IDs",
-        )
-        if type(target_ids) is not frozenset:
-            raise TypeError(
-                "articulation_operation_targets values must be exact frozensets."
-            )
-        for target_id in target_ids:
-            _exact_identifier(
-                target_id,
-                field_name="articulation operation target IDs",
-            )
-        entry = scene.lookup(
-            affordance_id,
-            expected_type=SceneAffordanceRef,
-            path=("articulation_operation_targets", affordance_id),
-        )
-        if entry.ref.entity_id != affordance_id:
-            raise ValueError(
-                "articulation_operation_targets keys must use canonical "
-                "affordance IDs."
-            )
-        if (
-            ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
-            not in entry.affordance_capabilities
-            or entry.affordance_payload_type is not ArticulationOperationAffordance
-        ):
-            raise TypeError(
-                f"Scene affordance {affordance_id!r} is not an articulation "
-                "operation affordance."
-            )
-        normalized[affordance_id] = frozenset(target_ids)
-
-    declared_affordance_ids = {
-        entry.ref.entity_id
-        for entry in scene.entries
-        if type(entry.ref) is SceneAffordanceRef
-        and ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
-        in entry.affordance_capabilities
-    }
-    if set(normalized) != declared_affordance_ids:
-        raise ValueError(
-            "articulation_operation_targets must cover every declared operation "
-            f"affordance exactly; expected {sorted(declared_affordance_ids)}, got "
-            f"{sorted(normalized)}."
-        )
-    return MappingProxyType(normalized)
-
-
-class _SceneManifestProgramResolver:
-    """Resolve compiler references from an immutable :class:`SceneManifest`."""
-
-    def __init__(self, scene: SceneManifest) -> None:
-        if type(scene) is not SceneManifest:
-            raise TypeError("scene must be exactly SceneManifest.")
-        self._scene = scene
-
-    def resolve(
-        self,
-        reference: str,
-        *,
-        expected_types: tuple[type[SceneEntityRef], ...],
-        path: ConfigPath,
-    ) -> SceneEntityRef:
-        """Resolve one reference without retaining a live registry."""
-        if (
-            type(expected_types) is not tuple
-            or not expected_types
-            or not all(
-                isinstance(expected_type, type)
-                and issubclass(expected_type, SceneEntityRef)
-                for expected_type in expected_types
-            )
-        ):
-            raise TypeError(
-                "expected_types must be a non-empty tuple of scene-ref types."
-            )
-        try:
-            resolved = self._scene.resolve(reference, path=path)
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ExpertProgramCompileError(
-                "unknown_scene_reference",
-                path,
-                str(exc),
-            ) from exc
-        if type(resolved) not in expected_types:
-            raise ExpertProgramCompileError(
-                "scene_reference_type_mismatch",
-                path,
-                f"Scene reference {reference!r} resolves to "
-                f"{type(resolved).__name__}, expected one of "
-                f"{tuple(value.__name__ for value in expected_types)}.",
-            )
-        return type(resolved)(resolved.entity_id)
-
-
 @dataclass(frozen=True, slots=True)
 class ExpertProgramIntegrationCatalog:
     """Provider-free integration directory owned by one task registration."""
@@ -549,7 +424,6 @@ class ExpertProgramIntegrationCatalog:
     robot_profile: RobotSkillProfile
     call_catalog: SemanticCallCatalog
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]]
-    articulation_operation_targets: Mapping[str, frozenset[str]]
     settle_preset_ids: frozenset[str]
     endpoint_adapter_declarations: Mapping[
         type[ResourceEndpoint], EndpointAdapterDeclaration
@@ -577,14 +451,6 @@ class ExpertProgramIntegrationCatalog:
             self,
             "relation_grounder_keys",
             _snapshot_relation_grounder_keys(self.relation_grounder_keys),
-        )
-        object.__setattr__(
-            self,
-            "articulation_operation_targets",
-            _snapshot_articulation_operation_targets(
-                self.articulation_operation_targets,
-                scene=self.scene,
-            ),
         )
         extensions = StandardExtensionDeclarations(
             endpoint_adapters=self.endpoint_adapter_declarations,
@@ -675,64 +541,6 @@ class ExpertProgramIntegrationCatalog:
             raise ValueError(
                 f"Semantic call {call_id!r} requires schema_version "
                 f"{descriptor.schema_version}, got {call.schema_version}."
-            )
-        if type(call) is OperateArticulationCfg and call.target is not None:
-            self._validate_articulation_operation_target(
-                articulation=call.articulation,
-                handle=call.handle,
-                target=call.target,
-                path=path,
-            )
-
-    def _validate_articulation_operation_target(
-        self,
-        *,
-        articulation: str | SceneArticulationRef,
-        handle: str | SceneAffordanceRef | None,
-        target: str,
-        path: ConfigPath,
-    ) -> None:
-        """Resolve one operation affordance and validate its named target."""
-        try:
-            articulation_ref = self.scene.resolve(
-                articulation,
-                expected_type=SceneArticulationRef,
-                path=(*path, "articulation"),
-            )
-        except SemanticValidationError as exc:
-            raise ExpertProgramValidationError(
-                exc.diagnostic.code,
-                exc.diagnostic.path,
-                exc.diagnostic.message,
-            ) from exc
-        try:
-            affordance = self.scene.resolve_affordance(
-                articulation_ref,
-                capability=ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
-                explicit=handle,
-                path=(*path, "handle"),
-            )
-        except SemanticValidationError as exc:
-            raise ExpertProgramValidationError(
-                exc.diagnostic.code,
-                exc.diagnostic.path,
-                exc.diagnostic.message,
-            ) from exc
-        target_ids = self.articulation_operation_targets.get(affordance.entity_id)
-        if target_ids is None:
-            raise ExpertProgramValidationError(
-                "missing_articulation_operation_targets",
-                (*path, "handle"),
-                f"Operation affordance {affordance.entity_id!r} has no static "
-                "named-target declaration.",
-            )
-        if target not in target_ids:
-            raise ExpertProgramValidationError(
-                "unknown_articulation_operation_target",
-                (*path, "target"),
-                f"Unknown target {target!r} for operation affordance "
-                f"{affordance.entity_id!r}; available targets are "
-                f"{sorted(target_ids)}.",
             )
 
     def _validate_place_relation_grounder(
@@ -840,8 +648,7 @@ class ExpertProgramIntegrationCatalog:
     def preflight(self, program: ExpertProgramCfg) -> CompiledProgram:
         """Compile and statically link every expanded semantic call."""
         self.validate_integration(program.integration, path=("integration",))
-        resolver: ExpertProgramSceneResolver = _SceneManifestProgramResolver(self.scene)
-        compiled = ExpertProgramCompiler(resolver).compile(program)
+        compiled = ExpertProgramCompiler(self.scene).compile(program)
         manifest = SemanticIntegrationManifest(
             scene=self.scene,
             robot_profile=self.robot_profile,
@@ -860,16 +667,6 @@ class ExpertProgramIntegrationCatalog:
                     "physical safety-validator factory.",
                 )
             for call in segment.calls:
-                if (
-                    type(call.call) is OperateArticulation
-                    and call.call.target is not None
-                ):
-                    self._validate_articulation_operation_target(
-                        articulation=call.call.articulation,
-                        handle=call.call.handle,
-                        target=call.call.target,
-                        path=call.source_path,
-                    )
                 linked = manifest.link_call(call.call, path=call.source_path)
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
@@ -1092,35 +889,10 @@ class ExpertProgramIntegrationCatalog:
                     )
 
 
-def _profile_with_control_dt(
-    profile: RobotSkillProfile,
-    *,
-    control_dt: float,
-) -> RobotSkillProfile:
-    """Return the registration profile aligned to one Gym control cadence."""
-    return replace(
-        profile,
-        presets={
-            preset_id: SkillPolicyPreset(
-                preset_id=preset.preset_id,
-                schema_version=preset.schema_version,
-                motion_policy=replace(preset.motion_policy, control_dt=control_dt),
-                tracking_policy=preset.tracking_policy,
-                recovery_policy=preset.recovery_policy,
-                runner_cfg=preset.runner_cfg,
-                effect_monitors=preset.effect_monitors,
-                action_option_templates=preset.action_option_templates,
-            )
-            for preset_id, preset in profile.presets.items()
-        },
-    )
-
-
 def _registration_payload(
     *,
     scene_binding: SimulationSceneBinding,
     scene: SceneManifest,
-    articulation_operation_targets: Mapping[str, frozenset[str]],
     robot_profile_binding: SimulationRobotSkillProfileBinding,
     robot_profile: RobotSkillProfile,
     call_catalog: SemanticCallCatalog,
@@ -1138,7 +910,6 @@ def _registration_payload(
         "schema_version": _CATALOG_FINGERPRINT_SCHEMA_VERSION,
         "scene_binding": scene_binding,
         "scene_manifest": scene.entries,
-        "articulation_operation_targets": articulation_operation_targets,
         "robot_profile_binding": robot_profile_binding,
         "robot_profile": robot_profile,
         "call_descriptors": tuple(
@@ -1273,9 +1044,6 @@ class SimulationExpertProgramRegistration:
         )
 
         scene = self.scene_binding.declare()
-        articulation_operation_targets = _declared_articulation_operation_targets(
-            self.scene_binding
-        )
         profile = self.robot_profile_binding.declare()
         _validate_standard_effect_monitors(profile)
         _validate_standard_tracking_metrics(profile)
@@ -1320,7 +1088,6 @@ class SimulationExpertProgramRegistration:
             _registration_payload(
                 scene_binding=self.scene_binding,
                 scene=scene,
-                articulation_operation_targets=articulation_operation_targets,
                 robot_profile_binding=self.robot_profile_binding,
                 robot_profile=profile,
                 call_catalog=self.call_catalog,
@@ -1344,7 +1111,6 @@ class SimulationExpertProgramRegistration:
                 robot_profile=profile,
                 call_catalog=self.call_catalog,
                 relation_grounder_keys=relation_grounder_keys,
-                articulation_operation_targets=articulation_operation_targets,
                 settle_preset_ids=frozenset(settle_presets),
                 endpoint_adapter_declarations=extensions.endpoint_adapters,
                 runtime_transport_declarations=extensions.runtime_transports,
@@ -1364,9 +1130,6 @@ class SimulationExpertProgramRegistration:
     def assert_unchanged(self) -> None:
         """Reject nested declaration drift before live component creation."""
         scene = self.scene_binding.declare()
-        articulation_operation_targets = _declared_articulation_operation_targets(
-            self.scene_binding
-        )
         profile = self.robot_profile_binding.declare()
         try:
             _validate_standard_call_catalog(self.call_catalog)
@@ -1389,7 +1152,6 @@ class SimulationExpertProgramRegistration:
                 _registration_payload(
                     scene_binding=self.scene_binding,
                     scene=scene,
-                    articulation_operation_targets=(articulation_operation_targets),
                     robot_profile_binding=self.robot_profile_binding,
                     robot_profile=profile,
                     call_catalog=self.call_catalog,
@@ -1469,18 +1231,12 @@ class SimulationExpertProgramRegistration:
     def validate_robot_profile(
         self,
         profile: RobotSkillProfile,
-        *,
-        step_dt: float,
     ) -> None:
-        """Validate a cadence-aligned live profile against its declaration."""
+        """Validate a live profile against its registered declaration."""
         self.assert_unchanged()
         if type(profile) is not RobotSkillProfile:
             raise TypeError("profile must be exactly RobotSkillProfile.")
-        expected = _profile_with_control_dt(
-            self.catalog.robot_profile,
-            control_dt=step_dt,
-        )
-        if _canonical_json(profile) != _canonical_json(expected):
+        if _canonical_json(profile) != _canonical_json(self.catalog.robot_profile):
             raise IntegrationFingerprintMismatch(
                 "Live robot skill profile differs from the registered declaration."
             )

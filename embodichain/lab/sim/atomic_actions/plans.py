@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -65,7 +66,6 @@ class TimedTrajectory:
     accelerations: torch.Tensor | None
     dt: torch.Tensor
     """Per-waypoint arrival intervals; the first sample normally has zero dt."""
-    duration: torch.Tensor
     env_ids: torch.Tensor
 
     def __post_init__(self) -> None:
@@ -95,21 +95,6 @@ class TimedTrajectory:
             raise ValueError("dt must share the positions device.")
         if not torch.isfinite(self.dt).all() or (self.dt < 0).any():
             raise ValueError("dt must contain finite non-negative values.")
-        if not isinstance(self.duration, torch.Tensor) or self.duration.shape != (
-            batch_size,
-        ):
-            raise ValueError(f"duration must have shape ({batch_size},).")
-        if self.duration.device != self.positions.device:
-            raise ValueError("duration must share the positions device.")
-        if not torch.isfinite(self.duration).all() or (self.duration < 0).any():
-            raise ValueError("duration must contain finite non-negative values.")
-        if not torch.allclose(
-            self.duration,
-            self.dt.sum(dim=1),
-            rtol=1e-4,
-            atol=1e-6,
-        ):
-            raise ValueError("duration must equal the sum of dt for each environment.")
         if not isinstance(self.env_ids, torch.Tensor):
             raise TypeError("env_ids must be a torch.Tensor.")
         if self.env_ids.dtype != torch.long or self.env_ids.shape != (batch_size,):
@@ -134,7 +119,6 @@ class TimedTrajectory:
             ),
         )
         object.__setattr__(self, "dt", self.dt.detach().clone())
-        object.__setattr__(self, "duration", self.duration.detach().clone())
         object.__setattr__(self, "env_ids", self.env_ids.detach().clone())
 
     @property
@@ -152,6 +136,11 @@ class TimedTrajectory:
         """Number of full-robot command columns."""
         return int(self.positions.shape[2])
 
+    @property
+    def duration(self) -> torch.Tensor:
+        """Per-environment trajectory duration derived from waypoint intervals."""
+        return self.dt.sum(dim=1)
+
     def snapshot(self) -> TimedTrajectory:
         """Return an independently owned copy of this trajectory.
 
@@ -166,7 +155,6 @@ class TimedTrajectory:
                 None if self.accelerations is None else self.accelerations.clone()
             ),
             dt=self.dt.clone(),
-            duration=self.duration.clone(),
             env_ids=self.env_ids.clone(),
         )
 
@@ -176,71 +164,80 @@ class TimedTrajectory:
         positions: torch.Tensor,
         *,
         env_ids: torch.Tensor,
-        control_dt: float,
+        dt: torch.Tensor,
         velocities: torch.Tensor | None = None,
         accelerations: torch.Tensor | None = None,
-        dt: torch.Tensor | None = None,
-        duration: torch.Tensor | float | None = None,
     ) -> TimedTrajectory:
-        """Build a timed trajectory and synthesize missing timing metadata.
+        """Build a trajectory from positions and explicit per-sample timing.
 
         Args:
             positions: Full-robot positions, shape ``(B, N, D)``.
             env_ids: Environment identifiers, shape ``(B,)``.
-            control_dt: Fallback interval used when ``dt`` is absent.
+            dt: Per-sample arrival intervals, shape ``(B, N)``.
             velocities: Optional joint velocities.
             accelerations: Optional joint accelerations.
-            dt: Optional per-sample time deltas.
-            duration: Optional duration used to synthesize or validate ``dt``.
 
         Returns:
             Validated timed trajectory.
         """
-        if control_dt <= 0.0:
-            raise ValueError("control_dt must be greater than zero.")
         if not isinstance(positions, torch.Tensor) or positions.dim() != 3:
             raise ValueError("positions must have shape (B, N, D).")
-        batch_size, waypoint_count, _ = positions.shape
-        if dt is None:
-            dt = torch.zeros(
-                (batch_size, waypoint_count),
-                dtype=torch.float32,
-                device=positions.device,
-            )
-            if waypoint_count > 1:
-                if duration is None:
-                    dt[:, 1:] = control_dt
-                else:
-                    duration_tensor = torch.as_tensor(
-                        duration, dtype=torch.float32, device=positions.device
-                    )
-                    if duration_tensor.dim() == 0:
-                        duration_tensor = duration_tensor.expand(batch_size)
-                    if duration_tensor.shape != (batch_size,):
-                        raise ValueError(f"duration must have shape ({batch_size},).")
-                    dt[:, 1:] = duration_tensor[:, None] / (waypoint_count - 1)
-        else:
-            dt = dt.to(device=positions.device, dtype=torch.float32)
-        computed_duration = dt.sum(dim=1)
-        if duration is not None:
-            duration_tensor = torch.as_tensor(
-                duration, dtype=torch.float32, device=positions.device
-            )
-            if duration_tensor.dim() == 0:
-                duration_tensor = duration_tensor.expand(batch_size)
-            if duration_tensor.shape != (batch_size,):
-                raise ValueError(f"duration must have shape ({batch_size},).")
-            if not torch.allclose(
-                computed_duration, duration_tensor, rtol=1e-4, atol=1e-6
-            ):
-                raise ValueError("duration does not match the supplied dt.")
+        if not isinstance(dt, torch.Tensor):
+            raise TypeError("dt must be a torch.Tensor.")
         return cls(
             positions=positions,
             velocities=velocities,
             accelerations=accelerations,
-            dt=dt,
-            duration=computed_duration,
+            dt=dt.to(device=positions.device, dtype=torch.float32),
             env_ids=env_ids,
+        )
+
+    @classmethod
+    def from_uniform_step(
+        cls,
+        positions: torch.Tensor,
+        *,
+        env_ids: torch.Tensor,
+        step_dt: float,
+        velocities: torch.Tensor | None = None,
+        accelerations: torch.Tensor | None = None,
+    ) -> TimedTrajectory:
+        """Build an explicitly uniform-time trajectory.
+
+        The first waypoint has zero arrival time; every following waypoint uses
+        ``step_dt``. This factory is intended for interpolation algorithms whose
+        cadence is selected by the caller, not for repairing untimed plans.
+
+        Args:
+            positions: Full-robot positions, shape ``(B, N, D)``.
+            env_ids: Environment identifiers, shape ``(B,)``.
+            step_dt: Explicit interval between consecutive waypoints.
+            velocities: Optional joint velocities.
+            accelerations: Optional joint accelerations.
+
+        Returns:
+            Validated uniformly timed trajectory.
+        """
+        if isinstance(step_dt, bool) or not isinstance(step_dt, (int, float)):
+            raise TypeError("step_dt must be a real number.")
+        if not math.isfinite(step_dt) or step_dt <= 0.0:
+            raise ValueError("step_dt must be finite and greater than zero.")
+        if not isinstance(positions, torch.Tensor) or positions.dim() != 3:
+            raise ValueError("positions must have shape (B, N, D).")
+        batch_size, waypoint_count, _ = positions.shape
+        dt = torch.zeros(
+            (batch_size, waypoint_count),
+            dtype=torch.float32,
+            device=positions.device,
+        )
+        if waypoint_count > 1:
+            dt[:, 1:] = float(step_dt)
+        return cls.from_positions(
+            positions,
+            env_ids=env_ids,
+            dt=dt,
+            velocities=velocities,
+            accelerations=accelerations,
         )
 
     @classmethod
@@ -261,7 +258,6 @@ class TimedTrajectory:
             velocities=None,
             accelerations=None,
             dt=torch.empty((batch_size, 0), dtype=torch.float32, device=resolved),
-            duration=torch.zeros(batch_size, dtype=torch.float32, device=resolved),
             env_ids=env_ids,
         )
 
@@ -306,7 +302,6 @@ class TimedTrajectory:
             velocities=mask_derivative(self.velocities),
             accelerations=mask_derivative(self.accelerations),
             dt=self.dt,
-            duration=self.duration,
             env_ids=self.env_ids,
         )
 
@@ -358,7 +353,6 @@ class TimedTrajectory:
             velocities=concatenate_optional("velocities"),
             accelerations=concatenate_optional("accelerations"),
             dt=dt,
-            duration=dt.sum(dim=1),
             env_ids=first.env_ids,
         )
 
@@ -468,6 +462,8 @@ class ActionPlan:
             monitored for the action's full execution. Once the bound is reached,
             all pose changes for that entity are ignored, regardless of whether
             they were caused by the action or by an external disturbance.
+        scene_dependency_end_segment: Optional last segment during which scene
+            motion may invalidate and replan the action for every dependency.
     """
 
     skill_id: str
@@ -483,6 +479,7 @@ class ActionPlan:
     segments: tuple[TrajectorySegment, ...] = ()
     scene_dependencies: tuple[str, ...] = ()
     scene_dependency_monitor_until: Mapping[str, int] = field(default_factory=dict)
+    scene_dependency_end_segment: str | None = None
     collision_world_sensitive: bool = False
     replannable: bool = True
     expected_effects: StateDelta = field(default_factory=StateDelta)
@@ -735,6 +732,21 @@ class ActionPlan:
                 "ActionPlan segments must cover the command sequence exactly without "
                 "gaps or overlaps."
             )
+        dependency_end = self.scene_dependency_end_segment
+        if dependency_end is not None:
+            if not isinstance(dependency_end, str) or not dependency_end:
+                raise ValueError(
+                    "scene_dependency_end_segment must be a non-empty segment "
+                    "name or None."
+                )
+            if dependency_end not in names:
+                raise ValueError(
+                    "scene_dependency_end_segment must name an ActionPlan segment."
+                )
+            if not dependencies:
+                raise ValueError(
+                    "scene_dependency_end_segment requires scene_dependencies."
+                )
         object.__setattr__(self, "plan_success", self.plan_success.clone())
         object.__setattr__(self, "commands", self.commands.snapshot())
         object.__setattr__(
@@ -814,6 +826,7 @@ class ActionPlan:
             segments=self.segments,
             scene_dependencies=self.scene_dependencies,
             scene_dependency_monitor_until=self.scene_dependency_monitor_until,
+            scene_dependency_end_segment=self.scene_dependency_end_segment,
             collision_world_sensitive=self.collision_world_sensitive,
             replannable=self.replannable,
             expected_effects=self.expected_effects,

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for strict Expert Program Version 1 decoding."""
+"""Tests for strict Expert Program Version 2 decoding."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from copy import deepcopy
 import pytest
 
 from embodichain.lab.gym.envs.expert_program import (
-    MAX_REPEAT_COUNT,
+    ArticulationJointPositionValidatorCfg,
     ConfigPath,
     ExpertProgramDecodeError,
     ExpertProgramIntegrationCfg,
@@ -31,23 +31,26 @@ from embodichain.lab.gym.envs.expert_program import (
     HandOverCfg,
     PickCfg,
     PlaceCfg,
-    PostPolicyCfg,
     RegisteredSemanticCallCfg,
     RepeatCfg,
     SceneReferenceRole,
     SegmentCfg,
     SequenceCfg,
     TargetRefCfg,
-    ValidatorCfg,
     decode_expert_program,
     render_config_path,
+)
+from embodichain.lab.gym.envs.expert_program.cfg import (
+    MAX_REPEAT_COUNT,
+    PostPolicyCfg,
+    ValidatorCfg,
 )
 
 
 def _program_data() -> dict[str, object]:
-    """Return the repeated-cube Version 1 example as plain JSON values."""
+    """Return the repeated-cube Version 2 example as plain JSON values."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "program_id": "repeated_cube_pick_place",
         "integration": {
             "robot_profile": "auto",
@@ -141,7 +144,30 @@ def test_decoder_builds_owned_repeated_cube_ast() -> None:
     assert config.targets["drop_pose"].values[0].position[0] == pytest.approx(0.45)
 
 
-def test_decoder_supports_every_version_one_semantic_call() -> None:
+def test_decoder_supports_articulation_joint_position_validator() -> None:
+    """Joint bounds decode without requiring an unrelated pose target."""
+    data = _program_data()
+    segment = data["program"]["body"]
+    segment["validators"] = [
+        {
+            "kind": "articulation_joint_position",
+            "articulation": "drawer",
+            "joint": "cabinet_to_drawer",
+            "minimum_position": 0.10,
+        }
+    ]
+
+    config = decode_expert_program(data)
+
+    validator = config.program.body.validators[0]
+    assert type(validator) is ArticulationJointPositionValidatorCfg
+    assert validator.articulation == "drawer"
+    assert validator.joint == "cabinet_to_drawer"
+    assert validator.minimum_position == pytest.approx(0.10)
+    assert validator.maximum_position is None
+
+
+def test_decoder_supports_every_builtin_semantic_call() -> None:
     data = _program_data()
     data["program"] = {
         "kind": "sequence",
@@ -244,7 +270,7 @@ def test_decoder_reports_missing_required_field_at_exact_path() -> None:
     ("value", "code"),
     [
         (None, "missing_discriminator"),
-        ("parallel", "unknown_discriminator"),
+        ("unknown", "unknown_discriminator"),
     ],
 )
 def test_decoder_rejects_missing_or_reserved_program_discriminator(
@@ -309,7 +335,7 @@ def test_every_union_rejects_unknown_discriminator_at_exact_path(
     assert render_config_path(error.value.path) == expected_path
 
 
-@pytest.mark.parametrize("schema_version", [False, 0, 3, "1"])
+@pytest.mark.parametrize("schema_version", [False, 0, 1, 3, "2"])
 def test_decoder_rejects_unsupported_top_level_schema_version(
     schema_version: object,
 ) -> None:

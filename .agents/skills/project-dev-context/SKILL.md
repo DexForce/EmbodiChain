@@ -1,22 +1,17 @@
 ---
 name: project-dev-context
-description: Use when a request asks to reference, refresh, write, or register project development context so the agent resolves the topic through agent_context/MAP.yaml and reads or updates the mapped Markdown context files.
+description: >
+  Route EmbodiChain development-context and codebase-navigation requests through
+  agent_context/MAP.yaml. Use when asked to locate files, configs, defaults,
+  entry points, registration paths, or change sites; explain a code or
+  configuration resolution chain; reference project context; refresh or write
+  context; register a context topic; or work with a named topic such as
+  simulation-system, env-framework, rl-learning, manager-functor, ik-solvers,
+  or atomic-actions. Chinese triggers include 文件在哪里、配置或默认值在哪里、
+  入口或注册逻辑在哪里、应该修改哪个文件、参考项目上下文、刷新项目上下文。
 ---
 
-# Project Dev Context
-
-Use this skill when:
-- the request says `reference project development docs`
-- the request says `reference project context`
-- the request says `refresh project context`
-- the request says `update project context`
-- the request says `write project context`
-- the request says `参考项目开发文档`
-- the request says `参考项目上下文`
-- the request says `刷新项目上下文`
-- the request says `更新项目上下文`
-- the request says `写项目上下文`
-- the request names a known project topic such as `env-framework`, `manager-functor`, `ik-solvers`, or `atomic-actions`
+# Project Development Context and Codebase Navigation
 
 ## Start here
 
@@ -25,18 +20,50 @@ Use this skill when:
 - Read `agents/openai.yaml` for the canonical agent metadata
 - Read `agent_context/conventions/*.md` when creating or updating context files
 
-## Workflow
+## Select the operation
 
-1. Resolve the topic through `agent_context/MAP.yaml`
-2. Match in this order: exact `id`, then `aliases`, then `keywords`
-3. Choose the operation mode:
-   - **read**: load only the matched Markdown files under `agent_context/`
-   - **refresh existing topic**: re-read `source_of_truth` and rewrite the mapped topic Markdown so it matches current implementation
-   - **add new topic**: write a new topic Markdown file and register it in `agent_context/MAP.yaml`
-4. Load `agent_context/conventions/*.md` if you add or update context files
-5. Do not re-read `docs/source/` unless the user explicitly asks for Sphinx documentation
+- **navigate**: locate a file, symbol, config, default, entry point,
+  registration path, or recommended change site.
+- **read**: load the matched agent context without changing it.
+- **refresh**: rebuild an existing topic from its current
+  `source_of_truth`.
+- **add**: create and register a new topic from current source code.
 
-This skill routes context. It does not replace the underlying source-of-truth files listed in each topic entry.
+An explicit refresh or add request determines the mode. If the user asks to
+implement work covered by a specialized skill such as `add-robot`,
+`add-solver`, or `add-functor`, let that skill own the implementation and
+use this skill only for orientation or mapped context.
+
+## Route the request
+
+1. Resolve the topic through `agent_context/MAP.yaml`.
+2. Match in this order: exact `id`, then `aliases`, then `keywords`.
+3. For a matched read request, load only the Markdown files in `paths`.
+4. For a matched navigation request, load the mapped topic and verify the
+   relevant path or behavior against the current `source_of_truth`.
+5. For an unmatched navigation request:
+   - list candidate files with `rg --files`;
+   - search symbols, flags, config keys, registries, and imports with `rg -n`;
+   - inspect the closest package `__init__.py`, config loader, registry,
+     test, and entry point as relevant;
+   - inspect `pyproject.toml` and `embodichain/__main__.py` for CLI or
+     package-discovery questions.
+6. Do not add a topic merely because navigation did not match. Propose or add
+   one only when the user requests it or the missing area is recurring.
+7. Do not read `docs/source/` unless the user explicitly asks for Sphinx
+   documentation.
+
+Never treat topic Markdown as a substitute for current code. For navigation,
+report only paths and behavior verified in the working tree.
+
+## Navigation answer contract
+
+Include the parts relevant to the request:
+
+- the entry point or owning location;
+- the call, registration, or configuration-resolution path;
+- the file or symbol to change;
+- the focused tests or documentation affected by that change.
 
 ## Explicit refresh mode
 
@@ -53,6 +80,16 @@ In refresh mode:
 2. Re-read the files listed in `source_of_truth`
 3. Rewrite the mapped topic Markdown from current implementation, not stale notes
 4. Update `aliases`, `keywords`, `paths`, `related_topics` if needed
+5. Load and follow `agent_context/conventions/*.md`
+
+## Add mode
+
+1. Choose a stable kebab-case topic id.
+2. Read the current source files that define the topic.
+3. Write one focused Markdown file under
+   `agent_context/topics/<topic-id>/`.
+4. Register the topic in `agent_context/MAP.yaml`.
+5. Load and follow `agent_context/conventions/*.md`.
 
 ## Update contract
 
@@ -66,7 +103,8 @@ If code behavior changes a routed topic, update all relevant pieces in the same 
 
 ## Source-of-truth
 
-This skill does not store the project knowledge itself. The canonical project context lives in:
+This skill stores the routing procedure, not project facts. Canonical project
+context lives in:
 - `agent_context/MAP.yaml`
 - `agent_context/topics/**/*.md`
 - `agent_context/conventions/*.md`

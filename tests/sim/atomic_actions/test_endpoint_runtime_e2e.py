@@ -150,7 +150,6 @@ def _engine(robot: _Robot) -> AtomicActionEngine:
             success=torch.ones(positions.shape[0], dtype=torch.bool),
             positions=positions,
             dt=dt,
-            duration=dt.sum(dim=1),
         )
 
     generator.generate.side_effect = generate
