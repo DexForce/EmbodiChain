@@ -36,6 +36,7 @@ from scripts.benchmark.atomic_action.common import (
     build_single_action_leaderboard,
     build_video_output_path,
     create_antipodal_object_semantics,
+    create_benchmark_grasp_pose_generator,
     create_benchmark_object,
     describe_object_preset,
     ensure_repo_root,
@@ -184,13 +185,12 @@ def _prepare_held_state(
         PickUpOptions,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
-        build_grasp_generator_cfg,
-        build_gripper_collision_cfg,
         get_hand_open_close_qpos,
         make_pre_pick_eef_pose,
     )
 
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
+    pickup_args = _make_pickup_args(args, object_preset, profile)
     atomic_engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
@@ -199,13 +199,13 @@ def _prepare_held_state(
                 grasp=hand_close,
             )
         },
+        grasp_pose_generators={
+            "hand": create_benchmark_grasp_pose_generator(pickup_args)
+        },
     )
     semantics = create_antipodal_object_semantics(
         obj=obj,
         preset=object_preset,
-        args=_make_pickup_args(args, object_preset, profile),
-        build_gripper_collision_cfg=build_gripper_collision_cfg,
-        build_grasp_generator_cfg=build_grasp_generator_cfg,
     )
     obj_pose = obj.get_local_pose(to_matrix=True)
     move_position = obj_pose[0, :3, 3].clone()
@@ -241,7 +241,8 @@ def _prepare_held_state(
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-        )
+        ),
+        atomic_engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions

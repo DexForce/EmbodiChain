@@ -1,0 +1,37 @@
+schema_version: 2
+program_id: dual_ur5_hand_over
+
+integration:
+  robot_profile: dual_ur5_handover_v1
+  scene_registry: dual_ur5_handover_v1
+  runtime_preset: safe
+
+targets:
+  delivery_pose:
+    kind: cyclic_pose
+    values:
+      - position: [0.0, -0.2, 0.7]
+        quaternion_wxyz: [0.7071067812, 0.7071067812, 0.0, 0.0]
+
+program:
+  kind: segment
+  name: hand_over_can
+  steps:
+    kind: sequence
+    items:
+      - kind: invoke
+        call:
+          kind: hand_over
+          object: can
+          final_target:
+            kind: target_ref
+            target: delivery_pose
+  post:
+    - kind: wait_stable
+      entity: can
+      preset: rigid_object
+  validators:
+    - kind: object_near_target
+      object: can
+      target: delivery_pose
+      position_tolerance: 0.12

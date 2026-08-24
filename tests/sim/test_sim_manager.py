@@ -76,6 +76,25 @@ class FakeCamera:
         return np.full((4, 4, 4), 7, dtype=np.uint8)
 
 
+class FakePointCloud:
+    """Point-cloud stub that records native rendering calls."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.points: np.ndarray | None = None
+        self.colors: np.ndarray | None = None
+        self.point_size: float | None = None
+
+    def add_points(self, points: np.ndarray) -> None:
+        self.points = points
+
+    def set_colors(self, colors: np.ndarray) -> None:
+        self.colors = colors
+
+    def set_point_size(self, point_size: float) -> None:
+        self.point_size = point_size
+
+
 class FakeThreadRuntime:
     """Runtime loop stub for viewer-timed recording."""
 
@@ -105,15 +124,21 @@ class FakeWorld:
 
 
 class FakeEnv:
-    """Environment stub that creates fake cameras."""
+    """Environment stub that creates fake cameras and point clouds."""
 
     def __init__(self) -> None:
         self.created_cameras: list[FakeCamera] = []
+        self.created_point_clouds: list[FakePointCloud] = []
 
     def create_camera(self, name: str, width: int, height: int) -> FakeCamera:
         camera = FakeCamera()
         self.created_cameras.append(camera)
         return camera
+
+    def create_point_cloud(self, name: str) -> FakePointCloud:
+        point_cloud = FakePointCloud(name)
+        self.created_point_clouds.append(point_cloud)
+        return point_cloud
 
 
 class FakeVisualizationRuntime:
@@ -278,6 +303,34 @@ def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
     sim.set_visualization_overlays(None)
     assert sim.visualization_overlays is None
     assert runtime.capture_calls[-1]["overlays"] is None
+
+
+def test_sim_manager_visualizes_native_point_cloud() -> None:
+    sim = _make_sim_manager()
+    points = torch.tensor([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
+    colors = torch.tensor([[255, 0, 0, 1], [0, 255, 0, 0]])
+
+    point_cloud = sim.visualize_point_cloud(
+        points,
+        colors=colors,
+        point_size=3.0,
+        name="workspace",
+    )
+
+    assert point_cloud is sim._env.created_point_clouds[0]
+    assert point_cloud.name == "workspace"
+    assert point_cloud.point_size == 3.0
+    np.testing.assert_array_equal(point_cloud.points, points.numpy())
+    np.testing.assert_allclose(
+        point_cloud.colors,
+        np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32),
+    )
+
+    default_color_cloud = sim.visualize_point_cloud(points, name="default_colors")
+    np.testing.assert_array_equal(
+        default_color_cloud.colors,
+        np.array([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32),
+    )
 
 
 def test_sim_manager_routes_viser_gizmo_commands_in_local_arena_frame() -> None:

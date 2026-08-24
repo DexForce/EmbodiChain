@@ -51,7 +51,6 @@ from embodichain.lab.sim.skills import (
     HandOver,
     HandOverPoseProvider,
     HandOverPoseTargets,
-    OperateArticulation,
     RelationTargetGrounder,
     SemanticCallCatalog,
     SceneAffordanceRef,
@@ -79,18 +78,11 @@ from embodichain.lab.sim.skills.effects import EffectMonitorRef
 from embodichain.lab.sim.skills.parallel_runtime import (
     ParallelCommandSafetyValidator,
 )
-from embodichain_tasks.multi_segments.cube_pick_place import (
-    CUBE_ROBOT_PROFILE_ID,
-    CUBE_SCENE_REGISTRY_ID,
-    create_cube_robot_profile_binding,
-    create_cube_scene_binding,
-)
-from embodichain_tasks.tableware.open_drawer import (
-    DRAWER_HANDLE_AFFORDANCE_ID,
-    DRAWER_ROBOT_PROFILE_ID,
-    DRAWER_SCENE_REGISTRY_ID,
-    DRAWER_UID,
-    OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION,
+from embodichain_tasks.expert_program.repeated_pick_place import (
+    ROBOT_PROFILE_ID as CUBE_ROBOT_PROFILE_ID,
+    SCENE_REGISTRY_ID as CUBE_SCENE_REGISTRY_ID,
+    create_repeated_pick_place_robot_profile_binding as create_cube_robot_profile_binding,
+    create_repeated_pick_place_scene_binding as create_cube_scene_binding,
 )
 
 
@@ -331,7 +323,7 @@ def _program_payload(
 ) -> dict[str, object]:
     """Return one minimal catalog-linked program payload."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "program_id": "catalog_pick",
         "integration": {
             "robot_profile": CUBE_ROBOT_PROFILE_ID,
@@ -349,7 +341,7 @@ def _program_payload(
 def _registration() -> SimulationExpertProgramRegistration:
     """Build one isolated provider-free task registration."""
     return SimulationExpertProgramRegistration(
-        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        scene_binding=create_cube_scene_binding(),
         robot_profile_binding=create_cube_robot_profile_binding(),
     )
 
@@ -360,32 +352,6 @@ def _parallel_live_inputs() -> tuple[object, SceneRegistry, AtomicActionEngine]:
     engine = AtomicActionEngine.__new__(AtomicActionEngine)
     engine._planning_services = SimpleNamespace(robot=robot)  # type: ignore[attr-defined]
     return robot, SceneRegistry(), engine
-
-
-def _operate_articulation_payload(
-    *,
-    target: str,
-    handle: str | None = None,
-) -> dict[str, object]:
-    """Return one named drawer-operation program with an optional handle."""
-    call: dict[str, object] = {
-        "kind": "operate_articulation",
-        "articulation": DRAWER_UID,
-        "target": target,
-    }
-    if handle is not None:
-        call["handle"] = handle
-    return {
-        "schema_version": 1,
-        "program_id": "catalog_open_drawer",
-        "integration": {
-            "robot_profile": DRAWER_ROBOT_PROFILE_ID,
-            "scene_registry": DRAWER_SCENE_REGISTRY_ID,
-            "runtime_preset": "safe",
-        },
-        "targets": {},
-        "program": {"kind": "invoke", "call": call},
-    }
 
 
 def _place_relation_catalog(
@@ -435,7 +401,6 @@ def _place_relation_catalog(
         robot_profile=base.robot_profile,
         call_catalog=base.call_catalog,
         relation_grounder_keys=grounder_keys,
-        articulation_operation_targets={},
         settle_preset_ids=base.settle_preset_ids,
         endpoint_adapter_declarations=base.endpoint_adapter_declarations,
         runtime_transport_declarations=base.runtime_transport_declarations,
@@ -448,7 +413,7 @@ def _place_relation_catalog(
 def _place_relation_payload() -> dict[str, object]:
     """Return one Place(on=object) program requiring relation grounding."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "program_id": "catalog_place_relation",
         "integration": {
             "robot_profile": CUBE_ROBOT_PROFILE_ID,
@@ -506,7 +471,7 @@ def _registration_with_preset(
     """Replace the Cube task's sole preset for registration validation tests."""
     binding = create_cube_robot_profile_binding()
     return SimulationExpertProgramRegistration(
-        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        scene_binding=create_cube_scene_binding(),
         robot_profile_binding=replace(binding, presets=(preset,)),
     )
 
@@ -555,7 +520,7 @@ def test_parallel_preflight_requires_registered_safety_factory_at_exact_path() -
 def test_parallel_preflight_accepts_exact_registration_owned_safety_factory() -> None:
     """A factory declaration covers preflight and creates a fresh live gate."""
     registration = SimulationExpertProgramRegistration(
-        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        scene_binding=create_cube_scene_binding(),
         robot_profile_binding=create_cube_robot_profile_binding(),
         parallel_safety_factory=_CatalogParallelSafetyFactory(),
     )
@@ -599,7 +564,7 @@ def test_parallel_safety_factory_must_return_a_validator() -> None:
             return object()
 
     registration = SimulationExpertProgramRegistration(
-        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        scene_binding=create_cube_scene_binding(),
         robot_profile_binding=create_cube_robot_profile_binding(),
         parallel_safety_factory=InvalidParallelSafetyFactory(),
     )
@@ -619,7 +584,7 @@ def test_parallel_safety_creation_and_history_are_one_registration_lock_scope() 
     factory_type = _SerializedParallelSafetyFactory
     factory_type.reset()
     registration = SimulationExpertProgramRegistration(
-        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        scene_binding=create_cube_scene_binding(),
         robot_profile_binding=create_cube_robot_profile_binding(),
         parallel_safety_factory=factory_type(),
     )
@@ -661,7 +626,7 @@ def test_standard_registration_rejects_registered_semantic_descriptors() -> None
 
     with pytest.raises(ValueError, match="Registered semantic call"):
         SimulationExpertProgramRegistration(
-            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            scene_binding=create_cube_scene_binding(),
             robot_profile_binding=create_cube_robot_profile_binding(),
             call_catalog=catalog.with_descriptor(custom),
         )
@@ -708,53 +673,6 @@ def test_standard_registration_rejects_tracking_metric_without_builtin_evaluator
         _registration_with_preset(preset)
 
 
-@pytest.mark.parametrize("validation_stage", ("decode", "preflight"))
-def test_catalog_rejects_unknown_named_articulation_target_at_exact_path(
-    validation_stage: str,
-) -> None:
-    """Unknown provider-owned target IDs fail before simulation startup."""
-    catalog = OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION.catalog
-    payload = _operate_articulation_payload(target="does_not_exist")
-
-    with pytest.raises(ExpertProgramValidationError) as error:
-        if validation_stage == "decode":
-            decode_expert_program(payload, validation_context=catalog)
-        else:
-            catalog.preflight(decode_expert_program(payload))
-
-    assert error.value.code == "unknown_articulation_operation_target"
-    assert error.value.path == ("program", "call", "target")
-
-
-@pytest.mark.parametrize("handle", (None, DRAWER_HANDLE_AFFORDANCE_ID))
-def test_catalog_accepts_named_target_through_default_or_explicit_affordance(
-    handle: str | None,
-) -> None:
-    """Both handle-selection forms resolve the same registered target table."""
-    catalog = OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION.catalog
-    program = decode_expert_program(
-        _operate_articulation_payload(target="open", handle=handle),
-        validation_context=catalog,
-    )
-
-    compiled = catalog.preflight(program)
-
-    call = tuple(compiled.iter_segments())[0].calls[0].call
-    assert type(call) is OperateArticulation
-    assert call.target == "open"
-
-
-def test_catalog_owns_immutable_articulation_operation_target_metadata() -> None:
-    """Named target IDs are a read-only task-registration catalog surface."""
-    targets = (
-        OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION.catalog.articulation_operation_targets
-    )
-
-    assert targets == {DRAWER_HANDLE_AFFORDANCE_ID: frozenset({"open"})}
-    with pytest.raises(TypeError):
-        targets[DRAWER_HANDLE_AFFORDANCE_ID] = frozenset()  # type: ignore[index]
-
-
 def test_catalog_rejects_linked_place_relation_without_exact_grounder() -> None:
     """A linked affordance cannot defer a missing typed grounder to runtime."""
     catalog = _place_relation_catalog(install_grounder_key=False)
@@ -785,7 +703,7 @@ def test_catalog_accepts_linked_place_relation_with_exact_grounder_key() -> None
 
 def test_standard_support_binding_installs_grounder_without_task_code() -> None:
     """A task relation declaration supplies its production grounder implicitly."""
-    base = create_cube_scene_binding(grasp_samples=32)
+    base = create_cube_scene_binding()
     scene = replace(
         base,
         registry_id="relation_scene",
@@ -913,7 +831,7 @@ def test_fingerprint_is_independent_of_catalog_and_provider_insertion_order() ->
     first_handover = _CatalogHandOverPoseProvider(transfer_height=0.6)
     second_handover = _SecondCatalogHandOverPoseProvider()
     common = {
-        "scene_binding": create_cube_scene_binding(grasp_samples=32),
+        "scene_binding": create_cube_scene_binding(),
         "robot_profile_binding": create_cube_robot_profile_binding(),
     }
     forward = SimulationExpertProgramRegistration(
@@ -936,13 +854,13 @@ def test_fingerprint_owns_provider_ids_and_declarative_fields() -> None:
     """Provider identity and dataclass configuration are registration data."""
     provider = _CatalogHandOverPoseProvider(transfer_height=0.6)
     registration = SimulationExpertProgramRegistration(
-        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        scene_binding=create_cube_scene_binding(),
         robot_profile_binding=create_cube_robot_profile_binding(),
         relation_grounders=(_CatalogRelationGrounder(),),
         handover_pose_providers=(provider,),
     )
     changed_value = SimulationExpertProgramRegistration(
-        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        scene_binding=create_cube_scene_binding(),
         robot_profile_binding=create_cube_robot_profile_binding(),
         relation_grounders=(_CatalogRelationGrounder(),),
         handover_pose_providers=(_CatalogHandOverPoseProvider(transfer_height=0.7),),
@@ -959,7 +877,7 @@ def test_fingerprint_rejects_opaque_nested_declaration_values() -> None:
     """Unknown nested values cannot silently collapse to their Python type."""
     with pytest.raises(TypeError, match="unsupported value type"):
         SimulationExpertProgramRegistration(
-            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            scene_binding=create_cube_scene_binding(),
             robot_profile_binding=create_cube_robot_profile_binding(),
             handover_pose_providers=(_OpaqueHandOverPoseProvider(opaque=object()),),
         )
@@ -968,7 +886,7 @@ def test_fingerprint_rejects_opaque_nested_declaration_values() -> None:
 def test_registration_rejects_duplicate_provider_keys_and_ids() -> None:
     """Provider lookup tables remain unambiguous before simulation startup."""
     common = {
-        "scene_binding": create_cube_scene_binding(grasp_samples=32),
+        "scene_binding": create_cube_scene_binding(),
         "robot_profile_binding": create_cube_robot_profile_binding(),
     }
 
@@ -994,7 +912,7 @@ def test_registration_requires_immutable_provider_tuples() -> None:
     """Mutable provider containers cannot enter task registration metadata."""
     with pytest.raises(TypeError, match="relation_grounders must be an exact tuple"):
         SimulationExpertProgramRegistration(
-            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            scene_binding=create_cube_scene_binding(),
             robot_profile_binding=create_cube_robot_profile_binding(),
             relation_grounders=[_CatalogRelationGrounder()],  # type: ignore[arg-type]
         )
@@ -1003,7 +921,7 @@ def test_registration_requires_immutable_provider_tuples() -> None:
         match="handover_pose_providers must be an exact tuple",
     ):
         SimulationExpertProgramRegistration(
-            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            scene_binding=create_cube_scene_binding(),
             robot_profile_binding=create_cube_robot_profile_binding(),
             handover_pose_providers=[  # type: ignore[arg-type]
                 _CatalogHandOverPoseProvider(transfer_height=0.6)
@@ -1031,7 +949,7 @@ def test_registration_rejects_stateful_non_dataclass_providers(
 
     with pytest.raises(TypeError, match="Use a frozen dataclass"):
         SimulationExpertProgramRegistration(
-            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            scene_binding=create_cube_scene_binding(),
             robot_profile_binding=create_cube_robot_profile_binding(),
             **kwargs,
         )
@@ -1041,7 +959,7 @@ def test_registration_rejects_nested_mutable_relation_grounder_state() -> None:
     """Catalog providers reuse the standard recursive immutability boundary."""
     with pytest.raises(TypeError, match="deeply immutable"):
         SimulationExpertProgramRegistration(
-            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            scene_binding=create_cube_scene_binding(),
             robot_profile_binding=create_cube_robot_profile_binding(),
             relation_grounders=(_NestedMutableCatalogRelationGrounder(offsets=[0.1]),),
         )
@@ -1050,9 +968,11 @@ def test_registration_rejects_nested_mutable_relation_grounder_state() -> None:
 def test_nested_declaration_drift_is_detected_before_live_build() -> None:
     """Mutable nested config cannot silently change a registered binding."""
     registration = _registration()
-    generator_cfg = registration.scene_binding.antipodal_grasps[0].generator_cfg
-    assert generator_cfg is not None
-    generator_cfg.antipodal_sampler_cfg.n_sample = 64
+    object.__setattr__(
+        registration.scene_binding.rigid_objects[0],
+        "semantic_type",
+        "changed_cube",
+    )
 
     with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
         registration.assert_unchanged()

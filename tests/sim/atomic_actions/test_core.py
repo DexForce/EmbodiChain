@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, FrozenInstanceError
+from dataclasses import dataclass, FrozenInstanceError, replace
 from unittest.mock import Mock
 
 import pytest
@@ -32,7 +32,6 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AtomicAction,
     AtomicActionEngine,
-    CoordinatedHeldObjectState,
     DynamicCollisionMode,
     EndpointBinding,
     EndpointCommand,
@@ -74,17 +73,21 @@ from embodichain.lab.sim.atomic_actions.goals import (
     collect_scene_dependencies,
     resolve_pose_goal,
 )
+from embodichain.lab.sim.common import BatchEntity
+from embodichain.lab.sim.planners import ToppraPlanOptions
 
 
 def _semantics(
     label: str = "object",
     *,
+    entity: BatchEntity | None = None,
     entity_id: str | None = None,
 ) -> ObjectSemantics:
     return ObjectSemantics(
         affordance=Affordance(),
         geometry={},
         label=label,
+        entity=entity,
         entity_id=entity_id,
     )
 
@@ -93,37 +96,29 @@ def _held(
     batch_size: int = 2,
     *,
     semantics: ObjectSemantics | None = None,
+    env_mask: torch.Tensor | None = None,
 ) -> HeldObjectState:
     pose = torch.eye(4).repeat(batch_size, 1, 1)
     return HeldObjectState(
         semantics=semantics or _semantics(),
         object_to_eef=pose,
         grasp_xpos=pose,
+        env_mask=env_mask,
     )
 
 
-def _coordinated_held(
-    batch_size: int = 2,
+def _context(
+    scene: SceneSnapshot | None = None,
     *,
-    semantics: ObjectSemantics | None = None,
-) -> CoordinatedHeldObjectState:
-    pose = torch.eye(4).repeat(batch_size, 1, 1)
-    return CoordinatedHeldObjectState(
-        semantics=semantics or _semantics(),
-        left_object_to_eef=pose,
-        right_object_to_eef=pose,
-        left_grasp_xpos=pose,
-        right_grasp_xpos=pose,
-    )
-
-
-def _context(scene: SceneSnapshot | None = None) -> PlanningContext:
+    control_dt: float | None = None,
+) -> PlanningContext:
     qpos = torch.zeros(2, 4)
     return PlanningContext(
         robot=RobotObservation(timestamp=1.0, qpos=qpos, qvel=torch.zeros_like(qpos)),
         task=TaskState.empty(batch_size=2, device="cpu"),
         scene=scene or SceneSnapshot.empty(),
         env_ids=torch.tensor([4, 7], dtype=torch.long),
+        control_dt=control_dt,
     )
 
 
@@ -291,7 +286,7 @@ def test_action_plan_owns_explicit_effect_verification_requirement() -> None:
         env_ids=torch.tensor([4], dtype=torch.long),
         frame_count=1,
     )
-    requirement = EffectVerificationRequirement(kind="articulation.joint_progress")
+    requirement = EffectVerificationRequirement(kind="physical.effect")
 
     plan = _action_plan(commands, effect_verification=requirement)
     requirement_snapshot = plan.effect_verification
@@ -446,15 +441,6 @@ def test_action_binding_is_endpoint_based_and_immutable() -> None:
         )
 
 
-def test_invocation_rejects_values_without_goal_contract() -> None:
-    with pytest.raises(TypeError, match="goal_kind"):
-        ActionInvocation(
-            skill_id="move_end_effector",
-            goal=object(),  # type: ignore[arg-type]
-            binding=ActionBinding(owner_id="test-engine"),
-        )
-
-
 @pytest.mark.parametrize("entity_id", ["", "   ", 7])
 def test_object_semantics_rejects_invalid_entity_id(entity_id: object) -> None:
     with pytest.raises(ValueError, match="entity_id"):
@@ -473,9 +459,8 @@ def test_object_semantics_identity_fields_are_frozen() -> None:
 
 
 def test_motion_and_recovery_policy_validate_shared_parameters() -> None:
-    policy = MotionPolicy(sample_count=24, control_dt=0.01)
+    policy = MotionPolicy(sample_count=24)
     assert policy.sample_count == 24
-    assert policy.control_dt == 0.01
     assert policy.dynamic_collision_mode is DynamicCollisionMode.AUTO
     with pytest.raises(ValueError, match="sample_count"):
         MotionPolicy(sample_count=1)
@@ -497,18 +482,22 @@ def test_motion_policy_normalizes_dynamic_collision_mode() -> None:
 
 
 def test_motion_policy_maps_to_motion_generator_strategy() -> None:
+    planner_options = ToppraPlanOptions(
+        constraints={"velocity": 0.2, "acceleration": 0.5}
+    )
     policy = MotionPolicy(
         strategy="ik_interp",
         sample_count=24,
-        velocity_limit=0.2,
-        acceleration_limit=0.5,
+        plan_opts=planner_options,
     )
+    planner_options.constraints["velocity"] = 1.0
     start_qpos = torch.zeros(2, 6)
 
     options = policy.to_motion_gen_options(
         start_qpos=start_qpos,
         control_part="arm",
         sample_count=12,
+        interpolation_dt=0.02,
     )
 
     assert options.strategy == "ik_interp"
@@ -516,8 +505,11 @@ def test_motion_policy_maps_to_motion_generator_strategy() -> None:
     assert options.start_qpos is not start_qpos
     assert torch.equal(options.start_qpos, start_qpos)
     assert options.control_part == "arm"
-    assert options.velocity_limit == 0.2
-    assert options.acceleration_limit == 0.5
+    assert options.interpolation_dt == pytest.approx(0.02)
+    assert options.velocity_limit is None
+    assert options.acceleration_limit is None
+    assert isinstance(options.plan_opts, ToppraPlanOptions)
+    assert options.plan_opts.constraints == {"velocity": 0.2, "acceleration": 0.5}
 
 
 def test_task_state_normalizes_held_relations_and_masks_updates() -> None:
@@ -540,6 +532,59 @@ def test_task_state_normalizes_held_relations_and_masks_updates() -> None:
     assert left is not None and left.env_mask.tolist() == [False, True]
     assert right is not None and right.env_mask.tolist() == [True, False]
     assert state.get_held_object("right_arm") is None
+
+
+def test_task_state_reports_per_environment_exclusive_holds() -> None:
+    entity = Mock(spec=BatchEntity)
+    shared = _semantics("shared", entity=entity)
+    same_entity = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="same-entity-alias",
+        entity=entity,
+    )
+    independent = _semantics("shared")
+    state = TaskState(
+        batch_size=2,
+        device="cpu",
+        held_objects={
+            "left_arm": _held(semantics=shared),
+            "right_arm": _held(
+                semantics=same_entity,
+                env_mask=torch.tensor([True, False]),
+            ),
+            "third_arm": _held(
+                semantics=independent,
+                env_mask=torch.tensor([False, True]),
+            ),
+        },
+    )
+
+    assert state.held_object_mask("left_arm").tolist() == [True, True]
+    assert state.exclusive_held_object_mask("left_arm").tolist() == [False, True]
+    assert state.exclusive_held_object_mask("right_arm").tolist() == [False, False]
+    assert state.exclusive_held_object_mask("third_arm").tolist() == [False, True]
+    assert state.held_object_mask("missing").tolist() == [False, False]
+
+
+def test_task_state_treats_matching_entity_ids_as_shared() -> None:
+    state = TaskState(
+        batch_size=1,
+        device="cpu",
+        held_objects={
+            "left_arm": _held(
+                batch_size=1,
+                semantics=_semantics(entity_id="tray"),
+            ),
+            "right_arm": _held(
+                batch_size=1,
+                semantics=_semantics(entity_id="tray"),
+            ),
+        },
+    )
+
+    assert state.exclusive_held_object_mask("left_arm").tolist() == [False]
+    assert state.exclusive_held_object_mask("right_arm").tolist() == [False]
 
 
 def test_state_delta_merges_distinct_semantics_with_same_entity_id() -> None:
@@ -647,29 +692,6 @@ def test_state_delta_merges_legacy_semantics_with_same_uid() -> None:
     ).apply(state, torch.tensor([True, False]))
 
     held = updated.get_held_object("arm")
-    assert held is not None and held.semantics is previous_semantics
-
-
-def test_state_delta_merges_coordinated_semantics_with_same_entity_id() -> None:
-    previous_semantics = _semantics(entity_id="tray")
-    candidate_semantics = _semantics(entity_id="tray")
-    key = ("left_arm", "right_arm")
-    state = TaskState(
-        batch_size=2,
-        device="cpu",
-        coordinated_held_objects={
-            key: _coordinated_held(semantics=previous_semantics),
-        },
-    )
-
-    updated = StateDelta(
-        coordinated_held_object_updates={
-            key: _coordinated_held(semantics=candidate_semantics),
-        }
-    ).apply(state, torch.tensor([True, False]))
-
-    held = updated.get_coordinated_held_object(*key)
-    assert previous_semantics is not candidate_semantics
     assert held is not None and held.semantics is previous_semantics
 
 
@@ -809,6 +831,14 @@ def test_build_plan_uses_action_scene_dependency_hook() -> None:
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
     )
+
+    with pytest.raises(TypeError, match="TimedTrajectory with explicit dt"):
+        action.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=context.robot.qpos.unsqueeze(1),  # type: ignore[arg-type]
+        )
 
     plan = action.build_command_plan(
         request,
@@ -978,6 +1008,25 @@ def test_command_target_authorization_rejects_custom_claim_conflicts() -> None:
         )
 
 
+def test_action_plan_rejects_unknown_scene_dependency_end_segment() -> None:
+    plan = _action_plan(
+        _command_sequence(
+            env_ids=torch.tensor([0, 1], dtype=torch.long),
+            frame_count=2,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="scene_dependency_end_segment must name an ActionPlan segment",
+    ):
+        replace(
+            plan,
+            scene_dependencies=("target",),
+            scene_dependency_end_segment="approach",
+        )
+
+
 def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
     env_ids = torch.tensor([4, 7], dtype=torch.long)
     commands = _command_sequence(env_ids=env_ids, frame_count=2)
@@ -988,10 +1037,10 @@ def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
         ),
         dim=1,
     )
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         trajectory_positions,
         env_ids=env_ids,
-        control_dt=0.1,
+        step_dt=0.1,
     )
     plan_success = torch.tensor([True, False])
 
@@ -1147,10 +1196,10 @@ def test_action_plan_validates_joint_trajectory_against_commands(
         env_ids=torch.tensor([4], dtype=torch.long),
         frame_count=1,
     )
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         torch.ones(1, trajectory_frame_count, 2),
         env_ids=trajectory_env_ids,
-        control_dt=0.1,
+        step_dt=0.1,
     )
 
     with pytest.raises(ValueError, match=message):
@@ -1367,12 +1416,12 @@ def test_scene_snapshot_rejects_unknown_collision_entity() -> None:
         )
 
 
-def test_timed_trajectory_synthesizes_timing_and_holds_selected_rows() -> None:
+def test_timed_trajectory_uses_explicit_uniform_timing_and_holds_rows() -> None:
     positions = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         positions,
         env_ids=torch.tensor([4, 7]),
-        control_dt=0.02,
+        step_dt=0.02,
     )
     held = trajectory.hold_rows(
         torch.tensor([True, False]),
@@ -1389,14 +1438,12 @@ def test_timed_trajectory_constructor_detaches_and_owns_all_tensor_fields() -> N
     velocities = torch.full_like(positions, 0.5, requires_grad=True)
     accelerations = torch.full_like(positions, 0.25, requires_grad=True)
     dt = torch.tensor([[0.0, 0.1]], requires_grad=True)
-    duration = torch.tensor([0.1], requires_grad=True)
     env_ids = torch.tensor([4], dtype=torch.long)
     inputs = {
         "positions": positions,
         "velocities": velocities,
         "accelerations": accelerations,
         "dt": dt,
-        "duration": duration,
         "env_ids": env_ids,
     }
     expected = {name: value.detach().clone() for name, value in inputs.items()}
@@ -1418,23 +1465,32 @@ def test_timed_trajectory_rejects_duplicate_environment_ids() -> None:
         TimedTrajectory.from_positions(
             torch.zeros(2, 1, 2),
             env_ids=torch.tensor([4, 4], dtype=torch.long),
-            control_dt=0.1,
+            dt=torch.zeros(2, 1),
         )
 
 
+def test_planning_context_requires_explicit_interpolation_period() -> None:
+    with pytest.raises(ValueError, match="explicit PlanningContext.control_dt"):
+        _context().require_control_dt()
+
+    assert _context(control_dt=0.02).require_control_dt() == pytest.approx(0.02)
+    with pytest.raises(ValueError, match="finite and greater than zero"):
+        _context(control_dt=0.0)
+
+
 def test_timed_trajectory_snapshot_owns_its_tensor_storage() -> None:
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         torch.arange(12, dtype=torch.float32).reshape(1, 3, 4),
         env_ids=torch.tensor([4]),
-        control_dt=0.02,
+        step_dt=0.02,
     )
 
     snapshot = trajectory.snapshot()
     snapshot.positions.zero_()
     snapshot.dt.zero_()
-    snapshot.duration.zero_()
     snapshot.env_ids.zero_()
 
+    assert snapshot.duration.item() == 0.0
     assert torch.count_nonzero(trajectory.positions).item() > 0
     assert torch.count_nonzero(trajectory.dt).item() > 0
     assert trajectory.duration.item() > 0.0
@@ -1442,15 +1498,15 @@ def test_timed_trajectory_snapshot_owns_its_tensor_storage() -> None:
 
 
 def test_timed_trajectory_concatenates_metadata() -> None:
-    first = TimedTrajectory.from_positions(
+    first = TimedTrajectory.from_uniform_step(
         torch.zeros(2, 2, 4),
         env_ids=torch.tensor([0, 1]),
-        control_dt=0.1,
+        step_dt=0.1,
     )
-    second = TimedTrajectory.from_positions(
+    second = TimedTrajectory.from_uniform_step(
         torch.ones(2, 3, 4),
         env_ids=torch.tensor([0, 1]),
-        control_dt=0.2,
+        step_dt=0.2,
     )
 
     result = TimedTrajectory.concatenate((first, second))
