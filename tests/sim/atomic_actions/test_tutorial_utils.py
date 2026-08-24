@@ -51,6 +51,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_tutorial_argument_parser,
     create_tutorial_robot_cfg,
     create_ur5_gripper_robot_cfg,
+    create_parallel_jaw_grasp_pose_generator,
     get_hand_open_close_qpos,
     replay_trajectory,
     should_open_tutorial_window,
@@ -224,20 +225,22 @@ def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
     obj.get_vertices.return_value = vertices.unsqueeze(0)
     obj.get_triangles.return_value = triangles.unsqueeze(0)
 
-    semantics = create_antipodal_semantics(
-        obj,
-        label="cube",
-        n_sample=64,
-        force_reannotate=True,
-    )
+    semantics = create_antipodal_semantics(obj, label="cube")
 
     assert semantics.entity is obj
     assert semantics.label == "cube"
     assert semantics.geometry == {}
     assert torch.equal(semantics.affordance.mesh_vertices, vertices)
     assert torch.equal(semantics.affordance.mesh_triangles, triangles)
-    assert semantics.affordance.force_reannotate is True
-    assert semantics.affordance.generator_cfg.antipodal_sampler_cfg.n_sample == 64
+    assert not hasattr(semantics.affordance, "generator_cfg")
+
+    generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=64,
+        force_refresh=True,
+    )
+    assert generator.algorithm_cfg.sample_count == 64
+    assert generator.annotation_cfg.force_refresh is True
+    assert generator.gripper_model.model_id == "dh_pgi_140_80"
 
 
 def test_franka_tutorial_config_uses_ur5_gripper_component() -> None:

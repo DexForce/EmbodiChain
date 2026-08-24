@@ -136,10 +136,8 @@ class PickUpOptions(ActionOptions):
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
-        if self.pick_object_part not in {"center", "top", "bottom"}:
-            raise ValueError(
-                "pick_object_part must be one of 'center', 'top', or 'bottom'."
-            )
+        if not isinstance(self.pick_object_part, str) or not self.pick_object_part:
+            raise ValueError("pick_object_part must be a non-empty string.")
         if self.lift_height < 0.0:
             raise ValueError("lift_height must be non-negative.")
         if self.pre_grasp_distance < 0.0:
@@ -391,6 +389,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 object_pose,
                 start_arm_qpos,
                 manipulator,
+                end_effector.target_id,
                 options,
                 approach_direction,
             )
@@ -476,9 +475,14 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         object_pose: torch.Tensor,
         start_qpos: torch.Tensor,
         manipulator: JointPositionTarget,
+        grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        affordance = semantics.affordance
+        if not isinstance(affordance, AntipodalAffordance):
+            raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
+        generator = self.planning_services.grasp_pose_generator(grasp_target_id)
         obj_longest_axis = None
         is_positive_part = True
         if options.pick_object_part != "center":
@@ -488,7 +492,9 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 device=self.device,
             )
             is_positive_part = options.pick_object_part == "top"
-        grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
+        grasp_poses_result = generator.get_valid_grasp_poses(
+            mesh_vertices=affordance.mesh_vertices,
+            mesh_triangles=affordance.mesh_triangles,
             obj_poses=object_pose,
             approach_direction=approach_direction,
             obj_longest_axis=obj_longest_axis,

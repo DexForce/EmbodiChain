@@ -247,6 +247,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             approach_direction,
             rotation_axis,
             rotation_angle,
+            end_effector.target_id,
             object_part=options.pick_object_part,
         )
         grasp_xpos = self._find_symmetric_nearest_xpos(
@@ -420,6 +421,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         approach_direction: torch.Tensor,
         rotation_axis: torch.Tensor,
         rotation_angle: torch.Tensor,
+        grasp_target_id: str,
         *,
         object_part: str,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -435,19 +437,23 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                 grasp_xpos,
             )
 
-        sampled = affordance.get_valid_grasp_poses(
+        obj_longest_axis = None
+        is_positive_part = True
+        if object_part != "center":
+            obj_longest_axis = torch.tensor(
+                [0.0, 0.0, 1.0],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            is_positive_part = object_part == "top"
+        generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        sampled = generator.get_valid_grasp_poses(
+            mesh_vertices=affordance.mesh_vertices,
+            mesh_triangles=affordance.mesh_triangles,
             obj_poses=object_pose,
             approach_direction=approach_direction,
-            obj_longest_axis=(
-                None
-                if object_part == "center"
-                else torch.tensor(
-                    [0.0, 0.0, 1.0],
-                    dtype=torch.float32,
-                    device=self.device,
-                )
-            ),
-            is_positive_part=object_part == "top",
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
         )
         poses: list[torch.Tensor] = []
         success: list[bool] = []

@@ -7,6 +7,7 @@
 
 builtin_actions
 robot_skill_profiles
+expert_programs
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions
@@ -36,7 +37,7 @@ payloads, and transports without adding fixed resource categories to the core.
 +---------------+----------------+    +---------------+----------------+
                 |                                     |
                 v                                     |
- SemanticSkillCompiler / SemanticSkillRuntime:         |
+ SemanticSkillCompiler / SkillRuntime:                 |
  schema validation, SceneRegistry grounding, binding  |
                 |                                     |
                 +------------------+------------------+
@@ -853,7 +854,7 @@ MLLM / application SemanticCallSpec
        object / affordance / resource / effect-flow validation
     -> SemanticSkillCompiler.ground(latest_context)
        participant binding + safe options + ActionInvocation
-    -> SemanticSkillRuntime / AtomicActionEngine
+    -> SkillRuntime / AtomicActionEngine
     -> verified task state + structured execution events
 ```
 

@@ -18,12 +18,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
-
 import pytest
 import torch
-
-from embodichain.toolkits.graspkit.pg_grasp import GraspGenerator
 
 from embodichain.lab.sim.atomic_actions.affordance import (
     Affordance,
@@ -99,173 +95,36 @@ class TestAntipodalAffordance:
         aff = AntipodalAffordance()
         assert not hasattr(aff, "geometry")
 
-    def test_failed_valid_grasp_poses_are_batched_with_inf_costs(self):
-        aff = AntipodalAffordance()
-        generator = Mock()
-        generator.device = torch.device("cpu")
-        generator.get_valid_grasp_poses.return_value = (
-            False,
-            torch.eye(4),
-            0.0,
-            torch.zeros(1),
-        )
-        aff._generator = generator
+    def test_owns_no_generator_configuration_or_runtime(self):
+        affordance = AntipodalAffordance()
+        assert not hasattr(affordance, "generator_cfg")
+        assert not hasattr(affordance, "gripper_collision_cfg")
+        assert not hasattr(affordance, "force_reannotate")
+        assert not hasattr(affordance, "_generator")
 
-        results = aff.get_valid_grasp_poses(torch.eye(4).unsqueeze(0))
-
-        grasp_poses, costs = results[0]
-        assert grasp_poses.shape == (1, 4, 4)
-        assert costs.shape == (1,)
-        assert torch.isinf(costs).all()
-
-    def test_valid_grasp_poses_casts_approach_direction_to_generator_device(self):
-        aff = AntipodalAffordance()
-        generator = Mock()
-        generator.device = torch.device("cpu")
-        generator.get_valid_grasp_poses.return_value = (
-            True,
-            torch.eye(4).unsqueeze(0),
-            0.0,
-            torch.zeros(1),
-        )
-        aff._generator = generator
-
-        aff.get_valid_grasp_poses(
-            torch.eye(4).unsqueeze(0),
-            approach_direction=torch.tensor([0, 0, -1], dtype=torch.int64),
-        )
-
-        approach_direction = generator.get_valid_grasp_poses.call_args.kwargs[
-            "approach_direction"
-        ]
-        assert approach_direction.dtype == torch.float32
-        assert approach_direction.device == generator.device
-
-    def test_valid_grasp_poses_forwards_batched_axis_end_selection(self):
-        aff = AntipodalAffordance()
-        generator = Mock()
-        generator.device = torch.device("cpu")
-        generator.get_valid_grasp_poses.return_value = (
-            True,
-            torch.eye(4).unsqueeze(0),
-            torch.ones(1),
-            torch.zeros(1),
-        )
-        aff._generator = generator
-        poses = torch.eye(4).repeat(2, 1, 1)
-        axes = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
-
-        aff.get_valid_grasp_poses(
-            poses,
-            obj_longest_axis=axes,
-            is_positive_part=torch.tensor([True, False]),
-        )
-
-        first, second = generator.get_valid_grasp_poses.call_args_list
-        assert torch.equal(
-            first.kwargs["obj_longest_axis"], torch.tensor([1.0, 0.0, 0.0])
-        )
-        assert first.kwargs["is_positive_part"] is True
-        assert torch.equal(
-            second.kwargs["obj_longest_axis"], torch.tensor([0.0, 0.0, 1.0])
-        )
-        assert second.kwargs["is_positive_part"] is False
+    def test_requires_mesh_fields_together(self):
+        with pytest.raises(ValueError, match="provided together"):
+            AntipodalAffordance(mesh_vertices=torch.zeros(3, 3))
 
     def test_surface_svd_uses_at_most_1000_points_in_current_pose(self):
         vertices, triangles = self._long_box_mesh()
-        aff = AntipodalAffordance(
+        affordance = AntipodalAffordance(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
         )
-        first_points = aff.sample_surface_points(max_points=1000)
-        second_points = aff.sample_surface_points(max_points=1000)
+        first_points = affordance.sample_surface_points(max_points=1000)
+        second_points = affordance.sample_surface_points(max_points=1000)
         poses = torch.eye(4).repeat(2, 1, 1)
         poses[1, :3, :3] = torch.tensor(
             [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
         )
 
-        axes = aff.get_object_longest_axis(poses, max_points=1000)
+        axes = affordance.get_object_longest_axis(poses, max_points=1000)
 
         assert first_points.shape == (1000, 3)
         assert torch.equal(first_points, second_points)
         assert torch.abs(axes[0, 2]) > 0.99
         assert torch.abs(axes[1, 0]) > 0.99
-
-    def test_generator_partitions_pairs_by_axis_projection(self):
-        generator = object.__new__(GraspGenerator)
-        generator.device = torch.device("cpu")
-        centers = torch.tensor(
-            [
-                [-0.75, 0.0, 0.0],
-                [-0.25, 0.0, 0.0],
-                [0.25, 0.0, 0.0],
-                [0.75, 0.0, 0.0],
-            ]
-        )
-        jaw_offset = torch.tensor([0.0, 0.05, 0.0])
-        generator._hit_point_pairs = torch.stack(
-            [centers - jaw_offset, centers + jaw_offset], dim=1
-        )
-        generator.vertices = torch.tensor(
-            [
-                [-1.0, -0.1, -0.1],
-                [-1.0, 0.1, 0.1],
-                [1.0, -0.1, -0.1],
-                [1.0, 0.1, 0.1],
-            ]
-        )
-        expected_result = (True, torch.eye(4), torch.ones(1), torch.zeros(1))
-        generator._filter_valid_grasp_poses = Mock(return_value=expected_result)
-
-        positive_result = generator.get_valid_grasp_poses(
-            torch.eye(4),
-            torch.tensor([0.0, 0.0, -1.0]),
-            obj_longest_axis=torch.tensor([1.0, 0.0, 0.0]),
-            is_positive_part=True,
-        )
-        positive_kwargs = generator._filter_valid_grasp_poses.call_args.kwargs
-        generator._filter_valid_grasp_poses.reset_mock()
-        negative_result = generator.get_valid_grasp_poses(
-            torch.eye(4),
-            torch.tensor([0.0, 0.0, -1.0]),
-            obj_longest_axis=torch.tensor([1.0, 0.0, 0.0]),
-            is_positive_part=False,
-        )
-        negative_kwargs = generator._filter_valid_grasp_poses.call_args.kwargs
-        generator._filter_valid_grasp_poses.reset_mock()
-        center_result = generator.get_valid_grasp_poses(
-            torch.eye(4),
-            torch.tensor([0.0, 0.0, -1.0]),
-            obj_longest_axis=None,
-        )
-        center_kwargs = generator._filter_valid_grasp_poses.call_args.kwargs
-
-        assert positive_result is expected_result
-        assert negative_result is expected_result
-        assert center_result is expected_result
-        torch.testing.assert_close(
-            positive_kwargs["origin_points_"][:, 0], torch.tensor([0.75])
-        )
-        torch.testing.assert_close(
-            negative_kwargs["origin_points_"][:, 0], torch.tensor([-0.75])
-        )
-        assert center_kwargs["origin_points_"].shape[0] == 4
-
-    def test_best_grasp_poses_casts_approach_direction_to_generator_device(self):
-        aff = AntipodalAffordance()
-        generator = Mock()
-        generator.device = torch.device("cpu")
-        generator.get_grasp_poses.return_value = (True, torch.eye(4), 0.05)
-        aff._generator = generator
-
-        aff.get_best_grasp_poses(
-            torch.eye(4).unsqueeze(0),
-            approach_direction=torch.tensor([0, 0, -1], dtype=torch.int64),
-        )
-
-        _, approach_direction = generator.get_grasp_poses.call_args.args
-        assert approach_direction.dtype == torch.float32
-        assert approach_direction.device == generator.device
 
 
 class TestAxisAlignAffordance:
@@ -329,7 +188,7 @@ class TestTwistAffordance:
 
 
 class TestSlideAffordance:
-    def test_uses_local_antipodal_mesh_with_batched_directions(self):
+    def test_uses_only_local_antipodal_mesh_and_translation_axis(self):
         vertices = torch.tensor(
             [
                 [-1.0, 0.0, 0.0],
@@ -338,42 +197,17 @@ class TestSlideAffordance:
             ]
         )
         triangles = torch.tensor([[0, 1, 2]])
-        link_pose = torch.eye(4).repeat(2, 1, 1)
-        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
         affordance = SlideAffordance(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
             translation_axis=torch.tensor([0.0, -1.0, 0.0]),
         )
-        generator = Mock()
-        generator.device = torch.device("cpu")
-        first_grasp = torch.eye(4)
-        first_grasp[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
-        second_grasp = torch.eye(4)
-        second_grasp[:3, 3] = torch.tensor([4.0, 5.0, 6.0])
-        generator.get_grasp_poses.side_effect = (
-            (True, first_grasp, 0.03),
-            (True, second_grasp, 0.04),
-        )
-        affordance._generator = generator
-        approach_directions = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0]])
-
-        success, grasp_poses, open_lengths = affordance.get_best_grasp_poses(
-            link_pose,
-            approach_direction=approach_directions,
-        )
-
         assert isinstance(affordance, AntipodalAffordance)
-        assert success.tolist() == [True, True]
-        assert torch.allclose(grasp_poses, torch.stack([first_grasp, second_grasp]))
-        assert torch.allclose(open_lengths, torch.tensor([0.03, 0.04]))
+        assert affordance.mesh_vertices is vertices
+        assert affordance.mesh_triangles is triangles
         assert torch.equal(
-            generator.get_grasp_poses.call_args_list[0].args[1],
-            approach_directions[0],
-        )
-        assert torch.equal(
-            generator.get_grasp_poses.call_args_list[1].args[1],
-            approach_directions[1],
+            affordance.translation_axis,
+            torch.tensor([0.0, -1.0, 0.0]),
         )
 
     def test_requires_local_antipodal_geometry(self):

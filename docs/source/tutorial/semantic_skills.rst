@@ -6,7 +6,7 @@ registry and robot profile own simulator- and embodiment-specific details. This
 tutorial covers two complete examples:
 
 * ``Pick -> Place`` with one manipulator;
-* ``Pick -> RegisteredSemanticCall`` lowered to a dual-arm HandOver.
+* ``RegisteredSemanticCall`` lowered to a unified dual-arm HandOver.
 
 The runnable sources are:
 
@@ -18,11 +18,11 @@ The runnable sources are:
 Both runnable examples use the same three-part structure:
 
 * ``create_*_application(...)`` assembles a fully bound
-  ``SemanticSkillRuntime`` and installs its default physical-effect verifier;
+  ``SkillRuntime`` and installs its default physical-effect verifier;
 * ``create_*_task()`` declares only robot-independent semantic calls;
 * ``app.run(task, ...)`` is the application-facing execution entry point.
 
-``app`` is still a ``SemanticSkillRuntime`` rather than another wrapper class.
+``app`` is still the canonical ``SkillRuntime`` rather than another wrapper class.
 The factory only keeps simulator, scene-registry, robot-profile, and verifier
 construction out of the task declaration.
 
@@ -63,7 +63,7 @@ controller commands:
    Diagnostic compilation projects expected attachment changes hypothetically
    between calls. It proves that the current workflow can be lowered and
    planned; it does not prove that a physical grasp, release, or transfer
-   occurred. Normal execution uses ``SemanticSkillRuntime`` and an explicit
+   occurred. Normal execution uses ``SkillRuntime`` and an explicit
    effect verifier.
 
 The application entry
@@ -208,7 +208,7 @@ same atomic skill contracts.
 Assemble and run the application
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``SemanticSkillRuntime.from_simulation`` assembles the standard planning scene,
+``SkillRuntime.from_simulation`` assembles the standard planning scene,
 simulation ports, action engine, manifest, and compiler:
 
 .. code-block:: python
@@ -222,11 +222,11 @@ simulation ports, action engine, manifest, and compiler:
        hand_grasp,
        n_sample,
        force_reannotate,
-   ) -> SemanticSkillRuntime:
+   ) -> SkillRuntime:
        registry = ...
        profile = ...
        verify_effect = ...
-       return SemanticSkillRuntime.from_simulation(
+       return SkillRuntime.from_simulation(
            simulation=simulation,
            robot=robot,
            motion_generator=create_curobo_motion_generator(robot),
@@ -283,11 +283,12 @@ HandOver descriptor:
 Why use a registered call here?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The public semantic :class:`~embodichain.lab.sim.skills.HandOver` path delegates
-middle and final object targets to a named ``HandOverPoseProvider`` selected by
-the robot profile. This tutorial instead demonstrates how an application can
-publish a separate versioned call schema and explicitly lower it to tuned
-``HandOverOptions``.
+The public semantic :class:`~embodichain.lab.sim.skills.HandOver` path obtains a
+default final object target from a named ``HandOverPoseProvider`` when the call
+does not provide one. The unified atomic action computes its central transfer
+pose from the two arm roots. This tutorial instead demonstrates how an
+application can publish a separate versioned call schema and explicitly lower
+it to a tuned final target and ``HandOverOptions``.
 
 The lowerer is executable integration code, so it is installed on the compiler
 rather than placed inside ``RegisteredSemanticCall.arguments``:
@@ -307,11 +308,13 @@ rather than placed inside ``RegisteredSemanticCall.arguments``:
                ),
            )
            return SemanticLowering(
-               goal=GraspGoal(semantics),
+               goal=HandOverGoal(
+                   semantics,
+                   target_pose=final_pose.to(context.robot.qpos.device),
+               ),
                skill_options=HandOverOptions(
-                   middle_object_pose=middle_pose.to(context.robot.qpos.device),
-                   final_object_pose=final_pose.to(context.robot.qpos.device),
-                   receive_pick_object_part="bottom",
+                   pre_grasp_distance=0.08,
+                   lift_height=0.08,
                ),
            )
 
@@ -320,9 +323,10 @@ registered call cannot replace the curated ``pick``, ``place``, or
 ``hand_over`` meanings.
 
 The dual-arm profile declares two physically disjoint manipulator resources.
-Its defaults map Pick's ``primary`` slot to the source and HandOver's ``source``
-and ``destination`` slots to different resources. Binding rejects overlapping
-claims before execution.
+Its defaults map HandOver's ``source`` and ``destination`` slots to different
+candidate resources. Binding rejects overlapping claims before execution; the
+atomic action chooses the nearer candidate arm for pickup from the live object
+pose.
 
 The application factory passes the extension objects and default verifier to
 the runtime explicitly:
@@ -340,11 +344,11 @@ the runtime explicitly:
        right_grasp,
        n_sample,
        force_reannotate,
-   ) -> SemanticSkillRuntime:
+   ) -> SkillRuntime:
        registry = ...
        profile = ...
        verify_effect = ...
-       return SemanticSkillRuntime.from_simulation(
+       return SkillRuntime.from_simulation(
            simulation=simulation,
            robot=robot,
            motion_generator=create_toppra_motion_generator(robot),

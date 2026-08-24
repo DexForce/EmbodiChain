@@ -518,6 +518,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             affordance,
             object_pose,
             handover_direction,
+            handover.hand.target_id,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=handover_is_positive_part,
         )
@@ -566,6 +567,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             affordance,
             middle_object_pose,
             receive_direction,
+            receive.hand.target_id,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=~handover_is_positive_part,
         )
@@ -1002,6 +1004,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         affordance: AntipodalAffordance,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
+        grasp_target_id: str,
         *,
         obj_longest_axis: torch.Tensor,
         is_positive_part: torch.Tensor,
@@ -1029,24 +1032,19 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 f"({self.num_envs},)."
             )
 
-        # AntipodalAffordance iterates over object poses but its underlying
-        # grasp generator accepts one direction vector with shape (3,) per
-        # object. Sample each environment separately so the automatically
-        # derived per-environment directions are not forwarded as (B, 3).
-        sampled: list[tuple[torch.Tensor, torch.Tensor]] = []
-        for env_index in range(self.num_envs):
-            env_sampled = affordance.get_valid_grasp_poses(
-                obj_poses=object_pose[env_index : env_index + 1],
-                approach_direction=approach_direction[env_index],
-                obj_longest_axis=obj_longest_axis[env_index],
-                is_positive_part=bool(is_positive_part[env_index].item()),
+        generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        sampled = generator.get_valid_grasp_poses(
+            mesh_vertices=affordance.mesh_vertices,
+            mesh_triangles=affordance.mesh_triangles,
+            obj_poses=object_pose,
+            approach_direction=approach_direction,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
+        )
+        if len(sampled) != self.num_envs:
+            raise ValueError(
+                "HandOver expected exactly one grasp-sampling result per environment."
             )
-            if len(env_sampled) != 1:
-                raise ValueError(
-                    "HandOver expected exactly one grasp-sampling result per "
-                    "environment."
-                )
-            sampled.append(env_sampled[0])
         poses = torch.eye(
             4,
             dtype=torch.float32,

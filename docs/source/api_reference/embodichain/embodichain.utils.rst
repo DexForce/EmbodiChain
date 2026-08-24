@@ -12,6 +12,16 @@ file/string/device/image utilities, non-maximum suppression, a visualizer
 helper, and the high-performance ``warp`` kernels for kinematics, collision,
 and image processing.
 
+.. currentmodule:: embodichain.utils
+
+.. autodata:: GLOBAL_SEED
+
+.. autofunction:: set_seed
+
+.. autofunction:: is_configclass
+
+.. autofunction:: resolve_config_path
+
    .. rubric:: Submodules
 
    .. autosummary::
@@ -19,6 +29,7 @@ and image processing.
       warp
       cfg
       configclass
+      config_paths
       device_utils
       file
       img_utils
@@ -45,6 +56,12 @@ Configuration Classes
    :members:
    :undoc-members:
    :show-inheritance:
+
+Configuration Paths
+-------------------
+
+.. automodule:: embodichain.utils.config_paths
+   :members:
 
 Configuration Nodes
 -------------------

@@ -45,6 +45,7 @@ from scripts.tutorials.atomic_action.axis_align import (
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
+    create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -107,8 +108,14 @@ def main() -> None:
                 grasp=hand_close,
             )
         },
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
+            )
+        },
     )
-    semantics = create_axis_align_semantics(obj, args, POUR_INTERNAL_AXIS)
+    semantics = create_axis_align_semantics(obj, POUR_INTERNAL_AXIS)
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "pour_object_axis", obj.get_local_pose(to_matrix=True))
     wait_for_user = prepare_tutorial_scene(

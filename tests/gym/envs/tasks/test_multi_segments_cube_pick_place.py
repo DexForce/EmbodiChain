@@ -37,6 +37,7 @@ from embodichain.lab.sim.robots import URRobotCfg
 discover_task_packages()
 
 from embodichain_tasks.multi_segments.cube_pick_place import (  # noqa: E402
+    DEFAULT_GRIPPER_CLOSE_QPOS,
     MultiSegmentsCubePickPlaceEnv,
 )
 
@@ -65,6 +66,8 @@ class TestMultiSegmentsCubePickPlaceEnv:
         assert config["id"] == "MultiSegmentsCubePickPlace-v1"
         assert config["env"]["extensions"]["num_cycles"] == 3
         assert config["env"]["extensions"]["grasp_hold_steps"] == 45
+        assert "grasp_samples" not in config["env"]["extensions"]
+        assert "force_reannotate" not in config["env"]["extensions"]
         assert len(config["env"]["extensions"]["place_positions"]) == 2
         assert config["rigid_object"][0]["uid"] == "cube"
         assert config["robot"]["class_type"] == "URRobot"
@@ -159,3 +162,86 @@ class TestMultiSegmentsCubePickPlaceEnv:
         assert augmented[0, 75, 0] == 75
         assert augmented[0, 76:78, 0].tolist() == [75, 75]
         assert augmented[0, 78, 0] == 76
+
+    def test_cycle_uses_grasp_service_and_motion_generator_directly(self) -> None:
+        """The non-atomic example composes the two planning services itself."""
+
+        class StubCube:
+            def __init__(self) -> None:
+                self.clear_dynamics_calls = 0
+
+            def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
+                assert to_matrix is True
+                return torch.eye(4, dtype=torch.float32).unsqueeze(0)
+
+            def clear_dynamics(self) -> None:
+                self.clear_dynamics_calls += 1
+
+        class StubRobot:
+            def get_qpos(self) -> torch.Tensor:
+                return torch.zeros(1, 8, dtype=torch.float32)
+
+        class StubGraspPoseGenerator:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def get_best_grasp_poses(self, **kwargs: object):
+                self.calls.append(kwargs)
+                object_poses = kwargs["obj_poses"]
+                assert isinstance(object_poses, torch.Tensor)
+                return (
+                    torch.ones(1, dtype=torch.bool),
+                    object_poses.clone(),
+                    torch.full((1,), 0.04, dtype=torch.float32),
+                )
+
+        class StubMotionGenerator:
+            def __init__(self) -> None:
+                self.calls: list[tuple[list[object], object]] = []
+
+            def generate(self, target_states: list[object], options: object):
+                self.calls.append((target_states, options))
+                start_qpos = options.start_qpos
+                sample_count = options.sample_count
+                assert isinstance(start_qpos, torch.Tensor)
+                assert isinstance(sample_count, int)
+                return SimpleNamespace(
+                    success=torch.ones(1, dtype=torch.bool),
+                    positions=start_qpos.unsqueeze(1).repeat(1, sample_count, 1),
+                )
+
+        env = object.__new__(MultiSegmentsCubePickPlaceEnv)
+        env.sim = SimpleNamespace(device=torch.device("cpu"))
+        env._num_envs = 1
+        env.robot = StubRobot()
+        env._cube = StubCube()
+        env._grasp_pose_generator = StubGraspPoseGenerator()
+        env._motion_generator = StubMotionGenerator()
+        env._arm_joint_ids = tuple(range(6))
+        env._hand_joint_ids = (6, 7)
+        env._hand_open_qpos = torch.zeros(1, 2)
+        env._hand_close_qpos = torch.full((1, 2), DEFAULT_GRIPPER_CLOSE_QPOS)
+        env._cube_mesh_vertices = torch.zeros(3, 3)
+        env._cube_mesh_triangles = torch.tensor([[0, 1, 2]], dtype=torch.long)
+        env.grasp_hold_steps = 0
+        env.settle_max_steps = 0
+
+        success, actions, _ = env._plan_pick_place_cycle(
+            torch.tensor([0.3, -0.2, 0.1], dtype=torch.float32)
+        )
+        planned_actions = list(actions)
+
+        assert success.tolist() == [True]
+        assert len(env._grasp_pose_generator.calls) == 1
+        assert len(env._motion_generator.calls) == 4
+        assert [len(states) for states, _ in env._motion_generator.calls] == [
+            2,
+            1,
+            2,
+            1,
+        ]
+        assert len(planned_actions) == (
+            env.PICK_SAMPLE_INTERVAL + env.PLACE_SAMPLE_INTERVAL
+        )
+        assert env._cube.clear_dynamics_calls == 1
+        assert not hasattr(env, "_action_engine")

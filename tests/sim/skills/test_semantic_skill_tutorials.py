@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     EffectVerificationRequest,
     GraspGoal,
+    HandOverGoal,
     HandOverOptions,
     PlanningContext,
 )
@@ -44,7 +45,6 @@ import scripts.tutorials.semantic_skill.place as place_tutorial
 from scripts.tutorials.semantic_skill.hand_over import (
     FINAL_OBJECT_POSITION,
     HANDOVER_CALL_ID,
-    MIDDLE_OBJECT_POSITION,
     TRACKING_ERROR_THRESHOLD as HANDOVER_TRACKING_ERROR_THRESHOLD,
     TutorialHandOverLowerer,
     create_handover_effect_verifier,
@@ -231,7 +231,7 @@ def test_place_application_installs_default_effect_verifier(
         Mock(return_value=motion_generator),
     )
     monkeypatch.setattr(
-        place_tutorial.SemanticSkillRuntime,
+        place_tutorial.SkillRuntime,
         "from_simulation",
         runtime_factory,
     )
@@ -328,24 +328,18 @@ def test_handover_tutorial_registers_tuned_atomic_lowering() -> None:
     context.robot.qpos = torch.zeros(1, 1)
     lowerer = TutorialHandOverLowerer(_graspable_registry())
 
-    assert tuple(type(call) for call in calls) == (Pick, RegisteredSemanticCall)
-    assert calls[1].call_id == HANDOVER_CALL_ID
-    assert dict(calls[0].resources) == {}
-    assert calls[1].arguments["object"] == calls[0].object
+    assert tuple(type(call) for call in calls) == (RegisteredSemanticCall,)
+    assert calls[0].call_id == HANDOVER_CALL_ID
     lowering = lowerer.lower(
-        calls[1],
+        calls[0],
         context=cast(PlanningContext, context),
         bound=cast("BoundSemanticCall", object()),
     )
-    assert type(lowering.goal) is GraspGoal
+    assert type(lowering.goal) is HandOverGoal
     assert type(lowering.skill_options) is HandOverOptions
     assert lowering.goal.semantics.entity_id == "workpiece"
     torch.testing.assert_close(
-        lowering.skill_options.middle_object_pose[:3, 3],
-        torch.tensor(MIDDLE_OBJECT_POSITION),
-    )
-    torch.testing.assert_close(
-        lowering.skill_options.final_object_pose[:3, 3],
+        lowering.goal.target_pose[:3, 3],
         torch.tensor(FINAL_OBJECT_POSITION),
     )
 
@@ -360,16 +354,10 @@ def test_handover_tutorial_profile_binds_disjoint_arms() -> None:
 
     assert profile.resources["left"].endpoints["motion"].control_part == "left_arm"
     assert profile.resources["right"].endpoints["motion"].control_part == "right_arm"
-    assert dict(profile.defaults["pick_up"].resources) == {"primary": "left"}
     assert dict(profile.defaults["hand_over"].resources) == {
         "source": "left",
         "destination": "right",
     }
-    assert (
-        profile.presets["pick"].recovery_policy.tracking_error_threshold
-        == HANDOVER_TRACKING_ERROR_THRESHOLD
-    )
-    assert profile.presets["hand_over"].recovery_policy.max_action_retries == 0
     assert (
         profile.presets["hand_over"].recovery_policy.tracking_error_threshold
         == HANDOVER_TRACKING_ERROR_THRESHOLD
@@ -400,7 +388,7 @@ def test_handover_application_installs_extension_and_default_verifier(
         Mock(return_value=motion_generator),
     )
     monkeypatch.setattr(
-        handover_tutorial.SemanticSkillRuntime,
+        handover_tutorial.SkillRuntime,
         "from_simulation",
         runtime_factory,
     )
@@ -433,18 +421,18 @@ def test_handover_application_installs_extension_and_default_verifier(
     )
 
 
-def test_handover_tutorial_verifies_receiver_ownership_at_final_target() -> None:
+def test_handover_tutorial_verifies_release_at_final_target() -> None:
     physical_object = _PhysicalObject(_pose_at((0.0, 0.0, 0.0)))
     physical_robot = _PhysicalRobot()
     left_open = torch.tensor([0.0])
-    right_grasp = torch.tensor([0.5])
+    right_open = torch.tensor([0.0])
     physical_robot.qpos["left_hand"] = left_open.unsqueeze(0)
-    physical_robot.qpos["right_hand"] = right_grasp.unsqueeze(0)
+    physical_robot.qpos["right_hand"] = right_open.unsqueeze(0)
     verifier = create_handover_effect_verifier(
         cast("RigidObject", physical_object),
         cast("Robot", physical_robot),
         left_open=left_open,
-        right_grasp=right_grasp,
+        right_open=right_open,
     )
     final_pose = _pose_at(FINAL_OBJECT_POSITION)
     physical_object.pose = final_pose
@@ -452,8 +440,8 @@ def test_handover_tutorial_verifies_receiver_ownership_at_final_target() -> None
     physical_robot.eef_pose["right_arm"] = final_pose
 
     success = verifier(
-        create_handover_task()[1],
-        _request("hand_over", held_control_part="right_arm"),
+        create_handover_task()[0],
+        _request("hand_over"),
         _verification_context(),
     )
 

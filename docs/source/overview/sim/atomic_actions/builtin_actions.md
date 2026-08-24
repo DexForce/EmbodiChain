@@ -804,8 +804,9 @@ pickment applies to dual-arm `strategy="motion_gen"` planning.
 ## `HandOver`
 
 Runs the full two-arm manipulation as one action: **choose the nearer arm ->
-pick the object's top half -> lift and move to the computed middle point -> the
-other arm grasps the bottom half -> transfer the grasp -> place and release**.
+grasp the nearer end of the object's longest axis -> lift and move to the
+computed middle point -> the other arm grasps the opposite end -> transfer the
+grasp -> place and release**.
 
 | Contract | Value |
 |---|---|

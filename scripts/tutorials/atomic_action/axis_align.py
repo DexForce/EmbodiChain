@@ -45,6 +45,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
+    create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -120,14 +121,12 @@ def create_align_object(
 
 
 def create_axis_align_semantics(
-    obj: RigidObject, args: argparse.Namespace, obj_internal_axis: Sequence[float]
+    obj: RigidObject, obj_internal_axis: Sequence[float]
 ) -> ObjectSemantics:
     """Extend the tutorial antipodal affordance with a local alignment axis."""
     semantics = create_antipodal_semantics(
         obj,
         label="cube",
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
     )
     antipodal = semantics.affordance
     return ObjectSemantics(
@@ -139,9 +138,6 @@ def create_axis_align_semantics(
         affordance=AxisAlignAffordance(
             mesh_vertices=antipodal.mesh_vertices,
             mesh_triangles=antipodal.mesh_triangles,
-            generator_cfg=antipodal.generator_cfg,
-            gripper_collision_cfg=antipodal.gripper_collision_cfg,
-            force_reannotate=antipodal.force_reannotate,
             internal_axis=torch.tensor(obj_internal_axis, dtype=torch.float32),
         ),
     )
@@ -165,12 +161,18 @@ def main() -> None:
                 grasp=hand_close,
             )
         },
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
+            )
+        },
     )
     # apply object internal axis to the semantics creation
     obj_internal_axis = ALIGNMENT_AXES[args.alignment][0]
     # apply target axis for the alignment skill
     align_target_axis = ALIGNMENT_AXES[args.alignment][1]
-    semantics = create_axis_align_semantics(obj, args, obj_internal_axis)
+    semantics = create_axis_align_semantics(obj, obj_internal_axis)
     if not args.no_vis_eef_axis:
         draw_axis_marker(
             sim,
