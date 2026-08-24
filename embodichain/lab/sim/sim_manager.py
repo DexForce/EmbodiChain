@@ -30,7 +30,7 @@ import warp as wp
 from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
-from functools import cached_property
+from functools import cached_property, partial
 from typing import TYPE_CHECKING, Callable, Dict, List, Sequence, Union
 from dataclasses import dataclass, asdict, field, MISSING
 
@@ -98,6 +98,7 @@ from embodichain.lab.sim.physics import NewtonPhysicsBackend, make_physics_backe
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     cloth_desc_from_cfg,
+    configure_articulation_desc,
     rigid_desc_from_cfg,
     soft_desc_from_cfg,
 )
@@ -496,7 +497,7 @@ class SimulationManager:
             num_envs=sim_config.num_envs,
             spacing=(sim_config.arena_space, sim_config.arena_space, 0.0),
         )
-        self._arenas = list(self._spawn_scene.builder.prepare_arenas())
+        self._arenas = list(self._spawn_scene.builder.prepare_arenas(materialize=False))
 
         self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
@@ -2318,10 +2319,10 @@ class SimulationManager:
     ) -> Articulation:
         """Declare an articulation facade and bind its Batch after finalize.
 
-        DexSim remains the sole articulation source loader. Default/PhysX may
-        expose native link and joint metadata immediately when Arenas were
-        prepared early; Newton keeps that metadata deferred until finalize.
-        Runtime Batch data is created at the shared prepare boundary.
+        DexSim remains the sole articulation source loader. EmbodiChain applies
+        regex/group configuration to the resolved descriptor before either
+        backend materializes it. Runtime Batch data is created at the shared
+        prepare boundary.
         """
         if _is_usd_path(cfg.fpath):
             descriptor, materials = articulation_desc_from_usd(
@@ -2351,22 +2352,12 @@ class SimulationManager:
             descriptor.name,
             descriptor,
             facade=facade,
+            configure_source=partial(
+                configure_articulation_desc,
+                cfg=cfg,
+                newton_solver_type=self._active_newton_solver_type,
+            ),
         )
-        if self.is_default_backend and not (
-            _is_usd_path(cfg.fpath) and cfg.use_usd_properties
-        ):
-            from embodichain.lab.sim.utility.sim_utils import (
-                set_dexsim_articulation_cfg,
-            )
-
-            handles = self._spawn_scene.handles(descriptor.name)
-            if not handles:
-                raise RuntimeError(
-                    "Default Spawn must materialize articulation handles before "
-                    "applying their physical configuration."
-                )
-            for handle in handles:
-                set_dexsim_articulation_cfg(handle, cfg)
         self.notify_visualization_topology_changed()
         return facade
 

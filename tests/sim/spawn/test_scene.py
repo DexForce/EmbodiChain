@@ -84,6 +84,82 @@ def test_bind_retries_only_incomplete_declarations() -> None:
     assert second.bind_attempts == 2
 
 
+def test_commit_resolves_and_configures_before_finalize() -> None:
+    events: list[str] = []
+    descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
+    result = object()
+    builder = SimpleNamespace(
+        is_finalized=False,
+        result=None,
+        replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
+        add_articulation=lambda value: value,
+    )
+
+    def resolve_sources() -> None:
+        events.append("resolve")
+        descriptor.links = [SimpleNamespace(name="base")]
+
+    def finalize() -> object:
+        events.append("finalize")
+        return result
+
+    builder.resolve_sources = resolve_sources
+    builder.finalize = finalize
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {}
+
+    def configure(value: object) -> None:
+        assert value.links[0].name == "base"
+        events.append("configure")
+
+    scene.declare(
+        "articulation",
+        "robot",
+        descriptor,
+        configure_source=configure,
+    )
+
+    assert scene.commit() is result
+    assert events == ["resolve", "configure", "finalize"]
+    assert scene._assets["robot"].source_configured
+
+
+def test_dynamic_articulation_is_configured_before_backend_add() -> None:
+    events: list[str] = []
+    descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
+    builder = SimpleNamespace(is_finalized=True, result=None)
+
+    def resolve_source(value: object) -> None:
+        events.append("resolve")
+        value.links = [SimpleNamespace(name="base")]
+
+    def configure(value: object) -> None:
+        assert value.links[0].name == "base"
+        events.append("configure")
+
+    def add_articulation(value: object) -> object:
+        assert value.links[0].name == "base"
+        events.append("add")
+        return value
+
+    builder.resolve_articulation_source = resolve_source
+    builder.add_articulation = add_articulation
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {}
+
+    scene.declare(
+        "articulation",
+        "robot",
+        descriptor,
+        configure_source=configure,
+    )
+
+    assert events == ["resolve", "configure", "add"]
+    assert scene._assets["robot"].source_configured
+
+
 class _RetryableArticulation(Articulation):
     bind_attempts = 0
     reset_attempts = 0

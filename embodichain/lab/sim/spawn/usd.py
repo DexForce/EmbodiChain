@@ -31,8 +31,6 @@ from dexsim.types import ActorType
 from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
 from embodichain.lab.sim.spawn.descriptors import (
     _compile_dexsim_collision,
-    _compile_joint_overrides,
-    _compile_link_override,
     _compile_newton_collision,
     _compile_rigid_physics,
     _compile_visual_material,
@@ -130,26 +128,6 @@ def articulation_desc_from_usd(
         desc.fixed_base = bool(cfg.fix_base)
         desc.enable_self_collision = not bool(cfg.disable_self_collision)
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
-        joint_defaults, joint_overrides = _compile_joint_overrides(cfg)
-        desc.link_defaults = _compile_link_override(
-            name="link_defaults",
-            patterns=(),
-            attrs=cfg.attrs,
-            replace_inertial=False,
-            newton_solver_type=newton_solver_type,
-        )
-        desc.link_overrides = [
-            _compile_link_override(
-                name=group_name,
-                patterns=tuple(group.link_names_expr),
-                attrs=group.attrs.merged_cfg(cfg.attrs),
-                replace_inertial=group.replace_inertial,
-                newton_solver_type=newton_solver_type,
-            )
-            for group_name, group in (cfg.link_attrs or {}).items()
-        ]
-        desc.joint_defaults = joint_defaults
-        desc.joint_overrides = joint_overrides
     return desc, materials
 
 

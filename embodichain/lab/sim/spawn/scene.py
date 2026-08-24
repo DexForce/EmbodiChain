@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 __all__ = ["SpawnScene"]
 
@@ -37,6 +37,8 @@ class _AssetDeclaration:
     kind: _AssetKind
     descriptor: Any
     facade: Any | None
+    source_configurator: Callable[[Any], None] | None = None
+    source_configured: bool = False
 
 
 class SpawnScene:
@@ -79,6 +81,7 @@ class SpawnScene:
         descriptor: Any,
         *,
         facade: Any | None = None,
+        configure_source: Callable[[Any], None] | None = None,
     ) -> None:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         if uid in self._assets:
@@ -87,6 +90,7 @@ class SpawnScene:
             kind=kind,
             descriptor=descriptor,
             facade=facade,
+            source_configurator=configure_source,
         )
 
         if kind == "rigid_object_group":
@@ -94,6 +98,14 @@ class SpawnScene:
                 self.builder.add_object(member) for member in descriptor
             )
         else:
+            if (
+                kind == "articulation"
+                and configure_source is not None
+                and self.builder.is_finalized
+            ):
+                self.builder.resolve_articulation_source(descriptor)
+                configure_source(descriptor)
+                declaration.source_configured = True
             add_name = {
                 "rigid_object": "add_object",
                 "articulation": "add_articulation",
@@ -105,6 +117,18 @@ class SpawnScene:
         handles = self.handles(uid)
         if facade is not None and handles:
             facade.attach_spawn_handles(handles)
+
+    def resolve_sources(self) -> None:
+        """Resolve and configure declarations before backend materialization."""
+        if self.builder.is_finalized:
+            return
+        self.builder.resolve_sources()
+        for declaration in self._assets.values():
+            configure = declaration.source_configurator
+            if configure is None or declaration.source_configured:
+                continue
+            configure(declaration.descriptor)
+            declaration.source_configured = True
 
     def track(
         self,
@@ -147,6 +171,7 @@ class SpawnScene:
     def commit(self) -> Any:
         """Finalize once or let ``SpawnResult`` consume pending changes."""
         if not self.builder.is_finalized:
+            self.resolve_sources()
             return self.builder.finalize()
         result = self.builder.result
         assert result is not None

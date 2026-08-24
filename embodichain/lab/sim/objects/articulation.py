@@ -563,9 +563,10 @@ class Articulation(BatchEntity):
                 self._set_default_joint_drive()
 
         # Regex limits for Spawn-owned URDF and authored USD articulations are
-        # already source-resolved by DexSim. Array limits, and USD assets that
-        # explicitly retain source properties, still require this post-bind
-        # runtime path because they are not declaration-time name rules.
+        # already applied by EmbodiChain to the source-resolved descriptor.
+        # Array limits, and USD assets that explicitly retain source
+        # properties, still require this post-bind runtime path because they
+        # are not declaration-time name rules.
         is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
         qpos_limits_are_source_resolved = (
             spawn_result is not None
@@ -722,9 +723,9 @@ class Articulation(BatchEntity):
     def _apply_spawn_config(self) -> None:
         """Apply render-only configuration requiring finalized source metadata.
 
-        Link physics and joint-drive regex overlays are part of the typed
-        :class:`dexsim.spawn.ArticulationDesc` and are applied by DexSim while
-        loading the source, before either physics backend is finalized.
+        Link physics and joint-drive regex selection is resolved by
+        EmbodiChain against the source descriptor before finalization. Only
+        render operations that require materialized bodies remain here.
         """
         if not self.cfg.compute_uv:
             return

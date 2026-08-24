@@ -21,9 +21,17 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pytest
 
-from dexsim.spawn import ArticulationDesc
+import dexsim
+from dexsim.spawn import (
+    ArticulationDesc,
+    CollisionDesc,
+    JointDesc,
+    LinkDesc,
+    RigidBodyPhysicsDesc,
+)
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -37,6 +45,7 @@ from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
+    configure_articulation_desc,
     rigid_desc_from_cfg,
 )
 from embodichain.lab.sim.spawn.usd import articulation_desc_from_usd
@@ -169,7 +178,7 @@ def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
         articulation_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
 
 
-def test_articulation_descriptor_compiles_source_resolved_overrides() -> None:
+def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
@@ -197,30 +206,71 @@ def test_articulation_descriptor_compiles_source_resolved_overrides() -> None:
     )
 
     descriptor = articulation_desc_from_cfg(cfg)
+    assert descriptor.links == []
+    assert descriptor.joints == []
+    assert not hasattr(descriptor, "link_overrides")
+    assert not hasattr(descriptor, "joint_overrides")
 
-    assert descriptor.link_defaults.rigid_body.mass == 1.0
-    assert descriptor.link_defaults.collision.dexsim.dynamic_friction == 0.4
-    assert len(descriptor.link_overrides) == 1
-    link_rule = descriptor.link_overrides[0]
-    assert link_rule.name == "fingers"
-    assert link_rule.patterns == ("finger_.*",)
-    assert link_rule.rigid_body.mass == 2.0
-    assert link_rule.collision.newton.mu == 0.8
-    assert link_rule.replace_inertial
+    source_inertia = np.ones(3, dtype=np.float32)
+    descriptor.links = [
+        LinkDesc(
+            "base",
+            "",
+            np.eye(4, dtype=np.float32),
+            collisions=[CollisionDesc()],
+            rigid_body=RigidBodyPhysicsDesc.dynamic(
+                mass=0.5,
+                inertia=source_inertia,
+            ),
+            inertia_from_source=True,
+        ),
+        LinkDesc(
+            "finger_left",
+            "base",
+            np.eye(4, dtype=np.float32),
+            collisions=[CollisionDesc()],
+            rigid_body=RigidBodyPhysicsDesc.dynamic(
+                mass=0.25,
+                inertia=source_inertia,
+            ),
+            inertia_from_source=True,
+        ),
+    ]
+    descriptor.joints = [
+        JointDesc(
+            "arm_joint",
+            "base",
+            "finger_left",
+            dexsim.engine.JointType.REVOLUTE,
+        )
+    ]
+    descriptor.root_link_name = "base"
 
-    assert descriptor.joint_defaults.dexsim.damping == 3.0
-    assert descriptor.joint_defaults.newton.target_kd == 3.0
-    assert descriptor.joint_defaults.armature == 0.2
-    assert len(descriptor.joint_overrides) == 1
-    joint_rule = descriptor.joint_overrides[0]
-    assert joint_rule.patterns == ("arm_.*",)
-    assert joint_rule.dexsim.stiffness == 10.0
-    assert joint_rule.newton.target_ke == 10.0
-    assert joint_rule.lower_limit == -1.0
-    assert joint_rule.upper_limit == 1.0
+    configure_articulation_desc(descriptor, cfg)
+
+    base = descriptor.get_link_desc("base")
+    finger = descriptor.get_link_desc("finger_left")
+    assert base.rigid_body.mass == 1.0
+    assert base.collisions[0].dexsim.dynamic_friction == 0.4
+    np.testing.assert_array_equal(base.rigid_body.inertia, source_inertia)
+    assert base.inertia_from_source
+    assert finger.rigid_body.mass == 2.0
+    assert finger.collisions[0].newton.mu == 0.8
+    assert finger.rigid_body.inertia is None
+    assert not finger.inertia_from_source
+    assert finger.replace_inertial
+
+    joint = descriptor.get_joint_desc("arm_joint")
+    assert joint.dexsim.damping == 3.0
+    assert joint.newton.target_kd == 3.0
+    assert joint.armature == 0.2
+    assert joint.dexsim.stiffness == 10.0
+    assert joint.newton.target_ke == 10.0
+    assert joint.lower_limit == -1.0
+    assert joint.upper_limit == 1.0
 
 
-def test_usd_articulation_descriptor_compiles_the_same_source_overrides() -> None:
+def test_usd_articulation_uses_the_same_exact_name_configuration() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.usd",
@@ -234,7 +284,26 @@ def test_usd_articulation_descriptor_compiles_the_same_source_overrides() -> Non
         },
         drive_pros=JointDrivePropertiesCfg(stiffness={"arm_.*": 10.0}),
     )
-    source = ArticulationDesc(name="source")
+    source = ArticulationDesc(
+        name="source",
+        links=[
+            LinkDesc(
+                "finger_left",
+                "",
+                np.eye(4, dtype=np.float32),
+                collisions=[CollisionDesc()],
+                rigid_body=RigidBodyPhysicsDesc.dynamic(mass=0.5),
+            )
+        ],
+        joints=[
+            JointDesc(
+                "arm_joint",
+                "finger_left",
+                "tip",
+                dexsim.engine.JointType.REVOLUTE,
+            )
+        ],
+    )
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
@@ -245,12 +314,16 @@ def test_usd_articulation_descriptor_compiles_the_same_source_overrides() -> Non
             newton_solver_type="mujoco_warp",
         )
 
-    assert descriptor.link_defaults.rigid_body.mass == 1.0
-    assert descriptor.link_overrides[0].patterns == ("finger_.*",)
-    assert descriptor.link_overrides[0].rigid_body.mass == 2.0
-    assert descriptor.joint_overrides[0].patterns == ("arm_.*",)
-    assert descriptor.joint_overrides[0].dexsim.stiffness == 10.0
-    assert descriptor.joint_overrides[0].newton.target_ke == 10.0
+    configure_articulation_desc(
+        descriptor,
+        cfg,
+        newton_solver_type="mujoco_warp",
+    )
+
+    assert descriptor.get_link_desc("finger_left").rigid_body.mass == 2.0
+    joint = descriptor.get_joint_desc("arm_joint")
+    assert joint.dexsim.stiffness == 10.0
+    assert joint.newton.target_ke == 10.0
 
 
 def test_spawn_post_config_only_applies_render_uv() -> None:

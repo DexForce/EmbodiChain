@@ -22,10 +22,9 @@ component that chooses between DexSim and Newton. When supplied, the active
 Newton solver type only prevents common contact values from being authored to
 a solver that cannot consume them.
 
-Articulation joint and link names are resolved by the normal DexSim adapter
-finalization, not by a second source parser in EmbodiChain. Configuration that
-depends on those names is compiled into typed regex overlays and applied by
-DexSim before the selected physics backend is finalized.
+Articulation source names are resolved by ``SceneBuilder.resolve_sources()``.
+EmbodiChain then owns regex/group selection and applies exact-name typed
+properties to the resolved descriptor before the selected backend is built.
 """
 
 from __future__ import annotations
@@ -47,8 +46,6 @@ from dexsim.spawn import (
     DexsimJointDesc,
     DexsimPhysicsDesc,
     GeometryDesc,
-    JointOverrideDesc,
-    LinkOverrideDesc,
     MaterialDesc,
     NewtonCollisionDesc,
     NewtonJointDesc,
@@ -69,6 +66,10 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, SphereCfg
 from embodichain.utils import logger
+from embodichain.utils.string import (
+    resolve_matching_names,
+    resolve_matching_names_values,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.material import VisualMaterialCfg
@@ -76,6 +77,7 @@ if TYPE_CHECKING:
 __all__ = [
     "articulation_desc_from_cfg",
     "cloth_desc_from_cfg",
+    "configure_articulation_desc",
     "rigid_desc_from_cfg",
     "soft_desc_from_cfg",
 ]
@@ -235,7 +237,6 @@ def articulation_desc_from_cfg(
         )
 
     target_mode = {"force": 3, "none": 0}.get(cfg.drive_pros.drive_type)
-    joint_defaults, joint_overrides = _compile_joint_overrides(cfg)
     return ArticulationDesc(
         name=_articulation_uid(cfg.uid, str(path)),
         pose=_pose_from_cfg(cfg),
@@ -253,36 +254,14 @@ def articulation_desc_from_cfg(
             cfg.attrs,
             newton_solver_type=newton_solver_type,
         ),
-        link_defaults=_compile_link_override(
-            name="link_defaults",
-            patterns=(),
-            attrs=cfg.attrs,
-            replace_inertial=False,
-            newton_solver_type=newton_solver_type,
-        ),
-        link_overrides=[
-            _compile_link_override(
-                name=group_name,
-                patterns=tuple(group.link_names_expr),
-                attrs=group.attrs.merged_cfg(cfg.attrs),
-                replace_inertial=group.replace_inertial,
-                newton_solver_type=newton_solver_type,
-            )
-            for group_name, group in (cfg.link_attrs or {}).items()
-        ],
-        joint_defaults=joint_defaults,
-        joint_overrides=joint_overrides,
     )
 
 
-def _compile_link_override(
-    *,
-    name: str,
-    patterns: tuple[str, ...],
+def _compile_link_properties(
     attrs: RigidBodyAttributesCfg,
-    replace_inertial: bool,
+    *,
     newton_solver_type: str | None,
-) -> LinkOverrideDesc:
+) -> tuple[RigidBodyPhysicsDesc, CollisionDesc]:
     collision = CollisionDesc(
         enable_collision=bool(attrs.enable_collision),
         dexsim=_compile_dexsim_collision(attrs),
@@ -291,32 +270,88 @@ def _compile_link_override(
             newton_solver_type=newton_solver_type,
         ),
     )
-    return LinkOverrideDesc(
-        name=name,
-        patterns=patterns,
-        rigid_body=_compile_rigid_physics(attrs, "dynamic"),
-        collision=collision,
-        replace_inertial=replace_inertial,
-    )
+    return _compile_rigid_physics(attrs, "dynamic"), collision
 
 
-def _compile_joint_overrides(
+def configure_articulation_desc(
+    desc: ArticulationDesc,
     cfg: ArticulationCfg,
-) -> tuple[JointOverrideDesc, list[JointOverrideDesc]]:
-    defaults = JointOverrideDesc(
-        name="joint_defaults",
-        dexsim=DexsimJointDesc(),
-        newton=NewtonJointDesc(target_mode=None),
-    )
-    rules: dict[str, JointOverrideDesc] = {}
+    *,
+    newton_solver_type: str | None = None,
+) -> ArticulationDesc:
+    """Apply one EmbodiChain config to exact source-resolved names.
 
+    Regex/default/group semantics remain private to EmbodiChain. The DexSim
+    descriptor receives only concrete link and joint properties.
+    """
+    if not desc.links:
+        raise RuntimeError(
+            f"Articulation source {desc.name!r} must be resolved before "
+            "configuration."
+        )
+    if _is_usd_path(cfg.fpath) and cfg.use_usd_properties:
+        return desc
+
+    rigid_body, collision = _compile_link_properties(
+        cfg.attrs,
+        newton_solver_type=newton_solver_type,
+    )
+    for link in desc.links:
+        desc.set_link_properties(
+            link.name,
+            rigid_body=rigid_body,
+            collision=collision,
+            replace_inertial=False,
+        )
+
+    claimed_links: dict[str, str] = {}
+    link_names = [link.name for link in desc.links]
+    for group_name, group in (cfg.link_attrs or {}).items():
+        _, matched_names = resolve_matching_names(
+            group.link_names_expr,
+            link_names,
+        )
+        group_body, group_collision = _compile_link_properties(
+            group.attrs.merged_cfg(cfg.attrs),
+            newton_solver_type=newton_solver_type,
+        )
+        for link_name in matched_names:
+            previous = claimed_links.get(link_name)
+            if previous is not None:
+                raise ValueError(
+                    f"Link {link_name!r} matches both {previous!r} and "
+                    f"{group_name!r}."
+                )
+            claimed_links[link_name] = group_name
+            desc.set_link_properties(
+                link_name,
+                rigid_body=group_body,
+                collision=group_collision,
+                replace_inertial=group.replace_inertial,
+            )
+
+    _configure_joint_properties(desc, cfg)
+    return desc
+
+
+def _configure_joint_properties(
+    desc: ArticulationDesc,
+    cfg: ArticulationCfg,
+) -> None:
+    joint_names = [joint.name for joint in desc.joints]
     drive_type = cfg.drive_pros.drive_type
-    defaults.dexsim.drive_mode = {
+    dexsim_mode = {
         "force": DriveType.FORCE,
         "acceleration": DriveType.ACCELERATION,
         "none": DriveType.NONE,
     }[drive_type]
-    defaults.newton.target_mode = {"force": 3, "none": 0}.get(drive_type)
+    newton_mode = {"force": 3, "none": 0}.get(drive_type)
+    for joint_name in joint_names:
+        desc.set_joint_properties(
+            joint_name,
+            dexsim=DexsimJointDesc(drive_mode=dexsim_mode),
+            newton=NewtonJointDesc(target_mode=newton_mode),
+        )
 
     for property_name in (
         "stiffness",
@@ -328,82 +363,83 @@ def _compile_joint_overrides(
     ):
         configured = getattr(cfg.drive_pros, property_name)
         if isinstance(configured, numbers.Number):
-            _set_joint_override_property(defaults, property_name, configured)
-            continue
-        if not isinstance(configured, dict):
+            matches = [(name, configured) for name in joint_names]
+        elif isinstance(configured, dict):
+            indices, _, values = resolve_matching_names_values(
+                configured,
+                joint_names,
+            )
+            matches = [
+                (joint_names[index], value) for index, value in zip(indices, values)
+            ]
+        else:
             raise TypeError(
                 f"Articulation drive property {property_name!r} must be a "
                 "number or regex-to-number mapping."
             )
-        for pattern, value in configured.items():
+        for joint_name, value in matches:
             if not isinstance(value, numbers.Number):
                 raise TypeError(
-                    f"Articulation drive rule {pattern!r} for "
+                    f"Articulation drive rule for {joint_name!r} and "
                     f"{property_name!r} must contain a numeric value."
                 )
-            rule = rules.setdefault(
-                str(pattern),
-                JointOverrideDesc(
-                    name=f"joint:{pattern}",
-                    patterns=(str(pattern),),
-                    dexsim=DexsimJointDesc(),
-                    newton=NewtonJointDesc(target_mode=None),
-                ),
-            )
-            _set_joint_override_property(rule, property_name, value)
+            _set_joint_property(desc, joint_name, property_name, value)
 
     if isinstance(cfg.qpos_limits, dict):
-        for pattern, limits in cfg.qpos_limits.items():
-            values = np.asarray(limits, dtype=np.float32).reshape(-1)
-            if values.size != 2:
+        indices, _, values = resolve_matching_names_values(
+            cfg.qpos_limits,
+            joint_names,
+        )
+        for index, limits in zip(indices, values):
+            limit_values = np.asarray(limits, dtype=np.float32).reshape(-1)
+            if limit_values.size != 2:
                 raise ValueError(
-                    f"qpos_limits rule {pattern!r} must contain [lower, upper]."
+                    f"qpos_limits for {joint_names[index]!r} must contain "
+                    "[lower, upper]."
                 )
-            rule = rules.setdefault(
-                str(pattern),
-                JointOverrideDesc(
-                    name=f"joint:{pattern}",
-                    patterns=(str(pattern),),
-                    dexsim=DexsimJointDesc(),
-                    newton=NewtonJointDesc(target_mode=None),
-                ),
+            desc.set_joint_properties(
+                joint_names[index],
+                lower_limit=float(limit_values[0]),
+                upper_limit=float(limit_values[1]),
             )
-            rule.lower_limit = float(values[0])
-            rule.upper_limit = float(values[1])
-
-    return defaults, list(rules.values())
 
 
-def _set_joint_override_property(
-    target: JointOverrideDesc,
+def _set_joint_property(
+    desc: ArticulationDesc,
+    joint_name: str,
     property_name: str,
     value: numbers.Number,
 ) -> None:
     scalar = float(value)
-    dexsim_drive = target.dexsim
-    newton_drive = target.newton
-    if dexsim_drive is None or newton_drive is None:
-        raise RuntimeError("Joint override backend descriptors are unavailable.")
+    dexsim = DexsimJointDesc()
+    newton = NewtonJointDesc(target_mode=None)
+    armature = None
     if property_name == "stiffness":
-        dexsim_drive.stiffness = scalar
-        newton_drive.target_ke = scalar
+        dexsim.stiffness = scalar
+        newton.target_ke = scalar
     elif property_name == "damping":
-        dexsim_drive.damping = scalar
-        newton_drive.target_kd = scalar
+        dexsim.damping = scalar
+        newton.target_kd = scalar
     elif property_name == "max_effort":
-        dexsim_drive.max_force = scalar
-        newton_drive.effort_limit = scalar
+        dexsim.max_force = scalar
+        newton.effort_limit = scalar
     elif property_name == "max_velocity":
-        dexsim_drive.max_velocity = scalar
-        newton_drive.velocity_limit = scalar
+        dexsim.max_velocity = scalar
+        newton.velocity_limit = scalar
     elif property_name == "friction":
-        dexsim_drive.joint_friction = scalar
-        newton_drive.friction = scalar
+        dexsim.joint_friction = scalar
+        newton.friction = scalar
     elif property_name == "armature":
-        target.armature = scalar
-        newton_drive.armature = scalar
+        armature = scalar
+        newton.armature = scalar
     else:
-        raise ValueError(f"Unsupported joint override property {property_name!r}.")
+        raise ValueError(f"Unsupported joint property {property_name!r}.")
+    desc.set_joint_properties(
+        joint_name,
+        armature=armature,
+        dexsim=dexsim,
+        newton=newton,
+    )
 
 
 def _compile_rigid_physics(
