@@ -16,26 +16,8 @@
 
 from __future__ import annotations
 
-from .api import (
-    SCENE_BLUEPRINT_SCHEMA,
-    SCENE_EDIT_BLUEPRINT_SCHEMA,
-    SceneBlueprintPackage,
-    SceneEditBlueprintPackage,
-    SceneMaterialization,
-    analyze_edit,
-    analyze_image,
-    materialize_blueprint,
-    materialize_edit,
-)
+__all__ = ["SceneServiceError"]
 
-__all__ = [
-    "SCENE_BLUEPRINT_SCHEMA",
-    "SCENE_EDIT_BLUEPRINT_SCHEMA",
-    "SceneBlueprintPackage",
-    "SceneEditBlueprintPackage",
-    "SceneMaterialization",
-    "analyze_edit",
-    "analyze_image",
-    "materialize_blueprint",
-    "materialize_edit",
-]
+
+class SceneServiceError(RuntimeError):
+    """A transient or remote Scene Engine service failure."""
