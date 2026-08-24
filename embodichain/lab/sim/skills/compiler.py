@@ -34,25 +34,21 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     ActionOptions,
     Affordance,
-    ArticulationOperationAffordance,
     GraspGoal,
+    HandOverGoal,
     HandOverOptions,
     HeldObjectState,
     PickUpOptions,
     PlaceGoal,
     PlaceOptions,
-    OperateArticulationGoal,
-    OperateArticulationOptions,
     PhaseEffectGateRequirement,
     PlanningContext,
     PoseGoalValue,
-    SceneArticulationOperationGeometry,
     SceneEntityPose,
     SkillDescriptor,
 )
 from .calls import (
     HandOver,
-    OperateArticulation,
     Pick,
     Place,
     RegisteredSemanticCall,
@@ -60,7 +56,6 @@ from .calls import (
     SemanticPose,
 )
 from .effects import (
-    ArticulationJointStateExpectation,
     CONTACT_EFFECT_CHANNEL,
     CONSTRAINT_EFFECT_CHANNEL,
     POSE_RELATION_EFFECT_CHANNEL,
@@ -76,7 +71,6 @@ from .effects import (
     EffectStateExpectation,
     HeldObjectRelation,
     HeldObjectStateExpectation,
-    JointStateEffectClause,
     PoseRelationClause,
     PoseRelationExpectation,
     ScalarEffectClause,
@@ -93,10 +87,6 @@ from .integration import (
     SemanticValidationError,
 )
 from .scene import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
-    SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
-    SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION,
-    ArticulationJointEvidenceAddress,
     PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
@@ -404,9 +394,6 @@ class SemanticLowering:
     )
 
     def __post_init__(self) -> None:
-        goal_kind = getattr(type(self.goal), "goal_kind", None)
-        if type(goal_kind) is not str or not goal_kind:
-            raise TypeError("goal must implement the typed ActionGoal protocol.")
         if self.skill_options is not None and not isinstance(
             self.skill_options, ActionOptions
         ):
@@ -442,7 +429,12 @@ class RegisteredSemanticLowerer(ABC):
 
 @dataclass(frozen=True, slots=True)
 class HandOverPoseTargets:
-    """Embodiment-owned object-space poses needed by the core handover skill."""
+    """Embodiment-owned handover poses, including the final delivery target.
+
+    ``middle`` is retained for provider compatibility. The unified atomic
+    action computes its central transfer pose from the bound arm roots and the
+    compiler consumes only ``final``.
+    """
 
     middle: SemanticObjectTarget
     final: SemanticObjectTarget
@@ -467,7 +459,7 @@ class HandOverPoseProvider(ABC):
         context: PlanningContext,
         bound: BoundSemanticCall,
     ) -> HandOverPoseTargets:
-        """Return middle and final object-space targets for one handover.
+        """Return compatible middle and final object-space targets.
 
         Args:
             call: Canonical handover semantic value.
@@ -475,7 +467,8 @@ class HandOverPoseProvider(ABC):
             bound: Engine/profile-bound handover call.
 
         Returns:
-            Embodiment-appropriate middle and final object targets.
+            Provider-compatible targets. The unified primitive derives its
+            middle pose internally and consumes the final target.
         """
 
 
@@ -929,7 +922,6 @@ class SemanticSkillCompiler:
             Pick,
             Place,
             HandOver,
-            OperateArticulation,
             RegisteredSemanticCall,
         )
         if not all(type(call) in allowed_types for call in supplied):
@@ -955,7 +947,7 @@ class SemanticSkillCompiler:
             )
         for index, bound in enumerate(bound_calls):
             call = bound.linked.call
-            if type(call) is HandOver:
+            if type(call) is HandOver and call.final_target is None:
                 self._require_handover_pose_provider(
                     call,
                     path=(*path, index, "call"),
@@ -984,7 +976,7 @@ class SemanticSkillCompiler:
         analyzed: list[AnalyzedSemanticCall] = []
         for index, bound in enumerate(bound_calls):
             call = bound.linked.call
-            requires_held = type(call) in (Place, HandOver)
+            requires_held = type(call) is Place
             if type(call) is Pick:
                 previous = latest_holder.get(call.object.entity_id)
                 if previous is not None:
@@ -1020,30 +1012,20 @@ class SemanticSkillCompiler:
                 )
                 latest_holder.pop(call.object.entity_id, None)
             elif type(call) is HandOver:
-                producer = latest_holder.get(call.object.entity_id)
-                source_resource = bound.binding.resource_ids["source"]
-                if producer is not None and producer[1] != source_resource:
+                previous = latest_holder.get(call.object.entity_id)
+                if previous is not None:
                     raise _diagnostic(
-                        "held_resource_mismatch",
-                        (*path, index, "call", "resources", "source"),
-                        f"HandOver selects source {source_resource!r}, but the "
-                        f"verified producer selects {producer[1]!r}.",
-                        (producer[1],),
+                        "invalid_object_state_flow",
+                        (*path, index, "call", "object"),
+                        f"Object {call.object.entity_id!r} is already acquired by "
+                        f"call {previous[0]}; the unified HandOver action starts "
+                        "before pickup and requires both candidate arms to be "
+                        "unoccupied.",
                     )
-                effect_kind = SemanticEffectKind.TRANSFER
-                dependencies.append(
-                    SemanticEffectDependency(
-                        producer_index=None if producer is None else producer[0],
-                        consumer_index=index,
-                        object=call.object,
-                    )
-                )
-                latest_holder[call.object.entity_id] = (
-                    index,
-                    bound.binding.resource_ids["destination"],
-                )
-            elif type(call) is OperateArticulation:
-                effect_kind = SemanticEffectKind.ARTICULATION
+                # The current primitive owns pickup, transfer, placement, and
+                # release.  Its externally visible held-object postcondition is
+                # therefore that both candidate arms are detached.
+                effect_kind = SemanticEffectKind.RELEASE
             else:
                 effect_kind = SemanticEffectKind.REGISTERED
                 # A registered extension has no declarative state-flow contract
@@ -1125,40 +1107,6 @@ class SemanticSkillCompiler:
                         )
                     )
                     for slot_id in ("source", "destination")
-                ),
-                False,
-            )
-        if type(call) is OperateArticulation:
-            handle_ref = bound.linked.affordances.get("handle")
-            if handle_ref is None:
-                raise AssertionError(
-                    "Linked articulation call lacks an operation affordance."
-                )
-            registration = self._integration.scene_registry.lookup(
-                handle_ref,
-                expected_type=SceneAffordanceRef,
-            )
-            affordance = registration.affordance
-            if (
-                type(affordance) is not ArticulationOperationAffordance
-                or ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
-                not in registration.affordance_capabilities
-            ):
-                raise _diagnostic(
-                    "invalid_articulation_affordance",
-                    (*path, "handle"),
-                    f"Handle {handle_ref.entity_id!r} must expose an exact "
-                    "ArticulationOperationAffordance payload and the articulation "
-                    "operation capability.",
-                )
-            return (
-                frozenset(
-                    {
-                        SymbolicStateKey.articulation_joint(
-                            call.articulation.entity_id,
-                            affordance.joint_id,
-                        )
-                    }
                 ),
                 False,
             )
@@ -1248,22 +1196,16 @@ class SemanticSkillCompiler:
             lowering = self._lower_place(analyzed, context, eligible, path=path)
         elif type(call) is HandOver:
             lowering = self._lower_handover(analyzed, context, eligible, path=path)
-        elif type(call) is OperateArticulation:
-            lowering = self._lower_operate_articulation(
-                analyzed,
-                context,
-                path=path,
-            )
         elif type(call) is RegisteredSemanticCall:
             lowering = self._lower_registered(analyzed, context, path=path)
         else:  # pragma: no cover - exact workflow construction prevents this
             raise AssertionError(f"Unsupported analyzed call {type(call).__name__}.")
 
-        bound = analyzed.bound
         if lowering.skill_options is None:
             raise AssertionError(
                 "Semantic lowering must resolve a non-None action-options value."
             )
+        bound = analyzed.bound
         invocation = ActionInvocation(
             skill_id=bound.linked.descriptor.skill_id,
             goal=lowering.goal,
@@ -1425,7 +1367,6 @@ class SemanticSkillCompiler:
                 Pick,
                 Place,
                 HandOver,
-                OperateArticulation,
             ):
                 raise _diagnostic(
                     "missing_effect_monitor",
@@ -1586,26 +1527,10 @@ class SemanticSkillCompiler:
         *,
         path: tuple[PathPart, ...],
     ) -> SemanticLowering:
-        """Lower handover through an explicitly installed embodiment provider."""
+        """Lower the unified pickup-to-release handover atomic action."""
         call = analyzed.call
         assert type(call) is HandOver
-        self._require_held_object(
-            analyzed,
-            context,
-            eligible,
-            slot_id="source",
-            path=(*path, analyzed.index, "call", "object"),
-        )
-        _, provider = self._require_handover_pose_provider(
-            call,
-            path=(*path, analyzed.index, "call"),
-        )
-        targets = self._resolve_handover_targets(
-            provider,
-            call,
-            context=context,
-            bound=analyzed.bound,
-        )
+        del eligible
         grasp_ref = analyzed.bound.linked.affordances.get("receiver_grasp")
         if grasp_ref is None:
             raise AssertionError("Linked handover lacks receiver grasp affordance.")
@@ -1613,155 +1538,26 @@ class SemanticSkillCompiler:
             call.object,
             affordance=grasp_ref,
         )
-        middle = self._ground_object_target(targets.middle, context)
-        final_target = (
-            SemanticObjectTarget(pose=call.final_target)
-            if call.final_target is not None
-            else targets.final
-        )
-        final = self._ground_object_target(final_target, context)
-        option_template = self._action_option_template(analyzed, HandOverOptions)
-        return SemanticLowering(
-            goal=GraspGoal(semantics=semantics),
-            skill_options=replace(
-                option_template,
-                middle_object_pose=middle,
-                final_object_pose=final,
-            ),
-        )
-
-    def _lower_operate_articulation(
-        self,
-        analyzed: AnalyzedSemanticCall,
-        context: PlanningContext,
-        *,
-        path: tuple[PathPart, ...],
-    ) -> SemanticLowering:
-        """Ground one handle operation from the latest scene snapshot."""
-        call = analyzed.call
-        assert type(call) is OperateArticulation
-        handle_ref = analyzed.bound.linked.affordances.get("handle")
-        if handle_ref is None:
-            raise AssertionError(
-                "Linked articulation call lacks an operation affordance."
-            )
-        registration = self._integration.scene_registry.lookup(
-            handle_ref,
-            expected_type=SceneAffordanceRef,
-        )
-        affordance = registration.affordance
-        if (
-            type(affordance) is not ArticulationOperationAffordance
-            or ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
-            not in registration.affordance_capabilities
-        ):
-            raise _diagnostic(
-                "invalid_articulation_affordance",
-                (*path, analyzed.index, "call", "handle"),
-                f"Handle {handle_ref.entity_id!r} must expose an exact "
-                "ArticulationOperationAffordance payload and the articulation "
-                "operation capability.",
-            )
-
-        if call.target is not None:
-            try:
-                resolved_target = affordance.resolve_target(call.target)
-            except KeyError as exc:
-                raise _diagnostic(
-                    "unknown_articulation_target",
-                    (*path, analyzed.index, "call", "target"),
-                    f"Handle {handle_ref.entity_id!r} has no semantic target "
-                    f"{call.target!r}.",
-                    tuple(affordance.semantic_targets),
-                ) from exc
-            target_position = resolved_target.target_position
-            displacement = resolved_target.displacement
+        if call.final_target is not None:
+            final_target = SemanticObjectTarget(pose=call.final_target)
         else:
-            assert call.target_position is not None
-            assert call.target_displacement is not None
-            target_position = call.target_position
-            displacement = call.target_displacement
-
-        try:
-            handle_state = context.scene.entities[handle_ref.entity_id]
-        except KeyError as exc:
-            raise _diagnostic(
-                "missing_handle_observation",
-                (*path, analyzed.index, "call", "handle"),
-                f"The current planning snapshot has no pose for handle "
-                f"{handle_ref.entity_id!r}.",
-            ) from exc
-        try:
-            self._broadcast_pose(
-                handle_state.pose,
-                context,
-                name=f"handle {handle_ref.entity_id!r}",
+            _, provider = self._require_handover_pose_provider(
+                call,
+                path=(*path, analyzed.index, "call"),
             )
-        except (TypeError, ValueError) as exc:
-            raise _diagnostic(
-                "articulation_grounding_failed",
-                (*path, analyzed.index, "call", "handle"),
-                f"Could not ground articulation handle geometry: {exc}",
-            ) from exc
-        joint_address = call.articulation.entity_id, affordance.joint_id
-        observed_joint = context.scene.get_articulation_joint_state(*joint_address)
-        if observed_joint is None:
-            raise _diagnostic(
-                "missing_articulation_joint_observation",
-                (*path, analyzed.index, "call", "articulation"),
-                "Recovery-safe articulation grounding requires a live "
-                "ObservedArticulationJointState for "
-                f"{joint_address!r} in the current scene snapshot.",
+            targets = self._resolve_handover_targets(
+                provider,
+                call,
+                context=context,
+                bound=analyzed.bound,
             )
-        try:
-            source_position = self._broadcast_joint_position(
-                observed_joint.position,
-                context,
-                name=f"articulation joint {joint_address!r}",
-            )
-        except (TypeError, ValueError) as exc:
-            raise _diagnostic(
-                "invalid_articulation_joint_observation",
-                (*path, analyzed.index, "call", "articulation"),
-                f"Could not use live articulation joint state: {exc}",
-            ) from exc
-        if observed_joint.valid_mask is not None:
-            valid = observed_joint.valid_mask.to(device=context.robot.qpos.device)
-            if bool((~valid).any()):
-                rows = (~valid).nonzero(as_tuple=False).flatten().tolist()
-                raise _diagnostic(
-                    "invalid_articulation_joint_observation",
-                    (*path, analyzed.index, "call", "articulation"),
-                    "Live articulation joint state is unavailable for planning "
-                    f"rows {rows}.",
-                )
-        target = torch.full(
-            (context.batch_size, 1),
-            target_position,
-            dtype=context.robot.qpos.dtype,
-            device=context.robot.qpos.device,
-        )
+            # The primitive now derives its central transfer pose from the two
+            # bound arm roots, so only the provider's final pose is consumed.
+            final_target = targets.final
+        final = self._ground_object_target(final_target, context)
         return SemanticLowering(
-            goal=OperateArticulationGoal(
-                articulation_id=call.articulation.entity_id,
-                joint_id=affordance.joint_id,
-                geometry=SceneArticulationOperationGeometry(
-                    handle_pose=SceneEntityPose(handle_ref.entity_id),
-                    approach_offset=affordance.approach_offset,
-                    contact_offset=affordance.contact_offset,
-                    operation_offset=affordance.operation_offset,
-                    retract_offset=affordance.retract_offset,
-                    operation_axis=affordance.operation_axis,
-                    position_scale=affordance.position_scale,
-                ),
-                source_position=source_position,
-                target_position=target,
-                target_displacement=displacement,
-            ),
-            skill_options=self._action_option_template(
-                analyzed,
-                OperateArticulationOptions,
-            ),
+            goal=HandOverGoal(semantics=semantics, target_pose=final),
+            skill_options=self._action_option_template(analyzed, HandOverOptions),
         )
 
     def _lower_registered(
@@ -1896,47 +1692,20 @@ class SemanticSkillCompiler:
                 object_id=call.object.entity_id,
                 context=context,
                 path=(*path, "state_expectations", "source"),
+                allow_missing_detached_baseline=True,
             )
             destination, destination_clauses = self._ground_held_effect(
                 analyzed,
                 expectation_id="destination",
-                relation=HeldObjectRelation.ATTACHED,
+                relation=HeldObjectRelation.DETACHED,
                 slot_id="destination",
                 object_id=call.object.entity_id,
                 context=context,
                 path=(*path, "state_expectations", "destination"),
+                allow_missing_detached_baseline=True,
             )
             state_expectations.extend((source, destination))
             clauses.extend((*source_clauses, *destination_clauses))
-        elif type(call) is OperateArticulation:
-            goal = invocation.goal
-            if type(goal) is not OperateArticulationGoal:
-                raise AssertionError(
-                    "OperateArticulation lowering produced an incompatible goal."
-                )
-            expectation = ArticulationJointStateExpectation(
-                expectation_id="joint",
-                articulation_id=goal.articulation_id,
-                joint_id=goal.joint_id,
-                target_position=goal.target_position,
-            )
-            source = EffectEvidenceSourceRef(
-                provider_id=SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
-                revision=SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION,
-                address=ArticulationJointEvidenceAddress(
-                    articulation_id=goal.articulation_id,
-                    joint_id=goal.joint_id,
-                ),
-            )
-            state_expectations.append(expectation)
-            clauses.append(
-                JointStateEffectClause(
-                    clause_id="joint.position",
-                    expectation_id=expectation.expectation_id,
-                    source=source,
-                    target_position=goal.target_position,
-                )
-            )
         else:  # pragma: no cover - exact workflow construction prevents this
             raise AssertionError(f"Unsupported analyzed call {type(call).__name__}.")
         return SemanticEffectSpec(
@@ -1963,19 +1732,53 @@ class SemanticSkillCompiler:
             return ()
         call = analyzed.call
         if type(call) is Pick:
-            definitions = (("destination_acquired", "lift", "destination"),)
+            definitions = (
+                (
+                    "destination_acquired",
+                    "lift",
+                    "destination",
+                    HeldObjectRelation.ATTACHED,
+                ),
+            )
         elif type(call) is Place:
-            definitions = (("source_released", "retract", "source"),)
+            definitions = (
+                (
+                    "source_released",
+                    "retract",
+                    "source",
+                    HeldObjectRelation.DETACHED,
+                ),
+            )
         elif type(call) is HandOver:
-            definitions = (("destination_acquired", "release", "destination"),)
+            definitions = (
+                (
+                    "source_acquired",
+                    "pickup_transport",
+                    "source",
+                    HeldObjectRelation.ATTACHED,
+                ),
+                (
+                    "destination_acquired",
+                    "handover_release",
+                    "destination",
+                    HeldObjectRelation.ATTACHED,
+                ),
+                (
+                    "source_released",
+                    "place",
+                    "source",
+                    HeldObjectRelation.DETACHED,
+                ),
+            )
         else:
             return ()
 
         gates: list[GroundedPhaseEffectGate] = []
-        for gate_id, segment_name, expectation_id in definitions:
+        for gate_id, segment_name, expectation_id, relation in definitions:
             gate_spec = self._single_held_expectation_effect_spec(
                 effect_spec,
                 expectation_id=expectation_id,
+                relation=relation,
             )
             try:
                 monitor = self._effect_monitor_registry.create(
@@ -1999,16 +1802,29 @@ class SemanticSkillCompiler:
             )
         return tuple(gates)
 
-    @staticmethod
     def _single_held_expectation_effect_spec(
+        self,
         terminal_spec: SemanticEffectSpec,
         *,
         expectation_id: str,
+        relation: HeldObjectRelation,
     ) -> SemanticEffectSpec:
         """Project one terminal held relation into an independent gate spec."""
         expectation = terminal_spec.state_expectation(expectation_id)
         if type(expectation) is not HeldObjectStateExpectation:
             raise TypeError("Phase-effect gates require held-object expectations.")
+        if relation is HeldObjectRelation.ATTACHED and expectation.relation is (
+            HeldObjectRelation.DETACHED
+        ):
+            return self._attached_guard_effect_spec(
+                terminal_spec,
+                expectation_id=expectation_id,
+            )
+        if expectation.relation is not relation:
+            raise ValueError(
+                f"Cannot project held-object expectation {expectation_id!r} from "
+                f"{expectation.relation.value!r} to {relation.value!r}."
+            )
         clauses = tuple(
             clause
             for clause in terminal_spec.clauses
@@ -2020,7 +1836,7 @@ class SemanticSkillCompiler:
             )
         effect_kind = (
             SemanticEffectKind.ATTACH
-            if expectation.relation is HeldObjectRelation.ATTACHED
+            if relation is HeldObjectRelation.ATTACHED
             else SemanticEffectKind.RELEASE
         )
         return SemanticEffectSpec(
@@ -2101,23 +1917,22 @@ class SemanticSkillCompiler:
         elif type(call) is HandOver:
             source = self._held_expectation(effect_spec, "source")
             destination = self._held_expectation(effect_spec, "destination")
-            self._validate_guard_verified_baseline(source, context)
             definitions = (
                 (
                     "source_attached",
                     source.expectation_id,
-                    ("transfer", "approach", "close", "hold"),
-                    HeldObjectGuardBaseline.VERIFIED_TASK_STATE,
+                    ("pickup_transport", "receive_approach", "receive_close"),
+                    HeldObjectGuardBaseline.PLANNED_EFFECT,
                     (source.task_state_key,),
-                    False,
+                    True,
                 ),
                 (
                     "destination_attached",
                     destination.expectation_id,
-                    ("release", "deliver"),
+                    ("handover_release", "place"),
                     HeldObjectGuardBaseline.PLANNED_EFFECT,
                     (source.task_state_key, destination.task_state_key),
-                    False,
+                    True,
                 ),
             )
         else:
@@ -2282,6 +2097,7 @@ class SemanticSkillCompiler:
         object_id: str,
         context: PlanningContext,
         path: tuple[PathPart, ...],
+        allow_missing_detached_baseline: bool = False,
     ) -> tuple[HeldObjectStateExpectation, tuple[EffectClause, ...]]:
         """Bind one held-object state relation to generic endpoint sources."""
         resource = analyzed.bound.binding.resources[slot_id]
@@ -2306,14 +2122,15 @@ class SemanticSkillCompiler:
         baseline: torch.Tensor | None = None
         if relation is HeldObjectRelation.DETACHED:
             held = context.task.get_held_object(task_state_key)
-            if held is None or held.semantics.entity_id != object_id:
+            if held is not None and held.semantics.entity_id == object_id:
+                baseline = held.object_to_eef
+            elif not allow_missing_detached_baseline:
                 raise _diagnostic(
                     "verified_held_object_required",
                     (*path, "baseline"),
                     f"Detached relation requires verified object {object_id!r} "
                     f"held under logical state key {task_state_key!r}.",
                 )
-            baseline = held.object_to_eef
         state_expectation = HeldObjectStateExpectation(
             expectation_id=expectation_id,
             relation=relation,
@@ -2321,11 +2138,6 @@ class SemanticSkillCompiler:
             slot_id=slot_id,
             resource_id=resource.resource_id,
             task_state_key=task_state_key,
-        )
-        pose_source = self._effect_source(
-            motion_endpoint.effect_sources,
-            POSE_RELATION_EFFECT_CHANNEL,
-            path=(*path, "motion"),
         )
         binary_channel = (
             CONSTRAINT_EFFECT_CHANNEL
@@ -2337,17 +2149,26 @@ class SemanticSkillCompiler:
             binary_channel,
             path=(*path, "grasp"),
         )
-        pose_clause = PoseRelationClause(
-            clause_id=f"{expectation_id}.pose",
-            expectation_id=expectation_id,
-            source=pose_source,
-            expectation=(
-                PoseRelationExpectation.MATCHED
-                if relation is HeldObjectRelation.ATTACHED
-                else PoseRelationExpectation.SEPARATED
-            ),
-            baseline_object_to_endpoint=baseline,
-        )
+        clauses: list[EffectClause] = []
+        if relation is HeldObjectRelation.ATTACHED or baseline is not None:
+            pose_source = self._effect_source(
+                motion_endpoint.effect_sources,
+                POSE_RELATION_EFFECT_CHANNEL,
+                path=(*path, "motion"),
+            )
+            clauses.append(
+                PoseRelationClause(
+                    clause_id=f"{expectation_id}.pose",
+                    expectation_id=expectation_id,
+                    source=pose_source,
+                    expectation=(
+                        PoseRelationExpectation.MATCHED
+                        if relation is HeldObjectRelation.ATTACHED
+                        else PoseRelationExpectation.SEPARATED
+                    ),
+                    baseline_object_to_endpoint=baseline,
+                )
+            )
         binary_kind = (
             BinaryEvidenceKind.CONSTRAINT
             if binary_channel == CONSTRAINT_EFFECT_CHANNEL
@@ -2360,7 +2181,8 @@ class SemanticSkillCompiler:
             evidence_kind=binary_kind,
             expected=relation is HeldObjectRelation.ATTACHED,
         )
-        return state_expectation, (pose_clause, binary_clause)
+        clauses.append(binary_clause)
+        return state_expectation, tuple(clauses)
 
     def _relation_target(
         self,
@@ -2627,31 +2449,6 @@ class SemanticSkillCompiler:
                 f"{name} must have shape (4, 4) or " f"({context.batch_size}, 4, 4)."
             )
         return pose.clone()
-
-    @staticmethod
-    def _broadcast_joint_position(
-        position: torch.Tensor,
-        context: PlanningContext,
-        *,
-        name: str,
-    ) -> torch.Tensor:
-        """Move and broadcast one scalar articulation joint observation."""
-        if not isinstance(position, torch.Tensor):
-            raise TypeError(f"{name} position must be a torch.Tensor.")
-        if not position.is_floating_point() or not torch.isfinite(position).all():
-            raise ValueError(f"{name} position must be a finite floating tensor.")
-        position = position.to(
-            device=context.robot.qpos.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        if position.shape == (1,):
-            return position.unsqueeze(0).expand(context.batch_size, -1).clone()
-        if position.shape != (context.batch_size, 1):
-            raise ValueError(
-                f"{name} position must have shape (1,) or "
-                f"({context.batch_size}, 1)."
-            )
-        return position.clone()
 
 
 __all__ = [

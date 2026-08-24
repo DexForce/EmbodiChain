@@ -37,24 +37,21 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
     RuntimeCommandFrameEncoder,
 )
 from embodichain.lab.sim.atomic_actions import Affordance, EntityState, TaskState
-from embodichain.lab.sim.skills.calls import OperateArticulation, Pick, Place
+from embodichain.lab.sim.skills.calls import Pick, Place, RegisteredSemanticCall
 from embodichain.lab.sim.skills.runtime import SkillResult, SkillStatus
 from embodichain.lab.sim.skills.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
-    SceneCollisionRole,
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
 )
-from embodichain_tasks.configs import get_config_path
-from embodichain_tasks.multi_segments import cube_pick_place as cube_task
-from embodichain_tasks.tableware import open_drawer as drawer_task
+from embodichain_tasks.expert_program import open_drawer as drawer_task
+from embodichain_tasks.expert_program import repeated_pick_place as cube_task
 
-_REPEATED_CUBE_PROGRAM = Path(
-    "expert_program/multi_segments/repeated_cube_pick_place.yaml"
-)
-_OPEN_DRAWER_PROGRAM = Path("expert_program/tableware/open_drawer.json")
+_REPOSITORY_ROOT = Path(__file__).parents[4]
+_REPEATED_CUBE_PROGRAM = Path("expert_program/repeated_pick_place.yaml")
+_OPEN_DRAWER_PROGRAM = Path("expert_program/open_drawer.yaml")
 _LIFECYCLE_BATCH_SIZE = 2
 _LIFECYCLE_ROBOT_DOF = 3
 _LIFECYCLE_STEP_DT = 0.02
@@ -293,7 +290,7 @@ class _LifecycleValidatorPort:
 
 def _read_payload(relative_path: Path) -> dict[str, object]:
     """Load one packaged JSON/YAML example as inert data."""
-    path = get_config_path(relative_path)
+    path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
     if path.suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
     else:
@@ -325,7 +322,7 @@ def _drawer_compiler() -> ExpertProgramCompiler:
             SceneEntityRegistration(
                 ref=SceneAffordanceRef("drawer_handle"),
                 parent=drawer,
-                native_name="handle_xpos",
+                native_name="large_handle_bar",
                 affordance=Affordance(),
                 relative_pose=torch.eye(4),
             ),
@@ -338,8 +335,8 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
     """The packaged cube task expands to three independently scoped cycles."""
     config = decode_expert_program(_read_payload(_REPEATED_CUBE_PROGRAM))
 
-    assert config.integration.scene_registry == cube_task.CUBE_SCENE_REGISTRY_ID
-    assert config.integration.robot_profile == cube_task.CUBE_ROBOT_PROFILE_ID
+    assert config.integration.scene_registry == cube_task.SCENE_REGISTRY_ID
+    assert config.integration.robot_profile == cube_task.ROBOT_PROFILE_ID
 
     segments = tuple(_cube_compiler().compile(config))
 
@@ -369,7 +366,7 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
 def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
     """The real packaged program owns three ordered observable lifecycles."""
     config = decode_expert_program(_read_payload(_REPEATED_CUBE_PROGRAM))
-    compiled = _cube_compiler().compile(config).materialize()
+    compiled = _cube_compiler().compile(config)
     lifecycle_events: list[tuple[str, int]] = []
     observation = _FreshObservationPort()
     clock = EnvironmentStepClock(_LIFECYCLE_STEP_DT)
@@ -514,13 +511,13 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
     assert last_place.at.position.tolist() == pytest.approx([-0.25, 0.20, 0.10])
 
 
-def test_open_drawer_program_compiles_to_reusable_articulation_skill() -> None:
-    """The drawer task supplies a goal and identities, never a trajectory."""
+def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
+    """The drawer task supplies a validated call, never a trajectory."""
     payload = _read_payload(_OPEN_DRAWER_PROGRAM)
     config = decode_expert_program(payload)
 
-    assert config.integration.scene_registry == drawer_task.DRAWER_SCENE_REGISTRY_ID
-    assert config.integration.robot_profile == drawer_task.DRAWER_ROBOT_PROFILE_ID
+    assert config.integration.scene_registry == drawer_task.SCENE_REGISTRY_ID
+    assert config.integration.robot_profile == drawer_task.ROBOT_PROFILE_ID
 
     segments = tuple(_drawer_compiler().compile(config))
 
@@ -528,13 +525,20 @@ def test_open_drawer_program_compiles_to_reusable_articulation_skill() -> None:
     assert segments[0].name == "open_drawer"
     assert len(segments[0].calls) == 1
     call = segments[0].calls[0].call
-    assert type(call) is OperateArticulation
-    assert call.articulation == SceneArticulationRef("drawer")
-    assert call.handle == SceneAffordanceRef("drawer_handle")
-    assert call.target == "open"
-    assert call.target_position is None
-    assert call.target_displacement is None
-    assert dict(call.resources) == {}
+    assert type(call) is RegisteredSemanticCall
+    assert call.call_id == "embodichain_tasks.open_drawer"
+    assert dict(call.arguments) == {
+        "handle": "drawer_handle",
+        "direction": "pull",
+        "hand_interp_steps": 12,
+        "approach_distance": 0.10,
+        "translation_distance": 0.18,
+    }
+    assert dict(call.resources) == {"primary": "manipulator"}
+    validator = segments[0].validators[0].cfg
+    assert validator.articulation == "drawer"
+    assert validator.joint == "cabinet_to_drawer"
+    assert validator.minimum_position == 0.10
 
 
 def test_task_classes_do_not_override_motion_or_demo_generation() -> None:
@@ -544,56 +548,21 @@ def test_task_classes_do_not_override_motion_or_demo_generation() -> None:
         "create_demo_segments",
         "_generate_eef_motion",
         "_initialize_atomic_actions",
+        "_observe_grasp_constraint",
         "_plan_pick_place_cycle",
     }
 
     for env_type in (
-        cube_task.MultiSegmentsCubePickPlaceEnv,
-        drawer_task.OpenDrawerEnv,
+        cube_task.ExpertProgramRepeatedPickPlaceEnv,
+        drawer_task.ExpertProgramOpenDrawerEnv,
     ):
         assert forbidden_overrides.isdisjoint(env_type.__dict__)
 
 
-def test_cube_task_declares_scene_and_robot_bindings_without_trajectory_code() -> None:
-    """Cube integration is an auditable identity/resource declaration."""
-    scene = cube_task.create_cube_scene_binding(grasp_samples=32)
-    profile = cube_task.create_cube_robot_profile_binding()
-
-    assert scene.registry_id == cube_task.CUBE_SCENE_REGISTRY_ID
-    assert scene.rigid_objects[0].simulation_uid == "cube"
-    assert scene.rigid_objects[0].collision_role is SceneCollisionRole.NONE
-    assert scene.rigid_objects[0].default_grasp_affordance == (
-        cube_task.CUBE_GRASP_AFFORDANCE_ID
-    )
-    assert scene.antipodal_grasps[0].object_id == "cube"
-    assert profile.profile_id == cube_task.CUBE_ROBOT_PROFILE_ID
-    assert dict(profile.defaults) == {
-        "pick_up": {"primary": "manipulator"},
-        "place": {"primary": "manipulator"},
-    }
-    assert profile.command_presets[0].commands["grasp"] == (0.024,)
-
-
-def test_drawer_task_declares_native_link_joint_and_named_target() -> None:
-    """Drawer operation grounds through explicit native simulation identities."""
-    scene = drawer_task.create_open_drawer_scene_binding()
-    profile = drawer_task.create_open_drawer_robot_profile_binding()
-
-    operation = scene.articulation_operations[0]
-    assert scene.registry_id == drawer_task.DRAWER_SCENE_REGISTRY_ID
-    assert scene.articulations[0].collision_role is SceneCollisionRole.NONE
-    assert scene.links[0].native_link_name == "handle_xpos"
-    assert operation.joint_id == "slide_rails"
-    assert operation.operation_axis == (0.0, 0.0, -1.0)
-    assert operation.semantic_targets["open"].target_position == 0.11
-    assert profile.profile_id == drawer_task.DRAWER_ROBOT_PROFILE_ID
-    assert dict(profile.defaults) == {
-        "operate_articulation": {"primary": "right_manipulator"}
-    }
-    assert profile.command_presets[0].commands == {
-        "open": (0.05, 0.05),
-        "grasp": (0.0, 0.0),
-    }
+def test_cube_task_declares_the_canonical_scene_and_profile_ids() -> None:
+    """The repeated task owns one canonical scene/profile integration."""
+    assert cube_task.SCENE_REGISTRY_ID == "expert_program_repeated_pick_place"
+    assert cube_task.ROBOT_PROFILE_ID == "expert_program_ur5_pick_place"
 
 
 def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:

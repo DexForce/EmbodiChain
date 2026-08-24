@@ -30,6 +30,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
@@ -44,13 +45,11 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     URDFCfg,
 )
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
-    GraspGenerator,
-    GraspGeneratorCfg,
-    AntipodalSamplerCfg,
-)
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalGraspPoseGenerator,
+    AntipodalGraspPoseGeneratorCfg,
+    GraspAnnotationCfg,
+    ParallelJawGraspCollisionCfg,
 )
 
 
@@ -153,7 +152,7 @@ def create_mug(sim: SimulationManager):
 
 
 def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tensor):
-    n_envs = sim.num_envs
+    num_envs = sim.num_envs
     rest_arm_qpos = robot.get_qpos("arm")
 
     approach_xpos = grasp_xpos.clone()
@@ -183,12 +182,12 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
     )
     hand_trajectory = torch.cat(
         [
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
         ],
         dim=1,
     )
@@ -210,56 +209,50 @@ def test_grasp_pose_generator():
         mug = create_mug(sim)
 
         # get mug grasp pose
-        grasp_cfg = GraspGeneratorCfg(
-            viser_port=11801,
-            antipodal_sampler_cfg=AntipodalSamplerCfg(
-                n_sample=10000, max_length=0.088, min_length=0.003
+        grasp_generator = AntipodalGraspPoseGenerator(
+            ParallelJawGripperModelCfg(
+                model_id="test_parallel_jaw",
+                min_opening_width=0.003,
+                max_opening_width=0.088,
+                finger_length=0.078,
             ),
-            is_partial_annotate=False,
-            is_filter_ground_collision=True,
-            n_top_grasps=30,
-        )
-
-        gripper_collision_cfg = GripperCollisionCfg(
-            max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
+            algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+                sample_count=10_000,
+                max_candidates=30,
+            ),
+            collision_cfg=ParallelJawGraspCollisionCfg(
+                point_sample_density=0.012,
+                filter_ground_collision=True,
+            ),
+            annotation_cfg=GraspAnnotationCfg(
+                selection_mode="whole_mesh",
+                viser_port=11801,
+            ),
         )
 
         vertices = mug.get_vertices(env_ids=[0], scale=True)[0]
         triangles = mug.get_triangles(env_ids=[0])[0]
-        grasp_generator = GraspGenerator(
-            vertices=vertices,
-            triangles=triangles,
-            cfg=grasp_cfg,
-            gripper_collision_cfg=gripper_collision_cfg,
-        )
 
-        # Annotate grasp region (populates internal antipodal point pairs)
-        grasp_generator.annotate()
-
-        # Compute grasp poses per environment
         approach_direction = torch.tensor(
             [0, 0, -1], dtype=torch.float32, device=sim.device
         )
         obj_poses = mug.get_local_pose(to_matrix=True)
-        grasp_xpos_list = []
-
         rest_xpos = robot.compute_fk(
             qpos=robot.get_qpos("arm"), name="arm", to_matrix=True
         )[0]
-        for i, obj_pose in enumerate(obj_poses):
-            is_success, grasp_pose, open_length = grasp_generator.get_grasp_poses(
-                obj_pose,
-                approach_direction,
-                visualize_collision=False,
-                visualize_pose=False,
+        success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
+            obj_poses=obj_poses,
+            approach_direction=approach_direction,
+        )
+        if not bool(success.all().item()):
+            logger.log_warning("No valid grasp pose found for at least one object.")
+            grasp_xpos = torch.where(
+                success[:, None, None],
+                grasp_xpos,
+                rest_xpos.unsqueeze(0).expand_as(grasp_xpos),
             )
-            if is_success:
-                grasp_xpos_list.append(grasp_pose.unsqueeze(0))
-            else:
-                logger.log_warning(f"No valid grasp pose found for {i}-th object.")
-                grasp_xpos_list.append(rest_xpos.unsqueeze(0))
-
-        grasp_xpos = torch.cat(grasp_xpos_list, dim=0)
         grab_traj = get_grasp_traj(sim, robot, grasp_xpos)
         assert grasp_xpos.shape == torch.Size([1, 4, 4])
         assert grab_traj.shape == torch.Size([1, 200, 8])

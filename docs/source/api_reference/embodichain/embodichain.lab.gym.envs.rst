@@ -23,6 +23,7 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
       demo
       expert_program
       managers
+      types
       wrapper
 
 .. toctree::
@@ -55,6 +56,19 @@ Environment Classes
     :members:
     :exclude-members: __init__, class_type
 
+Controller-ready Actions
+------------------------
+
+``ControllerAction`` marks commands that already crossed the raw-policy
+preprocessing boundary. The environment validates these commands and skips
+``ActionManager`` terms in ``pre`` mode while retaining the normal Gym step and
+``post`` processing lifecycle.
+
+.. currentmodule:: embodichain.lab.gym.envs.types
+
+.. autoclass:: ControllerAction
+    :members:
+
 Demonstration Episodes
 ----------------------
 
@@ -63,10 +77,9 @@ containing one or more semantic subtasks. Segment action iterables may be lazy,
 and the common executor records per-environment lengths, terminal status, and
 segment spans.
 
-.. autoclass:: DemoSegment
-    :members:
+.. currentmodule:: embodichain.lab.gym.envs.demo
 
-.. autoclass:: ProcessedEnvAction
+.. autoclass:: DemoSegment
     :members:
 
 .. autoclass:: DemoSegmentResult
@@ -79,8 +92,30 @@ segment spans.
 
 .. autofunction:: resolve_demo_segments
 
+Dynamic Settling
+----------------
+
+The shared settling monitor is used by both reset events and Expert Program
+post-policies, so they apply the same row-local stability semantics.
+
+.. currentmodule:: embodichain.lab.gym.envs.settling
+
+.. autoclass:: DynamicSettleMonitorCfg
+    :members:
+
+.. autoclass:: DynamicSettleSample
+    :members:
+
+.. autoclass:: DynamicSettleState
+    :members:
+
+.. autoclass:: DynamicSettleMonitor
+    :members:
+
 Wrappers
 --------
+
+.. currentmodule:: embodichain.lab.gym.envs
 
 .. autoclass:: NoFailWrapper
     :members:

@@ -470,9 +470,9 @@ def test_spec_rejects_clause_without_typed_state_expectation() -> None:
 def test_articulation_and_joint_clause_are_first_class_typed_contracts() -> None:
     target = torch.tensor([0.42])
     spec = SemanticEffectSpec(
-        semantic_id="operate_articulation",
+        semantic_id="test_articulation",
         effect_kind=SemanticEffectKind.ARTICULATION,
-        skill_id="operate_articulation",
+        skill_id="test_articulation",
         invocation_id="drawer-1",
         invocation_revision=0,
         env_ids=_ENV_IDS,
@@ -504,7 +504,7 @@ def test_articulation_and_joint_clause_are_first_class_typed_contracts() -> None
 
     request = EffectVerificationRequest(
         verification_id=1,
-        skill_id="operate_articulation",
+        skill_id="test_articulation",
         invocation_id="drawer-1",
         invocation_revision=0,
         invocation_index=0,

@@ -25,30 +25,24 @@ import torch
 
 from embodichain.lab.gym.envs.expert_program.simulation import (
     AntipodalGraspAffordanceBinding,
-    ArticulationOperationAffordanceBinding,
-    ArticulationOperationTargetBinding,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
-    RobotResourceBinding,
     SimulationArticulationBinding,
     SimulationArticulationLinkBinding,
     SimulationRigidObjectBinding,
-    SimulationResourceEndpointBinding,
-    SimulationRobotResourceBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
 )
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
-    ArticulationOperationAffordance,
     CARTESIAN_POSE_CAPABILITY,
     GRASP_CAPABILITY,
     PickUpOptions,
 )
 from embodichain.lab.sim.skills import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
     GRASP_AFFORDANCE_CAPABILITY,
+    RobotResource,
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneDynamics,
@@ -59,8 +53,6 @@ from embodichain.lab.sim.skills import (
 from embodichain.lab.sim.skills.profiles import ResourceEndpoint
 
 _BATCH_SIZE = 2
-_OPEN_TARGET = 0.42
-_OPEN_DISPLACEMENT = 0.4
 
 
 class _RigidObject:
@@ -179,7 +171,6 @@ def _scene_binding() -> SimulationSceneBinding:
                 entity_id="drawer",
                 simulation_uid="native_drawer",
                 semantic_type="drawer",
-                default_operation_affordance="drawer_handle_operation",
             ),
         ),
         links=(
@@ -195,21 +186,6 @@ def _scene_binding() -> SimulationSceneBinding:
                 object_id="cube",
                 native_name="mesh_antipodal",
                 revision="cube-grasp-v1",
-            ),
-        ),
-        articulation_operations=(
-            ArticulationOperationAffordanceBinding(
-                entity_id="drawer_handle_operation",
-                articulation_id="drawer",
-                link_id="drawer_handle_link",
-                joint_id="drawer_slide",
-                revision="drawer-operation-v1",
-                semantic_targets={
-                    "open": ArticulationOperationTargetBinding(
-                        target_position=_OPEN_TARGET,
-                        displacement=_OPEN_DISPLACEMENT,
-                    )
-                },
             ),
         ),
     )
@@ -275,22 +251,12 @@ def test_scene_binding_builds_existing_registry_contracts() -> None:
     grasp = registry.lookup(grasp_ref).affordance
     assert isinstance(grasp, AntipodalAffordance)
     assert grasp.mesh_vertices is not None and grasp.mesh_vertices.shape == (3, 3)
-    operation_ref = registry.resolve_affordance(
-        "drawer",
-        capability=ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
-    )
-    operation = registry.lookup(operation_ref).affordance
-    assert isinstance(operation, ArticulationOperationAffordance)
-    assert operation.joint_id == "drawer_slide"
-    assert operation.semantic_targets["open"].target_position == pytest.approx(
-        _OPEN_TARGET
-    )
     assert torch.equal(
         snapshot.articulation_joints[("drawer", "drawer_slide")].position,
         simulation.articulation.qpos,
     )
     assert torch.equal(
-        snapshot.entities["drawer_handle_operation"].pose,
+        snapshot.entities["drawer_handle_link"].pose,
         simulation.articulation.link_pose,
     )
 
@@ -318,19 +284,6 @@ def test_scene_binding_fails_closed_on_missing_native_link() -> None:
         )
 
 
-def test_scene_binding_fails_closed_on_missing_native_joint() -> None:
-    binding = _scene_binding()
-    missing = replace(
-        binding.articulation_operations[0],
-        joint_id="missing_joint",
-    )
-
-    with pytest.raises(KeyError, match="missing_joint"):
-        replace(binding, articulation_operations=(missing,)).build(  # type: ignore[arg-type]
-            _Simulation()
-        )
-
-
 def test_robot_profile_binding_builds_existing_profile_contracts() -> None:
     profile = _profile_binding().build(_Robot())  # type: ignore[arg-type]
 
@@ -346,34 +299,28 @@ def test_robot_profile_binding_builds_existing_profile_contracts() -> None:
     assert profile.defaults["pick_up"].resources == {"primary": "manipulator"}
 
 
-def test_generic_resource_binding_owns_arbitrary_typed_endpoint() -> None:
+def test_profile_binding_owns_direct_core_resource() -> None:
     endpoint = _MobileEndpoint(
         controller_id="base_controller",
         capabilities=frozenset({"motion.base.velocity"}),
     )
-    binding = RobotResourceBinding(
+    resource = RobotResource(
         resource_id="mobile_base",
         endpoints={"motion": endpoint},
     )
+    binding = SimulationRobotSkillProfileBinding(
+        profile_id="mobile_robot",
+        resources=(resource,),
+    )
 
-    assert isinstance(binding, SimulationRobotResourceBinding)
-    resource = binding.build(object())  # type: ignore[arg-type]
-    built_endpoint = resource.endpoints["motion"]
+    profile = binding.build(object())  # type: ignore[arg-type]
+    built_resource = profile.resources["mobile_base"]
+    built_endpoint = built_resource.endpoints["motion"]
 
     assert isinstance(built_endpoint, _MobileEndpoint)
     assert built_endpoint is not endpoint
     assert built_endpoint.controller_id == "base_controller"
-    assert resource.members == ()
-
-
-def test_control_part_endpoint_binding_implements_public_build_protocol() -> None:
-    binding = ControlPartEndpointBinding(
-        endpoint_id="motion",
-        control_part="arm",
-        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-    )
-
-    assert isinstance(binding, SimulationResourceEndpointBinding)
+    assert built_resource.members == ()
 
 
 def test_whole_body_control_part_remains_supported_and_strict() -> None:

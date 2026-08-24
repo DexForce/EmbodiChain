@@ -753,7 +753,7 @@ def main() -> None:
             {"primary": {"motion": control_part}},
         )
         motion_policy = MotionPolicy(
-            motion_source="motion_gen",
+            strategy="motion_gen",
             plan_opts=CuroboPlanOptions(
                 dynamic_obstacle_poses=(
                     obstacle_poses if use_independent_worlds else None

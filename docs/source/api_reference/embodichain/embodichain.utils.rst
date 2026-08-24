@@ -12,6 +12,16 @@ file/string/device/image utilities, non-maximum suppression, a visualizer
 helper, and the high-performance ``warp`` kernels for kinematics, collision,
 and image processing.
 
+.. currentmodule:: embodichain.utils
+
+.. autodata:: GLOBAL_SEED
+
+.. autofunction:: set_seed
+
+.. autofunction:: is_configclass
+
+.. autofunction:: resolve_config_path
+
    .. rubric:: Submodules
 
    .. autosummary::

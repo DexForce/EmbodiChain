@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -91,11 +93,14 @@ class AntipodalSampler:
         ray_origin = (
             sample_points - 2.0 * max_range * ray_direc
         )  # ray origin in the other side of the mesh
-        # casting
+        ray_origin_2 = sample_points - 2.0 * self.cfg.max_length * ray_direc
+        all_ray_origin = torch.cat([ray_origin, ray_origin_2], dim=0)
+        all_ray_direc = torch.cat([ray_direc, ray_direc], dim=0)
+        all_surface_origin = torch.cat([sample_points, sample_points], dim=0)
         return self._get_raycast_result(
-            ray_origin,
-            ray_direc,
-            surface_origin=sample_points,
+            all_ray_origin,
+            all_ray_direc,
+            surface_origin=all_surface_origin,
         )
 
     def _sample_surface_by_fibonacci_raycast(
@@ -344,7 +349,7 @@ class AntipodalSampler:
 
         Temporary debug helper that draws the mesh, a ground plane, and the
         antipodal point pairs (surface origin connected to its antipodal hit)
-        in the style of :meth:`GraspGenerator.visualize_grasp_poses`.
+        in the same style as the grasp-pose backend visualizer.
 
         .. attention::
             ``self.mesh`` must have been populated by a prior call to

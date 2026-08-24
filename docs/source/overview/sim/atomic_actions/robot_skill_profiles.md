@@ -77,16 +77,12 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     ControlPartCommandProfile,
-    HandOverOptions,
+    ExecutionRunnerCfg,
     MotionPolicy,
     PickUpOptions,
-    PlaceOptions,
 )
 from embodichain.lab.sim.skills import (
-    COMPOSITE_EFFECT_MONITOR_ID,
-    COMPOSITE_EFFECT_MONITOR_REVISION,
     ControlPartEndpoint,
-    EffectMonitorRef,
     ResourceBinding,
     RobotResource,
     RobotSkillProfile,
@@ -143,37 +139,80 @@ profile = RobotSkillProfile(
     presets={
         "default": SkillPolicyPreset(
             preset_id="default",
-            action_option_templates={
-                "pick": PickUpOptions(),
-                "place": PlaceOptions(),
-                "hand_over": HandOverOptions(),
-            },
+            action_option_templates={"pick": PickUpOptions()},
             motion_policy=MotionPolicy(strategy="ik_interp"),
-            effect_monitors={
-                semantic_id: EffectMonitorRef(
-                    COMPOSITE_EFFECT_MONITOR_ID,
-                    COMPOSITE_EFFECT_MONITOR_REVISION,
-                    {
-                        "attached_translation_threshold": 0.02,
-                        "detached_translation_threshold": 0.05,
-                        "consecutive_samples": 2,
-                    },
-                )
-                for semantic_id in ("pick", "place", "hand_over")
-            },
+            runner_cfg=ExecutionRunnerCfg(command_timeout=2.0),
         ),
     },
     default_preset="default",
 )
 ```
 
-During binding, each resolved endpoint also receives a logical
-`task_state_key` and immutable, channel-keyed `effect_sources`. By default the
-logical key is the selected resource ID, so the `motion` and `grasp` endpoints
-of `left_participant` share one symbolic held-object state even though they use
-different control parts. An effect source contains an `EffectEvidenceAddress`;
-it is intentionally separate from the endpoint's command-only
-`RuntimeEndpointTarget`.
+Set `SkillPolicyPreset.required_planner` only when a preset depends on one
+planner backend, typically because it carries backend-specific typed planning
+options. Profile binding checks that requirement against the engine's configured
+backend and fails early on a mismatch. Leave it as `None` for portable presets.
+
+A {class}`SkillPolicyPreset` owns three independently snapshotted policy layers:
+`motion_policy`, `recovery_policy`, and `runner_cfg`. Semantic integration
+selects a preset in this order: an integration-wide `runtime_preset`, the
+profile's `skill_presets[atomic_skill_id]`, then `default_preset`. At execution
+time, an explicit `runner_cfg` supplied when constructing a `SkillRuntime` or
+`SkillRuntime` overrides the selected preset's runner configuration for
+every call; otherwise each call keeps its selected preset's transport timeouts,
+minimum cycle time, and completion-hold behavior.
+
+## Configure semantic action behavior with the preset
+
+`SkillPolicyPreset.action_option_templates` is the required typed behavior
+table for semantic calls that can select the preset. Each key is the exact
+semantic call ID (`pick`, `place`, `hand_over`, or a registered call ID), and
+each value is the target action's exact frozen `ActionOptions` dataclass.
+Static linking rejects a missing entry or a value of the wrong exact type
+before simulation starts.
+
+The preset owns independent snapshots of every template. Semantic lowering may
+replace only compiler-owned dynamic values—for example Pick's downstream target
+poses—while reusable distances, directions, waypoint counts, and other behavior
+remain configuration. A registered semantic lowerer builds the goal but cannot
+return replacement options. Planner choice, sample count, tracking, recovery,
+runner policy, and effect monitors remain in their dedicated preset fields.
+
+## Select semantic grounding providers
+
+Some semantic calls require embodiment knowledge that does not belong in the
+agent-facing call or the atomic action. The built-in semantic HandOver is the
+canonical example: the robot profile selects a named provider that supplies a
+safe middle and default final object target for that embodiment. An explicit
+semantic `HandOver.final_target` overrides the provider's final target.
+
+```python
+profile = RobotSkillProfile(
+    profile_id="dual_arm_robot",
+    resources=dual_arm_resources,
+    command_profiles=hand_command_profiles,
+    defaults=dual_arm_skill_defaults,
+    presets={"default": default_preset},
+    default_preset="default",
+    grounding_providers={"hand_over": "center_workspace_handover"},
+)
+
+runtime = SkillRuntime.from_simulation(
+    simulation=sim,
+    robot=robot,
+    motion_generator=motion_generator,
+    scene_registry=scene_registry,
+    robot_profile=profile,
+    handover_pose_providers=(CenterWorkspaceHandOverProvider(),),
+)
+```
+
+`grounding_providers` maps a **semantic call ID** to a provider ID. The selected
+ID must match one explicitly installed {class}`HandOverPoseProvider`; missing or
+unknown providers fail during workflow analysis, before observation, planning,
+or controller work. The provider is executable integration code and therefore
+is passed to the runtime/compiler rather than stored inside the declarative
+profile.
 
 Every `ControlPartEndpoint.control_part` must be a key in
 `robot.control_parts`. A composite endpoint may reuse a member's control part,
@@ -202,28 +241,6 @@ A linked call receives an effective immutable preset snapshot with
 `DynamicCollisionMode.REQUIRED`; the source profile preset is not mutated.
 Other presets, and scenes without dynamic collision entities, retain their
 configured collision mode.
-
-## Configure semantic action behavior with the preset
-
-`SkillPolicyPreset.action_option_templates` is the required, typed action-
-behavior table for semantic calls that can select the preset. Each key is the
-exact semantic call ID (`pick`, `place`, `hand_over`, or
-`operate_articulation`), and each value must be the target action's exact frozen
-`ActionOptions` dataclass. Static linking rejects a missing entry, an unknown
-call ID, or an options value of the wrong exact type before simulation starts.
-
-The preset owns independent snapshots of each template. Pick and HandOver
-grounding only replace their compiler-owned dynamic target fields; distances,
-directions, waypoint counts, and other reusable behavior remain configuration.
-A registered semantic lowerer may build a goal but cannot return replacement
-options. This keeps task extensions from silently moving action parameters back
-into Python code.
-
-Pick's `downstream_object_target_poses` and HandOver's
-`middle_object_pose`/`final_object_pose` are reserved for the semantic compiler
-and must remain empty in a template. Planner choice, sample count, tracking,
-recovery, runner timing, and effect monitors stay in their dedicated preset
-fields rather than `ActionOptions`.
 
 ## Select semantic effect monitors with the preset
 
@@ -309,6 +326,13 @@ and `bound.skills` is the profile-supported catalog. Registering or replacing an
 action invalidates the bound profile; bind it again before discovery or
 resolution.
 
+{attr}`BoundRobotSkillProfile.source_profile` identifies the exact immutable
+profile used for the binding. The bound view also snapshots the engine's
+monotonic semantic skill-catalog revision. A later agent-visible action
+registration or replacement makes discovery, preset selection, and resolution
+fail until the profile and semantic integration are rebound; an equal public
+descriptor does not make a different implementation owner safe to reuse.
+
 ## Extend the graph beyond manipulation
 
 Resource and capability identifiers are open strings. A joint-driven mobile
@@ -364,75 +388,21 @@ endpoint subtype and adapter when controller semantics differ. An adapter may
 set `requires_command_profile=True` when a missing generic command-profile ID
 must make profile binding fail immediately.
 
-The standard Expert Program simulation declaration accepts these endpoints
-directly for robots that expose the normal full-state/qpos action base; a task
-does not need a custom runtime factory solely to register the endpoint and Gym
-transport:
+On the standard Expert Program path, endpoint adapters and their ordered Gym
+transports are declared by `SimulationExpertProgramRegistration`. Adapter
+classes publish their endpoint type, runtime target types, transport IDs, and
+versioned tracking/evidence routes; encoder classes publish their transport ID
+and exact target/payload types. Registration rejects missing, unused,
+duplicate, or conflicting declarations, and live profile binding checks the
+resolved routes against the fingerprinted declarations. Stateful adapters,
+transports, grounding providers, and safety factories must be frozen dataclasses
+whose configuration is recursively immutable.
 
-```python
-profile = SimulationRobotSkillProfileBinding(
-    profile_id="mobile_v1",
-    resources=(
-        RobotResourceBinding(
-            resource_id="mobile_base",
-            endpoints={
-                "motion": MobileVelocityEndpoint(
-                    controller_id="base_controller",
-                    capabilities=frozenset({"motion.base.velocity"}),
-                )
-            },
-        ),
-    ),
-)
-
-adapter = create_simulation_expert_program_adapter(
-    env,
-    registration=SimulationExpertProgramRegistration(
-        scene_binding=scene_binding,
-        robot_profile_binding=profile,
-        endpoint_adapters=(MobileVelocityEndpointAdapter(),),
-        runtime_transports=(MobileVelocityGymEncoder(),),
-    ),
-)
-```
-
-The adapter and encoder publish exact class-level declarations before a live
-robot is created. The adapter declares its endpoint type, runtime target types,
-transport IDs, and versioned tracking/evidence routes. The encoder declares its
-transport ID plus exact target and payload types; each target and payload type
-declares the same `TRANSPORT_ID`. Registration rejects missing, unused,
-duplicate, or conflicting declarations, and runtime profile binding verifies
-that `adapter.resolve()` returns only those declared routes. A stateful adapter,
-transport, grounding provider, or safety factory must be a frozen dataclass whose
-configuration is recursively immutable; mutable leaves such as lists, mappings,
-sets, byte arrays, and tensors are rejected before registration.
-
-The standard factory currently accepts its built-in tracking feedback,
-projector, evaluator, and effect-evidence routes only for
-`ControlPartEndpoint`. In C1, every custom endpoint adapter must declare empty
-route sets and therefore supports timed/open-loop execution only. Custom
-closed-loop mobile or whole-body tracking/evidence needs a registration-owned
-provider factory in C2; task code must not supply a live provider side channel.
-
-`RobotResourceBinding` snapshots arbitrary typed `ResourceEndpoint` values.
-`ControlPartResourceBinding` remains the stricter joint-backed convenience and
-continues to validate native control parts, joint IDs, and command-preset
-widths.
-
-Endpoint registration is not a navigation or whole-body planner. Existing
-built-in semantic skills do not consume the example base/whole-body
-capabilities. A reusable capability must also install its semantic descriptor
-and lowerer, atomic planner, command payload, safe-state transport behavior, and
-effect integration as applicable. The current standard Gym encoder composes
-custom transports over a full-qpos hold and the standard simulation factory
-owns a `MotionGenerator`; a truly jointless or natively structured controller
-therefore needs a reusable base-action composition/provider integration. This
-does not require base- or whole-body-specific fields in the generic profile or
-runtime core.
-
-Task vertical slices may declare a typed profile binding locally while the API
-stabilizes. Repeated use should move that binding into an embodiment-owned
-profile catalog so new tasks select it instead of redefining robot data.
+The standard factory currently accepts built-in closed-loop routes only for
+`ControlPartEndpoint`. Custom endpoint adapters must declare empty tracking and
+effect-evidence routes and therefore support timed/open-loop completion. Custom
+mobile or whole-body closed-loop tracking needs a registration-owned provider
+factory; it cannot be supplied later as a task-side callback.
 
 A resolved action binding is keyed only by the skill-local
 `(slot_id, endpoint_id)` pair. A reusable non-joint capability supplies a
@@ -448,14 +418,13 @@ code.
 
 ```{important}
 `ResourceClaim` combines leaf IDs, concrete joint IDs, and adapter claim tokens.
-It and explicit disjoint constraints detect physical overlap for binding. A
-claim alone does not enable or prove safe parallel action execution. The
-separate explicit `ParallelSkillRuntime` can coordinate disjoint branch lanes,
-but it merges command frames only through an authoritative
-`ParallelCommandSafetyValidator`. Joint-backed plans may retain a full-robot
-trajectory for feedback and offline compilation, while runtime dispatch remains
-scoped to the endpoints in each command frame.
+It and explicit disjoint constraints detect physical overlap for binding and
+future scheduling work. They do not enable parallel action execution. The
+runtime does not merge concurrent endpoint-command streams. Joint-backed plans
+may retain a full-robot trajectory for feedback and offline compilation, but
+runtime dispatch is scoped to the endpoints in each command frame.
 ```
 
-See {doc}`index` for the direct atomic-action core and
+See {doc}`index` for the direct atomic-action core,
+{doc}`../semantic_skills` for compiler/runtime integration, and
 {doc}`../scene_registry` for canonical scene identity and snapshots.

@@ -31,14 +31,12 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 import math
 from types import MappingProxyType
-from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
-    ArticulationOperationAffordance,
-    ArticulationOperationTarget,
     ControlPartCommandProfile,
     EntityState,
 )
@@ -52,7 +50,6 @@ from embodichain.lab.sim.skills.profiles import (
 )
 from embodichain.lab.sim.skills.integration import SceneEntityManifest, SceneManifest
 from embodichain.lab.sim.skills.scene import (
-    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
     GRASP_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneArticulationRef,
@@ -64,10 +61,6 @@ from embodichain.lab.sim.skills.scene import (
     SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
-)
-from embodichain.toolkits.graspkit.pg_grasp import GraspGeneratorCfg
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
 )
 
 if TYPE_CHECKING:
@@ -226,7 +219,6 @@ class SimulationArticulationBinding:
     dynamics: SceneDynamics = SceneDynamics.UNKNOWN
     collision_role: SceneCollisionRole = SceneCollisionRole.NONE
     semantic_type: str | None = None
-    default_operation_affordance: str | None = None
     geometry_provider: SceneGeometryProvider | None = None
 
     def __post_init__(self) -> None:
@@ -239,10 +231,6 @@ class SimulationArticulationBinding:
         )
         _validate_scene_classification(self.dynamics, self.collision_role)
         _optional_identifier(self.semantic_type, field_name="semantic_type")
-        _optional_identifier(
-            self.default_operation_affordance,
-            field_name="default_operation_affordance",
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,9 +269,6 @@ class AntipodalGraspAffordanceBinding:
     aliases: tuple[str, ...] = ()
     relative_pose: tuple[float, ...] = _IDENTITY_POSE
     mesh_env_id: int = 0
-    generator_cfg: GraspGeneratorCfg | None = None
-    gripper_collision_cfg: GripperCollisionCfg | None = None
-    force_reannotate: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("entity_id", "object_id", "native_name", "revision"):
@@ -304,123 +289,6 @@ class AntipodalGraspAffordanceBinding:
             or self.mesh_env_id < 0
         ):
             raise ValueError("mesh_env_id must be a non-negative integer.")
-        if self.generator_cfg is not None and not isinstance(
-            self.generator_cfg,
-            GraspGeneratorCfg,
-        ):
-            raise TypeError("generator_cfg must be GraspGeneratorCfg or None.")
-        if self.gripper_collision_cfg is not None and not isinstance(
-            self.gripper_collision_cfg,
-            GripperCollisionCfg,
-        ):
-            raise TypeError(
-                "gripper_collision_cfg must be GripperCollisionCfg or None."
-            )
-        if not isinstance(self.force_reannotate, bool):
-            raise TypeError("force_reannotate must be a bool.")
-        object.__setattr__(self, "generator_cfg", deepcopy(self.generator_cfg))
-        object.__setattr__(
-            self,
-            "gripper_collision_cfg",
-            deepcopy(self.gripper_collision_cfg),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class ArticulationOperationTargetBinding:
-    """Declarative named target for one articulation operation."""
-
-    target_position: float
-    displacement: float
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "target_position",
-            _finite(self.target_position, field_name="target_position"),
-        )
-        object.__setattr__(
-            self,
-            "displacement",
-            _finite(self.displacement, field_name="displacement"),
-        )
-
-    def build(self) -> ArticulationOperationTarget:
-        """Build the existing atomic-action target value."""
-        return ArticulationOperationTarget(
-            target_position=self.target_position,
-            displacement=self.displacement,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class ArticulationOperationAffordanceBinding:
-    """Bind one handle operation to an explicit native link and joint."""
-
-    entity_id: str
-    articulation_id: str
-    link_id: str
-    joint_id: str
-    revision: str
-    semantic_targets: Mapping[str, ArticulationOperationTargetBinding]
-    aliases: tuple[str, ...] = ()
-    handle_pose_offset: tuple[float, ...] = _IDENTITY_POSE
-    approach_offset: tuple[float, ...] = _IDENTITY_POSE
-    contact_offset: tuple[float, ...] = _IDENTITY_POSE
-    operation_offset: tuple[float, ...] = _IDENTITY_POSE
-    retract_offset: tuple[float, ...] = _IDENTITY_POSE
-    operation_axis: tuple[float, float, float] = (1.0, 0.0, 0.0)
-    position_scale: float = 1.0
-
-    def __post_init__(self) -> None:
-        for field_name in (
-            "entity_id",
-            "articulation_id",
-            "link_id",
-            "joint_id",
-            "revision",
-        ):
-            _identifier(getattr(self, field_name), field_name=field_name)
-        object.__setattr__(
-            self,
-            "aliases",
-            _identifier_tuple(self.aliases, field_name="aliases"),
-        )
-        for field_name in (
-            "handle_pose_offset",
-            "approach_offset",
-            "contact_offset",
-            "operation_offset",
-            "retract_offset",
-        ):
-            object.__setattr__(
-                self,
-                field_name,
-                _pose_tuple(getattr(self, field_name), field_name=field_name),
-            )
-        axis = tuple(
-            _finite(value, field_name=f"operation_axis[{index}]")
-            for index, value in enumerate(self.operation_axis)
-        )
-        if len(axis) != 3 or math.sqrt(sum(value * value for value in axis)) <= 0.0:
-            raise ValueError("operation_axis must contain three non-zero values.")
-        object.__setattr__(self, "operation_axis", axis)
-        position_scale = _finite(self.position_scale, field_name="position_scale")
-        if position_scale <= 0.0:
-            raise ValueError("position_scale must be positive.")
-        object.__setattr__(self, "position_scale", position_scale)
-        if not isinstance(self.semantic_targets, Mapping):
-            raise TypeError("semantic_targets must be a mapping.")
-        targets: dict[str, ArticulationOperationTargetBinding] = {}
-        for target_id, target in self.semantic_targets.items():
-            _identifier(target_id, field_name="semantic target IDs")
-            if type(target) is not ArticulationOperationTargetBinding:
-                raise TypeError(
-                    "semantic_targets values must be exact "
-                    "ArticulationOperationTargetBinding values."
-                )
-            targets[target_id] = target
-        object.__setattr__(self, "semantic_targets", MappingProxyType(targets))
 
 
 @dataclass(frozen=True, slots=True)
@@ -548,9 +416,6 @@ def _antipodal_affordance(
     return AntipodalAffordance(
         mesh_vertices=vertices,
         mesh_triangles=triangles,
-        generator_cfg=deepcopy(binding.generator_cfg),
-        gripper_collision_cfg=deepcopy(binding.gripper_collision_cfg),
-        force_reannotate=binding.force_reannotate,
     )
 
 
@@ -563,7 +428,6 @@ class SimulationSceneBinding:
     articulations: tuple[SimulationArticulationBinding, ...] = ()
     links: tuple[SimulationArticulationLinkBinding, ...] = ()
     antipodal_grasps: tuple[AntipodalGraspAffordanceBinding, ...] = ()
-    articulation_operations: tuple[ArticulationOperationAffordanceBinding, ...] = ()
     collision_world_mode: SceneCollisionWorldMode | None = None
 
     def __post_init__(self) -> None:
@@ -573,7 +437,6 @@ class SimulationSceneBinding:
             "articulations": SimulationArticulationBinding,
             "links": SimulationArticulationLinkBinding,
             "antipodal_grasps": AntipodalGraspAffordanceBinding,
-            "articulation_operations": ArticulationOperationAffordanceBinding,
         }
         all_ids: list[str] = []
         for field_name, expected_type in expected_types.items():
@@ -598,15 +461,9 @@ class SimulationSceneBinding:
             )
 
     def declare(self) -> SceneManifest:
-        """Project the complete provider-free scene declaration.
-
-        Canonical topology errors are rejected here, before a simulation is
-        constructed. Native simulation UIDs, mesh data, link names, and joint
-        names remain live validation owned by :meth:`build`.
-        """
+        """Project the complete provider-free scene declaration."""
         objects = {item.entity_id: item for item in self.rigid_objects}
         articulations = {item.entity_id: item for item in self.articulations}
-        links = {item.entity_id: item for item in self.links}
         entries: list[SceneEntityManifest] = []
 
         for binding in self.rigid_objects:
@@ -641,15 +498,6 @@ class SimulationSceneBinding:
                 if binding.simulation_uid == binding.entity_id
                 else (binding.simulation_uid,)
             )
-            defaults = (
-                {}
-                if binding.default_operation_affordance is None
-                else {
-                    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY: (
-                        SceneAffordanceRef(binding.default_operation_affordance)
-                    )
-                }
-            )
             entries.append(
                 SceneEntityManifest(
                     ref=SceneArticulationRef(binding.entity_id),
@@ -657,7 +505,6 @@ class SimulationSceneBinding:
                     dynamics=binding.dynamics,
                     collision_role=binding.collision_role,
                     semantic_type=binding.semantic_type,
-                    default_affordances=defaults,
                 )
             )
 
@@ -697,38 +544,10 @@ class SimulationSceneBinding:
                 )
             )
 
-        for binding in self.articulation_operations:
-            if binding.articulation_id not in articulations:
-                raise KeyError(
-                    f"Operation affordance {binding.entity_id!r} references "
-                    f"unbound articulation {binding.articulation_id!r}."
-                )
-            link = links.get(binding.link_id)
-            if link is None:
-                raise KeyError(
-                    f"Operation affordance {binding.entity_id!r} references "
-                    f"unbound link {binding.link_id!r}."
-                )
-            if link.articulation_id != binding.articulation_id:
-                raise ValueError(
-                    f"Operation affordance {binding.entity_id!r} and link "
-                    f"{binding.link_id!r} select different articulations."
-                )
-            entries.append(
-                SceneEntityManifest(
-                    ref=SceneAffordanceRef(binding.entity_id),
-                    aliases=binding.aliases,
-                    parent=SceneArticulationRef(binding.articulation_id),
-                    native_name=link.native_link_name,
-                    affordance_capabilities=frozenset(
-                        {ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY}
-                    ),
-                    affordance_payload_type=ArticulationOperationAffordance,
-                    affordance_revision=binding.revision,
-                )
-            )
-
-        return SceneManifest(entries)
+        return SceneManifest(
+            entries,
+            collision_world_mode=self.collision_world_mode,
+        )
 
     def build(self, simulation: SimulationManager) -> SceneRegistry:
         """Build the existing authoritative scene registry.
@@ -779,15 +598,7 @@ class SimulationSceneBinding:
                 )
             else:
                 binding = articulations[entity_id]
-                defaults = (
-                    {}
-                    if binding.default_operation_affordance is None
-                    else {
-                        ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY: (
-                            SceneAffordanceRef(binding.default_operation_affordance)
-                        )
-                    }
-                )
+                defaults = {}
             registrations.append(
                 replace(
                     registration,
@@ -871,71 +682,6 @@ class SimulationSceneBinding:
                     affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
                     affordance_revision=binding.revision,
                     relative_pose=_pose_tensor(binding.relative_pose),
-                )
-            )
-
-        for binding in self.articulation_operations:
-            articulation_binding = articulations.get(binding.articulation_id)
-            if articulation_binding is None:
-                raise KeyError(
-                    f"Operation affordance {binding.entity_id!r} references "
-                    f"unbound articulation {binding.articulation_id!r}."
-                )
-            link_binding = links.get(binding.link_id)
-            if link_binding is None:
-                raise KeyError(
-                    f"Operation affordance {binding.entity_id!r} references "
-                    f"unbound link {binding.link_id!r}."
-                )
-            if link_binding.articulation_id != binding.articulation_id:
-                raise ValueError(
-                    f"Operation affordance {binding.entity_id!r} and link "
-                    f"{binding.link_id!r} select different articulations."
-                )
-            articulation = native_articulations[binding.articulation_id]
-            native_joints = _native_names(
-                articulation,
-                attribute="joint_names",
-                owner=f"articulation {binding.articulation_id!r}",
-            )
-            if binding.joint_id not in native_joints:
-                raise KeyError(
-                    f"Native joint {binding.joint_id!r} selected for "
-                    f"{binding.entity_id!r} was not found; available joints are "
-                    f"{sorted(native_joints)}."
-                )
-            payload = ArticulationOperationAffordance(
-                joint_id=binding.joint_id,
-                approach_offset=_pose_tensor(binding.approach_offset),
-                contact_offset=_pose_tensor(binding.contact_offset),
-                operation_offset=_pose_tensor(binding.operation_offset),
-                retract_offset=_pose_tensor(binding.retract_offset),
-                operation_axis=torch.tensor(
-                    binding.operation_axis,
-                    dtype=torch.float32,
-                ),
-                position_scale=binding.position_scale,
-                semantic_targets={
-                    target_id: target.build()
-                    for target_id, target in binding.semantic_targets.items()
-                },
-            )
-            registrations.append(
-                SceneEntityRegistration(
-                    ref=SceneAffordanceRef(binding.entity_id),
-                    state_provider=_SimulationArticulationLinkStateProvider(
-                        articulation,
-                        link_binding.native_link_name,
-                        _pose_tensor(binding.handle_pose_offset),
-                    ),
-                    aliases=binding.aliases,
-                    parent=SceneArticulationRef(binding.articulation_id),
-                    native_name=link_binding.native_link_name,
-                    affordance=payload,
-                    affordance_capabilities=frozenset(
-                        {ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY}
-                    ),
-                    affordance_revision=binding.revision,
                 )
             )
 
@@ -1034,87 +780,6 @@ def _require_control_part_dof(robot: Robot, control_part: str) -> int:
     return len(joint_ids)
 
 
-@runtime_checkable
-class SimulationResourceEndpointBinding(Protocol):
-    """Build one typed resource endpoint from an explicitly selected robot.
-
-    Implementations are reusable robot-integration declarations. They may
-    validate embodiment-specific controller surfaces, but must only return an
-    owned :class:`ResourceEndpoint`; live controller handles remain in the
-    endpoint adapter and runtime transport.
-    """
-
-    @property
-    def endpoint_id(self) -> str:
-        """Return the stable endpoint ID within its containing resource."""
-
-    def build(self, robot: Robot) -> ResourceEndpoint:
-        """Build and validate one endpoint declaration for ``robot``."""
-
-    def declare(self) -> ResourceEndpoint:
-        """Return the provider-free endpoint declaration."""
-
-
-@runtime_checkable
-class SimulationRobotResourceBinding(Protocol):
-    """Build one leaf or composite resource in the robot resource DAG."""
-
-    @property
-    def resource_id(self) -> str:
-        """Return the stable resource ID."""
-
-    @property
-    def members(self) -> tuple[str, ...]:
-        """Return explicitly declared child resource IDs."""
-
-    def build(self, robot: Robot) -> RobotResource:
-        """Build and validate one owned robot resource declaration."""
-
-    def declare(self) -> RobotResource:
-        """Return the provider-free resource declaration."""
-
-
-@dataclass(frozen=True, slots=True)
-class RobotResourceBinding:
-    """Generic simulation binding for arbitrary typed resource endpoints.
-
-    This is the direct configuration path for mobile bases, whole-body
-    controllers, tools, and other non-joint transports. Endpoint-specific
-    validation remains in the registered :class:`ResourceEndpointAdapter`;
-    this value owns the declaration and preserves the resource DAG exactly.
-    """
-
-    resource_id: str
-    endpoints: Mapping[str, ResourceEndpoint] = field(default_factory=dict)
-    members: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        resource = RobotResource(
-            resource_id=self.resource_id,
-            endpoints=self.endpoints,
-            members=self.members,
-        )
-        object.__setattr__(self, "endpoints", resource.endpoints)
-        object.__setattr__(self, "members", resource.members)
-
-    def build(self, robot: Robot) -> RobotResource:
-        """Build an independently owned resource without assuming robot joints."""
-        del robot
-        return RobotResource(
-            resource_id=self.resource_id,
-            endpoints=self.endpoints,
-            members=self.members,
-        )
-
-    def declare(self) -> RobotResource:
-        """Return an independently owned provider-free resource."""
-        return RobotResource(
-            resource_id=self.resource_id,
-            endpoints=self.endpoints,
-            members=self.members,
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class ControlPartEndpointBinding:
     """Profile endpoint backed by one explicit robot control part."""
@@ -1138,11 +803,7 @@ class ControlPartEndpointBinding:
     def build(self, robot: Robot) -> ResourceEndpoint:
         """Build a joint-backed endpoint after native control-part validation."""
         _require_control_part_dof(robot, self.control_part)
-        return ControlPartEndpoint(
-            control_part=self.control_part,
-            command_profile=self.command_preset,
-            capabilities=self.capabilities,
-        )
+        return self.declare()
 
     def declare(self) -> ResourceEndpoint:
         """Return the endpoint contract without reading a robot."""
@@ -1251,7 +912,7 @@ class SimulationRobotSkillProfileBinding:
     """Build a profile from typed resources with strict native validation."""
 
     profile_id: str
-    resources: tuple[SimulationRobotResourceBinding, ...]
+    resources: tuple[ControlPartResourceBinding | RobotResource, ...]
     command_presets: tuple[ControlPartCommandPreset, ...] = ()
     defaults: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     presets: tuple[SkillPolicyPreset, ...] = ()
@@ -1263,10 +924,14 @@ class SimulationRobotSkillProfileBinding:
         _identifier(self.profile_id, field_name="profile_id")
         resources = tuple(self.resources)
         if not all(
-            isinstance(resource, SimulationRobotResourceBinding)
+            type(resource) is RobotResource
+            or type(resource) is ControlPartResourceBinding
             for resource in resources
         ):
-            raise TypeError("resources must implement SimulationRobotResourceBinding.")
+            raise TypeError(
+                "resources must contain exact RobotResource or "
+                "ControlPartResourceBinding values."
+            )
         for resource in resources:
             _identifier(resource.resource_id, field_name="resource_id")
             _identifier_tuple(resource.members, field_name="resource members")
@@ -1343,7 +1008,11 @@ class SimulationRobotSkillProfileBinding:
 
         resources: dict[str, RobotResource] = {}
         for resource_binding in self.resources:
-            resource = resource_binding.build(robot)
+            resource = (
+                resource_binding.snapshot()
+                if type(resource_binding) is RobotResource
+                else resource_binding.build(robot)
+            )
             if type(resource) is not RobotResource:
                 raise TypeError(
                     f"Resource binding {resource_binding.resource_id!r} must build "
@@ -1406,7 +1075,11 @@ class SimulationRobotSkillProfileBinding:
         """Project the complete provider-free robot skill profile."""
         resources: dict[str, RobotResource] = {}
         for binding in self.resources:
-            resource = binding.declare()
+            resource = (
+                binding.snapshot()
+                if type(binding) is RobotResource
+                else binding.declare()
+            )
             if type(resource) is not RobotResource:
                 raise TypeError(
                     f"Resource binding {binding.resource_id!r} must declare "
@@ -1462,19 +1135,4 @@ class SimulationRobotSkillProfileBinding:
         )
 
 
-__all__ = [
-    "AntipodalGraspAffordanceBinding",
-    "ArticulationOperationAffordanceBinding",
-    "ArticulationOperationTargetBinding",
-    "ControlPartCommandPreset",
-    "ControlPartEndpointBinding",
-    "ControlPartResourceBinding",
-    "RobotResourceBinding",
-    "SimulationArticulationBinding",
-    "SimulationArticulationLinkBinding",
-    "SimulationRigidObjectBinding",
-    "SimulationResourceEndpointBinding",
-    "SimulationRobotResourceBinding",
-    "SimulationRobotSkillProfileBinding",
-    "SimulationSceneBinding",
-]
+__all__: list[str] = []

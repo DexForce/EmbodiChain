@@ -107,6 +107,7 @@ API Reference
    motion_opts = MotionGenOptions(
        strategy="motion_gen",               # "motion_gen" or "ik_interp"
        sample_count=None,                    # Optional normalized output length
+       interpolation_dt=None,                # Required for deterministic interpolation
        plan_opts=ToppraPlanOptions(...),  # Options for the underlying planner
        control_part=arm_name,              # Robot part to control (e.g., 'left_arm')
        is_interpolate=False,               # Whether to pre-interpolate trajectory
@@ -126,8 +127,10 @@ API Reference
        options: MotionGenOptions | None = None,
    ) -> PlanResult
 
-- ``strategy="motion_gen"`` delegates to the configured backend; ``strategy="ik_interp"`` performs deterministic waypoint IK and joint interpolation.
-- Returns a normalized, environment-batched ``PlanResult``.
+- ``strategy="motion_gen"`` delegates to the configured backend; ``strategy="ik_interp"`` performs deterministic waypoint IK and joint interpolation and requires ``interpolation_dt``.
+- Returns a normalized, environment-batched ``PlanResult`` with explicit ``dt``
+  and derived ``duration`` whenever positions are present. Missing timing raises
+  immediately.
 - Uses ``target_states`` (list of PlanState) and ``options`` (MotionGenOptions) instead of individual parameters.
 
 **interpolate_trajectory**
@@ -166,7 +169,7 @@ API Reference
 - (Reserved) Plan trajectory with collision checking (not yet implemented).
 
 Notes & Best Practices
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 - Only collision-free planning is currently supported; collision checking is a placeholder.
 - Input/outputs are numpy arrays or torch tensors; ensure type consistency.
