@@ -156,7 +156,7 @@ A {class}`SkillPolicyPreset` owns three independently snapshotted policy layers:
 selects a preset in this order: an integration-wide `runtime_preset`, the
 profile's `skill_presets[atomic_skill_id]`, then `default_preset`. At execution
 time, an explicit `runner_cfg` supplied when constructing a `SkillRuntime` or
-`SemanticSkillRuntime` overrides the selected preset's runner configuration for
+`SkillRuntime` overrides the selected preset's runner configuration for
 every call; otherwise each call keeps its selected preset's transport timeouts,
 minimum cycle time, and completion-hold behavior.
 
@@ -179,7 +179,7 @@ profile = RobotSkillProfile(
     grounding_providers={"hand_over": "center_workspace_handover"},
 )
 
-runtime = SemanticSkillRuntime.from_simulation(
+runtime = SkillRuntime.from_simulation(
     simulation=sim,
     robot=robot,
     motion_generator=motion_generator,

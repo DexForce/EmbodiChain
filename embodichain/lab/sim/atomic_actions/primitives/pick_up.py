@@ -389,6 +389,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 object_pose,
                 start_arm_qpos,
                 manipulator,
+                end_effector.target_id,
                 options,
                 approach_direction,
             )
@@ -474,10 +475,17 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         object_pose: torch.Tensor,
         start_qpos: torch.Tensor,
         manipulator: JointPositionTarget,
+        grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
+        affordance = semantics.affordance
+        if not isinstance(affordance, AntipodalAffordance):
+            raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
+        generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        grasp_poses_result = generator.get_valid_grasp_poses(
+            mesh_vertices=affordance.mesh_vertices,
+            mesh_triangles=affordance.mesh_triangles,
             obj_poses=object_pose,
             approach_direction=approach_direction,
             object_part=options.pick_object_part,

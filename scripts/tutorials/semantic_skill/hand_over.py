@@ -19,7 +19,7 @@
 The workflow contains an object-centric ``Pick`` followed by a registered
 dual-arm transfer call. The robot profile chooses the left and right resources;
 an explicit lowerer supplies the atomic HandOver goal and embodiment-specific
-receive behavior at grounding time. :class:`SemanticSkillRuntime` executes each
+receive behavior at grounding time. :class:`SkillRuntime` executes each
 call from fresh observations and commits transfer state only after physical
 verification.
 """
@@ -63,7 +63,7 @@ from embodichain.lab.sim.skills import (
     SemanticEffectVerifier,
     SemanticLowering,
     SemanticPose,
-    SemanticSkillRuntime,
+    SkillRuntime,
     SkillPolicyPreset,
     builtin_semantic_call_catalog,
 )
@@ -80,6 +80,7 @@ from scripts.tutorials.atomic_action.scenario_utils import settle_object
 from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
+    create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -409,12 +410,12 @@ def create_handover_application(
     right_grasp: torch.Tensor,
     n_sample: int,
     force_reannotate: bool,
-) -> SemanticSkillRuntime:
+) -> SkillRuntime:
     """Assemble the application-facing runtime for the HandOver tutorial.
 
     The returned runtime owns the registered call extension, robot binding,
     scene catalog, and default physical-effect verifier. Task code only needs
-    to submit semantic calls through :meth:`SemanticSkillRuntime.run`.
+    to submit semantic calls through :meth:`SkillRuntime.run`.
 
     Args:
         simulation: Simulation containing the robot and workpiece.
@@ -433,8 +434,6 @@ def create_handover_application(
     object_semantics = create_antipodal_semantics(
         obj,
         label="handover object",
-        n_sample=n_sample,
-        force_reannotate=force_reannotate,
     )
     registry, _ = create_graspable_object_registry(
         simulation,
@@ -456,12 +455,20 @@ def create_handover_application(
             target_descriptor=AtomicHandOver.descriptor(),
         )
     )
-    return SemanticSkillRuntime.from_simulation(
+    grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=n_sample,
+        force_refresh=force_reannotate,
+    )
+    return SkillRuntime.from_simulation(
         simulation=simulation,
         robot=robot,
         motion_generator=create_toppra_motion_generator(robot),
         scene_registry=registry,
         robot_profile=profile,
+        grasp_pose_generators={
+            "left_hand": grasp_pose_generator,
+            "right_hand": grasp_pose_generator,
+        },
         call_catalog=call_catalog,
         effect_verifier=create_handover_effect_verifier(
             obj,
@@ -545,7 +552,7 @@ def main() -> None:
     try:
         result = app.run(
             calls,
-            task_id="tutorial.semantic_pick_handover",
+            workflow_id="tutorial.semantic_pick_handover",
             on_step=create_runtime_step_observer(
                 obj,
                 robot,

@@ -26,6 +26,7 @@ import torch
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 
+from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
@@ -82,8 +83,7 @@ class HandOverOptions(ActionOptions):
     """Per-invocation handover behavior and object-pose targets."""
 
     receive_pick_object_part: str = "bottom"
-    """Object part the receiving arm grasps during the handover
-    (see :meth:`AntipodalAffordance.get_valid_grasp_poses`)."""
+    """Object part passed to the receiving endpoint's grasp-pose generator."""
 
     middle_object_pose: PoseGoalValue | None = None
     """Object pose at the handover point where the receiving arm grasps it,
@@ -393,6 +393,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             middle_object_pose,
             options.receive_pick_object_part,
             receive_approach_direction,
+            resources.receive_hand.target_id,
         )
         success_mask = normalize_success_mask(
             grasp_success,
@@ -691,9 +692,16 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         object_pose: torch.Tensor,
         object_part: str,
         approach_direction: torch.Tensor,
+        grasp_target_id: str,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Select the lowest-cost receiving grasp on ``object_part`` at ``object_pose``."""
-        grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
+        affordance = semantics.affordance
+        if not isinstance(affordance, AntipodalAffordance):
+            raise ValueError("HandOver grasp sampling requires AntipodalAffordance.")
+        generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        grasp_poses_result = generator.get_valid_grasp_poses(
+            mesh_vertices=affordance.mesh_vertices,
+            mesh_triangles=affordance.mesh_triangles,
             obj_poses=object_pose,
             approach_direction=approach_direction,
             object_part=object_part,

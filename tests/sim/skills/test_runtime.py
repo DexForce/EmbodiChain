@@ -72,7 +72,6 @@ from embodichain.lab.sim.skills.integration import (
 )
 from embodichain.lab.sim.skills.runtime import (
     AtomicSkills,
-    SemanticSkillRuntime,
     SkillEndpointBindingTrace,
     SkillRuntime,
     SkillStatus,
@@ -665,9 +664,7 @@ def test_nonblocking_step_routes_effect_feedback_through_collector() -> None:
     assert system.compiler.monitors[0].requests[0].verification_id == 0
 
 
-def test_compatibility_runtime_combines_legacy_effect_verifier_and_step_observer() -> (
-    None
-):
+def test_runtime_combines_application_effect_verifier_and_step_observer() -> None:
     system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
     verifier_calls: list[tuple[str, int]] = []
     observed_steps = []
@@ -681,24 +678,24 @@ def test_compatibility_runtime_combines_legacy_effect_verifier_and_step_observer
         verifier_calls.append((call.semantic_id, request.verification_id))
         return request.env_mask.clone()
 
-    runtime = SemanticSkillRuntime(
+    runtime = SkillRuntime(
         system.compiler,
         system.observation,
         system.sink,
         system.collector,
         task_state=TaskState.empty(BATCH_SIZE, "cpu"),
         clock=system.clock,
+        effect_verifier=verify,
     )
 
     result = runtime.run(
-        (_call("compatibility"),),
-        task_id="compatibility",
-        effect_verifier=verify,
+        (_call("canonical"),),
+        workflow_id="canonical",
         on_step=observed_steps.append,
     )
 
     assert result.status is SkillStatus.COMPLETED
-    assert verifier_calls == [("test.compatibility", 0)]
+    assert verifier_calls == [("test.canonical", 0)]
     assert observed_steps
 
 

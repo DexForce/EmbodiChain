@@ -79,12 +79,12 @@ def test_decode_schema_v2_parallel_with_explicit_barrier() -> None:
     )
 
 
-def test_schema_v1_rejects_parallel_discriminator() -> None:
+def test_schema_v1_is_rejected_before_program_decoding() -> None:
     with pytest.raises(ExpertProgramDecodeError) as error:
         decode_expert_program(_payload(schema_version=1))
 
-    assert error.value.code == "unknown_discriminator"
-    assert error.value.path == ("program", "kind")
+    assert error.value.code == "unsupported_schema_version"
+    assert error.value.path == ("schema_version",)
 
 
 def test_parallel_requires_two_branches_and_explicit_barrier() -> None:
@@ -107,7 +107,7 @@ def test_parallel_requires_two_branches_and_explicit_barrier() -> None:
 
 
 def test_barrier_is_not_valid_as_a_standalone_program() -> None:
-    with pytest.raises(ValueError, match="only be owned by Parallel"):
+    with pytest.raises(TypeError, match="exact ProgramNodeCfg"):
         ExpertProgramCfg(
             schema_version=2,
             program_id="invalid_barrier",

@@ -18,11 +18,11 @@ The runnable sources are:
 Both runnable examples use the same three-part structure:
 
 * ``create_*_application(...)`` assembles a fully bound
-  ``SemanticSkillRuntime`` and installs its default physical-effect verifier;
+  ``SkillRuntime`` and installs its default physical-effect verifier;
 * ``create_*_task()`` declares only robot-independent semantic calls;
 * ``app.run(task, ...)`` is the application-facing execution entry point.
 
-``app`` is still a ``SemanticSkillRuntime`` rather than another wrapper class.
+``app`` is still the canonical ``SkillRuntime`` rather than another wrapper class.
 The factory only keeps simulator, scene-registry, robot-profile, and verifier
 construction out of the task declaration.
 
@@ -63,7 +63,7 @@ controller commands:
    Diagnostic compilation projects expected attachment changes hypothetically
    between calls. It proves that the current workflow can be lowered and
    planned; it does not prove that a physical grasp, release, or transfer
-   occurred. Normal execution uses ``SemanticSkillRuntime`` and an explicit
+   occurred. Normal execution uses ``SkillRuntime`` and an explicit
    effect verifier.
 
 The application entry
@@ -208,7 +208,7 @@ same atomic skill contracts.
 Assemble and run the application
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``SemanticSkillRuntime.from_simulation`` assembles the standard planning scene,
+``SkillRuntime.from_simulation`` assembles the standard planning scene,
 simulation ports, action engine, manifest, and compiler:
 
 .. code-block:: python
@@ -222,11 +222,11 @@ simulation ports, action engine, manifest, and compiler:
        hand_grasp,
        n_sample,
        force_reannotate,
-   ) -> SemanticSkillRuntime:
+   ) -> SkillRuntime:
        registry = ...
        profile = ...
        verify_effect = ...
-       return SemanticSkillRuntime.from_simulation(
+       return SkillRuntime.from_simulation(
            simulation=simulation,
            robot=robot,
            motion_generator=create_curobo_motion_generator(robot),
@@ -340,11 +340,11 @@ the runtime explicitly:
        right_grasp,
        n_sample,
        force_reannotate,
-   ) -> SemanticSkillRuntime:
+   ) -> SkillRuntime:
        registry = ...
        profile = ...
        verify_effect = ...
-       return SemanticSkillRuntime.from_simulation(
+       return SkillRuntime.from_simulation(
            simulation=simulation,
            robot=robot,
            motion_generator=create_toppra_motion_generator(robot),

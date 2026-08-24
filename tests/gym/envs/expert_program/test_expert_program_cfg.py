@@ -23,7 +23,7 @@ import math
 import pytest
 
 from embodichain.lab.gym.envs.expert_program import (
-    MAX_REPEAT_COUNT,
+    ArticulationJointPositionValidatorCfg,
     CyclicPoseTargetCfg,
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
@@ -40,6 +40,7 @@ from embodichain.lab.gym.envs.expert_program import (
     TargetRefCfg,
     WaitStablePostCfg,
 )
+from embodichain.lab.gym.envs.expert_program.cfg import MAX_REPEAT_COUNT
 from embodichain.utils.configclass import is_configclass
 
 
@@ -70,6 +71,7 @@ def test_every_public_schema_value_uses_configclass() -> None:
         RegisteredSemanticCallCfg,
         WaitStablePostCfg,
         ObjectNearTargetValidatorCfg,
+        ArticulationJointPositionValidatorCfg,
         InvokeCfg,
         SequenceCfg,
         RepeatCfg,
@@ -113,7 +115,7 @@ def test_program_rejects_nested_repeat_expansion_above_static_budget() -> None:
 
     with pytest.raises(ValueError, match="expands to more than"):
         ExpertProgramCfg(
-            schema_version=1,
+            schema_version=2,
             program_id="too_large",
             integration=_integration(),
             targets={},
@@ -152,7 +154,7 @@ def test_programmatic_config_rejects_unknown_target_reference() -> None:
 
     with pytest.raises(ValueError, match="Unknown target reference 'missing'"):
         ExpertProgramCfg(
-            schema_version=1,
+            schema_version=2,
             program_id="missing_target",
             integration=_integration(),
             targets={},
@@ -204,3 +206,26 @@ def test_segment_owns_post_policy_and_validator_sequences() -> None:
     assert segment.validators == (
         ObjectNearTargetValidatorCfg(object="cube", target="drop_pose"),
     )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({}, "At least one"),
+        (
+            {"minimum_position": 0.2, "maximum_position": 0.1},
+            "less than or equal",
+        ),
+    ],
+)
+def test_articulation_joint_validator_requires_an_ordered_bound(
+    kwargs: dict[str, object],
+    message: str,
+) -> None:
+    """A joint validator must define one non-empty inclusive interval."""
+    with pytest.raises(ValueError, match=message):
+        ArticulationJointPositionValidatorCfg(
+            articulation="drawer",
+            joint="cabinet_to_drawer",
+            **kwargs,
+        )
