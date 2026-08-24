@@ -316,9 +316,12 @@ def test_curobo_planner_exposes_collision_world_contract(multi_env, expected_mod
         ),
     )
 
-    assert planner.dynamic_collision_entity_ids == ("registry_cube",)
-    assert planner.collision_world_entity_ids == ("registry_cube",)
-    assert planner.collision_world_batch_mode == expected_mode
+    info = planner.collision_world_info
+
+    assert info.dynamic_entity_ids == ("registry_cube",)
+    assert info.entity_ids == ("registry_cube",)
+    assert info.batch_mode == expected_mode
+    assert info.supports_updates is True
 
 
 def test_curobo_collision_world_binding_merges_owned_obstacle_poses():

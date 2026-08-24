@@ -1361,7 +1361,8 @@ def test_generic_profile_supports_base_and_whole_body_without_arm_tool_fields() 
 def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     preset = SkillPolicyPreset(
         "safe",
-        motion_policy=MotionPolicy(planner="stub_planner", sample_count=80),
+        motion_policy=MotionPolicy(sample_count=80),
+        required_planner="stub_planner",
     )
     profile = RobotSkillProfile(
         "presets",
@@ -1378,6 +1379,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
 
     assert first is not second
     assert first.schema_version == 1
+    assert first.required_planner == "stub_planner"
     assert first.motion_policy.sample_count == 80
     mutable_runner = first.runner_cfg
     mutable_runner.command_timeout = 99.0
@@ -1388,6 +1390,8 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         bound.preset("safe", skill_id="typo")
     with pytest.raises(ValueError, match=r"supported versions are \[1\]"):
         SkillPolicyPreset("future", schema_version=2)
+    with pytest.raises(ValueError, match="required_planner"):
+        SkillPolicyPreset("invalid", required_planner="")
 
     incompatible = RobotSkillProfile(
         "bad_preset",
@@ -1396,7 +1400,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         presets={
             "other": SkillPolicyPreset(
                 "other",
-                motion_policy=MotionPolicy(planner="other_planner"),
+                required_planner="other_planner",
             )
         },
     )
@@ -1411,7 +1415,6 @@ def test_policy_preset_defaults_exact_builtin_effect_monitor_refs() -> None:
         "pick",
         "place",
         "hand_over",
-        "operate_articulation",
     }
     for monitor_ref in preset.effect_monitors.values():
         assert monitor_ref.monitor_id == COMPOSITE_EFFECT_MONITOR_ID

@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
-from typing import TypeVar
+from typing import Literal, TypeVar
 from unittest.mock import Mock
 
 import pytest
@@ -36,7 +37,6 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicAction,
     AtomicActionEngine,
     ControlPartCommandProfile,
-    CoordinatedHeldObjectState,
     CoordinatedPickGoal,
     CoordinatedPickment,
     CoordinatedPickmentOptions,
@@ -62,10 +62,6 @@ from embodichain.lab.sim.atomic_actions import (
     MoveJoints,
     MoveJointsOptions,
     ObjectSemantics,
-    ObservedArticulationJointState,
-    OperateArticulation,
-    OperateArticulationGoal,
-    OperateArticulationOptions,
     PickUp,
     PickUpOptions,
     Place,
@@ -73,14 +69,28 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     PlanningContext,
     Press,
+    PressAffordance,
     PressGoal,
     PressOptions,
+    SlideAffordance,
+    Slide,
+    SlideGoal,
+    SlideOptions,
     RobotObservation,
-    SceneArticulationOperationGeometry,
     SceneEntityPose,
     SceneSnapshot,
     TaskState,
     TimedTrajectory,
+    TwistAffordance,
+    Twist,
+    TwistGoal,
+    TwistOptions,
+)
+from embodichain.lab.sim.atomic_actions.goals import collect_scene_dependencies
+from embodichain.lab.sim.common import BatchEntity
+from embodichain.toolkits.graspkit import (
+    ParallelJawGraspPoseGenerator,
+    ParallelJawGripperModelCfg,
 )
 from embodichain.lab.sim.planners import (
     MotionGenerator,
@@ -94,11 +104,80 @@ NUM_ENVS = 2
 ARM_DOF = 6
 HAND_DOF = 2
 ROBOT_DOF = ARM_DOF + HAND_DOF
+CONTROL_DT = 1.0 / 60.0
 DUAL_ARM_DOF = 2 * ARM_DOF
 DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
 
 ActionT = TypeVar("ActionT", bound=AtomicAction)
 _ACTION_ENGINES: dict[int, AtomicActionEngine] = {}
+_GRASP_GENERATORS: dict[int, _StubGraspPoseGenerator] = {}
+
+
+class _StubGraspPoseGenerator(ParallelJawGraspPoseGenerator):
+    """Deterministic planning-service double used by atomic-action tests."""
+
+    def __init__(self) -> None:
+        super().__init__(ParallelJawGripperModelCfg(model_id="test_parallel_jaw"))
+
+    def get_valid_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        object_part: str = "center",
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        del mesh_vertices, mesh_triangles, approach_direction, object_part
+        return [
+            (
+                torch.eye(4, dtype=torch.float32, device=obj_poses.device).unsqueeze(0),
+                torch.zeros(1, dtype=torch.float32, device=obj_poses.device),
+            )
+            for _ in range(obj_poses.shape[0])
+        ]
+
+    def get_best_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        del mesh_vertices, mesh_triangles, approach_direction
+        return (
+            torch.ones(obj_poses.shape[0], dtype=torch.bool, device=obj_poses.device),
+            torch.eye(4, dtype=torch.float32, device=obj_poses.device).repeat(
+                obj_poses.shape[0], 1, 1
+            ),
+            torch.zeros(obj_poses.shape[0], device=obj_poses.device),
+        )
+
+    def get_dual_arm_valid_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        left_to_right_arm_direction: torch.Tensor,
+        approach_direction: torch.Tensor,
+        middle_empty_ratio: float = 0.4,
+    ) -> list[dict[str, dict[str, object]] | None]:
+        del (
+            mesh_vertices,
+            mesh_triangles,
+            left_to_right_arm_direction,
+            approach_direction,
+            middle_empty_ratio,
+        )
+        arm = {
+            "is_success": True,
+            "grasp_poses": torch.eye(4, dtype=torch.float32).unsqueeze(0),
+            "open_lengths": torch.tensor([0.0], dtype=torch.float32),
+            "total_cost": torch.tensor([0.0], dtype=torch.float32),
+        }
+        return [{"left": arm, "right": arm} for _ in range(obj_poses.shape[0])]
 
 
 @pytest.fixture(autouse=True)
@@ -186,6 +265,7 @@ def _motion_generator() -> MotionGenerator:
     generator.device = torch.device("cpu")
     generator.planner = Mock()
     generator.planner.cfg.planner_type = "stub"
+    generator.planner.collision_world_info = None
     generator.planner.preserve_plan_samples = False
     generator.planner.supports_move_type.return_value = False
     generator.planner.default_plan_options.return_value = PlanOptions()
@@ -210,13 +290,20 @@ def _bind_action(
         if "hand" in name
     }
     profiles.update({} if control_profiles is None else control_profiles)
+    grasp_generator = _StubGraspPoseGenerator()
     engine = AtomicActionEngine(
         generator,
         control_profiles=profiles,
+        grasp_pose_generators={
+            name: grasp_generator
+            for name in generator.robot.control_parts
+            if "hand" in name
+        },
         load_builtins=False,
     )
     engine.register(action)
     _ACTION_ENGINES[id(action)] = engine
+    _GRASP_GENERATORS[id(action)] = grasp_generator
     return action
 
 
@@ -245,6 +332,7 @@ def _context(
         task=task or TaskState.empty(batch_size=NUM_ENVS, device="cpu"),
         scene=SceneSnapshot.empty() if scene is None else scene,
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
 
@@ -262,45 +350,11 @@ def _target_scene(
     )
 
 
-def _articulation_geometry() -> SceneArticulationOperationGeometry:
-    """Build late-bound identity handle geometry for atomic tests."""
-    identity = torch.eye(4)
-    return SceneArticulationOperationGeometry(
-        handle_pose=SceneEntityPose("drawer_handle"),
-        approach_offset=identity,
-        contact_offset=identity,
-        operation_offset=identity,
-        retract_offset=identity,
-        operation_axis=torch.tensor((1.0, 0.0, 0.0)),
-    )
-
-
-def _articulation_scene(
-    position: torch.Tensor,
-    *,
-    handle_x: float = 0.0,
-    timestamp: float = 0.0,
-    version: int = 0,
-) -> SceneSnapshot:
-    """Build one live handle and articulation-joint snapshot."""
-    handle = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    handle[:, 0, 3] = handle_x
-    return SceneSnapshot(
-        timestamp=timestamp,
-        version=version,
-        entities={"drawer_handle": EntityState(handle)},
-        articulation_joints={
-            ("drawer", "slide"): ObservedArticulationJointState(position)
-        },
-    )
-
-
 def _binding(
     action: AtomicAction,
     *,
     motion: str = "arm",
     grasp: str = "hand",
-    task_state_key: str | None = None,
 ) -> ActionBinding:
     """Bind one single-participant action through its owning engine."""
     contract = type(action).__dict__.get("binding_contract")
@@ -319,11 +373,6 @@ def _binding(
             }
             for slot in contract.slots
         },
-        task_state_keys=(
-            None
-            if task_state_key is None
-            else {slot.slot_id: task_state_key for slot in contract.slots}
-        ),
     )
 
 
@@ -379,7 +428,7 @@ def _joint_command_payloads(
 
 
 def _semantics(*, entity_id: str | None = None) -> ObjectSemantics:
-    entity = Mock()
+    entity = Mock(spec=BatchEntity)
     entity.get_local_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     return ObjectSemantics(
         affordance=Affordance(),
@@ -390,12 +439,17 @@ def _semantics(*, entity_id: str | None = None) -> ObjectSemantics:
     )
 
 
-def _held(semantics: ObjectSemantics | None = None) -> HeldObjectState:
+def _held(
+    semantics: ObjectSemantics | None = None,
+    *,
+    env_mask: torch.Tensor | None = None,
+) -> HeldObjectState:
     poses = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     return HeldObjectState(
         semantics=semantics or _semantics(),
         object_to_eef=poses,
         grasp_xpos=poses,
+        env_mask=env_mask,
     )
 
 
@@ -463,6 +517,7 @@ def _dual_motion_generator() -> MotionGenerator:
     generator.device = torch.device("cpu")
     generator.planner = Mock()
     generator.planner.cfg.planner_type = "stub"
+    generator.planner.collision_world_info = None
     generator.planner.preserve_plan_samples = False
     generator.planner.supports_move_type.return_value = False
     generator.planner.default_plan_options.return_value = PlanOptions()
@@ -483,6 +538,7 @@ def _dual_context(
         task=task or TaskState.empty(NUM_ENVS, "cpu"),
         scene=SceneSnapshot.empty() if scene is None else scene,
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
 
@@ -490,8 +546,6 @@ def _dual_binding(
     action: AtomicAction,
     first_slot: str,
     second_slot: str,
-    *,
-    task_state_keys: dict[str, str] | None = None,
 ) -> ActionBinding:
     return _ACTION_ENGINES[id(action)].bind_control_parts(
         action.skill_id,
@@ -505,12 +559,11 @@ def _dual_binding(
                 "grasp": "right_hand",
             },
         },
-        task_state_keys=task_state_keys,
     )
 
 
-def _stub_dual_arm_grasp_poses(affordance: AntipodalAffordance) -> None:
-    """Stub affordance dual-arm grasp sampling with identity grasp poses."""
+def _stub_dual_arm_grasp_poses(action: AtomicAction) -> None:
+    """Stub the engine's dual-arm grasp service with identity grasp poses."""
 
     def _sample(obj_poses: torch.Tensor, **_kwargs: object) -> list[dict]:
         arm = {
@@ -521,7 +574,9 @@ def _stub_dual_arm_grasp_poses(affordance: AntipodalAffordance) -> None:
         }
         return [{"left": arm, "right": arm} for _ in range(obj_poses.shape[0])]
 
-    affordance.get_dual_arm_valid_grasp_poses = Mock(side_effect=_sample)
+    _GRASP_GENERATORS[id(action)].get_dual_arm_valid_grasp_poses = Mock(
+        side_effect=_sample
+    )
 
 
 def _plan_segment_contract_case(case_id: str) -> ActionPlan:
@@ -593,7 +648,17 @@ def _plan_segment_contract_case(case_id: str) -> ActionPlan:
 
     if case_id == "press":
         action = _bind_action(generator, Press())
-        goal = PressGoal(torch.eye(4))
+        goal = PressGoal(
+            ObjectSemantics(
+                affordance=PressAffordance(
+                    press_axis=torch.tensor([1.0, 0.0, 0.0]),
+                    press_position=(0.0, 0.0, 0.0),
+                ),
+                geometry={},
+                label="button",
+            ),
+            torch.eye(4),
+        )
         return _plan_action(
             action,
             _invocation(action, goal, sample_count=sample_count),
@@ -610,10 +675,11 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
     assert Press.GoalType is PressGoal
+    assert Slide.GoalType is SlideGoal
+    assert Twist.GoalType is TwistGoal
     assert CoordinatedPickment.GoalType is CoordinatedPickGoal
     assert CoordinatedPlacement.GoalType is CoordinatedPlacementGoal
     assert HandOver.GoalType is GraspGoal
-    assert OperateArticulation.GoalType is OperateArticulationGoal
 
 
 @pytest.mark.parametrize(
@@ -624,7 +690,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
         ("move_held_object", ("transport",)),
         ("place", ("approach", "release", "retract")),
         ("assemble", ("approach", "release", "retract")),
-        ("press", ("close", "press", "retract")),
+        ("press", ("close", "approach", "contact", "press", "retract")),
     ),
 )
 def test_builtin_trajectory_segment_names_and_ranges_are_stable(
@@ -643,6 +709,14 @@ def test_builtin_trajectory_segment_names_and_ranges_are_stable(
     assert plan.segments[-1].stop == plan.commands.frame_count
 
 
+def test_interaction_primitives_use_motion_centric_skill_ids() -> None:
+    assert (Press.skill_id, Slide.skill_id, Twist.skill_id) == (
+        "press",
+        "slide",
+        "twist",
+    )
+
+
 @pytest.mark.parametrize(
     "options",
     (
@@ -650,10 +724,11 @@ def test_builtin_trajectory_segment_names_and_ranges_are_stable(
         MoveHeldObjectOptions(),
         PlaceOptions(),
         PressOptions(),
+        SlideOptions(),
+        TwistOptions(),
         CoordinatedPickmentOptions(),
         CoordinatedPlacementOptions(),
         HandOverOptions(),
-        OperateArticulationOptions(),
     ),
 )
 def test_action_options_do_not_contain_embodiment_resources(options: object) -> None:
@@ -749,6 +824,7 @@ def test_move_joints_uses_binding_and_preserves_uncontrolled_joints() -> None:
         task=TaskState.empty(NUM_ENVS, "cpu"),
         scene=SceneSnapshot.empty(),
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
     plan = _plan_action(
@@ -775,15 +851,14 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
         ActionInvocation(
             skill_id="pick_up",
             goal=GraspGoal(semantics=semantics, grasp_xpos=grasp),
-            binding=_binding(pick, task_state_key="logical_arm"),
+            binding=_binding(pick),
         ),
         initial,
     )
     picked_task = pick_plan.expected_effects.apply(initial.task, pick_plan.plan_success)
 
-    assert initial.task.get_held_object("logical_arm") is None
-    assert picked_task.get_held_object("logical_arm") is not None
-    assert picked_task.get_held_object("arm") is None
+    assert initial.task.get_held_object("arm") is None
+    assert picked_task.get_held_object("arm") is not None
 
     place = _bind_action(generator, Place())
     picked_context = PlanningContext(
@@ -791,13 +866,14 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
         task=picked_task,
         scene=initial.scene,
         env_ids=initial.env_ids,
+        control_dt=initial.control_dt,
     )
     place_plan = _plan_action(
         place,
         ActionInvocation(
             skill_id="place",
             goal=PlaceGoal(torch.eye(4)),
-            binding=_binding(place, task_state_key="logical_arm"),
+            binding=_binding(place),
         ),
         picked_context,
     )
@@ -805,8 +881,54 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
         picked_task, place_plan.plan_success
     )
 
-    assert picked_task.get_held_object("logical_arm") is not None
-    assert placed_task.get_held_object("logical_arm") is None
+    assert picked_task.get_held_object("arm") is not None
+    assert placed_task.get_held_object("arm") is None
+
+
+def test_place_releases_only_exclusively_held_rows() -> None:
+    generator = _motion_generator()
+
+    def move_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
+
+    generator.robot.compute_ik.side_effect = move_ik
+    action = _bind_action(generator, Place())
+    semantics = _semantics()
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={
+            "arm": _held(semantics),
+            "alternate_arm": _held(
+                semantics,
+                env_mask=torch.tensor([True, False]),
+            ),
+        },
+    )
+    context = _context(task)
+
+    plan = _plan_action(
+        action,
+        _invocation(action, PlaceGoal(torch.eye(4))),
+        context,
+    )
+    projected = plan.expected_effects.apply(task, plan.plan_success)
+
+    assert plan.plan_success.tolist() == [False, True]
+    trajectory = _joint_trajectory(plan)
+    assert torch.allclose(
+        trajectory.positions[0],
+        context.robot.qpos[0].unsqueeze(0).expand(trajectory.waypoint_count, -1),
+    )
+    primary = projected.get_held_object("arm")
+    alternate = projected.get_held_object("alternate_arm")
+    assert primary is not None and primary.env_mask.tolist() == [True, False]
+    assert alternate is not None and alternate.env_mask.tolist() == [True, False]
 
 
 def test_move_held_object_requires_projected_attachment() -> None:
@@ -817,11 +939,6 @@ def test_move_held_object_requires_projected_attachment() -> None:
         HeldObjectPoseGoal(torch.eye(4)),
         sample_count=10,
     )
-    invocation = replace(
-        invocation,
-        binding=_binding(action, task_state_key="logical_arm"),
-    )
-
     with pytest.raises(ValueError, match="requires an object held"):
         _plan_action(action, invocation, _context())
 
@@ -834,7 +951,7 @@ def test_move_held_object_requires_projected_attachment() -> None:
     task = TaskState(
         batch_size=NUM_ENVS,
         device="cpu",
-        held_objects={"logical_arm": held},
+        held_objects={"arm": held},
     )
     eef_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     eef_pose[:, :3, :3] = torch.tensor(
@@ -847,7 +964,7 @@ def test_move_held_object_requires_projected_attachment() -> None:
     configured_invocation = ActionInvocation(
         skill_id="move_held_object",
         goal=HeldObjectPoseGoal(torch.eye(4)),
-        binding=_binding(action, task_state_key="logical_arm"),
+        binding=_binding(action),
         motion_policy=MotionPolicy(sample_count=10),
         skill_options=MoveHeldObjectOptions(pick_rotate_upright=0.25),
     )
@@ -865,204 +982,46 @@ def test_move_held_object_requires_projected_attachment() -> None:
     semantics.entity.get_local_pose.assert_not_called()
 
 
-def test_press_uses_invocation_sample_budget() -> None:
+def test_move_held_object_moves_only_exclusively_held_rows() -> None:
     generator = _motion_generator()
-    action = _bind_action(generator, Press())
+
+    def move_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
+
+    generator.robot.compute_ik.side_effect = move_ik
+    action = _bind_action(generator, MoveHeldObject())
+    semantics = _semantics()
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={
+            "arm": _held(semantics),
+            "alternate_arm": _held(
+                semantics,
+                env_mask=torch.tensor([True, False]),
+            ),
+        },
+    )
+    context = _context(task)
 
     plan = _plan_action(
         action,
-        _invocation(action, PressGoal(torch.eye(4)), sample_count=12),
-        _context(),
-    )
-
-    assert plan.plan_success.tolist() == [True, True]
-    assert plan.commands.frame_count == 12
-    assert plan.expected_effects.is_empty
-
-
-def test_operate_articulation_builds_named_verified_interaction() -> None:
-    generator = _motion_generator()
-    action = _bind_action(
-        generator,
-        OperateArticulation(
-            OperateArticulationOptions(engage_steps=2, release_steps=2)
-        ),
-    )
-    goal = OperateArticulationGoal(
-        articulation_id="drawer",
-        joint_id="slide",
-        geometry=_articulation_geometry(),
-        source_position=torch.tensor([0.0]),
-        target_position=torch.tensor([0.4]),
-        target_displacement=0.4,
-    )
-
-    plan = _plan_action(
-        action,
-        _invocation(action, goal, sample_count=16),
-        _context(scene=_articulation_scene(torch.tensor([0.0]))),
-    )
-
-    assert plan.plan_success.tolist() == [True, True]
-    assert plan.commands.frame_count == 16
-    assert tuple(segment.name for segment in plan.segments) == (
-        "approach",
-        "engage",
-        "operate",
-        "release",
-        "retract",
-    )
-    assert plan.requires_effect_verification
-    assert plan.scene_dependency_monitor_until == {
-        "drawer_handle": plan.segment("operate").start
-    }
-    assert plan.effect_verification is not None
-    assert plan.effect_verification.kind == "articulation.joint_progress"
-    update = plan.expected_effects.articulation_joint_updates[("drawer", "slide")]
-    assert update is not None
-    assert torch.equal(update.position, torch.tensor([0.4]))
-    interaction = _joint_command_positions(plan, "hand")
-    assert torch.all(interaction[:, -1] == 0.0)
-    assert torch.any(interaction == 1.0)
-
-
-def test_operate_articulation_reports_per_phase_planning_failures() -> None:
-    generator = _motion_generator()
-    action = _bind_action(
-        generator,
-        OperateArticulation(
-            OperateArticulationOptions(engage_steps=2, release_steps=2)
-        ),
-    )
-    phase_results = []
-    for index in range(4):
-        phase_results.append(
-            PlanResult(
-                success=torch.tensor([index != 2, True]),
-                positions=torch.zeros(NUM_ENVS, 3, ARM_DOF),
-            )
-        )
-    generator.generate = Mock(side_effect=phase_results)
-    goal = OperateArticulationGoal(
-        articulation_id="drawer",
-        joint_id="slide",
-        geometry=_articulation_geometry(),
-        source_position=torch.tensor([0.0]),
-        target_position=torch.tensor([0.4]),
-        target_displacement=0.4,
-    )
-
-    plan = _plan_action(
-        action,
-        _invocation(action, goal, sample_count=16),
-        _context(scene=_articulation_scene(torch.tensor([0.0]))),
+        _invocation(action, HeldObjectPoseGoal(torch.eye(4))),
+        context,
     )
 
     assert plan.plan_success.tolist() == [False, True]
-    assert plan.diagnostics.messages == (
-        "Articulation motion phase 'operate' failed for rows [0].",
+    trajectory = _joint_trajectory(plan)
+    assert torch.allclose(
+        trajectory.positions[0],
+        context.robot.qpos[0].unsqueeze(0).expand(trajectory.waypoint_count, -1),
     )
-    phases = plan.diagnostics.metadata["motion_phases"]
-    assert phases["operate"] == {
-        "success": [False, True],
-        "failed_rows": [0],
-        "waypoint_count": 3,
-    }
-
-
-def test_operate_articulation_replan_uses_fresh_handle_and_remaining_stroke() -> None:
-    generator = _motion_generator()
-    action = _bind_action(
-        generator,
-        OperateArticulation(
-            OperateArticulationOptions(engage_steps=2, release_steps=2)
-        ),
-    )
-    goal = OperateArticulationGoal(
-        articulation_id="drawer",
-        joint_id="slide",
-        geometry=_articulation_geometry(),
-        source_position=torch.tensor([[0.0], [0.0]]),
-        target_position=torch.tensor([[0.4], [0.4]]),
-        target_displacement=0.4,
-    )
-    invocation = _invocation(action, goal, sample_count=16)
-    initial_context = _context(
-        scene=_articulation_scene(
-            torch.tensor([[0.0], [0.0]]),
-            handle_x=0.3,
-        )
-    )
-    session = _ACTION_ENGINES[id(action)].start((invocation,), initial_context)
-    first_operation = generator.robot.compute_ik.call_args_list[2].kwargs["pose"]
-    assert torch.allclose(first_operation[:, 0, 3], torch.tensor([0.7, 0.7]))
-    session.tick(initial_context)
-
-    generator.robot.compute_ik.reset_mock()
-    recovered = session.tick(
-        _context(
-            scene=_articulation_scene(
-                torch.tensor([[0.2], [0.4]]),
-                handle_x=0.55,
-                timestamp=1.0,
-                version=1,
-            ),
-            timestamp=1.0,
-        ),
-    )
-    recovered_operation = generator.robot.compute_ik.call_args_list[2].kwargs["pose"]
-
-    assert torch.allclose(recovered_operation[:, 0, 3], torch.tensor([0.75, 0.55]))
-    event_kinds = {event.kind for event in recovered.events}
-    assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED in event_kinds
-    assert ExecutionEventKind.REPLANNED in event_kinds
-    assert session.trajectory_segment("operate").name == "operate"
-
-
-def test_operate_articulation_requires_live_joint_observation() -> None:
-    generator = _motion_generator()
-    action = _bind_action(generator, OperateArticulation())
-    goal = OperateArticulationGoal(
-        articulation_id="drawer",
-        joint_id="slide",
-        geometry=_articulation_geometry(),
-        source_position=torch.tensor([0.0]),
-        target_position=torch.tensor([0.4]),
-        target_displacement=0.4,
-    )
-    handle = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    scene = SceneSnapshot(
-        timestamp=0.0,
-        version=0,
-        entities={"drawer_handle": EntityState(handle)},
-    )
-
-    with pytest.raises(ValueError, match="ObservedArticulationJointState"):
-        _plan_action(
-            action,
-            _invocation(action, goal, sample_count=20),
-            _context(scene=scene),
-        )
-
-
-def test_operate_articulation_rejects_insufficient_motion_budget() -> None:
-    generator = _motion_generator()
-    action = _bind_action(generator, OperateArticulation())
-    goal = OperateArticulationGoal(
-        articulation_id="drawer",
-        joint_id="slide",
-        geometry=_articulation_geometry(),
-        source_position=torch.tensor([0.0]),
-        target_position=torch.tensor([0.4]),
-        target_displacement=0.4,
-    )
-
-    with pytest.raises(ValueError, match="at least two waypoints"):
-        _plan_action(
-            action,
-            _invocation(action, goal, sample_count=17),
-            _context(scene=_articulation_scene(torch.tensor([0.0]))),
-        )
+    assert not torch.allclose(trajectory.positions[1], context.robot.qpos[1])
 
 
 def test_strategy_and_sample_count_are_not_action_config_fields() -> None:
@@ -1084,6 +1043,36 @@ def test_move_joints_rejects_binding_with_wrong_goal_skill() -> None:
         action.resolve_request(invocation)
 
 
+def test_move_joints_rejects_incompatible_goal_at_action_boundary() -> None:
+    action = _bind_action(_motion_generator(), MoveJoints())
+    invocation = ActionInvocation(
+        skill_id="move_joints",
+        goal=object(),  # type: ignore[arg-type]
+        binding=_binding(action),
+    )
+
+    with pytest.raises(TypeError, match="expects goal JointPositionGoal"):
+        action.resolve_request(invocation)
+
+
+def test_builtin_action_validates_resolved_request_once() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, MoveEndEffector())
+    validator = Mock(wraps=action.require_goal)
+    action.require_goal = validator  # type: ignore[method-assign]
+
+    _plan_action(
+        action,
+        _invocation(
+            action,
+            EndEffectorPoseGoal(torch.eye(4)),
+        ),
+        _context(),
+    )
+
+    validator.assert_called_once()
+
+
 def test_planner_timing_is_preserved_in_simple_action() -> None:
     generator = _motion_generator()
     generator.planner.cfg.planner_type = "toppra"
@@ -1096,7 +1085,6 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
         velocities=torch.full((NUM_ENVS, 3, ARM_DOF), 0.5),
         accelerations=torch.zeros(NUM_ENVS, 3, ARM_DOF),
         dt=torch.tensor([[0.0, 0.1, 0.2]]).repeat(NUM_ENVS, 1),
-        duration=torch.full((NUM_ENVS,), 0.3),
     )
     action = _bind_action(generator, MoveJoints())
     invocation = ActionInvocation(
@@ -1193,7 +1181,6 @@ def test_move_joints_visits_waypoints_and_rejects_unknown_names() -> None:
 def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     generator = _motion_generator()
     affordance = AntipodalAffordance()
-    affordance.get_valid_grasp_poses = Mock()
     entity = Mock()
     entity.get_local_pose.return_value = torch.full((NUM_ENVS, 4, 4), 9.0)
     semantics = ObjectSemantics(
@@ -1206,6 +1193,8 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     grasp = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     grasp[:, 0, 3] = torch.tensor([0.1, 0.2])
     action = _bind_action(generator, PickUp())
+    grasp_generator = _GRASP_GENERATORS[id(action)]
+    grasp_generator.get_valid_grasp_poses = Mock()
     object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     object_pose[:, :3, :3] = torch.tensor(
         [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
@@ -1223,7 +1212,7 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     plan = action.plan(request, context)
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
 
-    request.goal.semantics.affordance.get_valid_grasp_poses.assert_not_called()
+    grasp_generator.get_valid_grasp_poses.assert_not_called()
     request.goal.semantics.entity.get_local_pose.assert_not_called()
     held = projected.get_held_object("arm")
     assert held is not None
@@ -1330,6 +1319,9 @@ def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
     assert held is not None
     assert torch.allclose(held.grasp_xpos, expected_grasp)
     assert plan.scene_dependencies == ("target",)
+    assert plan.scene_dependency_monitor_until == {
+        "target": plan.segment("approach").stop
+    }
 
 
 def test_pick_session_replans_when_late_bound_target_moves() -> None:
@@ -1427,6 +1419,7 @@ def test_pick_scene_monitoring_window_is_exclusive_at_close_boundary(
             task=task_state,
             scene=_target_scene(pose, timestamp=timestamp, version=version),
             env_ids=torch.arange(NUM_ENVS),
+            control_dt=CONTROL_DT,
         )
 
     session = engine.start(
@@ -1470,7 +1463,7 @@ def test_pick_scene_monitoring_window_is_exclusive_at_close_boundary(
     assert len(session.plan_attempts) == (2 if expects_replan else 1)
 
 
-def test_pick_uses_logical_task_state_key_and_physical_control_target() -> None:
+def test_pick_uses_selected_control_part_for_state_and_commands() -> None:
     generator = _motion_generator()
     action = _bind_action(generator, PickUp())
     invocation = ActionInvocation(
@@ -1483,7 +1476,6 @@ def test_pick_uses_logical_task_state_key_and_physical_control_target() -> None:
             action,
             motion="alternate_arm",
             grasp="alternate_hand",
-            task_state_key="logical_picker",
         ),
         motion_policy=MotionPolicy(sample_count=20),
     )
@@ -1499,8 +1491,7 @@ def test_pick_uses_logical_task_state_key_and_physical_control_target() -> None:
     plan = action.plan(request, context)
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
 
-    assert projected.get_held_object("logical_picker") is not None
-    assert projected.get_held_object("alternate_arm") is None
+    assert projected.get_held_object("alternate_arm") is not None
     assert projected.get_held_object("arm") is None
     assert {target.target_id for target in plan.commands.targets} == {
         "alternate_arm",
@@ -1508,83 +1499,33 @@ def test_pick_uses_logical_task_state_key_and_physical_control_target() -> None:
     }
 
 
-def test_participant_motion_and_grasp_must_share_task_state_key() -> None:
-    generator = _motion_generator()
-    action = _bind_action(generator, PickUp())
-    binding = _binding(action)
-    mismatched = ActionBinding(
-        owner_id=binding.owner_id,
-        endpoints=tuple(
-            (
-                replace(endpoint, task_state_key="other_participant")
-                if endpoint.endpoint_id == "grasp"
-                else endpoint
-            )
-            for endpoint in binding.endpoints
-        ),
-    )
-    invocation = ActionInvocation(
-        skill_id="pick_up",
-        goal=GraspGoal(
-            semantics=_semantics(entity_id="target"),
-            grasp_xpos=torch.eye(4),
-        ),
-        binding=mismatched,
-    )
-    context = _context(
-        scene=_target_scene(
-            torch.eye(4).repeat(NUM_ENVS, 1, 1),
-            timestamp=0.0,
-            version=0,
-        )
-    )
-
-    with pytest.raises(ValueError, match="must share one task_state_key"):
-        _plan_action(action, invocation, context)
-
-
-def test_handover_participants_must_use_distinct_task_state_keys() -> None:
-    generator = _dual_motion_generator()
-    action = _bind_action(
-        generator,
-        HandOver(
-            default_options=HandOverOptions(
-                middle_object_pose=torch.eye(4),
-                final_object_pose=torch.eye(4),
-            )
-        ),
-    )
-    invocation = ActionInvocation(
-        skill_id="hand_over",
-        goal=GraspGoal(semantics=_semantics()),
-        binding=_dual_binding(
-            action,
-            "source",
-            "destination",
-            task_state_keys={"source": "same", "destination": "same"},
-        ),
-    )
-
-    with pytest.raises(ValueError, match="different task_state_key"):
-        _plan_action(action, invocation, _dual_context())
-
-
 def test_press_closes_hand_without_changing_projected_attachment() -> None:
-    held = _held()
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(0.0, 0.0, 0.0),
+        ),
+        geometry={},
+        label="button",
+    )
+    held = _held(semantics)
     task = TaskState(
         batch_size=NUM_ENVS,
         device="cpu",
         held_objects={"arm": held},
     )
-    generator = _motion_generator()
     action = _bind_action(
-        generator,
+        _motion_generator(),
         Press(default_options=PressOptions(hand_interp_steps=4)),
     )
 
     plan = _plan_action(
         action,
-        _invocation(action, PressGoal(torch.eye(4)), sample_count=12),
+        _invocation(
+            action,
+            PressGoal(semantics, torch.eye(4)),
+            sample_count=12,
+        ),
         _context(task),
     )
     projected = plan.expected_effects.apply(task, plan.plan_success)
@@ -1594,6 +1535,785 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
     assert projected_held is not None
     assert projected_held.semantics is held.semantics
     assert torch.equal(projected_held.object_to_eef, held.object_to_eef)
+
+
+def test_twist_plans_six_segments_from_articulation_link() -> None:
+    affordance = TwistAffordance(
+        grasp_position=(0.0, 0.0, 0.0),
+        axis_origin=(0.0, 0.0, 0.0),
+        twist_axis=torch.tensor([0.0, 1.0, 0.0]),
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="knob",
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, Twist())
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="twist",
+            goal=TwistGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=TwistOptions(hand_interp_steps=3),
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    trajectory = _joint_trajectory(plan)
+    assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert [segment.name for segment in plan.segments] == [
+        "approach",
+        "reach",
+        "close",
+        "twist",
+        "open",
+        "retract",
+    ]
+    assert torch.all(
+        trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+    )
+    assert torch.all(
+        trajectory.positions[:, plan.segment("open").stop - 1, ARM_DOF:] == 0.0
+    )
+    first_target = generator.robot.compute_ik.call_args_list[0].kwargs["pose"]
+    grasp_pose = affordance.get_grasp_pose(torch.eye(4).repeat(NUM_ENVS, 1, 1))
+    expected_pre_grasp_position = (
+        grasp_pose[:, :3, 3] - grasp_pose[:, :3, 2] * TwistOptions().pre_grasp_distance
+    )
+    assert torch.allclose(first_target[:, :3, 3], expected_pre_grasp_position)
+
+
+def test_twist_plans_from_explicit_rigid_object_pose_snapshot() -> None:
+    semantics = ObjectSemantics(
+        affordance=TwistAffordance(
+            grasp_position=(0.0, 0.0, 0.0),
+            axis_origin=(0.0, 0.0, 0.0),
+            twist_axis=torch.tensor([0.0, 1.0, 0.0]),
+        ),
+        geometry={},
+        label="rigid-knob",
+    )
+
+    action = _bind_action(_motion_generator(), Twist())
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="twist",
+            goal=TwistGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=TwistOptions(hand_interp_steps=3),
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+
+
+def test_twist_rotates_grasp_about_explicit_axis_origin() -> None:
+    action = _bind_action(_motion_generator(), Twist())
+    target_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    grasp_pose = target_pose.clone()
+    grasp_pose[:, 0, 3] = 2.0
+
+    twisted = action._twisted_grasp_poses(
+        target_pose,
+        grasp_pose,
+        torch.tensor([0.0, 0.0, 1.0]),
+        (1.0, 0.0, 0.0),
+        math.pi / 2,
+        4,
+    )
+
+    assert torch.allclose(
+        twisted[:, -1, :3, 3],
+        torch.tensor([1.0, 1.0, 0.0]).expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+
+
+@pytest.mark.parametrize(
+    ("goal_factory", "affordance"),
+    (
+        (
+            PressGoal,
+            PressAffordance(
+                press_axis=torch.tensor([1.0, 0.0, 0.0]),
+                press_position=(0.0, 0.0, 0.0),
+            ),
+        ),
+        (
+            SlideGoal,
+            SlideAffordance(
+                mesh_vertices=torch.zeros(3, 3),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+            ),
+        ),
+        (
+            TwistGoal,
+            TwistAffordance(
+                grasp_position=(0.0, 0.0, 0.0),
+                axis_origin=(0.0, 0.0, 0.0),
+            ),
+        ),
+    ),
+)
+def test_interaction_goal_collects_target_scene_dependency(
+    goal_factory,
+    affordance,
+) -> None:
+    semantics = ObjectSemantics(affordance=affordance, geometry={}, label="target")
+    goal = goal_factory(semantics, SceneEntityPose("target-link"))
+
+    assert collect_scene_dependencies(goal) == ("target-link",)
+
+
+def test_open_loop_interaction_primitives_are_explicitly_described() -> None:
+    assert Press.descriptor().open_loop is True
+    assert Slide.descriptor().open_loop is True
+    assert Twist.descriptor().open_loop is True
+
+
+def test_twist_session_replans_when_scene_target_moves() -> None:
+    generator = _motion_generator()
+    engine = AtomicActionEngine(
+        generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(HAND_DOF),
+                grasp=torch.ones(HAND_DOF),
+            )
+        },
+        load_builtins=False,
+    )
+    action = Twist()
+    engine.register(action)
+    semantics = ObjectSemantics(
+        affordance=TwistAffordance(
+            grasp_position=(0.0, 0.0, 0.0),
+            axis_origin=(0.0, 0.0, 0.0),
+        ),
+        geometry={},
+        label="moving-knob",
+    )
+    invocation = ActionInvocation(
+        skill_id="twist",
+        goal=TwistGoal(semantics, SceneEntityPose("target")),
+        binding=engine.bind_control_parts(
+            "twist",
+            {"primary": {"motion": "arm", "grasp": "hand"}},
+        ),
+        motion_policy=MotionPolicy(sample_count=24),
+        skill_options=TwistOptions(hand_interp_steps=3),
+    )
+    initial_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    initial_context = _context(
+        scene=_target_scene(initial_pose, timestamp=0.0, version=0)
+    )
+    session = engine.start((invocation,), initial_context)
+    session.tick(initial_context)
+    moved_pose = initial_pose.clone()
+    moved_pose[:, 1, 3] = 0.3
+
+    recovered = session.tick(
+        _context(
+            scene=_target_scene(moved_pose, timestamp=0.1, version=1),
+            timestamp=0.1,
+        )
+    )
+
+    event_kinds = {event.kind for event in recovered.events}
+    assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED in event_kinds
+    assert ExecutionEventKind.REPLANNED in event_kinds
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected_segments", "translation_sign"),
+    (
+        ("pull", ["approach", "reach", "close", "pull", "open"], -1.0),
+        (
+            "push",
+            ["approach", "reach", "close", "push", "open", "return"],
+            1.0,
+        ),
+    ),
+)
+def test_slide_plans_expected_segments(
+    direction: Literal["pull", "push"],
+    expected_segments: list[str],
+    translation_sign: float,
+) -> None:
+    vertices = torch.tensor(
+        [
+            [-0.1, 0.0, 0.0],
+            [0.1, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ]
+    )
+    link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    affordance = SlideAffordance(
+        mesh_vertices=vertices,
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    grasp_calls: list[tuple[torch.Tensor, torch.Tensor]] = []
+
+    def sample_grasp(
+        *,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        grasp_calls.append((obj_poses, approach_direction))
+        return (
+            torch.ones(NUM_ENVS, dtype=torch.bool),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.full((NUM_ENVS,), 0.03),
+        )
+
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="drawer_handle",
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, Slide())
+    _GRASP_GENERATORS[id(action)].get_best_grasp_poses = Mock(side_effect=sample_grasp)
+    options = SlideOptions(
+        direction=direction,
+        hand_interp_steps=3,
+        approach_distance=0.1,
+        translation_distance=0.15,
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="slide",
+            goal=SlideGoal(semantics, SceneEntityPose("target")),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=options,
+        ),
+        _context(scene=_target_scene(link_pose, timestamp=0.0, version=0)),
+    )
+
+    trajectory = _joint_trajectory(plan)
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.scene_dependencies == ("target",)
+    assert plan.scene_dependency_end_segment == "reach"
+    assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert [segment.name for segment in plan.segments] == expected_segments
+    assert torch.all(
+        trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+    )
+    assert torch.all(
+        trajectory.positions[:, plan.segment("open").stop - 1, ARM_DOF:] == 0.0
+    )
+    assert len(grasp_calls) == 1
+    assert torch.equal(grasp_calls[0][0], link_pose)
+    assert torch.allclose(
+        grasp_calls[0][1],
+        torch.tensor([0.0, -1.0, 0.0]).expand(NUM_ENVS, -1),
+    )
+    planned_targets = [
+        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
+    ]
+    expected_axis = torch.tensor([0.0, -1.0, 0.0])
+    motion_lengths = Slide._motion_segment_lengths(
+        24,
+        options.hand_interp_steps,
+        direction=direction,
+    )
+    assert torch.allclose(
+        planned_targets[0][:, :3, 3],
+        -expected_axis.expand(NUM_ENVS, -1) * options.approach_distance,
+    )
+    reach_stop = 1 + motion_lengths[1] - 1
+    assert torch.allclose(
+        planned_targets[reach_stop - 1][:, :3, 3],
+        torch.zeros(NUM_ENVS, 3),
+    )
+    translate_stop = reach_stop + motion_lengths[2] - 1
+    translated_targets = torch.stack(
+        [pose[:, :3, 3] for pose in planned_targets[reach_stop:translate_stop]],
+        dim=1,
+    )
+    assert torch.allclose(
+        translated_targets[:, -1],
+        expected_axis.expand(NUM_ENVS, -1)
+        * (translation_sign * options.translation_distance),
+    )
+    orthogonal = (
+        translated_targets
+        - (translated_targets * expected_axis).sum(dim=-1, keepdim=True) * expected_axis
+    )
+    assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+    if direction == "push":
+        assert torch.allclose(
+            planned_targets[-1][:, :3, 3],
+            -expected_axis.expand(NUM_ENVS, -1) * options.approach_distance,
+        )
+
+
+def test_slide_holds_failed_environment() -> None:
+    affordance = SlideAffordance(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="drawer_handle",
+    )
+    generator = _motion_generator()
+
+    def successful_ik(
+        pose: torch.Tensor | None = None,
+        name: str | None = None,
+        joint_seed: torch.Tensor | None = None,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert joint_seed is not None
+        return torch.ones(NUM_ENVS, dtype=torch.bool), torch.ones_like(joint_seed)
+
+    generator.robot.compute_ik.side_effect = successful_ik
+    action = _bind_action(generator, Slide())
+    _GRASP_GENERATORS[id(action)].get_best_grasp_poses = Mock(
+        return_value=(
+            torch.tensor([True, False]),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.full((NUM_ENVS,), 0.03),
+        )
+    )
+    context = _context()
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="slide",
+            goal=SlideGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=18),
+            skill_options=SlideOptions(hand_interp_steps=3),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, False]
+    trajectory = _joint_trajectory(plan)
+    assert not torch.allclose(trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(18, -1),
+    )
+
+
+def test_slide_fk_path_remains_on_translation_axis() -> None:
+    generator = _motion_generator()
+
+    def position_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        qpos = joint_seed.clone()
+        qpos[:, :3] = pose[:, :3, 3]
+        return torch.ones(NUM_ENVS, dtype=torch.bool), qpos
+
+    def position_fk(
+        qpos: torch.Tensor,
+        name: str,
+        to_matrix: bool,
+    ) -> torch.Tensor:
+        pose = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+        pose[:, :3, 3] = qpos[:, :3]
+        return pose
+
+    generator.robot.compute_ik.side_effect = position_ik
+    generator.robot.compute_fk.side_effect = position_fk
+    affordance = SlideAffordance(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    semantics = ObjectSemantics(affordance=affordance, geometry={}, label="handle")
+    action = _bind_action(generator, Slide())
+    _GRASP_GENERATORS[id(action)].get_best_grasp_poses = Mock(
+        return_value=(
+            torch.ones(NUM_ENVS, dtype=torch.bool),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.full((NUM_ENVS,), 0.03),
+        )
+    )
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="slide",
+            goal=SlideGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=SlideOptions(direction="pull", hand_interp_steps=3),
+        ),
+        _context(),
+    )
+
+    pull_segment = plan.segment("pull")
+    arm_path = _joint_trajectory(plan).positions[
+        :, pull_segment.start : pull_segment.stop, :ARM_DOF
+    ]
+    fk_path = position_fk(arm_path.reshape(-1, ARM_DOF), "arm", True).reshape(
+        NUM_ENVS, -1, 4, 4
+    )
+    positions = fk_path[:, :, :3, 3]
+    axis = torch.tensor([0.0, -1.0, 0.0])
+    orthogonal = positions - (positions * axis).sum(dim=-1, keepdim=True) * axis
+    assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+
+
+def test_press_plans_close_approach_press_and_retract() -> None:
+    affordance = PressAffordance(
+        press_axis=torch.tensor([1.0, 0.0, 0.0]),
+        press_position=(0.0, 0.0, 0.0),
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="button",
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, Press())
+    options = PressOptions(
+        hand_interp_steps=3,
+        approach_distance=0.1,
+        press_distance=0.02,
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="press",
+            goal=PressGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=options,
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    trajectory = _joint_trajectory(plan)
+    assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert [segment.name for segment in plan.segments] == [
+        "close",
+        "approach",
+        "contact",
+        "press",
+        "retract",
+    ]
+    assert torch.all(
+        trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+    )
+    contact_pose = affordance.get_press_pose(torch.eye(4).repeat(NUM_ENVS, 1, 1))
+    expected_approach = (
+        contact_pose[:, :3, 3] - contact_pose[:, :3, 2] * options.approach_distance
+    )
+    expected_pressed = (
+        contact_pose[:, :3, 3] + contact_pose[:, :3, 2] * options.press_distance
+    )
+    planned_targets = [
+        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
+    ]
+    motion_lengths = Press._motion_segment_lengths(24, options.hand_interp_steps)
+    contact_stop = 1 + motion_lengths[1] - 1
+    press_stop = contact_stop + motion_lengths[2] - 1
+    assert torch.allclose(planned_targets[0][:, :3, 3], expected_approach)
+    assert torch.allclose(
+        planned_targets[contact_stop - 1][:, :3, 3], contact_pose[:, :3, 3]
+    )
+    assert torch.allclose(planned_targets[press_stop - 1][:, :3, 3], expected_pressed)
+    assert torch.allclose(planned_targets[-1][:, :3, 3], expected_approach)
+
+
+def test_press_plans_from_rigid_object_pose_snapshot_with_option_position() -> None:
+    affordance = PressAffordance(
+        press_axis=torch.tensor([1.0, 0.0, 0.0]),
+        press_position=(0.5, 0.5, 0.5),
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="rigid-button",
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, Press())
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="press",
+            goal=PressGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=PressOptions(
+                hand_interp_steps=3,
+                press_position=(0.1, 0.2, 0.3),
+            ),
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    planned_approach = generator.robot.compute_ik.call_args_list[0].kwargs["pose"]
+    assert torch.allclose(
+        planned_approach[:, :3, 3],
+        torch.tensor([0.0, 0.2, 0.3]).expand(NUM_ENVS, -1),
+    )
+
+
+def test_press_fk_path_passes_contact_and_remains_on_press_axis() -> None:
+    generator = _motion_generator()
+
+    def position_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        qpos = joint_seed.clone()
+        qpos[:, :3] = pose[:, :3, 3]
+        return torch.ones(NUM_ENVS, dtype=torch.bool), qpos
+
+    def position_fk(
+        qpos: torch.Tensor,
+        name: str,
+        to_matrix: bool,
+    ) -> torch.Tensor:
+        pose = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+        pose[:, :3, 3] = qpos[:, :3]
+        return pose
+
+    generator.robot.compute_ik.side_effect = position_ik
+    generator.robot.compute_fk.side_effect = position_fk
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(0.0, 0.0, 0.0),
+        ),
+        geometry={},
+        label="button",
+    )
+    action = _bind_action(generator, Press())
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="press",
+            goal=PressGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=PressOptions(hand_interp_steps=3, press_distance=0.04),
+        ),
+        _context(),
+    )
+
+    trajectory = _joint_trajectory(plan)
+    contact_arm = trajectory.positions[:, plan.segment("contact").stop - 1, :ARM_DOF]
+    contact_fk = position_fk(contact_arm, "arm", True)
+    assert torch.allclose(contact_fk[:, :3, 3], torch.zeros(NUM_ENVS, 3))
+    press_segment = plan.segment("press")
+    press_arm = trajectory.positions[
+        :, press_segment.start : press_segment.stop, :ARM_DOF
+    ]
+    press_fk = position_fk(press_arm.reshape(-1, ARM_DOF), "arm", True).reshape(
+        NUM_ENVS, -1, 4, 4
+    )
+    positions = press_fk[:, :, :3, 3]
+    axis = torch.tensor([1.0, 0.0, 0.0])
+    orthogonal = positions - (positions * axis).sum(dim=-1, keepdim=True) * axis
+    assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+    assert torch.allclose(positions[:, -1], torch.tensor([0.04, 0.0, 0.0]))
+
+
+def test_press_preserves_failed_environment_at_observed_qpos() -> None:
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(0.0, 0.0, 0.0),
+        ),
+        geometry={},
+        label="button",
+    )
+    generator = _motion_generator()
+
+    def partial_ik(
+        pose: torch.Tensor | None = None,
+        name: str | None = None,
+        joint_seed: torch.Tensor | None = None,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert joint_seed is not None
+        return torch.tensor([True, False]), torch.ones_like(joint_seed)
+
+    generator.robot.compute_ik.side_effect = partial_ik
+    action = _bind_action(generator, Press())
+    context = _context()
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="press",
+            goal=PressGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=18),
+            skill_options=PressOptions(hand_interp_steps=3),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, False]
+    trajectory = _joint_trajectory(plan)
+    assert not torch.allclose(trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(18, -1),
+    )
+
+
+def test_press_rejects_non_press_affordance() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.zeros(8, 3),
+            mesh_triangles=torch.zeros(4, 3, dtype=torch.long),
+        ),
+        geometry={},
+        label="mesh-button",
+    )
+    action = _bind_action(_motion_generator(), Press())
+
+    with pytest.raises(ValueError, match="PressAffordance"):
+        _plan_action(
+            action,
+            _invocation(action, PressGoal(semantics, torch.eye(4))),
+            _context(),
+        )
+
+
+def test_press_requires_primary_arm_and_end_effector_bindings() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(),
+        geometry={},
+        label="button",
+    )
+    action = _bind_action(_motion_generator(), Press())
+    invocation = ActionInvocation(
+        skill_id="press",
+        goal=PressGoal(semantics, torch.eye(4)),
+        binding=ActionBinding(
+            owner_id=_ACTION_ENGINES[id(action)].binding_owner_id,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="missing=.*grasp"):
+        action.resolve_request(invocation)
+
+
+def test_press_axis_belongs_to_affordance_not_action_options() -> None:
+    assert "press_axis" not in PressOptions.__dataclass_fields__
+
+
+@pytest.mark.parametrize(
+    "press_position",
+    ((0.0, 1.0), (0.0, 1.0, float("nan"))),
+)
+def test_press_options_reject_invalid_press_position(
+    press_position: tuple[float, ...],
+) -> None:
+    with pytest.raises(ValueError, match="press_position"):
+        PressOptions(press_position=press_position)  # type: ignore[arg-type]
+
+
+def test_twist_rejects_non_twist_affordance() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.zeros(8, 3),
+            mesh_triangles=torch.zeros(4, 3, dtype=torch.long),
+        ),
+        geometry={},
+        label="mesh-knob",
+    )
+    action = _bind_action(_motion_generator(), Twist())
+
+    with pytest.raises(ValueError, match="TwistAffordance"):
+        _plan_action(
+            action,
+            _invocation(action, TwistGoal(semantics, torch.eye(4))),
+            _context(),
+        )
+
+
+def test_twist_axis_belongs_to_affordance_not_action_options() -> None:
+    assert "twist_axis" not in TwistOptions.__dataclass_fields__
+    assert "approach_direction" not in TwistOptions.__dataclass_fields__
+
+
+def test_twist_options_reject_non_finite_pre_grasp_distance() -> None:
+    with pytest.raises(ValueError, match="pre_grasp_distance must be finite"):
+        TwistOptions(pre_grasp_distance=float("nan"))
+
+
+def test_slide_rejects_non_slide_affordance() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.zeros(8, 3),
+            mesh_triangles=torch.zeros(4, 3, dtype=torch.long),
+        ),
+        geometry={},
+        label="mesh-handle",
+    )
+    action = _bind_action(_motion_generator(), Slide())
+
+    with pytest.raises(ValueError, match="SlideAffordance"):
+        _plan_action(
+            action,
+            _invocation(
+                action,
+                SlideGoal(semantics, torch.eye(4)),
+            ),
+            _context(),
+        )
+
+
+def test_slide_requires_primary_end_effector() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(),
+        geometry={},
+        label="drawer_handle",
+    )
+    action = _bind_action(_motion_generator(), Slide())
+    invocation = ActionInvocation(
+        skill_id="slide",
+        goal=SlideGoal(semantics, torch.eye(4)),
+        binding=ActionBinding(
+            owner_id=_ACTION_ENGINES[id(action)].binding_owner_id,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="missing=.*grasp"):
+        action.resolve_request(invocation)
+
+
+def test_slide_axis_belongs_to_affordance_not_action_options() -> None:
+    assert "translation_axis" not in SlideOptions.__dataclass_fields__
+
+
+def test_slide_options_reject_invalid_direction() -> None:
+    with pytest.raises(ValueError, match="direction"):
+        SlideOptions(direction="open")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -1609,6 +2329,7 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
 def test_handover_does_not_mutate_cached_final_pose_and_omits_empty_hold(
     hold_steps: int,
     expected_segments: tuple[str, ...],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     generator = _dual_motion_generator()
     handover_options = HandOverOptions(
@@ -1648,15 +2369,22 @@ def test_handover_does_not_mutate_cached_final_pose_and_omits_empty_hold(
     )
 
     def plan_from_start(
+        motion_generator: MotionGenerator,
         control_part: str,
         start_qpos: torch.Tensor,
         target_poses: torch.Tensor,
         n_waypoints: int,
         motion_policy: MotionPolicy,
+        interpolation_dt: float | None,
     ) -> tuple[bool, torch.Tensor]:
+        del interpolation_dt
         return True, start_qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
 
-    action._plan_named_arm_trajectory = Mock(side_effect=plan_from_start)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.atomic_actions.primitives.hand_over."
+        "plan_named_arm_trajectory",
+        plan_from_start,
+    )
     invocation = ActionInvocation(
         skill_id="hand_over",
         goal=GraspGoal(
@@ -1776,7 +2504,7 @@ def test_handover_holds_only_environment_with_ik_failure() -> None:
     task = TaskState(
         batch_size=NUM_ENVS,
         device="cpu",
-        held_objects={"logical_source": _held(semantics)},
+        held_objects={"left_arm": _held(semantics)},
     )
     action = _bind_action(
         generator,
@@ -1800,15 +2528,7 @@ def test_handover_holds_only_environment_with_ik_failure() -> None:
     invocation = ActionInvocation(
         skill_id="hand_over",
         goal=GraspGoal(semantics=semantics),
-        binding=_dual_binding(
-            action,
-            "source",
-            "destination",
-            task_state_keys={
-                "source": "logical_source",
-                "destination": "logical_destination",
-            },
-        ),
+        binding=_dual_binding(action, "source", "destination"),
         motion_policy=MotionPolicy(sample_count=30),
     )
 
@@ -1824,10 +2544,9 @@ def test_handover_holds_only_environment_with_ik_failure() -> None:
         context.robot.qpos[1].unsqueeze(0).expand(30, -1),
     )
     assert all(not frame.active_mask[1].item() for frame in plan.commands.frames)
-    received = projected.get_held_object("logical_destination")
+    received = projected.get_held_object("right_arm")
     assert received is not None
     assert received.env_mask.tolist() == [True, False]
-    assert projected.get_held_object("right_arm") is None
     semantics.entity.get_local_pose.assert_not_called()
 
 
@@ -1862,6 +2581,62 @@ def test_handover_rejects_goal_for_a_different_held_object() -> None:
     goal_semantics.entity.get_local_pose.assert_not_called()
 
 
+def test_handover_transfers_only_exclusively_held_rows() -> None:
+    generator = _dual_motion_generator()
+    semantics = _semantics()
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={
+            "left_arm": _held(semantics),
+            "right_arm": _held(
+                semantics,
+                env_mask=torch.tensor([True, False]),
+            ),
+        },
+    )
+    action = _bind_action(
+        generator,
+        HandOver(
+            default_options=HandOverOptions(
+                middle_object_pose=torch.eye(4),
+                final_object_pose=torch.eye(4),
+                hand_interp_steps=4,
+                hold_steps=2,
+                retreat_steps=5,
+            )
+        ),
+    )
+    action._resolve_receive_grasp = Mock(
+        return_value=(
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.ones(NUM_ENVS, dtype=torch.bool),
+        )
+    )
+    context = _dual_context(task)
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=GraspGoal(semantics=semantics),
+        binding=_dual_binding(action, "source", "destination"),
+        motion_policy=MotionPolicy(sample_count=30),
+    )
+
+    plan = _plan_action(action, invocation, context)
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+
+    assert plan.plan_success.tolist() == [False, True]
+    trajectory = _joint_trajectory(plan)
+    assert torch.allclose(
+        trajectory.positions[0],
+        context.robot.qpos[0].unsqueeze(0).expand(30, -1),
+    )
+    transferred = projected.get_held_object("left_arm")
+    received = projected.get_held_object("right_arm")
+    assert transferred is not None and transferred.env_mask.tolist() == [True, False]
+    assert received is not None and received.env_mask.tolist() == [True, True]
+    assert received.semantics is semantics
+
+
 @pytest.mark.parametrize(
     ("hold_steps", "expected_segments"),
     (
@@ -1885,7 +2660,7 @@ def test_coordinated_pick_returns_full_dof_plan_and_omits_empty_hold(
         ),
     )
     affordance = AntipodalAffordance()
-    _stub_dual_arm_grasp_poses(affordance)
+    _stub_dual_arm_grasp_poses(action)
     entity = Mock()
     entity.get_local_pose.return_value = torch.full((NUM_ENVS, 4, 4), 9.0)
     semantics = ObjectSemantics(
@@ -1902,15 +2677,7 @@ def test_coordinated_pick_returns_full_dof_plan_and_omits_empty_hold(
             object_target_pose=torch.eye(4),
             object_initial_pose=torch.eye(4),
         ),
-        binding=_dual_binding(
-            action,
-            "left",
-            "right",
-            task_state_keys={
-                "left": "logical_left",
-                "right": "logical_right",
-            },
-        ),
+        binding=_dual_binding(action, "left", "right"),
         motion_policy=MotionPolicy(sample_count=30),
     )
     context = _dual_context()
@@ -1920,6 +2687,17 @@ def test_coordinated_pick_returns_full_dof_plan_and_omits_empty_hold(
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
 
     assert plan.plan_success.tolist() == [True, True]
+    assert _joint_trajectory(plan).positions.shape == (
+        NUM_ENVS,
+        30,
+        DUAL_ROBOT_DOF,
+    )
+    left_held = projected.get_held_object("left_arm")
+    right_held = projected.get_held_object("right_arm")
+    assert isinstance(left_held, HeldObjectState)
+    assert isinstance(right_held, HeldObjectState)
+    assert left_held.semantics is right_held.semantics
+    assert left_held.semantics is not semantics
     assert plan.commands.frame_count == 30
     assert {target.target_id for target in plan.commands.targets} == {
         "left_arm",
@@ -1929,13 +2707,6 @@ def test_coordinated_pick_returns_full_dof_plan_and_omits_empty_hold(
     }
     assert plan.scene_dependencies == ()
     request.goal.semantics.entity.get_local_pose.assert_not_called()
-    assert projected.get_held_object("logical_left") is None
-    assert projected.get_held_object("logical_right") is None
-    assert isinstance(
-        projected.get_coordinated_held_object("logical_left", "logical_right"),
-        CoordinatedHeldObjectState,
-    )
-    assert projected.get_coordinated_held_object("left_arm", "right_arm") is None
     assert tuple(segment.name for segment in plan.segments) == expected_segments
     assert plan.segments[0].start == 0
     assert all(
@@ -1958,7 +2729,7 @@ def test_coordinated_pick_implicit_initial_pose_uses_scene_snapshot() -> None:
         ),
     )
     affordance = AntipodalAffordance()
-    _stub_dual_arm_grasp_poses(affordance)
+    _stub_dual_arm_grasp_poses(action)
     entity = Mock()
     entity.get_local_pose.return_value = torch.full((NUM_ENVS, 4, 4), 9.0)
     semantics = ObjectSemantics(
@@ -1988,17 +2759,18 @@ def test_coordinated_pick_implicit_initial_pose_uses_scene_snapshot() -> None:
     plan = action.plan(request, context)
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
 
-    resolved_affordance = request.goal.semantics.affordance
-    sampled_pose = resolved_affordance.get_dual_arm_valid_grasp_poses.call_args.kwargs[
-        "obj_poses"
-    ]
+    sampled_pose = _GRASP_GENERATORS[
+        id(action)
+    ].get_dual_arm_valid_grasp_poses.call_args.kwargs["obj_poses"]
     assert torch.equal(sampled_pose, object_pose)
     assert plan.scene_dependencies == ("target",)
     request.goal.semantics.entity.get_local_pose.assert_not_called()
-    held = projected.get_coordinated_held_object("left_arm", "right_arm")
-    assert held is not None
-    assert torch.allclose(held.left_object_to_eef, pose_inv(object_pose))
-    assert torch.allclose(held.right_object_to_eef, pose_inv(object_pose))
+    left_held = projected.get_held_object("left_arm")
+    right_held = projected.get_held_object("right_arm")
+    assert left_held is not None and right_held is not None
+    assert left_held.semantics is right_held.semantics
+    assert torch.allclose(left_held.object_to_eef, pose_inv(object_pose))
+    assert torch.allclose(right_held.object_to_eef, pose_inv(object_pose))
 
 
 def test_assemble_place_uses_explicit_base_snapshot() -> None:
@@ -2015,7 +2787,7 @@ def test_assemble_place_uses_explicit_base_snapshot() -> None:
     task = TaskState(
         batch_size=NUM_ENVS,
         device="cpu",
-        held_objects={"logical_arm": _held(_semantics(entity_id="assemble_object"))},
+        held_objects={"arm": _held(_semantics(entity_id="assemble_object"))},
     )
     base_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     base_pose[:, 0, 3] = torch.tensor([0.2, 0.4])
@@ -2029,15 +2801,12 @@ def test_assemble_place_uses_explicit_base_snapshot() -> None:
     )
 
     request = action.resolve_request(
-        replace(
-            _invocation(
-                action,
-                AssembleGoal(
-                    affordance=affordance,
-                    base_pose=SceneEntityPose("base"),
-                ),
+        _invocation(
+            action,
+            AssembleGoal(
+                affordance=affordance,
+                base_pose=SceneEntityPose("base"),
             ),
-            binding=_binding(action, task_state_key="logical_arm"),
         )
     )
     plan = action.plan(request, context)
@@ -2106,7 +2875,7 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
     target_pose = torch.eye(4)
     target_pose[0, 3] = 0.3
     affordance = AntipodalAffordance()
-    _stub_dual_arm_grasp_poses(affordance)
+    _stub_dual_arm_grasp_poses(action)
     invocation = ActionInvocation(
         skill_id="coordinated_pickment",
         goal=CoordinatedPickGoal(
@@ -2130,9 +2899,12 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
         context.robot.qpos[1].unsqueeze(0).repeat(30, 1),
     )
     assert all(not frame.active_mask[1].item() for frame in plan.commands.frames)
-    held = projected.get_coordinated_held_object("left_arm", "right_arm")
-    assert held is not None
-    assert held.env_mask.tolist() == [True, False]
+    left_held = projected.get_held_object("left_arm")
+    right_held = projected.get_held_object("right_arm")
+    assert left_held is not None and right_held is not None
+    assert left_held.semantics is right_held.semantics
+    assert left_held.env_mask.tolist() == [True, False]
+    assert right_held.env_mask.tolist() == [True, False]
 
 
 def test_coordinated_pick_fails_when_affordance_has_no_grasp() -> None:
@@ -2148,7 +2920,7 @@ def test_coordinated_pick_fails_when_affordance_has_no_grasp() -> None:
         ),
     )
     affordance = AntipodalAffordance()
-    affordance.get_dual_arm_valid_grasp_poses = Mock(
+    _GRASP_GENERATORS[id(action)].get_dual_arm_valid_grasp_poses = Mock(
         return_value=[
             None,
             {
@@ -2224,8 +2996,8 @@ def test_coordinated_placement_projects_effects_and_omits_empty_segments(
         batch_size=NUM_ENVS,
         device="cpu",
         held_objects={
-            "logical_placing": placing,
-            "logical_support": support,
+            "left_arm": placing,
+            "right_arm": support,
         },
     )
     invocation = ActionInvocation(
@@ -2234,15 +3006,7 @@ def test_coordinated_placement_projects_effects_and_omits_empty_segments(
             placing_object_target_pose=torch.eye(4),
             support_object_target_pose=torch.eye(4),
         ),
-        binding=_dual_binding(
-            action,
-            "placing",
-            "support",
-            task_state_keys={
-                "placing": "logical_placing",
-                "support": "logical_support",
-            },
-        ),
+        binding=_dual_binding(action, "placing", "support"),
         motion_policy=MotionPolicy(sample_count=30),
     )
     context = _dual_context(task)
@@ -2258,16 +3022,16 @@ def test_coordinated_placement_projects_effects_and_omits_empty_segments(
         "right_arm",
         "right_hand",
     }
-    projected_placing = projected.get_held_object("logical_placing")
+    projected_placing = projected.get_held_object("left_arm")
     if release:
         assert projected_placing is None
     else:
         assert projected_placing is not None
         assert projected_placing.semantics is placing.semantics
         assert torch.equal(projected_placing.object_to_eef, placing.object_to_eef)
-    assert projected.get_held_object("logical_support") is not None
-    assert projected.get_held_object("logical_support").semantics is support.semantics
-    assert projected.get_held_object("right_arm") is None
+    projected_support = projected.get_held_object("right_arm")
+    assert projected_support is not None
+    assert projected_support.semantics is support.semantics
     assert tuple(segment.name for segment in plan.segments) == expected_segments
     assert plan.segments[0].start == 0
     assert all(
@@ -2275,6 +3039,35 @@ def test_coordinated_placement_projects_effects_and_omits_empty_segments(
         for previous, current in zip(plan.segments, plan.segments[1:])
     )
     assert plan.segments[-1].stop == plan.commands.frame_count
+
+
+def test_coordinated_placement_rejects_one_object_held_by_both_arms() -> None:
+    generator = _dual_motion_generator()
+    action = _bind_action(generator, CoordinatedPlacement())
+    semantics = _semantics()
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={
+            "left_arm": _held(semantics),
+            "right_arm": _held(semantics),
+        },
+    )
+    invocation = ActionInvocation(
+        skill_id="coordinated_placement",
+        goal=CoordinatedPlacementGoal(
+            placing_object_target_pose=torch.eye(4),
+            support_object_target_pose=torch.eye(4),
+        ),
+        binding=_dual_binding(action, "placing", "support"),
+        motion_policy=MotionPolicy(sample_count=30),
+    )
+
+    plan = _plan_action(action, invocation, _dual_context(task))
+
+    assert plan.plan_success.tolist() == [False, False]
+    assert _joint_trajectory(plan).waypoint_count == 0
+    generator.robot.compute_ik.assert_not_called()
 
 
 def test_coordinated_placement_holds_only_environment_with_ik_failure() -> None:

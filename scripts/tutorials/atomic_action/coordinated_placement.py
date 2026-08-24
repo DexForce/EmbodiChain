@@ -16,8 +16,8 @@
 
 """Demonstrate dual-arm coordinated placement with bread and pan meshes.
 
-The left UR5 picks up bread. The right UR5 picks up a pan and moves it to the
-lower alignment pose. The left UR5 places the bread above the pan and releases
+The left arm picks up bread. The right arm picks up a pan and moves it to the
+lower alignment pose. The left arm places the bread above the pan and releases
 it while the right hand keeps holding the pan.
 """
 
@@ -38,7 +38,6 @@ from scipy.spatial.transform import Rotation as SciRotation
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     CoordinatedPlacementOptions,
@@ -58,14 +57,13 @@ from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.scenario_utils import (
-    add_dual_ur5_robot,
+    add_dual_tutorial_robot,
     compute_local_bounds,
     compute_world_bounds,
     create_manual_object_semantics,
     get_local_vertices,
     invert_pose,
     log_action_plan,
-    make_dual_ur5_solver_cfg,
     normalize_vector,
     resolve_cached_data_path,
     rotate_pose_about_world_z,
@@ -73,6 +71,7 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     transform_points,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_toppra_motion_generator,
@@ -211,21 +210,18 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
-    """Create a dual-UR5 robot with one PGI gripper on each arm."""
-    return add_dual_ur5_robot(
+def create_dual_robot(
+    sim: SimulationManager,
+    robot_type: TutorialRobot,
+) -> Robot:
+    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    return add_dual_tutorial_robot(
         sim,
-        uid="DualUR5CoordinatedPlacement",
-        urdf_name="dual_ur5_coordinated_placement",
-        arm_urdf_path=resolve_cached_data_path("UniversalRobots/UR5/UR5.urdf"),
-        gripper_urdf_path=resolve_cached_data_path("DH_PGI_140_80/DH_PGI_140_80.urdf"),
-        solver_cfg=make_dual_ur5_solver_cfg(
-            GRIPPER_TCP_Z,
-            clear_urdf_path=True,
-        ),
+        robot_type=robot_type,
+        uid=f"Dual{robot_type.title()}CoordinatedPlacement",
+        urdf_name=f"dual_{robot_type}_coordinated_placement",
+        tcp_z=GRIPPER_TCP_Z,
         init_pos=ROBOT_INIT_POS,
-        joint_name_case="lower",
-        set_urdf_name_case=False,
     )
 
 
@@ -547,7 +543,7 @@ def run_coordinated_placement_demo(
     pan.clear_dynamics()
     bread_pose = bread_pose_batch[0].to(device=sim.device, dtype=torch.float32)
     pan_pose = pan_pose_batch[0].to(device=sim.device, dtype=torch.float32)
-    n_envs = bread_pose_batch.shape[0]
+    num_envs = bread_pose_batch.shape[0]
     bread_vertices = get_local_vertices(bread)
     pan_vertices = get_local_vertices(pan)
     bread_local_min, bread_local_max = compute_local_bounds(bread_vertices)
@@ -599,7 +595,7 @@ def run_coordinated_placement_demo(
         },
     )
     full_joint_ids = list(range(robot.dof))
-    state = engine.initial_context()
+    state = engine.initial_context(control_dt=sim.sim_config.physics_dt)
 
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the scene, then press Enter to compile both pick-ups..."
@@ -619,33 +615,31 @@ def run_coordinated_placement_demo(
         sim.device,
         z_clearance=PAN_GRASP_Z_CLEARANCE,
     )
-    left_pick_binding = engine.bind_control_parts(
-        "pick_up",
-        {"primary": {"motion": "left_arm", "grasp": "left_hand"}},
-    )
-    right_pick_binding = engine.bind_control_parts(
-        "pick_up",
-        {"primary": {"motion": "right_arm", "grasp": "right_hand"}},
-    )
     pick_invocations = (
-        ActionInvocation(
-            skill_id="pick_up",
-            goal=GraspGoal(
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
                 semantics=bread_semantics,
-                grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=n_envs),
+                grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=num_envs),
             ),
-            binding=left_pick_binding,
-            motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+            control_parts={"primary": {"motion": "left_arm", "grasp": "left_hand"}},
+            motion_policy=MotionPolicy(
+                strategy="motion_gen",
+                sample_count=PICK_SAMPLE_INTERVAL,
+            ),
             skill_options=left_pick_options,
         ),
-        ActionInvocation(
-            skill_id="pick_up",
-            goal=GraspGoal(
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
                 semantics=pan_semantics,
-                grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=n_envs),
+                grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=num_envs),
             ),
-            binding=right_pick_binding,
-            motion_policy=MotionPolicy(sample_count=PAN_PICK_SAMPLE_INTERVAL),
+            control_parts={"primary": {"motion": "right_arm", "grasp": "right_hand"}},
+            motion_policy=MotionPolicy(
+                strategy="motion_gen",
+                sample_count=PAN_PICK_SAMPLE_INTERVAL,
+            ),
             skill_options=right_pick_options,
         ),
     )
@@ -753,7 +747,6 @@ def run_coordinated_placement_demo(
                 batch_size=state.batch_size,
                 device=state.robot.qpos.device,
                 held_objects=held_objects,
-                coordinated_held_objects=state.task.coordinated_held_objects,
             ),
         )
 
@@ -776,34 +769,33 @@ def run_coordinated_placement_demo(
             sim,
             support_target_pose,
             placing_target_pose,
-            num_envs=n_envs,
+            num_envs=num_envs,
         )
     coordinated_target = CoordinatedPlacementGoal(
         placing_object_target_pose=broadcast_pose_batch(
-            placing_target_pose, num_envs=n_envs
+            placing_target_pose, num_envs=num_envs
         ),
         support_object_target_pose=broadcast_pose_batch(
-            support_target_pose, num_envs=n_envs
+            support_target_pose, num_envs=num_envs
         ),
         placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,
         support_height_offset=SUPPORT_TARGET_HEIGHT_OFFSET,
         release=True,
     )
     start_time = time.time()
-    placement_binding = engine.bind_control_parts(
-        "coordinated_placement",
-        {
-            "placing": {"motion": "left_arm", "grasp": "left_hand"},
-            "support": {"motion": "right_arm", "grasp": "right_hand"},
-        },
-    )
     placement_compiled = engine.compile(
         (
-            ActionInvocation(
-                skill_id="coordinated_placement",
-                goal=coordinated_target,
-                binding=placement_binding,
-                motion_policy=MotionPolicy(sample_count=COORDINATED_SAMPLE_INTERVAL),
+            engine.make_invocation(
+                "coordinated_placement",
+                coordinated_target,
+                control_parts={
+                    "placing": {"motion": "left_arm", "grasp": "left_hand"},
+                    "support": {"motion": "right_arm", "grasp": "right_hand"},
+                },
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=COORDINATED_SAMPLE_INTERVAL,
+                ),
                 skill_options=coordinated_options,
             ),
         ),
@@ -838,7 +830,7 @@ def run_coordinated_placement_demo(
             sim,
             support_target_pose,
             placing_target_pose,
-            num_envs=n_envs,
+            num_envs=num_envs,
         )
     if wait_for_user:
         input("Press Enter to execute coordinated placement...")
@@ -871,7 +863,7 @@ def main() -> None:
         arena_space=3.0,
         light_pos=(0.0, -0.4, 3.0),
     )
-    robot = create_dual_ur5_robot(sim)
+    robot = create_dual_robot(sim, args.robot)
     run_coordinated_placement_demo(args, sim, robot)
 
 

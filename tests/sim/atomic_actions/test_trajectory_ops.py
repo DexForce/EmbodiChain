@@ -28,6 +28,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     resolve_object_target,
 )
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    axis_translation_keyframes,
     build_joint_plan_states,
     build_pose_plan_states,
     interpolate_hand_qpos,
@@ -46,7 +47,7 @@ class TestNormalizeSuccessMask:
     def test_python_bool_is_expanded_without_collapsing_batch(self):
         success = normalize_success_mask(
             True,
-            n_envs=2,
+            num_envs=2,
             device=CPU,
             name="IK success",
         )
@@ -56,7 +57,7 @@ class TestNormalizeSuccessMask:
     def test_per_environment_tensor_is_preserved(self):
         success = normalize_success_mask(
             torch.tensor([True, False]),
-            n_envs=2,
+            num_envs=2,
             device=CPU,
             name="IK success",
         )
@@ -66,7 +67,7 @@ class TestNormalizeSuccessMask:
     def test_binary_integer_success_is_normalized_at_planner_boundary(self):
         success = normalize_success_mask(
             torch.tensor([1, 0], dtype=torch.int32),
-            n_envs=2,
+            num_envs=2,
             device=CPU,
             name="IK success",
         )
@@ -78,7 +79,7 @@ class TestNormalizeSuccessMask:
         with pytest.raises(TypeError, match="binary integer"):
             normalize_success_mask(
                 torch.tensor([1, 2], dtype=torch.int32),
-                n_envs=2,
+                num_envs=2,
                 device=CPU,
                 name="IK success",
             )
@@ -93,7 +94,7 @@ class TestNormalizeSuccessMask:
         with pytest.raises(ValueError, match="CUDA device requested"):
             normalize_success_mask(
                 True,
-                n_envs=2,
+                num_envs=2,
                 device="cuda",
                 name="IK success",
             )
@@ -102,46 +103,46 @@ class TestNormalizeSuccessMask:
 class TestResolvePoseTarget:
     def test_unbatched_pose_broadcasts(self):
         pose = torch.eye(4)
-        out = resolve_pose_target(pose, n_envs=2, device=CPU)
+        out = resolve_pose_target(pose, num_envs=2, device=CPU)
         assert out.shape == (2, 4, 4)
 
     def test_batched_pose_passes_through(self):
         pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
-        out = resolve_pose_target(pose, n_envs=2, device=CPU)
+        out = resolve_pose_target(pose, num_envs=2, device=CPU)
         assert torch.equal(out, pose)
 
     def test_batched_pose_returns_owned_tensor(self):
         pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
-        out = resolve_pose_target(pose, n_envs=2, device=CPU)
+        out = resolve_pose_target(pose, num_envs=2, device=CPU)
         out[:, 0, 0] = 2.0
         assert torch.equal(pose, torch.eye(4).unsqueeze(0).repeat(2, 1, 1))
 
     def test_pose_converts_to_float32_on_requested_device(self):
         pose = torch.eye(4, dtype=torch.float64)
-        out = resolve_pose_target(pose, n_envs=2, device=CPU)
+        out = resolve_pose_target(pose, num_envs=2, device=CPU)
         assert out.dtype == torch.float32
         assert out.device == CPU
 
     def test_wrong_shape_raises(self):
         with pytest.raises(ValueError):
-            resolve_pose_target(torch.eye(3), n_envs=2, device=CPU)
+            resolve_pose_target(torch.eye(3), num_envs=2, device=CPU)
 
     def test_multi_waypoint_passes_through(self):
         pose = torch.eye(4).unsqueeze(0).unsqueeze(0).repeat(2, 3, 1, 1)
         pose[0, 1, :3, 3] = torch.tensor([1.0, 0.0, 0.0])
-        out = resolve_pose_target(pose, n_envs=2, device=CPU)
+        out = resolve_pose_target(pose, num_envs=2, device=CPU)
         assert out.shape == (2, 3, 4, 4)
         assert torch.equal(out, pose.to(torch.float32))
 
     def test_multi_waypoint_wrong_envs_raises(self):
         pose = torch.eye(4).unsqueeze(0).unsqueeze(0).repeat(3, 2, 1, 1)
         with pytest.raises(ValueError):
-            resolve_pose_target(pose, n_envs=2, device=CPU)
+            resolve_pose_target(pose, num_envs=2, device=CPU)
 
     def test_multi_waypoint_empty_raises(self):
         empty = torch.zeros((2, 0, 4, 4), dtype=torch.float32)
         with pytest.raises(ValueError, match="zero waypoints"):
-            resolve_pose_target(empty, n_envs=2, device=CPU)
+            resolve_pose_target(empty, num_envs=2, device=CPU)
 
 
 class TestResolveObjectTarget:
@@ -149,7 +150,7 @@ class TestResolveObjectTarget:
         pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
         out = resolve_object_target(
             pose,
-            n_envs=2,
+            num_envs=2,
             device=CPU,
         )
 
@@ -163,7 +164,7 @@ class TestResolveJointTarget:
         qpos = torch.arange(6, dtype=torch.float32)
         out = resolve_joint_target(
             qpos,
-            n_envs=2,
+            num_envs=2,
             joint_dof=6,
             control_part="arm",
             device=CPU,
@@ -176,7 +177,7 @@ class TestResolveJointTarget:
         qpos = torch.arange(12, dtype=torch.float32).reshape(2, 6)
         out = resolve_joint_target(
             qpos,
-            n_envs=2,
+            num_envs=2,
             joint_dof=6,
             control_part="arm",
             device=CPU,
@@ -188,7 +189,7 @@ class TestResolveJointTarget:
         expected = qpos.clone()
         out = resolve_joint_target(
             qpos,
-            n_envs=2,
+            num_envs=2,
             joint_dof=6,
             control_part="arm",
             device=CPU,
@@ -200,7 +201,7 @@ class TestResolveJointTarget:
         with pytest.raises(ValueError):
             resolve_joint_target(
                 torch.zeros(5),
-                n_envs=2,
+                num_envs=2,
                 joint_dof=6,
                 control_part="arm",
                 device=CPU,
@@ -210,7 +211,7 @@ class TestResolveJointTarget:
         qpos = torch.arange(24, dtype=torch.float32).reshape(2, 2, 6)
         out = resolve_joint_target(
             qpos,
-            n_envs=2,
+            num_envs=2,
             joint_dof=6,
             control_part="arm",
             device=CPU,
@@ -222,7 +223,7 @@ class TestResolveJointTarget:
         with pytest.raises(ValueError):
             resolve_joint_target(
                 torch.zeros(3, 2, 6),
-                n_envs=2,
+                num_envs=2,
                 joint_dof=6,
                 control_part="arm",
                 device=CPU,
@@ -232,7 +233,7 @@ class TestResolveJointTarget:
         with pytest.raises(ValueError):
             resolve_joint_target(
                 torch.zeros(2, 2, 5),
-                n_envs=2,
+                num_envs=2,
                 joint_dof=6,
                 control_part="arm",
                 device=CPU,
@@ -243,7 +244,7 @@ class TestResolveJointTarget:
         with pytest.raises(ValueError, match="zero waypoints"):
             resolve_joint_target(
                 empty,
-                n_envs=2,
+                num_envs=2,
                 joint_dof=6,
                 control_part="arm",
                 device=CPU,
@@ -320,6 +321,45 @@ class TestTranslatePoseWorld:
         offset = torch.zeros(3, 3)
         with pytest.raises(ValueError, match="offset batch size"):
             translate_pose_world(pose, offset)
+
+
+class TestAxisTranslationKeyframes:
+    def test_excludes_start_includes_end_and_stays_on_axis(self):
+        start = torch.eye(4).repeat(2, 1, 1)
+        start[:, :3, 3] = torch.tensor([[-0.1, 0.2, 0.3], [0.4, -0.2, 0.1]])
+        axis = torch.tensor([[1.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
+        axis = torch.nn.functional.normalize(axis, dim=1)
+        end = start.clone()
+        end[:, :3, 3] += axis * torch.tensor([[0.5], [-0.3]])
+
+        keyframes = axis_translation_keyframes(
+            start,
+            end,
+            axis,
+            n_waypoints=5,
+        )
+
+        displacement = keyframes[:, :, :3, 3] - start[:, None, :3, 3]
+        orthogonal = (
+            displacement
+            - (displacement * axis[:, None]).sum(dim=-1, keepdim=True) * axis[:, None]
+        )
+        assert keyframes.shape == (2, 5, 4, 4)
+        assert torch.allclose(keyframes[:, -1], end)
+        assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+
+    def test_rejects_off_axis_displacement(self):
+        start = torch.eye(4).unsqueeze(0)
+        end = start.clone()
+        end[:, 1, 3] = 0.1
+
+        with pytest.raises(ValueError, match="parallel to axis"):
+            axis_translation_keyframes(
+                start,
+                end,
+                torch.tensor([1.0, 0.0, 0.0]),
+                n_waypoints=2,
+            )
 
 
 def test_interpolate_hand_qpos_preserves_endpoints():

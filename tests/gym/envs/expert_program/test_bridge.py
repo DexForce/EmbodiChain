@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 import torch
 
-from embodichain.lab.gym.envs.demo import ProcessedEnvAction, execute_demo_episode
+from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.gym.envs.expert_program.bridge import (
     AtomicDemoBridge,
     BufferedGymCommandSink,
@@ -35,6 +35,7 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
     UnsupportedRuntimeTransportError,
 )
 import embodichain.lab.gym.envs.expert_program.bridge as bridge_module
+from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.sim.atomic_actions.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
@@ -200,47 +201,6 @@ class _DummyTransportEncoder:
         return base_action.clone()
 
 
-class _RecordingAcceptedCommandObserver:
-    """Record transactional sink notifications and optional callback failures."""
-
-    def __init__(
-        self,
-        *,
-        fail_accept: bool = False,
-        fail_cancel: bool = False,
-    ) -> None:
-        self.fail_accept = fail_accept
-        self.fail_cancel = fail_cancel
-        self.sink: BufferedGymCommandSink | None = None
-        self.accepted_frames: list[RuntimeCommandFrame] = []
-        self.accepted_pending_counts: list[int] = []
-        self.cancelled_targets: list[tuple[RuntimeEndpointTarget, ...]] = []
-        self.cancelled_pending_counts: list[int] = []
-        self.discard_count = 0
-
-    def accepted(self, command: RuntimeCommandFrame) -> None:
-        """Record acceptance after observing the sink's committed buffer."""
-        if self.sink is None:
-            raise AssertionError("Observer sink must be assigned before use.")
-        self.accepted_pending_counts.append(self.sink.pending_count)
-        self.accepted_frames.append(command)
-        if self.fail_accept:
-            raise RuntimeError("observer rejected accepted command")
-
-    def cancelled(self, targets: tuple[RuntimeEndpointTarget, ...]) -> None:
-        """Record owned cancellation targets."""
-        if self.sink is None:
-            raise AssertionError("Observer sink must be assigned before use.")
-        self.cancelled_pending_counts.append(self.sink.pending_count)
-        self.cancelled_targets.append(targets)
-        if self.fail_cancel:
-            raise RuntimeError("observer rejected cancellation")
-
-    def discarded(self) -> None:
-        """Record one fail-closed observer reset."""
-        self.discard_count += 1
-
-
 def _dummy_frame() -> RuntimeCommandFrame:
     return RuntimeCommandFrame(
         commands=(
@@ -302,7 +262,7 @@ class _FakeProgramAnalysis:
 
 
 class _FakeProgram:
-    schema_version = 1
+    schema_version = 2
     program_id = "demo-program"
 
     def __init__(self, *segments: _FakeSegment) -> None:
@@ -531,12 +491,12 @@ class _TerminalFailedRuntime(_FakeRuntime):
                 ExecutionEvent(
                     kind=ExecutionEventKind.ACTION_PLANNING_FAILED,
                     timestamp=self.clock.now(),
-                    skill_id="operate_articulation",
+                    skill_id="slide",
                     invocation_id="open-drawer-call",
                     invocation_revision=0,
                     invocation_index=0,
                     env_mask=failed_mask,
-                    message="Articulation motion phase 'operate' failed.",
+                    message="Slide contact motion failed.",
                 ),
             ),
             message="Motion planning failed before the first command.",
@@ -767,6 +727,24 @@ class _PostPolicyPort:
         self.active_masks.append(active_mask.clone())
         yield self.action
 
+    def post_policy_result(
+        self,
+        policy: object,
+        *,
+        segment: object,
+    ) -> torch.Tensor:
+        del policy, segment
+        return self.active_masks[-1].clone()
+
+    def post_policy_metadata(
+        self,
+        policy: object,
+        *,
+        segment: object,
+    ) -> dict[str, object]:
+        del policy, segment
+        return {}
+
 
 class _ValidatorPort:
     def __init__(self, result: torch.Tensor) -> None:
@@ -780,6 +758,15 @@ class _ValidatorPort:
         del segment
         self.seen.append(validator)
         return self.result
+
+    def validator_metadata(
+        self,
+        validator: object,
+        *,
+        segment: object,
+    ) -> dict[str, object]:
+        del validator, segment
+        return {}
 
 
 class _MetadataPostPolicyPort(_PostPolicyPort):
@@ -842,6 +829,24 @@ class _FailingPostPolicyPort:
             yield torch.empty(0)
         raise RuntimeError("post-policy observation failed")
 
+    def post_policy_result(
+        self,
+        policy: object,
+        *,
+        segment: object,
+    ) -> bool:
+        del policy, segment
+        return True
+
+    def post_policy_metadata(
+        self,
+        policy: object,
+        *,
+        segment: object,
+    ) -> dict[str, object]:
+        del policy, segment
+        return {}
+
 
 class _AcceptParallelSafety:
     """Test-only authoritative gate that accepts the supplied merged frame."""
@@ -896,6 +901,20 @@ def test_environment_step_clock_advances_only_explicitly() -> None:
     clock.advance_after_env_step()
     assert clock.step_index == 1
     assert clock.now() == pytest.approx(STEP_DT)
+
+
+def test_atomic_demo_bridge_rejects_non_v2_compiled_program() -> None:
+    clock = EnvironmentStepClock(STEP_DT)
+    sink = BufferedGymCommandSink(
+        RuntimeCommandFrameEncoder(_QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))),
+        clock,
+    )
+    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=STEP_DT))
+    program = _FakeProgram(_FakeSegment())
+    program.schema_version = 1
+
+    with pytest.raises(ValueError, match="schema_version must be exactly 2"):
+        AtomicDemoBridge(program, runtime, sink, clock)
 
 
 def test_observation_provider_reorders_qpos_by_stable_env_id() -> None:
@@ -973,7 +992,7 @@ def test_buffered_sink_buffers_command_hold_and_cancel_without_stepping() -> Non
     assert acknowledgement.accepted
     assert sink.pending_count == 1
     action = sink.pop()
-    assert isinstance(action, ProcessedEnvAction)
+    assert isinstance(action, ControllerAction)
     assert action.metadata["bridge_action_kind"] == "runtime_command"
     assert clock.step_index == 0
 
@@ -982,95 +1001,6 @@ def test_buffered_sink_buffers_command_hold_and_cancel_without_stepping() -> Non
     sink.cancel(frame.targets, timeout=1.0)
     assert sink.pending_count == 0
     assert clock.step_index == 0
-
-
-def test_buffered_sink_notifies_observer_only_after_successful_buffering() -> None:
-    """Observer acceptance follows encoding and owns a command snapshot."""
-    clock = EnvironmentStepClock(STEP_DT)
-    observer = _RecordingAcceptedCommandObserver()
-    sink = BufferedGymCommandSink(
-        RuntimeCommandFrameEncoder(_QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))),
-        clock,
-        accepted_command_observer=observer,
-    )
-    observer.sink = sink
-    frame = _joint_frame(duration=STEP_DT)
-
-    sink.send(frame, timeout=1.0)
-
-    assert observer.accepted_pending_counts == [1]
-    assert len(observer.accepted_frames) == 1
-    observed = observer.accepted_frames[0]
-    assert observed is not frame
-    assert torch.equal(observed.env_ids, frame.env_ids)
-    assert observed.env_ids.data_ptr() != frame.env_ids.data_ptr()
-
-
-def test_buffered_sink_does_not_notify_observer_when_encoding_fails() -> None:
-    """A frame that never reaches the buffer cannot establish evidence."""
-    clock = EnvironmentStepClock(STEP_DT)
-    observer = _RecordingAcceptedCommandObserver()
-    sink = BufferedGymCommandSink(
-        RuntimeCommandFrameEncoder(_QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))),
-        clock,
-        accepted_command_observer=observer,
-    )
-    observer.sink = sink
-
-    with pytest.raises(UnsupportedRuntimeTransportError, match="test.transport"):
-        sink.send(_dummy_frame(), timeout=1.0)
-
-    assert sink.pending_count == 0
-    assert observer.accepted_frames == []
-    assert observer.discard_count == 0
-
-
-def test_buffered_sink_rolls_back_buffer_when_observer_rejects_acceptance() -> None:
-    """Observer failure atomically clears the pending action and evidence state."""
-    clock = EnvironmentStepClock(STEP_DT)
-    observer = _RecordingAcceptedCommandObserver(fail_accept=True)
-    sink = BufferedGymCommandSink(
-        RuntimeCommandFrameEncoder(_QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))),
-        clock,
-        accepted_command_observer=observer,
-    )
-    observer.sink = sink
-
-    with pytest.raises(RuntimeError, match="observer rejected accepted command"):
-        sink.send(_joint_frame(duration=STEP_DT), timeout=1.0)
-
-    assert observer.accepted_pending_counts == [1]
-    assert sink.pending_count == 0
-    assert observer.discard_count == 1
-
-
-def test_buffered_sink_notifies_observer_on_cancel_and_explicit_discard() -> None:
-    """Cancel is target-scoped while a local discard resets all evidence."""
-    clock = EnvironmentStepClock(STEP_DT)
-    observer = _RecordingAcceptedCommandObserver()
-    sink = BufferedGymCommandSink(
-        RuntimeCommandFrameEncoder(_QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))),
-        clock,
-        accepted_command_observer=observer,
-    )
-    observer.sink = sink
-    frame = _joint_frame(duration=STEP_DT)
-    sink.send(frame, timeout=1.0)
-
-    sink.cancel(frame.targets, timeout=1.0)
-
-    assert sink.pending_count == 0
-    assert observer.cancelled_pending_counts == [0]
-    assert len(observer.cancelled_targets) == 1
-    assert observer.cancelled_targets[0][0].address_fingerprint == (
-        frame.targets[0].address_fingerprint
-    )
-    assert observer.discard_count == 0
-
-    sink.send(frame, timeout=1.0)
-    sink.discard_pending()
-    assert sink.pending_count == 0
-    assert observer.discard_count == 1
 
 
 def test_atomic_demo_bridge_is_lazy_and_waits_with_hold_actions() -> None:
@@ -1100,6 +1030,28 @@ def test_atomic_demo_bridge_is_lazy_and_waits_with_hold_actions() -> None:
     assert runtime.status is SkillStatus.COMPLETED
     assert runtime.cancel_count == 0
     assert demo_segment.validator().tolist() == [True, True]
+
+
+def test_bridge_publishes_completion_only_after_normal_program_exhaustion() -> None:
+    """Task success cannot observe a partial segment lifecycle as completion."""
+    bridge, _, _ = _bridge(duration=STEP_DT)
+    segments = iter(bridge.iter_segments())
+
+    demo_segment = next(segments)
+    assert bridge.program_completed is False
+    with pytest.raises(RuntimeError, match="before all segments"):
+        bridge.completion_mask
+
+    tuple(demo_segment.actions)
+    assert demo_segment.validator().tolist() == [True, True]
+    assert bridge.program_completed is False
+
+    with pytest.raises(StopIteration):
+        next(segments)
+    assert bridge.program_completed is True
+    completion = bridge.completion_mask
+    completion[0] = False
+    assert bridge.completion_mask.tolist() == [True, True]
 
 
 def test_closing_without_abort_handshake_fails_loudly_and_does_not_ack() -> None:
@@ -1259,7 +1211,7 @@ class _BridgeExecutorEnv:
         )
         self.raise_first_step = raise_first_step
         self.num_envs = BATCH_SIZE
-        self.steps: list[ProcessedEnvAction] = []
+        self.steps: list[ControllerAction] = []
         self._demo_no_auto_reset = False
 
     @property
@@ -1269,8 +1221,8 @@ class _BridgeExecutorEnv:
     def create_demo_segments(self):
         return self.bridge.iter_segments()
 
-    def step(self, action: ProcessedEnvAction):
-        assert isinstance(action, ProcessedEnvAction)
+    def step(self, action: ControllerAction):
+        assert isinstance(action, ControllerAction)
         self.steps.append(action.snapshot())
         if self.raise_first_step and len(self.steps) == 1:
             raise RuntimeError("simulated environment failure")
@@ -1289,9 +1241,9 @@ class _BridgeExecutorEnv:
 
     def _mask_demo_action(
         self,
-        action: ProcessedEnvAction,
+        action: ControllerAction,
         active_mask: tuple[bool, ...],
-    ) -> ProcessedEnvAction:
+    ) -> ControllerAction:
         del active_mask
         return action.snapshot()
 
@@ -1301,7 +1253,7 @@ def test_zero_command_terminal_runtime_failure_preserves_trace_and_validates_onc
 ):
     validator = object()
     first = _FakeSegment(
-        calls=(_FakeCompiledCall(0, "operate_articulation"),),
+        calls=(_FakeCompiledCall(0, "slide"),),
         validators=(validator,),
     )
     second = _FakeSegment(
@@ -1352,12 +1304,12 @@ def test_zero_command_terminal_runtime_failure_preserves_trace_and_validates_onc
         {
             "kind": "action_planning_failed",
             "timestamp": 0.0,
-            "skill_id": "operate_articulation",
+            "skill_id": "slide",
             "invocation_id": "open-drawer-call",
             "invocation_revision": 0,
             "invocation_index": 0,
             "env_mask": [True, True],
-            "message": "Articulation motion phase 'operate' failed.",
+            "message": "Slide contact motion failed.",
         }
     ]
     assert segment_result.metadata["validation"] == {
@@ -1371,7 +1323,7 @@ def test_zero_command_terminal_runtime_failure_preserves_trace_and_validates_onc
                 "kind": "object",
                 "source_path": [],
                 "result_mask": [True, True],
-                "result": None,
+                "result": {},
             }
         ],
         "accepted_mask": [False, False],

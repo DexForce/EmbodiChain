@@ -7,6 +7,9 @@ Interactive Robot Control with Gizmo
 
 This tutorial demonstrates how to use the Gizmo class for interactive robot manipulation in SimulationManager. You'll learn how to create a gizmo attached to a robot's end-effector and use it for real-time inverse kinematics (IK) control, allowing intuitive manipulation of robot poses through visual interaction.
 
+For the cross-frontend capability summary, supported targets, lifecycle rules,
+and security boundary, see :doc:`/features/interaction/gizmo`.
+
 The Code
 ~~~~~~~~
 
@@ -71,7 +74,7 @@ First, we configure a UR10 robot with an IK solver for end-effector control:
 
 .. literalinclude:: ../../../scripts/tutorials/sim/gizmo_robot.py
    :language: python
-   :start-at: # Create UR10 robot configuration
+   :start-at: # Create UR10 robot
    :end-at: robot = sim.add_robot(cfg=robot_cfg)
 
 Key components of the robot configuration:

@@ -25,16 +25,16 @@ import sys
 
 import pytest
 
-from embodichain_tasks.configs import get_config_path
 from scripts.benchmark.expert_program.demo_success import (
     aggregate_demo_success_trials,
     load_raw_trials,
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_OPEN_DRAWER_GYM_CONFIG = get_config_path("gym/open_drawer/cobot_magic_3cam.json")
-_OPEN_DRAWER_EXPERT_PROGRAM = get_config_path(
-    "expert_program/tableware/open_drawer.json"
+_TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
+_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "gym/open_drawer/cobot_magic_3cam.json"
+_OPEN_DRAWER_EXPERT_PROGRAM = (
+    _TASK_CONFIG_ROOT / "expert_program/tableware/open_drawer.json"
 )
 _CASE_ID = "open_drawer_live"
 _SEED = 0
@@ -142,15 +142,19 @@ def test_live_open_drawer_benchmark_writes_successful_decodable_artifacts(
     assert isinstance(calls, list)
     assert len(calls) == 1
     call = calls[0]
-    assert call["semantic_id"] == "operate_articulation"
+    assert call["semantic_id"] == "embodichain_tasks.open_drawer"
+    assert call["skill_id"] == "slide"
     assert call["status"] == "completed"
-    effects = call["effects"]
-    assert isinstance(effects, list)
-    assert effects
-    for effect in effects:
-        evidence = effect["evidence"]["joint.position"]
-        assert evidence["valid_mask"] == [True]
-        assert evidence["acquisition_errors"] == [None]
+    assert call["effects"] == []
+    validation = segment["metadata"]["validation"]
+    assert validation["accepted_mask"] == [True]
+    validators = validation["validators"]
+    assert len(validators) == 1
+    assert validators[0]["kind"] == "articulation_joint_position"
+    assert validators[0]["result_mask"] == [True]
+    assert validators[0]["result"]["joint"] == "slide_rails"
+    assert validators[0]["result"]["minimum_position"] == pytest.approx(0.09)
+    assert validators[0]["result"]["accepted_mask"] == [True]
 
     aggregates = aggregate_demo_success_trials(decoded_trials)
     assert len(aggregates.success_and_metrics) == 1
