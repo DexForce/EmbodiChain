@@ -85,6 +85,7 @@ from .bridge import (
     GymPlanningObservationProvider,
     RuntimeTransportActionEncoder,
 )
+from .catalog import SimulationExpertProgramRegistration
 from .environment import (
     ExpertProgramEnvironmentAdapter,
     ExpertProgramEnvironmentFactory,
@@ -452,8 +453,8 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         self,
         simulation: SimulationManager,
         robot: Robot,
-        scene_binding: SimulationSceneBinding,
-        robot_profile_binding: SimulationRobotSkillProfileBinding,
+        scene_binding: SimulationSceneBinding | SimulationExpertProgramRegistration,
+        robot_profile_binding: SimulationRobotSkillProfileBinding | None = None,
         *,
         step_dt: float,
         planner_cfg: BasePlannerCfg | None = None,
@@ -470,13 +471,58 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         force_observer: ScalarObservationCallback | None = None,
         wrench_observer: ScalarObservationCallback | None = None,
     ) -> None:
-        if type(scene_binding) is not SimulationSceneBinding:
-            raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
-        if type(robot_profile_binding) is not SimulationRobotSkillProfileBinding:
-            raise TypeError(
-                "robot_profile_binding must be exactly "
-                "SimulationRobotSkillProfileBinding."
+        registration: SimulationExpertProgramRegistration | None = None
+        if type(scene_binding) is SimulationExpertProgramRegistration:
+            if robot_profile_binding is not None:
+                raise ValueError(
+                    "A task registration and robot_profile_binding are mutually "
+                    "exclusive."
+                )
+            registration = scene_binding
+            registration.assert_unchanged()
+            selected_scene_binding = registration.scene_binding
+            selected_profile_binding = registration.robot_profile_binding
+            if endpoint_adapters is not None:
+                raise ValueError(
+                    "endpoint_adapters are owned by the task registration."
+                )
+            if settle_presets is not None:
+                raise ValueError("settle_presets are owned by the task registration.")
+            supplied_evidence_callbacks = tuple(
+                name
+                for name, callback in (
+                    ("contact_observer", contact_observer),
+                    ("constraint_observer", constraint_observer),
+                    ("force_observer", force_observer),
+                    ("wrench_observer", wrench_observer),
+                )
+                if callback is not None
             )
+            if supplied_evidence_callbacks:
+                raise ValueError(
+                    "Evidence callbacks are not registration-owned standard "
+                    "extensions: "
+                    f"{supplied_evidence_callbacks}."
+                )
+            selected_endpoint_adapters = dict(registration.endpoint_adapter_map)
+            selected_settle_presets = registration.settle_presets
+        else:
+            if type(scene_binding) is not SimulationSceneBinding:
+                raise TypeError(
+                    "scene_binding must be exactly SimulationSceneBinding or "
+                    "SimulationExpertProgramRegistration."
+                )
+            if type(robot_profile_binding) is not SimulationRobotSkillProfileBinding:
+                raise TypeError(
+                    "robot_profile_binding must be exactly "
+                    "SimulationRobotSkillProfileBinding."
+                )
+            selected_scene_binding = scene_binding
+            selected_profile_binding = robot_profile_binding
+            selected_endpoint_adapters = (
+                None if endpoint_adapters is None else dict(endpoint_adapters)
+            )
+            selected_settle_presets = settle_presets
         if planner_cfg is not None and motion_generator_factory is not None:
             raise ValueError(
                 "planner_cfg and motion_generator_factory are mutually exclusive."
@@ -522,17 +568,16 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
 
         self._simulation = simulation
         self._robot = robot
-        self._scene_binding = scene_binding
-        self._robot_profile_binding = robot_profile_binding
+        self._registration = registration
+        self._scene_binding = selected_scene_binding
+        self._robot_profile_binding = selected_profile_binding
         self._step_dt = _positive_finite(step_dt, field_name="step_dt")
         self._planner_cfg = selected_planner_cfg
         self._motion_generator_factory = motion_generator_factory
         self._grasp_pose_generators = (
             {} if grasp_pose_generators is None else dict(grasp_pose_generators)
         )
-        self._endpoint_adapters = (
-            None if endpoint_adapters is None else dict(endpoint_adapters)
-        )
+        self._endpoint_adapters = selected_endpoint_adapters
         self._translation_threshold = _non_negative_finite(
             translation_threshold,
             field_name="translation_threshold",
@@ -557,8 +602,8 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         self._segment_policy_port = SimulationSegmentPolicyPort(
             simulation,
             robot,
-            scene_binding,
-            settle_presets=settle_presets,
+            selected_scene_binding,
+            settle_presets=selected_settle_presets,
             env_ids=self._env_ids,
         )
 
@@ -567,8 +612,9 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         cls,
         environment: SimulationExpertProgramEnvironment,
         *,
-        scene_binding: SimulationSceneBinding,
-        robot_profile_binding: SimulationRobotSkillProfileBinding,
+        registration: SimulationExpertProgramRegistration | None = None,
+        scene_binding: SimulationSceneBinding | None = None,
+        robot_profile_binding: SimulationRobotSkillProfileBinding | None = None,
         planner_cfg: BasePlannerCfg | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
@@ -592,10 +638,26 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
             raise TypeError("environment must expose step_dt.") from exc
         if simulation is None or robot is None:
             raise TypeError("environment must expose non-None sim and robot values.")
+        if registration is not None:
+            if scene_binding is not None or robot_profile_binding is not None:
+                raise ValueError(
+                    "registration is mutually exclusive with scene_binding and "
+                    "robot_profile_binding."
+                )
+            selected_binding: (
+                SimulationSceneBinding | SimulationExpertProgramRegistration
+            ) = registration
+        else:
+            if type(scene_binding) is not SimulationSceneBinding:
+                raise TypeError(
+                    "scene_binding must be exactly SimulationSceneBinding when "
+                    "registration is omitted."
+                )
+            selected_binding = scene_binding
         return cls(
             simulation,
             robot,
-            scene_binding,
+            selected_binding,
             robot_profile_binding,
             step_dt=step_dt,
             planner_cfg=planner_cfg,
@@ -631,13 +693,36 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         """Return the shared simulation post-policy and validator port."""
         return self._segment_policy_port
 
+    @property
+    def expert_program_registration(self) -> SimulationExpertProgramRegistration:
+        """Return the exact standard registration owned by this factory."""
+        if self._registration is None:
+            raise RuntimeError(
+                "This factory uses the explicit legacy integration path."
+            )
+        return self._registration
+
+    def registration_owned_segment_policy_ports(
+        self,
+    ) -> tuple[SimulationSegmentPolicyPort, SimulationSegmentPolicyPort]:
+        """Return registration-owned post-policy and validator ports."""
+        if self._registration is None:
+            raise RuntimeError("This factory does not own a task registration.")
+        return self._segment_policy_port, self._segment_policy_port
+
     def create_scene_registry(self) -> SceneRegistry:
         """Build one fresh authoritative registry from explicit bindings."""
-        return self._scene_binding.build(self._simulation)
+        registry = self._scene_binding.build(self._simulation)
+        if self._registration is not None:
+            self._registration.validate_scene_registry(registry)
+        return registry
 
     def create_robot_skill_profile(self) -> RobotSkillProfile:
         """Build the robot's declared semantic-skill profile."""
-        return self._robot_profile_binding.build(self._robot)
+        profile = self._robot_profile_binding.build(self._robot)
+        if self._registration is not None:
+            self._registration.validate_robot_profile(profile)
+        return profile
 
     def create_atomic_action_engine(
         self,
@@ -656,12 +741,15 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
             raise ValueError(
                 "Motion generator must own the exact robot selected by the factory."
             )
-        return AtomicActionEngine(
+        engine = AtomicActionEngine(
             motion_generator,
             grasp_pose_generators=self._grasp_pose_generators,
             skill_profile=profile,
             endpoint_adapters=self._endpoint_adapters,
         )
+        if self._registration is not None:
+            self._registration.validate_engine(engine)
+        return engine
 
     def create_planning_observation_provider(
         self,
@@ -735,6 +823,40 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         )
         return tuple(providers)
 
+    def create_parallel_command_safety_validator(
+        self,
+        *,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        observation_provider: PlanningObservationPort,
+    ) -> ParallelCommandSafetyValidator:
+        """Create the registration-owned validator for this runtime assembly."""
+        if self._registration is None:
+            raise RuntimeError("This factory does not own a task registration.")
+        if type(scene_registry) is not SceneRegistry:
+            raise TypeError("scene_registry must be exactly SceneRegistry.")
+        if (
+            not isinstance(engine, AtomicActionEngine)
+            or engine.robot is not self._robot
+        ):
+            raise ValueError("engine must own the exact factory robot.")
+        if type(observation_provider) is not SimulationPlanningObservationProvider:
+            raise TypeError(
+                "observation_provider must be exactly "
+                "SimulationPlanningObservationProvider."
+            )
+        if not observation_provider.is_owned_by(self._owner_token):
+            raise ValueError("observation_provider belongs to another factory.")
+        validator = self._registration.create_parallel_safety_validator(
+            simulation=self._simulation,
+            robot=self._robot,
+        )
+        if validator is None:
+            raise RuntimeError(
+                "The task registration does not declare a parallel safety factory."
+            )
+        return validator
+
     def create_adapter(
         self,
         *,
@@ -748,6 +870,20 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
     ) -> ExpertProgramEnvironmentAdapter:
         """Create the exact Gym adapter with shared simulation policy ports."""
+        if self._registration is not None:
+            return ExpertProgramEnvironmentAdapter(
+                self,
+                step_dt=self._step_dt,
+                registration=self._registration,
+                call_catalog=call_catalog,
+                registered_lowerers=registered_lowerers,
+                relation_grounders=relation_grounders,
+                handover_pose_providers=handover_pose_providers,
+                effect_monitor_registry=effect_monitor_registry,
+                runtime_transports=runtime_transports,
+                runner_cfg=runner_cfg,
+                parallel_safety_validator=parallel_safety_validator,
+            )
         return ExpertProgramEnvironmentAdapter(
             self,
             step_dt=self._step_dt,
@@ -785,8 +921,9 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
 def create_simulation_expert_program_adapter(
     environment: SimulationExpertProgramEnvironment,
     *,
-    scene_binding: SimulationSceneBinding,
-    robot_profile_binding: SimulationRobotSkillProfileBinding,
+    registration: SimulationExpertProgramRegistration | None = None,
+    scene_binding: SimulationSceneBinding | None = None,
+    robot_profile_binding: SimulationRobotSkillProfileBinding | None = None,
     planner_cfg: BasePlannerCfg | None = None,
     motion_generator_factory: MotionGeneratorFactory | None = None,
     grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
@@ -807,20 +944,20 @@ def create_simulation_expert_program_adapter(
 ) -> ExpertProgramEnvironmentAdapter:
     """Create a complete production adapter from one standard Gym environment.
 
-    This is the intended task-side one-line integration. Relation-target
-    grounders and embodiment-owned handover pose providers are explicit and
-    default to empty collections, so calls that require an uninstalled provider
-    remain fail-closed during program preflight. Advanced callers can retain
-    :class:`SimulationExpertProgramFactory` and call ``create_adapter`` directly
-    to install registered semantic lowerers or custom monitors. Custom endpoint
-    adapters and their matching Gym runtime transports are accepted here so a
-    non-joint endpoint remains executable through the one-line path.
+    This is the intended task-side one-line integration. Standard tasks pass
+    one immutable ``registration`` that owns their pre-simulation catalog and
+    every runtime extension. Advanced tasks may instead pass explicit scene and
+    profile bindings plus live extension providers.
 
     Args:
         environment: Standard Gym simulation environment exposing ``sim``,
             ``robot``, and ``step_dt``.
-        scene_binding: Authoritative typed scene declaration.
-        robot_profile_binding: Typed robot resource and policy declaration.
+        registration: Optional standard task registration. It is mutually
+            exclusive with explicit scene and profile bindings.
+        scene_binding: Authoritative typed scene declaration for the advanced
+            integration path.
+        robot_profile_binding: Typed robot resource and policy declaration for
+            the advanced integration path.
         planner_cfg: Optional planner configuration owned by the factory.
         motion_generator_factory: Optional factory for one fresh motion generator.
         grasp_pose_generators: Standalone grasp-pose services keyed by grasp
@@ -843,6 +980,7 @@ def create_simulation_expert_program_adapter(
     """
     factory = SimulationExpertProgramFactory.from_environment(
         environment,
+        registration=registration,
         scene_binding=scene_binding,
         robot_profile_binding=robot_profile_binding,
         planner_cfg=planner_cfg,

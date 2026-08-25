@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
 import math
 from types import MappingProxyType
@@ -37,7 +37,7 @@ from ..atomic_actions.execution import (
     ExecutionEvent,
     ExecutionPlanAttempt,
 )
-from ..atomic_actions.plans import ExecutionFeedbackMode, TrajectorySegment
+from ..atomic_actions.plans import TrajectorySegment
 from ..atomic_actions.policies import MotionPolicy, RecoveryPolicy
 from ..atomic_actions.runner import (
     CommandSink,
@@ -50,6 +50,12 @@ from ..atomic_actions.runner import (
     RunnerStep,
 )
 from ..atomic_actions.state import PlanningContext, TaskState
+from ..atomic_actions.tracking import (
+    FeedbackTerminalAcceptance,
+    TimedTrackingSequence,
+    TrackingMetricCfg,
+    TrackingPolicy,
+)
 from .calls import SemanticCallSpec
 from .compiler import SemanticSkillCompiler
 from .effects import (
@@ -119,6 +125,8 @@ def _metadata_value(value: object, *, depth: int = 0) -> object:
         return _metadata_value(value.detach().cpu().tolist(), depth=depth + 1)
     if isinstance(value, torch.device):
         return str(value)
+    if isinstance(value, type):
+        return {"__type__": f"{value.__module__}.{value.__qualname__}"}
     if isinstance(value, Mapping):
         items = sorted(value.items(), key=lambda item: str(item[0]))
         if all(type(key) is str and key and key == key.strip() for key, _ in items):
@@ -142,6 +150,17 @@ def _metadata_value(value: object, *, depth: int = 0) -> object:
             for nested in sorted(value, key=str)
         ]
     return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+
+
+def _freeze_metadata_value(value: object) -> object:
+    """Recursively freeze already JSON-safe metadata for immutable traces."""
+    if isinstance(value, dict):
+        return MappingProxyType(
+            {key: _freeze_metadata_value(nested) for key, nested in value.items()}
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_metadata_value(nested) for nested in value)
+    return value
 
 
 def _snapshot_metadata_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
@@ -228,6 +247,59 @@ class SkillStatus(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class SkillEndpointTrackingChannelTrace:
+    """Stable provider and projector route for one endpoint feedback channel."""
+
+    channel_id: str
+    provider_id: str
+    provider_revision: str
+    projector_id: str
+    projector_revision: str
+    feedback_address_type: str
+    address_fingerprint: object
+    route_fingerprint: object
+
+    def __post_init__(self) -> None:
+        for name in (
+            "channel_id",
+            "provider_id",
+            "provider_revision",
+            "projector_id",
+            "projector_revision",
+            "feedback_address_type",
+        ):
+            if type(getattr(self, name)) is not str or not getattr(self, name):
+                raise ValueError(f"{name} must be a non-empty string.")
+        object.__setattr__(
+            self,
+            "address_fingerprint",
+            _freeze_metadata_value(_metadata_value(self.address_fingerprint)),
+        )
+        object.__setattr__(
+            self,
+            "route_fingerprint",
+            _freeze_metadata_value(_metadata_value(self.route_fingerprint)),
+        )
+
+    def to_metadata(self) -> dict[str, object]:
+        """Return the exact immutable tracking route without live objects."""
+        return {
+            "channel_id": self.channel_id,
+            "feedback_source": {
+                "provider_id": self.provider_id,
+                "revision": self.provider_revision,
+                "address_type": self.feedback_address_type,
+                "address_fingerprint": _metadata_value(self.address_fingerprint),
+            },
+            "projector": {
+                "projector_id": self.projector_id,
+                "revision": self.projector_revision,
+            },
+            "route_fingerprint": _metadata_value(self.route_fingerprint),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class SkillEndpointBindingTrace:
     """JSON-safe typed projection of one resolved execution endpoint."""
 
@@ -241,6 +313,7 @@ class SkillEndpointBindingTrace:
     task_state_key: str
     capabilities: tuple[str, ...]
     command_ids: tuple[str, ...]
+    tracking_channels: tuple[SkillEndpointTrackingChannelTrace, ...]
     claim_tokens: tuple[str, ...]
     joint_ids: tuple[int, ...]
 
@@ -265,6 +338,21 @@ class SkillEndpointBindingTrace:
             ):
                 raise ValueError(f"{name} must contain sorted unique identifiers.")
             object.__setattr__(self, name, values)
+        tracking_channels = tuple(self.tracking_channels)
+        if not all(
+            type(value) is SkillEndpointTrackingChannelTrace
+            for value in tracking_channels
+        ):
+            raise TypeError(
+                "tracking_channels must contain exact "
+                "SkillEndpointTrackingChannelTrace values."
+            )
+        channel_ids = tuple(value.channel_id for value in tracking_channels)
+        if tuple(sorted(set(channel_ids))) != channel_ids:
+            raise ValueError(
+                "tracking_channels must use sorted unique channel identifiers."
+            )
+        object.__setattr__(self, "tracking_channels", tracking_channels)
         joint_ids = tuple(self.joint_ids)
         if len(set(joint_ids)) != len(joint_ids) or not all(
             type(value) is int and value >= 0 for value in joint_ids
@@ -289,6 +377,22 @@ class SkillEndpointBindingTrace:
             task_state_key=binding.task_state_key,
             capabilities=tuple(sorted(binding.capabilities)),
             command_ids=tuple(sorted(binding.commands)),
+            tracking_channels=tuple(
+                SkillEndpointTrackingChannelTrace(
+                    channel_id=channel_id,
+                    provider_id=channel.source.provider_id,
+                    provider_revision=channel.source.revision,
+                    projector_id=channel.projector.projector_id,
+                    projector_revision=channel.projector.revision,
+                    feedback_address_type=(
+                        f"{type(channel.source.address).__module__}."
+                        f"{type(channel.source.address).__qualname__}"
+                    ),
+                    address_fingerprint=(channel.source.address.address_fingerprint),
+                    route_fingerprint=channel.route_fingerprint,
+                )
+                for channel_id, channel in sorted(binding.tracking_channels.items())
+            ),
             claim_tokens=tuple(sorted(binding.claim_tokens)),
             joint_ids=binding.joint_ids,
         )
@@ -306,6 +410,9 @@ class SkillEndpointBindingTrace:
             "task_state_key": self.task_state_key,
             "capabilities": list(self.capabilities),
             "command_ids": list(self.command_ids),
+            "tracking_channels": [
+                channel.to_metadata() for channel in self.tracking_channels
+            ],
             "claim_tokens": list(self.claim_tokens),
             "joint_ids": list(self.joint_ids),
         }
@@ -338,12 +445,102 @@ def _recovery_policy_to_metadata(policy: RecoveryPolicy) -> dict[str, object]:
     return {
         "max_replans": policy.max_replans,
         "max_action_retries": policy.max_action_retries,
-        "tracking_error_threshold": _metadata_value(policy.tracking_error_threshold),
         "goal_translation_threshold": _metadata_value(
             policy.goal_translation_threshold
         ),
         "goal_rotation_threshold": _metadata_value(policy.goal_rotation_threshold),
         "action_timeout": _metadata_value(policy.action_timeout),
+    }
+
+
+def _tracking_metric_to_metadata(metric: TrackingMetricCfg) -> dict[str, object]:
+    """Serialize one exact typed metric and its unit-preserving tolerances."""
+    parameters = (
+        {
+            value.name: _metadata_value(getattr(metric, value.name))
+            for value in fields(metric)
+        }
+        if is_dataclass(metric)
+        else {}
+    )
+    return {
+        "metric_id": metric.metric_id,
+        "revision": metric.revision,
+        "channel_id": metric.channel_id,
+        "type": f"{type(metric).__module__}.{type(metric).__qualname__}",
+        "parameters": parameters,
+    }
+
+
+def _tracking_policy_to_metadata(policy: TrackingPolicy) -> dict[str, object]:
+    """Serialize independent in-flight and terminal tracking contracts."""
+    in_flight = policy.in_flight
+    terminal = policy.terminal
+    return {
+        "in_flight": (
+            None
+            if in_flight is None
+            else {
+                "metrics": [
+                    _tracking_metric_to_metadata(metric) for metric in in_flight.metrics
+                ],
+                "consecutive_violations": in_flight.consecutive_violations,
+                "grace_period": _metadata_value(in_flight.grace_period),
+            }
+        ),
+        "terminal": (
+            {
+                "mode": "feedback",
+                "metrics": [
+                    _tracking_metric_to_metadata(metric) for metric in terminal.metrics
+                ],
+                "settle_timeout": _metadata_value(terminal.settle_timeout),
+                "consecutive_acceptances": terminal.consecutive_acceptances,
+            }
+            if isinstance(terminal, FeedbackTerminalAcceptance)
+            else {
+                "mode": "timed",
+                "settle_duration": _metadata_value(terminal.settle_duration),
+            }
+        ),
+    }
+
+
+def _tracking_sequence_to_metadata(
+    sequence: TimedTrackingSequence | None,
+) -> dict[str, object] | None:
+    """Serialize the provider/projector shape of one plan-owned contract."""
+    if sequence is None:
+        return None
+    first_frame = None if not sequence.frames else sequence.frames[0]
+    return {
+        "env_ids": _metadata_value(sequence.env_ids),
+        "frame_count": sequence.frame_count,
+        "setpoints": [
+            {
+                "endpoint": list(setpoint.endpoint_key),
+                "channel_id": setpoint.binding.channel_id,
+                "state_type": (
+                    f"{type(setpoint.desired).__module__}."
+                    f"{type(setpoint.desired).__qualname__}"
+                ),
+                "feedback_source": {
+                    "provider_id": setpoint.binding.source.provider_id,
+                    "revision": setpoint.binding.source.revision,
+                    "address_fingerprint": _metadata_value(
+                        setpoint.binding.source.address.address_fingerprint
+                    ),
+                },
+                "projector": {
+                    "projector_id": setpoint.binding.projector.projector_id,
+                    "revision": setpoint.binding.projector.revision,
+                },
+                "route_fingerprint": _metadata_value(
+                    setpoint.binding.route_fingerprint
+                ),
+            }
+            for setpoint in (() if first_frame is None else first_frame.setpoints)
+        ],
     }
 
 
@@ -355,6 +552,7 @@ class ResolvedCorePolicyTrace:
     preset_id: str
     preset_schema_version: int
     motion_policy: MotionPolicy
+    tracking_policy: TrackingPolicy
     recovery_policy: RecoveryPolicy
     endpoints: tuple[SkillEndpointBindingTrace, ...]
 
@@ -370,6 +568,8 @@ class ResolvedCorePolicyTrace:
             raise ValueError("preset_schema_version must be a positive integer.")
         if not isinstance(self.motion_policy, MotionPolicy):
             raise TypeError("motion_policy must be a MotionPolicy.")
+        if not isinstance(self.tracking_policy, TrackingPolicy):
+            raise TypeError("tracking_policy must be a TrackingPolicy.")
         if not isinstance(self.recovery_policy, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
         endpoints = tuple(self.endpoints)
@@ -381,6 +581,7 @@ class ResolvedCorePolicyTrace:
         if len(set(keys)) != len(keys):
             raise ValueError("endpoints must use unique slot/endpoint keys.")
         object.__setattr__(self, "motion_policy", replace(self.motion_policy))
+        object.__setattr__(self, "tracking_policy", self.tracking_policy.snapshot())
         object.__setattr__(self, "recovery_policy", replace(self.recovery_policy))
         object.__setattr__(self, "endpoints", endpoints)
 
@@ -392,6 +593,7 @@ class ResolvedCorePolicyTrace:
         preset_id: str,
         preset_schema_version: int,
         motion_policy: MotionPolicy,
+        tracking_policy: TrackingPolicy,
         recovery_policy: RecoveryPolicy,
         endpoints: Iterable[EndpointBinding],
     ) -> ResolvedCorePolicyTrace:
@@ -401,6 +603,7 @@ class ResolvedCorePolicyTrace:
             preset_id=preset_id,
             preset_schema_version=preset_schema_version,
             motion_policy=motion_policy,
+            tracking_policy=tracking_policy,
             recovery_policy=recovery_policy,
             endpoints=tuple(
                 SkillEndpointBindingTrace.from_binding(endpoint)
@@ -415,6 +618,7 @@ class ResolvedCorePolicyTrace:
             preset_id=self.preset_id,
             preset_schema_version=self.preset_schema_version,
             motion_policy=self.motion_policy,
+            tracking_policy=self.tracking_policy,
             recovery_policy=self.recovery_policy,
             endpoints=self.endpoints,
         )
@@ -428,6 +632,7 @@ class ResolvedCorePolicyTrace:
                 "schema_version": self.preset_schema_version,
             },
             "motion_policy": _motion_policy_to_metadata(self.motion_policy),
+            "tracking_policy": _tracking_policy_to_metadata(self.tracking_policy),
             "recovery_policy": _recovery_policy_to_metadata(self.recovery_policy),
             "endpoints": [endpoint.to_metadata() for endpoint in self.endpoints],
         }
@@ -461,7 +666,8 @@ class SkillPlanAttemptTrace:
     scene_dependency_monitor_until: Mapping[str, int]
     collision_world_sensitive: bool
     replannable: bool
-    feedback_mode: ExecutionFeedbackMode
+    tracking_policy: TrackingPolicy
+    tracking: TimedTrackingSequence | None
     effect_verification_kind: str | None
     resolved_core_policy: ResolvedCorePolicyTrace
     planner_backend: str
@@ -551,8 +757,12 @@ class SkillPlanAttemptTrace:
             raise TypeError("collision_world_sensitive must be a bool.")
         if type(self.replannable) is not bool:
             raise TypeError("replannable must be a bool.")
-        if not isinstance(self.feedback_mode, ExecutionFeedbackMode):
-            raise TypeError("feedback_mode must be an ExecutionFeedbackMode.")
+        if not isinstance(self.tracking_policy, TrackingPolicy):
+            raise TypeError("tracking_policy must be a TrackingPolicy.")
+        if self.tracking is not None and not isinstance(
+            self.tracking, TimedTrackingSequence
+        ):
+            raise TypeError("tracking must be a TimedTrackingSequence or None.")
         if self.effect_verification_kind is not None and (
             type(self.effect_verification_kind) is not str
             or not self.effect_verification_kind
@@ -583,6 +793,9 @@ class SkillPlanAttemptTrace:
             "scene_dependency_monitor_until",
             MappingProxyType(monitor_until),
         )
+        object.__setattr__(self, "tracking_policy", self.tracking_policy.snapshot())
+        if self.tracking is not None:
+            object.__setattr__(self, "tracking", self.tracking.snapshot())
         object.__setattr__(
             self,
             "resolved_core_policy",
@@ -629,7 +842,8 @@ class SkillPlanAttemptTrace:
             scene_dependency_monitor_until=plan.scene_dependency_monitor_until,
             collision_world_sensitive=plan.collision_world_sensitive,
             replannable=plan.replannable,
-            feedback_mode=plan.feedback_mode,
+            tracking_policy=plan.tracking_policy,
+            tracking=plan.tracking,
             effect_verification_kind=(
                 None
                 if plan.effect_verification is None
@@ -640,6 +854,7 @@ class SkillPlanAttemptTrace:
                 preset_id=preset_id,
                 preset_schema_version=preset_schema_version,
                 motion_policy=request.motion_policy,
+                tracking_policy=request.tracking_policy,
                 recovery_policy=request.recovery_policy,
                 endpoints=request.binding.endpoints,
             ),
@@ -670,7 +885,8 @@ class SkillPlanAttemptTrace:
             scene_dependency_monitor_until=self.scene_dependency_monitor_until,
             collision_world_sensitive=self.collision_world_sensitive,
             replannable=self.replannable,
-            feedback_mode=self.feedback_mode,
+            tracking_policy=self.tracking_policy,
+            tracking=self.tracking,
             effect_verification_kind=self.effect_verification_kind,
             resolved_core_policy=self.resolved_core_policy,
             planner_backend=self.planner_backend,
@@ -715,7 +931,8 @@ class SkillPlanAttemptTrace:
             },
             "collision_world_sensitive": self.collision_world_sensitive,
             "replannable": self.replannable,
-            "feedback_mode": self.feedback_mode.value,
+            "tracking_policy": _tracking_policy_to_metadata(self.tracking_policy),
+            "tracking_contract": _tracking_sequence_to_metadata(self.tracking),
             "effect_verification_kind": self.effect_verification_kind,
             "resolved_core_policy": self.resolved_core_policy.to_metadata(),
             "planner_diagnostics": {
@@ -2311,6 +2528,11 @@ class SkillRuntime:
                     if invocation is None
                     else invocation.motion_policy
                 ),
+                tracking_policy=(
+                    preset.tracking_policy
+                    if invocation is None
+                    else invocation.tracking_policy
+                ),
                 recovery_policy=(
                     preset.recovery_policy
                     if invocation is None
@@ -2554,6 +2776,7 @@ __all__ = [
     "SemanticEffectVerifier",
     "SkillCallTrace",
     "SkillEndpointBindingTrace",
+    "SkillEndpointTrackingChannelTrace",
     "SkillEffectTrace",
     "SkillFailure",
     "SkillPlanAttemptTrace",

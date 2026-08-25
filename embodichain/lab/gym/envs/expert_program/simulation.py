@@ -48,6 +48,7 @@ from embodichain.lab.sim.skills.profiles import (
     RobotSkillProfile,
     SkillPolicyPreset,
 )
+from embodichain.lab.sim.skills.integration import SceneEntityManifest, SceneManifest
 from embodichain.lab.sim.skills.scene import (
     GRASP_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
@@ -459,6 +460,95 @@ class SimulationSceneBinding:
                 "collision_world_mode must be SceneCollisionWorldMode or None."
             )
 
+    def declare(self) -> SceneManifest:
+        """Project the complete provider-free scene declaration."""
+        objects = {item.entity_id: item for item in self.rigid_objects}
+        articulations = {item.entity_id: item for item in self.articulations}
+        entries: list[SceneEntityManifest] = []
+
+        for binding in self.rigid_objects:
+            native_aliases = (
+                ()
+                if binding.simulation_uid == binding.entity_id
+                else (binding.simulation_uid,)
+            )
+            defaults = (
+                {}
+                if binding.default_grasp_affordance is None
+                else {
+                    GRASP_AFFORDANCE_CAPABILITY: SceneAffordanceRef(
+                        binding.default_grasp_affordance
+                    )
+                }
+            )
+            entries.append(
+                SceneEntityManifest(
+                    ref=SceneObjectRef(binding.entity_id),
+                    aliases=(*native_aliases, *binding.aliases),
+                    dynamics=binding.dynamics,
+                    collision_role=binding.collision_role,
+                    semantic_type=binding.semantic_type,
+                    default_affordances=defaults,
+                )
+            )
+
+        for binding in self.articulations:
+            native_aliases = (
+                ()
+                if binding.simulation_uid == binding.entity_id
+                else (binding.simulation_uid,)
+            )
+            entries.append(
+                SceneEntityManifest(
+                    ref=SceneArticulationRef(binding.entity_id),
+                    aliases=(*native_aliases, *binding.aliases),
+                    dynamics=binding.dynamics,
+                    collision_role=binding.collision_role,
+                    semantic_type=binding.semantic_type,
+                )
+            )
+
+        for binding in self.links:
+            if binding.articulation_id not in articulations:
+                raise KeyError(
+                    f"Link {binding.entity_id!r} references unbound articulation "
+                    f"{binding.articulation_id!r}."
+                )
+            entries.append(
+                SceneEntityManifest(
+                    ref=SceneLinkRef(binding.entity_id),
+                    aliases=binding.aliases,
+                    parent=SceneArticulationRef(binding.articulation_id),
+                    native_name=binding.native_link_name,
+                    dynamics=binding.dynamics,
+                    semantic_type=binding.semantic_type,
+                )
+            )
+
+        for binding in self.antipodal_grasps:
+            if binding.object_id not in objects:
+                raise KeyError(
+                    f"Grasp affordance {binding.entity_id!r} references unbound "
+                    f"object {binding.object_id!r}."
+                )
+            entries.append(
+                SceneEntityManifest(
+                    ref=SceneAffordanceRef(binding.entity_id),
+                    aliases=binding.aliases,
+                    parent=SceneObjectRef(binding.object_id),
+                    native_name=binding.native_name,
+                    affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                    affordance_payload_type=AntipodalAffordance,
+                    affordance_revision=binding.revision,
+                    relative_pose=binding.relative_pose,
+                )
+            )
+
+        return SceneManifest(
+            entries,
+            collision_world_mode=self.collision_world_mode,
+        )
+
     def build(self, simulation: SimulationManager) -> SceneRegistry:
         """Build the existing authoritative scene registry.
 
@@ -644,6 +734,21 @@ class ControlPartCommandPreset:
             }
         )
 
+    def declare(self) -> ControlPartCommandProfile:
+        """Build a provider-free command profile from declared tuple widths."""
+        widths = {len(positions) for positions in self.commands.values()}
+        if len(widths) > 1:
+            raise ValueError(
+                f"Command preset {self.preset_id!r} declares inconsistent command "
+                f"widths {sorted(widths)}."
+            )
+        return ControlPartCommandProfile.joint_positions(
+            **{
+                command_id: torch.tensor(positions, dtype=torch.float32)
+                for command_id, positions in self.commands.items()
+            }
+        )
+
 
 def _require_control_part_dof(robot: Robot, control_part: str) -> int:
     """Validate one native joint-backed control part and return its width."""
@@ -698,6 +803,10 @@ class ControlPartEndpointBinding:
     def build(self, robot: Robot) -> ResourceEndpoint:
         """Build a joint-backed endpoint after native control-part validation."""
         _require_control_part_dof(robot, self.control_part)
+        return self.declare()
+
+    def declare(self) -> ResourceEndpoint:
+        """Return the endpoint contract without reading a robot."""
         return ControlPartEndpoint(
             control_part=self.control_part,
             command_profile=self.command_preset,
@@ -746,6 +855,16 @@ class ControlPartResourceBinding:
         return RobotResource(
             resource_id=self.resource_id,
             endpoints=endpoints,
+            members=self.members,
+        )
+
+    def declare(self) -> RobotResource:
+        """Return the resource graph without reading native control parts."""
+        return RobotResource(
+            resource_id=self.resource_id,
+            endpoints={
+                binding.endpoint_id: binding.declare() for binding in self.endpoints
+            },
             members=self.members,
         )
 
@@ -942,6 +1061,69 @@ class SimulationRobotSkillProfileBinding:
             profile_id=self.profile_id,
             resources=resources,
             command_profiles=command_profiles,
+            defaults={
+                skill_id: ResourceBinding(resources=bindings)
+                for skill_id, bindings in self.defaults.items()
+            },
+            presets={preset.preset_id: preset for preset in self.presets},
+            default_preset=self.default_preset,
+            skill_presets=self.skill_presets,
+            grounding_providers=self.grounding_providers,
+        )
+
+    def declare(self) -> RobotSkillProfile:
+        """Project the complete provider-free robot skill profile."""
+        resources: dict[str, RobotResource] = {}
+        for binding in self.resources:
+            resource = (
+                binding.snapshot()
+                if type(binding) is RobotResource
+                else binding.declare()
+            )
+            if type(resource) is not RobotResource:
+                raise TypeError(
+                    f"Resource binding {binding.resource_id!r} must declare "
+                    "exactly RobotResource."
+                )
+            if resource.resource_id != binding.resource_id:
+                raise ValueError(
+                    f"Resource binding {binding.resource_id!r} declared "
+                    f"resource ID {resource.resource_id!r}."
+                )
+            if resource.members != tuple(binding.members):
+                raise ValueError(
+                    f"Resource binding {binding.resource_id!r} changed its "
+                    "declared resource members."
+                )
+            resources[resource.resource_id] = resource
+
+        command_presets = {preset.preset_id: preset for preset in self.command_presets}
+        for resource in resources.values():
+            for endpoint_id, endpoint in resource.endpoints.items():
+                if not isinstance(endpoint, ControlPartEndpoint):
+                    continue
+                preset_id = endpoint.command_profile
+                if preset_id is None:
+                    continue
+                preset = command_presets.get(preset_id)
+                if preset is None:
+                    raise KeyError(
+                        f"Endpoint {resource.resource_id!r}.{endpoint_id!r} "
+                        f"references unknown command preset {preset_id!r}."
+                    )
+                if preset.control_part != endpoint.control_part:
+                    raise ValueError(
+                        f"Endpoint {resource.resource_id!r}.{endpoint_id!r} uses "
+                        f"control part {endpoint.control_part!r}, but command "
+                        f"preset {preset_id!r} targets {preset.control_part!r}."
+                    )
+
+        return RobotSkillProfile(
+            profile_id=self.profile_id,
+            resources=resources,
+            command_profiles={
+                preset.preset_id: preset.declare() for preset in self.command_presets
+            },
             defaults={
                 skill_id: ResourceBinding(resources=bindings)
                 for skill_id, bindings in self.defaults.items()

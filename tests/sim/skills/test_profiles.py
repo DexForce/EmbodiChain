@@ -45,6 +45,7 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionGoal,
     MotionPolicy,
     OPEN_COMMAND,
+    PickUpOptions,
     ResolvedActionRequest,
     SkillBindingContract,
     SkillEndpointRequirement,
@@ -55,6 +56,12 @@ from embodichain.lab.sim.atomic_actions.bindings import (
     RuntimeEndpointTarget,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.tracking import (
+    JOINT_POSITION_CHANNEL,
+    EndpointTrackingFeedbackAddress,
+    JointPositionTrackingMetric,
+    TrackingPolicy,
+)
 from embodichain.lab.sim.skills import (
     AmbiguousSkillBindingError,
     COMPOSITE_EFFECT_MONITOR_ID,
@@ -1150,6 +1157,19 @@ def test_unique_capability_binding_lowers_to_exact_action_binding() -> None:
     assert grasp.require_target(JointPositionTarget).control_part == "left_hand"
     assert motion.task_state_key == "left_actor"
     assert grasp.task_state_key == "left_actor"
+    motion_tracking = motion.tracking_channel(JOINT_POSITION_CHANNEL)
+    assert motion_tracking.source.provider_id == "planning_context.robot"
+    assert motion_tracking.source.revision == "1"
+    assert motion_tracking.projector.projector_id == "joint_position_payload"
+    assert motion_tracking.projector.revision == "1"
+    assert isinstance(
+        motion_tracking.source.address,
+        EndpointTrackingFeedbackAddress,
+    )
+    assert (
+        motion_tracking.source.address.target.address_fingerprint
+        == motion.target.address_fingerprint
+    )
     resource = resolved.resources["primary"]
     motion_sources = resource.endpoints["motion"].effect_sources
     grasp_sources = resource.endpoints["grasp"].effect_sources
@@ -1361,7 +1381,14 @@ def test_generic_profile_supports_base_and_whole_body_without_arm_tool_fields() 
 def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     preset = SkillPolicyPreset(
         "safe",
+        action_option_templates={
+            "pick": PickUpOptions(pre_grasp_distance=0.08),
+        },
         motion_policy=MotionPolicy(sample_count=80),
+        tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=0.125,
+            terminal_max_abs_error=0.125,
+        ),
         required_planner="stub_planner",
     )
     profile = RobotSkillProfile(
@@ -1378,9 +1405,21 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     second = bound.preset()
 
     assert first is not second
-    assert first.schema_version == 1
+    assert first.schema_version == 2
     assert first.required_planner == "stub_planner"
     assert first.motion_policy.sample_count == 80
+    assert first.tracking_policy is not second.tracking_policy
+    assert first.action_option_templates["pick"] is not (
+        second.action_option_templates["pick"]
+    )
+    assert (
+        first.action_option_templates["pick"].pre_grasp_distance  # type: ignore[attr-defined]
+        == 0.08
+    )
+    first_tracking = first.tracking_policy.in_flight
+    assert first_tracking is not None
+    assert isinstance(first_tracking.metrics[0], JointPositionTrackingMetric)
+    assert first_tracking.metrics[0].tolerance == 0.125
     mutable_runner = first.runner_cfg
     mutable_runner.command_timeout = 99.0
     assert bound.preset().runner_cfg.command_timeout == 1.0
@@ -1388,10 +1427,10 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         bound.preset(skill_id="typo")
     with pytest.raises(KeyError, match="not an installed"):
         bound.preset("safe", skill_id="typo")
-    with pytest.raises(ValueError, match=r"supported versions are \[1\]"):
-        SkillPolicyPreset("future", schema_version=2)
+    with pytest.raises(ValueError, match=r"supported versions are \[2\]"):
+        SkillPolicyPreset("legacy", action_option_templates={}, schema_version=1)
     with pytest.raises(ValueError, match="required_planner"):
-        SkillPolicyPreset("invalid", required_planner="")
+        SkillPolicyPreset("invalid", action_option_templates={}, required_planner="")
 
     incompatible = RobotSkillProfile(
         "bad_preset",
@@ -1400,6 +1439,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         presets={
             "other": SkillPolicyPreset(
                 "other",
+                action_option_templates={},
                 required_planner="other_planner",
             )
         },
@@ -1409,7 +1449,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
 
 
 def test_policy_preset_defaults_exact_builtin_effect_monitor_refs() -> None:
-    preset = SkillPolicyPreset("safe")
+    preset = SkillPolicyPreset("safe", action_option_templates={})
 
     assert set(preset.effect_monitors) == {
         "pick",
@@ -1423,7 +1463,11 @@ def test_policy_preset_defaults_exact_builtin_effect_monitor_refs() -> None:
 
 
 def test_policy_preset_distinguishes_explicit_empty_effect_monitor_mapping() -> None:
-    preset = SkillPolicyPreset("unmonitored", effect_monitors={})
+    preset = SkillPolicyPreset(
+        "unmonitored",
+        action_option_templates={},
+        effect_monitors={},
+    )
 
     assert dict(preset.effect_monitors) == {}
     assert dict(preset.snapshot().effect_monitors) == {}
@@ -1436,7 +1480,11 @@ def test_policy_preset_owns_and_snapshots_effect_monitor_refs() -> None:
     }
     source_ref = EffectMonitorRef("test.monitor", "2", source_params)
     source_mapping = {"pick": source_ref}
-    preset = SkillPolicyPreset("custom", effect_monitors=source_mapping)
+    preset = SkillPolicyPreset(
+        "custom",
+        action_option_templates={},
+        effect_monitors=source_mapping,
+    )
 
     source_params["consecutive_samples"] = 99
     source_params["metadata"][1]["source"] = "mutated"  # type: ignore[index]
@@ -1458,6 +1506,89 @@ def test_policy_preset_owns_and_snapshots_effect_monitor_refs() -> None:
         first["place"] = source_ref  # type: ignore[index]
     with pytest.raises(TypeError):
         first["pick"].params["consecutive_samples"] = 4  # type: ignore[index]
+
+
+def test_policy_preset_owns_and_freezes_action_option_templates() -> None:
+    direction = torch.tensor([0.0, 1.0, 0.0])
+    source = PickUpOptions(
+        pick_object_part="top",
+        approach_direction=direction,
+    )
+    source_mapping = {"pick": source}
+    preset = SkillPolicyPreset(
+        "custom",
+        action_option_templates=source_mapping,
+    )
+
+    direction.fill_(9.0)
+    source.approach_direction.fill_(8.0)
+    source_mapping.clear()
+    first = preset.action_option_templates
+    second = preset.snapshot().action_option_templates
+    selected = preset.action_option_template("pick")
+
+    assert type(first["pick"]) is PickUpOptions
+    assert first["pick"] is not source
+    assert second["pick"] is not first["pick"]
+    assert selected is not first["pick"]
+    assert first["pick"].pick_object_part == "top"  # type: ignore[attr-defined]
+    torch.testing.assert_close(
+        first["pick"].approach_direction,  # type: ignore[attr-defined]
+        torch.tensor([0.0, 1.0, 0.0]),
+    )
+    with pytest.raises(TypeError):
+        first["place"] = PickUpOptions()  # type: ignore[index]
+    with pytest.raises(KeyError, match="no action-option template"):
+        preset.action_option_template("place")
+
+
+def test_policy_preset_requires_typed_action_option_templates() -> None:
+    with pytest.raises(TypeError, match="action_option_templates"):
+        SkillPolicyPreset("missing")  # type: ignore[call-arg]
+
+    assert not SkillPolicyPreset(
+        "empty", action_option_templates={}
+    ).action_option_templates
+
+    with pytest.raises(TypeError, match="ActionOptions"):
+        SkillPolicyPreset(
+            "invalid",
+            action_option_templates={"pick": object()},  # type: ignore[dict-item]
+        )
+
+
+def test_policy_preset_rejects_deepcopy_with_nested_mutable_aliases() -> None:
+    @dataclass(frozen=True, slots=True)
+    class AliasingOptions(ActionOptions):
+        values: list[int]
+
+        def __deepcopy__(self, memo: dict[int, object]) -> AliasingOptions:
+            del memo
+            return type(self)(self.values)
+
+    with pytest.raises(TypeError, match="without shared mutable objects"):
+        SkillPolicyPreset(
+            "invalid",
+            action_option_templates={"vendor.alias": AliasingOptions([1])},
+        )
+
+
+def test_policy_preset_rejects_deepcopy_with_shared_tensor_storage() -> None:
+    @dataclass(frozen=True, slots=True)
+    class TensorViewOptions(ActionOptions):
+        values: torch.Tensor
+
+        def __deepcopy__(self, memo: dict[int, object]) -> TensorViewOptions:
+            del memo
+            return type(self)(self.values.view_as(self.values))
+
+    with pytest.raises(TypeError, match="tensor storage"):
+        SkillPolicyPreset(
+            "invalid",
+            action_option_templates={
+                "vendor.tensor_alias": TensorViewOptions(torch.ones(2))
+            },
+        )
 
 
 def test_profile_owns_named_grounding_provider_selections() -> None:

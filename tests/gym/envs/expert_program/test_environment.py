@@ -63,7 +63,10 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     JOINT_POSITION_CAPABILITY,
+    HandOverOptions,
     MotionPolicy,
+    PickUpOptions,
+    PlaceOptions,
     PlanningContext,
     RobotObservation,
     TaskState,
@@ -194,6 +197,11 @@ def _robot_profile(
         presets={
             "safe": SkillPolicyPreset(
                 "safe",
+                action_option_templates={
+                    "pick": PickUpOptions(),
+                    "place": PlaceOptions(),
+                    "hand_over": HandOverOptions(),
+                },
                 motion_policy=safe_motion_policy,
             )
         },

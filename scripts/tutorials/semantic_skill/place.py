@@ -40,8 +40,11 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     EffectVerificationRequest,
     MotionPolicy,
+    PickUpOptions,
+    PlaceOptions,
     PlanningContext,
     RecoveryPolicy,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.skills import (
@@ -143,6 +146,7 @@ def create_robot_profile(
         presets={
             "pick": SkillPolicyPreset(
                 "pick",
+                action_option_templates={"pick": PickUpOptions()},
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICK_SAMPLE_COUNT,
@@ -150,22 +154,25 @@ def create_robot_profile(
                 # The PGI gripper closes in five interpolated commands. Its
                 # position controller can legitimately trail one command by
                 # more than the generic 0.05-rad threshold.
-                recovery_policy=RecoveryPolicy(
-                    tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+                    terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
                 ),
             ),
             "place": SkillPolicyPreset(
                 "place",
+                action_option_templates={"place": PlaceOptions()},
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PLACE_SAMPLE_COUNT,
                 ),
                 # A failed release is not safely repeatable without first
                 # reconciling the physical object state.
-                recovery_policy=RecoveryPolicy(
-                    max_action_retries=0,
-                    tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+                    terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
                 ),
+                recovery_policy=RecoveryPolicy(max_action_retries=0),
             ),
         },
         default_preset="pick",

@@ -324,6 +324,7 @@ embodichain.lab.sim.atomic_actions.affordance
 
    Affordance
    AntipodalAffordance
+   AxisAlignAffordance
    SlideAffordance
    PressAffordance
    TwistAffordance
@@ -448,7 +449,6 @@ embodichain.lab.sim.atomic_actions.plans
    ActionPlan
    CompiledTrajectory
    EffectVerificationRequirement
-   ExecutionFeedbackMode
    PlannerDiagnostics
    TimedTrajectory
    TrajectorySegment
@@ -1717,24 +1717,9 @@ embodichain_tasks.expert_program.repeated_pick_place
 .. autosummary::
 
    ExpertProgramRepeatedPickPlaceEnv
-
-embodichain_tasks.multi_segments
---------------------------------
-
-.. currentmodule:: embodichain_tasks.multi_segments
-
-.. autosummary::
-
-   MultiSegmentsCubePickPlaceEnv
-
-embodichain_tasks.multi_segments.cube_pick_place
-------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.multi_segments.cube_pick_place
-
-.. autosummary::
-
-   MultiSegmentsCubePickPlaceEnv
+   REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
+   create_repeated_pick_place_robot_profile_binding
+   create_repeated_pick_place_scene_binding
 
 embodichain_tasks.rl
 --------------------
@@ -1782,15 +1767,6 @@ embodichain_tasks.special.stay_still_save
 
    StayStillSaveEnv
 
-embodichain_tasks.tableware
----------------------------
-
-.. currentmodule:: embodichain_tasks.tableware
-
-.. autosummary::
-
-   OpenDrawerEnv
-
 embodichain_tasks.tableware.blocks_ranking_rgb
 ----------------------------------------------
 
@@ -1817,15 +1793,6 @@ embodichain_tasks.tableware.match_object_container
 .. autosummary::
 
    MatchObjectContainerEnv
-
-embodichain_tasks.tableware.open_drawer
----------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.open_drawer
-
-.. autosummary::
-
-   OpenDrawerEnv
 
 embodichain_tasks.tableware.place_object_drawer
 -----------------------------------------------

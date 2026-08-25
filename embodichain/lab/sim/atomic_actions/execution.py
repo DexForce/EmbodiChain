@@ -27,20 +27,22 @@ import torch
 
 from .effects import StateDelta
 from .invocation import ActionInvocation, ResolvedActionRequest
-from .bindings import JointPositionTarget, RuntimeEndpointTarget
+from .bindings import RuntimeEndpointTarget
 from .plans import (
     ActionPlan,
     EffectVerificationRequirement,
-    ExecutionFeedbackMode,
     TrajectorySegment,
 )
 from .policies import RecoveryPolicy
-from .runtime_commands import (
-    JointPositionPayload,
-    RuntimeCommandFrame,
-    TimedCommandSequence,
-)
+from .runtime_commands import RuntimeCommandFrame, TimedCommandSequence
 from .state import EntityState, PlanningContext, SceneSnapshot, TaskState
+from .tracking import (
+    FeedbackTerminalAcceptance,
+    TimedTerminalAcceptance,
+    TrackingEvaluation,
+    TrackingFrame,
+    TrackingMetricCfg,
+)
 
 if TYPE_CHECKING:
     from .engine import AtomicActionEngine
@@ -60,7 +62,10 @@ class ExecutionEventKind(str, Enum):
     ACTION_PLANNED = "action_planned"
     INVOCATION_REVISED = "invocation_revised"
     REPLANNED = "replanned"
-    TRACKING_ERROR = "tracking_error"
+    TRACKING_DIVERGED = "tracking_diverged"
+    TRACKING_FEEDBACK_FAILED = "tracking_feedback_failed"
+    TERMINAL_ACCEPTANCE_PENDING = "terminal_acceptance_pending"
+    TERMINAL_ACCEPTANCE_FAILED = "terminal_acceptance_failed"
     DYNAMIC_GOAL_CHANGED = "dynamic_goal_changed"
     COLLISION_WORLD_CHANGED = "collision_world_changed"
     ACTION_PLANNING_FAILED = "action_planning_failed"
@@ -413,14 +418,27 @@ class ExecutionSession:
             tuple[str, str],
             RuntimeEndpointTarget,
         ] = {}
+        self._active_tracking_routes: dict[
+            tuple[str, str, str],
+            tuple[object, str, str],
+        ] = {}
         self._planned_scene = context.scene
         self._action_started_at = context.robot.timestamp
         self._attempt_generation = -1
-        self._last_joint_command: torch.Tensor | None = None
-        self._last_joint_ids: tuple[int, ...] = ()
+        self._last_tracking_frame: TrackingFrame | None = None
         self._last_command_mask = torch.zeros(
             context.batch_size, dtype=torch.bool, device=context.robot.qpos.device
         )
+        self._tracking_violation_counts = torch.zeros(
+            context.batch_size,
+            dtype=torch.long,
+            device=context.robot.qpos.device,
+        )
+        self._terminal_acceptance_counts = torch.zeros_like(
+            self._tracking_violation_counts
+        )
+        self._terminal_started_at: float | None = None
+        self._terminal_pending_reported = False
         self._eligible = (
             torch.ones_like(self._last_command_mask)
             if eligible_mask is None
@@ -624,6 +642,10 @@ class ExecutionSession:
             replacement_context,
         )
         self._validate_destination_continuity(
+            replacement_plan,
+            ExecutionEventKind.INVOCATION_REVISED,
+        )
+        self._validate_tracking_continuity(
             replacement_plan,
             ExecutionEventKind.INVOCATION_REVISED,
         )
@@ -833,6 +855,7 @@ class ExecutionSession:
             in {
                 ExecutionEventKind.REPLANNED,
                 ExecutionEventKind.RECOVERY_EXHAUSTED,
+                ExecutionEventKind.TRACKING_FEEDBACK_FAILED,
             }
             for event in recovery_events
         ):
@@ -851,45 +874,110 @@ class ExecutionSession:
             self._waypoint_index += 1
             return self._tick_result(command=command, events=events)
 
-        terminal_error = self._terminal_error(plan)
-        not_reached = execution_mask & (
-            terminal_error > plan.recovery_policy.tracking_error_threshold
-        )
-        if not_reached.any():
-            max_terminal_error = float(terminal_error[not_reached].amax().item())
-            events.extend(
-                self._attempt_replan(
-                    not_reached,
-                    ExecutionEventKind.TRACKING_ERROR,
-                    "Terminal command has not been reached "
-                    f"(max_error={max_terminal_error:.6f}, "
-                    "threshold="
-                    f"{plan.recovery_policy.tracking_error_threshold:.6f}).",
+        terminal = plan.tracking_policy.terminal
+        if self._terminal_started_at is None:
+            self._terminal_started_at = self._context.robot.timestamp
+        elapsed_terminal = self._context.robot.timestamp - self._terminal_started_at
+        terminal_pending = torch.zeros_like(execution_mask)
+        if isinstance(terminal, TimedTerminalAcceptance):
+            if elapsed_terminal < terminal.settle_duration:
+                terminal_pending = execution_mask.clone()
+        elif isinstance(terminal, FeedbackTerminalAcceptance):
+            if plan.tracking is None or not plan.tracking.frames:
+                raise RuntimeError(
+                    "Feedback terminal acceptance requires a terminal tracking "
+                    "frame."
                 )
-            )
-            if self._status is not ExecutionStatus.RUNNING:
+            try:
+                accepted, valid, normalized_error = self._evaluate_tracking_frame(
+                    plan.tracking.frames[-1],
+                    terminal.metrics,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail required feedback closed
+                events.extend(
+                    self._fail_tracking_feedback(
+                        execution_mask,
+                        "Terminal tracking feedback evaluation failed: "
+                        f"{type(exc).__name__}: {exc}",
+                    )
+                )
                 return self._tick_result(command=None, events=events)
-            assert self._plan is not None
-            plan = self._plan
-            execution_mask = self._pending & self._plan.plan_success
-            if not self._pending.any():
-                return self._finish_action_tick(self._pending, None, events)
-            if plan.commands.frame_count > 0:
-                command = self._command_at(plan, 0, execution_mask)
-                self._waypoint_index = 1
-                return self._tick_result(command=command, events=events)
-            events.append(
-                self._event(
-                    ExecutionEventKind.TRAJECTORY_COMPLETED,
-                    execution_mask,
-                    "Replanned action has no executable command frame.",
+            invalid = execution_mask & ~valid
+            if invalid.any():
+                events.extend(
+                    self._fail_tracking_feedback(
+                        invalid,
+                        "Required terminal tracking feedback was invalid.",
+                    )
                 )
+                if self._status is not ExecutionStatus.RUNNING:
+                    return self._tick_result(command=None, events=events)
+                execution_mask = self._pending & plan.plan_success
+            accepted_now = execution_mask & valid & accepted
+            self._terminal_acceptance_counts[accepted_now] += 1
+            self._terminal_acceptance_counts[execution_mask & ~accepted_now] = 0
+            terminal_pending = execution_mask & (
+                self._terminal_acceptance_counts < terminal.consecutive_acceptances
             )
-            return self._finish_action_tick(
-                execution_mask,
-                effect_result,
-                events=events,
+            if terminal_pending.any() and elapsed_terminal >= terminal.settle_timeout:
+                max_error = float(normalized_error[terminal_pending].amax().item())
+                events.extend(
+                    self._attempt_action_retry(
+                        terminal_pending,
+                        ExecutionEventKind.TERMINAL_ACCEPTANCE_FAILED,
+                        "Terminal feedback did not satisfy the acceptance "
+                        "contract before its settle timeout "
+                        f"(max_normalized_error={max_error:.6f}).",
+                    )
+                )
+                if self._status is not ExecutionStatus.RUNNING:
+                    return self._tick_result(command=None, events=events)
+                assert self._plan is not None
+                plan = self._plan
+                execution_mask = self._pending & plan.plan_success
+                if not self._pending.any():
+                    return self._finish_action_tick(self._pending, None, events)
+                if plan.commands.frame_count > 0 and execution_mask.any():
+                    command = self._command_at(plan, 0, execution_mask)
+                    self._waypoint_index = 1
+                    return self._tick_result(command=command, events=events)
+                events.append(
+                    self._event(
+                        ExecutionEventKind.TRAJECTORY_COMPLETED,
+                        execution_mask,
+                        "Replanned action has no executable command frame.",
+                    )
+                )
+                return self._finish_action_tick(
+                    execution_mask,
+                    effect_result,
+                    events=events,
+                )
+        else:  # pragma: no cover - TrackingPolicy validates exact alternatives
+            raise AssertionError(
+                f"Unsupported terminal acceptance {type(terminal).__name__}."
             )
+
+        if terminal_pending.any():
+            if not self._terminal_pending_reported:
+                events.append(
+                    self._event(
+                        ExecutionEventKind.TERMINAL_ACCEPTANCE_PENDING,
+                        terminal_pending,
+                        "Maintaining the terminal command while acceptance is "
+                        "pending.",
+                    )
+                )
+                self._terminal_pending_reported = True
+            if plan.commands.frame_count == 0:
+                raise RuntimeError(
+                    "Terminal settling requires an executable terminal command "
+                    "frame."
+                )
+            terminal_command = plan.commands.frames[-1].with_active_mask(
+                plan.commands.frames[-1].active_mask & terminal_pending
+            )
+            return self._tick_result(command=terminal_command, events=events)
 
         events.append(
             self._event(
@@ -972,8 +1060,10 @@ class ExecutionSession:
             for target in plan.commands.targets
         }
         replacement_destinations = frozenset(replacement_targets)
+        replacement_tracking_routes = self._tracking_routes(plan)
         if not destination_continuity_validated:
             self._validate_destination_continuity(plan, event_kind)
+        self._validate_tracking_continuity(plan, event_kind)
         if (
             event_kind
             not in (
@@ -983,14 +1073,26 @@ class ExecutionSession:
             or replacement_destinations
         ):
             self._active_targets = replacement_targets
+        if (
+            event_kind
+            not in (
+                ExecutionEventKind.REPLANNED,
+                ExecutionEventKind.INVOCATION_REVISED,
+            )
+            or replacement_tracking_routes
+        ):
+            self._active_tracking_routes = replacement_tracking_routes
         self._plan = plan
         self._attempt_generation += 1
         self._waypoint_index = 0
         self._planned_scene = context.scene
         self._action_started_at = context.robot.timestamp
-        self._last_joint_command = None
-        self._last_joint_ids = ()
+        self._last_tracking_frame = None
         self._last_command_mask.zero_()
+        self._tracking_violation_counts.zero_()
+        self._terminal_acceptance_counts.zero_()
+        self._terminal_started_at = None
+        self._terminal_pending_reported = False
         self._pending_effect = None
         self._effect_failures.zero_()
         self._effect_requested_at = None
@@ -1077,6 +1179,56 @@ class ExecutionSession:
             f"replacement={sorted(replacement_destinations)}.{guidance}"
         )
 
+    def _validate_tracking_continuity(
+        self,
+        plan: ActionPlan,
+        event_kind: ExecutionEventKind,
+    ) -> None:
+        """Reject in-place replacement of feedback ownership or projection."""
+        if event_kind not in (
+            ExecutionEventKind.REPLANNED,
+            ExecutionEventKind.INVOCATION_REVISED,
+        ):
+            return
+        if self._plan is None:
+            return
+        previous_routes = self._active_tracking_routes
+        replacement_routes = self._tracking_routes(plan)
+        if (
+            event_kind is ExecutionEventKind.REPLANNED
+            and not plan.commands.targets
+            and not replacement_routes
+        ):
+            return
+        if previous_routes == replacement_routes:
+            return
+        prefix = (
+            "Recovery replans"
+            if event_kind is ExecutionEventKind.REPLANNED
+            else "Invocation revisions"
+        )
+        raise ValueError(
+            f"{prefix} must preserve endpoint tracking source fingerprints and "
+            "projector routes; start a new invocation to change feedback "
+            "ownership."
+        )
+
+    @staticmethod
+    def _tracking_routes(
+        plan: ActionPlan,
+    ) -> dict[tuple[str, str, str], tuple[object, str, str]]:
+        """Return the complete feedback/projector route owned by one plan."""
+        if plan.tracking is None or not plan.tracking.frames:
+            return {}
+        return {
+            setpoint.key: (
+                setpoint.binding.source.source_fingerprint,
+                setpoint.binding.projector.projector_id,
+                setpoint.binding.projector.revision,
+            )
+            for setpoint in plan.tracking.frames[0].setpoints
+        }
+
     def _recover_if_needed(
         self,
         plan: ActionPlan,
@@ -1099,34 +1251,49 @@ class ExecutionSession:
                 ExecutionEventKind.COLLISION_WORLD_CHANGED,
                 "The collision world changed after this trajectory was planned.",
             )
+        in_flight = plan.tracking_policy.in_flight
         if (
-            plan.feedback_mode is ExecutionFeedbackMode.JOINT_POSITION
-            and self._last_joint_command is not None
-            and self._last_joint_ids
+            in_flight is not None
+            and self._last_tracking_frame is not None
+            and self._waypoint_index < plan.commands.frame_count
         ):
-            joint_ids = list(self._last_joint_ids)
-            tracking_error = torch.amax(
-                torch.abs(
-                    self._context.robot.qpos[:, joint_ids]
-                    - self._last_joint_command[:, joint_ids]
-                ),
-                dim=1,
-            )
-            tracking_mask = (
-                execution_mask
-                & self._last_command_mask
-                & (tracking_error > plan.recovery_policy.tracking_error_threshold)
-            )
-            if tracking_mask.any():
-                max_tracking_error = float(tracking_error[tracking_mask].amax().item())
-                return self._attempt_replan(
-                    tracking_mask,
-                    ExecutionEventKind.TRACKING_ERROR,
-                    "Observed joint tracking error exceeded the policy threshold "
-                    f"(max_error={max_tracking_error:.6f}, "
-                    "threshold="
-                    f"{plan.recovery_policy.tracking_error_threshold:.6f}).",
+            tracking_mask = execution_mask & self._last_command_mask
+            if (
+                tracking_mask.any()
+                and self._context.robot.timestamp - self._action_started_at
+                >= in_flight.grace_period
+            ):
+                try:
+                    accepted, valid, normalized_error = self._evaluate_tracking_frame(
+                        self._last_tracking_frame,
+                        in_flight.metrics,
+                    )
+                except Exception as exc:  # noqa: BLE001 - fail required feedback closed
+                    return self._fail_tracking_feedback(
+                        tracking_mask,
+                        "In-flight tracking feedback evaluation failed: "
+                        f"{type(exc).__name__}: {exc}",
+                    )
+                invalid = tracking_mask & ~valid
+                if invalid.any():
+                    return self._fail_tracking_feedback(
+                        invalid,
+                        "Required in-flight tracking feedback was invalid.",
+                    )
+                violated = tracking_mask & valid & ~accepted
+                self._tracking_violation_counts[violated] += 1
+                self._tracking_violation_counts[tracking_mask & ~violated] = 0
+                diverged = tracking_mask & (
+                    self._tracking_violation_counts >= in_flight.consecutive_violations
                 )
+                if diverged.any():
+                    max_error = float(normalized_error[diverged].amax().item())
+                    return self._attempt_replan(
+                        diverged,
+                        ExecutionEventKind.TRACKING_DIVERGED,
+                        "Observed in-flight tracking diverged from the commanded "
+                        f"setpoint (max_normalized_error={max_error:.6f}).",
+                    )
         scene_mask, scene_message = self._dynamic_scene_change(
             plan,
             execution_mask,
@@ -1427,76 +1594,72 @@ class ExecutionSession:
         waypoint_index: int,
         active_mask: torch.Tensor,
     ) -> RuntimeCommandFrame:
-        """Return one frame and retain joint targets when feedback requires it."""
+        """Return one frame and retain its generic typed tracking targets."""
         frame = plan.commands.frames[waypoint_index]
         frame = frame.with_active_mask(frame.active_mask & active_mask)
-        if plan.feedback_mode is ExecutionFeedbackMode.JOINT_POSITION:
-            positions = self._context.robot.qpos.clone()
-            commanded_joint_ids: list[int] = []
-            for command in frame.commands:
-                if not isinstance(
-                    command.target, JointPositionTarget
-                ) or not isinstance(
-                    command.payload,
-                    JointPositionPayload,
-                ):
-                    raise TypeError(
-                        "joint_position feedback requires only joint-position "
-                        "targets and payloads."
-                    )
-                joint_ids = list(command.target.joint_ids)
-                commanded_joint_ids.extend(joint_ids)
-                positions[:, joint_ids] = torch.where(
-                    frame.active_mask[:, None],
-                    command.payload.positions,
-                    positions[:, joint_ids],
-                )
-            self._last_joint_command = positions
-            self._last_joint_ids = tuple(commanded_joint_ids)
-            self._last_command_mask = frame.active_mask.clone()
-        else:
-            self._last_joint_command = None
-            self._last_joint_ids = ()
-            self._last_command_mask.zero_()
+        self._last_tracking_frame = (
+            None
+            if plan.tracking is None
+            else plan.tracking.frames[waypoint_index].snapshot()
+        )
+        self._last_command_mask = frame.active_mask.clone()
+        if waypoint_index == plan.commands.frame_count - 1:
+            self._terminal_started_at = self._context.robot.timestamp
+            self._terminal_acceptance_counts.zero_()
+            self._terminal_pending_reported = False
         return frame
 
-    def _terminal_error(self, plan: ActionPlan) -> torch.Tensor:
-        """Return terminal error for the plan's explicit feedback contract."""
-        if plan.feedback_mode is ExecutionFeedbackMode.TIMED:
-            return torch.zeros(
-                self._context.batch_size,
-                dtype=self._context.robot.qpos.dtype,
-                device=self._context.robot.qpos.device,
-            )
-        if plan.commands.frame_count == 0:
-            return torch.full_like(
-                self._eligible,
-                float("inf"),
-                dtype=self._context.robot.qpos.dtype,
-            )
-        errors: list[torch.Tensor] = []
-        for command in plan.commands.frames[-1].commands:
-            if not isinstance(command.target, JointPositionTarget) or not isinstance(
-                command.payload,
-                JointPositionPayload,
-            ):
+    def _evaluate_tracking_frame(
+        self,
+        frame: TrackingFrame,
+        metrics: tuple[TrackingMetricCfg, ...],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Aggregate typed endpoint predicates without mixing physical units."""
+        evaluations = self._engine.tracking_runtime.evaluate_frame(
+            frame,
+            metrics,
+            self._context,
+        )
+        accepted = torch.ones_like(self._eligible)
+        valid = torch.ones_like(self._eligible)
+        normalized_error = torch.zeros(
+            self._context.batch_size,
+            dtype=self._context.robot.qpos.dtype,
+            device=self._context.robot.qpos.device,
+        )
+        for evaluation in evaluations.values():
+            if not isinstance(evaluation, TrackingEvaluation):
                 raise TypeError(
-                    "joint_position feedback requires only joint-position targets "
-                    "and payloads."
+                    "TrackingRuntime.evaluate_frame() must return "
+                    "TrackingEvaluation values."
                 )
-            joint_ids = list(command.target.joint_ids)
-            errors.append(
-                torch.abs(
-                    self._context.robot.qpos[:, joint_ids] - command.payload.positions
-                )
+            accepted &= evaluation.accepted_mask
+            valid &= evaluation.valid_mask
+            normalized_error = torch.maximum(
+                normalized_error,
+                evaluation.normalized_error.to(normalized_error.dtype),
             )
-        if not errors:
-            return torch.full_like(
-                self._eligible,
-                float("inf"),
-                dtype=self._context.robot.qpos.dtype,
+        return accepted, valid, normalized_error
+
+    def _fail_tracking_feedback(
+        self,
+        failed_mask: torch.Tensor,
+        message: str,
+    ) -> list[ExecutionEvent]:
+        """Fail affected rows closed when required feedback is unavailable."""
+        self._eligible &= ~failed_mask
+        self._pending &= ~failed_mask
+        events = [
+            self._event(
+                ExecutionEventKind.TRACKING_FEEDBACK_FAILED,
+                failed_mask,
+                message,
             )
-        return torch.amax(torch.cat(errors, dim=1), dim=1)
+        ]
+        terminal_event = self._update_terminal_status()
+        if terminal_event is not None:
+            events.append(terminal_event)
+        return events
 
     def _dynamic_scene_change(
         self,

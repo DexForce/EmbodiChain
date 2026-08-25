@@ -290,7 +290,7 @@ def create_runtime_step_observer(
     dynamics_cleared = False
     reported_events = {
         ExecutionEventKind.REPLANNED,
-        ExecutionEventKind.TRACKING_ERROR,
+        ExecutionEventKind.TRACKING_DIVERGED,
         ExecutionEventKind.DYNAMIC_GOAL_CHANGED,
         ExecutionEventKind.COLLISION_WORLD_CHANGED,
         ExecutionEventKind.ACTION_RETRY,

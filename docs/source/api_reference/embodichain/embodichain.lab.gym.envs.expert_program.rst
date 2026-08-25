@@ -21,6 +21,7 @@ embodichain.lab.gym.envs.expert_program
       EXPERT_PROGRAM_SCHEMA_VERSION
       EnvironmentStepClock
       EnvironmentStepTimingError
+      EndpointAdapterDeclaration
       ExpertProgramCfg
       ExpertProgramCompileError
       ExpertProgramCompiler
@@ -29,14 +30,18 @@ embodichain.lab.gym.envs.expert_program
       ExpertProgramEnvironmentAdapter
       ExpertProgramEnvironmentFactory
       ExpertProgramIntegrationCfg
+      ExpertProgramIntegrationCatalog
       ExpertProgramRuntimeAssembly
       ExpertProgramValidationContext
       ExpertProgramValidationError
       GymPlanningObservationProvider
       HandOverCfg
       InvokeCfg
+      IntegrationFingerprintMismatch
       ObjectNearTargetValidatorCfg
       ParallelCfg
+      ParallelCommandSafetyValidatorFactory
+      ParallelSafetyDeclaration
       PickCfg
       PlaceCfg
       PlanningObservationPort
@@ -44,6 +49,7 @@ embodichain.lab.gym.envs.expert_program
       RegisteredSemanticCallCfg
       RepeatCfg
       RuntimeCommandFrameEncoder
+      RuntimeTransportDeclaration
       RuntimeTransportActionEncoder
       SceneReferenceRole
       SegmentCfg
@@ -53,14 +59,18 @@ embodichain.lab.gym.envs.expert_program
       SimulationArticulationBinding
       SimulationArticulationLinkBinding
       SimulationExpertProgramFactory
+      SimulationExpertProgramRegistration
       SimulationRigidObjectBinding
       SimulationRobotSkillProfileBinding
       SimulationSceneBinding
       SimulationSegmentPolicyPort
+      StandardExtensionDeclarations
       TargetRefCfg
       UnsupportedRuntimeTransportError
+      VersionedKey
       WaitStablePostCfg
       create_simulation_expert_program_adapter
+      default_simulation_settle_presets
       decode_expert_program
       load_expert_program
       loads_expert_program_json
@@ -196,6 +206,40 @@ bridge.
 
 .. autoclass:: PlanningObservationPort
 
+Registration catalogs and standard extensions
+---------------------------------------------
+
+The standard simulation path snapshots one task-owned registration before a
+live environment is created. Its fingerprint covers the scene/profile
+manifests and the exact endpoint, transport, and parallel-safety declarations
+used again during runtime assembly.
+
+.. autoclass:: ExpertProgramIntegrationCatalog
+   :members:
+
+.. autoclass:: SimulationExpertProgramRegistration
+   :members:
+
+.. autoclass:: IntegrationFingerprintMismatch
+
+.. autoclass:: EndpointAdapterDeclaration
+   :members:
+
+.. autoclass:: RuntimeTransportDeclaration
+   :members:
+
+.. autoclass:: ParallelSafetyDeclaration
+   :members:
+
+.. autoclass:: ParallelCommandSafetyValidatorFactory
+
+.. autoclass:: StandardExtensionDeclarations
+   :members:
+
+.. autodata:: VersionedKey
+
+.. autofunction:: default_simulation_settle_presets
+
 Gym bridge ports
 ----------------
 
@@ -270,3 +314,59 @@ use the core ``RobotResource`` type directly.
    :members:
 
 .. autofunction:: create_simulation_expert_program_adapter
+
+Catalog implementation module
+-----------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.catalog
+
+.. autosummary::
+
+   ExpertProgramIntegrationCatalog
+   IntegrationFingerprintMismatch
+   SimulationExpertProgramRegistration
+
+Extension declaration implementation module
+-------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.extensions
+
+.. autosummary::
+
+   EndpointAdapterDeclaration
+   ParallelCommandSafetyValidatorFactory
+   ParallelSafetyDeclaration
+   RuntimeTransportDeclaration
+   StandardExtensionDeclarations
+   VersionedKey
+   build_standard_extension_declarations
+   declare_endpoint_adapter
+   declare_parallel_safety_factory
+   declare_runtime_transport
+   validate_immutable_extension_declaration
+
+.. autoclass:: EndpointAdapterDeclaration
+   :members:
+
+.. autoclass:: ParallelCommandSafetyValidatorFactory
+
+.. autoclass:: ParallelSafetyDeclaration
+   :members:
+
+.. autoclass:: RuntimeTransportDeclaration
+   :members:
+
+.. autoclass:: StandardExtensionDeclarations
+   :members:
+
+.. autodata:: VersionedKey
+
+.. autofunction:: build_standard_extension_declarations
+
+.. autofunction:: declare_endpoint_adapter
+
+.. autofunction:: declare_parallel_safety_factory
+
+.. autofunction:: declare_runtime_transport
+
+.. autofunction:: validate_immutable_extension_declaration
