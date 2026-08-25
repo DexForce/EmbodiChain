@@ -738,6 +738,11 @@ def evaluate_predicate(
             )
         return _constant(env, False)
     if kind == "poured":
+        if spec.get("verification") == "action_completion":
+            # Reaching semantic-step verification means every required E3 edge
+            # already completed without a fatal planning or execution failure.
+            return _constant(env, True)
+
         raw_contents = spec.get("contents", ())
         if not isinstance(raw_contents, Sequence) or isinstance(
             raw_contents, (str, bytes, bytearray)

@@ -848,25 +848,6 @@ class ActionGrounder:
                     f"Target materializer {capability.target_materializer!r} "
                     "cannot resolve a pour_goal."
                 )
-            contents = step.goal.get("contents", ())
-            if not isinstance(contents, Sequence) or isinstance(
-                contents, (str, bytes, bytearray)
-            ):
-                raise ValueError("Pour contents must be a list of object bindings.")
-            content_uids = [
-                item.get("object") if isinstance(item, Mapping) else item
-                for item in contents
-            ]
-            if not content_uids or any(
-                not isinstance(uid, str) or not uid for uid in content_uids
-            ):
-                raise ValueError(
-                    "Pour requires independently observable content objects; "
-                    "a texture or contents baked into the source mesh is not "
-                    "physical transfer evidence."
-                )
-            for uid in content_uids:
-                _object(self.env, str(uid))
             policy.setdefault("rotate_angle", math.pi / 2.0)
             target = PourGoal()
         elif kind == "articulation_goal":
@@ -1797,6 +1778,15 @@ class ActionGrounder:
                 target[:, 2, 3] += float(policy["staging_lift_height"])
             return target
         if step.operator == "pour":
+            if phase == "return":
+                initial = getattr(self.env, "agent_initial_object_poses", {}).get(
+                    step.object_uid
+                )
+                if initial is None:
+                    raise ValueError(
+                        f"Pour return requires an initial pose for {step.object_uid!r}."
+                    )
+                return _batched_pose(initial, self.env).clone()
             if reference_pose is None:
                 raise ValueError("Pour requires a live target-container pose.")
             target = object_pose.clone()

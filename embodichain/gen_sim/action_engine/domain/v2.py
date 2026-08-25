@@ -637,6 +637,17 @@ def _validate_task_group_semantics(
     }
     for group in groups:
         task_type = str(group["task_type"])
+        if task_type == "E3":
+            goal = group.get("goal", {})
+            unsupported = sorted(
+                {"pour_mode", "pouring_arm", "holding_arm"} & set(goal)
+            )
+            if unsupported:
+                raise ValueError(
+                    f"SeedGraph TaskGroup {group['id']!r} uses unsupported "
+                    f"dual-arm E3 fields {unsupported}; regenerate it as a "
+                    "single-arm pour over a fixed target container."
+                )
         group_nodes = [node_by_id[node_id] for node_id in group["node_ids"]]
         actions = {str(node["atomic_action"]) for node in group_nodes}
         missing = required_actions[task_type] - actions

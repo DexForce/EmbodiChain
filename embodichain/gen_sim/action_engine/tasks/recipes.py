@@ -499,30 +499,31 @@ def _recipe(
             success,
         )
     if task_type == "E3":
+        unsupported = sorted({"pour_mode", "pouring_arm", "holding_arm"} & set(params))
+        if unsupported:
+            raise ValueError(
+                "Dual-arm E3 is not supported; remove fields "
+                f"{unsupported} and use required_arm with a fixed target container."
+            )
         target = str(params["target_role"])
-        contents = [{"object": str(uid)} for uid in params.get("content_roles", [])]
         goal = {
             "reference_object": target,
             "relation": "above",
             "amount": "task_defined",
-            "contents": deepcopy(contents),
         }
         success = {
             "type": "poured",
+            "verification": "action_completion",
             "object": object_uid,
             "reference_object": target,
-            "contents": deepcopy(contents),
         }
-        specs = []
+        specs: list[tuple[str, Mapping[str, Any], str]] = []
         if incoming_held_arm is None:
             specs.append(
                 (
                     "PickUp",
-                    {
-                        "kind": "object",
-                        "object": object_uid,
-                        "payloads": deepcopy(contents),
-                    },
+                    {"kind": "object", "object": object_uid},
+                    role,
                 )
             )
         specs.extend(
@@ -533,8 +534,8 @@ def _recipe(
                         "kind": "semantic_goal",
                         "semantic_step": group_id,
                         "phase": "final",
-                        "payloads": deepcopy(contents),
                     },
+                    role,
                 ),
                 (
                     "Pour",
@@ -542,14 +543,46 @@ def _recipe(
                         "kind": "pour_goal",
                         "object": object_uid,
                         "reference_object": target,
-                        "payloads": deepcopy(contents),
                     },
+                    role,
+                ),
+                (
+                    "MoveHeldObject",
+                    {
+                        "kind": "semantic_goal",
+                        "semantic_step": group_id,
+                        "phase": "return",
+                    },
+                    role,
+                ),
+                (
+                    "Place",
+                    {"kind": "current_held_pose"},
+                    role,
+                ),
+                (
+                    "MoveEndEffector",
+                    {
+                        "kind": "policy_pose",
+                        "source": "release",
+                        "operation": "retreat",
+                    },
+                    "cleanup",
+                ),
+                (
+                    "MoveJoints",
+                    {
+                        "kind": "joint_state",
+                        "source": "initial",
+                        "operation": "e3_home",
+                    },
+                    "cleanup",
                 ),
             )
         )
         nodes = []
         previous = list(dependencies)
-        for index, (action, binding) in enumerate(specs, start=1):
+        for index, (action, binding, node_role) in enumerate(specs, start=1):
             node = _node(
                 group_id,
                 index,
@@ -560,8 +593,8 @@ def _recipe(
                 "arm",
                 binding,
                 previous,
-                role,
-                success if action == "Pour" else {},
+                node_role,
+                success if index == len(specs) else {},
                 motion_policy(),
             )
             nodes.append(node)
@@ -1054,10 +1087,6 @@ def _terminal_hold(
 ) -> tuple[str, str] | None:
     if task_type == "E4":
         return object_uid, str(params.get("receive_arm", "right_arm"))
-    if task_type == "E3":
-        arm = str(params.get("required_arm", ""))
-        if arm in {"left_arm", "right_arm"}:
-            return object_uid, arm
     if task_type == "E2" and str(params.get("terminal_behavior", "place")) == "hold":
         arm = str(params.get("required_arm", ""))
         if arm in {"left_arm", "right_arm"}:
@@ -1077,7 +1106,13 @@ def _validate_bindings(
             raise ValueError("role_bindings must map non-empty role IDs to scene UIDs.")
     required = set()
     for instance in task["task_instances"]:
-        required.update(_role_references(instance["params"]))
+        references = _role_references(instance["params"])
+        if instance["task_type"] == "E3":
+            references -= _role_references(
+                instance["params"].get("content_roles", []),
+                "content_roles",
+            )
+        required.update(references)
     required.discard("table")
     missing = sorted(required - set(bindings))
     if missing:

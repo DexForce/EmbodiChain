@@ -852,7 +852,7 @@ def _verify_axis_alignment(
 
 
 def _resolve_pour_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
-    """Retain one verified holder until observable content transfer succeeds."""
+    """Retain one verified holder until the E3 action chain completes."""
     object_uid = _required_string(node.get("object_uid"), "node.object_uid")
     actor = node.get("actor", {})
     binding = node.get("target_binding", {})
@@ -949,7 +949,7 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
     if node.get("role") == "cleanup":
         required_home = (
             node.get("task_type") == "E2" and binding.get("operation") == "e2_home"
-        )
+        ) or (node.get("task_type") == "E3" and binding.get("operation") == "e3_home")
         return ResolvedActionContract(
             requires=(StateAtom("arm_clear", arm=arm),),
             effects=(

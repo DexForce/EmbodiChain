@@ -298,7 +298,7 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     )
 
 
-def test_pour_recipe_establishes_hold_and_requires_observable_contents() -> None:
+def test_pour_recipe_completes_release_and_home_without_observable_contents() -> None:
     task = {
         "schema_version": "action_engine_task_spec_v2",
         "task_id": "pour_contents",
@@ -312,7 +312,7 @@ def test_pour_recipe_establishes_hold_and_requires_observable_contents() -> None
                 "params": {
                     "source_role": "cup",
                     "target_role": "bin",
-                    "content_roles": ["ball"],
+                    "content_roles": ["unmodeled_liquid"],
                     "required_arm": "right_arm",
                 },
                 "depends_on": [],
@@ -326,7 +326,7 @@ def test_pour_recipe_establishes_hold_and_requires_observable_contents() -> None
 
     graph = instantiate_seed_graph(
         task,
-        {"cup": "source_cup", "bin": "target_bin", "ball": "content_ball"},
+        {"cup": "source_cup", "bin": "target_bin"},
     )
     nodes = graph["nodes"]
     group = graph["task_groups"][0]
@@ -335,13 +335,25 @@ def test_pour_recipe_establishes_hold_and_requires_observable_contents() -> None
         "PickUp",
         "MoveHeldObject",
         "Pour",
+        "MoveHeldObject",
+        "Place",
+        "MoveEndEffector",
+        "MoveJoints",
     ]
-    assert nodes[1]["depends_on"] == [nodes[0]["id"]]
-    assert nodes[2]["depends_on"] == [nodes[1]["id"]]
-    assert nodes[2]["contract"]["completion"] == "terminal_barrier"
+    assert all(
+        node["depends_on"] == [nodes[index - 1]["id"]]
+        for index, node in enumerate(nodes[1:], start=1)
+    )
     assert nodes[2]["contract"]["failure_policy"] == "task_required"
-    assert group["success"]["contents"] == [{"object": "content_ball"}]
-    assert nodes[2]["target_binding"]["payloads"] == [{"object": "content_ball"}]
+    assert nodes[3]["target_binding"]["phase"] == "return"
+    assert nodes[4]["contract"]["effects"][-1]["atom"] == {
+        "predicate": "object_free",
+        "object_uid": "source_cup",
+    }
+    assert nodes[-1]["contract"]["completion"] == "terminal_barrier"
+    assert group["success"]["verification"] == "action_completion"
+    assert "contents" not in group["goal"]
+    assert all("payloads" not in node["target_binding"] for node in nodes)
 
 
 def test_handover_to_place_uses_receiver_hold_without_repickup() -> None:
