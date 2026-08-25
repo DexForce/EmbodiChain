@@ -606,6 +606,7 @@ class ProgramExecutor:
                                 else None
                             ),
                         )
+                    self._release_candidate_plans(step.id)
             revalidation_failures = self._revalidate_support_relations()
             for step_id, lost in revalidation_failures.items():
                 step = self.steps[step_id]
@@ -1609,6 +1610,16 @@ class ProgramExecutor:
         self._transition_count += int(count)
         if self._transition_count > self.max_transitions:
             raise RuntimeError("Execution exceeded max_transitions.")
+
+    def _release_candidate_plans(self, step_id: str) -> None:
+        """Drop completed-step speculative plans and their retained trajectories."""
+        for mapping in (self._candidate_cache, self._candidate_failures):
+            for key in tuple(mapping):
+                if key[0] == step_id:
+                    mapping.pop(key, None)
+        self._candidate_diagnostics.pop(step_id, None)
+        self._candidate_blockers.pop(step_id, None)
+        self._reported_candidates.discard(step_id)
 
     def _pack_ready_edges(
         self,
@@ -2907,7 +2918,46 @@ class ProgramExecutor:
             )
         trajectory, action_success = self.adapter.combine(outcomes, masks)
         active = assigned & action_success & ~failed & ~planning_failed
-        actions = self.adapter.execute_trajectory(trajectory, active=active)
+        observation_points: dict[int, list[str]] = {}
+        execution_observations: dict[str, dict[str, torch.Tensor]] = {}
+        for outcome in outcomes.values():
+            if outcome is None:
+                continue
+            diagnostics = outcome.planner_trace.get(
+                "primary_action_diagnostics", {}
+            )
+            observed_segments = set(
+                diagnostics.get("execution_observation_segments", ())
+            )
+            for name, segment in outcome.planner_trace.get(
+                "action_segments", {}
+            ).items():
+                stop = int(segment["stop"])
+                if name in observed_segments and stop > 0:
+                    observation_points.setdefault(stop - 1, []).append(name)
+            break
+
+        def observe_waypoint(waypoint_index: int) -> None:
+            for name in observation_points.get(waypoint_index, ()):
+                execution_observations[name] = self._action_execution_observation(
+                    step.object_uid
+                )
+
+        actions = (
+            self.adapter.execute_trajectory(
+                trajectory,
+                active=active,
+                waypoint_observer=observe_waypoint,
+            )
+            if observation_points
+            else self.adapter.execute_trajectory(trajectory, active=active)
+        )
+        if execution_observations:
+            for outcome in outcomes.values():
+                if outcome is not None:
+                    outcome.planner_trace["execution_observations"] = (
+                        execution_observations
+                    )
         physical_failed = torch.zeros_like(failed)
         for arm, outcome in outcomes.items():
             if outcome is not None:
@@ -2976,6 +3026,90 @@ class ProgramExecutor:
             planner_traces,
             active,
         )
+
+    def _action_execution_observation(
+        self,
+        object_uid: str,
+    ) -> dict[str, torch.Tensor]:
+        """Capture live object and TCP state at one requested segment boundary."""
+        entity = self.env.sim.get_rigid_object(object_uid)
+        if entity is None:
+            raise ValueError(f"Unknown action observation object {object_uid!r}.")
+        observation = {
+            "object_pose": self._entity_pose(object_uid).detach().clone(),
+        }
+        for name, attribute_names in (
+            (
+                "linear_velocity",
+                ("lin_vel", "linear_velocity", "get_linear_velocity"),
+            ),
+            (
+                "angular_velocity",
+                ("ang_vel", "angular_velocity", "get_angular_velocity"),
+            ),
+        ):
+            for attribute_name in attribute_names:
+                value = getattr(entity, attribute_name, None)
+                if callable(value):
+                    value = value()
+                if value is None:
+                    continue
+                tensor = torch.as_tensor(
+                    value,
+                    dtype=torch.float32,
+                    device=self.env.device,
+                )
+                if tensor.shape[-1:] == (3,):
+                    observation[name] = tensor.detach().clone()
+                    break
+        if not {"linear_velocity", "angular_velocity"} <= set(observation):
+            body_state = getattr(entity, "body_state", None)
+            if callable(body_state):
+                body_state = body_state()
+            if body_state is not None:
+                state = torch.as_tensor(
+                    body_state,
+                    dtype=torch.float32,
+                    device=self.env.device,
+                )
+                if state.ndim == 1:
+                    state = state.unsqueeze(0)
+                if state.shape == (int(self.env.num_envs), 13):
+                    observation.setdefault("linear_velocity", state[:, 7:10].clone())
+                    observation.setdefault(
+                        "angular_velocity", state[:, 10:13].clone()
+                    )
+        body_data = getattr(entity, "body_data", None)
+        if body_data is not None:
+            for name, attribute_name in (
+                ("linear_velocity", "lin_vel"),
+                ("angular_velocity", "ang_vel"),
+            ):
+                if name in observation:
+                    continue
+                value = getattr(body_data, attribute_name, None)
+                if callable(value):
+                    value = value()
+                if value is not None:
+                    observation[name] = torch.as_tensor(
+                        value,
+                        dtype=torch.float32,
+                        device=self.env.device,
+                    ).detach().clone()
+        getter = getattr(self.env, "get_current_xpos_agent", None)
+        if callable(getter):
+            left, right = getter()
+            observation["left_tcp_pose"] = torch.as_tensor(
+                left,
+                dtype=torch.float32,
+                device=self.env.device,
+            ).detach().clone()
+            observation["right_tcp_pose"] = torch.as_tensor(
+                right,
+                dtype=torch.float32,
+                device=self.env.device,
+            ).detach().clone()
+        return observation
 
     def _plan_live_hold(
         self,

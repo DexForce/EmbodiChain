@@ -42,7 +42,8 @@ __all__ = [
 ]
 
 ACTION_ENGINE_DEFAULTS_SCHEMA: Final = "action_engine_defaults_v1"
-RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v6"
+RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v7"
+_PRE_AXIS_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v6"
 _PREVIOUS_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v5"
 _PRE_GRASP_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v4"
 _PRE_PLANNER_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v3"
@@ -129,6 +130,7 @@ _CUROBO_KEYS = {
     "collision_activation_distance",
 }
 _MOTION_DEFAULT_ACTIONS = {
+    "AxisAlign",
     "CoordinatedPickment",
     "CoordinatedPlacement",
     "HandOver",
@@ -645,6 +647,19 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         merged.update(snapshot["arm_selection"])
         policy.arm_selection = ArmSelectionPolicyCfg.from_mapping(merged)
         return policy
+    if snapshot.get("schema_version") == _PRE_AXIS_RUNTIME_POLICY_SCHEMA:
+        defaults = default_runtime_policy(
+            str(agent_config.get("robot_profile", "dual_ur10"))
+        )
+        migrated = deepcopy(dict(snapshot))
+        migrated["schema_version"] = RUNTIME_POLICY_SCHEMA
+        migrated_motion = deepcopy(dict(migrated.get("motion_defaults", {})))
+        migrated_motion.setdefault(
+            "AxisAlign",
+            deepcopy(defaults.motion_defaults["AxisAlign"]),
+        )
+        migrated["motion_defaults"] = migrated_motion
+        return RuntimePolicyCfg.from_mapping(migrated)
     if snapshot.get("schema_version") == _PREVIOUS_RUNTIME_POLICY_SCHEMA:
         defaults = default_runtime_policy(
             str(agent_config.get("robot_profile", "dual_ur10"))

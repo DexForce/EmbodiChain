@@ -23,6 +23,8 @@ from typing import Any
 
 import torch
 
+from .geometry_axes import analyze_local_geometry_axes
+
 from embodichain.gen_sim.action_engine.config import default_runtime_policy
 
 from .frames import relation_axes
@@ -245,8 +247,7 @@ def _local_axis_index(env: Any, uid: str, axis: Any) -> int:
         vertices = vertices[0]
     if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
         raise ValueError(f"Rigid object {uid!r} has invalid mesh vertices.")
-    extents = vertices.max(dim=0).values - vertices.min(dim=0).values
-    return int(torch.argmax(extents).item())
+    return analyze_local_geometry_axes(vertices).long_axis_index
 
 
 def _arm_values(

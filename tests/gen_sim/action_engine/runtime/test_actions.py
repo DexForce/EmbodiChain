@@ -25,6 +25,9 @@ import pytest
 import torch
 
 from embodichain.gen_sim.action_engine.runtime import actions
+from embodichain.gen_sim.action_engine.runtime.atomic_compat import (
+    ExactTargetMoveHeldObject,
+)
 from embodichain.gen_sim.action_engine.runtime.actions import AtomicActionAdapter
 from embodichain.gen_sim.action_engine.runtime.models import (
     ActionOutcome,
@@ -36,8 +39,11 @@ from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionPlan,
     AntipodalAffordance,
+    AxisAlignAffordance,
+    AxisAlignGoal,
     CoordinatedPickGoal,
     EndEffectorPoseGoal,
+    EntityState,
     GraspGoal,
     HeldObjectState,
     JointPositionGoal,
@@ -49,9 +55,10 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TimedCommandSequence,
     TimedTrajectory,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.planners import CuroboPlannerCfg
-from embodichain.toolkits.graspkit.pg_grasp import GraspGeneratorCfg
+from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 
 
 class _MeshEntity:
@@ -102,6 +109,16 @@ class _PlannerRobot:
         pose[:, 1, 3] = 0.3 if name == "physical_left_arm" else -0.3
         return pose
 
+    def compute_batch_ik(
+        self,
+        *,
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del pose, name
+        return torch.ones(joint_seed.shape[:2], dtype=torch.bool), joint_seed.clone()
+
 
 def _commands_for(trajectory: TimedTrajectory) -> TimedCommandSequence:
     """Build timing-only frames for retained test trajectories."""
@@ -137,6 +154,157 @@ class _FakeEngine:
         if self._plan is None:
             raise AssertionError("This fake engine has no planning callback.")
         return self._plan(invocation, context)
+
+
+def test_adapter_registers_only_move_held_object_compat_action(
+    monkeypatch: Any,
+) -> None:
+    registered: list[tuple[type, bool]] = []
+
+    class Engine:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def register(self, action: Any, *, replace: bool = False) -> None:
+            registered.append((type(action), replace))
+
+    adapter = AtomicActionAdapter(_planner_env())
+    monkeypatch.setattr(actions, "AtomicActionEngine", Engine)
+    monkeypatch.setattr(adapter, "_generator", lambda: object())
+    monkeypatch.setattr(adapter, "_control_profiles", lambda: {})
+    monkeypatch.setattr(adapter, "_grasp_pose_generators", lambda: {})
+
+    engine = adapter._engine()
+
+    assert isinstance(engine, Engine)
+    assert registered == [
+        (ExactTargetMoveHeldObject, True),
+    ]
+
+
+def test_adapter_lowers_axis_align_from_live_pose_with_a_stable_seed() -> None:
+    vertices = torch.tensor(
+        [[x, y, z] for x in (-0.03, 0.03) for y in (-0.06, 0.06) for z in (-0.03, 0.03)]
+    )
+    semantics = ObjectSemantics(
+        label="can",
+        entity_id="can",
+        geometry={},
+        affordance=AxisAlignAffordance(
+            mesh_vertices=vertices,
+            mesh_triangles=torch.tensor([[0, 1, 2]]),
+            internal_axis=torch.tensor([0.0, 1.0, 0.0]),
+        ),
+    )
+
+    live_pose = torch.eye(4).repeat(2, 1, 1)
+    live_pose[:, 2, 3] = 1.10
+    parked_pose = live_pose.clone()
+    parked_pose[:, 2, 3] -= 100.0
+    sampled_poses: list[torch.Tensor] = []
+    sampled_random_values: list[float] = []
+
+    class Generator:
+        def get_valid_grasp_poses(self, **kwargs: Any):
+            poses = kwargs["obj_poses"].clone()
+            sampled_poses.append(poses)
+            sampled_random_values.append(float(torch.rand(())))
+            return [
+                (pose.unsqueeze(0), torch.tensor([0.1])) for pose in poses.unbind(dim=0)
+            ]
+
+    adapter = AtomicActionAdapter(_planner_env())
+    adapter._atomic_engine = SimpleNamespace(
+        grasp_pose_generators={"physical_left_eef": Generator()}
+    )
+    grounded = GroundedAction(
+        "AxisAlign",
+        "left_arm",
+        "arm",
+        AxisAlignGoal(semantics=semantics),
+        {},
+        object_pose=live_pose,
+        object_uid="can",
+    )
+    contexts = [
+        SimpleNamespace(
+            robot=SimpleNamespace(qpos=torch.zeros(2, 8)),
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=version,
+                entities={"can": EntityState(parked_pose)},
+            ),
+        )
+        for version in (3, 97)
+    ]
+
+    adaptations = [
+        adapter._adapt_axis_align_body_grasps(
+            grounded,
+            context,
+            adapter.capabilities.get("AxisAlign"),
+        )
+        for context in contexts
+    ]
+    adapted_items = adaptations[0]
+    adapted = adapted_items[0]
+
+    assert len(adapted_items) == 1
+    assert isinstance(adapted.target, AxisAlignGoal)
+    assert adapted.target.semantics.entity_id is None
+    assert adapted.target.grasp_xpos is not None
+    assert adapted.motion_policy["body_grasp"]["long_axis_index"] == 1
+    assert adapted.motion_policy["body_grasp"]["candidate_counts"] == [1, 1]
+    assert len(sampled_poses) == 2
+    torch.testing.assert_close(sampled_poses[0], live_pose)
+    torch.testing.assert_close(sampled_poses[1], live_pose)
+    assert not torch.equal(sampled_poses[0], parked_pose)
+    assert sampled_random_values[0] == sampled_random_values[1]
+    torch.testing.assert_close(
+        adaptations[0][0].target.grasp_xpos,
+        adaptations[1][0].target.grasp_xpos,
+    )
+
+
+def test_axis_align_body_grasp_does_not_fall_back_to_scene_snapshot_pose() -> None:
+    vertices = torch.tensor(
+        [[x, y, z] for x in (-0.03, 0.03) for y in (-0.06, 0.06) for z in (-0.03, 0.03)]
+    )
+    grounded = GroundedAction(
+        "AxisAlign",
+        "left_arm",
+        "arm",
+        AxisAlignGoal(
+            semantics=ObjectSemantics(
+                label="can",
+                geometry={},
+                affordance=AxisAlignAffordance(
+                    mesh_vertices=vertices,
+                    mesh_triangles=torch.tensor([[0, 1, 2]]),
+                    internal_axis=torch.tensor([0.0, 1.0, 0.0]),
+                ),
+            )
+        ),
+        {},
+        object_uid="can",
+    )
+    parked_pose = torch.eye(4).repeat(2, 1, 1)
+    parked_pose[:, 2, 3] = -98.9
+    context = SimpleNamespace(
+        scene=SceneSnapshot(
+            timestamp=0.0,
+            version=3,
+            entities={"can": EntityState(parked_pose)},
+        )
+    )
+    adapter = AtomicActionAdapter(_planner_env())
+
+    with pytest.raises(ValueError, match="grounded live object pose"):
+        adapter._adapt_axis_align_body_grasps(
+            grounded,
+            context,
+            adapter.capabilities.get("AxisAlign"),
+        )
 
 
 def _planner_env(
@@ -190,8 +358,7 @@ def test_semantics_prewarms_vhacd_cache_before_affordance(
 
     def fake_affordance(**kwargs: Any) -> Affordance:
         events.append("affordance")
-        observed["generator_cfg"] = kwargs["generator_cfg"]
-        observed["gripper_collision_cfg"] = kwargs["gripper_collision_cfg"]
+        observed["affordance_kwargs"] = kwargs
         return Affordance()
 
     monkeypatch.setattr(
@@ -206,12 +373,16 @@ def test_semantics_prewarms_vhacd_cache_before_affordance(
     second = adapter.semantics("cube")
 
     assert first is second
+    assert first.entity_id is None
     assert events == ["cache", "affordance"]
     assert observed["max_decomposition_hulls"] == 8
     assert observed["mesh_vertices"].dtype == torch.float32
     assert observed["mesh_triangles"].dtype == torch.int64
-    assert observed["generator_cfg"].n_deviated_approach_directions == 4
-    assert observed["gripper_collision_cfg"] is not None
+    assert set(observed["affordance_kwargs"]) == {
+        "object_label",
+        "mesh_vertices",
+        "mesh_triangles",
+    }
 
 
 def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None:
@@ -257,11 +428,10 @@ def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None
     assert hand.motion_policy.strategy == "ik_interp"
 
 
-def test_coordinated_pickment_scopes_ground_filter_to_gensim_goal_copy() -> None:
+def test_coordinated_pickment_uses_engine_scoped_grasp_generator() -> None:
     adapter = AtomicActionAdapter(_planner_env())
     adapter._atomic_engine = _FakeEngine()
-    original_cfg = GraspGeneratorCfg(is_filter_ground_collision=True)
-    affordance = AntipodalAffordance(generator_cfg=original_cfg)
+    affordance = AntipodalAffordance()
     goal = CoordinatedPickGoal(
         semantics=ObjectSemantics(
             label="tray",
@@ -289,12 +459,23 @@ def test_coordinated_pickment_scopes_ground_filter_to_gensim_goal_copy() -> None
 
     scoped_affordance = invocation.goal.semantics.affordance
     assert isinstance(scoped_affordance, AntipodalAffordance)
-    assert scoped_affordance is not affordance
-    assert affordance.generator_cfg is original_cfg
-    assert original_cfg.is_filter_ground_collision is True
-    assert scoped_affordance.generator_cfg is not original_cfg
-    assert scoped_affordance.generator_cfg.is_filter_ground_collision is False
+    assert scoped_affordance is affordance
     assert invocation.skill_options.middle_empty_ratio == pytest.approx(0.7)
+
+
+def test_grasp_generators_follow_mainline_service_contract() -> None:
+    adapter = AtomicActionAdapter(_planner_env())
+
+    generators = adapter._grasp_pose_generators()
+
+    assert set(generators) == {"physical_left_eef", "physical_right_eef"}
+    generator = generators["physical_left_eef"]
+    assert isinstance(generator, AntipodalGraspPoseGenerator)
+    assert generator.algorithm_cfg.sample_count == 10000
+    assert generator.algorithm_cfg.approach_direction_samples == 4
+    assert generator.algorithm_cfg.max_candidates == 500
+    assert generator.collision_cfg.max_decomposition_hulls == 16
+    assert generator.collision_cfg.filter_ground_collision is True
 
 
 def test_retreat_uses_row_local_motion_planner_reachability_search(
@@ -328,6 +509,7 @@ def test_retreat_uses_row_local_motion_planner_reachability_search(
             commands=_commands_for(trajectory),
             joint_trajectory=trajectory,
             recovery_policy=RecoveryPolicy(),
+            tracking_policy=TrackingPolicy.timed(),
             planned_scene_version=0,
             planned_collision_world_revision=(0, 0),
             diagnostics=PlannerDiagnostics(backend="fake"),
@@ -717,9 +899,13 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
             commands=_commands_for(trajectory),
             joint_trajectory=trajectory,
             recovery_policy=RecoveryPolicy(),
+            tracking_policy=TrackingPolicy.timed(),
             planned_scene_version=0,
             planned_collision_world_revision=(0, 0),
-            diagnostics=PlannerDiagnostics(backend="fake"),
+            diagnostics=PlannerDiagnostics(
+                backend="fake",
+                metadata={"marker": terminal},
+            ),
             expected_effects=StateDelta(
                 held_object_updates={"physical_left_arm": held}
             ),
@@ -772,6 +958,8 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
     assert torch.equal(
         outcome.planner_trace["fallback_used"], torch.tensor([False, True])
     )
+    assert outcome.planner_trace["primary_action_diagnostics"]["marker"] == 1.0
+    assert outcome.planner_trace["fallback_action_diagnostics"]["marker"] == 2.0
 
 
 def test_collision_required_cleanup_does_not_use_unsafe_fallback(
@@ -796,6 +984,7 @@ def test_collision_required_cleanup_does_not_use_unsafe_fallback(
         commands=_commands_for(failed_trajectory),
         joint_trajectory=failed_trajectory,
         recovery_policy=RecoveryPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
         planned_scene_version=1,
         planned_collision_world_revision=(1, 1),
         diagnostics=PlannerDiagnostics(backend="fake"),

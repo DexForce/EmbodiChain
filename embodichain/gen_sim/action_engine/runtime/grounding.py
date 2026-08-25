@@ -66,6 +66,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
 )
 from embodichain.utils.logger import log_info
 from .frames import arm_base_poses, relation_offset, robot_frame_axes
+from .geometry_axes import analyze_local_geometry_axes
 from .grasp_collision_cache import ensure_vhacd_grasp_collision_cache
 from .models import ExecutionProgram, GroundedAction, SemanticStep
 from .motion_policy import resolve_motion_policy, with_motion_modifiers
@@ -73,6 +74,8 @@ from .robot_parts import arm_control_part
 from .state import ExecutionState
 
 __all__ = ["ActionGrounder", "LiveArrangementPlan", "LivePlacementPlan"]
+
+_E2_CLEARANCE_RETREAT_DISTANCE = 0.20
 
 
 def _batched_pose(value: Any, env: Any) -> torch.Tensor:
@@ -959,13 +962,16 @@ class ActionGrounder:
             )
         elif kind == "policy_pose":
             source = binding.get("source")
+            operation = binding.get("operation")
             retreat_reference = self._retreat_reference_pose(
                 arm,
                 reference_eef_pose,
             )
-            if binding.get("operation") == "retreat":
+            if operation == "retreat":
                 policy["retreat_reachability_search"] = True
                 policy["retreat_reference_pose"] = retreat_reference.clone()
+            if operation == "retreat_after_lift":
+                policy["retreat_distance"] = _E2_CLEARANCE_RETREAT_DISTANCE
             if source in {"release", "handover"}:
                 policy["clearance_object_uid"] = step.object_uid
                 policy["collision_safety"] = "required"
@@ -988,6 +994,7 @@ class ActionGrounder:
                     policy,
                     retreat_reference,
                     clear_exchange=source == "handover",
+                    retreat_after_lift=operation == "retreat_after_lift",
                 )
             )
         elif kind == "visual_constraint":
@@ -2537,9 +2544,8 @@ class ActionGrounder:
         axis = self._upright_local_axis(step)
         entity = _object(self.env, step.object_uid)
         vertices = _local_vertices(entity, self.env, 0)
-        extents = vertices.max(dim=0).values - vertices.min(dim=0).values
         if axis == "long_axis":
-            axis_index = int(torch.argmax(extents).item())
+            axis_index = analyze_local_geometry_axes(vertices).long_axis_index
         else:
             axis_index = {"x": 0, "y": 1, "z": 2}[axis]
         direction = torch.zeros(3, dtype=torch.float32, device=self.env.device)
@@ -2567,8 +2573,7 @@ class ActionGrounder:
             return False
         entity = _object(self.env, step.object_uid)
         vertices = _local_vertices(entity, self.env, 0)
-        extents = vertices.max(dim=0).values - vertices.min(dim=0).values
-        axis_index = int(torch.argmax(extents).item())
+        axis_index = analyze_local_geometry_axes(vertices).long_axis_index
         pose = _live_pose(self.env, step.object_uid)
         cosine = pose[:, 2, axis_index].abs().clamp(0.0, 1.0)
         tolerance = float(self.runtime_policy.predicate_fallbacks["upright_max_tilt"])
@@ -2623,11 +2628,9 @@ class ActionGrounder:
         rotations = []
         for env_id in range(int(self.env.num_envs)):
             vertices = _local_vertices(entity, self.env, env_id)
-            extents = vertices.max(dim=0).values - vertices.min(dim=0).values
-            longest_to_shortest = torch.argsort(
-                extents,
-                descending=True,
-            ).tolist()
+            longest_to_shortest = list(
+                analyze_local_geometry_axes(vertices).ordered_axis_indices
+            )
             if goal == "upright":
                 upright_axis = (
                     align_term.local_axis
@@ -2699,8 +2702,7 @@ class ActionGrounder:
         if isinstance(align_to, str) and align_to:
             reference = _object(self.env, align_to)
             vertices = _local_vertices(reference, self.env, env_id)
-            extents = vertices.max(dim=0).values - vertices.min(dim=0).values
-            ordered = torch.argsort(extents, descending=True)
+            ordered = analyze_local_geometry_axes(vertices).ordered_axis_indices
             requested = str(step.goal.get("orientation_axis", "long_axis"))
             reference_axis = int(
                 ordered[-1] if requested == "short_axis" else ordered[0]
@@ -2997,8 +2999,34 @@ class ActionGrounder:
         reference: torch.Tensor | None,
         *,
         clear_exchange: bool = False,
+        retreat_after_lift: bool = False,
     ) -> torch.Tensor:
         target = self._retreat_reference_pose(arm, reference).clone()
+        if retreat_after_lift:
+            direction: torch.Tensor | None = None
+            clearance_uid = policy.get("clearance_object_uid")
+            if isinstance(clearance_uid, str) and clearance_uid:
+                entity = _object(self.env, clearance_uid)
+                object_pose = _batched_pose(
+                    entity.get_local_pose(to_matrix=True),
+                    self.env,
+                )
+                direction = target[:, :2, 3] - object_pose[:, :2, 3]
+            if direction is None:
+                direction = torch.zeros_like(target[:, :2, 3])
+            norm = torch.linalg.vector_norm(direction, dim=1, keepdim=True)
+            unresolved = norm <= 1.0e-6
+            if unresolved.any():
+                left_base, right_base = arm_base_poses(self.env)
+                base = left_base if arm == "left_arm" else right_base
+                baseward = base[:, :2, 3] - target[:, :2, 3]
+                baseward_norm = torch.linalg.vector_norm(baseward, dim=1, keepdim=True)
+                baseward = baseward / torch.clamp(baseward_norm, min=1.0e-6)
+                direction = torch.where(unresolved, baseward, direction)
+                norm = torch.linalg.vector_norm(direction, dim=1, keepdim=True)
+            direction = direction / torch.clamp(norm, min=1.0e-6)
+            target[:, :2, 3] += direction * float(policy.get("retreat_distance", 0.10))
+            return target
         desired = float(self._policy_value(policy, "retreat_height"))
         if clear_exchange:
             _, lateral = robot_frame_axes(self.env)

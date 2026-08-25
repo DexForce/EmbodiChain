@@ -346,11 +346,11 @@ class AtomicCapabilityRegistry:
 def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
     """Build the default catalog, including explicit planning-only skills."""
     from embodichain.lab.sim.atomic_actions import (
+        AxisAlign,
         CoordinatedPickment,
         CoordinatedPickmentOptions,
         CoordinatedPlacement,
         CoordinatedPlacementOptions,
-        AxisAlign,
         AxisAlignOptions,
         HandOver,
         HandOverOptions,
@@ -385,8 +385,9 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
             "single_arm_object",
             "preserve",
             "axis_align",
-            motion_base="PickUp",
+            motion_base="AxisAlign",
             verifier="postcondition",
+            verifier_hook=_verify_axis_alignment,
             failure_classifier="grasp",
             contract_resolver_hook=_resolve_axis_align_contract,
             allows_target_contact=True,
@@ -787,7 +788,16 @@ def _resolve_end_effector_contract(
         raise ValueError("MoveEndEffector contract requires actor and target_binding.")
     arm = _required_arm(_actor_arms(actor)[0], "MoveEndEffector")
     if binding.get("operation") == "retreat" or node.get("role") == "cleanup":
-        requires = [StateAtom("arm_free", arm=arm)]
+        requires = [
+            StateAtom(
+                (
+                    "arm_clear"
+                    if binding.get("operation") == "retreat_after_lift"
+                    else "arm_free"
+                ),
+                arm=arm,
+            )
+        ]
         if binding.get("source") == "handover":
             requires.append(StateAtom("handover_complete", object_uid=object_uid))
         return ResolvedActionContract(
@@ -826,6 +836,20 @@ def _resolve_axis_align_contract(node: Mapping[str, Any]) -> ResolvedActionContr
         completion="terminal_barrier",
         failure_policy="task_required",
     )
+
+
+def _verify_axis_alignment(
+    *,
+    executor: Any,
+    step: Any,
+    arm: str,
+    outcome: Any,
+    attempted: torch.Tensor,
+) -> torch.Tensor:
+    """Reuse the E2 live predicate before committing AxisAlign completion."""
+    del arm, outcome
+    verified_failed, success, _ = executor._verify_step(step, ~attempted)
+    return attempted & success & ~verified_failed
 
 
 def _resolve_pour_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
@@ -924,6 +948,9 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
             ),
         )
     if node.get("role") == "cleanup":
+        required_home = (
+            node.get("task_type") == "E2" and binding.get("operation") == "e2_home"
+        )
         return ResolvedActionContract(
             requires=(StateAtom("arm_clear", arm=arm),),
             effects=(
@@ -932,7 +959,7 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
             ),
             claims=(ResourceClaim(f"arm:{arm}"),),
             completion="terminal_barrier",
-            failure_policy="best_effort",
+            failure_policy="safety_required" if required_home else "best_effort",
         )
     return ResolvedActionContract(
         requires=(StateAtom("arm_free", arm=arm),),

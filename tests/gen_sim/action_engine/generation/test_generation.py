@@ -669,15 +669,15 @@ def test_fast_gym_config_supports_all_robot_profiles(
     robot_uid: str,
     solver_type: str | None,
 ) -> None:
-    expected_tcp = [
+    rotated_tcp = [
+        [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.2],
         [0.0, 0.0, 0.0, 1.0],
     ]
-    expected_hand_mount = [
+    identity_hand_mount = [
+        [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
-        [-1.0, 0.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.0],
         [0.0, 0.0, 0.0, 1.0],
     ]
@@ -695,13 +695,13 @@ def test_fast_gym_config_supports_all_robot_profiles(
     assert config["robot"]["uid"] == robot_uid
     assert config["env"]["extensions"]["agent_robot_profile"] == profile
     for arm in ("left_arm", "right_arm"):
-        assert config["robot"]["solver_cfg"][arm]["tcp"] == expected_tcp
+        assert config["robot"]["solver_cfg"][arm]["tcp"] == rotated_tcp
     components = {
         component["component_type"]: component
         for component in config["robot"]["urdf_cfg"]["components"]
     }
     for hand in ("left_hand", "right_hand"):
-        assert components[hand]["transform"] == expected_hand_mount
+        assert components[hand]["transform"] == identity_hand_mount
     if solver_type is not None:
         assert config["robot"]["solver_cfg"]["left_arm"]["ur_type"] == solver_type
 
@@ -998,7 +998,7 @@ def test_generation_calls_interpreter_recipe_and_renderer_once(
     assert agent_config["seed_task_graph"] == "seed_task_graph.json"
     assert len(agent_config["seed_task_graph_hash"]) == 64
     assert agent_config["runtime_policy"]["schema_version"] == (
-        "action_engine_runtime_policy_v6"
+        "action_engine_runtime_policy_v7"
     )
     assert agent_config["runtime_policy"]["planner"]["dynamic_collision"] is True
     assert agent_config["runtime_policy"]["planner"]["static_obstacle_uids"] == [
@@ -1414,7 +1414,7 @@ def test_agent_config_uses_relative_program_paths(gym_export: Path) -> None:
     assert config["runtime_policy"]["arm_selection"]["pickup_crossing_weight"] == 1.0
     assert config["runtime_policy"]["motion_defaults"]["PickUp"][
         "lift_height"
-    ] == pytest.approx(0.30)
+    ] == pytest.approx(0.16)
     assert config["runtime_policy"]["grasp"]["max_open_length"] == pytest.approx(0.15)
     assert len(config["runtime_policy_hash"]) == 64
 

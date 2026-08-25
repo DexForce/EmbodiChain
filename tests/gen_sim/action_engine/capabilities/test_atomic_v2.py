@@ -119,6 +119,76 @@ class _Sim:
         return _Entity()
 
 
+def test_axis_align_uses_its_tutorial_motion_policy_base() -> None:
+    capability = build_atomic_capability_registry().get("AxisAlign")
+
+    assert capability.motion_base == "AxisAlign"
+
+
+def test_axis_align_verifies_the_live_semantic_postcondition() -> None:
+    capability = build_atomic_capability_registry().get("AxisAlign")
+    attempted = torch.tensor([True, False])
+    calls = []
+
+    def verify_step(step, failed):
+        calls.append((step, failed.clone()))
+        return failed.clone(), torch.tensor([True, False]), torch.zeros(2, 3)
+
+    executor = SimpleNamespace(
+        _verify_step=verify_step,
+        _action_execution_observation=lambda _uid: {
+            "linear_velocity": torch.zeros(2, 3),
+            "angular_velocity": torch.zeros(2, 3),
+        },
+        runtime_policy=SimpleNamespace(
+            execution={
+                "support_linear_velocity_tolerance": 0.02,
+                "support_angular_velocity_tolerance": 0.2,
+            }
+        ),
+    )
+    step = SimpleNamespace(id="orient", object_uid="can")
+
+    verified = capability.verifier_hook(
+        executor=executor,
+        step=step,
+        arm="left_arm",
+        outcome=SimpleNamespace(),
+        attempted=attempted,
+    )
+
+    assert verified.tolist() == [True, False]
+    assert calls[0][0] is step
+    assert calls[0][1].tolist() == [False, True]
+
+
+def test_e2_home_is_required_while_generic_cleanup_home_is_best_effort() -> None:
+    capability = build_atomic_capability_registry().get("MoveJoints")
+    base = {
+        "atomic_action": "MoveJoints",
+        "object_uid": "can",
+        "actor": {"mode": "required", "arm": "right_arm"},
+        "control": "arm",
+        "role": "cleanup",
+        "target_binding": {"kind": "joint_state", "source": "initial"},
+    }
+
+    generic = capability.resolve_contract(base)
+    e2_home = capability.resolve_contract(
+        {
+            **base,
+            "task_type": "E2",
+            "target_binding": {
+                **base["target_binding"],
+                "operation": "e2_home",
+            },
+        }
+    )
+
+    assert generic.failure_policy == "best_effort"
+    assert e2_home.failure_policy == "safety_required"
+
+
 def test_new_descriptor_reuses_loader_and_adapter_without_dispatch_changes() -> None:
     registry = build_atomic_capability_registry()
     calls = []

@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
 import math
@@ -37,6 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionPlan,
     AntipodalAffordance,
     AtomicActionEngine,
+    AxisAlignGoal,
     ControlPartCommandProfile,
     CoordinatedPickGoal,
     DynamicCollisionMode,
@@ -60,13 +61,16 @@ from embodichain.lab.sim.planners import (
     MotionGenerator,
     ToppraPlannerCfg,
 )
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
-    AntipodalSamplerCfg,
-    GraspGeneratorCfg,
-    GripperCollisionCfg,
+    AntipodalGraspPoseGenerator,
+    AntipodalGraspPoseGeneratorCfg,
+    GraspAnnotationCfg,
+    ParallelJawGraspCollisionCfg,
 )
 from embodichain.utils.logger import log_info
 
+from .body_grasp import AxisAlignBodyGraspAdapter
 from .grasp_collision_cache import ensure_vhacd_grasp_collision_cache
 from .models import ActionOutcome, GroundedAction
 from .state import ExecutionState
@@ -96,6 +100,8 @@ _DEFAULT_PLANNER_POLICY: dict[str, Any] = {
 
 # Preserve cuRobo's fixed world shape while disabling intentional-contact objects.
 _COLLISION_PARKING_Z_OFFSET = -100.0
+_BODY_GRASP_CANDIDATE_LIMIT = 500
+_BODY_GRASP_SEED = 17_392
 
 
 def _collision_cache_for_world(
@@ -304,27 +310,7 @@ class AtomicActionAdapter:
             raise ValueError(f"Object {uid!r} has invalid mesh triangles.")
 
         grasp_options = self.grasp_policy
-        sampler = AntipodalSamplerCfg(
-            n_sample=int(grasp_options["antipodal_n_sample"]),
-            max_angle=float(grasp_options["antipodal_max_angle"]),
-            max_length=float(grasp_options["max_open_length"]),
-            min_length=float(grasp_options["min_open_length"]),
-        )
-        generator = GraspGeneratorCfg(
-            viser_port=int(grasp_options["viser_port"]),
-            antipodal_sampler_cfg=sampler,
-            max_deviation_angle=float(grasp_options["max_deviation_angle"]),
-            n_deviated_approach_directions=int(
-                grasp_options["n_deviated_approach_directions"]
-            ),
-        )
         max_hulls = int(grasp_options["max_decomposition_hulls"])
-        collision = GripperCollisionCfg(
-            max_open_length=float(grasp_options["max_open_length"]),
-            finger_length=float(grasp_options["finger_length"]),
-            point_sample_dense=float(grasp_options["point_sample_dense"]),
-            max_decomposition_hulls=max_hulls,
-        )
         cache_result = ensure_vhacd_grasp_collision_cache(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
@@ -341,9 +327,6 @@ class AtomicActionAdapter:
                 object_label=uid,
                 mesh_vertices=vertices,
                 mesh_triangles=triangles,
-                generator_cfg=generator,
-                gripper_collision_cfg=collision,
-                force_reannotate=bool(grasp_options["force_grasp_reannotate"]),
             ),
         )
         self._semantics[uid] = semantics
@@ -359,8 +342,25 @@ class AtomicActionAdapter:
         state = state or self.initial_state()
         grounded = self._select_upright_transport_yaw(grounded, state)
         context = self._planning_context(state, grounded)
-        invocation = self._invocation(grounded, capability)
-        plan = self._engine().plan(invocation, context)
+        grounded_candidates = self._adapt_axis_align_body_grasps(
+            grounded,
+            context,
+            capability,
+        )
+        selected: tuple[GroundedAction, ActionInvocation, ActionPlan] | None = None
+        best_failure_count = self.num_envs + 1
+        for candidate in grounded_candidates:
+            candidate_invocation = self._invocation(candidate, capability)
+            candidate_plan = self._engine().plan(candidate_invocation, context)
+            failure_count = int((~candidate_plan.plan_success).sum().item())
+            if selected is None or failure_count < best_failure_count:
+                selected = (candidate, candidate_invocation, candidate_plan)
+                best_failure_count = failure_count
+            if failure_count == 0:
+                break
+        if selected is None:
+            raise RuntimeError("Atomic action adaptation produced no plan candidate.")
+        grounded, invocation, plan = selected
         selected_positions = self._positions_with_agent_holds(
             plan,
             grounded,
@@ -499,8 +499,89 @@ class AtomicActionAdapter:
                 # Auditability takes precedence over compactness here: every
                 # selected planner route retains its complete joint path.
                 "planned_trajectory": selected_positions.detach().clone(),
+                "primary_action_diagnostics": deepcopy(dict(plan.diagnostics.metadata)),
+                "fallback_action_diagnostics": (
+                    None
+                    if fallback_plan is None
+                    else deepcopy(dict(fallback_plan.diagnostics.metadata))
+                ),
+                "action_segments": {
+                    segment.name: {
+                        "start": int(segment.start),
+                        "stop": int(segment.stop),
+                    }
+                    for segment in plan.segments
+                },
             },
         )
+
+    def _adapt_axis_align_body_grasps(
+        self,
+        grounded: GroundedAction,
+        context: PlanningContext,
+        capability: AtomicCapability,
+    ) -> tuple[GroundedAction, ...]:
+        if capability.target_materializer != "axis_align":
+            return (grounded,)
+        goal = grounded.target
+        if not isinstance(goal, AxisAlignGoal) or goal.grasp_xpos is not None:
+            return (grounded,)
+        object_pose = grounded.object_pose
+        if (
+            not isinstance(object_pose, torch.Tensor)
+            or object_pose.shape != (self.num_envs, 4, 4)
+            or not torch.isfinite(object_pose).all()
+        ):
+            raise ValueError(
+                "AxisAlign body grasp requires a finite grounded live object pose "
+                f"with shape ({self.num_envs}, 4, 4)."
+            )
+        if goal.semantics.entity_id is not None:
+            goal = replace(
+                goal,
+                semantics=replace(goal.semantics, entity_id=None),
+            )
+        _, hand_part, _ = self._parts(grounded.arm)
+        if hand_part is None:
+            raise ValueError("AxisAlign body grasp requires a configured hand part.")
+        options = self._build_config(grounded, capability)
+        selected_approach = options.approach_direction
+        adaptation = AxisAlignBodyGraspAdapter().adapt(
+            goal,
+            object_pose=object_pose,
+            grasp_generator=self._engine().grasp_pose_generators[hand_part],
+            approach_direction=selected_approach,
+            target_axis=options.target_axis,
+            seed=_BODY_GRASP_SEED,
+        )
+        cfg = dict(grounded.cfg)
+        cfg["approach_direction"] = selected_approach
+        candidates: list[GroundedAction] = []
+        for adaptation_index, candidate_goal in enumerate(adaptation.alternative_goals):
+            rank = adaptation.alternative_rank_indices[adaptation_index]
+            policy = dict(grounded.motion_policy)
+            policy["body_grasp"] = {
+                "long_axis_index": adaptation.axes.long_axis_index,
+                "short_axis_index": adaptation.axes.short_axis_index,
+                "elongation_ratio": adaptation.axes.elongation_ratio,
+                "candidate_indices": (
+                    adaptation.selection.ranked_candidate_indices[:, rank].tolist()
+                ),
+                "candidate_counts": (
+                    adaptation.selection.body_candidate_counts.tolist()
+                ),
+                "candidate_rank": rank,
+                "approach_direction": selected_approach.detach().cpu().tolist(),
+            }
+            candidates.append(
+                replace(
+                    grounded,
+                    target=candidate_goal,
+                    cfg=cfg,
+                    motion_policy=policy,
+                )
+            )
+        return tuple(candidates)
 
     def _search_reachable_retreat(
         self,
@@ -752,6 +833,9 @@ class AtomicActionAdapter:
                         (direction / norm).detach().cpu().tolist()
                     )
             trace["grasp_policy"] = grasp_policy
+        body_grasp = grounded.motion_policy.get("body_grasp")
+        if isinstance(body_grasp, Mapping):
+            trace["body_grasp"] = deepcopy(dict(body_grasp))
         return trace
 
     def _select_upright_transport_yaw(
@@ -999,11 +1083,9 @@ class AtomicActionAdapter:
             )
         else:
             dynamic_mode = DynamicCollisionMode.OFF
-        goal = (
-            self._coordinated_pickment_goal(grounded)
-            if capability.config_materializer == "coordinated_pickment"
-            else grounded.target
-        )
+        goal = grounded.target
+        if capability.config_materializer == "coordinated_pickment":
+            self._validate_coordinated_pickment_goal(grounded)
         return ActionInvocation(
             skill_id=str(capability.action_type.skill_id),
             goal=goal,
@@ -1018,28 +1100,22 @@ class AtomicActionAdapter:
         )
 
     @staticmethod
-    def _coordinated_pickment_goal(grounded: GroundedAction) -> CoordinatedPickGoal:
-        """Apply GenSim-only coordinated grasp filtering to an owned goal copy."""
+    def _validate_coordinated_pickment_goal(
+        grounded: GroundedAction,
+    ) -> CoordinatedPickGoal:
+        """Validate the coordinated goal against the engine-scoped generator."""
         target = grounded.target
         if not isinstance(target, CoordinatedPickGoal):
             raise TypeError("CoordinatedPickment requires a CoordinatedPickGoal.")
         requested = grounded.cfg.get("is_filter_ground_collision")
-        if requested is None:
-            return target
-        if not isinstance(requested, bool):
+        if requested is not None and not isinstance(requested, bool):
             raise TypeError("is_filter_ground_collision must be a boolean.")
-        semantics = target.semantics
-        affordance = semantics.affordance
-        if not isinstance(affordance, AntipodalAffordance):
+        if not isinstance(target.semantics.affordance, AntipodalAffordance):
             raise TypeError(
                 "CoordinatedPickment requires an AntipodalAffordance for GenSim "
                 "grasp filtering."
             )
-        generator_cfg = deepcopy(affordance.generator_cfg or GraspGeneratorCfg())
-        generator_cfg.is_filter_ground_collision = requested
-        scoped_affordance = replace(affordance, generator_cfg=generator_cfg)
-        scoped_semantics = replace(semantics, affordance=scoped_affordance)
-        return replace(target, semantics=scoped_semantics)
+        return target
 
     def _binding(
         self,
@@ -1341,6 +1417,7 @@ class AtomicActionAdapter:
         trajectory: torch.Tensor,
         *,
         active: torch.Tensor,
+        waypoint_observer: Callable[[int], None] | None = None,
     ) -> list[torch.Tensor]:
         """Advance the environment while holding inactive vectorized rows."""
         if trajectory.ndim != 3 or trajectory.shape[0] != self.num_envs:
@@ -1351,13 +1428,15 @@ class AtomicActionAdapter:
             dtype=trajectory.dtype,
         )
         commands: list[torch.Tensor] = []
-        for waypoint in trajectory.unbind(dim=1):
+        for waypoint_index, waypoint in enumerate(trajectory.unbind(dim=1)):
             command = torch.where(active[:, None], waypoint, current)
             self.env.step(command)
             self._scene_time += self._scene_step_duration()
             update = getattr(self.env, "update_obj_info", None)
             if callable(update):
                 update()
+            if waypoint_observer is not None:
+                waypoint_observer(waypoint_index)
             commands.append(command.detach())
             current = command
         sync = getattr(self.env, "sync_agent_state_from_qpos", None)
@@ -1432,6 +1511,7 @@ class AtomicActionAdapter:
             engine = AtomicActionEngine(
                 self._generator(),
                 control_profiles=self._control_profiles(),
+                grasp_pose_generators=self._grasp_pose_generators(),
             )
             engine.register(ExactTargetMoveHeldObject(), replace=True)
             self._atomic_engine = engine
@@ -1511,6 +1591,52 @@ class AtomicActionAdapter:
                 grasp=_as_hand_qpos(self.env.close_state, hand_dof, self.device),
             )
         return profiles
+
+    def _grasp_pose_generators(self) -> dict[str, AntipodalGraspPoseGenerator]:
+        """Build one mainline grasp service for each runtime hand endpoint."""
+        options = self.grasp_policy
+        model = ParallelJawGripperModelCfg(
+            model_id="gen_sim_parallel_jaw",
+            min_opening_width=float(options["min_open_length"]),
+            max_opening_width=float(options["max_open_length"]),
+            finger_length=float(options["finger_length"]),
+            finger_width=0.03,
+            finger_thickness=0.01,
+            palm_depth=0.08,
+        )
+        algorithm = AntipodalGraspPoseGeneratorCfg(
+            sample_count=int(options["antipodal_n_sample"]),
+            ray_deviation_angle=float(options["antipodal_max_angle"]),
+            approach_deviation_angle=float(options["max_deviation_angle"]),
+            approach_direction_samples=int(options["n_deviated_approach_directions"]),
+            max_candidates=_BODY_GRASP_CANDIDATE_LIMIT,
+        )
+        collision = ParallelJawGraspCollisionCfg(
+            point_sample_density=float(options["point_sample_dense"]),
+            max_decomposition_hulls=int(options["max_decomposition_hulls"]),
+            opening_margin=0.01,
+            filter_ground_collision=True,
+        )
+        annotation = GraspAnnotationCfg(
+            selection_mode="whole_mesh",
+            viser_port=int(options["viser_port"]),
+            force_refresh=bool(options["force_grasp_reannotate"]),
+        )
+        generators: dict[str, AntipodalGraspPoseGenerator] = {}
+        for arm in ("left_arm", "right_arm"):
+            try:
+                _, hand_part, _ = self._parts(arm)
+            except ValueError:
+                continue
+            if hand_part is None or hand_part in generators:
+                continue
+            generators[hand_part] = AntipodalGraspPoseGenerator(
+                model,
+                algorithm_cfg=algorithm,
+                collision_cfg=collision,
+                annotation_cfg=annotation,
+            )
+        return generators
 
     def _parts(self, arm: str) -> tuple[str, str | None, int]:
         if arm not in {"left_arm", "right_arm"}:

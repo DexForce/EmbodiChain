@@ -94,6 +94,7 @@ from embodichain.lab.sim.atomic_actions import (
     CoordinatedPickGoal,
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
+    EndEffectorPoseGoal,
     HandOverOptions,
     HeldObjectPoseGoal,
     HeldObjectState,
@@ -553,7 +554,7 @@ def test_dual_ur5_policy_uses_short_reach_upright_lifts() -> None:
 
     assert ur5_pickup["lift_height"] == pytest.approx(0.12)
     assert ur5_transport["staging_lift_height"] == pytest.approx(0.12)
-    assert ur10_pickup["lift_height"] == pytest.approx(0.30)
+    assert ur10_pickup["lift_height"] == pytest.approx(0.16)
     assert ur10_transport["staging_lift_height"] == pytest.approx(0.25)
 
 
@@ -619,7 +620,7 @@ def test_runtime_policy_v4_migrates_grasp_direction_count() -> None:
         }
     )
 
-    assert policy.schema_version == "action_engine_runtime_policy_v6"
+    assert policy.schema_version == "action_engine_runtime_policy_v7"
     assert policy.grasp["n_deviated_approach_directions"] == 4
 
 
@@ -665,7 +666,7 @@ def test_runtime_policy_v5_migrates_support_geometry_thresholds() -> None:
         }
     )
 
-    assert policy.schema_version == "action_engine_runtime_policy_v6"
+    assert policy.schema_version == "action_engine_runtime_policy_v7"
     assert policy.predicate_fallbacks["support_min_overlap_ratio"] == 0.25
     assert policy.grounding["placement"]["clearance"] == 0.019
     assert policy.grounding["placement"]["candidate_count"] == 5
@@ -1659,7 +1660,9 @@ def _handover_then_place_task() -> dict[str, Any]:
 
 def test_handover_continuation_uses_stable_upright_policies() -> None:
     entities = {
-        "can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03)),
+        "can": _FakeEntity(
+            "can", _pose(0.0, 0.2, 0.75), _rect_vertices(0.03, 0.03, 0.10)
+        ),
         "target": _FakeEntity("target", _pose(0.2, 0.0, 0.75), _box_vertices(0.03)),
         "table": _FakeEntity("table", _pose(0.0, 0.0, 0.5), _box_vertices(0.5)),
     }
@@ -3452,7 +3455,7 @@ def test_handover_defers_clearance_verification_to_retreat_action() -> None:
 
 
 def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -> None:
-    entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
+    entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _rect_vertices(0.10, 0.03, 0.03))
     env = _FakeEnv(
         {
             "can": entity,
@@ -3507,13 +3510,26 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         if candidate.id in orient_step.edge_ids
         and candidate.actions[0]["atomic_action_class"] == "AxisAlign"
     )
+    orient_lift_edge = next(
+        candidate
+        for candidate in program.edges
+        if candidate.id in orient_step.edge_ids
+        and candidate.actions[0]["target_binding"].get("operation") == "lift_clear"
+    )
+    orient_retreat_edge = next(
+        candidate
+        for candidate in program.edges
+        if candidate.id in orient_step.edge_ids
+        and candidate.actions[0]["target_binding"].get("operation")
+        == "retreat_after_lift"
+    )
     handover_edge = next(
         candidate
         for candidate in program.edges
         if candidate.id in handover_step.edge_ids
         if candidate.actions[0]["atomic_action_class"] == "PickUp"
     )
-    vertices = _box_vertices(0.03)
+    vertices = _rect_vertices(0.10, 0.03, 0.03)
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(
             object_label="can",
@@ -3531,6 +3547,21 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         arm="right_arm",
         state=ExecutionState(last_qpos=env.robot.get_qpos()),
     )
+    release_pose = _pose(0.05, 0.2, 0.78)
+    orient_lift = grounder.ground(
+        orient_lift_edge.actions[0],
+        orient_step,
+        arm="right_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+        reference_eef_pose=release_pose,
+    )
+    orient_retreat = grounder.ground(
+        orient_retreat_edge.actions[0],
+        orient_step,
+        arm="right_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+        reference_eef_pose=orient_lift.target.xpos,
+    )
     handover_pickup = grounder.ground(
         handover_edge.actions[0],
         handover_step,
@@ -3542,6 +3573,33 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
     assert "approach_direction_mode" not in handover_pickup.cfg
     assert handover_pickup.cfg["pick_object_part"] == "top"
     assert isinstance(orient_alignment.target, AxisAlignGoal)
+    assert isinstance(orient_lift.target, EndEffectorPoseGoal)
+    assert torch.equal(
+        orient_lift.target.xpos[:, :2, 3],
+        release_pose[:, :2, 3],
+    )
+    assert bool((orient_lift.target.xpos[:, 2, 3] > release_pose[:, 2, 3]).all())
+    assert "retreat_reachability_search" not in orient_lift.motion_policy
+    assert isinstance(orient_retreat.target, EndEffectorPoseGoal)
+    retreat_distance = torch.linalg.vector_norm(
+        orient_retreat.target.xpos[:, :2, 3] - orient_lift.target.xpos[:, :2, 3],
+        dim=1,
+    )
+    torch.testing.assert_close(
+        retreat_distance, torch.full_like(retreat_distance, 0.20)
+    )
+    assert bool(
+        (orient_retreat.target.xpos[:, 0, 3] > orient_lift.target.xpos[:, 0, 3]).all()
+    )
+    assert torch.equal(
+        orient_retreat.target.xpos[:, 2, 3],
+        orient_lift.target.xpos[:, 2, 3],
+    )
+    assert bool(
+        (
+            orient_retreat.target.xpos[:, :2, 3] != orient_lift.target.xpos[:, :2, 3]
+        ).any()
+    )
     assert orient_alignment.target.grasp_xpos is None
     assert torch.equal(
         orient_alignment.target.object_target_pose,
@@ -4044,6 +4102,35 @@ def test_pickup_is_replanned_from_live_pose_and_screens_downstream_targets(
     assert not edge_result.planner_traces[0]["speculative_candidate_available"]
     assert bool(edge_result.failed[0])
     assert executor._object_owners["can"] == [None]
+
+
+def test_completed_step_releases_speculative_candidate_plans() -> None:
+    executor = object.__new__(ProgramExecutor)
+    executor._candidate_cache = {
+        ("completed", "left_arm"): object(),
+        ("next", "right_arm"): object(),
+    }
+    executor._candidate_failures = {
+        ("completed", "left_arm"): "failed",
+        ("next", "right_arm"): "pending",
+    }
+    executor._candidate_diagnostics = {
+        "completed": {"large": "trace"},
+        "next": {"small": "trace"},
+    }
+    executor._candidate_blockers = {
+        "completed": ({"reason": "old"},),
+        "next": ({"reason": "new"},),
+    }
+    executor._reported_candidates = {"completed", "next"}
+
+    executor._release_candidate_plans("completed")
+
+    assert set(executor._candidate_cache) == {("next", "right_arm")}
+    assert set(executor._candidate_failures) == {("next", "right_arm")}
+    assert set(executor._candidate_diagnostics) == {"next"}
+    assert set(executor._candidate_blockers) == {"next"}
+    assert executor._reported_candidates == {"next"}
 
 
 def test_live_pickup_planning_exception_is_a_retryable_edge_failure(

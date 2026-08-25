@@ -169,12 +169,19 @@ runtime:
       force_grasp_reannotate: false
 
     motion_defaults:
+      AxisAlign:
+        sample_interval: 180
+        pre_grasp_distance: 0.15
+        lift_height: 0.16
+        lower_distance: 0.03
+        hand_interp_steps: 12
       PickUp:
-        pre_grasp_distance: 0.08
-        lift_height: 0.30
-        sample_interval: 45
+        pre_grasp_distance: 0.15
+        lift_height: 0.16
+        sample_interval: 120
+        hand_interp_steps: 12
       MoveHeldObject:
-        sample_interval: 45
+        sample_interval: 120
         relation_distance: 0.18
         robot_relative_distance: 0.10
         relation_clearance: 0.02
@@ -198,10 +205,11 @@ runtime:
         line_perpendicular_tolerance: 0.06
         preserve_orientation_tolerance: 0.2617993877991494
       Place:
-        sample_interval: 15
-        lift_height: 0.0
-        post_hold_steps: 0
+        sample_interval: 120
+        lift_height: 0.14
+        post_hold_steps: 60
         cartesian_waypoint_count: 2
+        hand_interp_steps: 12
       MoveEndEffector:
         sample_interval: 20
         retreat_height: 0.30
@@ -264,8 +272,8 @@ runtime:
             upright_xy_tolerance: 0.05
             upright_max_tilt: 0.2617993877991494
           Place:
-            sample_interval: 64
-            post_hold_steps: 12
+            sample_interval: 120
+            post_hold_steps: 60
             hand_interp_steps: 12
           MoveEndEffector:
             sample_interval: 30

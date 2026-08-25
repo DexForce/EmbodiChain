@@ -24,6 +24,11 @@ from embodichain.gen_sim.action_engine.tasks import (
     ground_instruction_draft,
     instantiate_seed_graph,
 )
+from tests.gen_sim.action_engine.task_fixtures import (
+    TASK2_1_HISTORICAL_ROLE_BINDINGS,
+    TASK2_1_HISTORICAL_SCENE_FINGERPRINT,
+    make_task2_1_historical_spec,
+)
 
 
 def _selector(
@@ -87,6 +92,102 @@ def _ground_draft(
     )
 
 
+def _historical_task2_1_graph() -> dict:
+    return instantiate_seed_graph(
+        make_task2_1_historical_spec(),
+        TASK2_1_HISTORICAL_ROLE_BINDINGS,
+    )
+
+
+def _actions_by_task_group(graph: dict) -> dict[str, list[str]]:
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    return {
+        group["id"]: [nodes[node_id]["atomic_action"] for node_id in group["node_ids"]]
+        for group in graph["task_groups"]
+    }
+
+
+def test_historical_task2_1_fixture_preserves_ten_step_semantics() -> None:
+    task = make_task2_1_historical_spec()
+
+    assert [instance["task_type"] for instance in task["task_instances"]] == [
+        "E2",
+        "E2",
+        "E4",
+        "E1",
+        "E4",
+        "E1",
+        "E1",
+        "E1",
+        "E4",
+        "E1",
+    ]
+    assert [term["task_instance_id"] for term in task["success"]["terms"]] == [
+        instance["id"] for instance in task["task_instances"]
+    ]
+    assert TASK2_1_HISTORICAL_SCENE_FINGERPRINT["config_sha256"] == (
+        "1042967c9b7021f518e82ace62aa824015a3ad50639fa8a326b7dc0474277481"
+    )
+
+
+def test_historical_task2_1_uses_axis_align_and_explicit_handover_arms() -> None:
+    task = make_task2_1_historical_spec()
+    graph = _historical_task2_1_graph()
+    actions = _actions_by_task_group(graph)
+
+    expected_orient_actions = [
+        "AxisAlign",
+        "MoveEndEffector",
+        "MoveEndEffector",
+        "MoveJoints",
+    ]
+    assert actions["task_01"] == expected_orient_actions
+    assert actions["task_02"] == expected_orient_actions
+    assert [
+        (
+            instance["params"]["transfer_arm"],
+            instance["params"]["receive_arm"],
+        )
+        for instance in task["task_instances"]
+        if instance["task_type"] == "E4"
+    ] == [
+        ("left_arm", "right_arm"),
+        ("right_arm", "left_arm"),
+        ("left_arm", "right_arm"),
+    ]
+
+
+def test_historical_task2_1_handover_continuations_preserve_receiver_hold() -> None:
+    graph = _historical_task2_1_graph()
+    actions = _actions_by_task_group(graph)
+    groups = {group["id"]: group for group in graph["task_groups"]}
+
+    for group_id, expected_arm in (
+        ("task_04", "right_arm"),
+        ("task_06", "left_arm"),
+        ("task_10", "right_arm"),
+    ):
+        assert actions[group_id][0] == "MoveHeldObject"
+        assert "PickUp" not in actions[group_id]
+        assert groups[group_id]["contract"]["entry_requires"] == [
+            {
+                "predicate": "object_held",
+                "object_uid": groups[group_id]["object_uid"],
+                "arm": expected_arm,
+            }
+        ]
+
+
+def test_historical_task2_1_reacquires_objects_after_release() -> None:
+    graph = _historical_task2_1_graph()
+    actions = _actions_by_task_group(graph)
+
+    assert actions["task_05"][0] == "PickUp"
+    assert actions["task_07"][0] == "PickUp"
+    assert actions["task_08"][0] == "PickUp"
+    assert actions["task_09"][0] == "PickUp"
+
+
 def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -> None:
     task = {
         "schema_version": "action_engine_task_spec_v2",
@@ -131,8 +232,38 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     ]
     orient = next(group for group in graph["task_groups"] if group["id"] == "orient")
 
-    assert [node["atomic_action"] for node in orient_nodes] == ["AxisAlign"]
+    assert [node["atomic_action"] for node in orient_nodes] == [
+        "AxisAlign",
+        "MoveEndEffector",
+        "MoveEndEffector",
+        "MoveJoints",
+    ]
     assert orient_nodes[0]["motion_policy"] == {"modifiers": []}
+    assert [node["role"] for node in orient_nodes] == [
+        "primary",
+        "cleanup",
+        "cleanup",
+        "cleanup",
+    ]
+    assert orient_nodes[1]["target_binding"] == {
+        "kind": "policy_pose",
+        "source": "release",
+        "operation": "lift_clear",
+    }
+    assert orient_nodes[1]["motion_policy"] == {"modifiers": []}
+    assert orient_nodes[2]["target_binding"] == {
+        "kind": "policy_pose",
+        "source": "release",
+        "operation": "retreat_after_lift",
+    }
+    assert orient_nodes[3]["target_binding"] == {
+        "kind": "joint_state",
+        "source": "initial",
+        "operation": "e2_home",
+    }
+    assert orient_nodes[1]["depends_on"] == [orient_nodes[0]["id"]]
+    assert orient_nodes[2]["depends_on"] == [orient_nodes[1]["id"]]
+    assert orient_nodes[3]["depends_on"] == [orient_nodes[2]["id"]]
     assert [node["atomic_action"] for node in handover_nodes] == [
         "PickUp",
         "MoveHeldObject",
@@ -147,8 +278,17 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     assert orient["actor"] == {"mode": "required", "arm": "left_arm"}
     assert handover_nodes[0]["actor"] == {"mode": "required", "arm": "right_arm"}
     assert orient_nodes[-1]["contract"]["completion"] == "terminal_barrier"
-    assert orient_nodes[-1]["contract"]["failure_policy"] == "task_required"
-    assert not any(
+    assert orient_nodes[0]["contract"]["failure_policy"] == "task_required"
+    assert orient_nodes[1]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[2]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[-1]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[1]["contract"]["requires"] == [
+        {"predicate": "arm_free", "arm": "left_arm"}
+    ]
+    assert orient_nodes[2]["contract"]["requires"] == [
+        {"predicate": "arm_clear", "arm": "left_arm"}
+    ]
+    assert any(
         effect["atom"]["predicate"] == "arm_home"
         for effect in orient["contract"]["exit_effects"]
     )
