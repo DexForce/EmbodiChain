@@ -29,8 +29,8 @@ def test_upright_policy_matches_mature_runtime_across_robot_profiles() -> None:
     franka = resolve_motion_policy("dual_franka", "PickUp", upright)
     ur10 = resolve_motion_policy("dual_ur10", "PickUp", upright)
 
-    assert franka["lift_height"] == pytest.approx(0.30)
-    assert ur10["lift_height"] == pytest.approx(0.30)
+    assert franka["lift_height"] == pytest.approx(0.16)
+    assert ur10["lift_height"] == pytest.approx(0.16)
     assert ur10["rotate_upright"] == pytest.approx(0.7853981633974483)
 
 

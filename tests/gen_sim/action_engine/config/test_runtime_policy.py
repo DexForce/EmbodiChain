@@ -120,6 +120,43 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
     ]
 
 
+def test_e1_motion_defaults_match_atomic_action_tutorial_cadence() -> None:
+    policy = default_runtime_policy("dual_franka")
+    motion = policy.motion_defaults
+
+    assert motion["PickUp"] == {
+        "pre_grasp_distance": pytest.approx(0.15),
+        "lift_height": pytest.approx(0.16),
+        "sample_interval": 120,
+        "hand_interp_steps": 12,
+    }
+    assert motion["MoveHeldObject"]["sample_interval"] == 120
+    assert motion["Place"] == {
+        "sample_interval": 120,
+        "lift_height": pytest.approx(0.14),
+        "post_hold_steps": 60,
+        "cartesian_waypoint_count": 2,
+        "hand_interp_steps": 12,
+    }
+    assert policy.motion_modifiers["orientation"]["upright"]["Place"] == {
+        "sample_interval": 120,
+        "post_hold_steps": 60,
+        "hand_interp_steps": 12,
+    }
+
+
+def test_axis_align_defaults_match_atomic_action_tutorial_cadence() -> None:
+    axis_align = default_runtime_policy("dual_franka").motion_defaults["AxisAlign"]
+
+    assert axis_align == {
+        "sample_interval": 180,
+        "pre_grasp_distance": pytest.approx(0.15),
+        "lift_height": pytest.approx(0.16),
+        "lower_distance": pytest.approx(0.03),
+        "hand_interp_steps": 12,
+    }
+
+
 def test_place_defaults_fit_the_mainline_motion_sample_budget() -> None:
     place = default_runtime_policy("dual_ur10").motion_defaults["Place"]
     sample_count = int(place["sample_interval"])
@@ -142,7 +179,7 @@ def test_default_runtime_policy_returns_detached_profile_snapshots() -> None:
     first.motion_defaults["PickUp"]["lift_height"] = 9.0
 
     assert second.arm_selection.pickup_crossing_weight == 1.0
-    assert second.motion_defaults["PickUp"]["lift_height"] == 0.30
+    assert second.motion_defaults["PickUp"]["lift_height"] == 0.16
     assert franka.arm_selection.pickup_crossing_weight == 1.0
     assert franka.motion_defaults["MoveEndEffector"]["retreat_height"] == 0.10
 
@@ -228,6 +265,31 @@ def test_agent_policy_snapshot_is_hash_verified_and_legacy_config_falls_back() -
     assert legacy.as_mapping() == snapshot
 
 
+def test_v6_policy_snapshot_adds_axis_align_defaults_without_rewriting_e1() -> None:
+    snapshot = default_runtime_policy("dual_franka").as_mapping()
+    snapshot["schema_version"] = "action_engine_runtime_policy_v6"
+    snapshot["motion_defaults"].pop("AxisAlign")
+    snapshot["motion_defaults"]["PickUp"]["lift_height"] = 0.11
+    payload = json.dumps(
+        snapshot,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+    resolved = resolve_agent_runtime_policy(
+        {
+            "robot_profile": "dual_franka",
+            "runtime_policy": snapshot,
+            "runtime_policy_hash": hashlib.sha256(payload).hexdigest(),
+        }
+    )
+
+    assert resolved.schema_version == "action_engine_runtime_policy_v7"
+    assert resolved.motion_defaults["AxisAlign"]["sample_interval"] == 180
+    assert resolved.motion_defaults["PickUp"]["lift_height"] == pytest.approx(0.11)
+
+
 def test_narrow_v1_policy_snapshot_is_migrated_to_complete_runtime_policy() -> None:
     snapshot = {
         "schema_version": "action_engine_runtime_policy_v1",
@@ -255,7 +317,7 @@ def test_narrow_v1_policy_snapshot_is_migrated_to_complete_runtime_policy() -> N
     )
 
     assert resolved.arm_selection.pickup_crossing_weight == 2.0
-    assert resolved.motion_defaults["PickUp"]["lift_height"] == 0.30
+    assert resolved.motion_defaults["PickUp"]["lift_height"] == 0.16
 
 
 def test_v3_policy_snapshot_is_migrated_with_default_planner_policy() -> None:
@@ -278,7 +340,7 @@ def test_v3_policy_snapshot_is_migrated_with_default_planner_policy() -> None:
         }
     )
 
-    assert resolved.schema_version == "action_engine_runtime_policy_v6"
+    assert resolved.schema_version == "action_engine_runtime_policy_v7"
     assert resolved.planner == expected.planner
 
 

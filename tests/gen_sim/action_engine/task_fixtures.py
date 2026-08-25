@@ -30,7 +30,38 @@ from embodichain.gen_sim.action_engine.protocol import (
     TASK_SPEC_SCHEMA,
 )
 
-__all__ = ["make_task_level", "make_task_spec"]
+__all__ = [
+    "TASK2_1_HISTORICAL_ROLE_BINDINGS",
+    "TASK2_1_HISTORICAL_SCENE_FINGERPRINT",
+    "make_task2_1_historical_spec",
+    "make_task_level",
+    "make_task_spec",
+]
+
+
+TASK2_1_HISTORICAL_ROLE_BINDINGS = {
+    "object_01": "interact_purple_soda_can",
+    "object_02": "interact_orange_soda_can",
+    "object_03": "interact_spiral_notebook",
+}
+"""Runtime role bindings from clean v14 run ``20260820_233507``."""
+
+TASK2_1_HISTORICAL_SCENE_FINGERPRINT = {
+    "config_sha256": "1042967c9b7021f518e82ace62aa824015a3ad50639fa8a326b7dc0474277481",
+    "asset_sha256": {
+        "interact_orange_soda_can": (
+            "ae6c8b9922d4a20746241daf0a607d29f33eb5d96f3dfa2244ffa6ba1d89f5ce"
+        ),
+        "interact_purple_soda_can": (
+            "ee3c0d53d298f2be2db778d8a1227122b57b9492651e1825cd7335a8bf4cec42"
+        ),
+        "interact_spiral_notebook": (
+            "25cbbf49e89da935c32ea939e523997ca538f09c4a29cff334dcbf785380afc8"
+        ),
+        "table": "99caec34e31d43e34f9326fb16c6e8660288d24e0482f463ac6d90c99368b76a",
+    },
+}
+"""Path-independent source fingerprint for the historical Task 2-1 scene."""
 
 _OBJECT_FIXTURES = {
     "E1": ("can", ["graspable", "placeable"], {}),
@@ -43,6 +74,193 @@ _OBJECT_FIXTURES = {
     "E8": ("knob", ["turnable"], {}),
     "E9": ("button", ["pressable"], {"activation": "inactive"}),
 }
+
+
+def make_task2_1_historical_spec() -> dict[str, Any]:
+    """Build the deterministic ten-step Task 2-1 behavior from clean v14.
+
+    The fixture preserves task semantics and ownership transitions from commit
+    ``f70138c6`` run ``20260820_233507``. It intentionally does not freeze the
+    Atomic Action node count or the v14 E2 lowering topology.
+    """
+    instances = [
+        {
+            "id": "task_01",
+            "task_type": "E2",
+            "params": {
+                "object_role": "object_01",
+                "required_arm": "right_arm",
+                "orientation_goal": "upright",
+                "support_role": "table",
+                "upright_local_axis": "long_axis",
+            },
+            "depends_on": [],
+            "role": "primary",
+        },
+        {
+            "id": "task_02",
+            "task_type": "E2",
+            "params": {
+                "object_role": "object_02",
+                "required_arm": "left_arm",
+                "orientation_goal": "upright",
+                "support_role": "table",
+                "upright_local_axis": "long_axis",
+            },
+            "depends_on": [],
+            "role": "primary",
+        },
+        {
+            "id": "task_03",
+            "task_type": "E4",
+            "params": {
+                "object_role": "object_02",
+                "transfer_arm": "left_arm",
+                "receive_arm": "right_arm",
+                "orientation_goal": "none",
+            },
+            "depends_on": ["task_02"],
+            "role": "primary",
+        },
+        {
+            "id": "task_04",
+            "task_type": "E1",
+            "params": {
+                "object_role": "object_02",
+                "target_role": "object_01",
+                "relation": "behind",
+                "relation_frame": "robot",
+                "required_arm": "right_arm",
+                "orientation_goal": "none",
+                "orientation_axis": "none",
+            },
+            "depends_on": ["task_03"],
+            "role": "primary",
+        },
+        {
+            "id": "task_05",
+            "task_type": "E4",
+            "params": {
+                "object_role": "object_01",
+                "transfer_arm": "right_arm",
+                "receive_arm": "left_arm",
+                "orientation_goal": "none",
+            },
+            "depends_on": ["task_04", "task_01"],
+            "role": "primary",
+        },
+        {
+            "id": "task_06",
+            "task_type": "E1",
+            "params": {
+                "object_role": "object_01",
+                "target_role": "object_03",
+                "relation": "left_of",
+                "relation_frame": "robot",
+                "required_arm": "left_arm",
+                "orientation_goal": "none",
+                "orientation_axis": "none",
+            },
+            "depends_on": ["task_05"],
+            "role": "primary",
+        },
+        {
+            "id": "task_07",
+            "task_type": "E1",
+            "params": {
+                "object_role": "object_02",
+                "target_role": "object_03",
+                "relation": "front_of",
+                "relation_frame": "robot",
+                "required_arm": "right_arm",
+                "orientation_goal": "none",
+                "orientation_axis": "none",
+            },
+            "depends_on": ["task_04"],
+            "role": "primary",
+        },
+        {
+            "id": "task_08",
+            "task_type": "E1",
+            "params": {
+                "object_role": "object_02",
+                "target_role": "object_03",
+                "relation": "on",
+                "relation_frame": "robot",
+                "required_arm": "left_arm",
+                "orientation_goal": "none",
+                "orientation_axis": "none",
+            },
+            "depends_on": ["task_07"],
+            "role": "primary",
+        },
+        {
+            "id": "task_09",
+            "task_type": "E4",
+            "params": {
+                "object_role": "object_01",
+                "transfer_arm": "left_arm",
+                "receive_arm": "right_arm",
+                "orientation_goal": "none",
+            },
+            "depends_on": ["task_06"],
+            "role": "primary",
+        },
+        {
+            "id": "task_10",
+            "task_type": "E1",
+            "params": {
+                "object_role": "object_01",
+                "target_role": "object_02",
+                "relation": "above",
+                "relation_frame": "robot",
+                "required_arm": "right_arm",
+                "orientation_goal": "none",
+                "orientation_axis": "none",
+            },
+            "depends_on": ["task_09", "task_08"],
+            "role": "primary",
+        },
+    ]
+    success_types = (
+        "object_upright",
+        "object_upright",
+        "handover_complete",
+        "semantic_goal",
+        "handover_complete",
+        "semantic_goal",
+        "semantic_goal",
+        "semantic_goal",
+        "handover_complete",
+        "semantic_goal",
+    )
+    return validate_task_spec(
+        {
+            "schema_version": TASK_SPEC_SCHEMA,
+            "task_id": "task2_1",
+            "level": "L3",
+            "instruction": "historical-task2_1-ten-step-regression",
+            "reasoning_type": "none",
+            "task_instances": instances,
+            "success": {
+                "op": "all",
+                "terms": [
+                    {"type": success_type, "task_instance_id": instance["id"]}
+                    for instance, success_type in zip(instances, success_types)
+                ],
+            },
+            "oracle": {
+                "task_order": [instance["id"] for instance in instances],
+                "role_bindings": dict(TASK2_1_HISTORICAL_ROLE_BINDINGS),
+            },
+            "metadata": {
+                "fixture": True,
+                "historical_commit": "f70138c626daf84918b15b954765493000cb40a5",
+                "historical_run": "20260820_233507",
+                "role_bindings": dict(TASK2_1_HISTORICAL_ROLE_BINDINGS),
+            },
+        }
+    )
 
 
 def make_task_spec(

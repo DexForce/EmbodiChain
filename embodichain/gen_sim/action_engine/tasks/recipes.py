@@ -409,23 +409,76 @@ def _recipe(
             "local_axis": goal["upright_local_axis"],
         }
         if incoming_held_arm is None and terminal_behavior == "place":
+            alignment = _node(
+                group_id,
+                1,
+                "AxisAlign",
+                task_type,
+                object_uid,
+                actor,
+                "arm",
+                {"kind": "object", "object": object_uid},
+                dependencies,
+                role,
+                success,
+                motion_policy(),
+            )
+            lift_clear = _node(
+                group_id,
+                2,
+                "MoveEndEffector",
+                task_type,
+                object_uid,
+                actor,
+                "arm",
+                {
+                    "kind": "policy_pose",
+                    "source": "release",
+                    "operation": "lift_clear",
+                },
+                [alignment["id"]],
+                "cleanup",
+                {},
+                motion_policy(),
+            )
+            retreat = _node(
+                group_id,
+                3,
+                "MoveEndEffector",
+                task_type,
+                object_uid,
+                actor,
+                "arm",
+                {
+                    "kind": "policy_pose",
+                    "source": "release",
+                    "operation": "retreat_after_lift",
+                },
+                [lift_clear["id"]],
+                "cleanup",
+                {},
+                motion_policy(("orientation", "upright")),
+            )
+            home = _node(
+                group_id,
+                4,
+                "MoveJoints",
+                task_type,
+                object_uid,
+                actor,
+                "arm",
+                {
+                    "kind": "joint_state",
+                    "source": "initial",
+                    "operation": "e2_home",
+                },
+                [retreat["id"]],
+                "cleanup",
+                {},
+                motion_policy(),
+            )
             return (
-                [
-                    _node(
-                        group_id,
-                        1,
-                        "AxisAlign",
-                        task_type,
-                        object_uid,
-                        actor,
-                        "arm",
-                        {"kind": "object", "object": object_uid},
-                        dependencies,
-                        role,
-                        success,
-                        motion_policy(),
-                    )
-                ],
+                [alignment, lift_clear, retreat, home],
                 "orient_object",
                 goal,
                 success,
