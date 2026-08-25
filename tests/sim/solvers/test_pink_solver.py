@@ -307,11 +307,54 @@ class TestPinkSolverUnit:
         assert np.allclose(solver.robot.model.upperPositionLimit, [0.3, 0.25])
 
         assert solver.set_qpos_limits([-0.05, -0.15], [0.2, 0.2])
-        assert np.allclose(solver.robot.model.lowerPositionLimit, [-0.15, -0.05])
+        assert np.allclose(solver.robot.model.lowerPositionLimit, [-0.1, -0.05])
         assert np.allclose(solver.robot.model.upperPositionLimit, [0.2, 0.2])
+        assert torch.allclose(solver.lower_qpos_limits, torch.tensor([-0.05, -0.1]))
+        assert torch.allclose(solver.upper_qpos_limits, torch.tensor([0.2, 0.2]))
 
         with pytest.raises(ValueError, match="shape"):
             solver.update_with_robot_limit(torch.zeros(2, 3))
+
+        setter_first_solver = cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+        assert setter_first_solver.set_qpos_limits([-0.05, -0.15], [0.2, 0.2])
+        setter_first_solver.update_with_robot_limit(
+            torch.tensor([[-0.2, 0.25], [-0.1, 0.3]], dtype=torch.float32)
+        )
+        assert np.allclose(
+            setter_first_solver.robot.model.lowerPositionLimit, [-0.1, -0.05]
+        )
+        assert np.allclose(
+            setter_first_solver.robot.model.upperPositionLimit, [0.2, 0.2]
+        )
+
+    def test_invalid_limit_setters_are_transactional(self, tmp_path: Path):
+        """Test rejected limits preserve configured, effective, and model state."""
+        solver = self._make_solver(tmp_path / "planar_transactional_limits.urdf")
+        solver.update_with_robot_limit(
+            torch.tensor([[-0.2, 0.25], [-0.1, 0.3]], dtype=torch.float32)
+        )
+        configured_lower = solver._configured_lower_limits.clone()
+        configured_upper = solver._configured_upper_limits.clone()
+        effective_lower = solver.lower_qpos_limits.clone()
+        effective_upper = solver.upper_qpos_limits.clone()
+        model_lower = solver.robot.model.lowerPositionLimit.copy()
+        model_upper = solver.robot.model.upperPositionLimit.copy()
+        invalid_limits = [
+            ([0.0], [1.0]),
+            ([np.nan, 0.0], [1.0, 1.0]),
+            ([1.0, 0.0], [0.0, 1.0]),
+            ([0.5, 0.5], [0.6, 0.6]),
+        ]
+
+        for lower, upper in invalid_limits:
+            with pytest.raises(ValueError):
+                solver.set_qpos_limits(lower, upper)
+            assert torch.equal(solver._configured_lower_limits, configured_lower)
+            assert torch.equal(solver._configured_upper_limits, configured_upper)
+            assert torch.equal(solver.lower_qpos_limits, effective_lower)
+            assert torch.equal(solver.upper_qpos_limits, effective_upper)
+            assert np.array_equal(solver.robot.model.lowerPositionLimit, model_lower)
+            assert np.array_equal(solver.robot.model.upperPositionLimit, model_upper)
 
     def test_initial_posture_is_projected_into_effective_limits(self, tmp_path: Path):
         """Test default seeds and posture targets cannot start outside user limits."""
@@ -393,6 +436,39 @@ class TestPinkSolverUnit:
         frame_jacobian = solver.pink_cfg.get_frame_jacobian("tool")
         assert np.linalg.norm(frame_jacobian @ projector) < 1e-10
 
+    def test_full_rank_primary_task_is_not_vetoed_by_posture_merit(
+        self, tmp_path: Path
+    ):
+        """Test a projected-out posture error cannot block frame convergence."""
+        urdf_path = tmp_path / "planar_full_rank_posture.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        posture_task = NullSpacePostureTask(
+            cost=10.0,
+            controlled_frames=["tool"],
+        )
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            fixed_input_tasks=[posture_task],
+            pos_eps=1e-5,
+            rot_eps=1e-5,
+            show_ik_warnings=False,
+        )
+        solver = cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+        truth = torch.tensor([[0.4, -0.2]], dtype=torch.float32)
+        target = solver.get_fk(truth)
+
+        projector = posture_task.compute_jacobian(solver.pink_cfg)
+        success, solution = solver.get_ik(target, torch.zeros_like(truth))
+
+        assert np.linalg.norm(projector) < 1e-10
+        assert torch.all(success)
+        assert torch.allclose(
+            solver.get_fk(solution[:, 0]), target, atol=1e-4, rtol=1e-4
+        )
+
     def test_null_space_posture_task_rejects_unknown_entities(self, tmp_path: Path):
         """Test invalid joint and frame selectors fail with useful errors."""
         solver = self._make_solver(tmp_path / "planar_unknown.urdf")
@@ -405,6 +481,46 @@ class TestPinkSolverUnit:
         frame_task.set_target(np.zeros(2))
         with pytest.raises(ValueError, match="Unknown controlled frames"):
             frame_task.compute_jacobian(solver.pink_cfg)
+
+    def test_null_space_posture_default_excludes_floating_base(self):
+        """Test the default posture mask contains only actuated coordinates."""
+        pin = pytest.importorskip("pinocchio")
+        pink = pytest.importorskip("pink")
+        model = pin.Model()
+        root_id = model.addJoint(
+            0,
+            pin.JointModelFreeFlyer(),
+            pin.SE3.Identity(),
+            "root_joint",
+        )
+        model.appendBodyToJoint(root_id, pin.Inertia.Random(), pin.SE3.Identity())
+        joint_id = model.addJoint(
+            root_id,
+            pin.JointModelRZ(),
+            pin.SE3.Identity(),
+            "joint1",
+        )
+        model.appendBodyToJoint(joint_id, pin.Inertia.Random(), pin.SE3.Identity())
+        neutral = pin.neutral(model)
+        configuration = pink.configuration.Configuration(
+            model,
+            model.createData(),
+            pin.integrate(model, neutral, np.full(model.nv, 0.1)),
+        )
+
+        for controlled_joints in (None, ["joint1"]):
+            task = NullSpacePostureTask(
+                cost=1.0,
+                controlled_joints=controlled_joints,
+            )
+            task.set_target(neutral)
+
+            assert np.allclose(task.compute_error(configuration)[:6], 0.0)
+            assert not np.isclose(task.compute_error(configuration)[6], 0.0)
+            assert np.allclose(
+                task.compute_jacobian(configuration),
+                np.diag([0.0] * 6 + [1.0]),
+            )
 
 
 @pytest.mark.skip(reason="Skipping Pink tests temporarily")

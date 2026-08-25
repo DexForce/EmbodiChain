@@ -31,9 +31,11 @@ except ImportError as exc:
 try:
     from pink.configuration import Configuration
     from pink.tasks import Task
+    from pink.utils import get_root_joint_dim
 except ImportError as exc:
     Configuration = Any
     Task = object
+    get_root_joint_dim = None
     _OPTIONAL_IMPORT_ERROR = exc
 
 __all__ = ["NullSpacePostureTask"]
@@ -161,7 +163,12 @@ class NullSpacePostureTask(Task):
         """
         model = configuration.model
         self._velocity_mask = np.zeros(model.nv)
-        available_joints = set(model.names.tolist()[1:])
+        _, root_nv = get_root_joint_dim(model)
+        available_joints = {
+            model.names[joint_id]
+            for joint_id in range(1, model.njoints)
+            if model.joints[joint_id].idx_v >= root_nv
+        }
         unknown_joints = set(self.controlled_joints).difference(available_joints)
         if unknown_joints:
             raise ValueError(f"Unknown controlled joints: {sorted(unknown_joints)}")

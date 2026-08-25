@@ -127,6 +127,10 @@ class PinkSolver(BaseSolver):
         """
         self.cfg = cfg
         self._validate_cfg()
+        self._configured_lower_limits: torch.Tensor | None = None
+        self._configured_upper_limits: torch.Tensor | None = None
+        self._runtime_robot_lower_limits: torch.Tensor | None = None
+        self._runtime_robot_upper_limits: torch.Tensor | None = None
         super().__init__(cfg=cfg, **kwargs)
         self.pin = lazy_import_pinocchio()
         self.pink = lazy_import_pink()
@@ -140,7 +144,7 @@ class PinkSolver(BaseSolver):
             cfg.urdf_path, mesh_path, root_joint=None
         )
         self.robot = build_reduced_pinocchio_robot(self.entire_robot, self.joint_names)
-        self.pink_cfg = self.pink.Configuration(
+        self.pink_cfg = self.pink.configuration.Configuration(
             self.robot.model, self.robot.data, self.robot.q0
         )
         self.init_qpos = np.asarray(self.robot.q0, dtype=float).copy()
@@ -299,7 +303,14 @@ class PinkSolver(BaseSolver):
             )
         if not torch.isfinite(limits).all() or torch.any(limits[:, 0] > limits[:, 1]):
             raise ValueError("robot_qpos_limits must be finite and ordered")
-        super().update_with_robot_limit(limits)
+        self._calculate_effective_limits(
+            self._configured_lower_limits,
+            self._configured_upper_limits,
+            limits[:, 0],
+            limits[:, 1],
+        )
+        self._runtime_robot_lower_limits = limits[:, 0].clone()
+        self._runtime_robot_upper_limits = limits[:, 1].clone()
         self._sync_effective_limits()
 
     def set_qpos_limits(
@@ -316,31 +327,83 @@ class PinkSolver(BaseSolver):
         Returns:
             Whether the limits were accepted.
         """
-        updated = super().set_qpos_limits(lower_qpos_limits, upper_qpos_limits)
+        lower = torch.as_tensor(
+            lower_qpos_limits, dtype=torch.float32, device=self.device
+        )
+        upper = torch.as_tensor(
+            upper_qpos_limits, dtype=torch.float32, device=self.device
+        )
+        if lower.shape != (self.dof,) or upper.shape != (self.dof,):
+            raise ValueError(
+                f"qpos limits must both have shape ({self.dof},), got "
+                f"{tuple(lower.shape)} and {tuple(upper.shape)}"
+            )
+        if not torch.isfinite(lower).all() or not torch.isfinite(upper).all():
+            raise ValueError("qpos limits must contain only finite values")
+        if torch.any(lower > upper):
+            raise ValueError("lower qpos limits must not exceed upper limits")
+        if hasattr(self, "_urdf_model_lower"):
+            self._calculate_effective_limits(
+                lower,
+                upper,
+                self._runtime_robot_lower_limits,
+                self._runtime_robot_upper_limits,
+            )
+        self._configured_lower_limits = lower.clone()
+        self._configured_upper_limits = upper.clone()
+        updated = super().set_qpos_limits(lower, upper)
         if updated and hasattr(self, "_urdf_model_lower"):
             self._sync_effective_limits()
         return updated
 
-    def _sync_effective_limits(self) -> None:
-        """Apply configured and robot-synchronized limits to the Pink model."""
+    def _calculate_effective_limits(
+        self,
+        configured_lower: torch.Tensor | None,
+        configured_upper: torch.Tensor | None,
+        runtime_lower: torch.Tensor | None,
+        runtime_upper: torch.Tensor | None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Calculate an effective limit intersection without mutating state."""
         lower = self._urdf_model_lower.copy()
         upper = self._urdf_model_upper.copy()
-        if self.lower_qpos_limits is not None:
+        if configured_lower is not None:
             configured_lower = self._to_pink_order(
-                self.lower_qpos_limits.detach().cpu().numpy()
+                configured_lower.detach().cpu().numpy()
             )
             lower = np.maximum(lower, configured_lower)
-        if self.upper_qpos_limits is not None:
+        if configured_upper is not None:
             configured_upper = self._to_pink_order(
-                self.upper_qpos_limits.detach().cpu().numpy()
+                configured_upper.detach().cpu().numpy()
             )
             upper = np.minimum(upper, configured_upper)
+        if runtime_lower is not None:
+            runtime_lower = self._to_pink_order(runtime_lower.detach().cpu().numpy())
+            lower = np.maximum(lower, runtime_lower)
+        if runtime_upper is not None:
+            runtime_upper = self._to_pink_order(runtime_upper.detach().cpu().numpy())
+            upper = np.minimum(upper, runtime_upper)
         if np.any(lower > upper):
             raise ValueError("Effective Pink joint limits have an empty intersection")
+        return lower, upper
+
+    def _sync_effective_limits(self) -> None:
+        """Apply configured and robot-synchronized limits to the Pink model."""
+        lower, upper = self._calculate_effective_limits(
+            self._configured_lower_limits,
+            self._configured_upper_limits,
+            self._runtime_robot_lower_limits,
+            self._runtime_robot_upper_limits,
+        )
         self._model_lower = lower
         self._model_upper = upper
         self.robot.model.lowerPositionLimit[:] = lower
         self.robot.model.upperPositionLimit[:] = upper
+        self.lower_qpos_limits = torch.as_tensor(
+            self._to_output_order(lower), dtype=torch.float32, device=self.device
+        )
+        self.upper_qpos_limits = torch.as_tensor(
+            self._to_output_order(upper), dtype=torch.float32, device=self.device
+        )
 
     @staticmethod
     def reorder_array(
@@ -457,16 +520,30 @@ class PinkSolver(BaseSolver):
             frame_target = frame_target @ self._tcp_inverse
         self._target_task.set_target(self.pin.SE3(frame_target))
 
-    def _task_metrics(self) -> tuple[float, float, float]:
-        """Return full task objective and frame-task convergence errors."""
-        objective = 0.0
+    def _task_metrics(self) -> tuple[float, float, float, float]:
+        """Return lexicographic task merits and frame convergence errors."""
+        from embodichain.lab.sim.solvers.null_space_posture_task import (
+            NullSpacePostureTask,
+        )
+
+        primary_objective = 0.0
+        secondary_objective = 0.0
         position_error = 0.0
         orientation_error = 0.0
         for task in self.tasks:
             error = np.asarray(task.compute_error(self.pink_cfg), dtype=float)
             cost = 1.0 if task.cost is None else np.asarray(task.cost, dtype=float)
-            weighted = cost * float(task.gain) * error
-            objective += 0.5 * float(weighted @ weighted)
+            if isinstance(task, self.pink.tasks.FrameTask):
+                weighted = cost * float(task.gain) * error
+                primary_objective += 0.5 * float(weighted @ weighted)
+            elif isinstance(task, NullSpacePostureTask):
+                jacobian = np.asarray(task.compute_jacobian(self.pink_cfg), dtype=float)
+                weighted_error = cost * float(task.gain) * error
+                controllable_gradient = jacobian.T @ (cost * weighted_error)
+                secondary_objective += 0.5 * float(
+                    controllable_gradient @ controllable_gradient
+                )
+
             if id(task) in self._frame_task_ids:
                 cost_vector = np.broadcast_to(cost, error.shape)
                 active_position = cost_vector[:3] > 0.0
@@ -479,7 +556,12 @@ class PinkSolver(BaseSolver):
                     orientation_error,
                     float(np.linalg.norm(error[3:][active_orientation])),
                 )
-        return objective, position_error, orientation_error
+        return (
+            primary_objective,
+            secondary_objective,
+            position_error,
+            orientation_error,
+        )
 
     def _converged(self, position_error: float, orientation_error: float) -> bool:
         """Return whether configured task tolerances are satisfied."""
@@ -505,7 +587,7 @@ class PinkSolver(BaseSolver):
         stagnant = 0
 
         for _ in range(self.cfg.max_iterations):
-            objective, position_error, orientation_error = self._task_metrics()
+            primary, secondary, position_error, orientation_error = self._task_metrics()
             if self._converged(position_error, orientation_error):
                 return True, self._to_output_order(np.asarray(self.pink_cfg.q))
 
@@ -529,9 +611,15 @@ class PinkSolver(BaseSolver):
                     self.robot.model, base_q, velocity * self.cfg.dt * scale
                 )
                 self.pink_cfg.update(self._project_model_limits(candidate))
-                candidate_objective, _, _ = self._task_metrics()
-                if candidate_objective < objective:
-                    improvement = objective - candidate_objective
+                candidate_primary, candidate_secondary, _, _ = self._task_metrics()
+                primary_improvement = primary - candidate_primary
+                primary_tied = abs(primary_improvement) <= np.finfo(float).eps * max(
+                    1.0, abs(primary)
+                )
+                if primary_improvement > 0.0 or (
+                    primary_tied and candidate_secondary < secondary
+                ):
+                    improvement = max(0.0, primary_improvement)
                     accepted = True
                     damping = max(self.cfg.damp, damping * self.cfg.damping_decay)
                     stagnant = (
@@ -551,7 +639,7 @@ class PinkSolver(BaseSolver):
             if stagnant >= self.cfg.stagnation_iterations:
                 break
 
-        _, position_error, orientation_error = self._task_metrics()
+        _, _, position_error, orientation_error = self._task_metrics()
         success = self._converged(position_error, orientation_error)
         return success, self._to_output_order(np.asarray(self.pink_cfg.q))
 

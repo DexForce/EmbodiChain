@@ -156,8 +156,9 @@ class RobotCfg(ArticulationCfg):
   corresponding input seed.
 - Adaptive controls (`stagnation_tolerance`, `stagnation_iterations`,
   `max_backtracks`, `damping_growth`, `damping_decay`, and `max_damping`)
-  reject non-improving steps, increase regularization, and terminate stalled
-  solves early.
+  use a lexicographic merit that prioritizes FrameTask progress and considers
+  only controllable projected null-space posture error as a secondary term.
+  They increase regularization and terminate stalled solves early.
 - Effective limits intersect URDF, user-configured, and runtime robot limits,
   then synchronize the result into the reduced Pinocchio model in Pink order.
 
@@ -192,10 +193,12 @@ A `pink.tasks.Task` subclass for posture control in the null space of
 higher-priority tasks.
 
 - Error: a Pinocchio manifold difference masked in tangent space (`nv`), with
-  an empty joint selection meaning all actuated joints.
+  an empty joint selection meaning all actuated joints while floating-base
+  coordinates are always excluded.
 - Jacobian: null-space projector `N(q) = I − J_primary⁺ · J_primary`.
 - Add it to either `variable_input_tasks` or `fixed_input_tasks`; PinkSolver
-  initializes it, includes it in QP solving and backtracking objectives, and
+  initializes it, includes it in QP solving, and uses its controllable projected
+  error only as a secondary backtracking merit behind FrameTask progress. It
   updates its simulator-ordered target through
   `update_null_space_joint_targets()`.
 
