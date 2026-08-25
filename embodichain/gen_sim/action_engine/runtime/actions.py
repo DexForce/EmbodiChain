@@ -192,6 +192,7 @@ class AtomicActionAdapter:
         self.capabilities = capability_registry or build_atomic_capability_registry()
         self._motion_generator: MotionGenerator | None = None
         self._atomic_engine: AtomicActionEngine | None = None
+        self._coordinated_engines: dict[bool, AtomicActionEngine] = {}
         self._semantics: dict[str, ObjectSemantics] = {}
         self._scene_time = 0.0
         if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
@@ -228,9 +229,14 @@ class AtomicActionAdapter:
         capability = self.capabilities.require_executable(grounded.action_class)
         state = state or self.initial_state()
         grounded = self._select_transport_yaw(grounded, state)
+        grounded = self._adapt_coordinated_pickment_grasps(
+            grounded,
+            capability,
+        )[0]
         context = self._planning_context(state, grounded)
-        invocation = self._invocation(grounded, capability)
-        return self._engine().start((invocation,), context)
+        engine = self._engine_for(grounded, capability)
+        invocation = self._invocation(grounded, capability, engine=engine)
+        return engine.start((invocation,), context)
 
     def _build_scene_provider(self) -> SceneProvider | None:
         """Create the shared live rigid-object provider when entities are available."""
@@ -343,25 +349,51 @@ class AtomicActionAdapter:
         state = state or self.initial_state()
         grounded = self._select_transport_yaw(grounded, state)
         context = self._planning_context(state, grounded)
-        grounded_candidates = self._adapt_axis_align_body_grasps(
+        coordinated_candidates = self._adapt_coordinated_pickment_grasps(
             grounded,
-            context,
             capability,
         )
-        selected: tuple[GroundedAction, ActionInvocation, ActionPlan] | None = None
+        grounded_candidates = tuple(
+            candidate
+            for coordinated in coordinated_candidates
+            for candidate in self._adapt_axis_align_body_grasps(
+                coordinated,
+                context,
+                capability,
+            )
+        )
+        selected: (
+            tuple[
+                GroundedAction,
+                ActionInvocation,
+                ActionPlan,
+                AtomicActionEngine,
+            ]
+            | None
+        ) = None
         best_failure_count = self.num_envs + 1
         for candidate in grounded_candidates:
-            candidate_invocation = self._invocation(candidate, capability)
-            candidate_plan = self._engine().plan(candidate_invocation, context)
+            candidate_engine = self._engine_for(candidate, capability)
+            candidate_invocation = self._invocation(
+                candidate,
+                capability,
+                engine=candidate_engine,
+            )
+            candidate_plan = candidate_engine.plan(candidate_invocation, context)
             failure_count = int((~candidate_plan.plan_success).sum().item())
             if selected is None or failure_count < best_failure_count:
-                selected = (candidate, candidate_invocation, candidate_plan)
+                selected = (
+                    candidate,
+                    candidate_invocation,
+                    candidate_plan,
+                    candidate_engine,
+                )
                 best_failure_count = failure_count
             if failure_count == 0:
                 break
         if selected is None:
             raise RuntimeError("Atomic action adaptation produced no plan candidate.")
-        grounded, invocation, plan = selected
+        grounded, invocation, plan, selected_engine = selected
         selected_positions = self._positions_with_agent_holds(
             plan,
             grounded,
@@ -409,7 +441,7 @@ class AtomicActionAdapter:
                 dynamic_collision_mode=DynamicCollisionMode.OFF,
                 plan_opts=None,
             )
-            fallback_plan = self._engine().plan(
+            fallback_plan = selected_engine.plan(
                 replace(invocation, motion_policy=fallback_policy),
                 context,
             )
@@ -583,6 +615,163 @@ class AtomicActionAdapter:
                 )
             )
         return tuple(candidates)
+
+    def _adapt_coordinated_pickment_grasps(
+        self,
+        grounded: GroundedAction,
+        capability: AtomicCapability,
+    ) -> tuple[GroundedAction, ...]:
+        """Build deterministic geometry-ranked E5 partition candidates.
+
+        ``left_to_right_arm_direction`` remains the live base-to-base direction:
+        it labels the two participant regions and is not the transport direction.
+        Object geometry only adjusts how much of the projected middle is excluded.
+        """
+        if capability.config_materializer != "coordinated_pickment":
+            return (grounded,)
+        target = self._validate_coordinated_pickment_goal(grounded)
+        live_pose = grounded.object_pose
+        expected_shape = (self.num_envs, 4, 4)
+        if (
+            not isinstance(live_pose, torch.Tensor)
+            or live_pose.shape != expected_shape
+            or not bool(torch.isfinite(live_pose).all())
+        ):
+            raise ValueError(
+                "CoordinatedPickment requires a finite grounded live object pose "
+                f"with shape {expected_shape}."
+            )
+        live_pose = live_pose.to(device=self.device, dtype=torch.float32).clone()
+        affordance = target.semantics.affordance
+        assert isinstance(affordance, AntipodalAffordance)
+        vertices = torch.as_tensor(
+            affordance.mesh_vertices,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if (
+            vertices.ndim != 2
+            or vertices.shape[1] != 3
+            or vertices.shape[0] < 3
+            or not bool(torch.isfinite(vertices).all())
+        ):
+            raise ValueError(
+                "CoordinatedPickment mesh vertices must be finite with shape (N, 3)."
+            )
+
+        left_base, right_base = self._coordinated_arm_bases()
+        arm_directions = right_base[:, :3, 3] - left_base[:, :3, 3]
+        arm_norms = torch.linalg.vector_norm(arm_directions, dim=1, keepdim=True)
+        if not bool(torch.isfinite(arm_directions).all()) or bool(
+            (arm_norms <= 1.0e-6).any()
+        ):
+            raise ValueError(
+                "Coordinated pickup requires distinct finite left/right arm bases."
+            )
+        arm_directions = arm_directions / arm_norms
+        shared_direction = arm_directions[0]
+        if bool(
+            (torch.matmul(arm_directions, shared_direction).abs() < 1.0 - 1.0e-4).any()
+        ):
+            raise ValueError(
+                "CoordinatedPickment requires one shared base-to-base direction "
+                "across vectorized environments."
+            )
+
+        centered = vertices - vertices.mean(dim=0, keepdim=True)
+        covariance = centered.transpose(0, 1) @ centered / float(vertices.shape[0])
+        eigenvalues, eigenvectors = torch.linalg.eigh(covariance)
+        principal_local = eigenvectors[:, -1]
+        principal_world = torch.matmul(
+            live_pose[:, :3, :3],
+            principal_local,
+        )
+        principal_world = principal_world / torch.linalg.vector_norm(
+            principal_world,
+            dim=1,
+            keepdim=True,
+        ).clamp_min(1.0e-6)
+        arm_alignment = torch.abs((principal_world * arm_directions).sum(dim=1))
+        elongation_ratio = torch.sqrt(
+            eigenvalues[-1].clamp_min(1.0e-12) / eigenvalues[-2].clamp_min(1.0e-12)
+        )
+        elongation_confidence = torch.clamp(
+            (elongation_ratio - 1.0) / 1.5,
+            min=0.0,
+            max=1.0,
+        )
+        base_ratio = float(grounded.cfg.get("middle_empty_ratio", 0.4))
+        if not math.isfinite(base_ratio) or not 0.0 <= base_ratio < 1.0:
+            raise ValueError("middle_empty_ratio must be finite and in [0, 1).")
+        geometric_ratio = 0.25 + 0.45 * float(arm_alignment.mean())
+        confidence = float(elongation_confidence)
+        preferred_ratio = (1.0 - confidence) * base_ratio + confidence * geometric_ratio
+        raw_ratios = (
+            preferred_ratio,
+            base_ratio,
+            preferred_ratio - 0.15,
+            preferred_ratio + 0.15,
+        )
+        ratios: list[float] = []
+        for raw_ratio in raw_ratios:
+            ratio = min(0.90, max(0.05, float(raw_ratio)))
+            if not any(abs(ratio - existing) <= 1.0e-6 for existing in ratios):
+                ratios.append(ratio)
+
+        approach = grounded.cfg.get("approach_direction", (0.0, 0.0, -1.0))
+        approach = torch.as_tensor(
+            approach,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if approach.shape != (3,) or not bool(torch.isfinite(approach).all()):
+            raise ValueError("approach_direction must be a finite vector shaped (3,).")
+        approach_norm = torch.linalg.vector_norm(approach)
+        if float(approach_norm) <= 1.0e-6:
+            raise ValueError("approach_direction must be non-zero.")
+        approach = approach / approach_norm
+        trace = {
+            "strategy": "live_geometry_partition_search",
+            "local_principal_axis": principal_local.detach().cpu().tolist(),
+            "world_principal_axes": principal_world.detach().cpu().tolist(),
+            "elongation_ratio": float(elongation_ratio),
+            "elongation_confidence": confidence,
+            "arm_axis_alignment": arm_alignment.detach().cpu().tolist(),
+            "left_to_right_arm_direction": shared_direction.detach().cpu().tolist(),
+            "approach_direction": approach.detach().cpu().tolist(),
+            "candidate_middle_empty_ratios": list(ratios),
+        }
+        candidates: list[GroundedAction] = []
+        for candidate_index, ratio in enumerate(ratios):
+            cfg = {
+                **grounded.cfg,
+                "left_to_right_arm_direction": shared_direction.clone(),
+                "approach_direction": approach.clone(),
+                "middle_empty_ratio": ratio,
+            }
+            motion_policy = {
+                **grounded.motion_policy,
+                "coordinated_grasp": {
+                    **trace,
+                    "candidate_index": candidate_index,
+                    "selected_middle_empty_ratio": ratio,
+                },
+            }
+            candidates.append(
+                replace(
+                    grounded,
+                    target=replace(target, object_initial_pose=live_pose.clone()),
+                    cfg=cfg,
+                    object_pose=live_pose.clone(),
+                    motion_policy=motion_policy,
+                )
+            )
+        return tuple(candidates)
+
+    def _coordinated_arm_bases(self) -> tuple[torch.Tensor, torch.Tensor]:
+        from .frames import arm_base_poses
+
+        return arm_base_poses(self.env)
 
     def _search_reachable_retreat(
         self,
@@ -837,6 +1026,9 @@ class AtomicActionAdapter:
         body_grasp = grounded.motion_policy.get("body_grasp")
         if isinstance(body_grasp, Mapping):
             trace["body_grasp"] = deepcopy(dict(body_grasp))
+        coordinated_grasp = grounded.motion_policy.get("coordinated_grasp")
+        if isinstance(coordinated_grasp, Mapping):
+            trace["coordinated_grasp"] = deepcopy(dict(coordinated_grasp))
         return trace
 
     def _select_transport_yaw(
@@ -1085,6 +1277,8 @@ class AtomicActionAdapter:
         self,
         grounded: GroundedAction,
         capability: AtomicCapability,
+        *,
+        engine: AtomicActionEngine | None = None,
     ) -> ActionInvocation:
         if capability.resource_mode == "coordinated_object":
             strategy = str(self.planner_policy["coordinated_strategy"])
@@ -1111,7 +1305,7 @@ class AtomicActionAdapter:
         return ActionInvocation(
             skill_id=str(capability.action_type.skill_id),
             goal=goal,
-            binding=self._binding(grounded, capability),
+            binding=self._binding(grounded, capability, engine=engine),
             motion_policy=MotionPolicy(
                 strategy=strategy,
                 sample_count=sample_count,
@@ -1143,8 +1337,10 @@ class AtomicActionAdapter:
         self,
         action: GroundedAction,
         capability: AtomicCapability,
+        *,
+        engine: AtomicActionEngine | None = None,
     ) -> ActionBinding:
-        engine = self._engine()
+        engine = self._engine() if engine is None else engine
         contract = getattr(capability.action_type, "binding_contract", None)
         if contract is None:
             return ActionBinding(owner_id=engine.binding_owner_id)
@@ -1303,17 +1499,20 @@ class AtomicActionAdapter:
         action: GroundedAction,
         capability: AtomicCapability,
     ) -> Any:
-        from .frames import arm_base_poses
-
         policy = self._config_policy(action)
-        left_base, right_base = arm_base_poses(self.env)
+        left_base, right_base = self._coordinated_arm_bases()
         direction = right_base[0, :3, 3] - left_base[0, :3, 3]
         norm = torch.linalg.vector_norm(direction)
         if not torch.isfinite(direction).all() or norm <= 1.0e-6:
             raise ValueError(
                 "Coordinated pickup requires distinct finite left/right arm bases."
             )
-        policy["left_to_right_arm_direction"] = direction / norm
+        policy.setdefault("left_to_right_arm_direction", direction / norm)
+        for name in ("approach_direction", "left_to_right_arm_direction"):
+            if name in policy and not isinstance(policy[name], torch.Tensor):
+                policy[name] = torch.as_tensor(
+                    policy[name], dtype=torch.float32, device=self.device
+                )
         return capability.config_type(
             **_supported_kwargs(capability.config_type, policy)
         )
@@ -1526,81 +1725,113 @@ class AtomicActionAdapter:
 
     def _engine(self) -> AtomicActionEngine:
         if self._atomic_engine is None:
-            from embodichain.gen_sim.action_engine.capabilities import (
-                HeldObjectHandOver,
-            )
-
-            from .atomic_compat import ExactTargetMoveHeldObject
-
-            engine = AtomicActionEngine(
+            self._atomic_engine = self._new_engine(
                 self._generator(),
-                control_profiles=self._control_profiles(),
-                grasp_pose_generators=self._grasp_pose_generators(),
+                filter_ground_collision=True,
             )
-            engine.register(ExactTargetMoveHeldObject(), replace=True)
-            engine.register(HeldObjectHandOver(), replace=True)
-            self._atomic_engine = engine
         return self._atomic_engine
+
+    def _engine_for(
+        self,
+        grounded: GroundedAction,
+        capability: AtomicCapability,
+    ) -> AtomicActionEngine:
+        if capability.config_materializer != "coordinated_pickment":
+            return self._engine()
+        filter_ground_collision = grounded.cfg.get(
+            "is_filter_ground_collision",
+            True,
+        )
+        if not isinstance(filter_ground_collision, bool):
+            raise TypeError("is_filter_ground_collision must be a boolean.")
+        if filter_ground_collision:
+            return self._engine()
+        cached = self._coordinated_engines.get(filter_ground_collision)
+        if cached is None:
+            cached = self._new_engine(
+                MotionGenerator(cfg=self._motion_generator_cfg()),
+                filter_ground_collision=filter_ground_collision,
+            )
+            self._coordinated_engines[filter_ground_collision] = cached
+        return cached
+
+    def _new_engine(
+        self,
+        motion_generator: MotionGenerator,
+        *,
+        filter_ground_collision: bool,
+    ) -> AtomicActionEngine:
+        from embodichain.gen_sim.action_engine.capabilities import HeldObjectHandOver
+
+        from .atomic_compat import ExactTargetMoveHeldObject
+
+        engine = AtomicActionEngine(
+            motion_generator,
+            control_profiles=self._control_profiles(),
+            grasp_pose_generators=self._grasp_pose_generators(
+                filter_ground_collision=filter_ground_collision,
+            ),
+        )
+        engine.register(ExactTargetMoveHeldObject(), replace=True)
+        engine.register(HeldObjectHandOver(), replace=True)
+        return engine
 
     def _generator(self) -> MotionGenerator:
         if self._motion_generator is None:
-            backend = str(self.planner_policy.get("backend", "curobo"))
-            if backend == "curobo":
-                options = dict(self.planner_policy.get("curobo", {}))
-                obstacle_uids = tuple(
-                    dict.fromkeys(
-                        [
-                            *self.planner_policy.get("static_obstacle_uids", ()),
-                            *self.planner_policy.get("dynamic_obstacle_uids", ()),
-                        ]
-                    )
-                )
-                rigid_objects: dict[str, Any] = {}
-                for uid in obstacle_uids:
-                    obstacle_uid = str(uid)
-                    entity = self.env.sim.get_rigid_object(obstacle_uid)
-                    if entity is None:
-                        raise ValueError(f"Unknown cuRobo obstacle {uid!r}.")
-                    rigid_objects[obstacle_uid] = entity
-                obstacle_representation = str(
-                    options.get("obstacle_representation", "cuboid")
-                )
-                world = CuroboWorldCfg(
-                    rigid_objects=rigid_objects or None,
-                    obstacle_representation=obstacle_representation,
-                    collision_cache=_collision_cache_for_world(
-                        obstacle_representation,
-                        len(rigid_objects),
-                    ),
-                    dynamic_obstacle_names=[
-                        str(uid)
-                        for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
-                    ],
-                    multi_env=bool(options.get("multi_env", False)),
-                )
-                planner_cfg = CuroboPlannerCfg(
-                    robot_uid=self.env.robot.uid,
-                    log_level=str(options.get("log_level", "error")),
-                    world=world,
-                    use_cuda_graph=bool(options.get("use_cuda_graph", True)),
-                    preserve_plan_samples=bool(
-                        options.get("preserve_plan_samples", False)
-                    ),
-                    max_attempts=int(options.get("max_attempts", 5)),
-                    collision_activation_distance=float(
-                        options.get("collision_activation_distance", 0.01)
-                    ),
-                )
-            elif backend == "toppra":
-                planner_cfg = ToppraPlannerCfg(robot_uid=self.env.robot.uid)
-            else:
-                raise ValueError(
-                    f"Unsupported Action Engine planner backend {backend!r}."
-                )
-            self._motion_generator = MotionGenerator(
-                cfg=MotionGenCfg(planner_cfg=planner_cfg)
-            )
+            self._motion_generator = MotionGenerator(cfg=self._motion_generator_cfg())
         return self._motion_generator
+
+    def _motion_generator_cfg(self) -> MotionGenCfg:
+        backend = str(self.planner_policy.get("backend", "curobo"))
+        if backend == "curobo":
+            options = dict(self.planner_policy.get("curobo", {}))
+            obstacle_uids = tuple(
+                dict.fromkeys(
+                    [
+                        *self.planner_policy.get("static_obstacle_uids", ()),
+                        *self.planner_policy.get("dynamic_obstacle_uids", ()),
+                    ]
+                )
+            )
+            rigid_objects: dict[str, Any] = {}
+            for uid in obstacle_uids:
+                obstacle_uid = str(uid)
+                entity = self.env.sim.get_rigid_object(obstacle_uid)
+                if entity is None:
+                    raise ValueError(f"Unknown cuRobo obstacle {uid!r}.")
+                rigid_objects[obstacle_uid] = entity
+            obstacle_representation = str(
+                options.get("obstacle_representation", "cuboid")
+            )
+            world = CuroboWorldCfg(
+                rigid_objects=rigid_objects or None,
+                obstacle_representation=obstacle_representation,
+                collision_cache=_collision_cache_for_world(
+                    obstacle_representation,
+                    len(rigid_objects),
+                ),
+                dynamic_obstacle_names=[
+                    str(uid)
+                    for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
+                ],
+                multi_env=bool(options.get("multi_env", False)),
+            )
+            planner_cfg = CuroboPlannerCfg(
+                robot_uid=self.env.robot.uid,
+                log_level=str(options.get("log_level", "error")),
+                world=world,
+                use_cuda_graph=bool(options.get("use_cuda_graph", True)),
+                preserve_plan_samples=bool(options.get("preserve_plan_samples", False)),
+                max_attempts=int(options.get("max_attempts", 5)),
+                collision_activation_distance=float(
+                    options.get("collision_activation_distance", 0.01)
+                ),
+            )
+        elif backend == "toppra":
+            planner_cfg = ToppraPlannerCfg(robot_uid=self.env.robot.uid)
+        else:
+            raise ValueError(f"Unsupported Action Engine planner backend {backend!r}.")
+        return MotionGenCfg(planner_cfg=planner_cfg)
 
     def _control_profiles(self) -> dict[str, ControlPartCommandProfile]:
         profiles: dict[str, ControlPartCommandProfile] = {}
@@ -1617,8 +1848,14 @@ class AtomicActionAdapter:
             )
         return profiles
 
-    def _grasp_pose_generators(self) -> dict[str, AntipodalGraspPoseGenerator]:
+    def _grasp_pose_generators(
+        self,
+        *,
+        filter_ground_collision: bool = True,
+    ) -> dict[str, AntipodalGraspPoseGenerator]:
         """Build one mainline grasp service for each runtime hand endpoint."""
+        if not isinstance(filter_ground_collision, bool):
+            raise TypeError("filter_ground_collision must be a boolean.")
         options = self.grasp_policy
         model = ParallelJawGripperModelCfg(
             model_id="gen_sim_parallel_jaw",
@@ -1640,12 +1877,18 @@ class AtomicActionAdapter:
             point_sample_density=float(options["point_sample_dense"]),
             max_decomposition_hulls=int(options["max_decomposition_hulls"]),
             opening_margin=0.01,
-            filter_ground_collision=True,
+            filter_ground_collision=filter_ground_collision,
         )
         annotation = GraspAnnotationCfg(
             selection_mode="whole_mesh",
             viser_port=int(options["viser_port"]),
             force_refresh=bool(options["force_grasp_reannotate"]),
+        )
+        shared_generator = AntipodalGraspPoseGenerator(
+            model,
+            algorithm_cfg=algorithm,
+            collision_cfg=collision,
+            annotation_cfg=annotation,
         )
         generators: dict[str, AntipodalGraspPoseGenerator] = {}
         for arm in ("left_arm", "right_arm"):
@@ -1655,12 +1898,7 @@ class AtomicActionAdapter:
                 continue
             if hand_part is None or hand_part in generators:
                 continue
-            generators[hand_part] = AntipodalGraspPoseGenerator(
-                model,
-                algorithm_cfg=algorithm,
-                collision_cfg=collision,
-                annotation_cfg=annotation,
-            )
+            generators[hand_part] = shared_generator
         return generators
 
     def _parts(self, arm: str) -> tuple[str, str | None, int]:

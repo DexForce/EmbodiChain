@@ -40,7 +40,6 @@ def _archive_task_recording(env: Any, task_id: str) -> Path | None:
         RuntimeError: If configured recorders do not identify one task video.
         ValueError: If the task ID can escape the video directory.
         FileNotFoundError: If the expected source recording does not exist.
-        FileExistsError: If the task archive already exists.
     """
     manager = getattr(env.unwrapped, "event_manager", None)
     mode_cfgs = getattr(manager, "_mode_functor_cfgs", {})
@@ -103,7 +102,6 @@ def _archive_task_video(
     Raises:
         ValueError: If the task ID can escape the video directory.
         FileNotFoundError: If the expected source recording does not exist.
-        FileExistsError: If the task archive already exists.
         RuntimeError: If more than one source extension matches.
     """
     _validate_task_id(task_id)
@@ -134,12 +132,7 @@ def _archive_task_video(
     source = candidates[0]
     extension = source.name[len(source_stem) :]
     destination = directory / f"{task_id}{extension}"
-    if destination.exists():
-        raise FileExistsError(
-            f"Cannot archive video for task {task_id!r}: destination already "
-            f"exists at {destination}."
-        )
-    source.rename(destination)
+    source.replace(destination)
     return destination
 
 

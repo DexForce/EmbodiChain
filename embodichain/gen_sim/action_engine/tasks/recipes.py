@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
@@ -29,8 +29,10 @@ from embodichain.gen_sim.action_engine.capabilities import (
 )
 from embodichain.gen_sim.action_engine.domain import (
     TERMINAL_BEHAVIORS,
+    TaskContract,
     TRANSPORT_DIRECTIONS,
     motion_policy,
+    task_contract,
     task_success_type,
     validate_task_spec,
 )
@@ -97,10 +99,10 @@ def instantiate_seed_graph(
             )
         nodes.extend(recipe_nodes)
         terminal_by_group[group_id] = _terminal_nodes(recipe_nodes)
-        held_after_group[group_id] = _terminal_hold(
-            task_type,
+        held_after_group[group_id] = _terminal_hold_from_contracts(
             object_uid,
-            params,
+            recipe_nodes,
+            capabilities,
         )
         groups.append(
             {
@@ -192,8 +194,10 @@ def _topological_instances(
 def _propagate_direct_payloads(
     task: Mapping[str, Any],
     bindings: Mapping[str, str],
+    *,
+    contract_resolver: Callable[[str], TaskContract] = task_contract,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    """Carry direct E1 support relations into a later single-arm E1 move.
+    """Propagate direct support through declared carrier-flow contracts.
 
     This is intentionally a one-hop physical relation rather than a general
     scene-state planner: an object placed on or inside a carrier becomes that
@@ -208,25 +212,29 @@ def _propagate_direct_payloads(
 
     for instance in _topological_instances(result["task_instances"]):
         task_type = str(instance["task_type"])
+        contract = contract_resolver(task_type)
         params = instance["params"]
-        primary_key = "source_role" if task_type == "E3" else "object_role"
+        primary_key = contract.primary_role_field
         primary_role = params.get(primary_key)
         if not isinstance(primary_role, str) or not primary_role:
             continue
         primary_uid = bindings.get(primary_role, primary_role)
         direct_payloads = list(direct_by_carrier.get(primary_uid, ()))
         if direct_payloads:
-            if task_type != "E1":
+            if not contract.accepts_direct_payloads:
                 raise ValueError(
-                    f"TaskGroup {instance['id']!r} moves carrier {primary_uid!r} "
-                    "with direct payloads, but payload propagation currently "
-                    "supports only single-arm E1 placement."
+                    f"TaskGroup {instance['id']!r} consumes carrier "
+                    f"{primary_uid!r}, but its {task_type!r} contract does not "
+                    "accept direct payloads."
                 )
             payload_roles = [payload_role for _, payload_role, _ in direct_payloads]
             if params.get("payload_roles") != payload_roles:
                 params["payload_roles"] = payload_roles
                 changed = True
             for payload_uid, _payload_role, producer_id in direct_payloads:
+                if producer_id not in instance["depends_on"]:
+                    instance["depends_on"].append(producer_id)
+                    changed = True
                 links.append(
                     {
                         "producer": producer_id,
@@ -237,7 +245,7 @@ def _propagate_direct_payloads(
                     }
                 )
 
-        if task_type in {"E1", "E2", "E3", "E4", "E5"}:
+        if contract.moves_primary_object:
             old_carrier = carrier_by_payload.pop(primary_uid, None)
             if old_carrier is not None:
                 direct_by_carrier[old_carrier] = [
@@ -246,7 +254,7 @@ def _propagate_direct_payloads(
                     if item[0] != primary_uid
                 ]
 
-        if task_type != "E1" or str(params.get("relation")) not in {"on", "inside"}:
+        if str(params.get("relation")) not in contract.direct_payload_relations:
             continue
         target_role = params.get("target_role")
         if not isinstance(target_role, str) or not target_role:
@@ -272,14 +280,14 @@ def _payload_goal(params: Mapping[str, Any], object_uid: str) -> list[dict[str, 
     if not isinstance(raw_payloads, Sequence) or isinstance(
         raw_payloads, (str, bytes, bytearray)
     ):
-        raise ValueError("E1 payload_roles must be a list.")
+        raise ValueError("payload_roles must be a list.")
     payloads = [str(value) for value in raw_payloads]
     if any(not value for value in payloads):
-        raise ValueError("E1 payload_roles must contain non-empty object IDs.")
+        raise ValueError("payload_roles must contain non-empty object IDs.")
     if object_uid in payloads:
-        raise ValueError("An E1 carrier cannot be its own payload.")
+        raise ValueError("A carrier cannot be its own payload.")
     if len(payloads) != len(set(payloads)):
-        raise ValueError("E1 direct payload objects must be unique.")
+        raise ValueError("Direct payload objects must be unique.")
     return [{"object": value, "slot": "center"} for value in payloads]
 
 
@@ -471,6 +479,7 @@ def _recipe(
                     "kind": "joint_state",
                     "source": "initial",
                     "operation": "e2_home",
+                    "required_home": True,
                 },
                 [retreat["id"]],
                 "cleanup",
@@ -575,6 +584,7 @@ def _recipe(
                         "kind": "joint_state",
                         "source": "initial",
                         "operation": "e3_home",
+                        "required_home": True,
                     },
                     "cleanup",
                 ),
@@ -745,6 +755,9 @@ def _recipe(
             **_orientation_extensions(params),
             "relation_frame": str(params.get("relation_frame", "robot")),
         }
+        payloads = _payload_goal(params, object_uid)
+        if payloads:
+            goal["payloads"] = payloads
         target = params.get("target_role")
         relation = str(params.get("relation", "none"))
         if isinstance(target, str) and target:
@@ -768,7 +781,11 @@ def _recipe(
             object_uid,
             actor,
             "coordinated",
-            {"kind": "coordinated_goal", "object": object_uid},
+            {
+                "kind": "coordinated_goal",
+                "object": object_uid,
+                **({"payloads": deepcopy(payloads)} if payloads else {}),
+            },
             dependencies,
             role,
             {"type": "held_by_both_grippers", "object": object_uid},
@@ -1024,7 +1041,7 @@ def _terminal_nodes(nodes: list[Mapping[str, Any]]) -> list[str]:
 
 
 def _primary_object(task_type: str, params: Mapping[str, Any]) -> str:
-    key = "source_role" if task_type == "E3" else "object_role"
+    key = task_contract(task_type).primary_role_field
     value = params.get(key)
     if not isinstance(value, str) or not value:
         raise ValueError(f"{task_type} requires resolved parameter {key!r}.")
@@ -1037,6 +1054,7 @@ def _actor(
     *,
     incoming_held_arm: str | None = None,
 ) -> dict[str, Any]:
+    contract = task_contract(task_type)
     required_arm = params.get("required_arm")
     if (
         incoming_held_arm is not None
@@ -1051,9 +1069,9 @@ def _actor(
         return {"mode": "required", "arm": incoming_held_arm}
     if required_arm in {"left_arm", "right_arm"}:
         return {"mode": "required", "arm": str(required_arm)}
-    if task_type == "E5":
+    if contract.resource_mode == "coordinated":
         return {"mode": "coordinated", "arms": ["left_arm", "right_arm"]}
-    if task_type == "E4":
+    if contract.resource_mode == "handover":
         return {"mode": "required", "arm": str(params.get("transfer_arm", "left_arm"))}
     return {"mode": "auto"}
 
@@ -1065,7 +1083,7 @@ def _incoming_held_arm(
     held_after_group: Mapping[str, tuple[str, str] | None],
 ) -> str | None:
     """Resolve a predecessor-provided hold for a continuation recipe."""
-    if task_type not in {"E1", "E2", "E3", "E4"}:
+    if not task_contract(task_type).accepts_incoming_hold:
         return None
     candidates = {
         held[1]
@@ -1077,23 +1095,51 @@ def _incoming_held_arm(
         raise ValueError(
             f"Task instance has conflicting predecessor holders for {object_uid!r}."
         )
-    return next(iter(candidates), None)
+    holder = next(iter(candidates), None)
+    if holder is not None and holder not in {"left_arm", "right_arm"}:
+        raise ValueError(
+            f"Task instance cannot consume holder kind {holder!r} for "
+            f"{object_uid!r}; its contract accepts only single-arm ownership."
+        )
+    return holder
 
 
-def _terminal_hold(
-    task_type: str,
+def _terminal_hold_from_contracts(
     object_uid: str,
-    params: Mapping[str, Any],
+    nodes: Sequence[Mapping[str, Any]],
+    capabilities: AtomicCapabilityRegistry,
 ) -> tuple[str, str] | None:
-    if task_type == "E4":
-        return object_uid, str(params.get("receive_arm", "right_arm"))
-    if task_type == "E2" and str(params.get("terminal_behavior", "place")) == "hold":
-        arm = str(params.get("required_arm", ""))
-        if arm in {"left_arm", "right_arm"}:
-            return object_uid, arm
-    if task_type == "E5" and str(params.get("terminal_behavior", "hold")) == "hold":
+    """Fold action effects into the terminal holder of one recipe."""
+    holders: set[str] = set()
+    coordinated = False
+    for node in nodes:
+        contract = capabilities.get(str(node["atomic_action"])).resolve_contract(node)
+        for effect in contract.effects:
+            atom = effect.atom
+            if atom.object_uid != object_uid:
+                continue
+            if atom.predicate == "object_held" and atom.arm is not None:
+                if effect.op == "add":
+                    holders.add(atom.arm)
+                else:
+                    holders.discard(atom.arm)
+            elif atom.predicate == "object_coordinated_held":
+                coordinated = effect.op == "add"
+            elif atom.predicate == "object_free" and effect.op == "add":
+                holders.clear()
+                coordinated = False
+    if coordinated and holders:
+        raise ValueError(
+            f"Recipe for {object_uid!r} ends with conflicting single and "
+            "coordinated ownership effects."
+        )
+    if coordinated:
         return object_uid, "coordinated"
-    return None
+    if len(holders) > 1:
+        raise ValueError(
+            f"Recipe for {object_uid!r} ends with multiple single-arm holders."
+        )
+    return (object_uid, next(iter(holders))) if holders else None
 
 
 def _validate_bindings(

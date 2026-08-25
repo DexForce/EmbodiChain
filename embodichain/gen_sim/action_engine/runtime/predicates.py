@@ -688,16 +688,19 @@ def evaluate_predicate(
         if not hasattr(env, "get_current_gripper_state_agent"):
             return _constant(env, False)
         left, right = env.get_current_gripper_state_agent()
-        expected = torch.as_tensor(
-            env.open_state,
-            dtype=torch.float32,
-            device=env.device,
-        )
         results = []
-        for value in (left, right):
+        for side, value in zip(("left", "right"), (left, right)):
             value = torch.as_tensor(value, dtype=torch.float32, device=env.device)
             if value.ndim == 1:
                 value = value.unsqueeze(0).repeat(int(env.num_envs), 1)
+            expected = getattr(env, f"{side}_arm_init_gripper_state", env.open_state)
+            expected = torch.as_tensor(
+                expected,
+                dtype=torch.float32,
+                device=env.device,
+            )
+            if expected.ndim == 1:
+                expected = expected.unsqueeze(0).repeat(int(env.num_envs), 1)
             results.append(
                 torch.linalg.vector_norm(value - expected, dim=-1)
                 <= float(spec.get("tolerance", defaults["gripper_state_tolerance"]))

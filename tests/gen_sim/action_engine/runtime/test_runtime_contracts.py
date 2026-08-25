@@ -35,7 +35,10 @@ from embodichain.gen_sim.action_engine.config import (
     resolve_agent_runtime_policy,
     runtime_policy_hash,
 )
-from embodichain.gen_sim.action_engine.capabilities import HeldObjectHandOverOptions
+from embodichain.gen_sim.action_engine.capabilities import (
+    HeldObjectHandOverOptions,
+    build_atomic_capability_registry,
+)
 from embodichain.gen_sim.action_engine.compiler import (
     compile_task_agent,
     compile_task_agent_v2,
@@ -106,6 +109,7 @@ from embodichain.lab.sim.atomic_actions import (
     PressOptions,
     SlideAffordance,
     SlideGoal,
+    StateDelta,
     TwistAffordance,
     TwistGoal,
 )
@@ -600,6 +604,46 @@ def test_joint_state_binding_selects_hand_timing_without_a_named_policy() -> Non
     )
 
     assert grounded.cfg["sample_interval"] == 10
+
+
+def test_e5_synchronized_release_uses_physics_verified_opening_time() -> None:
+    entity = _FakeEntity("tray", _pose(0.0, 0.0, 0.75), _box_vertices(0.20))
+    env = _FakeEnv({"tray": entity})
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "transport",
+                    "operator": "coordinated_transport",
+                    "object": "tray",
+                    "actor": {
+                        "mode": "coordinated",
+                        "arms": ["left_arm", "right_arm"],
+                    },
+                    "goal": {"direction": "front", "terminal_behavior": "place"},
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    step = program.semantic_steps[0]
+    release = next(
+        action
+        for edge in program.edges
+        for action in edge.actions
+        if action.get("target_binding", {}).get("coordinated_release_role")
+        == "participant"
+    )
+    grounder = ActionGrounder(program, env, lambda _uid: None)
+
+    grounded = grounder.ground(
+        release,
+        step,
+        arm="left_arm",
+        state=_coordinated_held_state(env, entity),
+    )
+
+    assert grounded.cfg["sample_interval"] == 60
 
 
 def test_runtime_policy_discards_legacy_support_z_fallbacks() -> None:
@@ -1419,9 +1463,15 @@ def test_explicit_dual_gripper_release_commits_only_after_both_hands_open(
     state = _coordinated_held_state(env, entity)
     executor = object.__new__(ProgramExecutor)
     executor.env = env
+    executor.runtime_policy = default_runtime_policy("dual_ur10")
     executor._assignments = {"task_01": ["coordinated"]}
     executor._step_states = {("task_01", "coordinated"): state}
     executor._object_states = {}
+    executor._object_owners = {"tray": ["coordinated"]}
+    executor._arm_owners = {
+        "left_arm": ["tray"],
+        "right_arm": ["tray"],
+    }
     executor._orientation_references = {}
 
     def ground(
@@ -1461,6 +1511,7 @@ def test_explicit_dual_gripper_release_commits_only_after_both_hands_open(
 
     executor.grounder = SimpleNamespace(ground=ground)
     executor.adapter = SimpleNamespace(
+        capabilities=build_atomic_capability_registry(),
         plan=plan,
         combine=lambda _outcomes, _masks: (
             torch.zeros(1, 2, env.robot.dof),
@@ -1487,7 +1538,7 @@ def test_explicit_dual_gripper_release_commits_only_after_both_hands_open(
 
     result = executor._execute_explicit_dual(
         SimpleNamespace(id="release", actions=actions),
-        SimpleNamespace(id="task_01"),
+        SimpleNamespace(id="task_01", object_uid="tray"),
         torch.zeros(1, dtype=torch.bool),
     )
 
@@ -1496,6 +1547,95 @@ def test_explicit_dual_gripper_release_commits_only_after_both_hands_open(
     right_held = released_state.get_held_object("physical_right_arm")
     assert result.failed.tolist() == [expected_failed]
     assert (left_held is not None and right_held is not None) is expect_held
+    expected_owner = "coordinated" if expect_held else None
+    assert executor._object_owners["tray"] == [expected_owner]
+    assert executor._arm_owners["left_arm"] == (["tray"] if expect_held else [None])
+    assert executor._arm_owners["right_arm"] == (["tray"] if expect_held else [None])
+
+
+@pytest.mark.parametrize(
+    ("closes_both", "expected_failed", "expect_held"),
+    ((True, False, True), (False, True, False)),
+)
+def test_coordinated_pickment_commits_only_after_physical_dual_hold(
+    monkeypatch: pytest.MonkeyPatch,
+    closes_both: bool,
+    expected_failed: bool,
+    expect_held: bool,
+) -> None:
+    entity = _FakeEntity("tray", _pose(0.0, 0.0, 0.75), _box_vertices(0.2))
+    env = _FakeEnv({"tray": entity})
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "task_01",
+                    "operator": "coordinated_transport",
+                    "object": "tray",
+                    "actor": {
+                        "mode": "coordinated",
+                        "arms": ["left_arm", "right_arm"],
+                    },
+                    "goal": {"direction": "up", "terminal_behavior": "hold"},
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    executor = ProgramExecutor(program, env, record_runtime=False)
+    step = program.semantic_steps[0]
+    edge = program.edges[0]
+    executor._assignments[step.id] = ["coordinated"]
+    prior_state = ExecutionState(last_qpos=env.robot.get_qpos().clone())
+    planned_state = _coordinated_held_state(env, entity)
+    grounded = GroundedAction(
+        action_class="CoordinatedPickment",
+        arm="coordinated",
+        control="coordinated",
+        target=SimpleNamespace(),
+        cfg={"postcondition_tolerance": 0.06},
+        object_pose=entity.get_local_pose(to_matrix=True),
+        target_object_pose=entity.get_local_pose(to_matrix=True),
+        object_uid="tray",
+    )
+    outcome = ActionOutcome(
+        trajectory=torch.zeros(1, 1, env.robot.dof),
+        success=torch.tensor([True]),
+        next_state=planned_state,
+        grounded=grounded,
+        prior_state=prior_state,
+        expected_effects=StateDelta(
+            held_object_updates=dict(planned_state.held_objects)
+        ),
+    )
+    monkeypatch.setattr(
+        executor.grounder,
+        "ground_candidates",
+        lambda *_args, **_kwargs: (grounded,),
+    )
+    monkeypatch.setattr(executor.adapter, "plan", lambda *_args, **_kwargs: outcome)
+
+    def execute_trajectory(*_args: Any, **_kwargs: Any) -> list[torch.Tensor]:
+        env.robot._qpos[:, env.left_eef_joints] = env.close_state
+        if closes_both:
+            env.robot._qpos[:, env.right_eef_joints] = env.close_state
+        return []
+
+    monkeypatch.setattr(executor.adapter, "execute_trajectory", execute_trajectory)
+
+    result = executor._execute_coordinated(edge, step, torch.tensor([False]))
+
+    committed = executor._step_states[(step.id, "coordinated")]
+    held = tuple(
+        committed.get_held_object(f"physical_{arm}")
+        for arm in ("left_arm", "right_arm")
+    )
+    assert result.failed.tolist() == [expected_failed]
+    assert all(item is not None for item in held) is expect_held
+    expected_owner = "coordinated" if expect_held else None
+    assert executor._object_owners["tray"] == [expected_owner]
+    assert executor._arm_owners["left_arm"] == (["tray"] if expect_held else [None])
+    assert executor._arm_owners["right_arm"] == (["tray"] if expect_held else [None])
 
 
 def _handover_held_state(
@@ -4368,6 +4508,28 @@ def test_coordinated_held_predicate_uses_per_arm_held_relations() -> None:
     assert not bool(evaluate_predicate(env, predicate, coordinated_state=state)[0])
 
 
+def test_both_grippers_open_uses_the_live_reset_posture() -> None:
+    env = _FakeEnv()
+    physical_open = torch.tensor([[0.20, 0.45]])
+    env.left_arm_init_gripper_state = physical_open.clone()
+    env.right_arm_init_gripper_state = physical_open.clone()
+    env.robot._qpos[:, env.left_eef_joints] = physical_open
+    env.robot._qpos[:, env.right_eef_joints] = physical_open
+
+    opened = evaluate_predicate(
+        env,
+        {"type": "both_grippers_open", "tolerance": 0.08},
+    )
+    assert opened.tolist() == [True]
+
+    env.robot._qpos[:, env.right_eef_joints] += 0.20
+    opened = evaluate_predicate(
+        env,
+        {"type": "both_grippers_open", "tolerance": 0.08},
+    )
+    assert opened.tolist() == [False]
+
+
 def test_object_supported_by_requires_overlap_and_vertical_contact() -> None:
     support_z = 0.75
     payload_z = support_z + 0.05 + 0.02 + 0.005
@@ -5677,6 +5839,7 @@ def test_coordinated_transport_direction_is_grounded_from_live_pose(
         )
     }
     env = _FakeEnv(entities)
+    env.agent_initial_object_poses = {"shared_box": _pose(9.0, 9.0, 9.0)}
     program = load_execution_program(
         compile_task_agent(
             _task_agent(
@@ -5721,6 +5884,14 @@ def test_coordinated_transport_direction_is_grounded_from_live_pose(
 
     assert isinstance(grounded.target, CoordinatedPickGoal)
     assert torch.allclose(
+        grounded.target.object_initial_pose,
+        entities["shared_box"].get_local_pose(to_matrix=True),
+    )
+    assert not torch.allclose(
+        grounded.target.object_initial_pose,
+        env.agent_initial_object_poses["shared_box"],
+    )
+    assert torch.allclose(
         grounded.target.object_target_pose[0, :3, 3],
         torch.tensor(expected_position),
     )
@@ -5747,6 +5918,11 @@ def test_coordinated_payload_monitor_rejects_drift_and_carrier_tilt() -> None:
             _pose(0.0, 0.0, 0.80),
             _rect_vertices(0.03, 0.03, 0.08),
         ),
+        "cup": _FakeEntity(
+            "cup",
+            _pose(0.06, 0.0, 0.79),
+            _rect_vertices(0.025, 0.025, 0.06),
+        ),
     }
     program = compile_task_agent(
         _task_agent(
@@ -5760,7 +5936,10 @@ def test_coordinated_payload_monitor_rejects_drift_and_carrier_tilt() -> None:
                 },
                 "goal": {
                     "terminal_behavior": "place",
-                    "payloads": [{"object": "bottle", "slot": "center"}],
+                    "payloads": [
+                        {"object": "bottle", "slot": "center"},
+                        {"object": "cup", "slot": "center"},
+                    ],
                 },
                 "depends_on": [],
             }
@@ -5778,6 +5957,9 @@ def test_coordinated_payload_monitor_rejects_drift_and_carrier_tilt() -> None:
     entities["bottle"]._pose[:, 0, 3] += 0.20
     assert not bool(executor._verify_payloads(step)[0])
     entities["bottle"]._pose = _pose(0.0, 0.0, 0.80)
+    entities["cup"]._pose[:, 1, 3] += 0.20
+    assert not bool(executor._verify_payloads(step)[0])
+    entities["cup"]._pose = _pose(0.06, 0.0, 0.79)
     entities["tray"]._pose[:, :3, :3] = torch.tensor(
         [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
     )

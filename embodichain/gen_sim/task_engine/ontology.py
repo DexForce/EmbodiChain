@@ -70,6 +70,7 @@ TRANSPORT_DIRECTIONS = frozenset(
     }
 )
 TERMINAL_BEHAVIORS = frozenset({"none", "hold", "place"})
+_RESOURCE_MODES = frozenset({"single_arm", "handover", "coordinated"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +84,26 @@ class TaskContract:
     required_affordances: frozenset[str]
     success_type: str
     scene_affordances: frozenset[str]
+    primary_role_field: str
+    resource_mode: str
+    moves_primary_object: bool
+    accepts_direct_payloads: bool
+    direct_payload_relations: frozenset[str]
+    accepts_incoming_hold: bool
+    terminal_success_types: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        if not self.primary_role_field.endswith("_role"):
+            raise ValueError("primary_role_field must name one role parameter.")
+        if self.resource_mode not in _RESOURCE_MODES:
+            raise ValueError(f"Unknown task resource_mode {self.resource_mode!r}.")
+        if self.direct_payload_relations - RELATIONS:
+            raise ValueError("direct_payload_relations contain unknown relations.")
+        terminal_behaviors = [item[0] for item in self.terminal_success_types]
+        if len(terminal_behaviors) != len(set(terminal_behaviors)):
+            raise ValueError("terminal_success_types must use unique behaviors.")
+        if set(terminal_behaviors) - TERMINAL_BEHAVIORS:
+            raise ValueError("terminal_success_types contain unknown behaviors.")
 
 
 def _contract(
@@ -94,6 +115,13 @@ def _contract(
     success_type: str,
     *,
     scene_affordances: frozenset[str] | None = None,
+    primary_role_field: str = "object_role",
+    resource_mode: str = "single_arm",
+    moves_primary_object: bool = False,
+    accepts_direct_payloads: bool = False,
+    direct_payload_relations: frozenset[str] = frozenset(),
+    accepts_incoming_hold: bool = False,
+    terminal_success_types: tuple[tuple[str, str], ...] = (),
 ) -> TaskContract:
     return TaskContract(
         task_type=task_type,
@@ -103,6 +131,13 @@ def _contract(
         required_affordances=required_affordances,
         success_type=success_type,
         scene_affordances=scene_affordances or required_affordances,
+        primary_role_field=primary_role_field,
+        resource_mode=resource_mode,
+        moves_primary_object=moves_primary_object,
+        accepts_direct_payloads=accepts_direct_payloads,
+        direct_payload_relations=direct_payload_relations,
+        accepts_incoming_hold=accepts_incoming_hold,
+        terminal_success_types=terminal_success_types,
     )
 
 
@@ -124,6 +159,10 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             "rigid_object",
             frozenset({"graspable", "placeable"}),
             "semantic_goal",
+            moves_primary_object=True,
+            accepts_direct_payloads=True,
+            direct_payload_relations=frozenset({"on", "inside"}),
+            accepts_incoming_hold=True,
         ),
         "E2": _contract(
             "E2",
@@ -132,6 +171,8 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             "rigid_object",
             frozenset({"graspable", "orientable"}),
             "object_upright",
+            moves_primary_object=True,
+            accepts_incoming_hold=True,
         ),
         "E3": _contract(
             "E3",
@@ -141,6 +182,9 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             "rigid_object",
             frozenset({"graspable", "pourable"}),
             "poured",
+            primary_role_field="source_role",
+            moves_primary_object=True,
+            accepts_incoming_hold=True,
         ),
         "E4": _contract(
             "E4",
@@ -149,6 +193,9 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             "rigid_object",
             frozenset({"graspable", "handover"}),
             "handover_complete",
+            resource_mode="handover",
+            moves_primary_object=True,
+            accepts_incoming_hold=True,
         ),
         "E5": _contract(
             "E5",
@@ -158,6 +205,13 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"dual_graspable"}),
             "held_by_both_grippers",
             scene_affordances=frozenset({"dual_graspable", "rigid"}),
+            resource_mode="coordinated",
+            moves_primary_object=True,
+            accepts_direct_payloads=True,
+            terminal_success_types=(
+                ("hold", "held_by_both_grippers"),
+                ("place", "semantic_goal"),
+            ),
         ),
         "E6": _contract(
             "E6",
@@ -211,11 +265,14 @@ def task_success_type(
 ) -> str:
     """Resolve a TaskSpec success type, including E5's terminal behavior."""
     contract = task_contract(task_type)
-    if contract.task_type != "E5":
+    if not contract.terminal_success_types:
         return contract.success_type
     terminal_behavior = str((params or {}).get("terminal_behavior", "hold"))
-    if terminal_behavior == "hold":
-        return "held_by_both_grippers"
-    if terminal_behavior == "place":
-        return "semantic_goal"
-    raise ValueError("E5 terminal_behavior must be 'hold' or 'place'.")
+    success_by_behavior = dict(contract.terminal_success_types)
+    try:
+        return success_by_behavior[terminal_behavior]
+    except KeyError as exc:
+        raise ValueError(
+            f"{contract.task_type} terminal_behavior must be one of "
+            f"{sorted(success_by_behavior)}."
+        ) from exc

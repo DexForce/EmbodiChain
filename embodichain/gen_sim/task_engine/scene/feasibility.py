@@ -23,6 +23,8 @@ from collections.abc import Mapping, Sequence
 import math
 from typing import Any
 
+from ..ontology import task_contract
+
 from .contracts import (
     ASSESSMENT_STATUSES,
     FEASIBILITY_REPORT_SCHEMA,
@@ -334,8 +336,9 @@ class FeasibilityBroker:
                 object_uids_by_step,
             )
             task_type = str(step.get("task_type", ""))
+            contract = task_contract(task_type)
             required_arm = str(step.get("required_arm", "auto"))
-            if task_type == "E4":
+            if contract.resource_mode == "handover":
                 required_arm = str(step.get("transfer_arm", "none"))
             if required_arm in {"left_arm", "right_arm"}:
                 for uid in object_uids:
@@ -375,9 +378,10 @@ class FeasibilityBroker:
             phases.extend(
                 _workflow_phases(
                     step_id,
-                    task_type,
                     object_uids,
                     target_uids,
+                    resource_mode=contract.resource_mode,
+                    moves_primary_object=contract.moves_primary_object,
                     transfer_arm=str(step.get("transfer_arm", "none")),
                     receive_arm=str(step.get("receive_arm", "none")),
                 )
@@ -626,10 +630,11 @@ def _step_selector_uids(
 
 def _workflow_phases(
     step_id: str,
-    task_type: str,
     object_uids: Sequence[str],
     target_uids: Sequence[str],
     *,
+    resource_mode: str,
+    moves_primary_object: bool,
     transfer_arm: str,
     receive_arm: str,
 ) -> list[dict[str, Any]]:
@@ -643,7 +648,7 @@ def _workflow_phases(
                 "object_uids": list(object_uids),
             }
         )
-    if task_type == "E4":
+    if resource_mode == "handover":
         phases.append(
             {
                 "step_id": step_id,
@@ -662,7 +667,7 @@ def _workflow_phases(
                 "target_uids": list(target_uids),
             }
         )
-    if task_type in {"E1", "E2", "E3", "E4", "E5"}:
+    if moves_primary_object:
         phases.append(
             {
                 "step_id": step_id,

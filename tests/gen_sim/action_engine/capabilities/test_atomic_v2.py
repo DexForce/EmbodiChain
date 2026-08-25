@@ -24,6 +24,7 @@ import torch
 
 from embodichain.gen_sim.action_engine.capabilities import (
     AtomicCapability,
+    StateAtom,
     build_atomic_capability_registry,
 )
 from embodichain.gen_sim.action_engine.runtime.actions import AtomicActionAdapter
@@ -162,7 +163,7 @@ def test_axis_align_verifies_the_live_semantic_postcondition() -> None:
     assert calls[0][1].tolist() == [False, True]
 
 
-def test_e2_home_is_required_while_generic_cleanup_home_is_best_effort() -> None:
+def test_explicit_required_home_is_safety_required_for_any_task_type() -> None:
     capability = build_atomic_capability_registry().get("MoveJoints")
     base = {
         "atomic_action": "MoveJoints",
@@ -174,19 +175,44 @@ def test_e2_home_is_required_while_generic_cleanup_home_is_best_effort() -> None
     }
 
     generic = capability.resolve_contract(base)
-    e2_home = capability.resolve_contract(
+    required_home = capability.resolve_contract(
         {
             **base,
-            "task_type": "E2",
+            "task_type": "test_carrier_consumer",
             "target_binding": {
                 **base["target_binding"],
-                "operation": "e2_home",
+                "operation": "custom_home",
+                "required_home": True,
             },
         }
     )
 
     assert generic.failure_policy == "best_effort"
-    assert e2_home.failure_policy == "safety_required"
+    assert required_home.failure_policy == "safety_required"
+
+
+def test_coordinated_release_contract_uses_binding_not_task_number() -> None:
+    capability = build_atomic_capability_registry().get("MoveJoints")
+    node = {
+        "atomic_action": "MoveJoints",
+        "task_type": "test_carrier_consumer",
+        "object_uid": "tray",
+        "actor": {"mode": "required", "arm": "left_arm"},
+        "control": "hand",
+        "role": "primary",
+        "sync_group": "release_pair",
+        "target_binding": {
+            "kind": "joint_state",
+            "source": "gripper_open",
+            "coordinated_release_role": "participant",
+        },
+    }
+
+    contract = capability.resolve_contract(node)
+
+    assert contract.requires == (
+        StateAtom("object_coordinated_held", object_uid="tray"),
+    )
 
 
 def test_new_descriptor_reuses_loader_and_adapter_without_dispatch_changes() -> None:

@@ -98,22 +98,22 @@ def test_archive_task_video_reports_missing_source_with_task_and_path(
     assert str(tmp_path / f"{SOURCE_STEM}.<extension>") in message
 
 
-def test_archive_task_video_does_not_overwrite_existing_target(
+def test_archive_task_video_overwrites_existing_target(
     tmp_path: Path,
 ) -> None:
     source = _write_source(tmp_path, ".mp4", b"new")
     destination = tmp_path / "task2_1.mp4"
     destination.write_bytes(b"existing")
 
-    with pytest.raises(FileExistsError, match="destination already exists"):
-        _archive_task_video(
-            tmp_path,
-            source_stem=SOURCE_STEM,
-            task_id="task2_1",
-        )
+    result = _archive_task_video(
+        tmp_path,
+        source_stem=SOURCE_STEM,
+        task_id="task2_1",
+    )
 
-    assert source.read_bytes() == b"new"
-    assert destination.read_bytes() == b"existing"
+    assert result == destination
+    assert destination.read_bytes() == b"new"
+    assert not source.exists()
 
 
 def test_consecutive_tasks_keep_independent_videos(tmp_path: Path) -> None:

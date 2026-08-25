@@ -107,6 +107,12 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
         runtime.motion_defaults["CoordinatedPickment"]["is_filter_ground_collision"]
         is False
     )
+    assert (
+        runtime.motion_defaults["CoordinatedPickment"]["release_sample_interval"] == 60
+    )
+    assert runtime.motion_defaults["CoordinatedPickment"][
+        "release_gripper_tolerance"
+    ] == pytest.approx(0.08)
     assert runtime.predicate_fallbacks["upright_max_tilt"] == pytest.approx(
         0.2617993877991494
     )
