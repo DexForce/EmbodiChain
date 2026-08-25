@@ -13,6 +13,7 @@ embodichain.lab.gym.envs.expert_program
       ConfigPath
       ConfigPathPart
       CompiledProgram
+      ConfiguredHandOverPoseProvider
       ControlPartCommandPreset
       ControlPartEndpointBinding
       ControlPartResourceBinding
@@ -308,6 +309,9 @@ use the core ``RobotResource`` type directly.
    :members:
 
 .. autoclass:: SimulationExpertProgramFactory
+   :members:
+
+.. autoclass:: ConfiguredHandOverPoseProvider
    :members:
 
 .. autoclass:: SimulationSegmentPolicyPort

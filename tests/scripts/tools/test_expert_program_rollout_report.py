@@ -28,7 +28,7 @@ from scripts.tools.expert_program_rollout_report import (
 
 EXPECTED_CURRENT_COUNTS = {
     # Each tuple is (raw LF bytes, raw file bytes) for the explicit task pair.
-    "Cube": (197, 6_561),
+    "Cube": (200, 6_690),
     "Drawer": (313, 11_352),
 }
 

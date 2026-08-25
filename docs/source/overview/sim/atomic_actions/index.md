@@ -811,6 +811,8 @@ At the terminal waypoint, an `ExecutionSession` requests an external
 correlated per-environment result before committing a non-empty effect:
 
 ```python
+import torch
+
 from embodichain.lab.sim.atomic_actions import EffectVerificationResult
 
 tick = session.tick(latest_context)
@@ -821,17 +823,27 @@ if tick.pending_effect is not None:
         verification_id=request.verification_id,
         success_mask=success_mask,
         failure_mask=failure_mask,
+        invalidation_mask=failure_mask,
+        retry_mask=torch.zeros_like(failure_mask),
     )
     tick = session.tick(latest_context, effect_result=effect_result)
 ```
 
 This prevents a collision-free or well-tracked command plan from being
-misreported as a successful grasp or release. The typed
+misreported as a successful grasp, release, or handover. The typed
 `EffectVerificationRequest` persists on subsequent ticks while waiting;
 `EFFECT_VERIFICATION_REQUIRED` remains a one-time observability event. Success
 and failure masks are disjoint subsets of the request mask; omitted request rows
 remain unresolved. Request IDs change after mask shrinkage or whole-action
 retry, so a delayed result cannot commit a newer attempt.
+
+Every result also classifies failed rows with `invalidation_mask` and
+`retry_mask`, both subsets of `failure_mask`. Invalidation applies the
+request's core-owned, removal-only `failure_invalidation`; the verifier cannot
+inject replacement state. Retry is valid only while the same invocation's
+physical preconditions remain satisfied. Other failed rows enter external
+recovery, and unresolved evidence at the deadline removes covered active
+verified state before recovery.
 
 `request.deadline` is expressed in the robot-observation timestamp domain.
 `RecoveryPolicy.action_timeout` covers both trajectory execution and the
@@ -840,6 +852,24 @@ terminal effect wait; a retry invalidates the old request ID. With
 its `effect_result`: schedule another call using `wait_duration`, re-read the
 current request, and submit a result for that current ID. Partial resolution and
 row deactivation can also replace the request before the delayed result arrives.
+
+The semantic compiler installs segment-scoped held-object guards and blocking
+physical-effect gates for curated manipulation calls. A guard observes a
+negative invariant before a due command and, on proven attachment loss,
+applies an action-authorized removal-only `StateDelta` before retry or
+`RECOVERY_REQUIRED`. A gate blocks entry to a named segment until the positive
+physical transition is verified. While unresolved, the waypoint cursor stays
+fixed and the preceding command is replayed for the synchronized active cohort,
+preserving gripper preload or open intent. Gate success unlocks motion without
+committing `TaskState`; terminal verification remains authoritative.
+
+Pick gates attachment before `lift`, and Place gates detachment before
+`retract`. The unified HandOver action gates source pickup before
+`pickup_transport`, destination pickup before `handover_release`, and source
+release before `place`; source- and destination-held guards cover the motion
+segments that depend on those relations. Each boundary owns an independent
+monitor and correlated request ID. These checks are observational and never
+create simulator attachments, freeze objects, or override poses.
 
 ## Action Agent integration
 
@@ -872,8 +902,9 @@ events without mutating a request implicitly.
 The semantic runtime is also useful without an agent. `run()` executes one
 known workflow and preserves verified state for a later workflow submitted at a
 terminal result boundary. Call-local recovery remains owned by
-`ExecutionRunner`; automatic skill replacement or symbolic-state reconciliation
-after a terminal failure is intentionally not provided. See
+`ExecutionRunner`; `SkillRuntime` performs terminal symbolic reconciliation and
+may use a bounded `WorkflowRecoveryPolicy` to retry from verified state or run
+a real semantic Pick before retrying the failed call. See
 {doc}`../semantic_skills` for the complete compiler/runtime and dynamic-task
 contract.
 

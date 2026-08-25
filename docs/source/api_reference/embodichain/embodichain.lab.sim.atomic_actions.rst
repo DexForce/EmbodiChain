@@ -18,6 +18,7 @@ embodichain.lab.sim.atomic_actions
       ControlPartCommandProfile
       ActionControlOverrides
       ActionInvocation
+      PhaseEffectGateRequirement
       ResolvedActionRequest
       ActionOptions
       MotionPolicy
@@ -75,6 +76,10 @@ embodichain.lab.sim.atomic_actions
       EffectVerificationRequest
       EffectVerificationRequirement
       EffectVerificationResult
+      PhaseEffectGateRequest
+      PhaseEffectGateResult
+      HeldObjectGuardRequest
+      HeldObjectGuardResult
       ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind

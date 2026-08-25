@@ -455,6 +455,10 @@ class ActionPlan:
     sequence without implying independent planning or recovery boundaries.
 
     Attributes:
+        expected_effects: Terminal symbolic state changes committed only after
+            physical-effect verification succeeds.
+        effect_candidates: Nonterminal attachment baselines available to phase
+            gates and in-flight guards without being committed to task state.
         scene_dependency_monitor_until: Optional exclusive waypoint-index upper
             bounds for individual ``scene_dependencies``. An entity is monitored
             while the current waypoint index is smaller than its bound; ``0``
@@ -483,6 +487,7 @@ class ActionPlan:
     collision_world_sensitive: bool = False
     replannable: bool = True
     expected_effects: StateDelta = field(default_factory=StateDelta)
+    effect_candidates: StateDelta = field(default_factory=StateDelta)
     effect_verification: EffectVerificationRequirement | None = None
     invocation_id: str | None = None
     invocation_revision: int = 0
@@ -700,6 +705,19 @@ class ActionPlan:
             raise TypeError("replannable must be a bool.")
         if not isinstance(self.expected_effects, StateDelta):
             raise TypeError("expected_effects must be a StateDelta.")
+        if not isinstance(self.effect_candidates, StateDelta):
+            raise TypeError("effect_candidates must be a StateDelta.")
+        if (
+            self.effect_candidates.coordinated_held_object_updates
+            or self.effect_candidates.articulation_joint_updates
+            or any(
+                candidate is None
+                for candidate in self.effect_candidates.held_object_updates.values()
+            )
+        ):
+            raise ValueError(
+                "effect_candidates may contain only attached held-object states."
+            )
         if (
             self.effect_verification is not None
             and type(self.effect_verification) is not EffectVerificationRequirement
@@ -787,6 +805,11 @@ class ActionPlan:
         object.__setattr__(self, "segments", segments)
         object.__setattr__(
             self,
+            "effect_candidates",
+            self.effect_candidates.snapshot(),
+        )
+        object.__setattr__(
+            self,
             "effect_verification",
             (
                 None
@@ -830,6 +853,7 @@ class ActionPlan:
             collision_world_sensitive=self.collision_world_sensitive,
             replannable=self.replannable,
             expected_effects=self.expected_effects,
+            effect_candidates=self.effect_candidates,
             effect_verification=self.effect_verification,
             invocation_id=self.invocation_id,
             invocation_revision=self.invocation_revision,

@@ -13,11 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+from __future__ import annotations
 
-import torch
+from abc import ABCMeta, abstractmethod
+from dataclasses import fields
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union
+
 import numpy as np
-from typing import List, Dict, Any, Union, TYPE_CHECKING, Tuple
-from abc import abstractmethod, ABCMeta
+import torch
 
 from embodichain.utils import configclass, logger
 
@@ -98,22 +101,39 @@ class SolverCfg:
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> "SolverCfg":
-        """Initialize the configuration from a dictionary."""
+        """Initialize the concrete solver configuration from a dictionary.
+
+        The concrete config receives all recognized dataclass init fields in its
+        constructor so initialization and ``__post_init__`` observe the final
+        inputs exactly once. Legacy unannotated config attributes are applied
+        afterward. Unknown fields preserve the historical behavior: they are
+        ignored with a warning.
+        """
         from embodichain.utils.utility import get_class_instance
 
         if "class_type" not in init_dict:
             logger.log_error("class type must be specified in the configuration.")
 
-        cfg = get_class_instance(
+        cfg_type = get_class_instance(
             "embodichain.lab.sim.solvers", init_dict["class_type"] + "Cfg"
-        )()
+        )
+        concrete_fields = {field.name: field for field in fields(cfg_type)}
+        kwargs: Dict[str, Any] = {}
+        deferred: Dict[str, Any] = {}
         for key, value in init_dict.items():
-            if hasattr(cfg, key):
-                setattr(cfg, key, value)
+            field = concrete_fields.get(key)
+            if field is not None and field.init:
+                kwargs[key] = value
+            elif field is not None or hasattr(cfg_type, key):
+                # A few legacy solver configs expose configurable class
+                # attributes without dataclass annotations. They cannot be
+                # constructor arguments, but remain valid serialized fields.
+                deferred[key] = value
             else:
-                logger.log_warning(
-                    f"Key '{key}' not found in {cfg.__class__.__name__}."
-                )
+                logger.log_warning(f"Key '{key}' not found in {cfg_type.__name__}.")
+        cfg = cfg_type(**kwargs)
+        for key, value in deferred.items():
+            setattr(cfg, key, value)
         return cfg
 
 

@@ -371,14 +371,21 @@ contains tensor-owning row masks, verified task state, call/plan/effect traces,
 and JSON-safe metadata. `SkillFailure` exposes a stable `code` and `phase`;
 post-analysis preparation failures preserve an original `SemanticDiagnostic`
 when available, while low-level execution events remain in the call trace.
-Failures are terminal in the current runtime; workflow-level replacement,
-reacquisition, and symbolic-state reconciliation are not yet provided.
+Terminal failure first applies the core-owned symbolic reconciliation selected
+from per-expectation physical outcomes. `WorkflowRecoveryPolicy` then provides
+a bounded, row-local recovery budget. Rows whose reconciled state still proves
+the failed call's source relation retry that call from a fresh observation;
+rows whose source relation was invalidated execute a real semantic Pick on the
+resolved source resource and then retry the original call. Already successful
+rows wait at the shared call barrier, and every recovery call uses normal
+analysis, grounding, planning, command dispatch, effect verification, and
+trace metadata.
 
 `SkillRuntime.from_simulation()` is the standard explicit simulation factory.
-It may combine one application-owned physical-effect gate with the typed
-evidence monitor selected by the profile. `AtomicSkills` is a small application
-facade over that same runtime; it does not own a second compiler or execution
-loop.
+It combines an optional application verifier and step observer with the typed
+terminal monitors, phase-effect gates, and held-object guards selected by the
+compiler. `AtomicSkills` is a small application facade over that same runtime;
+it does not own a second compiler or execution loop.
 
 `ParallelSkillRuntime` coordinates two or more forked semantic lanes on one
 clock. It rejects overlapping `ResourceClaim` values and symbolic writes,
@@ -456,7 +463,7 @@ Scene dependencies must match the poses each primitive actually consumes:
 | `Slide` | `SlideGoal.target_pose` when it is a `SceneEntityPose`; the local grasp mesh does not own the link. |
 | `Twist` | `TwistGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
-| `HandOver` | `SceneEntityPose` values in `HandOverOptions.middle_object_pose` or `final_object_pose`. Its current held-object pose is derived from verified attachment state and observed EEF pose; the reused `GraspGoal.grasp_xpos` field is ignored. |
+| `HandOver` | Its semantic object ID, when present, plus a `SceneEntityPose` in `HandOverGoal.target_pose`. The unified action observes the object before pickup, derives its middle transfer pose from the two arm roots, and owns pickup through final release. |
 
 `collect_scene_dependencies()` deliberately stops at `ObjectSemantics`.
 Therefore, a custom action that consumes a snapshot pose through semantic data
@@ -588,14 +595,42 @@ asynchronous integrations instead pass `effect_result` explicitly on a due
 `step()` call.
 
 ```python
+import torch
+
 request = tick.pending_effect
 effect_result = EffectVerificationResult(
     verification_id=request.verification_id,
     success_mask=observed_success,
     failure_mask=observed_failure,
+    invalidation_mask=observed_failure,
+    retry_mask=torch.zeros_like(observed_failure),
 )
 result = runner.step(effect_result=effect_result)
 ```
+
+Both failure-policy masks must be subsets of `failure_mask`.
+`invalidation_mask` applies only the request-owned, removal-only
+`failure_invalidation` delta; a verifier cannot inject replacement state.
+`retry_mask` selects rows whose physical preconditions still permit replay of
+the same invocation. Other failures cross a typed recovery boundary, while
+unresolved terminal evidence is reconciled fail-closed at the action deadline.
+
+Curated semantic calls also install physical checks inside an action. A
+`HeldObjectGuardRequest` observes negative invariants before commands in named
+segments and applies removal-only reconciliation when attachment loss is
+proven. A `PhaseEffectGateRequest` blocks entry to a named segment until its
+positive physical transition is verified, replaying the preceding command for
+the synchronized active cohort while evidence is unresolved. Gate success
+unlocks motion but does not commit `TaskState`; the terminal monitor remains
+authoritative.
+
+Pick gates attachment before `lift`; Place gates release before `retract`.
+The unified HandOver action gates source pickup before `pickup_transport`,
+destination pickup before `handover_release`, and source release before
+`place`. Its source-held guard covers pickup transport through receiver close,
+and its destination-held guard covers source release and placement. All checks
+are observational: they never create simulator constraints, freeze bodies, or
+override poses.
 
 Cause events (`ACTION_PLANNING_FAILED`, `EFFECT_VERIFICATION_FAILED`, and
 `EFFECT_VERIFICATION_TIMEOUT`) are distinct from the `ACTION_RETRY` recovery
@@ -718,7 +753,7 @@ execution loop. `place.py`
 executes `Pick -> Place`, verifying the observed lift, planned object-to-EEF
 relation, release pose, and open hand. `hand_over.py` demonstrates disjoint
 dual-arm resources plus an explicit `RegisteredSemanticLowerer`, then verifies
-source release and receiver ownership at the final target. Both report
+the unified pickup, transfer, placement, and final release. Both report
 structured recovery events and use `--diagnose_plan` only for a separate
 offline compile that projects hypothetical effects without executing them.
 Release and ownership-transfer presets disable whole-action effect retries

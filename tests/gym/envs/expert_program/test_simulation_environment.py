@@ -644,8 +644,9 @@ class _MobileRobot:
     def __init__(self) -> None:
         self.qpos = torch.zeros(_BATCH_SIZE, _ROBOT_DOF)
 
-    def get_qpos(self) -> torch.Tensor:
+    def get_qpos(self, *, target: bool = False) -> torch.Tensor:
         """Return the full controller hold state."""
+        del target
         return self.qpos
 
     def get_qvel(self) -> torch.Tensor:
@@ -901,13 +902,13 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
 def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     """Build one grasp frame and an identity object-to-endpoint expectation."""
     goal = action.require_goal(request)
-    positions = context.robot.qpos.unsqueeze(1).clone()
-    positions[:, 0, 1] = _HAND_GRASP_POSITION
+    positions = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
+    positions[:, :, 1] = _HAND_GRASP_POSITION
     trajectory = TimedTrajectory.from_positions(
         positions,
         env_ids=context.env_ids,
         dt=torch.full(
-            (context.batch_size, 1),
+            (context.batch_size, 2),
             context.require_control_dt(),
             dtype=positions.dtype,
             device=positions.device,
@@ -928,19 +929,20 @@ def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
             held_object_updates={"manipulator": held},
         ),
         replannable=False,
+        segment_lengths={"close": 1, "lift": 1},
         scene_dependency_monitor_until={"cube": 0},
     )
 
 
 def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     """Build one open frame and the matching held-object removal delta."""
-    positions = context.robot.qpos.unsqueeze(1).clone()
-    positions[:, 0, 1] = _HAND_OPEN_POSITION
+    positions = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
+    positions[:, :, 1] = _HAND_OPEN_POSITION
     trajectory = TimedTrajectory.from_positions(
         positions,
         env_ids=context.env_ids,
         dt=torch.full(
-            (context.batch_size, 1),
+            (context.batch_size, 2),
             context.require_control_dt(),
             dtype=positions.dtype,
             device=positions.device,
@@ -955,6 +957,7 @@ def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
             held_object_updates={"manipulator": None},
         ),
         replannable=False,
+        segment_lengths={"release": 1, "retract": 1},
     )
 
 
@@ -1068,11 +1071,17 @@ def _sample_effect(
     """Advance one fresh environment tick and return its production trace."""
     if advance_clock:
         assembly.clock.advance_after_env_step()
-    result = assembly.runtime.step()
-    assert len(result.effects) == expected_trace_count
-    while assembly.command_sink.pending_count:
-        _consume_buffered_action(assembly, robot)
-    return result, result.effects[-1]
+    for _ in range(4):
+        result = assembly.runtime.step()
+        while assembly.command_sink.pending_count:
+            _consume_buffered_action(assembly, robot)
+        if len(result.effects) == expected_trace_count:
+            return result, result.effects[-1]
+        assert len(result.effects) < expected_trace_count
+        assembly.clock.advance_after_env_step()
+    raise AssertionError(
+        f"Expected {expected_trace_count} effect traces, got {len(result.effects)}."
+    )
 
 
 class _SynchronousEvidenceClock:
@@ -1325,6 +1334,14 @@ def _run_evidence_pick_place(
     assert result.status is SkillStatus.COMPLETED
     assert verified_pick is not None
     assert result.task_state.get_held_object("manipulator") is None
+    assert {
+        (effect.call_index, effect.gate_id, effect.segment_name)
+        for effect in result.effects
+        if effect.boundary_kind == "phase_effect_gate"
+    } == {
+        (0, "destination_acquired", "lift"),
+        (1, "source_released", "retract"),
+    }
     return result, verified_pick
 
 
@@ -1768,6 +1785,36 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
 def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
     """Production Pick/Place evidence stays conjunctive through runtime traces."""
     assembly, robot, cube = _evidence_runtime()
+
+    def without_phase_gates(
+        self: Any,
+        analyzed: Any,
+        effect_spec: Any,
+        *,
+        path: tuple[Any, ...],
+    ) -> tuple[()]:
+        del self, analyzed, effect_spec, path
+        return ()
+
+    def without_in_flight_guards(
+        self: Any,
+        analyzed: Any,
+        effect_spec: Any,
+        context: Any,
+        *,
+        path: tuple[Any, ...],
+    ) -> tuple[()]:
+        del self, analyzed, effect_spec, context, path
+        return ()
+
+    assembly.compiler._ground_phase_effect_gates = MethodType(
+        without_phase_gates,
+        assembly.compiler,
+    )
+    assembly.compiler._ground_held_object_guards = MethodType(
+        without_in_flight_guards,
+        assembly.compiler,
+    )
     cube.pose[:, 0, 3] = 0.2
     result = assembly.runtime.start(
         (

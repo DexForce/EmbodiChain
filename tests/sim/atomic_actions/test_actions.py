@@ -2960,9 +2960,23 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     )
     assert torch.all(positions[:, handover_release_end, DUAL_ARM_DOF + 2 :] == 1)
     assert torch.all(positions[:, receive_release_end, DUAL_ARM_DOF:] == 0)
-    assert plan.expected_effects.is_empty
+    assert dict(plan.expected_effects.held_object_updates) == {
+        "left_arm": None,
+        "right_arm": None,
+    }
+    assert set(plan.effect_candidates.held_object_updates) == {
+        "left_arm",
+        "right_arm",
+    }
+    assert all(
+        isinstance(candidate, HeldObjectState)
+        for candidate in plan.effect_candidates.held_object_updates.values()
+    )
     assert context.task is original_task
     assert plan.scene_dependencies == ("handover_object",)
+    assert plan.scene_dependency_monitor_until == {
+        "handover_object": plan.segment("pickup_close").stop
+    }
 
 
 def test_handover_horizontal_mode_uses_downward_opposite_end_grasps() -> None:

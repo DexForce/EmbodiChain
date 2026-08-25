@@ -101,6 +101,15 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.gym.envs.expert_program.simulation_handover
+-----------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_handover
+
+.. autosummary::
+
+   ConfiguredHandOverPoseProvider
+
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
 
@@ -398,6 +407,7 @@ embodichain.lab.sim.atomic_actions.execution
 
 .. autosummary::
 
+   EffectExpectationResult
    EffectVerificationRequest
    EffectVerificationResult
    ExecutionEvent
@@ -406,6 +416,10 @@ embodichain.lab.sim.atomic_actions.execution
    ExecutionSession
    ExecutionStatus
    ExecutionTick
+   HeldObjectGuardRequest
+   HeldObjectGuardResult
+   PhaseEffectGateRequest
+   PhaseEffectGateResult
 
 embodichain.lab.sim.atomic_actions.goals
 ----------------------------------------
@@ -437,6 +451,7 @@ embodichain.lab.sim.atomic_actions.invocation
    ActionOptions
    GoalT
    OptionsT
+   PhaseEffectGateRequirement
    ResolvedActionRequest
 
 embodichain.lab.sim.atomic_actions.plans
@@ -509,8 +524,10 @@ embodichain.lab.sim.atomic_actions.runner
    ExecutionClock
    ExecutionRunner
    ExecutionRunnerCfg
+   HeldObjectGuardVerifier
    MonotonicExecutionClock
    ObservationProvider
+   PhaseEffectGateVerifier
    RunnerStatus
    RunnerStep
    RunnerStepCallback
@@ -915,9 +932,12 @@ embodichain.lab.sim.skills.compiler
 .. autosummary::
 
    AnalyzedSemanticCall
+   GroundedHeldObjectGuard
+   GroundedPhaseEffectGate
    GroundedSemanticCall
    HandOverPoseProvider
    HandOverPoseTargets
+   HeldObjectGuardBaseline
    RelationTargetGrounder
    RegisteredSemanticLowerer
    SemanticEffectDependency
@@ -1001,6 +1021,7 @@ embodichain.lab.sim.skills.profiles
    RobotSkillProfile
    SkillPolicyPreset
    UnsupportedSkillError
+   WorkflowRecoveryPolicy
 
 embodichain.lab.sim.skills.runtime
 ----------------------------------
@@ -1680,6 +1701,20 @@ simulation scenes, robot skill profiles, and atomic actions.
 
    ExpertProgramOpenDrawerEnv
    ExpertProgramRepeatedPickPlaceEnv
+   HandOverEnv
+
+embodichain_tasks.expert_program.hand_over
+------------------------------------------
+
+.. currentmodule:: embodichain_tasks.expert_program.hand_over
+
+.. autosummary::
+
+   HandOverEnv
+   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
+   HAND_OVER_POSE_PROVIDER
+   create_hand_over_robot_profile_binding
+   create_hand_over_scene_binding
 
 embodichain_tasks.expert_program.open_drawer
 --------------------------------------------

@@ -49,6 +49,7 @@ from embodichain.lab.sim.skills.effects import (
     EffectEvidenceAddress,
     EffectEvidenceBatch,
     EffectEvidenceSourceRef,
+    EffectExpectationDecision,
     EffectMonitor,
     EffectMonitorDecision,
     EffectMonitorFactory,
@@ -72,8 +73,13 @@ from embodichain.lab.sim.skills.effects import (
 _ENV_IDS = torch.tensor([101, 205, 309], dtype=torch.long)
 _OBJECT_ID = "scene/cube"
 _STATE_KEY = "left_actor"
+_SOURCE_STATE_KEY = "source_actor"
+_DESTINATION_STATE_KEY = "destination_actor"
 _SKILL_ID = "pick_up"
 _INVOCATION_ID = "call-7"
+_ATTACHED_OFFSET = 0.0
+_DETACHED_OFFSET = 0.1  # Above the built-in 0.06 translation threshold.
+_UNRESOLVED_OFFSET = 0.04  # Between the attached and detached thresholds.
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +182,120 @@ def _attach_spec() -> SemanticEffectSpec:
             ),
         ),
     )
+
+
+def _transfer_spec() -> SemanticEffectSpec:
+    source = _expectation(
+        HeldObjectRelation.DETACHED,
+        expectation_id="source",
+        state_key=_SOURCE_STATE_KEY,
+    )
+    destination = _expectation(
+        expectation_id="destination",
+        state_key=_DESTINATION_STATE_KEY,
+    )
+    return SemanticEffectSpec(
+        semantic_id="hand_over",
+        effect_kind=SemanticEffectKind.TRANSFER,
+        skill_id=_SKILL_ID,
+        invocation_id=_INVOCATION_ID,
+        invocation_revision=2,
+        env_ids=_ENV_IDS,
+        state_expectations=(source, destination),
+        clauses=(
+            PoseRelationClause(
+                "source.pose",
+                "source",
+                _source("source_pose_relation"),
+                PoseRelationExpectation.SEPARATED,
+                baseline_object_to_endpoint=_poses(0.0, 0.0, 0.0),
+            ),
+            BinaryEffectClause(
+                "source.constraint",
+                "source",
+                _source("source_constraint"),
+                BinaryEvidenceKind.CONSTRAINT,
+                False,
+            ),
+            PoseRelationClause(
+                "destination.pose",
+                "destination",
+                _source("destination_pose_relation"),
+                PoseRelationExpectation.MATCHED,
+            ),
+            BinaryEffectClause(
+                "destination.constraint",
+                "destination",
+                _source("destination_constraint"),
+                BinaryEvidenceKind.CONSTRAINT,
+                True,
+            ),
+        ),
+    )
+
+
+def _transfer_request() -> EffectVerificationRequest:
+    return _request(
+        effects=StateDelta(
+            held_object_updates={
+                _SOURCE_STATE_KEY: None,
+                _DESTINATION_STATE_KEY: _held(),
+            }
+        )
+    )
+
+
+def _transfer_evidence(
+    *,
+    source_offsets: tuple[float, ...],
+    source_constraints: tuple[bool, ...],
+    destination_offsets: tuple[float, ...],
+    destination_constraints: tuple[bool, ...],
+    timestamp: float,
+    revision: int,
+) -> Mapping[str, EffectEvidenceBatch]:
+    valid = torch.ones(len(source_offsets), dtype=torch.bool)
+    errors = tuple(None for _ in source_offsets)
+    return {
+        "source.pose": PoseRelationEvidenceBatch(
+            "source.pose",
+            _poses(*source_offsets),
+            valid,
+            errors,
+            timestamp,
+            _ENV_IDS,
+            revision,
+        ),
+        "source.constraint": BinaryEffectEvidenceBatch(
+            "source.constraint",
+            BinaryEvidenceKind.CONSTRAINT,
+            torch.tensor(source_constraints, dtype=torch.bool),
+            valid,
+            errors,
+            timestamp,
+            _ENV_IDS,
+            revision,
+        ),
+        "destination.pose": PoseRelationEvidenceBatch(
+            "destination.pose",
+            _poses(*destination_offsets),
+            valid,
+            errors,
+            timestamp,
+            _ENV_IDS,
+            revision,
+        ),
+        "destination.constraint": BinaryEffectEvidenceBatch(
+            "destination.constraint",
+            BinaryEvidenceKind.CONSTRAINT,
+            torch.tensor(destination_constraints, dtype=torch.bool),
+            valid,
+            errors,
+            timestamp,
+            _ENV_IDS,
+            revision,
+        ),
+    }
 
 
 def _request(
@@ -544,6 +664,183 @@ def test_valid_raw_evidence_rejects_nonfinite_payload() -> None:
         )
 
 
+def test_expectation_decision_owns_all_outcome_masks() -> None:
+    satisfied = torch.tensor([True, False, False])
+    contradicted = torch.tensor([False, True, False])
+    inverse_satisfied = torch.tensor([False, True, False])
+
+    decision = EffectExpectationDecision(
+        "source",
+        satisfied,
+        contradicted,
+        inverse_satisfied,
+    )
+    satisfied.zero_()
+    contradicted.zero_()
+    inverse_satisfied.zero_()
+
+    assert decision.satisfied_mask.tolist() == [True, False, False]
+    assert decision.contradicted_mask.tolist() == [False, True, False]
+    assert decision.inverse_satisfied_mask.tolist() == [False, True, False]
+
+    aggregate = EffectMonitorDecision(
+        decision.satisfied_mask,
+        decision.contradicted_mask,
+        (decision,),
+    )
+    decision.satisfied_mask.zero_()
+    assert aggregate.expectation_decisions[0].satisfied_mask.tolist() == [
+        True,
+        False,
+        False,
+    ]
+
+
+def test_expectation_decision_requires_complete_inverse_to_be_contradicted() -> None:
+    with pytest.raises(ValueError, match="subset of contradicted_mask"):
+        EffectExpectationDecision(
+            "source",
+            torch.tensor([False]),
+            torch.tensor([False]),
+            torch.tensor([True]),
+        )
+
+
+def test_transfer_monitor_reports_each_expectation_and_strong_inverse() -> None:
+    monitor = CompositeEffectMonitor(
+        _transfer_spec(),
+        CompositeEffectMonitorCfg(consecutive_samples=1),
+    )
+
+    decision = monitor.observe(
+        _transfer_request(),
+        _transfer_evidence(
+            source_offsets=(
+                _DETACHED_OFFSET,
+                _ATTACHED_OFFSET,
+                _DETACHED_OFFSET,
+            ),
+            source_constraints=(False, True, False),
+            destination_offsets=(
+                _ATTACHED_OFFSET,
+                _ATTACHED_OFFSET,
+                _DETACHED_OFFSET,
+            ),
+            destination_constraints=(True, True, False),
+            timestamp=2.0,
+            revision=4,
+        ),
+    )
+
+    outcomes = {
+        outcome.expectation_id: outcome for outcome in decision.expectation_decisions
+    }
+    assert tuple(outcomes) == ("source", "destination")
+    assert outcomes["source"].satisfied_mask.tolist() == [True, False, True]
+    assert outcomes["source"].contradicted_mask.tolist() == [False, True, False]
+    assert outcomes["source"].inverse_satisfied_mask.tolist() == [False, True, False]
+    assert outcomes["destination"].satisfied_mask.tolist() == [True, True, False]
+    assert outcomes["destination"].contradicted_mask.tolist() == [False, False, True]
+    assert outcomes["destination"].inverse_satisfied_mask.tolist() == [
+        False,
+        False,
+        True,
+    ]
+    assert decision.success_mask.tolist() == [True, False, False]
+    assert decision.failure_mask.tolist() == [False, True, True]
+
+
+def test_transfer_contradictions_are_counted_per_expectation() -> None:
+    monitor = CompositeEffectMonitor(
+        _transfer_spec(),
+        CompositeEffectMonitorCfg(consecutive_samples=2),
+    )
+    request = _transfer_request()
+    monitor.observe(
+        request,
+        _transfer_evidence(
+            source_offsets=(_ATTACHED_OFFSET,) * 3,
+            source_constraints=(True,) * 3,
+            destination_offsets=(_ATTACHED_OFFSET,) * 3,
+            destination_constraints=(True,) * 3,
+            timestamp=2.0,
+            revision=4,
+        ),
+    )
+
+    alternating = monitor.observe(
+        request,
+        _transfer_evidence(
+            source_offsets=(_DETACHED_OFFSET,) * 3,
+            source_constraints=(False,) * 3,
+            destination_offsets=(_DETACHED_OFFSET,) * 3,
+            destination_constraints=(False,) * 3,
+            timestamp=3.0,
+            revision=5,
+        ),
+    )
+    persistent = monitor.observe(
+        request,
+        _transfer_evidence(
+            source_offsets=(_DETACHED_OFFSET,) * 3,
+            source_constraints=(False,) * 3,
+            destination_offsets=(_DETACHED_OFFSET,) * 3,
+            destination_constraints=(False,) * 3,
+            timestamp=4.0,
+            revision=6,
+        ),
+    )
+
+    assert not alternating.failure_mask.any()
+    assert persistent.failure_mask.all()
+    persistent_outcomes = {
+        outcome.expectation_id: outcome for outcome in persistent.expectation_decisions
+    }
+    assert persistent_outcomes["source"].satisfied_mask.all()
+    assert persistent_outcomes["destination"].contradicted_mask.all()
+
+
+def test_transfer_success_never_stitches_expectations_across_ticks() -> None:
+    monitor = CompositeEffectMonitor(
+        _transfer_spec(),
+        CompositeEffectMonitorCfg(consecutive_samples=1),
+    )
+    request = _transfer_request()
+    source_only = monitor.observe(
+        request,
+        _transfer_evidence(
+            source_offsets=(_DETACHED_OFFSET,) * 3,
+            source_constraints=(False,) * 3,
+            destination_offsets=(_UNRESOLVED_OFFSET,) * 3,
+            destination_constraints=(True,) * 3,
+            timestamp=2.0,
+            revision=4,
+        ),
+    )
+    destination_only = monitor.observe(
+        request,
+        _transfer_evidence(
+            source_offsets=(_UNRESOLVED_OFFSET,) * 3,
+            source_constraints=(False,) * 3,
+            destination_offsets=(_ATTACHED_OFFSET,) * 3,
+            destination_constraints=(True,) * 3,
+            timestamp=3.0,
+            revision=5,
+        ),
+    )
+
+    assert not source_only.success_mask.any()
+    assert not source_only.failure_mask.any()
+    assert not destination_only.success_mask.any()
+    assert not destination_only.failure_mask.any()
+    destination_outcomes = {
+        outcome.expectation_id: outcome
+        for outcome in destination_only.expectation_decisions
+    }
+    assert not destination_outcomes["source"].satisfied_mask.any()
+    assert destination_outcomes["destination"].satisfied_mask.all()
+
+
 def test_monitor_requires_pose_and_binary_physical_evidence() -> None:
     monitor = CompositeEffectMonitor(
         _attach_spec(),
@@ -561,6 +858,9 @@ def test_monitor_requires_pose_and_binary_physical_evidence() -> None:
 
     assert not pose_only.success_mask.any()
     assert pose_only.failure_mask.all()
+    outcome = pose_only.expectation_decisions[0]
+    assert outcome.contradicted_mask.all()
+    assert not outcome.inverse_satisfied_mask.any()
 
 
 def test_monitor_reports_success_only_for_complete_consecutive_evidence() -> None:

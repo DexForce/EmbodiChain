@@ -41,7 +41,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     TrackingPolicy,
 )
-from embodichain.lab.sim.skills import SkillPolicyPreset
+from embodichain.lab.sim.skills import SkillPolicyPreset, WorkflowRecoveryPolicy
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 
 if TYPE_CHECKING:
@@ -86,6 +86,7 @@ def create_parallel_jaw_grasp_pose_generator(
     *,
     sample_count: int,
     opening_margin: float,
+    approach_direction_samples: int = 4,
     force_refresh: bool = False,
 ) -> AntipodalGraspPoseGenerator:
     """Create the shared antipodal service for the configured parallel jaws."""
@@ -98,7 +99,10 @@ def create_parallel_jaw_grasp_pose_generator(
 
     return AntipodalGraspPoseGenerator(
         DH_PGI_140_80_GRIPPER_MODEL,
-        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=sample_count),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+            sample_count=sample_count,
+            approach_direction_samples=approach_direction_samples,
+        ),
         collision_cfg=ParallelJawGraspCollisionCfg(
             opening_margin=opening_margin,
             point_sample_density=0.012,
@@ -119,6 +123,7 @@ def create_ur5_skill_profile_binding(
     sample_count: int,
     skill_ids: Sequence[str],
     action_option_templates: Mapping[str, ActionOptions],
+    workflow_recovery_policy: WorkflowRecoveryPolicy | None = None,
 ) -> SimulationRobotSkillProfileBinding:
     """Declare semantic manipulation resources for the common UR5 robot."""
     if type(sample_count) is not int or sample_count < 2:
@@ -131,6 +136,15 @@ def create_ur5_skill_profile_binding(
 
     if not isinstance(action_option_templates, Mapping):
         raise TypeError("action_option_templates must be a mapping.")
+    selected_workflow_recovery = (
+        WorkflowRecoveryPolicy()
+        if workflow_recovery_policy is None
+        else workflow_recovery_policy
+    )
+    if not isinstance(selected_workflow_recovery, WorkflowRecoveryPolicy):
+        raise TypeError(
+            "workflow_recovery_policy must be a WorkflowRecoveryPolicy or None."
+        )
     if robot is None:
         hand_open_values = (0.0,)
         hand_close_values = (DEFAULT_GRIPPER_CLOSE_QPOS,)
@@ -200,6 +214,7 @@ def create_ur5_skill_profile_binding(
                     in_flight_max_abs_error=DEFAULT_TRACKING_ERROR_THRESHOLD,
                     terminal_max_abs_error=DEFAULT_TRACKING_ERROR_THRESHOLD,
                 ),
+                workflow_recovery_policy=selected_workflow_recovery,
             ),
         ),
         default_preset="safe",

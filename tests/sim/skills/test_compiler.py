@@ -70,6 +70,7 @@ from embodichain.lab.sim.skills.compiler import (
     GroundedSemanticCall,
     HandOverPoseProvider,
     HandOverPoseTargets,
+    HeldObjectGuardBaseline,
     RegisteredSemanticLowerer,
     RelationTargetGrounder,
     SemanticLowering,
@@ -148,7 +149,7 @@ def _preset(
     registered: bool = False,
     **kwargs: object,
 ) -> SkillPolicyPreset:
-    """Build one complete schema-v2 test preset."""
+    """Build one complete schema-v3 test preset."""
     kwargs.setdefault(
         "action_option_templates",
         _action_option_templates(registered=registered),
@@ -748,6 +749,28 @@ def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding() ->
     assert revised.effect_spec is not None
     assert revised.effect_spec.invocation_revision == 1
     assert revised.effect_monitor.spec.invocation_revision == 1
+    assert len(first.effect_guards) == 1
+    guard = first.effect_guards[0]
+    assert guard.guard_id == "destination_attached"
+    assert guard.active_segments == ("lift",)
+    assert guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert guard.task_state_key == "manipulator"
+    assert guard.invalidation_task_state_keys == ("manipulator",)
+    assert guard.retry_action is True
+    assert guard.effect_monitor is not first.effect_monitor
+    assert guard.effect_spec.effect_kind is SemanticEffectKind.ATTACH
+    assert repeated.effect_guards[0].effect_monitor is not guard.effect_monitor
+    assert len(first.effect_gates) == 1
+    gate = first.effect_gates[0]
+    assert gate.gate_id == "destination_acquired"
+    assert gate.segment_name == "lift"
+    assert gate.retry_action is True
+    assert gate.effect_monitor is not first.effect_monitor
+    assert gate.effect_monitor is not guard.effect_monitor
+    assert gate.effect_spec.state_expectations[0].expectation_id == "destination"
+    assert gate.effect_spec.effect_kind is SemanticEffectKind.ATTACH
+    assert first.invocation.phase_effect_gates == (gate.requirement,)
+    assert repeated.effect_gates[0].effect_monitor is not gate.effect_monitor
 
 
 def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
@@ -799,6 +822,31 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     )
     assert isinstance(constraint, BinaryEffectClause)
     assert constraint.expected is False
+    assert len(grounded.effect_guards) == 1
+    guard = grounded.effect_guards[0]
+    assert guard.guard_id == "source_attached"
+    assert guard.active_segments == ("approach",)
+    assert guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+    assert guard.task_state_key == "manipulator"
+    assert guard.invalidation_task_state_keys == ("manipulator",)
+    assert guard.retry_action is False
+    guard_pose, guard_constraint = guard.effect_spec.clauses
+    assert isinstance(guard_pose, PoseRelationClause)
+    assert guard_pose.expectation is PoseRelationExpectation.MATCHED
+    assert guard_pose.baseline_object_to_endpoint is None
+    assert isinstance(guard_constraint, BinaryEffectClause)
+    assert guard_constraint.expected is True
+    assert len(grounded.effect_gates) == 1
+    gate = grounded.effect_gates[0]
+    assert gate.gate_id == "source_released"
+    assert gate.segment_name == "retract"
+    assert gate.retry_action is True
+    assert gate.effect_spec.effect_kind is SemanticEffectKind.RELEASE
+    gate_relation = gate.effect_spec.state_expectations[0]
+    assert isinstance(gate_relation, HeldObjectStateExpectation)
+    assert gate_relation.expectation_id == "source"
+    assert gate_relation.relation is HeldObjectRelation.DETACHED
+    assert grounded.invocation.phase_effect_gates == (gate.requirement,)
 
 
 def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
@@ -847,6 +895,51 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
     assert destination_constraint.expected is False
     assert type(grounded.invocation.goal) is HandOverGoal
     assert type(grounded.invocation.skill_options) is HandOverOptions
+    assert tuple(guard.guard_id for guard in grounded.effect_guards) == (
+        "source_attached",
+        "destination_attached",
+    )
+    source_guard, destination_guard = grounded.effect_guards
+    assert source_guard.active_segments == (
+        "pickup_transport",
+        "receive_approach",
+        "receive_close",
+    )
+    assert source_guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert source_guard.task_state_key == "left"
+    assert source_guard.invalidation_task_state_keys == ("left",)
+    assert source_guard.retry_action is True
+    assert destination_guard.active_segments == ("handover_release", "place")
+    assert destination_guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert destination_guard.task_state_key == "right"
+    assert destination_guard.invalidation_task_state_keys == ("left", "right")
+    assert destination_guard.retry_action is True
+    assert tuple(gate.gate_id for gate in grounded.effect_gates) == (
+        "source_acquired",
+        "destination_acquired",
+        "source_released",
+    )
+    source_acquired, destination_acquired, source_released = grounded.effect_gates
+    assert source_acquired.segment_name == "pickup_transport"
+    assert destination_acquired.segment_name == "handover_release"
+    assert source_released.segment_name == "place"
+    assert all(gate.retry_action for gate in grounded.effect_gates)
+    assert source_acquired.effect_monitor is not source_guard.effect_monitor
+    assert destination_acquired.effect_monitor is not destination_guard.effect_monitor
+    source_acquired_relation = source_acquired.effect_spec.state_expectations[0]
+    destination_acquired_relation = destination_acquired.effect_spec.state_expectations[
+        0
+    ]
+    source_released_relation = source_released.effect_spec.state_expectations[0]
+    assert isinstance(source_acquired_relation, HeldObjectStateExpectation)
+    assert isinstance(destination_acquired_relation, HeldObjectStateExpectation)
+    assert isinstance(source_released_relation, HeldObjectStateExpectation)
+    assert source_acquired_relation.relation is HeldObjectRelation.ATTACHED
+    assert destination_acquired_relation.relation is HeldObjectRelation.ATTACHED
+    assert source_released_relation.relation is HeldObjectRelation.DETACHED
+    assert grounded.invocation.phase_effect_gates == tuple(
+        gate.requirement for gate in grounded.effect_gates
+    )
 
 
 def test_registered_call_without_monitor_has_no_effect_contract() -> None:
@@ -878,6 +971,8 @@ def test_registered_call_without_monitor_has_no_effect_contract() -> None:
     assert workflow.calls[0].effect_monitor_ref is None
     assert grounded.effect_spec is None
     assert grounded.effect_monitor is None
+    assert grounded.effect_gates == ()
+    assert grounded.invocation.phase_effect_gates == ()
     options = grounded.invocation.skill_options
     assert type(options) is PickUpOptions
     assert options.pre_grasp_distance == 0.07

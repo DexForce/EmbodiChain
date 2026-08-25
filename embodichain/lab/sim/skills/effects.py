@@ -1510,11 +1510,89 @@ _EVIDENCE_TYPES = (
 
 
 @dataclass(frozen=True, slots=True, eq=False)
+class EffectExpectationDecision:
+    """Per-row outcome for one physical state expectation.
+
+    Rows absent from both ``satisfied_mask`` and ``contradicted_mask`` remain
+    unresolved.  ``inverse_satisfied_mask`` is deliberately stronger than
+    contradiction: it requires every clause in the expectation group to have
+    reached its explicit inverse band for the configured consecutive-sample
+    window.  This distinction lets failure reconciliation retain a relation
+    only from complete inverse evidence rather than from one contradictory
+    clause.
+    """
+
+    expectation_id: str
+    satisfied_mask: torch.Tensor
+    contradicted_mask: torch.Tensor
+    inverse_satisfied_mask: torch.Tensor
+
+    def __post_init__(self) -> None:
+        _validate_identifier(
+            self.expectation_id,
+            field_name="EffectExpectationDecision.expectation_id",
+        )
+        for field_name in (
+            "satisfied_mask",
+            "contradicted_mask",
+            "inverse_satisfied_mask",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{field_name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.dim() != 1:
+                raise ValueError(f"{field_name} must be a one-dimensional bool tensor.")
+        masks = (
+            self.satisfied_mask,
+            self.contradicted_mask,
+            self.inverse_satisfied_mask,
+        )
+        if any(value.shape != masks[0].shape for value in masks[1:]):
+            raise ValueError("Expectation decision masks must have equal shapes.")
+        if any(value.device != masks[0].device for value in masks[1:]):
+            raise ValueError("Expectation decision masks must use the same device.")
+        if (self.satisfied_mask & self.contradicted_mask).any():
+            raise ValueError("satisfied_mask and contradicted_mask must not overlap.")
+        if (self.inverse_satisfied_mask & ~self.contradicted_mask).any():
+            raise ValueError(
+                "inverse_satisfied_mask must be a subset of contradicted_mask."
+            )
+        object.__setattr__(self, "satisfied_mask", self.satisfied_mask.clone())
+        object.__setattr__(
+            self,
+            "contradicted_mask",
+            self.contradicted_mask.clone(),
+        )
+        object.__setattr__(
+            self,
+            "inverse_satisfied_mask",
+            self.inverse_satisfied_mask.clone(),
+        )
+
+    def snapshot(self) -> EffectExpectationDecision:
+        """Return an independently owned expectation outcome."""
+        return EffectExpectationDecision(
+            expectation_id=self.expectation_id,
+            satisfied_mask=self.satisfied_mask,
+            contradicted_mask=self.contradicted_mask,
+            inverse_satisfied_mask=self.inverse_satisfied_mask,
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class EffectMonitorDecision:
-    """Uncorrelated per-row decision; runtime adds the verification ID."""
+    """Uncorrelated aggregate and per-expectation monitor decision.
+
+    When ``expectation_decisions`` is non-empty, the aggregate masks are
+    authoritative reductions of that current observation: success is the
+    conjunction of every satisfied mask and failure is the union of every
+    contradicted mask.  This prevents callers from combining expectation
+    outcomes observed on different ticks.
+    """
 
     success_mask: torch.Tensor
     failure_mask: torch.Tensor
+    expectation_decisions: tuple[EffectExpectationDecision, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("success_mask", "failure_mask"):
@@ -1529,8 +1607,51 @@ class EffectMonitorDecision:
             raise ValueError("Decision masks must use the same device.")
         if (self.success_mask & self.failure_mask).any():
             raise ValueError("Decision masks must not overlap.")
+        expectation_decisions = tuple(self.expectation_decisions)
+        if not all(
+            type(value) is EffectExpectationDecision for value in expectation_decisions
+        ):
+            raise TypeError(
+                "expectation_decisions must contain exact "
+                "EffectExpectationDecision values."
+            )
+        expectation_ids = [value.expectation_id for value in expectation_decisions]
+        if len(set(expectation_ids)) != len(expectation_ids):
+            raise ValueError("Expectation decision IDs must be unique.")
+        if expectation_decisions:
+            for value in expectation_decisions:
+                if value.satisfied_mask.shape != self.success_mask.shape:
+                    raise ValueError(
+                        "Expectation and aggregate decision masks must have "
+                        "equal shapes."
+                    )
+                if value.satisfied_mask.device != self.success_mask.device:
+                    raise ValueError(
+                        "Expectation and aggregate decision masks must use the "
+                        "same device."
+                    )
+            expected_success = torch.ones_like(self.success_mask)
+            expected_failure = torch.zeros_like(self.failure_mask)
+            for value in expectation_decisions:
+                expected_success &= value.satisfied_mask
+                expected_failure |= value.contradicted_mask
+            if not torch.equal(self.success_mask, expected_success):
+                raise ValueError(
+                    "success_mask must equal the conjunction of expectation "
+                    "satisfied masks."
+                )
+            if not torch.equal(self.failure_mask, expected_failure):
+                raise ValueError(
+                    "failure_mask must equal the union of expectation "
+                    "contradicted masks."
+                )
         object.__setattr__(self, "success_mask", self.success_mask.clone())
         object.__setattr__(self, "failure_mask", self.failure_mask.clone())
+        object.__setattr__(
+            self,
+            "expectation_decisions",
+            tuple(value.snapshot() for value in expectation_decisions),
+        )
 
 
 class EffectMonitor(ABC):
@@ -1876,8 +1997,9 @@ class CompositeEffectMonitor(EffectMonitor):
         self._cfg = cfg
         self._attempt_generation: int | None = None
         self._active_env_ids: frozenset[int] = frozenset()
-        self._success_counts: dict[int, int] = {}
-        self._failure_counts: dict[int, int] = {}
+        self._success_counts: dict[tuple[str, int], int] = {}
+        self._failure_counts: dict[tuple[str, int], int] = {}
+        self._inverse_success_counts: dict[tuple[str, int], int] = {}
         self._last_observations: dict[int, tuple[float, int]] = {}
 
     @property
@@ -1901,6 +2023,7 @@ class CompositeEffectMonitor(EffectMonitor):
             self._active_env_ids = active_env_ids
             self._success_counts.clear()
             self._failure_counts.clear()
+            self._inverse_success_counts.clear()
             self._last_observations.clear()
             return
         if not active_env_ids.issubset(self._active_env_ids):
@@ -1910,14 +2033,19 @@ class CompositeEffectMonitor(EffectMonitor):
             )
         self._active_env_ids = active_env_ids
         self._success_counts = {
-            env_id: count
-            for env_id, count in self._success_counts.items()
-            if env_id in active_env_ids
+            key: count
+            for key, count in self._success_counts.items()
+            if key[1] in active_env_ids
         }
         self._failure_counts = {
-            env_id: count
-            for env_id, count in self._failure_counts.items()
-            if env_id in active_env_ids
+            key: count
+            for key, count in self._failure_counts.items()
+            if key[1] in active_env_ids
+        }
+        self._inverse_success_counts = {
+            key: count
+            for key, count in self._inverse_success_counts.items()
+            if key[1] in active_env_ids
         }
         self._last_observations = {
             env_id: observation
@@ -1996,9 +2124,13 @@ class CompositeEffectMonitor(EffectMonitor):
             raise ValueError("Evidence contains env_ids outside the effect spec.")
         missing = self._active_env_ids.difference(observed_env_ids)
         if missing:
+            expectation_ids = {clause.expectation_id for clause in self._spec.clauses}
             for env_id in missing:
-                self._success_counts[env_id] = 0
-                self._failure_counts[env_id] = 0
+                for expectation_id in expectation_ids:
+                    key = (expectation_id, env_id)
+                    self._success_counts[key] = 0
+                    self._failure_counts[key] = 0
+                    self._inverse_success_counts[key] = 0
             raise ValueError(
                 "Evidence must cover every active request env_id exactly once; "
                 f"missing {sorted(missing)}. Acquisition failures must be explicit "
@@ -2095,8 +2227,6 @@ class CompositeEffectMonitor(EffectMonitor):
             requested_at=request.requested_at,
             deadline=request.deadline,
         )
-        success_mask = torch.zeros_like(request.env_mask)
-        failure_mask = torch.zeros_like(request.env_mask)
         spec_rows = {
             int(env_id): row
             for row, env_id in enumerate(self._spec.env_ids.detach().cpu().tolist())
@@ -2128,7 +2258,23 @@ class CompositeEffectMonitor(EffectMonitor):
         clauses_by_expectation: dict[str, list[EffectClause]] = {}
         for clause in self._spec.clauses:
             clauses_by_expectation.setdefault(clause.expectation_id, []).append(clause)
-        physical_expectation_ids = set(clauses_by_expectation)
+        physical_expectation_ids = tuple(
+            expectation.expectation_id
+            for expectation in self._spec.state_expectations
+            if expectation.expectation_id in clauses_by_expectation
+        )
+        satisfied_masks = {
+            expectation_id: torch.zeros_like(request.env_mask)
+            for expectation_id in physical_expectation_ids
+        }
+        contradicted_masks = {
+            expectation_id: torch.zeros_like(request.env_mask)
+            for expectation_id in physical_expectation_ids
+        }
+        inverse_satisfied_masks = {
+            expectation_id: torch.zeros_like(request.env_mask)
+            for expectation_id in physical_expectation_ids
+        }
 
         for evidence_row, env_id in enumerate(observed_env_ids):
             request_row = request_rows.get(env_id)
@@ -2138,8 +2284,6 @@ class CompositeEffectMonitor(EffectMonitor):
                 continue
             self._last_observations[env_id] = observation_token
             spec_row = spec_rows[env_id]
-            expected_groups = True
-            contradicted_group = False
             for expectation_id in physical_expectation_ids:
                 classifications = [
                     self._classify_clause(
@@ -2153,24 +2297,55 @@ class CompositeEffectMonitor(EffectMonitor):
                 ]
                 group_expected = all(value == 1 for value in classifications)
                 group_contradicted = any(value == -1 for value in classifications)
-                expected_groups = expected_groups and group_expected
-                contradicted_group = contradicted_group or group_contradicted
-            if expected_groups:
-                self._success_counts[env_id] = self._success_counts.get(env_id, 0) + 1
-                self._failure_counts[env_id] = 0
-            elif contradicted_group:
-                self._failure_counts[env_id] = self._failure_counts.get(env_id, 0) + 1
-                self._success_counts[env_id] = 0
-            else:
-                self._success_counts[env_id] = 0
-                self._failure_counts[env_id] = 0
-            if self._success_counts.get(env_id, 0) >= self._cfg.consecutive_samples:
-                success_mask[request_row] = True
-            elif self._failure_counts.get(env_id, 0) >= self._cfg.consecutive_samples:
-                failure_mask[request_row] = True
-        success_mask &= request.env_mask
-        failure_mask &= request.env_mask
-        return EffectMonitorDecision(success_mask, failure_mask)
+                group_inverse_satisfied = all(value == -1 for value in classifications)
+                key = (expectation_id, env_id)
+                if group_expected:
+                    self._success_counts[key] = self._success_counts.get(key, 0) + 1
+                else:
+                    self._success_counts[key] = 0
+                if group_contradicted:
+                    self._failure_counts[key] = self._failure_counts.get(key, 0) + 1
+                else:
+                    self._failure_counts[key] = 0
+                if group_inverse_satisfied:
+                    self._inverse_success_counts[key] = (
+                        self._inverse_success_counts.get(key, 0) + 1
+                    )
+                else:
+                    self._inverse_success_counts[key] = 0
+                if self._success_counts.get(key, 0) >= self._cfg.consecutive_samples:
+                    satisfied_masks[expectation_id][request_row] = True
+                if self._failure_counts.get(key, 0) >= self._cfg.consecutive_samples:
+                    contradicted_masks[expectation_id][request_row] = True
+                if (
+                    self._inverse_success_counts.get(key, 0)
+                    >= self._cfg.consecutive_samples
+                ):
+                    inverse_satisfied_masks[expectation_id][request_row] = True
+
+        expectation_decisions = tuple(
+            EffectExpectationDecision(
+                expectation_id=expectation_id,
+                satisfied_mask=satisfied_masks[expectation_id] & request.env_mask,
+                contradicted_mask=(
+                    contradicted_masks[expectation_id] & request.env_mask
+                ),
+                inverse_satisfied_mask=(
+                    inverse_satisfied_masks[expectation_id] & request.env_mask
+                ),
+            )
+            for expectation_id in physical_expectation_ids
+        )
+        success_mask = request.env_mask.clone()
+        failure_mask = torch.zeros_like(request.env_mask)
+        for decision in expectation_decisions:
+            success_mask &= decision.satisfied_mask
+            failure_mask |= decision.contradicted_mask
+        return EffectMonitorDecision(
+            success_mask,
+            failure_mask,
+            expectation_decisions,
+        )
 
 
 class CompositeEffectMonitorFactory(EffectMonitorFactory):
@@ -2222,6 +2397,7 @@ __all__ = [
     "EffectEvidenceAddress",
     "EffectEvidenceBatch",
     "EffectEvidenceSourceRef",
+    "EffectExpectationDecision",
     "EffectMonitor",
     "EffectMonitorDecision",
     "EffectMonitorFactory",

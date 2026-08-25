@@ -32,7 +32,7 @@ from embodichain.lab.gym.envs.expert_program import (
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim.atomic_actions import PickUpOptions, PlaceOptions
-from embodichain.lab.sim.skills import SceneDynamics
+from embodichain.lab.sim.skills import SceneDynamics, WorkflowRecoveryPolicy
 
 from ._common import (
     HAND_CONTROL_PART,
@@ -95,6 +95,9 @@ def create_repeated_pick_place_robot_profile_binding() -> (
             "pick": PickUpOptions(),
             "place": PlaceOptions(),
         },
+        workflow_recovery_policy=WorkflowRecoveryPolicy(
+            max_recovery_attempts=2,
+        ),
     )
 
 

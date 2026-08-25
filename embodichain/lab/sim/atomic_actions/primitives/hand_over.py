@@ -63,6 +63,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     plan_named_arm_trajectory,
     repeat_qpos,
+    require_shared_task_state_key,
     resolve_batched_pose,
 )
 from embodichain.lab.sim.atomic_actions.requirements import (
@@ -71,7 +72,7 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     FORWARD_KINEMATICS_CAPABILITY,
     SkillBindingContract,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     interpolate_hand_qpos,
     translate_pose_world,
@@ -118,6 +119,7 @@ class HandOverOptions(ActionOptions):
 class _Participant:
     """One candidate arm, its hand, and resolved semantic hand commands."""
 
+    task_state_key: str
     arm: JointPositionTarget
     hand: JointPositionTarget
     hand_open_qpos: torch.Tensor
@@ -139,6 +141,10 @@ class _DirectionalPlan:
     success: torch.Tensor
     trajectory: torch.Tensor
     segment_lengths: dict[str, int]
+    handover_object_to_eef: torch.Tensor
+    handover_grasp_xpos: torch.Tensor
+    receive_object_to_eef: torch.Tensor
+    receive_grasp_xpos: torch.Tensor
 
 
 class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
@@ -235,9 +241,16 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         def participant(
             arm: JointPositionTarget,
             hand: JointPositionTarget,
+            motion_endpoint: EndpointBinding,
             grasp_endpoint: EndpointBinding,
+            participant_name: str,
         ) -> _Participant:
             return _Participant(
+                task_state_key=require_shared_task_state_key(
+                    motion_endpoint,
+                    grasp_endpoint,
+                    participant=participant_name,
+                ),
                 arm=arm,
                 hand=hand,
                 hand_open_qpos=grasp_endpoint.joint_positions(
@@ -255,8 +268,20 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
 
         return _HandOverResources(
-            first=participant(first_arm, first_hand, first_grasp),
-            second=participant(second_arm, second_hand, second_grasp),
+            first=participant(
+                first_arm,
+                first_hand,
+                first_motion,
+                first_grasp,
+                "HandOver source participant",
+            ),
+            second=participant(
+                second_arm,
+                second_hand,
+                second_motion,
+                second_grasp,
+                "HandOver destination participant",
+            ),
         )
 
     def _plan(
@@ -311,8 +336,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         # already holds an object are therefore ineligible and remain at the
         # observed robot state.
         eligible = ~context.task.held_object_mask(
-            resources.first.arm.control_part
-        ) & ~context.task.held_object_mask(resources.second.arm.control_part)
+            resources.first.task_state_key
+        ) & ~context.task.held_object_mask(resources.second.task_state_key)
         self._report_waypoint_failure(
             context,
             "candidate_arms_unoccupied",
@@ -347,6 +372,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
             success = selected.success & eligible
             full = selected.trajectory
+            first_object_to_eef = selected.handover_object_to_eef
+            first_grasp_xpos = selected.handover_grasp_xpos
+            second_object_to_eef = selected.receive_object_to_eef
+            second_grasp_xpos = selected.receive_grasp_xpos
         elif (~first_is_handover).all():
             selected = self._plan_direction(
                 context,
@@ -364,6 +393,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
             success = selected.success & eligible
             full = selected.trajectory
+            first_object_to_eef = selected.receive_object_to_eef
+            first_grasp_xpos = selected.receive_grasp_xpos
+            second_object_to_eef = selected.handover_object_to_eef
+            second_grasp_xpos = selected.handover_grasp_xpos
         else:
             first_to_second = self._plan_direction(
                 context,
@@ -410,6 +443,38 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 first_to_second.trajectory,
                 second_to_first.trajectory,
             )
+            pose_selector = first_is_handover[:, None, None]
+            first_object_to_eef = torch.where(
+                pose_selector,
+                first_to_second.handover_object_to_eef,
+                second_to_first.receive_object_to_eef,
+            )
+            first_grasp_xpos = torch.where(
+                pose_selector,
+                first_to_second.handover_grasp_xpos,
+                second_to_first.receive_grasp_xpos,
+            )
+            second_object_to_eef = torch.where(
+                pose_selector,
+                first_to_second.receive_object_to_eef,
+                second_to_first.handover_object_to_eef,
+            )
+            second_grasp_xpos = torch.where(
+                pose_selector,
+                first_to_second.receive_grasp_xpos,
+                second_to_first.handover_grasp_xpos,
+            )
+
+        first_candidate = HeldObjectState(
+            semantics=goal.semantics,
+            object_to_eef=first_object_to_eef,
+            grasp_xpos=first_grasp_xpos,
+        )
+        second_candidate = HeldObjectState(
+            semantics=goal.semantics,
+            object_to_eef=second_object_to_eef,
+            grasp_xpos=second_grasp_xpos,
+        )
 
         return self.build_plan(
             request,
@@ -420,8 +485,29 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 env_ids=context.env_ids,
                 step_dt=context.require_control_dt(),
             ),
-            expected_effects=StateDelta(),
+            expected_effects=StateDelta(
+                held_object_updates={
+                    resources.first.task_state_key: None,
+                    resources.second.task_state_key: None,
+                },
+            ),
+            effect_candidates=StateDelta(
+                held_object_updates={
+                    resources.first.task_state_key: first_candidate,
+                    resources.second.task_state_key: second_candidate,
+                },
+            ),
             segment_lengths=segment_lengths,
+            scene_dependency_monitor_until=(
+                {}
+                if goal.semantics.entity_id is None
+                else {
+                    goal.semantics.entity_id: (
+                        segment_lengths["pickup_approach"]
+                        + segment_lengths["pickup_close"]
+                    )
+                }
+            ),
         )
 
     def _find_symmetric_nearest_xpos(
@@ -879,6 +965,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             success=success,
             trajectory=trajectory,
             segment_lengths=actual_lengths,
+            handover_object_to_eef=handover_object_to_eef,
+            handover_grasp_xpos=handover_grasp,
+            receive_object_to_eef=receive_object_to_eef,
+            receive_grasp_xpos=receive_grasp,
         )
 
     @staticmethod

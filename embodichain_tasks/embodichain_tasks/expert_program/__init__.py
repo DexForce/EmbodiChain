@@ -18,10 +18,12 @@
 
 from __future__ import annotations
 
+from .hand_over import HandOverEnv
 from .open_drawer import ExpertProgramOpenDrawerEnv
 from .repeated_pick_place import ExpertProgramRepeatedPickPlaceEnv
 
 __all__ = [
     "ExpertProgramOpenDrawerEnv",
     "ExpertProgramRepeatedPickPlaceEnv",
+    "HandOverEnv",
 ]

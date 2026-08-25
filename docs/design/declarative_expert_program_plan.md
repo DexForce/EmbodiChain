@@ -1,13 +1,12 @@
 # Declarative Expert Programs and the Unified Semantic Skill Runtime
 
-- Status: Expert Program runtime, strict frontend, and two official reference
-  integrations are on `main`; this branch removes the duplicate cube task,
-  migrates Open Drawer, and adds deterministic rollout measurement. Broader
-  physical qualification remains in progress.
-- Main baseline: `origin/main@b7404d29` (strict Expert Program frontend, merged
-  through [PR #498](https://github.com/DexForce/EmbodiChain/pull/498))
-- Current branch: `feat/expert-program-rollout-validation`
-  ([PR #500](https://github.com/DexForce/EmbodiChain/pull/500))
+- Status: Expert Program registration and runtime catalogs are integrated; this
+  stack layer adds physical-effect reconciliation, segment gates, held-object
+  guards, bounded workflow reacquisition, and a dual-UR5 HandOver reference.
+- Stack baseline: `feat/expert-program-registration-runtime-catalog`
+  ([PR #504](https://github.com/DexForce/EmbodiChain/pull/504))
+- Current branch: `feat/workflow-reacquisition`
+  ([PR #480](https://github.com/DexForce/EmbodiChain/pull/480))
 - Last updated: 2026-08-24
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
@@ -320,7 +319,52 @@ The following boundaries remain distinct:
 Combining these would either duplicate atomic recovery or let a dataset metric
 fabricate verified task state.
 
-### 7.5 Demo execution
+### 7.5 Physical gates, reconciliation, and workflow reacquisition
+
+`EffectVerificationResult` carries row-local `invalidation_mask` and
+`retry_mask` values, both constrained to the terminal `failure_mask`.
+Invalidation applies only an invocation-owned, removal-only
+`failure_invalidation`; effect providers cannot inject replacement symbolic
+state. Retry is selected only when per-expectation evidence proves that replay
+of the same invocation remains physically valid. Unresolved terminal evidence
+is reconciled fail-closed at the action deadline.
+
+Curated semantic calls also install two kinds of in-flight physical boundary:
+
+- `HeldObjectGuardRequest` observes a held relation before commands in named
+  segments. Proven loss removes only action-authorized held-object relations
+  before retry or `RECOVERY_REQUIRED`.
+- `PhaseEffectGateRequest` blocks entry to a named segment until the preceding
+  physical transition succeeds. While evidence is unresolved, execution
+  replays the preceding command for the synchronized active cohort; success
+  unlocks motion without committing terminal `TaskState`.
+
+Pick gates destination attachment before `lift`, and Place gates source release
+before `retract`. The unified HandOver primitive owns pickup, transfer,
+placement, and final release. It gates source pickup before
+`pickup_transport`, destination pickup before `handover_release`, and source
+release before `place`; source- and destination-held guards cover the segments
+that physically depend on those relations. Every gate and guard owns a fresh
+monitor instance and correlated request ID. None may create a simulator joint,
+managed attachment, frozen body, or pose override.
+
+`SkillPolicyPreset` schema version 3 adds `WorkflowRecoveryPolicy`, whose
+per-row attempt budget defaults to zero. After terminal reconciliation, a row
+that still has the required verified source relation retries the failed call
+from a fresh observation. If the relation was invalidated, the runtime executes
+a real semantic Pick on the failed call's resolved source resource and then
+retries the original call. Recovery calls use ordinary analysis, grounding,
+planning, dispatch, physical verification, and trace recording; they are not
+symbolic edits or a second workflow executor. Successful peer rows remain at
+the existing shared call barrier.
+
+Timing remains owned by `PlanningContext.control_dt`. The factory does not
+rewrite `MotionPolicy` cadence. A joint-position task may disable runner holds
+during effect polling or after successful completion so the bridge can replay
+the last accepted environment action and preserve gripper preload. Failure and
+cancellation retain the normal cancel-then-safe-hold path.
+
+### 7.6 Demo execution
 
 `AtomicDemoBridge` never calls `env.step()` itself. It yields owned
 `ControllerAction` values through lazy `DemoSegment` iterables. The shared
@@ -331,17 +375,19 @@ The buffered sink owns only unconsumed Gym actions and safe-stop handshakes. It
 does not publish evidence or maintain a redundant wrapper around each buffered
 action.
 
-### 7.6 Official reference task integrations
+### 7.7 Official reference task integrations
 
-The current branch keeps both canonical task examples under
+The current branch keeps the canonical task examples under
 `embodichain_tasks.expert_program`. The repeated cube task has one Gym ID and
 implementation; its former compatibility package and ID are removed. Open
-Drawer likewise has one canonical integration, `ExpertProgramOpenDrawer-v1`.
+Drawer likewise has one canonical integration, `ExpertProgramOpenDrawer-v1`,
+and the dual-UR5 reference adds `HandOver-v1`.
 
 | Environment ID | Declarative path | Atomic path | Application acceptance |
 |---|---|---|---|
 | `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; the task installs no contact or constraint observer | standard `object_near_target` validator checks the measured cube position against the selected cyclic target; physical rollout remains unqualified without grasp evidence |
 | `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call whose executable-free payload names only the drawer handle | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal`; the selected policy preset is the sole owner of `SlideOptions` | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
+| `HandOver-v1` | one `Segment(HandOver)` with a final object target | unified built-in `HandOver` over disjoint left/right arm-and-gripper resources, standalone grasp-pose generators, and physical gates/guards | rigid-object settling plus `object_near_target`; supported-simulation recovery qualification remains a later stack layer |
 
 Both configurations load their Expert Program through the top-level
 `expert_program_path`, bind the same UR5 parallel-gripper embodiment explicitly,
@@ -504,12 +550,18 @@ Implemented on the current branch:
 - shared object-near-target and articulation-joint-position validation;
 - simulation scene/profile/evidence factories;
 - canonical `SkillRuntime` integration and fail-closed parallel coordinator;
+- per-expectation terminal outcomes, removal-only failure reconciliation,
+  segment-scoped held-object guards, blocking physical-effect gates, and
+  bounded workflow retry/reacquisition;
 - official `ExpertProgramRepeatedPickPlace-v1` integration with a packaged
   three-cycle program, cyclic targets, rigid-object settling, segment
   validation, and no task-local contact or constraint observer;
 - official `ExpertProgramOpenDrawer-v1` integration with a strict registered
   call lowered to `Slide`, shared articulation settling, and declarative
   measured passive-joint application acceptance;
+- official `HandOver-v1` dual-UR5/PGI integration using the unified HandOver
+  primitive, standalone grasp-planning services, settling, and declarative
+  target validation;
 - focused unit and fake-port coverage for schema, compiler, bridge, environment,
   evidence, timing, recovery metadata, parallel failure cases, and both task
   reference integrations;
@@ -518,7 +570,7 @@ Implemented on the current branch:
 
 The registration follow-up makes
 `SimulationExpertProgramRegistration` the sole extension owner for the
-standard runtime path. `SkillPolicyPreset` schema version 2 requires an exact
+standard runtime path. `SkillPolicyPreset` schema version 3 requires an exact
 typed action-option template for every reachable semantic call; lowering may
 replace only explicitly compiler-owned dynamic target fields. Endpoint
 adapters, ordered Gym transports, and a parallel-safety factory enter the
