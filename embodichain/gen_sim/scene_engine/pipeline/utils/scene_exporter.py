@@ -213,6 +213,7 @@ class SceneExporter:
             "category": scene_object.category,
             "name": scene_object.name,
             "description": scene_object.description,
+            "is_articulated": scene_object.is_articulated,
             "shape": {
                 "shape_type": "Mesh",
                 "fpath": asset_relative_path,

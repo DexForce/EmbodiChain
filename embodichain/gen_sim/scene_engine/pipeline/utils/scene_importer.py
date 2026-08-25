@@ -280,6 +280,9 @@ class SceneExportImporter:
             entry.get("support_optimization_rect_xy"),
             field_name=f"{uid}.support_optimization_rect_xy",
         )
+        is_articulated = entry.get("is_articulated")
+        if not isinstance(is_articulated, bool):
+            raise ValueError(f"Scene object {uid!r} is_articulated must be a boolean.")
 
         pos_y_up = _Z_UP_TO_Y_UP_ROTATION @ np.asarray(pos_z_up, dtype=float)
         rotation_z_up = Rotation.from_euler("XYZ", rot_z_up, degrees=True).as_matrix()
@@ -302,6 +305,7 @@ class SceneExportImporter:
                 default=uid,
             ),
             description=str(entry.get("description") or uid),
+            is_articulated=is_articulated,
             simready_glb_path=str(glb_path),
             rot=rot_y_up.tolist(),
             pos=pos_y_up.tolist(),

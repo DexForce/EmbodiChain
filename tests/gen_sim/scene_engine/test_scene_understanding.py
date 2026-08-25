@@ -29,6 +29,7 @@ from embodichain.gen_sim.scene_engine.pipeline.generation import scene_understan
 from embodichain.gen_sim.scene_engine.pipeline.utils import image_segmentation_utils
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     render_asset_mask_id_overlay,
+    save_visible_rgba_crop,
 )
 
 
@@ -39,12 +40,14 @@ def _response(*, asset_name: str = "cup") -> str:
                 "category": "dining_table",
                 "name": "wooden table",
                 "description": "A rectangular wooden table.",
+                "is_articulated": False,
             },
             "assets": [
                 {
                     "category": "cup",
                     "name": asset_name,
                     "description": "A small ceramic cup.",
+                    "is_articulated": False,
                 }
             ],
         }
@@ -59,6 +62,19 @@ def test_image_object_analysis_parses_code_fence_and_assigns_stable_ids() -> Non
     assert scene.table is not None
     assert scene.table.id == "table"
     assert [asset.id for asset in scene.assets] == ["cup_001"]
+    assert scene.assets[0].is_articulated is False
+
+
+def test_image_object_analysis_preserves_articulated_object_metadata() -> None:
+    response = json.loads(_response())
+    response["assets"][0]["category"] = "drawer"
+    response["assets"][0]["is_articulated"] = True
+
+    scene = scene_understanding._parse_image_object_analysis_response(
+        json.dumps(response)
+    )
+
+    assert scene.assets[0].is_articulated is True
 
 
 def test_image_object_analysis_accepts_name_with_spatial_words() -> None:
@@ -127,6 +143,77 @@ def test_asset_mask_id_overlay_excludes_the_table_mask(tmp_path: Path) -> None:
     with Image.open(rendered_path) as overlay:
         assert overlay.getpixel((10, 10)) == (0, 0, 0)
         assert overlay.getpixel((377, 180)) != (0, 0, 0)
+
+
+def test_visible_rgba_crop_preserves_object_pixels_on_a_fixed_canvas(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "scene.png"
+    mask_path = tmp_path / "cup_mask.png"
+    output_path = tmp_path / "object_images" / "cup_001_rgba.png"
+    image_size = (100, 60)
+    Image.new("RGB", image_size, "black").save(image_path)
+    with Image.open(image_path) as image:
+        image = image.copy()
+    ImageDraw.Draw(image).rectangle((30, 20, 70, 40), fill="red")
+    image.save(image_path)
+
+    mask = Image.new("L", image_size, 0)
+    ImageDraw.Draw(mask).rectangle((30, 20, 70, 40), fill=255)
+    mask.save(mask_path)
+
+    rendered_path = save_visible_rgba_crop(
+        image_path=image_path,
+        mask_path=mask_path,
+        output_path=output_path,
+    )
+
+    with Image.open(rendered_path) as rgba:
+        assert rgba.mode == "RGBA"
+        assert rgba.size == (512, 512)
+        assert rgba.getpixel((256, 256))[:3] == (255, 0, 0)
+        assert rgba.getpixel((0, 0))[3] == 0
+
+
+def test_visible_rgba_observations_leave_unsegmented_objects_empty(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "scene.png"
+    mask_path = tmp_path / "cup_mask.png"
+    image_size = (40, 40)
+    Image.new("RGB", image_size, "red").save(image_path)
+    mask = Image.new("L", image_size, 0)
+    ImageDraw.Draw(mask).rectangle((10, 10, 30, 30), fill=255)
+    mask.save(mask_path)
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="cup_001",
+                kind="asset",
+                category="cup",
+                name="red cup",
+                description="A red cup.",
+                mask_path=str(mask_path),
+            ),
+            SceneObject(
+                id="book_001",
+                kind="asset",
+                category="book",
+                name="blue book",
+                description="A blue book.",
+            ),
+        ]
+    )
+
+    scene_understanding._save_visible_rgba_observations(
+        image_path=image_path,
+        output_root=tmp_path / "object_images",
+        scene=scene,
+    )
+
+    assert scene.assets[0].visible_rgba_path is not None
+    assert Path(scene.assets[0].visible_rgba_path).is_file()
+    assert scene.assets[1].visible_rgba_path is None
 
 
 def test_asset_mask_id_label_font_fits_the_mask_bbox() -> None:
