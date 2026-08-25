@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from ..core import AtomicAction
+from .axis_align import AxisAlign, AxisAlignGoal, AxisAlignOptions
 from .coordinated_pickment import (
     CoordinatedPickGoal,
     CoordinatedPickment,
@@ -29,7 +30,7 @@ from .coordinated_placement import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
 )
-from .hand_over import HandOver, HandOverOptions
+from .hand_over import HandOver, HandOverGoal, HandOverOptions
 from .move_end_effector import (
     EndEffectorPoseGoal,
     MoveEndEffector,
@@ -44,14 +45,25 @@ from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import Press, PressGoal, PressOptions
+from .pour import Pour, PourGoal, PourOptions
+from .slide import (
+    Slide,
+    SlideGoal,
+    SlideOptions,
+)
+from .twist import Twist, TwistGoal, TwistOptions
 
 BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
     MoveJoints,
     PickUp,
+    AxisAlign,
     MoveHeldObject,
     Place,
+    Pour,
     Press,
+    Slide,
+    Twist,
     CoordinatedPickment,
     CoordinatedPlacement,
     HandOver,
@@ -60,6 +72,9 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
 
 __all__ = [
     "AssembleGoal",
+    "AxisAlign",
+    "AxisAlignGoal",
+    "AxisAlignOptions",
     "BUILTIN_ACTION_TYPES",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
@@ -70,6 +85,7 @@ __all__ = [
     "EndEffectorPoseGoal",
     "GraspGoal",
     "HandOver",
+    "HandOverGoal",
     "HandOverOptions",
     "HeldObjectPoseGoal",
     "JointPositionGoal",
@@ -84,7 +100,16 @@ __all__ = [
     "Place",
     "PlaceGoal",
     "PlaceOptions",
+    "Pour",
+    "PourGoal",
+    "PourOptions",
     "Press",
     "PressGoal",
     "PressOptions",
+    "Slide",
+    "SlideGoal",
+    "SlideOptions",
+    "Twist",
+    "TwistGoal",
+    "TwistOptions",
 ]

@@ -18,30 +18,124 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
 import torch
 
-from embodichain.utils import logger
-
+from ..bindings import EndpointBinding
 from ..state import PlanningContext
+from ..trajectory_ops import build_pose_plan_states
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.planners import MotionGenerator
+
+    from ..policies import MotionPolicy
+
+
+def resolve_batched_pose(
+    pose: torch.Tensor,
+    *,
+    num_envs: int,
+    device: torch.device,
+    name: str,
+) -> torch.Tensor:
+    """Copy and broadcast one homogeneous pose to ``(num_envs, 4, 4)``."""
+    pose = pose.to(device=device, dtype=torch.float32).clone()
+    if pose.shape == (4, 4):
+        pose = pose.unsqueeze(0).repeat(num_envs, 1, 1)
+    if pose.shape != (num_envs, 4, 4):
+        raise ValueError(
+            f"{name} must have shape (4, 4) or ({num_envs}, 4, 4), "
+            f"but got {pose.shape}"
+        )
+    return pose
 
 
 def resolve_object_target(
     target: torch.Tensor,
     *,
-    n_envs: int,
+    num_envs: int,
     device: torch.device,
     name: str = "object_target_pose",
 ) -> torch.Tensor:
-    """Broadcast an object target pose to ``(n_envs, 4, 4)`` or validate it."""
-    target = target.to(device=device, dtype=torch.float32).clone()
-    if target.shape == (4, 4):
-        target = target.unsqueeze(0).repeat(n_envs, 1, 1)
-    if target.shape != (n_envs, 4, 4):
-        logger.log_error(
-            f"{name} must be (4, 4) or ({n_envs}, 4, 4), but got {target.shape}",
-            ValueError,
+    """Broadcast an object target pose to ``(num_envs, 4, 4)`` or validate it."""
+    return resolve_batched_pose(
+        target,
+        num_envs=num_envs,
+        device=device,
+        name=name,
+    )
+
+
+def require_shared_task_state_key(
+    motion: EndpointBinding,
+    grasp: EndpointBinding,
+    *,
+    participant: str,
+) -> str:
+    """Return the logical held-object key shared by one participant's endpoints."""
+    motion_key = motion.task_state_key
+    grasp_key = grasp.task_state_key
+    if motion_key != grasp_key:
+        raise ValueError(
+            f"{participant} motion and grasp endpoints must share one "
+            f"task_state_key, but got {motion_key!r} and {grasp_key!r}."
         )
-    return target
+    if not isinstance(motion_key, str) or not motion_key:
+        raise ValueError(f"{participant} task_state_key must be a non-empty string.")
+    return motion_key
+
+
+def repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
+    """Repeat batched joint positions along a waypoint dimension."""
+    return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
+
+
+def assemble_full_robot_trajectory(
+    base_qpos: torch.Tensor,
+    part_trajectories: Sequence[tuple[Sequence[int], torch.Tensor]],
+) -> torch.Tensor:
+    """Overlay control-part trajectories on repeated full-robot positions."""
+    if not part_trajectories:
+        raise ValueError("part_trajectories must not be empty.")
+    n_waypoints = part_trajectories[0][1].shape[1]
+    full = repeat_qpos(
+        base_qpos.to(
+            device=part_trajectories[0][1].device,
+            dtype=torch.float32,
+        ),
+        n_waypoints,
+    ).clone()
+    for joint_ids, trajectory in part_trajectories:
+        full[:, :, list(joint_ids)] = trajectory
+    return full
+
+
+def plan_named_arm_trajectory(
+    motion_generator: MotionGenerator,
+    control_part: str,
+    start_qpos: torch.Tensor,
+    target_poses: torch.Tensor,
+    n_waypoints: int,
+    motion_policy: MotionPolicy,
+    interpolation_dt: float | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Plan a fixed-size pose trajectory for one named manipulator."""
+    result = motion_generator.generate(
+        build_pose_plan_states(target_poses),
+        options=motion_policy.to_motion_gen_options(
+            start_qpos=start_qpos,
+            control_part=control_part,
+            sample_count=n_waypoints,
+            interpolation_dt=interpolation_dt,
+        ),
+    )
+    if not isinstance(result.success, torch.Tensor):
+        raise TypeError("Motion planning success must be a torch.Tensor.")
+    if result.positions is None:
+        raise ValueError("Motion planning result must contain joint positions.")
+    return result.success, result.positions
 
 
 def arm_qpos_from_state(
@@ -52,4 +146,12 @@ def arm_qpos_from_state(
     return context.robot.qpos[:, arm_joint_ids]
 
 
-__all__ = ["arm_qpos_from_state", "resolve_object_target"]
+__all__ = [
+    "arm_qpos_from_state",
+    "assemble_full_robot_trajectory",
+    "plan_named_arm_trajectory",
+    "require_shared_task_state_key",
+    "repeat_qpos",
+    "resolve_batched_pose",
+    "resolve_object_target",
+]

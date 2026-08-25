@@ -48,7 +48,7 @@ Cloth bodies require both voxelization and physical attributes.
 | `min_position_iters` | `int` | `4` | Minimum solver iterations for position correction. |
 | `min_velocity_iters` | `int` | `1` | Minimum solver iterations for velocity updates. |
 
-For Cloth Object tutorial, please refer to the [Cloth Body Simulation](https://dexforce.github.io/EmbodiChain/tutorial/create_cloth.html).
+For a runnable example, see the {doc}`Cloth Body Simulation </tutorial/create_cloth>` tutorial.
 
 
 ### Setup & Initialization
@@ -135,9 +135,9 @@ For cloth objects, the state is represented by the positions and velocities of i
 
 | Method | Return Shape | Description |
 | :--- | :--- | :--- |
-| `get_current_vertex_position()` | `(n_envs, n_vert, 3)` | Current positions of mesh vertices. |
-| `get_current_vertex_velocity()` | `(n_envs, n_vert, 3)` | Current positions of  mesh vertices. |
-| `get_rest_vertex_position()` | `(n_envs, n_vert, 3` | Rest (initial) positions of collision vertices. |
+| `get_current_vertex_position()` | `(num_envs, n_vert, 3)` | Current positions of mesh vertices. |
+| `get_current_vertex_velocity()` | `(num_envs, n_vert, 3)` | Current positions of  mesh vertices. |
+| `get_rest_vertex_position()` | `(num_envs, n_vert, 3` | Rest (initial) positions of collision vertices. |
 
 > Note: N is the number of environments/instances, V_col is the number of collision vertices, and V_sim is the number of simulation vertices.
 

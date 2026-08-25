@@ -2,15 +2,17 @@ embodichain.lab.sim.atomic_actions
 ==================================
 
 .. automodule:: embodichain.lab.sim.atomic_actions
+   :members:
+   :no-index:
 
    .. rubric:: Planning contracts
 
    .. autosummary::
 
-      ActionGoal
       ActionBinding
-      ResolvedActionBinding
-      ResolvedControlPart
+      EndpointBinding
+      RuntimeEndpointTarget
+      JointPositionTarget
       ControlCommand
       JointPositionCommand
       ControlPartCommandProfile
@@ -27,10 +29,26 @@ embodichain.lab.sim.atomic_actions
       PlanningContext
       StateDelta
       TimedTrajectory
+      RuntimeCommandPayload
+      JointPositionPayload
+      EndpointCommand
+      RuntimeCommandFrame
+      TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
       ActionPlan
       CompiledTrajectory
+
+   .. rubric:: Semantic resource contracts
+
+   .. autosummary::
+
+      SkillDescriptor
+      SkillBindingContract
+      SkillResourceSlot
+      SkillEndpointRequirement
+      DisjointSlotEndpoints
+      DisjointResourceSlots
 
    .. rubric:: Execution contracts
 
@@ -45,6 +63,8 @@ embodichain.lab.sim.atomic_actions
       RunnerStatus
       ObservationProvider
       CommandSink
+      EndpointCommandTransport
+      EndpointCommandRouter
       CommandAcknowledgement
       CommandAckStatus
       CommandDispatch
@@ -53,7 +73,9 @@ embodichain.lab.sim.atomic_actions
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
-      JointCommand
+      EffectVerificationRequirement
+      EffectVerificationResult
+      ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind
       ExecutionStatus
@@ -65,18 +87,36 @@ embodichain.lab.sim.atomic_actions
       EndEffectorPoseGoal
       JointPositionGoal
       GraspGoal
+      HandOverGoal
+      AxisAlignGoal
+      AxisAlignOptions
+      AxisAlignAffordance
       HeldObjectPoseGoal
+      PourGoal
+      PourOptions
       PlaceGoal
       AssembleGoal
       PressGoal
+      PressOptions
+      PressAffordance
+      SlideGoal
+      SlideOptions
+      SlideAffordance
+      TwistGoal
+      TwistOptions
+      TwistAffordance
       CoordinatedPickGoal
       CoordinatedPlacementGoal
       MoveEndEffector
       MoveJoints
       PickUp
+      AxisAlign
       MoveHeldObject
+      Pour
       Place
       Press
+      Slide
+      Twist
       CoordinatedPickment
       CoordinatedPlacement
       HandOver
@@ -86,8 +126,45 @@ embodichain.lab.sim.atomic_actions
    :hidden:
 
    embodichain.lab.sim.atomic_actions.primitives
+   embodichain.lab.sim.atomic_actions.tracking
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Semantic resource contracts
+---------------------------
+
+.. autoclass:: SkillDescriptor
+   :members:
+
+.. autoclass:: SkillBindingContract
+   :members:
+
+.. autoclass:: SkillResourceSlot
+   :members:
+
+.. autoclass:: SkillEndpointRequirement
+   :members:
+
+.. autoclass:: DisjointSlotEndpoints
+   :members:
+
+.. autoclass:: DisjointResourceSlots
+   :members:
+
+Standard capability identifiers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autodata:: JOINT_POSITION_CAPABILITY
+
+.. autodata:: CARTESIAN_POSE_CAPABILITY
+
+.. autodata:: FORWARD_KINEMATICS_CAPABILITY
+
+.. autodata:: INVERSE_KINEMATICS_CAPABILITY
+
+.. autodata:: BATCH_INVERSE_KINEMATICS_CAPABILITY
+
+.. autodata:: GRASP_CAPABILITY
 
 Planning and state
 ------------------
@@ -95,10 +172,13 @@ Planning and state
 .. autoclass:: ActionBinding
    :members:
 
-.. autoclass:: ResolvedActionBinding
+.. autoclass:: EndpointBinding
    :members:
 
-.. autoclass:: ResolvedControlPart
+.. autoclass:: RuntimeEndpointTarget
+   :members:
+
+.. autoclass:: JointPositionTarget
    :members:
 
 .. autoclass:: ControlCommand
@@ -151,6 +231,21 @@ Planning and state
 .. autoclass:: TimedTrajectory
    :members:
 
+.. autoclass:: RuntimeCommandPayload
+   :members:
+
+.. autoclass:: JointPositionPayload
+   :members:
+
+.. autoclass:: EndpointCommand
+   :members:
+
+.. autoclass:: RuntimeCommandFrame
+   :members:
+
+.. autoclass:: TimedCommandSequence
+   :members:
+
 .. autoclass:: ActionPlan
    :members:
 
@@ -177,6 +272,12 @@ Engine and execution
    :members:
 
 .. autoclass:: CommandSink
+   :members:
+
+.. autoclass:: EndpointCommandTransport
+   :members:
+
+.. autoclass:: EndpointCommandRouter
    :members:
 
 .. autoclass:: ExecutionClock
@@ -209,9 +310,6 @@ Engine and execution
 .. autoclass:: ExecutionTick
    :members:
 
-.. autoclass:: JointCommand
-   :members:
-
 .. autoclass:: ExecutionEvent
    :members:
 
@@ -221,6 +319,18 @@ Engine and execution
 .. autoclass:: ExecutionStatus
    :members:
 
+.. autoclass:: EffectVerificationRequest
+   :members:
+
+.. autoclass:: EffectVerificationRequirement
+   :members:
+
+.. autoclass:: EffectVerificationResult
+   :members:
+
+.. autoclass:: ExecutionPlanAttempt
+   :members:
+
 Semantic objects and helpers
 ----------------------------
 
@@ -228,7 +338,4 @@ Semantic objects and helpers
    :members:
 
 .. autoclass:: HeldObjectState
-   :members:
-
-.. autoclass:: CoordinatedHeldObjectState
    :members:

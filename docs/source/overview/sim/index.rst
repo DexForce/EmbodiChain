@@ -9,7 +9,8 @@ designed around a small set of composable components: a
 :class:`SimulationManager` owns the simulation lifecycle, asset classes
 represent objects in the scene, sensors produce batched observations, solvers
 convert between joint space and task space, planners generate feasible
-trajectories, and atomic actions package common manipulation skills.
+trajectories, atomic actions package common manipulation primitives, and
+semantic skills bind robot-independent task intent to those primitives.
 
 Like EmbodiChain's environment and learning modules, the simulation framework is
 configuration driven. Scene elements are declared through config classes, spawned
@@ -43,8 +44,14 @@ The simulation stack can be read from the bottom up:
     |-- planners
     |   |-- joint-space and Cartesian trajectory generation
     |   `-- time parameterization and sampling utilities
-    `-- atomic actions
-        `-- reusable manipulation primitives built from assets, solvers, and planners
+    |-- scene registry
+    |   `-- canonical semantic identity, snapshots, and collision integration
+    |-- robot skill profiles
+    |   `-- generic resource graphs, capabilities, commands, and policy presets
+    |-- atomic actions
+    |   `-- reusable manipulation primitives built from assets, solvers, and planners
+    `-- semantic skills
+        `-- manifests, call catalogs, workflow compilation, and task execution
 
 The :class:`SimulationManager` is the entry point for most workflows. It creates
 the physics world, configures rendering and time stepping, lays out multiple
@@ -84,10 +91,23 @@ Submodule Relationships
        timing, and feasibility handling.
      - Use robot state and solver results to produce trajectories that can be
        replayed in the manager loop.
+   * - Scene registry
+     - Owns canonical typed entity IDs, aliases, pose sources, geometry,
+       affordances, hierarchy, and collision roles.
+     - Publishes registry-derived snapshots for atomic actions and validates
+       dynamic collision-world agreement with planners.
+   * - Robot skill profiles
+     - Describe embodiment resources as a generic graph with explicit
+       endpoints, capabilities, semantic commands, defaults, and presets.
+     - Match skill-local participants to robot resources and lower validated
+       selections to the current atomic-action binding contract.
    * - Atomic actions
      - Package complete manipulation primitives such as move, pick, and place.
      - Compose semantic targets, solvers, planners, and robot control into
        reusable higher-level skills.
+   * - Semantic skills
+     - Declare object-centric Pick, Place, HandOver, and registered calls without robot-specific bindings.
+     - Validate scene/profile manifests, JIT-ground calls to atomic actions, and retain verified state across dynamic task segments.
 
 Typical Data Flow
 -----------------
@@ -106,6 +126,11 @@ planner calls. An action engine receives semantic targets or poses, resolves the
 motion primitive sequence, and returns a trajectory that can be replayed in the
 simulation.
 
+For robot-independent task code, the semantic-skill layer validates typed scene
+references and robot capabilities before lowering one call at a time to that
+same action engine. It adds task segmentation and structured results without
+adding a separate planner or controller implementation.
+
 Choosing Where to Start
 -----------------------
 
@@ -120,6 +145,17 @@ Choosing Where to Start
   kinematics.
 - Use :doc:`planners/index` when a target pose or joint goal must become a
   time-ordered trajectory.
+- Use :doc:`scene_registry` when semantic calls, snapshots, and planner
+  obstacles must share one authoritative entity namespace.
+- Use :doc:`atomic_actions/robot_skill_profiles` when semantic skills should
+  resolve robot resources and policy presets from reusable embodiment
+  configuration.
+- Use :doc:`semantic_skills` when an application or agent should issue
+  robot-independent object-centric calls and retain verified state across
+  dynamic task segments.
+- Use :doc:`atomic_actions/expert_programs` when a task should declare semantic
+  calls, settling, validation, or parallel barriers from JSON/YAML without
+  implementing task-local motion generation.
 - Use :doc:`atomic actions <atomic_actions/index>` when building scripted manipulation from reusable
   motion primitives.
 
@@ -145,4 +181,6 @@ See Also
    viser_visualization.md
    solvers/index
    planners/index
+   scene_registry.md
+   semantic_skills.md
    atomic_actions/index

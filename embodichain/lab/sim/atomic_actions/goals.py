@@ -18,27 +18,16 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
-from typing import Any, ClassVar, Protocol, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 
 if TYPE_CHECKING:
     from .core import ObjectSemantics
     from .state import PlanningContext
-
-
-class ActionGoal(Protocol):
-    """Structural protocol implemented by atomic-action goal value objects.
-
-    Goals are action-owned dataclasses. They do not have to inherit from a
-    marker base class; the owning action declares its concrete ``GoalType``.
-    ``goal_kind`` supplies the stable semantic discriminator needed by skill
-    catalogs and agent-facing schemas.
-    """
-
-    goal_kind: ClassVar[str]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -68,8 +57,21 @@ class SceneEntityPose:
                 "relative_pose",
                 allow_waypoints=False,
             )
+            object.__setattr__(self, "relative_pose", self.relative_pose.clone())
         if not 0.0 <= self.minimum_confidence <= 1.0:
             raise ValueError("minimum_confidence must be in [0, 1].")
+
+    def snapshot(self) -> SceneEntityPose:
+        """Return an independently owned late-bound pose value.
+
+        Returns:
+            Exact scene reference with an owned relative-pose tensor.
+        """
+        return SceneEntityPose(
+            self.entity_id,
+            relative_pose=self.relative_pose,
+            minimum_confidence=self.minimum_confidence,
+        )
 
 
 PoseGoalValue = torch.Tensor | SceneEntityPose
@@ -97,9 +99,9 @@ def validate_pose_tensor(
         raise TypeError(f"{name} must be a torch.Tensor, got {type(value).__name__}.")
     valid_dims = {2, 3, 4} if allow_waypoints else {2, 3}
     if value.dim() not in valid_dims or value.shape[-2:] != (4, 4):
-        supported = "(4, 4), (n_envs, 4, 4)"
+        supported = "(4, 4), (num_envs, 4, 4)"
         if allow_waypoints:
-            supported += ", or (n_envs, n_waypoint, 4, 4)"
+            supported += ", or (num_envs, n_waypoint, 4, 4)"
         raise ValueError(
             f"{name} must have shape {supported}, got {tuple(value.shape)}."
         )
@@ -163,13 +165,55 @@ def resolve_pose_goal(
     return torch.bmm(pose, relative)
 
 
+def _resolve_object_pose(
+    semantics: ObjectSemantics,
+    context: PlanningContext,
+    *,
+    name: str = "object",
+) -> torch.Tensor:
+    """Resolve an object's pose from a snapshot or the deprecated live handle."""
+    from .core import ObjectSemantics
+
+    if not isinstance(semantics, ObjectSemantics):
+        raise TypeError("semantics must be an ObjectSemantics instance.")
+    if semantics.entity_id is not None:
+        return resolve_pose_goal(
+            SceneEntityPose(semantics.entity_id),
+            context,
+            name=name,
+        )
+    if semantics.entity is None:
+        raise ValueError(
+            f"{name} requires ObjectSemantics.entity_id or a legacy entity handle."
+        )
+    warnings.warn(
+        "Live pose grounding through ObjectSemantics.entity is deprecated; "
+        "set entity_id and provide the entity through PlanningContext.scene.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    pose = semantics.entity.get_local_pose(to_matrix=True)
+    if not isinstance(pose, torch.Tensor):
+        raise TypeError(f"{name} legacy entity pose must be a torch.Tensor.")
+    pose = pose.to(device=context.robot.qpos.device, dtype=torch.float32)
+    if pose.shape == (4, 4):
+        pose = pose.unsqueeze(0).expand(context.batch_size, -1, -1)
+    elif pose.shape != (context.batch_size, 4, 4):
+        raise ValueError(f"{name} legacy entity pose must match planning batch size.")
+    return pose.clone()
+
+
 def collect_scene_dependencies(value: Any) -> tuple[str, ...]:
     """Collect stable scene entity identifiers referenced by a goal value."""
+    from .core import ObjectSemantics
+
     found: set[str] = set()
 
     def visit(item: Any) -> None:
         if isinstance(item, SceneEntityPose):
             found.add(item.entity_id)
+        elif isinstance(item, ObjectSemantics):
+            return
         elif is_dataclass(item) and not isinstance(item, type):
             for data_field in fields(item):
                 visit(getattr(item, data_field.name))
@@ -191,8 +235,6 @@ def collect_scene_dependencies(value: Any) -> tuple[str, ...]:
 class ObjectActionGoal:
     """Shared semantic-object goal contract for object-centric skills."""
 
-    goal_kind: ClassVar[str] = "semantic_object"
-
     semantics: ObjectSemantics
     """Semantic and geometric description of the object."""
 
@@ -204,7 +246,6 @@ class ObjectActionGoal:
 
 
 __all__ = [
-    "ActionGoal",
     "ObjectActionGoal",
     "PoseGoalValue",
     "SceneEntityPose",

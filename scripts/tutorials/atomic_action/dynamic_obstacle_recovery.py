@@ -30,16 +30,15 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, VisualMaterialCfg
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
+    JointPositionPayload,
+    JointPositionTarget,
     MotionPolicy,
     RecoveryPolicy,
     RigidObjectSceneProvider,
@@ -47,6 +46,8 @@ from embodichain.lab.sim.atomic_actions import (
     RunnerStep,
     SimulationExecutionAdapter,
     TaskState,
+    TimedCommandSequence,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
@@ -56,11 +57,12 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
-from embodichain.lab.sim.robots import FrankaPandaCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.visualization import SceneOverlays, TrajectoryOverlay
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    add_tutorial_robot,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     prepare_tutorial_scene,
@@ -71,7 +73,6 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     stop_auto_play_recording,
 )
 
-ROBOT_UID = "dynamic_scene_franka"
 OBSTACLE_UID = "dynamic_obstacle"
 CONTROL_PART = "arm"
 SAMPLE_COUNT = 80
@@ -294,21 +295,35 @@ def _minimum_cuboid_clearance(
     return (outside_distance + inside_distance).amin(dim=1)
 
 
-def _trajectory_eef_positions(
+def _command_eef_positions(
     robot: Robot,
-    trajectory_positions: torch.Tensor,
+    commands: TimedCommandSequence,
     *,
     control_part: str,
 ) -> torch.Tensor:
-    """Convert a full-robot joint trajectory to batched EEF positions."""
-    if trajectory_positions.dim() != 3:
-        raise ValueError("trajectory_positions must have shape (B, N, robot_dof).")
-    joint_ids = robot.get_joint_ids(name=control_part)
-    arm_trajectory = trajectory_positions[:, :, joint_ids]
+    """Convert one endpoint command sequence to batched EEF positions."""
+    if not commands.frames:
+        raise ValueError("commands must contain at least one frame.")
     positions = []
-    for waypoint_index in range(arm_trajectory.shape[1]):
+    for frame in commands.frames:
+        matching_commands = tuple(
+            command
+            for command in frame.commands
+            if isinstance(command.target, JointPositionTarget)
+            and command.target.control_part == control_part
+        )
+        if len(matching_commands) != 1:
+            raise ValueError(
+                f"Expected one joint command for control part {control_part!r}, "
+                f"got {len(matching_commands)}."
+            )
+        payload = matching_commands[0].payload
+        if not isinstance(payload, JointPositionPayload):
+            raise TypeError(
+                f"Control part {control_part!r} did not receive joint positions."
+            )
         pose = robot.compute_fk(
-            qpos=arm_trajectory[:, waypoint_index],
+            qpos=payload.positions,
             name=control_part,
             to_matrix=True,
         )
@@ -373,11 +388,9 @@ def _publish_path_overlays(
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the dynamic-obstacle tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Demonstrate collision-world revision recovery with cuRobo."
+    parser = create_tutorial_argument_parser(
+        "Demonstrate collision-world revision recovery with cuRobo."
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--auto_play", action="store_true")
     parser.add_argument(
         "--no_obstacle_motion",
         action="store_true",
@@ -390,9 +403,7 @@ def main() -> None:
     """Move an obstacle during execution and replan from the latest snapshot."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = sim.add_robot(
-        cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
-    )
+    robot = add_tutorial_robot(sim, args.robot)
     obstacle = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid=OBSTACLE_UID,
@@ -417,7 +428,7 @@ def main() -> None:
     motion_gen = MotionGenerator(
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
-                robot_uid=ROBOT_UID,
+                robot_uid=robot.uid,
                 # The coarse default voxel fit under-covers the hand and
                 # fingertips. A denser fit plus modest padding matches the
                 # physical gripper without making the arm path infeasible.
@@ -442,6 +453,7 @@ def main() -> None:
     adapter = SimulationExecutionAdapter(
         sim,
         robot,
+        control_dt=COMMAND_CYCLE_TIME,
         scene_provider=scene_provider,
     )
 
@@ -457,27 +469,29 @@ def main() -> None:
         device=target_pose.device,
     )
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    invocation = ActionInvocation(
-        skill_id="move_end_effector",
-        goal=EndEffectorPoseGoal(target_pose),
-        binding=ActionBinding(manipulators={"primary": CONTROL_PART}),
+    invocation = engine.make_invocation(
+        "move_end_effector",
+        EndEffectorPoseGoal(target_pose),
+        control_parts={"primary": {"motion": CONTROL_PART}},
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=SAMPLE_COUNT,
-            control_dt=COMMAND_CYCLE_TIME,
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
-            tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
             action_timeout=30.0,
+        ),
+        tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+            terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
         ),
         invocation_id="dynamic-obstacle-demo",
     )
     task_state = TaskState.empty(robot.get_qpos().shape[0], robot.device)
     session = engine.start((invocation,), adapter.observe(task_state))
-    initial_eef_path = _trajectory_eef_positions(
+    initial_eef_path = _command_eef_positions(
         robot,
-        session.active_trajectory.positions,
+        session.active_commands,
         control_part=CONTROL_PART,
     )
     blocking_obstacle_pose, blocking_waypoint_index = _blocking_obstacle_pose(
@@ -496,7 +510,7 @@ def main() -> None:
         adapter,
         clock=adapter,
         # cuRobo can supply a trajectory duration, which takes precedence over
-        # MotionPolicy.control_dt. Keep a runner-side floor so the simulated
+        # engine fallback timing. Keep a runner-side floor so the simulated
         # controller receives enough feedback cycles to follow every waypoint.
         cfg=ExecutionRunnerCfg(minimum_cycle_time=COMMAND_CYCLE_TIME),
     )
@@ -573,7 +587,7 @@ def main() -> None:
             if event.kind in {
                 ExecutionEventKind.COLLISION_WORLD_CHANGED,
                 ExecutionEventKind.REPLANNED,
-                ExecutionEventKind.TRACKING_ERROR,
+                ExecutionEventKind.TRACKING_DIVERGED,
                 ExecutionEventKind.RECOVERY_EXHAUSTED,
             }:
                 rows = event.env_mask.nonzero(as_tuple=False).flatten().tolist()
@@ -586,9 +600,9 @@ def main() -> None:
                 and replanned_eef_path is None
                 and ExecutionEventKind.COLLISION_WORLD_CHANGED in observed_events
             ):
-                replanned_eef_path = _trajectory_eef_positions(
+                replanned_eef_path = _command_eef_positions(
                     robot,
-                    session.active_trajectory.positions,
+                    session.active_commands,
                     control_part=CONTROL_PART,
                 )
                 replan_detour = _maximum_path_deviation(

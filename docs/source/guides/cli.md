@@ -309,7 +309,7 @@ simulator:
 
 ```bash
 embodichain preview_lerobot_data \
-    outputs/lerobot/multi_segments \
+    outputs/lerobot/expert_program \
     --latest \
     --episode 0 \
     --expect-segments 3
@@ -349,7 +349,7 @@ embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/trai
 
 # Multi-GPU distributed training
 torchrun --nproc_per_node=2 -m embodichain train-rl \
-    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.yaml \
+    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json \
     --distributed
 ```
 

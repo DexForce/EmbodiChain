@@ -5,7 +5,7 @@
 | What | Path |
 |---|---|
 | Planner registry | `embodichain/lab/sim/planners/__init__.py` |
-| Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `PlanOptions`, `validate_plan_options` |
+| Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
 | TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
 | Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
@@ -97,6 +97,19 @@ Learning-based EEF waypoint planner. Franka Panda only.
 
 ### CuroboPlanner collision worlds
 
+`CuroboWorldCfg.rigid_objects` accepts either a mapping or a sequence. Use
+`Mapping[registry_id, RigidObject]` for a registry-backed integration. The
+mapping key is the authoritative logical/source obstacle ID used by the
+content-cache key, `collision_world_entity_ids`, and registry validation. For
+`cuboid` and `mesh`, it is also the physical YAML obstacle name and dynamic
+update key. For `sphere`, one static source expands to physical YAML names such
+as `registry_id_0`; dynamic sphere configuration is rejected, while cache and
+full-world identity remain keyed by `registry_id`. A registry mapping whose
+source lacks mesh geometry required by the selected representation fails fast
+instead of silently dropping the source. The sequence form is an advanced
+direct-core path that derives names from each object's `uid` or an
+`obstacle_<index>` fallback.
+
 `CuroboWorldCfg.multi_env` controls collision-world batching, not whether robot
 states or goals are batched:
 
@@ -116,16 +129,44 @@ differences require `"cuboid"` or `"mesh"` representation, registration in
 data and collision caches, so retain the shared default for identical rebased
 layouts.
 
-`BasePlanner.supports_collision_world_updates` and
+`BasePlanner.collision_world_info` and
 `with_collision_world(options, obstacle_poses=...)` form the generic per-plan
-dynamic-world bridge. The base implementation opts out and leaves options
-unchanged. `CuroboPlanner` opts in, clones the supplied pose tensors, and merges
-them into `CuroboPlanOptions.dynamic_obstacle_poses`.
+dynamic-world bridge. The base property returns `None` and the base hook leaves
+options unchanged. `CuroboPlanner` returns an immutable `CollisionWorldInfo`
+with updates enabled, clones the supplied pose tensors, and merges them into
+`CuroboPlanOptions.dynamic_obstacle_poses`.
 `MotionGenerator.supports_dynamic_collision_world` exposes the capability and
 `MotionGenerator.bind_collision_world()` owns option copying before forwarding
 to the backend hook. Atomic actions use that facade from their framework-owned
 `plan()` template when a `SceneSnapshot` declares collision entities;
 individual skills must not construct backend obstacle options themselves.
+`CollisionWorldInfo` carries the complete canonical world, its dynamic subset,
+the `"shared"` / `"per_env"` mode, and update capability as one validated
+contract. It requires unique canonical IDs and requires the dynamic subset to
+belong to the complete world. `MotionGenerator.collision_world_info` forwards
+that contract and retains derived ID/mode properties for callers. For cuRobo,
+the complete set is every mapping key (or inferred sequence name), while the
+dynamic set is exactly `CuroboWorldCfg.dynamic_obstacle_names`. Sphere-expanded
+physical YAML names are not part of either logical ID declaration.
+`CuroboWorldCfg` rejects duplicate obstacle names and requires every
+`dynamic_obstacle_name` to match an object registered in `rigid_objects`, so a
+planner-local mismatch fails before backend construction.
+
+For the canonical path, pass `SceneRegistry.collision_geometry_by_id()` into
+`CuroboWorldCfg.rigid_objects`, derive dynamic names from the registry, and call
+`SceneRegistry.make_planning_scene_provider(motion_generator, batch_size=...)`
+before execution. The geometry mapping excludes `NONE` registrations. The
+factory first requires the registry's complete `STATIC ∪ DYNAMIC` set to
+equal `MotionGenerator.collision_world_entity_ids`, then requires exact
+registry/derived-provider/planner dynamic-subset agreement. It also checks
+update capability for a non-empty dynamic set and the same collision-world
+batch mode. An external perception/hardware provider instead uses
+`validate_collision_integration(..., scene_provider=provider)`.
+
+One environment may infer `SHARED`; a multi-environment registry with dynamic
+entities must explicitly choose `SHARED` or `PER_ENV`. Alias normalization
+happens before planner construction, so planner IDs must never be simulator
+UIDs unless that string is also the chosen canonical registry ID.
 
 `MotionGenerator.resolve_plan_options()` is the corresponding option-ownership
 boundary. It copies caller-supplied typed options, otherwise obtains backend
@@ -142,7 +183,19 @@ Unified interface for trajectory planning with optional pre-interpolation.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the
-  supplied `start_qpos`.
+  supplied `start_qpos`, and every returned trajectory has explicit `dt` and
+  a `duration` derived from it.
+
+Grasp-pose generation is a sibling planning service, not a
+`MotionGenerator` feature. `embodichain.toolkits.graspkit` owns its standalone
+contract and the `pg_grasp` implementation without importing `embodichain.lab`.
+Atomic actions and Expert Program install a generator instance in
+`AtomicActionEngine`. The canonical repeated pick/place environment lives at
+`embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py` and
+creates the production simulation adapter; its factory owns the
+`AtomicActionEngine`, selected `MotionGenerator`, and grasp-pose generator.
+`ExpertProgramRepeatedPickPlace-v1` is the only registered task ID for that
+integration; there is no second compatibility package or direct-planning path.
 
 `MotionGenOptions` fields:
 
@@ -156,6 +209,7 @@ Unified interface for trajectory planning with optional pre-interpolation.
 | `control_part` | `str \| None` | `None` | Robot control part name (must match `RobotCfg.control_parts` key) |
 | `plan_opts` | `PlanOptions \| None` | `None` | Passed to the underlying planner |
 | `is_interpolate` | `bool` | `False` | Pre-interpolate waypoints before planning |
+| `interpolation_dt` | `float \| None` | `None` | Required explicit waypoint interval for `strategy="ik_interp"` and automatic joint interpolation fallback |
 | `interpolate_nums` | `int \| list[int]` | `10` | Points per segment (scalar or per-segment list) |
 | `is_linear` | `bool` | `False` | `True` = Cartesian linear interpolation; `False` = joint-space |
 | `interpolate_position_step` | `float` | `0.002` | Cartesian step size (meters) or joint step size (radians) |
@@ -192,10 +246,14 @@ Convenience constructors:
 | `positions` | `torch.Tensor \| None` | Joint positions `(B, N, DOF)` |
 | `velocities` | `torch.Tensor \| None` | Joint velocities `(B, N, DOF)` |
 | `accelerations` | `torch.Tensor \| None` | Joint accelerations `(B, N, DOF)` |
-| `dt` | `torch.Tensor \| None` | Per-step time durations `(B, N)` |
-| `duration` | `float \| torch.Tensor` | Total trajectory time per env `(B,)` |
+| `dt` | `torch.Tensor \| None` | Per-step arrival intervals `(B, N)`; required whenever `positions` is present |
+| `duration` | `torch.Tensor \| None` | Read-only total trajectory time `(B,)`, derived as `dt.sum(dim=1)` |
 
 Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env succeeded.
+`PlanResult` rejects positions with missing, malformed, or inconsistent timing.
+A failed result may omit the trajectory entirely by leaving `positions=None`.
+When `MotionGenerator` resamples a fully timed result, it preserves each row's
+total duration and emits new explicit arrival intervals.
 
 ### MoveType enum
 
@@ -221,11 +279,11 @@ Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env
 
 ### Registering a new planner
 
-1. Create a `BasePlanner` subclass with a `plan()` method decorated with `@validate_plan_options`.
+1. Create a `BasePlanner` subclass with a `plan()` method decorated with `@validate_plan_options`; every result containing positions must include `dt`, from which `duration` is derived.
 2. Create a `BasePlannerCfg` subclass with a unique `planner_type` string.
 3. Optionally create a `PlanOptions` subclass for planner-specific options.
-4. For a planner that accepts live obstacles, set
-   `supports_collision_world_updates = True` and implement
+4. For a planner that accepts live obstacles, override `collision_world_info`
+   with a `CollisionWorldInfo` whose `supports_updates=True`, and implement
    `with_collision_world()` without mutating caller-owned reusable options.
 5. Register in `MotionGenerator._support_planner_dict`:
    ```python
@@ -260,8 +318,19 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
 - **IK interpolation with unsupported MoveType** — `strategy="ik_interp"`
   accepts only `EEF_MOVE` and `JOINT_MOVE` and raises for other target types.
 - **Missing interpolation inputs** — `strategy="ik_interp"` requires explicit
-  `start_qpos` and `sample_count`; it never reads live robot state implicitly.
+  `start_qpos`, `sample_count`, and `interpolation_dt`; it never reads live robot
+  state or guesses a command period implicitly.
+- **Missing planner timing** — constructing a `PlanResult` with positions but
+  without `dt` raises immediately; `duration` is derived from `dt`.
+- **CUDA requested on a CPU-only runtime** — planner success-mask normalization
+  raises a direct `ValueError` before querying the active CUDA device. It never
+  silently falls back to CPU.
 - **Constraint tolerance** — `is_satisfied_constraint` allows 10% velocity / 25% acceleration overshoot. Dense waypoint trajectories may appear to violate constraints but pass validation.
 - **Fork safety with GPU sim** — `ToppraPlannerCfg.mp_context=None` defaults to `spawn` on GPU to avoid fork-after-CUDA-init hazards. Force `fork` only when the sim device is CPU or you have verified it is safe.
 - **cuRobo shared-world mismatch** — World-frame poses may differ solely because replicated arenas are offset. Compare poses after robot-base rebasing: keep `multi_env=False` if they match, and enable it only when robot-relative layouts differ.
-- **Dynamic obstacles silently stale** — A planner participates in atomic-action collision revision recovery only when it declares `supports_collision_world_updates=True`; its hook must bind every `collision_entity_id` pose into the current planning attempt.
+- **Dynamic obstacles silently stale** — A planner participates in atomic-action collision revision recovery only when `collision_world_info.supports_updates=True`; its hook must bind every `collision_entity_id` pose into the current planning attempt.
+- **Registry/planner identity drift** — Registry-backed cuRobo worlds must use a
+  canonical-ID mapping, not a list whose names are inferred from UIDs. Validate
+  exact full registry/planner collision-world agreement, dynamic
+  registry/provider/planner agreement, and batch-mode agreement through
+  `SceneRegistry` before starting execution.

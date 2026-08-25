@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar
 
 import torch
@@ -32,36 +32,59 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 
-from ._helpers import arm_qpos_from_state
-from ..affordance import AntipodalAffordance
-from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction, ObjectSemantics
-from ..effects import StateDelta
-from ..goals import (
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    require_shared_task_state_key,
+)
+from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
     ObjectActionGoal,
     PoseGoalValue,
+    _resolve_object_pose,
+    collect_scene_dependencies,
     resolve_pose_goal,
     validate_pose_goal,
 )
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
-from ..policies import MotionPolicy
-from ..state import HeldObjectState, PlanningContext
-from ..trajectory_ops import (
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
+from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+from embodichain.lab.sim.atomic_actions.requirements import (
+    BATCH_INVERSE_KINEMATICS_CAPABILITY,
+    CARTESIAN_POSE_CAPABILITY,
+    FORWARD_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
     split_three_segments,
     translate_pose_world,
 )
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class GraspGoal(ObjectActionGoal):
     """Pickup target with an affordance-selected or supplied grasp pose."""
-
-    goal_kind: ClassVar[str] = "grasp"
 
     grasp_xpos: PoseGoalValue | None = None
     """Optional end-effector grasp pose.
@@ -101,7 +124,7 @@ class PickUpOptions(ActionOptions):
     approach_alignment_max_angle: float | None = None
     """Optional maximum TCP z-axis deviation from the approach direction."""
 
-    downstream_object_target_poses: tuple[torch.Tensor, ...] = ()
+    downstream_object_target_poses: tuple[PoseGoalValue, ...] = ()
     """Future object poses that must be reachable with the selected grasp."""
 
     obj_upright_direction: torch.Tensor | None = None
@@ -135,10 +158,20 @@ class PickUpOptions(ActionOptions):
         ):
             raise ValueError("obj_upright_direction must be a finite (3,) tensor.")
         object.__setattr__(self, "approach_direction", self.approach_direction.clone())
+        downstream_targets: list[PoseGoalValue] = []
+        for index, value in enumerate(self.downstream_object_target_poses):
+            validate_pose_goal(
+                value,
+                f"downstream_object_target_poses[{index}]",
+                allow_waypoints=False,
+            )
+            downstream_targets.append(
+                value.clone() if isinstance(value, torch.Tensor) else value.snapshot()
+            )
         object.__setattr__(
             self,
             "downstream_object_target_poses",
-            tuple(value.clone() for value in self.downstream_object_target_poses),
+            tuple(downstream_targets),
         )
         if self.obj_upright_direction is not None:
             object.__setattr__(
@@ -152,19 +185,40 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     skill_id: ClassVar[str] = "pick_up"
     GoalType: ClassVar[type] = GraspGoal
     OptionsType: ClassVar[type] = PickUpOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        BATCH_INVERSE_KINEMATICS_CAPABILITY,
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
+                ),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
+            ),
+        ),
+    )
 
-    def __init__(
+    def _scene_dependencies(
         self,
-        default_options: PickUpOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
-    def _on_bind(self) -> None:
-        """Resolve engine-wide resources from the owning engine."""
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.robot_dof = self.robot.dof
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+    ) -> tuple[str, ...]:
+        """Include the semantic object when it has a stable scene identity."""
+        dependencies = set(super()._scene_dependencies(request))
+        entity_id = request.goal.semantics.entity_id
+        if entity_id is not None:
+            dependencies.add(entity_id)
+        dependencies.update(
+            collect_scene_dependencies(
+                request.skill_options.downstream_object_target_poses
+            )
+        )
+        return tuple(sorted(dependencies))
 
     def _get_full_pickup_trajectory(
         self,
@@ -174,10 +228,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         motion_policy: MotionPolicy,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
-        manipulator: ResolvedControlPart,
-        end_effector: ResolvedControlPart,
+        manipulator: JointPositionTarget,
+        end_effector: JointPositionTarget,
         hand_open_qpos: torch.Tensor,
         hand_grasp_qpos: torch.Tensor,
+        interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
@@ -194,8 +249,9 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             build_pose_plan_states(torch.stack([pre_grasp_xpos, grasp_xpos], dim=1)),
             options=motion_policy.to_motion_gen_options(
                 start_qpos=start_arm_qpos,
-                control_part=manipulator.name,
+                control_part=manipulator.control_part,
                 sample_count=n_approach,
+                interpolation_dt=interpolation_dt,
             ),
         )
         assert isinstance(approach_result.success, torch.Tensor)
@@ -212,8 +268,9 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             build_pose_plan_states(lift_xpos),
             options=motion_policy.to_motion_gen_options(
                 start_qpos=grasp_arm_qpos,
-                control_part=manipulator.name,
+                control_part=manipulator.control_part,
                 sample_count=n_lift,
+                interpolation_dt=interpolation_dt,
             ),
         )
         assert isinstance(lift_result.success, torch.Tensor)
@@ -228,7 +285,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         n_approach_actual = approach_arm.shape[1]
         n_lift_actual = lift_arm.shape[1]
         full = torch.empty(
-            (self.n_envs, n_approach_actual + n_close + n_lift_actual, self.robot_dof),
+            (
+                self.num_envs,
+                n_approach_actual + n_close + n_lift_actual,
+                self.robot_dof,
+            ),
             dtype=torch.float32,
             device=self.device,
         )
@@ -264,7 +325,19 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     ) -> ActionPlan:
         """Plan approach, close, and lift segments without committing attachment."""
         target = self.require_goal(request)
-        options = request.skill_options
+        options = replace(
+            request.skill_options,
+            downstream_object_target_poses=tuple(
+                resolve_pose_goal(
+                    downstream_target,
+                    context,
+                    name=f"downstream_object_target_poses[{index}]",
+                )
+                for index, downstream_target in enumerate(
+                    request.skill_options.downstream_object_target_poses
+                )
+            ),
+        )
         approach_direction = options.approach_direction.to(
             device=self.device, dtype=torch.float32
         )
@@ -272,33 +345,39 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             approach_direction
         )
         binding = request.binding
-        manipulator = binding.manipulator()
-        end_effector = binding.end_effector()
-        hand_open_qpos = end_effector.joint_positions(
+        motion = binding.endpoint("primary", "motion")
+        grasp = binding.endpoint("primary", "grasp")
+        manipulator = motion.require_target(JointPositionTarget)
+        end_effector = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="PickUp primary participant",
+        )
+        hand_open_qpos = grasp.joint_positions(
             OPEN_COMMAND,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        hand_grasp_qpos = end_effector.joint_positions(
+        hand_grasp_qpos = grasp.joint_positions(
             GRASP_COMMAND,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        control_part = manipulator.name
         state = context
         sem = target.semantics
+        object_pose = _resolve_object_pose(
+            sem,
+            context,
+            name="pickup_object_pose",
+        )
         if target.grasp_xpos is None and not isinstance(
             sem.affordance, AntipodalAffordance
         ):
-            logger.log_error(
-                "PickUp requires an AntipodalAffordance when grasp_xpos is not set.",
-                ValueError,
-            )
-        if sem.entity is None:
-            logger.log_error(
-                "PickUp requires an entity on the target semantics.", ValueError
+            raise ValueError(
+                "PickUp requires an AntipodalAffordance when grasp_xpos is not set."
             )
         start_arm_qpos = arm_qpos_from_state(
             state,
@@ -306,22 +385,30 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
         if target.grasp_xpos is None:
             is_success, grasp_xpos = self._resolve_grasp_pose(
-                sem, start_arm_qpos, manipulator, options, approach_direction
+                sem,
+                object_pose,
+                start_arm_qpos,
+                manipulator,
+                end_effector.target_id,
+                options,
+                approach_direction,
             )
         else:
             grasp_xpos = resolve_pose_target(
                 resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
             )
             if options.rotate_upright is not None:
                 grasp_xpos = self._upright_adjusted_grasp_poses(
-                    sem, grasp_xpos, options
+                    grasp_xpos,
+                    object_pose,
+                    options,
                 )
-            is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
+            is_success = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         grasp_success = normalize_success_mask(
             is_success,
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
             name="Grasp-pose success",
         )
@@ -342,60 +429,89 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             end_effector,
             hand_open_qpos,
             hand_grasp_qpos,
+            context.require_control_dt(),
         )
         success_mask = grasp_success & normalize_success_mask(
             trajectory_success,
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
             name="Pick-up trajectory success",
         )
 
-        obj_poses = sem.entity.get_local_pose(to_matrix=True)
-        object_to_eef = torch.bmm(pose_inv(obj_poses), grasp_xpos)
+        object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
         held = HeldObjectState(
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
         coordinated_updates = {
-            key: None for key in state.coordinated_held_objects if control_part in key
+            key: None for key in state.coordinated_held_objects if task_state_key in key
         }
         return self.build_plan(
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
-                held_object_updates={control_part: held},
+                held_object_updates={task_state_key: held},
                 coordinated_held_object_updates=coordinated_updates,
             ),
             segment_lengths=segment_lengths,
+            # Once the approach is dispatched the object can move because of
+            # contact or grasping. That self-induced motion must not look like
+            # an external dynamic-goal update.
+            scene_dependency_monitor_until=(
+                {}
+                if sem.entity_id is None
+                else {sem.entity_id: segment_lengths["approach"]}
+            ),
         )
 
     def _resolve_grasp_pose(
         self,
         semantics: ObjectSemantics,
+        object_pose: torch.Tensor,
         start_qpos: torch.Tensor,
-        manipulator: ResolvedControlPart,
+        manipulator: JointPositionTarget,
+        grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        obj_poses = semantics.entity.get_local_pose(to_matrix=True)
-        grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
-            obj_poses=obj_poses,
+        affordance = semantics.affordance
+        if not isinstance(affordance, AntipodalAffordance):
+            raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
+        generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        obj_longest_axis = None
+        is_positive_part = True
+        if options.pick_object_part != "center":
+            obj_longest_axis = torch.tensor(
+                [0.0, 0.0, 1.0],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            is_positive_part = options.pick_object_part == "top"
+        grasp_poses_result = generator.get_valid_grasp_poses(
+            mesh_vertices=affordance.mesh_vertices,
+            mesh_triangles=affordance.mesh_triangles,
+            obj_poses=object_pose,
             approach_direction=approach_direction,
-            object_part=options.pick_object_part,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
         )
-        n_envs = obj_poses.shape[0]
+        num_envs = object_pose.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
         grasp_xpos_padding = torch.zeros(
-            (n_envs, n_max_pose, 4, 4), dtype=torch.float32, device=self.device
+            (num_envs, n_max_pose, 4, 4), dtype=torch.float32, device=self.device
         )
         grasp_cost_padding = torch.full(
-            (n_envs, n_max_pose),
+            (num_envs, n_max_pose),
             float("inf"),
             dtype=torch.float32,
             device=self.device,
         )
-        for i in range(n_envs):
+        for i in range(num_envs):
             n_pose = grasp_poses_result[i][0].shape[0]
             grasp_poses = grasp_poses_result[i][0].to(
                 device=self.device, dtype=torch.float32
@@ -408,10 +524,9 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             grasp_xpos_padding[i, n_pose:] = grasp_poses[0]
             grasp_cost_padding[i, n_pose:] = grasp_costs[0]
         grasp_xpos_padding, ik_success = self._select_feasible_grasp_variants(
-            semantics,
             grasp_xpos_padding,
             start_qpos,
-            obj_poses,
+            object_pose,
             manipulator,
             options,
             approach_direction,
@@ -420,28 +535,29 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         best_cost, best_idx = grasp_cost_masked.min(dim=1)
         is_success = best_cost < 9999.0
         best_grasp_xpos = grasp_xpos_padding[
-            torch.arange(n_envs, device=self.device), best_idx
+            torch.arange(num_envs, device=self.device), best_idx
         ]
         return is_success, best_grasp_xpos
 
     def _select_feasible_grasp_variants(
         self,
-        semantics: ObjectSemantics,
         grasp_xpos: torch.Tensor,
         start_qpos: torch.Tensor,
         object_poses: torch.Tensor,
-        manipulator: ResolvedControlPart,
+        manipulator: JointPositionTarget,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Choose a TCP-roll variant with a feasible pickup and transport path."""
-        n_envs, n_pose = grasp_xpos.shape[:2]
+        num_envs, n_pose = grasp_xpos.shape[:2]
         mirrored_grasp_xpos = grasp_xpos.clone()
         mirrored_grasp_xpos[..., :3, 0] = -mirrored_grasp_xpos[..., :3, 0]
         mirrored_grasp_xpos[..., :3, 1] = -mirrored_grasp_xpos[..., :3, 1]
         selection_variants = torch.stack([grasp_xpos, mirrored_grasp_xpos], dim=2)
         grasp_variants = self._upright_adjusted_grasp_poses(
-            semantics, selection_variants, options
+            selection_variants,
+            object_poses,
+            options,
         )
 
         pre_grasp_variants = grasp_variants.clone()
@@ -482,14 +598,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             )
             if object_target_pose.shape == (4, 4):
                 object_target_pose = object_target_pose.unsqueeze(0).repeat(
-                    n_envs, 1, 1
+                    num_envs, 1, 1
                 )
-            if object_target_pose.shape != (n_envs, 4, 4):
-                logger.log_error(
+            if object_target_pose.shape != (num_envs, 4, 4):
+                raise ValueError(
                     "downstream_object_target_poses entries must have shape "
-                    f"(4, 4) or ({n_envs}, 4, 4), but got "
-                    f"{object_target_pose.shape}.",
-                    ValueError,
+                    f"(4, 4) or ({num_envs}, 4, 4), but got "
+                    f"{object_target_pose.shape}."
                 )
             downstream_eef_variants = torch.matmul(
                 object_target_pose[:, None, None], object_to_eef_variants
@@ -511,7 +626,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
 
         start_xpos = self.robot.compute_fk(
             qpos=start_qpos,
-            name=manipulator.name,
+            name=manipulator.control_part,
             to_matrix=True,
         )
         start_quat = quat_from_matrix(start_xpos[:, :3, :3])
@@ -522,7 +637,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         rotation_error = quat_error_magnitude(
             variant_quat.reshape(-1, 4),
             start_quat.reshape(-1, 4),
-        ).reshape(n_envs, n_pose, 2)
+        ).reshape(num_envs, n_pose, 2)
         feasible_rotation_error = torch.where(
             pickup_success,
             rotation_error,
@@ -530,7 +645,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
         best_variant_idx = feasible_rotation_error.argmin(dim=2)
 
-        env_idx = torch.arange(n_envs, device=self.device)[:, None]
+        env_idx = torch.arange(num_envs, device=self.device)[:, None]
         pose_idx = torch.arange(n_pose, device=self.device)[None, :]
         selected_grasp_xpos = grasp_variants[env_idx, pose_idx, best_variant_idx]
         ik_success = pickup_success[env_idx, pose_idx, best_variant_idx]
@@ -556,28 +671,29 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         self,
         poses: torch.Tensor,
         joint_seed: torch.Tensor,
-        manipulator: ResolvedControlPart,
+        manipulator: JointPositionTarget,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Solve candidate IK poses while preserving the candidate dimensions."""
-        n_envs, n_pose, n_variant = poses.shape[:3]
-        flat_poses = poses.reshape(n_envs, n_pose * n_variant, 4, 4)
+        num_envs, n_pose, n_variant = poses.shape[:3]
+        flat_poses = poses.reshape(num_envs, n_pose * n_variant, 4, 4)
         if joint_seed.dim() == 2:
             joint_seed = joint_seed[:, None, None, :].expand(-1, n_pose, n_variant, -1)
-        flat_seed = joint_seed.reshape(n_envs, n_pose * n_variant, manipulator.dof)
+        manipulator_dof = len(manipulator.joint_ids)
+        flat_seed = joint_seed.reshape(num_envs, n_pose * n_variant, manipulator_dof)
         is_success, qpos = self.robot.compute_batch_ik(
             pose=flat_poses,
-            name=manipulator.name,
+            name=manipulator.control_part,
             joint_seed=flat_seed,
         )
         return (
-            is_success.reshape(n_envs, n_pose, n_variant),
-            qpos.reshape(n_envs, n_pose, n_variant, manipulator.dof),
+            is_success.reshape(num_envs, n_pose, n_variant),
+            qpos.reshape(num_envs, n_pose, n_variant, manipulator_dof),
         )
 
     def _upright_adjusted_grasp_poses(
         self,
-        semantics: ObjectSemantics,
         grasp_xpos: torch.Tensor,
+        object_pose: torch.Tensor,
         options: PickUpOptions,
     ) -> torch.Tensor:
         """Return grasp poses after the optional upright-in-place roll adjustment."""
@@ -592,8 +708,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             upright_direction = options.obj_upright_direction.to(
                 device=self.device, dtype=torch.float32
             )
-        obj_pose = semantics.entity.get_local_pose(to_matrix=True)
-        obj_upright = torch.matmul(obj_pose[:, :3, :3], upright_direction)
+        obj_upright = torch.matmul(object_pose[:, :3, :3], upright_direction)
         adjusted_grasp_xpos = grasp_xpos.clone()
         grasp_ry = adjusted_grasp_xpos[..., :3, 1]
         object_axes = obj_upright.reshape(

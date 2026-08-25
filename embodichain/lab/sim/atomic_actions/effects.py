@@ -18,20 +18,116 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass, field, fields, is_dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.sim.common import BatchEntity
+
 from .state import (
+    ArticulationJointState,
     CoordinatedHeldObjectState,
     HeldObjectState,
     TaskState,
+    _normalize_articulation_joint,
     _normalize_coordinated_held,
     _normalize_held,
     _normalize_mask,
 )
+
+if TYPE_CHECKING:
+    from .core import ObjectSemantics
+
+
+def _effect_snapshot_memo(value: object) -> dict[int, object]:
+    """Preserve live entities and private runtime caches during effect copies."""
+    memo: dict[int, object] = {}
+    visited: set[int] = set()
+
+    def visit(nested: object) -> None:
+        nested_id = id(nested)
+        if nested_id in visited:
+            return
+        visited.add(nested_id)
+        if isinstance(nested, BatchEntity):
+            memo[nested_id] = nested
+            return
+        if is_dataclass(nested) and not isinstance(nested, type):
+            for data_field in fields(nested):
+                child = getattr(nested, data_field.name)
+                if data_field.name == "_generator" and child is not None:
+                    memo[id(child)] = None
+                elif not data_field.init and child is not None:
+                    memo[id(child)] = child
+                else:
+                    visit(child)
+            return
+        if isinstance(nested, Mapping):
+            for key, child in nested.items():
+                visit(key)
+                visit(child)
+            return
+        if isinstance(nested, (list, tuple, set, frozenset)):
+            for child in nested:
+                visit(child)
+
+    visit(value)
+    return memo
+
+
+def _snapshot_semantics(value: ObjectSemantics) -> ObjectSemantics:
+    """Copy semantic data while retaining live simulation-entity identity."""
+    try:
+        copied = deepcopy(value, _effect_snapshot_memo(value))
+    except Exception as exc:
+        raise TypeError(
+            "ObjectSemantics effect metadata must be copyable without cloning "
+            "live simulation entities."
+        ) from exc
+    if type(copied) is not type(value) or copied is value:
+        raise TypeError(
+            "ObjectSemantics effect snapshots must produce a distinct value "
+            "of the same exact type."
+        )
+    return copied
+
+
+def _snapshot_held(value: HeldObjectState) -> HeldObjectState:
+    """Return an independently owned held-object effect value."""
+    return HeldObjectState(
+        semantics=_snapshot_semantics(value.semantics),
+        object_to_eef=value.object_to_eef.clone(),
+        grasp_xpos=value.grasp_xpos.clone(),
+        env_mask=None if value.env_mask is None else value.env_mask.clone(),
+    )
+
+
+def _snapshot_coordinated(
+    value: CoordinatedHeldObjectState,
+) -> CoordinatedHeldObjectState:
+    """Return an independently owned coordinated held-object effect value."""
+    return CoordinatedHeldObjectState(
+        semantics=_snapshot_semantics(value.semantics),
+        left_object_to_eef=value.left_object_to_eef.clone(),
+        right_object_to_eef=value.right_object_to_eef.clone(),
+        left_grasp_xpos=value.left_grasp_xpos.clone(),
+        right_grasp_xpos=value.right_grasp_xpos.clone(),
+        env_mask=None if value.env_mask is None else value.env_mask.clone(),
+    )
+
+
+def _snapshot_articulation_joint(
+    value: ArticulationJointState,
+) -> ArticulationJointState:
+    """Return an independently owned articulation-joint effect value."""
+    return ArticulationJointState(
+        position=value.position.clone(),
+        env_mask=None if value.env_mask is None else value.env_mask.clone(),
+    )
 
 
 def _with_held_mask(
@@ -62,12 +158,22 @@ def _with_coordinated_mask(
     )
 
 
+def _with_articulation_joint_mask(
+    value: ArticulationJointState,
+    env_mask: torch.Tensor,
+) -> ArticulationJointState:
+    """Copy an articulation-joint state with a replacement mask."""
+    return ArticulationJointState(position=value.position, env_mask=env_mask)
+
+
 def _merge_held(
     previous: HeldObjectState | None,
     candidate: HeldObjectState | None,
     update_mask: torch.Tensor,
 ) -> HeldObjectState | None:
     """Apply one optional held-object update per environment."""
+    from .core import _same_object_identity
+
     if previous is None and candidate is None:
         return None
     if previous is None:
@@ -85,7 +191,7 @@ def _merge_held(
     if (
         previous_retained
         and candidate_applied
-        and previous.semantics is not candidate.semantics
+        and not _same_object_identity(previous.semantics, candidate.semantics)
     ):
         raise ValueError(
             "Cannot merge different held-object semantics for one resource "
@@ -96,7 +202,7 @@ def _merge_held(
         return None
     selector = update_mask[:, None, None]
     return HeldObjectState(
-        semantics=candidate.semantics if candidate_applied else previous.semantics,
+        semantics=(previous.semantics if previous_retained else candidate.semantics),
         object_to_eef=torch.where(
             selector, candidate.object_to_eef, previous.object_to_eef
         ),
@@ -111,6 +217,8 @@ def _merge_coordinated(
     update_mask: torch.Tensor,
 ) -> CoordinatedHeldObjectState | None:
     """Apply one optional coordinated relation update per environment."""
+    from .core import _same_object_identity
+
     if previous is None and candidate is None:
         return None
     if previous is None:
@@ -128,7 +236,7 @@ def _merge_coordinated(
     if (
         previous_retained
         and candidate_applied
-        and previous.semantics is not candidate.semantics
+        and not _same_object_identity(previous.semantics, candidate.semantics)
     ):
         raise ValueError(
             "Cannot merge different coordinated held-object semantics for one "
@@ -139,7 +247,7 @@ def _merge_coordinated(
         return None
     selector = update_mask[:, None, None]
     return CoordinatedHeldObjectState(
-        semantics=candidate.semantics if candidate_applied else previous.semantics,
+        semantics=(previous.semantics if previous_retained else candidate.semantics),
         left_object_to_eef=torch.where(
             selector, candidate.left_object_to_eef, previous.left_object_to_eef
         ),
@@ -151,6 +259,48 @@ def _merge_coordinated(
         ),
         right_grasp_xpos=torch.where(
             selector, candidate.right_grasp_xpos, previous.right_grasp_xpos
+        ),
+        env_mask=env_mask,
+    )
+
+
+def _merge_articulation_joint(
+    previous: ArticulationJointState | None,
+    candidate: ArticulationJointState | None,
+    update_mask: torch.Tensor,
+) -> ArticulationJointState | None:
+    """Apply one optional articulation-joint update per environment."""
+    if previous is None and candidate is None:
+        return None
+    if previous is None:
+        assert candidate is not None and candidate.env_mask is not None
+        env_mask = candidate.env_mask & update_mask
+        return (
+            _with_articulation_joint_mask(candidate, env_mask)
+            if env_mask.any()
+            else None
+        )
+    assert previous.env_mask is not None
+    if candidate is None:
+        env_mask = previous.env_mask & ~update_mask
+        return (
+            _with_articulation_joint_mask(previous, env_mask)
+            if env_mask.any()
+            else None
+        )
+    assert candidate.env_mask is not None
+    if candidate.position.shape != previous.position.shape:
+        raise ValueError(
+            "Cannot merge articulation-joint states with different joint widths."
+        )
+    env_mask = torch.where(update_mask, candidate.env_mask, previous.env_mask)
+    if not env_mask.any():
+        return None
+    return ArticulationJointState(
+        position=torch.where(
+            update_mask[:, None],
+            candidate.position,
+            previous.position,
         ),
         env_mask=env_mask,
     )
@@ -175,9 +325,15 @@ class StateDelta:
     ] = field(default_factory=dict)
     """Per-resource-pair coordinated attachment replacements or removals."""
 
+    articulation_joint_updates: Mapping[
+        tuple[str, str], ArticulationJointState | None
+    ] = field(default_factory=dict)
+    """Per-articulation/joint verified state replacements or removals."""
+
     def __post_init__(self) -> None:
         held = dict(self.held_object_updates)
         coordinated = dict(self.coordinated_held_object_updates)
+        articulation = dict(self.articulation_joint_updates)
         for resource, value in held.items():
             if not isinstance(resource, str) or not resource:
                 raise ValueError(
@@ -201,17 +357,67 @@ class StateDelta:
                     "coordinated_held_object_updates values must be "
                     "CoordinatedHeldObjectState or None."
                 )
+        for key, value in articulation.items():
+            if (
+                not isinstance(key, tuple)
+                or len(key) != 2
+                or not all(
+                    type(item) is str and item and item == item.strip() for item in key
+                )
+            ):
+                raise ValueError(
+                    "articulation_joint_updates keys must be canonical "
+                    "articulation/joint pairs."
+                )
+            if value is not None and not isinstance(value, ArticulationJointState):
+                raise TypeError(
+                    "articulation_joint_updates values must be "
+                    "ArticulationJointState or None."
+                )
         object.__setattr__(self, "held_object_updates", MappingProxyType(held))
         object.__setattr__(
             self,
             "coordinated_held_object_updates",
             MappingProxyType(coordinated),
         )
+        object.__setattr__(
+            self,
+            "articulation_joint_updates",
+            MappingProxyType(articulation),
+        )
 
     @property
     def is_empty(self) -> bool:
         """Whether this delta declares no symbolic state changes."""
-        return not self.held_object_updates and not self.coordinated_held_object_updates
+        return (
+            not self.held_object_updates
+            and not self.coordinated_held_object_updates
+            and not self.articulation_joint_updates
+        )
+
+    def snapshot(self) -> StateDelta:
+        """Return an independently owned symbolic-effect snapshot.
+
+        Live simulation entities retain identity, while semantic metadata,
+        affordance data, and every attachment tensor are copied.
+
+        Returns:
+            Independently owned state delta.
+        """
+        return StateDelta(
+            held_object_updates={
+                resource: None if value is None else _snapshot_held(value)
+                for resource, value in self.held_object_updates.items()
+            },
+            coordinated_held_object_updates={
+                resources: (None if value is None else _snapshot_coordinated(value))
+                for resources, value in self.coordinated_held_object_updates.items()
+            },
+            articulation_joint_updates={
+                key: (None if value is None else _snapshot_articulation_joint(value))
+                for key, value in self.articulation_joint_updates.items()
+            },
+        )
 
     def apply(
         self,
@@ -226,7 +432,7 @@ class StateDelta:
 
         Args:
             state: Input task state.
-            update_mask: Successful and verified rows, shape ``(n_envs,)``.
+            update_mask: Successful and verified rows, shape ``(num_envs,)``.
 
         Returns:
             New task state with masked updates.
@@ -273,11 +479,33 @@ class StateDelta:
             else:
                 coordinated[resources] = merged
 
+        articulation = dict(state.articulation_joints)
+        for key, candidate in self.articulation_joint_updates.items():
+            normalized = (
+                None
+                if candidate is None
+                else _normalize_articulation_joint(
+                    candidate,
+                    batch_size=state.batch_size,
+                    device=state.device,
+                )
+            )
+            merged = _merge_articulation_joint(
+                articulation.get(key),
+                normalized,
+                mask,
+            )
+            if merged is None:
+                articulation.pop(key, None)
+            else:
+                articulation[key] = merged
+
         return TaskState(
             batch_size=state.batch_size,
             device=state.device,
             held_objects=held,
             coordinated_held_objects=coordinated,
+            articulation_joints=articulation,
         )
 
 

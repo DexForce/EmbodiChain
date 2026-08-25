@@ -10,9 +10,10 @@
 | File | Role |
 |---|---|
 | `embodichain/lab/gym/envs/base_env.py` | `BaseEnv(gym.Env)` + `EnvCfg` — low-level env loop |
+| `embodichain/lab/gym/envs/types.py` | `ControllerAction` — owned controller-ready action boundary |
 | `embodichain/lab/gym/envs/embodied_env.py` | `EmbodiedEnv(BaseEnv)` + `EmbodiedEnvCfg` — modular task base class |
 | `embodichain/lab/gym/utils/registration.py` | `@register_env` decorator + `REGISTERED_ENVS` registry + `make()` |
-| `embodichain/lab/gym/envs/tasks/__init__.py` | All concrete task imports (forces registration on import) |
+| `embodichain_tasks/embodichain_tasks/__init__.py` | Recursively imports official tasks to trigger registration |
 | `embodichain/lab/gym/envs/managers/__init__.py` | Manager re-exports: `EventManager`, `ObservationManager`, `RewardManager`, `ActionManager`, `DatasetManager` |
 | `embodichain/lab/gym/envs/wrapper/no_fail.py` | `NoFailWrapper` — forces `is_task_success() → True` |
 | `embodichain/lab/gym/envs/wrapper/replay.py` | `ReplayWrapper` — record-and-replay trajectories (kinematic/dynamic/control) |
@@ -68,6 +69,35 @@ gym.Env
 - Overrides `_update_sim_state()` to run event-manager `interval` mode.
 - Manages rollout buffer (expert or RL mode) via `_hook_after_sim_step()`.
 - `extensions` dict entries are set as attributes on both cfg and env instance.
+
+### Action boundary (`types.py`, `embodied_env.py`)
+
+- Raw policy actions run through `ActionManager` terms in `pre` mode.
+- `ControllerAction` wraps a command that already completed raw-policy
+  preprocessing. `EmbodiedEnv` unwraps it and skips only `pre` terms.
+- Both paths converge at `_prepare_controller_action()`, which validates the
+  vector batch, control keys (`qpos`, `qvel`, `qf`), active/full joint width,
+  floating dtype, and environment device before robot control.
+- `ControllerAction` does not bypass `env.step()` or `ActionManager` terms in
+  `post` mode. Expert Program uses this boundary so runtime commands, wait
+  holds, and abort-safe holds retain the normal Gym lifecycle.
+- A structured controller `TensorDict` may carry auxiliary fields such as
+  `ik_success`, but it must contain at least one supported control key.
+
+### Expert Program completion (`embodied_env.py`, `expert_program/bridge.py`)
+
+- `EmbodiedEnvCfg.expert_program` remains opt-in and requires an explicit
+  `ExpertProgramEnvironmentAdapter` supplied by the concrete environment.
+- `create_demo_segments()` retains the active `AtomicDemoBridge` while its lazy
+  segments execute.
+- For an enabled program, `is_task_success()` returns all false until the bridge
+  iterator completes normally. It then returns the bridge's final row-local
+  acceptance mask, which already combines runtime, post-policy, and validator
+  results.
+- `reset()` lets `BaseEnv` read that final mask before clearing the active
+  bridge, preventing completed state from leaking into the next episode.
+- Non-Expert environments keep the ordinary `BaseEnv.is_task_success()`
+  behavior and task-specific overrides.
 
 ---
 
@@ -159,6 +189,9 @@ reset(options)
 ```
 step(action)
   ├── _preprocess_action(action)
+  │     ├── raw action → ActionManager "pre"
+  │     ├── ControllerAction → unwrap and skip "pre"
+  │     └── _prepare_controller_action() validation
   ├── _step_action(action)           # subclass sends control to sim
   ├── sim.update(dt, sim_steps_per_control)
   ├── _update_sim_state()            # event_manager "interval" mode
@@ -208,11 +241,11 @@ from the event config before the event manager is created.
 
 Use the `/add-task-env` skill. It scaffolds:
 
-1. A new file under `embodichain/lab/gym/envs/tasks/<category>/`.
+1. A new file under `embodichain_tasks/embodichain_tasks/<category>/`.
 2. `@register_env("<GymId>")` decorator on the class.
 3. `EmbodiedEnvCfg` subclass with robot, sensor, object configs.
 4. Stub implementations of `_setup_robot()`, `evaluate()`, `get_reward()`.
-5. Import entry in `tasks/__init__.py`.
+5. Export entry in the category package's `__init__.py`.
 6. Test stub.
 
 ### Minimal manual skeleton
@@ -355,7 +388,7 @@ parent; the first `warmup_steps` samples are discarded.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `KeyError: "Env X not found in registry"` | Task module not imported → `@register_env` never ran | Add import to `tasks/__init__.py` |
+| `KeyError: "Env X not found in registry"` | Task entry-point package not imported → `@register_env` never ran | Check the `embodichain.tasks` entry point and package import |
 | `RuntimeError: non json dumpable kwargs` | Passing class/type objects to `@register_env(…, kwarg=SomeClass)` | Use string keys + lookup mapping instead |
 | `single_action_space is None` | `_setup_robot()` didn't set `self.single_action_space` | Set it before returning the Robot |
 | `_setup_robot()` returns `None` | Forgot to return the Robot instance | Ensure `return robot` |
@@ -363,4 +396,6 @@ parent; the first `warmup_steps` samples are discarded.
 | Visual randomization still active during debug | `filter_visual_rand` not set | Set `cfg.filter_visual_rand = True` |
 | Dataset not saving | `filter_dataset_saving = True` or no `cfg.dataset` | Check both flags |
 | Rollout buffer overflow warning | `max_episode_steps` < actual episode length | Increase `max_episode_steps` or check termination logic |
+| Controller-ready action is transformed twice | Runtime output was passed as a raw tensor | Wrap it in `ControllerAction`; the environment skips only `pre` terms |
+| Controller action rejected before robot control | Batch, control key, dtype, or active/full joint width is invalid | Fix the producer at the controller boundary; do not bypass validation |
 | `Env X already registered` warning | Duplicate import or re-registration | Use `override=True` in tests/scripts |

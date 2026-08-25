@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanResult, PlanState
@@ -30,29 +29,29 @@ from .plans import TimedTrajectory, normalize_success_mask
 def resolve_pose_target(
     target: torch.Tensor,
     *,
-    n_envs: int,
+    num_envs: int,
     device: torch.device | str,
 ) -> torch.Tensor:
     """Validate and copy an end-effector target onto the planning device."""
     if not isinstance(target, torch.Tensor):
         raise TypeError(
-            f"target must be torch.Tensor of shape (4, 4), ({n_envs}, 4, 4), "
-            f"or ({n_envs}, n_waypoint, 4, 4)"
+            f"target must be torch.Tensor of shape (4, 4), ({num_envs}, 4, 4), "
+            f"or ({num_envs}, n_waypoint, 4, 4)"
         )
     target = target.to(device=device, dtype=torch.float32).clone()
     if target.shape == (4, 4):
-        target = target.unsqueeze(0).repeat(n_envs, 1, 1)
+        target = target.unsqueeze(0).repeat(num_envs, 1, 1)
     if target.dim() == 3:
-        if target.shape != (n_envs, 4, 4):
+        if target.shape != (num_envs, 4, 4):
             raise ValueError(
-                f"target tensor must have shape (4, 4) or ({n_envs}, 4, 4), "
+                f"target tensor must have shape (4, 4) or ({num_envs}, 4, 4), "
                 f"but got {target.shape}"
             )
     elif target.dim() == 4:
-        if target.shape[0] != n_envs or target.shape[2:] != (4, 4):
+        if target.shape[0] != num_envs or target.shape[2:] != (4, 4):
             raise ValueError(
                 "multi-waypoint target tensor must have shape "
-                f"({n_envs}, n_waypoint, 4, 4), but got {target.shape}"
+                f"({num_envs}, n_waypoint, 4, 4), but got {target.shape}"
             )
         if target.shape[1] == 0:
             raise ValueError(
@@ -61,8 +60,8 @@ def resolve_pose_target(
             )
     else:
         raise ValueError(
-            f"target tensor must be (4, 4), ({n_envs}, 4, 4), or "
-            f"({n_envs}, n_waypoint, 4, 4), but got {target.shape}"
+            f"target tensor must be (4, 4), ({num_envs}, 4, 4), or "
+            f"({num_envs}, n_waypoint, 4, 4), but got {target.shape}"
         )
     return target
 
@@ -70,7 +69,7 @@ def resolve_pose_target(
 def resolve_joint_target(
     target_qpos: torch.Tensor,
     *,
-    n_envs: int,
+    num_envs: int,
     joint_dof: int,
     control_part: str,
     device: torch.device | str,
@@ -79,23 +78,23 @@ def resolve_joint_target(
     if not isinstance(target_qpos, torch.Tensor):
         raise TypeError(
             f"target qpos for '{control_part}' must be a torch.Tensor with shape "
-            f"({joint_dof},), ({n_envs}, {joint_dof}), or "
-            f"({n_envs}, n_waypoint, {joint_dof})"
+            f"({joint_dof},), ({num_envs}, {joint_dof}), or "
+            f"({num_envs}, n_waypoint, {joint_dof})"
         )
     target_qpos = target_qpos.to(device=device, dtype=torch.float32).clone()
     if target_qpos.shape == (joint_dof,):
-        target_qpos = target_qpos.unsqueeze(0).repeat(n_envs, 1)
+        target_qpos = target_qpos.unsqueeze(0).repeat(num_envs, 1)
     if target_qpos.dim() == 2:
-        if target_qpos.shape != (n_envs, joint_dof):
+        if target_qpos.shape != (num_envs, joint_dof):
             raise ValueError(
                 f"target qpos for '{control_part}' must have shape ({joint_dof},) "
-                f"or ({n_envs}, {joint_dof}), but got {target_qpos.shape}"
+                f"or ({num_envs}, {joint_dof}), but got {target_qpos.shape}"
             )
     elif target_qpos.dim() == 3:
-        if target_qpos.shape[0] != n_envs or target_qpos.shape[2] != joint_dof:
+        if target_qpos.shape[0] != num_envs or target_qpos.shape[2] != joint_dof:
             raise ValueError(
                 f"multi-waypoint target qpos for '{control_part}' must have shape "
-                f"({n_envs}, n_waypoint, {joint_dof}), but got {target_qpos.shape}"
+                f"({num_envs}, n_waypoint, {joint_dof}), but got {target_qpos.shape}"
             )
         if target_qpos.shape[1] == 0:
             raise ValueError(
@@ -173,6 +172,76 @@ def translate_pose_world(pose: torch.Tensor, offset: torch.Tensor) -> torch.Tens
     return result
 
 
+def axis_translation_keyframes(
+    start_pose: torch.Tensor,
+    end_pose: torch.Tensor,
+    axis: torch.Tensor,
+    *,
+    n_waypoints: int,
+) -> torch.Tensor:
+    """Build exact Cartesian translation targets along one world-space axis.
+
+    The returned targets exclude ``start_pose`` and include ``end_pose``. This
+    matches motion generation, where the observed start configuration is added
+    separately. Rotation remains fixed for the entire constrained segment.
+
+    Args:
+        start_pose: Batched segment-start poses, shape ``(B, 4, 4)``.
+        end_pose: Batched segment-end poses, shape ``(B, 4, 4)``.
+        axis: Shared ``(3,)`` or batched ``(B, 3)`` world-space axis.
+        n_waypoints: Number of target poses, excluding the segment start.
+
+    Returns:
+        Batched keyframes with shape ``(B, n_waypoints, 4, 4)``.
+
+    Raises:
+        ValueError: If poses, axis, count, rotation, or displacement are invalid.
+    """
+    if (
+        start_pose.dim() != 3
+        or start_pose.shape[1:] != (4, 4)
+        or end_pose.shape != start_pose.shape
+    ):
+        raise ValueError("start_pose and end_pose must have shape (B, 4, 4).")
+    if n_waypoints < 1:
+        raise ValueError("n_waypoints must be at least 1.")
+    axis = axis.to(device=start_pose.device, dtype=start_pose.dtype)
+    if axis.shape == (3,):
+        axis = axis.unsqueeze(0).expand(start_pose.shape[0], -1)
+    if axis.shape != (start_pose.shape[0], 3) or not torch.isfinite(axis).all():
+        raise ValueError("axis must be finite with shape (3,) or (B, 3).")
+    axis_norm = torch.linalg.vector_norm(axis, dim=1, keepdim=True)
+    if torch.any(axis_norm <= 1.0e-6):
+        raise ValueError("axis must be non-zero.")
+    axis = axis / axis_norm
+    if not torch.allclose(
+        start_pose[:, :3, :3],
+        end_pose[:, :3, :3],
+        rtol=1.0e-5,
+        atol=1.0e-6,
+    ):
+        raise ValueError("Axis translation requires a fixed segment rotation.")
+    displacement = end_pose[:, :3, 3] - start_pose[:, :3, 3]
+    orthogonal = displacement - (displacement * axis).sum(dim=1, keepdim=True) * axis
+    if torch.any(torch.linalg.vector_norm(orthogonal, dim=1) > 1.0e-5):
+        raise ValueError("Segment displacement must be parallel to axis.")
+
+    weights = torch.linspace(
+        0.0,
+        1.0,
+        n_waypoints + 1,
+        dtype=start_pose.dtype,
+        device=start_pose.device,
+    )[1:]
+    result = start_pose[:, None].expand(-1, n_waypoints, -1, -1).clone()
+    result[:, :, :3, 3] = torch.lerp(
+        start_pose[:, None, :3, 3],
+        end_pose[:, None, :3, 3],
+        weights[None, :, None],
+    )
+    return result
+
+
 def split_three_segments(
     sample_count: int,
     hand_interp_steps: int,
@@ -182,7 +251,7 @@ def split_three_segments(
     third_segment_name: str = "third",
 ) -> tuple[int, int, int]:
     """Split a sample budget into motion, hand, and motion segments."""
-    first = int(np.round(sample_count - hand_interp_steps) * first_segment_ratio)
+    first = int(round((sample_count - hand_interp_steps) * first_segment_ratio))
     if first < 2:
         raise ValueError(
             f"Not enough waypoints for {first_segment_name} trajectory. "
@@ -251,7 +320,6 @@ def to_full_robot_trajectory(
     base_qpos: torch.Tensor,
     joint_ids: list[int],
     env_ids: torch.Tensor,
-    control_dt: float,
 ) -> tuple[torch.Tensor, TimedTrajectory]:
     """Embed a controlled-joint plan into a timed full-robot trajectory."""
     positions = result.positions
@@ -271,27 +339,18 @@ def to_full_robot_trajectory(
         full[:, :, joint_ids] = value
         return full
 
-    duration: float | torch.Tensor | None = result.duration
     if result.dt is None:
-        duration_tensor = torch.as_tensor(
-            result.duration,
-            dtype=torch.float32,
-            device=base_qpos.device,
-        )
-        if not bool((duration_tensor > 0.0).any().item()):
-            duration = None
+        raise ValueError("PlanResult must include explicit dt.")
     timed = TimedTrajectory.from_positions(
         full_positions,
         env_ids=env_ids,
-        control_dt=control_dt,
         velocities=embed_derivative(result.velocities),
         accelerations=embed_derivative(result.accelerations),
         dt=result.dt,
-        duration=duration,
     )
     success = normalize_success_mask(
         result.success,
-        n_envs=base_qpos.shape[0],
+        num_envs=base_qpos.shape[0],
         device=base_qpos.device,
         name="PlanResult.success",
     )
@@ -299,6 +358,7 @@ def to_full_robot_trajectory(
 
 
 __all__ = [
+    "axis_translation_keyframes",
     "build_joint_plan_states",
     "build_pose_plan_states",
     "interpolate_hand_qpos",

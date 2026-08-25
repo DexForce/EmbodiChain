@@ -211,7 +211,6 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
     ) -> tuple[torch.Tensor, Iterable[torch.Tensor], torch.Tensor]:
         """Plan an atomic PickUp followed by Place for one block."""
         from embodichain.lab.sim.atomic_actions import (
-            ActionBinding,
             ActionInvocation,
             GraspGoal,
             MotionPolicy,
@@ -233,9 +232,19 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             source_pose[:, :3, :3], local_grasp_offset.unsqueeze(-1)
         ).squeeze(-1)
         grasp_pose[:, :3, 3] = source_pose[:, :3, 3] + world_grasp_offset
-        binding = ActionBinding(
-            manipulators={"primary": arm},
-            end_effectors={"primary": hand},
+        endpoints = {
+            "primary": {
+                "motion": arm,
+                "grasp": hand,
+            }
+        }
+        pick_binding = self._action_engine.bind_control_parts(
+            "pick_up",
+            endpoints,
+        )
+        place_binding = self._action_engine.bind_control_parts(
+            "place",
+            endpoints,
         )
         pick_compiled = self._action_engine.compile(
             (
@@ -245,7 +254,7 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                         self._object_semantics[uid],
                         grasp_xpos=grasp_pose,
                     ),
-                    binding=binding,
+                    binding=pick_binding,
                     motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
                     skill_options=PickUpOptions(
                         pre_grasp_distance=0.12,
@@ -253,7 +262,8 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                         hand_interp_steps=HAND_INTERP_STEPS,
                     ),
                 ),
-            )
+            ),
+            self._action_engine.initial_context(control_dt=self.step_dt),
         )
         pick_success = pick_compiled.plan_success
         pick_trajectory = pick_compiled.trajectory.positions
@@ -277,7 +287,7 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                 ActionInvocation(
                     skill_id="place",
                     goal=PlaceGoal(place_eef_pose),
-                    binding=binding,
+                    binding=place_binding,
                     motion_policy=MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
                     skill_options=PlaceOptions(
                         lift_height=0.15,

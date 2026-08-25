@@ -30,7 +30,16 @@ We welcome pull requests for bug fixes, new features, and documentation improvem
     black .
     ```
     > Currently, we use black==26.3.1 for formatting. Make sure to use the same version to avoid inconsistencies.
-4.  **Submit a Pull Request**.
+4.  **Check public API documentation coverage**. The checker is read-only and
+    verifies that exports declared through `__all__` appear in the Sphinx API
+    reference.
+    ```bash
+    python docs/scripts/check_api_docs.py
+    ```
+    If it reports missing exports, update the appropriate API-reference page
+    and public docstrings. Agent users can invoke `/update-api-docs` to generate
+    these changes.
+5.  **Submit a Pull Request**.
     *   Use the [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md).
     *   Keep PRs small and focused.
     *   Include a summary of the changes and link to any relevant issues (e.g., `Fixes #123`).
@@ -39,13 +48,13 @@ We welcome pull requests for bug fixes, new features, and documentation improvem
 
 ## Contribute specific robots
 
-To contribute a new robot, please check the documentation on [Adding a New Robot](https://dexforce.github.io/EmbodiChain/guides/add_robot.html).
+To contribute a new robot, please check the documentation on [Adding a New Robot](https://dexforce.github.io/EmbodiChain/main/guides/add_robot.html).
 
 ## Contribute specific environments
 
-To contribute a new environment, please check the documentation on [Embodied Environments](https://dexforce.github.io/EmbodiChain/overview/gym/env.html) and see the tutorial below:
-- [Creating a Basic Environment](https://dexforce.github.io/EmbodiChain/tutorial/basic_env.html) 
-- [Creating a Modular Environment](https://dexforce.github.io/EmbodiChain/tutorial/modular_env.html)
+To contribute a new environment, please check the documentation on [Embodied Environments](https://dexforce.github.io/EmbodiChain/main/overview/gym/env.html) and see the tutorial below:
+- [Creating a Basic Environment](https://dexforce.github.io/EmbodiChain/main/tutorial/basic_env.html)
+- [Creating a Modular Environment](https://dexforce.github.io/EmbodiChain/main/tutorial/modular_env.html)
 
 If you want to implement your tasks in a new repo and with some customized functors and utilities, you can also use the [Task Template Repo](https://github.com/DexForce/embodichain_task_template).
 
@@ -72,7 +81,7 @@ Agent-facing development context lives in [`agent_context/`](agent_context/). Th
 Reference the project context for manager-functor before implementing this change.
 ```
 
-Both agents are instructed to read `agent_context/MAP.yaml` first, resolve the requested topic, and load only the matching context files. The files under `docs/source/` remain the human-facing Sphinx documentation and should be consulted only when explicitly requested.
+Both agents are instructed to read `agent_context/MAP.yaml` first, resolve the requested topic, and load only the matching context files. For codebase-navigation questions they also verify mapped paths against the current source tree and fall back to live search when no topic matches. The files under `docs/source/` remain the human-facing Sphinx documentation and should be consulted only when explicitly requested.
 
 ### Shared project skills
 
@@ -80,9 +89,10 @@ Canonical skills live in [`.agents/skills/`](.agents/skills/). Claude Code uses 
 
 | Skill | Purpose |
 |-------|---------|
-| `/project-dev-context` | Resolve or update agent development context |
+| `/project-dev-context` | Navigate, resolve, or update agent development context |
 | `/add-functor`, `/add-task-env`, `/add-robot`, `/add-solver`, `/add-atomic-action` | Scaffold project components following repository conventions |
 | `/add-test`, `/benchmark` | Add validation or performance benchmarks |
+| `/update-api-docs` | Generate API-reference entries and descriptions for missing public exports |
 | `/pre-commit-check` | Run proportional checks before committing |
 | `/pr`, `/release` | Prepare a pull request or release |
 
