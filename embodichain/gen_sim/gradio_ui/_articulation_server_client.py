@@ -31,6 +31,8 @@ from urllib.request import OpenerDirector, ProxyHandler, Request, build_opener
 
 __all__ = ["ArticulationServerClient", "ArticulationServerError"]
 
+_ERROR_DETAIL_LIMIT = 500
+
 
 class ArticulationServerError(RuntimeError):
     """Report a request or response error from the articulation service."""
@@ -174,7 +176,7 @@ class ArticulationServerClient:
             return self.opener.open(request, timeout=self.timeout_seconds)
         except HTTPError as exc:
             try:
-                raw_error = exc.read()
+                raw_error = exc.read(_ERROR_DETAIL_LIMIT + 1)
             except Exception:
                 raw_error = b""
             detail = _error_detail(raw_error)
@@ -225,7 +227,9 @@ def _error_detail(raw: bytes) -> str:
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return raw.decode("utf-8", errors="replace")[:500]
+        return raw[:_ERROR_DETAIL_LIMIT].decode("utf-8", errors="replace")
     if not isinstance(payload, dict):
         return ""
-    return str(payload.get("error") or payload.get("detail") or "")
+    return str(payload.get("error") or payload.get("detail") or "")[
+        :_ERROR_DETAIL_LIMIT
+    ]

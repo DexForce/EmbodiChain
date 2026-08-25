@@ -197,6 +197,17 @@ def test_http_error_without_response_body_is_wrapped() -> None:
         client.health()
 
 
+def test_http_error_detail_is_bounded() -> None:
+    response = io.BytesIO(json.dumps({"detail": "x" * 10_000}).encode("utf-8"))
+    client = ArticulationServerClient(SERVER_URL)
+    client.opener = _FakeOpener(HTTPError(SERVER_URL, 500, "Error", {}, response))
+
+    with pytest.raises(ArticulationServerError) as raised:
+        client.health()
+
+    assert len(str(raised.value)) < 600
+
+
 def test_network_error_is_wrapped() -> None:
     client = ArticulationServerClient(SERVER_URL)
     client.opener = _FakeOpener(URLError("connection refused"))

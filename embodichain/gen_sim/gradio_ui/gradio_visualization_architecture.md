@@ -75,7 +75,7 @@ conda run -n embodichain python gradio_app.py
 | Engine | 输入 | 预览/下载 | 实际产物 | 是否启动 DexSim |
 | --- | --- | --- | --- | --- |
 | Asset engine / SimReady | 一个网格、可选材质附件、类别 | 输入 GLB、SimReady GLB、原始输出下载 | `.gen_sim/assets/runs/<token>/` | 否 |
-| Asset engine / Articulation | 文字、可选参考图 | EmbodiChain USDC 下载和 Articraft USDZ 交互预览 | `.gen_sim/articraft/runs/` | 否 |
+| Asset engine / Articulation | 文字、可选参考图 | EmbodiChain USDC 下载；Remote server 显示结果摘要，Local Codex 提供 Articraft USDZ 交互预览 | Remote: `.gen_sim/articraft/server/<request-id>/`；Local: `.gen_sim/articraft/runs/` | 否 |
 | Scene engine | 一张图片，或已保存场景 + 文本编辑指令 | Scene Engine 的 Viser | `.gen_sim/scenes/<image-sha256-前16位>/` | 否 |
 | Action engine | 已生成场景列表、任务、机器人 | 选中场景的 Viser 和 DexSim 视频 | 场景预览来自 `.gen_sim/scenes/`；DexSim 暂沿用现有命令 | 是 |
 
