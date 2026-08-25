@@ -44,6 +44,20 @@ def test_task_contract_catalog_covers_the_canonical_protocol() -> None:
     }
 
 
+def test_task_contracts_declare_carrier_flow_and_resource_semantics() -> None:
+    e1 = task_contract("E1")
+    e3 = task_contract("E3")
+    e5 = task_contract("E5")
+
+    assert e1.direct_payload_relations == {"on", "inside"}
+    assert e1.accepts_direct_payloads
+    assert e3.primary_role_field == "source_role"
+    assert e5.accepts_direct_payloads
+    assert e5.moves_primary_object
+    assert e5.resource_mode == "coordinated"
+    assert not task_contract("E2").accepts_direct_payloads
+
+
 def test_e5_success_depends_only_on_terminal_behavior() -> None:
     assert task_success_type("E5", {"terminal_behavior": "hold"}) == (
         "held_by_both_grippers"

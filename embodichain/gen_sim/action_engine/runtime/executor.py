@@ -2944,9 +2944,7 @@ class ProgramExecutor:
         for outcome in outcomes.values():
             if outcome is None:
                 continue
-            diagnostics = outcome.planner_trace.get(
-                "primary_action_diagnostics", {}
-            )
+            diagnostics = outcome.planner_trace.get("primary_action_diagnostics", {})
             observed_segments = set(
                 diagnostics.get("execution_observation_segments", ())
             )
@@ -3097,9 +3095,7 @@ class ProgramExecutor:
                     state = state.unsqueeze(0)
                 if state.shape == (int(self.env.num_envs), 13):
                     observation.setdefault("linear_velocity", state[:, 7:10].clone())
-                    observation.setdefault(
-                        "angular_velocity", state[:, 10:13].clone()
-                    )
+                    observation.setdefault("angular_velocity", state[:, 10:13].clone())
         body_data = getattr(entity, "body_data", None)
         if body_data is not None:
             for name, attribute_name in (
@@ -3112,24 +3108,36 @@ class ProgramExecutor:
                 if callable(value):
                     value = value()
                 if value is not None:
-                    observation[name] = torch.as_tensor(
-                        value,
-                        dtype=torch.float32,
-                        device=self.env.device,
-                    ).detach().clone()
+                    observation[name] = (
+                        torch.as_tensor(
+                            value,
+                            dtype=torch.float32,
+                            device=self.env.device,
+                        )
+                        .detach()
+                        .clone()
+                    )
         getter = getattr(self.env, "get_current_xpos_agent", None)
         if callable(getter):
             left, right = getter()
-            observation["left_tcp_pose"] = torch.as_tensor(
-                left,
-                dtype=torch.float32,
-                device=self.env.device,
-            ).detach().clone()
-            observation["right_tcp_pose"] = torch.as_tensor(
-                right,
-                dtype=torch.float32,
-                device=self.env.device,
-            ).detach().clone()
+            observation["left_tcp_pose"] = (
+                torch.as_tensor(
+                    left,
+                    dtype=torch.float32,
+                    device=self.env.device,
+                )
+                .detach()
+                .clone()
+            )
+            observation["right_tcp_pose"] = (
+                torch.as_tensor(
+                    right,
+                    dtype=torch.float32,
+                    device=self.env.device,
+                )
+                .detach()
+                .clone()
+            )
         return observation
 
     def _plan_live_hold(
@@ -3267,6 +3275,98 @@ class ProgramExecutor:
         if arm not in owners:
             self._object_states.pop((uid, arm), None)
 
+    def _physical_coordinated_hold(
+        self,
+        uid: str,
+        state: ExecutionState,
+        grounded: GroundedAction,
+        attempted: torch.Tensor,
+    ) -> torch.Tensor:
+        """Require two live closed grasps and the measured transport target."""
+        held = evaluate_predicate(
+            self.env,
+            {"type": "held_by_both_grippers", "object": uid},
+            coordinated_state=state,
+        )
+        target = grounded.target_object_pose
+        if not isinstance(target, torch.Tensor):
+            return torch.zeros_like(attempted)
+        target = torch.as_tensor(
+            target,
+            dtype=torch.float32,
+            device=self.env.device,
+        )
+        if target.shape == (4, 4):
+            target = target.unsqueeze(0).repeat(int(self.env.num_envs), 1, 1)
+        if target.shape != (int(self.env.num_envs), 4, 4):
+            return torch.zeros_like(attempted)
+        actual = self._entity_pose(uid).to(dtype=target.dtype, device=target.device)
+        tolerance = float(
+            grounded.cfg.get(
+                "postcondition_tolerance",
+                self.runtime_policy.predicate_fallbacks["position_tolerance"],
+            )
+        )
+        reached = (
+            torch.linalg.vector_norm(
+                actual[:, :3, 3] - target[:, :3, 3],
+                dim=1,
+            )
+            <= tolerance
+        )
+        return attempted & held & reached
+
+    def _commit_coordinated_ownership(
+        self,
+        uid: str,
+        held: torch.Tensor,
+    ) -> None:
+        owners = self._object_owners.setdefault(
+            uid,
+            [None] * int(self.env.num_envs),
+        )
+        for env_id in torch.nonzero(held, as_tuple=False).flatten().tolist():
+            owners[env_id] = "coordinated"
+            self._arm_owners["left_arm"][env_id] = uid
+            self._arm_owners["right_arm"][env_id] = uid
+
+    def _release_coordinated_ownership(
+        self,
+        uid: str,
+        released: torch.Tensor,
+    ) -> None:
+        owners = self._object_owners.setdefault(
+            uid,
+            [None] * int(self.env.num_envs),
+        )
+        released_rows = torch.nonzero(released, as_tuple=False).flatten().tolist()
+        for env_id in released_rows:
+            if owners[env_id] == "coordinated":
+                owners[env_id] = None
+            for arm in ("left_arm", "right_arm"):
+                if self._arm_owners[arm][env_id] == uid:
+                    self._arm_owners[arm][env_id] = None
+
+        for key in tuple(self._object_states):
+            if key[0] != uid:
+                continue
+            state = self._object_states[key]
+            updates = {name: None for name in state.held_objects}
+            if not updates:
+                continue
+            task = StateDelta(held_object_updates=updates).apply(
+                state.to_task_state(),
+                released,
+            )
+            updated = ExecutionState.from_task_state(
+                task,
+                last_qpos=self.env.robot.get_qpos().clone(),
+            )
+            if updated.held_objects:
+                self._object_states[key] = updated
+            else:
+                self._object_states.pop(key, None)
+
     def _execute_coordinated(
         self,
         edge: ExecutionEdge,
@@ -3379,7 +3479,25 @@ class ProgramExecutor:
         physical_failed = torch.zeros_like(failed)
         committed_state = outcome.state_after(successful)
         if capability.state_effect == "coordinated_hold":
+            physical = self._physical_coordinated_hold(
+                step.object_uid,
+                committed_state,
+                grounded,
+                successful,
+            )
+            physical_failed |= successful & ~physical
+            successful = physical
+            committed_state = outcome.state_after(successful)
+            for participant_arm in ("left_arm", "right_arm"):
+                committed_state = self._rebase_held_state(
+                    step.object_uid,
+                    participant_arm,
+                    committed_state,
+                    successful,
+                    from_planned_qpos=False,
+                )
             self._clear_support_relation(step.object_uid, successful)
+            self._commit_coordinated_ownership(step.object_uid, successful)
         if capability.state_effect == "transfer_hold":
             if bool(successful.any()):
                 current_owners = list(
@@ -3466,7 +3584,7 @@ class ProgramExecutor:
             | physical_failed,
             [grounded],
             [outcome.planner_trace],
-            active & outcome.success,
+            successful,
         )
 
     def _rebase_held_state(
@@ -3592,7 +3710,27 @@ class ProgramExecutor:
         )
         physical_failed = torch.zeros_like(failed)
         if is_coordinated_release:
-            opened = evaluate_predicate(self.env, {"type": "both_grippers_open"})
+            coordinated_name = next(
+                name
+                for name in self.adapter.capabilities.executable_names()
+                if self.adapter.capabilities.get(name).config_materializer
+                == "coordinated_pickment"
+            )
+            coordinated_policy = self.runtime_policy.motion_defaults[coordinated_name]
+            opened = evaluate_predicate(
+                self.env,
+                {
+                    "type": "both_grippers_open",
+                    "tolerance": float(
+                        coordinated_policy.get(
+                            "release_gripper_tolerance",
+                            self.runtime_policy.predicate_fallbacks[
+                                "gripper_state_tolerance"
+                            ],
+                        )
+                    ),
+                },
+            )
             released = active & opened
             physical_failed = active & ~opened
             control_parts = (
@@ -3608,6 +3746,7 @@ class ProgramExecutor:
             )
             for key in ("coordinated", "left_arm", "right_arm"):
                 self._step_states[(step.id, key)] = released_state
+            self._release_coordinated_ownership(step.object_uid, released)
         else:
             for arm, outcome in outcomes.items():
                 if outcome is not None:

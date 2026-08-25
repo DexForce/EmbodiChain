@@ -94,6 +94,13 @@ class TaskContract:
     required_affordances: frozenset[str]
     success_type: str
     scene_affordances: frozenset[str]
+    primary_role_field: str
+    resource_mode: str
+    moves_primary_object: bool
+    accepts_direct_payloads: bool
+    direct_payload_relations: frozenset[str]
+    accepts_incoming_hold: bool
+    terminal_success_types: tuple[tuple[str, str], ...]
 
 
 def _action_contract(value: SemanticTaskContract) -> TaskContract:
@@ -106,6 +113,13 @@ def _action_contract(value: SemanticTaskContract) -> TaskContract:
         required_affordances=value.required_affordances,
         success_type=value.success_type,
         scene_affordances=value.scene_affordances,
+        primary_role_field=value.primary_role_field,
+        resource_mode=value.resource_mode,
+        moves_primary_object=value.moves_primary_object,
+        accepts_direct_payloads=value.accepts_direct_payloads,
+        direct_payload_relations=value.direct_payload_relations,
+        accepts_incoming_hold=value.accepts_incoming_hold,
+        terminal_success_types=value.terminal_success_types,
     )
 
 

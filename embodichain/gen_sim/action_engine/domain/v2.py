@@ -691,156 +691,78 @@ def _validate_ownership_transitions(
     nodes: Sequence[Mapping[str, Any]],
     groups: Sequence[Mapping[str, Any]],
 ) -> None:
-    """Check release/reacquire and explicit single-arm hold transitions.
-
-    An ordinary E2 -> E4 transition persists the supported upright state, ends
-    the predecessor resource lease, and lets E4 acquire a fresh transfer grasp.
-    E4 -> E1 keeps receiver ownership because the exchanged object is not yet
-    supported. Recovery groups may preserve an explicitly requested hold.
-    """
+    """Validate object ownership by folding persisted action contracts."""
     node_by_id = {str(node["id"]): node for node in nodes}
-    group_by_id = {str(group["id"]): group for group in groups}
-    nodes_by_group = {
-        group_id: [node_by_id[node_id] for node_id in group["node_ids"]]
-        for group_id, group in group_by_id.items()
-    }
+    ownership: dict[str, str] = {}
 
-    def direct_predecessor(
-        group: Mapping[str, Any], task_type: str
-    ) -> Mapping[str, Any] | None:
-        for dependency in group.get("depends_on", []):
-            candidate = group_by_id.get(str(dependency))
-            if candidate is not None and candidate.get("task_type") == task_type:
-                return candidate
-        return None
-
-    def held_arm(node: Mapping[str, Any]) -> str | None:
-        precondition = node.get("precondition", {})
-        if (
-            isinstance(precondition, Mapping)
-            and precondition.get("type") == "object_held"
-        ):
-            arm = str(precondition.get("arm", ""))
-            if arm in {"left_arm", "right_arm"}:
-                return arm
-        actor = node.get("actor", {})
-        if isinstance(actor, Mapping) and actor.get("mode") == "required":
-            arm = str(actor.get("arm", ""))
-            if arm in {"left_arm", "right_arm"}:
-                return arm
-        return None
-
-    for group_id, group in group_by_id.items():
-        task_type = str(group.get("task_type"))
-        group_nodes = nodes_by_group[group_id]
-        actions = [str(node.get("atomic_action")) for node in group_nodes]
+    for group in groups:
+        group_id = str(group["id"])
         object_uid = str(group.get("object_uid"))
-
-        if task_type == "E2":
-            handover = next(
-                (
-                    candidate
-                    for candidate in groups
-                    if candidate.get("task_type") == "E4"
-                    and group_id
-                    in {str(item) for item in candidate.get("depends_on", [])}
-                    and str(candidate.get("object_uid")) == object_uid
-                ),
-                None,
-            )
-            if handover is None:
-                continue
-            if (
-                group.get("goal", {}).get("terminal_behavior") == "hold"
-                and group.get("role") != "recovery"
-            ):
+        current = ownership.get(object_uid, "free")
+        may_rebase_recovery_entry = group.get("role") == "recovery"
+        for node_id in group["node_ids"]:
+            node = node_by_id[str(node_id)]
+            contract = node.get("contract", {})
+            if not isinstance(contract, Mapping):
                 raise ValueError(
-                    f"SeedGraph E2 group {group_id!r} may not preserve a holder "
-                    "across an ordinary E2->E4 TaskGroup boundary."
+                    f"SeedGraph node {node_id!r} requires an Action Contract."
                 )
-            if (
-                group.get("role") != "recovery"
-                and "Place" not in actions
-                and "AxisAlign" not in actions
-            ):
-                raise ValueError(
-                    f"SeedGraph E2 group {group_id!r} must release its supported "
-                    "object before E4 reacquires it."
-                )
-
-        if task_type == "E4":
-            predecessor = direct_predecessor(group, "E2")
-            if (
-                predecessor is not None
-                and str(predecessor.get("object_uid")) == object_uid
-            ):
-                predecessor_nodes = nodes_by_group[str(predecessor["id"])]
-                preserves_hold = (
-                    predecessor.get("role") == "recovery"
-                    and predecessor.get("goal", {}).get("terminal_behavior") == "hold"
-                )
-                if preserves_hold:
-                    if "PickUp" in actions or not group_nodes:
-                        raise ValueError(
-                            f"SeedGraph E4 group {group_id!r} must consume the "
-                            "recovery-held object without PickUp."
-                        )
-                    first = group_nodes[0]
-                    holder_arm = next(
-                        (
-                            held_arm(node)
-                            for node in reversed(predecessor_nodes)
-                            if held_arm(node) is not None
-                        ),
-                        None,
+            for requirement in contract.get("requires", []):
+                if not isinstance(requirement, Mapping):
+                    continue
+                if requirement.get("object_uid") != object_uid:
+                    continue
+                predicate = str(requirement.get("predicate", ""))
+                expected = (
+                    "free"
+                    if predicate == "object_free"
+                    else (
+                        "coordinated"
+                        if predicate == "object_coordinated_held"
+                        else str(requirement.get("arm", ""))
                     )
-                    if (
-                        str(first.get("atomic_action")) != "MoveHeldObject"
-                        or held_arm(first) is None
-                        or held_arm(first) != holder_arm
-                    ):
-                        raise ValueError(
-                            f"SeedGraph E2->E4 recovery holder mismatch for object "
-                            f"{object_uid!r}."
-                        )
-                else:
-                    predecessor_actions = {
-                        str(node.get("atomic_action")) for node in predecessor_nodes
-                    }
-                    if not predecessor_actions.intersection({"Place", "AxisAlign"}):
-                        raise ValueError(
-                            f"SeedGraph E2 predecessor {predecessor['id']!r} must "
-                            "release its object before E4."
-                        )
-                    if (
-                        not group_nodes
-                        or str(group_nodes[0].get("atomic_action")) != "PickUp"
-                    ):
-                        raise ValueError(
-                            f"SeedGraph E4 group {group_id!r} must reacquire the "
-                            "supported E2 object with PickUp."
-                        )
-
-        if task_type == "E1":
-            predecessor = direct_predecessor(group, "E4")
-            if (
-                predecessor is not None
-                and str(predecessor.get("object_uid")) == object_uid
-            ):
-                if "PickUp" in actions or not group_nodes:
-                    raise ValueError(
-                        f"SeedGraph E1 group {group_id!r} must preserve the E4 receiver hold "
-                        "without PickUp."
-                    )
-                first = group_nodes[0]
+                )
                 if (
-                    str(first.get("atomic_action")) != "MoveHeldObject"
-                    or held_arm(first) is None
+                    predicate
+                    in {
+                        "object_free",
+                        "object_held",
+                        "object_coordinated_held",
+                    }
+                    and current != expected
                 ):
-                    raise ValueError(
-                        f"SeedGraph E1 group {group_id!r} must start with MoveHeldObject "
-                        "from the receiver hold."
-                    )
+                    if may_rebase_recovery_entry:
+                        current = expected
+                    else:
+                        raise ValueError(
+                            f"SeedGraph group {group_id!r} requires {object_uid!r} "
+                            f"ownership {expected!r}, but the preceding contract "
+                            f"flow provides {current!r}."
+                        )
+                may_rebase_recovery_entry = False
+            for effect in contract.get("effects", []):
+                if not isinstance(effect, Mapping) or effect.get("op") != "add":
+                    continue
+                atom = effect.get("atom", {})
+                if (
+                    not isinstance(atom, Mapping)
+                    or atom.get("object_uid") != object_uid
+                ):
+                    continue
+                predicate = str(atom.get("predicate", ""))
+                if predicate == "object_free":
+                    current = "free"
+                elif predicate == "object_coordinated_held":
+                    current = "coordinated"
+                elif predicate == "object_held":
+                    arm = str(atom.get("arm", ""))
+                    if not arm:
+                        raise ValueError(
+                            f"SeedGraph node {node_id!r} adds object_held without "
+                            "an ownership resource."
+                        )
+                    current = arm
+        ownership[object_uid] = current
 
 
 def _validate_group_dependency_alignment(

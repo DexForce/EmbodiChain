@@ -81,6 +81,38 @@ class _MeshEntity:
         return torch.tensor([[0, 1, 2]], dtype=torch.int64)
 
 
+def _cuboid_vertices(x: float, y: float, z: float) -> torch.Tensor:
+    return torch.tensor(
+        [
+            [sx * x, sy * y, sz * z]
+            for sx in (-1.0, 1.0)
+            for sy in (-1.0, 1.0)
+            for sz in (-1.0, 1.0)
+        ],
+        dtype=torch.float32,
+    )
+
+
+def _rotation_x(degrees: float) -> torch.Tensor:
+    angle = torch.deg2rad(torch.tensor(degrees, dtype=torch.float32))
+    rotation = torch.eye(3)
+    rotation[1, 1] = torch.cos(angle)
+    rotation[1, 2] = -torch.sin(angle)
+    rotation[2, 1] = torch.sin(angle)
+    rotation[2, 2] = torch.cos(angle)
+    return rotation
+
+
+def _rotation_z(degrees: float) -> torch.Tensor:
+    angle = torch.deg2rad(torch.tensor(degrees, dtype=torch.float32))
+    rotation = torch.eye(3)
+    rotation[0, 0] = torch.cos(angle)
+    rotation[0, 1] = -torch.sin(angle)
+    rotation[1, 0] = torch.sin(angle)
+    rotation[1, 1] = torch.cos(angle)
+    return rotation
+
+
 class _PoseEntity:
     def __init__(self, pose: torch.Tensor) -> None:
         self.pose = pose
@@ -174,7 +206,7 @@ def test_adapter_registers_gen_sim_compat_actions(
     monkeypatch.setattr(actions, "AtomicActionEngine", Engine)
     monkeypatch.setattr(adapter, "_generator", lambda: object())
     monkeypatch.setattr(adapter, "_control_profiles", lambda: {})
-    monkeypatch.setattr(adapter, "_grasp_pose_generators", lambda: {})
+    monkeypatch.setattr(adapter, "_grasp_pose_generators", lambda **_kwargs: {})
 
     engine = adapter._engine()
 
@@ -539,6 +571,95 @@ def test_coordinated_pickment_uses_engine_scoped_grasp_generator() -> None:
     assert invocation.skill_options.middle_empty_ratio == pytest.approx(0.7)
 
 
+def _coordinated_grounded(
+    rotation: torch.Tensor,
+    *,
+    vertices: torch.Tensor | None = None,
+) -> GroundedAction:
+    object_pose = torch.eye(4).repeat(2, 1, 1)
+    object_pose[:, :3, :3] = rotation
+    object_pose[:, :3, 3] = torch.tensor([0.05, 0.0, 0.75])
+    mesh_vertices = _cuboid_vertices(0.03, 0.04, 0.20) if vertices is None else vertices
+    goal = CoordinatedPickGoal(
+        semantics=ObjectSemantics(
+            label="test_object",
+            geometry={},
+            affordance=AntipodalAffordance(
+                object_label="test_object",
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=torch.tensor([[0, 1, 2]], dtype=torch.int64),
+            ),
+        ),
+        object_target_pose=object_pose.clone(),
+        object_initial_pose=object_pose.clone(),
+    )
+    return GroundedAction(
+        "CoordinatedPickment",
+        "coordinated",
+        "arm",
+        goal,
+        {"middle_empty_ratio": 0.4},
+        object_pose=object_pose,
+        object_uid="test_object",
+    )
+
+
+def test_coordinated_pickment_geometry_candidates_are_live_and_continuous() -> None:
+    adapter = AtomicActionAdapter(_planner_env())
+    capability = adapter.capabilities.get("CoordinatedPickment")
+
+    vertical = adapter._adapt_coordinated_pickment_grasps(
+        _coordinated_grounded(torch.eye(3)), capability
+    )
+    tilted = adapter._adapt_coordinated_pickment_grasps(
+        _coordinated_grounded(_rotation_x(45.0)), capability
+    )
+    horizontal = adapter._adapt_coordinated_pickment_grasps(
+        _coordinated_grounded(_rotation_x(90.0)), capability
+    )
+    yawed = adapter._adapt_coordinated_pickment_grasps(
+        _coordinated_grounded(_rotation_z(90.0) @ _rotation_x(90.0)),
+        capability,
+    )
+
+    preferred = [
+        candidates[0].cfg["middle_empty_ratio"]
+        for candidates in (vertical, tilted, horizontal)
+    ]
+    assert preferred[0] < preferred[1] < preferred[2]
+    assert yawed[0].cfg["middle_empty_ratio"] == pytest.approx(preferred[0])
+    for candidates in (vertical, tilted, horizontal, yawed):
+        assert candidates
+        assert torch.allclose(
+            candidates[0].cfg["left_to_right_arm_direction"],
+            torch.tensor([0.0, -1.0, 0.0]),
+        )
+        assert torch.allclose(
+            candidates[0].cfg["approach_direction"],
+            torch.tensor([0.0, 0.0, -1.0]),
+        )
+
+
+def test_coordinated_pickment_geometry_candidates_are_deterministic_for_tray() -> None:
+    adapter = AtomicActionAdapter(_planner_env())
+    capability = adapter.capabilities.get("CoordinatedPickment")
+    grounded = _coordinated_grounded(
+        _rotation_z(31.0),
+        vertices=_cuboid_vertices(0.20, 0.14, 0.02),
+    )
+
+    first = adapter._adapt_coordinated_pickment_grasps(grounded, capability)
+    second = adapter._adapt_coordinated_pickment_grasps(grounded, capability)
+
+    assert [item.cfg["middle_empty_ratio"] for item in first] == pytest.approx(
+        [item.cfg["middle_empty_ratio"] for item in second]
+    )
+    assert (
+        first[0].motion_policy["coordinated_grasp"]
+        == second[0].motion_policy["coordinated_grasp"]
+    )
+
+
 def test_grasp_generators_follow_mainline_service_contract() -> None:
     adapter = AtomicActionAdapter(_planner_env())
 
@@ -546,12 +667,24 @@ def test_grasp_generators_follow_mainline_service_contract() -> None:
 
     assert set(generators) == {"physical_left_eef", "physical_right_eef"}
     generator = generators["physical_left_eef"]
+    assert generators["physical_right_eef"] is generator
     assert isinstance(generator, AntipodalGraspPoseGenerator)
     assert generator.algorithm_cfg.sample_count == 10000
     assert generator.algorithm_cfg.approach_direction_samples == 4
     assert generator.algorithm_cfg.max_candidates == 500
     assert generator.collision_cfg.max_decomposition_hulls == 16
     assert generator.collision_cfg.filter_ground_collision is True
+
+
+def test_coordinated_grasp_generator_honors_ground_filter_policy() -> None:
+    adapter = AtomicActionAdapter(_planner_env())
+
+    generators = adapter._grasp_pose_generators(filter_ground_collision=False)
+
+    assert generators["physical_left_eef"] is generators["physical_right_eef"]
+    assert (
+        generators["physical_left_eef"].collision_cfg.filter_ground_collision is False
+    )
 
 
 def test_retreat_uses_row_local_motion_planner_reachability_search(
@@ -841,7 +974,11 @@ def test_start_session_delegates_to_shared_atomic_engine(monkeypatch: Any) -> No
     captured: dict[str, Any] = {}
 
     monkeypatch.setattr(adapter, "_planning_context", lambda *_args: "context")
-    monkeypatch.setattr(adapter, "_invocation", lambda *_args: "invocation")
+    monkeypatch.setattr(
+        adapter,
+        "_invocation",
+        lambda *_args, **_kwargs: "invocation",
+    )
 
     class _Engine:
         def start(self, invocations: tuple[Any, ...], context: Any) -> object:

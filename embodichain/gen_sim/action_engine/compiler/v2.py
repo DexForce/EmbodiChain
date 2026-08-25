@@ -397,7 +397,12 @@ def _v2_actor(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _task_type(operator: str) -> str:
-    return _OPERATOR_TASK_TYPES.get(operator, "E1")
+    try:
+        return _OPERATOR_TASK_TYPES[operator]
+    except KeyError as exc:
+        raise ValueError(
+            f"Semantic operator {operator!r} has no registered task contract."
+        ) from exc
 
 
 def _level(groups: Sequence[Mapping[str, Any]]) -> str:

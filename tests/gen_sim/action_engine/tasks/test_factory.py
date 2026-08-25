@@ -260,6 +260,7 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
         "kind": "joint_state",
         "source": "initial",
         "operation": "e2_home",
+        "required_home": True,
     }
     assert orient_nodes[1]["depends_on"] == [orient_nodes[0]["id"]]
     assert orient_nodes[2]["depends_on"] == [orient_nodes[1]["id"]]

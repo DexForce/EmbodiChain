@@ -150,7 +150,7 @@ class GroundedTaskBuilder:
         self.requirements: dict[str, dict[str, Any]] = {}
         self.previous_object_uid: str | None = None
         self.previous_arm: str | None = None
-        self.last_task_by_object_uid: dict[str, tuple[str, str]] = {}
+        self.last_task_by_object_uid: dict[str, str] = {}
 
     def add(
         self,
@@ -162,6 +162,7 @@ class GroundedTaskBuilder:
         depends_on: Sequence[str] | None = None,
     ) -> str:
         values = deepcopy(dict(params or {}))
+        contract = task_contract(task_type)
         relation = str(values.get("relation", "none"))
         validate_source_compatibility(task_type, (object_entity,))
         validate_target_compatibility(task_type, target, relation=relation)
@@ -169,12 +170,10 @@ class GroundedTaskBuilder:
         instance_id = f"task_{len(self.instances) + 1:02d}"
         object_role = self._role(
             object_entity,
-            required_affordances=task_contract(task_type).required_affordances,
+            required_affordances=contract.required_affordances,
             initial_state={"orientation": "fallen"} if task_type == "E2" else {},
         )
-        values = {"object_role": object_role, **values}
-        if task_type == "E3":
-            values["source_role"] = values.pop("object_role")
+        values = {contract.primary_role_field: object_role, **values}
         if target is not None:
             values["target_role"] = self._role(
                 target,
@@ -185,13 +184,8 @@ class GroundedTaskBuilder:
         else:
             dependencies = list(depends_on)
         previous_for_object = self.last_task_by_object_uid.get(object_entity.uid)
-        if (
-            task_type == "E4"
-            and previous_for_object is not None
-            and previous_for_object[1] == "E2"
-            and previous_for_object[0] not in dependencies
-        ):
-            dependencies.append(previous_for_object[0])
+        if previous_for_object is not None and previous_for_object not in dependencies:
+            dependencies.append(previous_for_object)
         self.instances.append(
             {
                 "id": instance_id,
@@ -201,9 +195,9 @@ class GroundedTaskBuilder:
                 "role": "primary",
             }
         )
-        self.last_task_by_object_uid[object_entity.uid] = (instance_id, task_type)
+        self.last_task_by_object_uid[object_entity.uid] = instance_id
         self.previous_object_uid = object_entity.uid
-        if task_type == "E4":
+        if contract.resource_mode == "handover":
             receive_arm = str(values.get("receive_arm", ""))
             self.previous_arm = (
                 receive_arm if receive_arm in {"left_arm", "right_arm"} else None

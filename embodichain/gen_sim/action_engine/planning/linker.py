@@ -29,6 +29,7 @@ from embodichain.gen_sim.action_engine.capabilities import (
     build_atomic_capability_registry,
 )
 from embodichain.gen_sim.action_engine.domain import (
+    task_contract,
     validate_seed_graph,
     validate_task_spec,
 )
@@ -98,31 +99,28 @@ def link_task_dependencies(
     distinct_arm_pairs = _distinct_arm_pairs(task.get("metadata", {}))
     linked: list[dict[str, str]] = []
 
-    latest_by_object: dict[str, tuple[str, str]] = {}
+    latest_by_object: dict[str, str] = {}
     for instance in instances:
         instance_id = str(instance["id"])
-        task_type = str(instance["task_type"])
         primary = _task_primary_object(instance, bindings)
         previous = latest_by_object.get(primary)
         if (
-            task_type == "E4"
-            and previous is not None
-            and previous[1] == "E2"
-            and previous[0] not in dependencies[instance_id]
-            and not _reaches(dependencies, previous[0], instance_id)
+            previous is not None
+            and previous not in dependencies[instance_id]
+            and not _reaches(dependencies, previous, instance_id)
         ):
-            dependencies[instance_id].add(previous[0])
-            dependency_order[instance_id].append(previous[0])
+            dependencies[instance_id].add(previous)
+            dependency_order[instance_id].append(previous)
             linked.append(
                 {
-                    "from": previous[0],
+                    "from": previous,
                     "to": instance_id,
                     "reason": "causal",
-                    "detail": f"object_held:{primary}",
+                    "detail": f"object_flow:{primary}",
                 }
             )
             _assert_acyclic(dependencies, "TaskSpec causal linking")
-        latest_by_object[primary] = (instance_id, task_type)
+        latest_by_object[primary] = instance_id
 
     for later_index, later_id in enumerate(order):
         for earlier_id in order[:later_index]:
@@ -392,8 +390,9 @@ def _task_claims(
     instance: Mapping[str, Any], bindings: Mapping[str, str]
 ) -> list[dict[str, str]]:
     task_type = str(instance["task_type"])
+    contract = task_contract(task_type)
     params = _resolve_roles(instance.get("params", {}), bindings)
-    primary_key = "source_role" if task_type == "E3" else "object_role"
+    primary_key = contract.primary_role_field
     primary = params.get(primary_key)
     claims: list[dict[str, str]] = []
     if isinstance(primary, str) and primary:
@@ -408,7 +407,7 @@ def _task_claims(
         for payload in payloads:
             if isinstance(payload, str) and payload and payload != primary:
                 claims.append(_claim(f"object:{payload}", "exclusive"))
-    if task_type == "E4":
+    if contract.resource_mode == "handover":
         transfer = str(params.get("transfer_arm", ""))
         receive = str(params.get("receive_arm", ""))
         if transfer not in {"left_arm", "right_arm"} or receive not in {
@@ -416,19 +415,24 @@ def _task_claims(
             "right_arm",
         }:
             raise ValueError(
-                "E4 contract linking requires explicit transfer/receive arms."
+                "Handover resource mode requires explicit transfer/receive arms."
             )
         if transfer == receive:
-            raise ValueError("E4 transfer_arm and receive_arm must be distinct.")
+            raise ValueError("Handover transfer_arm and receive_arm must be distinct.")
         claims.extend((_claim(f"arm:{transfer}"), _claim(f"arm:{receive}")))
-    elif task_type == "E5":
+    elif contract.resource_mode == "coordinated":
         claims.extend((_claim("arm:left_arm"), _claim("arm:right_arm")))
-    else:
+    elif contract.resource_mode == "single_arm":
         required_arm = params.get("required_arm")
         if required_arm in {"left_arm", "right_arm"}:
             claims.append(_claim(f"arm:{required_arm}"))
         else:
             claims.append(_claim("arm:auto"))
+    else:
+        raise ValueError(
+            f"TaskGroup {instance.get('id')!r} has unsupported resource mode "
+            f"{contract.resource_mode!r}."
+        )
     return _merge_claims(claims)
 
 
@@ -436,8 +440,9 @@ def _task_primary_object(
     instance: Mapping[str, Any], bindings: Mapping[str, str]
 ) -> str:
     task_type = str(instance["task_type"])
+    contract = task_contract(task_type)
     params = _resolve_roles(instance.get("params", {}), bindings)
-    key = "source_role" if task_type == "E3" else "object_role"
+    key = contract.primary_role_field
     value = params.get(key)
     if not isinstance(value, str) or not value:
         raise ValueError(

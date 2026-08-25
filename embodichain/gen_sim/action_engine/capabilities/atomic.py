@@ -903,13 +903,12 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
     release_role = binding.get("coordinated_release_role")
     if release_role is not None:
         if (
-            node.get("task_type") != "E5"
-            or node.get("control") != "hand"
+            node.get("control") != "hand"
             or binding.get("source") != "gripper_open"
             or not node.get("sync_group")
         ):
             raise ValueError(
-                "Coordinated MoveJoints release requires an E5 synchronized "
+                "Coordinated MoveJoints release requires a synchronized "
                 "hand action targeting gripper_open."
             )
         if release_role not in {"participant", "commit"}:
@@ -947,9 +946,9 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
             ),
         )
     if node.get("role") == "cleanup":
-        required_home = (
-            node.get("task_type") == "E2" and binding.get("operation") == "e2_home"
-        ) or (node.get("task_type") == "E3" and binding.get("operation") == "e3_home")
+        required_home = binding.get("required_home", False)
+        if not isinstance(required_home, bool):
+            raise TypeError("joint_state required_home must be a boolean.")
         return ResolvedActionContract(
             requires=(StateAtom("arm_clear", arm=arm),),
             effects=(

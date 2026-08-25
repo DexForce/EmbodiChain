@@ -125,8 +125,10 @@ class ActionEngineEnv(EmbodiedEnv):
             dtype=self.init_qpos.dtype,
             device=self.init_qpos.device,
         ).flatten()
-        self.left_arm_current_gripper_state = self._hand_qpos("left")
-        self.right_arm_current_gripper_state = self._hand_qpos("right")
+        for side in ("left", "right"):
+            hand_qpos = self._hand_qpos(side)
+            setattr(self, f"{side}_arm_init_gripper_state", hand_qpos.clone())
+            setattr(self, f"{side}_arm_current_gripper_state", hand_qpos)
         self.update_obj_info()
         self.agent_initial_object_poses = {
             uid: item["pose"].clone() for uid, item in self.obj_info.items()

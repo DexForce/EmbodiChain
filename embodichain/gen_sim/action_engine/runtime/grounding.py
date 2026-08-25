@@ -725,9 +725,24 @@ class ActionGrounder:
                     joint_defaults["hand_close_sample_interval"]
                 )
             elif source == "gripper_open":
-                policy["sample_interval"] = int(
-                    joint_defaults["hand_open_sample_interval"]
-                )
+                if binding.get("coordinated_release_role") is not None:
+                    coordinated_name = next(
+                        name
+                        for name in self.capabilities.executable_names()
+                        if self.capabilities.get(name).config_materializer
+                        == "coordinated_pickment"
+                    )
+                    coordinated = self.runtime_policy.motion_defaults[coordinated_name]
+                    policy["sample_interval"] = int(
+                        coordinated.get(
+                            "release_sample_interval",
+                            joint_defaults["hand_open_sample_interval"],
+                        )
+                    )
+                else:
+                    policy["sample_interval"] = int(
+                        joint_defaults["hand_open_sample_interval"]
+                    )
             elif source == "initial" and control == "arm":
                 # Returning home after release is a safety motion. If the
                 # collision-aware planner cannot find a route, do not silently
