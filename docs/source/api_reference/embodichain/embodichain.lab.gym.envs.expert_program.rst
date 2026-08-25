@@ -13,9 +13,11 @@ embodichain.lab.gym.envs.expert_program
       ConfigPath
       ConfigPathPart
       CompiledProgram
-      ContainerAffordanceBinding
       ConfiguredHandOverPoseProvider
+      ContainerAffordanceBinding
       ControlPartCommandPreset
+      ControlPartEvidenceProviderDeclaration
+      ControlPartEvidenceProviderFactory
       ControlPartEndpointBinding
       ControlPartResourceBinding
       CyclicPoseTargetCfg
@@ -227,6 +229,11 @@ used again during runtime assembly.
 
 .. autoclass:: IntegrationFingerprintMismatch
 
+.. autoclass:: ControlPartEvidenceProviderDeclaration
+   :members:
+
+.. autoclass:: ControlPartEvidenceProviderFactory
+
 .. autoclass:: EndpointAdapterDeclaration
    :members:
 
@@ -300,12 +307,6 @@ use the core ``RobotResource`` type directly.
 .. autoclass:: AntipodalGraspAffordanceBinding
    :members:
 
-.. autoclass:: ContainerAffordanceBinding
-   :members:
-
-.. autoclass:: SupportSurfaceAffordanceBinding
-   :members:
-
 .. autoclass:: ControlPartCommandPreset
    :members:
 
@@ -321,9 +322,8 @@ use the core ``RobotResource`` type directly.
 .. autoclass:: SimulationExpertProgramFactory
    :members:
 
-The cuRobo parallel-safety gate densifies synchronized joint-position segments
-and checks every sample against robot limits, self-collision, and the live
-registry-backed collision world before transport dispatch.
+.. autoclass:: ConfiguredHandOverPoseProvider
+   :members:
 
 .. autoclass:: CuroboParallelCommandSafetyValidator
    :members:
@@ -331,13 +331,26 @@ registry-backed collision world before transport dispatch.
 .. autoclass:: CuroboParallelSafetyValidatorFactory
    :members:
 
-.. autoclass:: ConfiguredHandOverPoseProvider
+.. autoclass:: ContainerAffordanceBinding
+   :members:
+
+.. autoclass:: SupportSurfaceAffordanceBinding
    :members:
 
 .. autoclass:: SimulationSegmentPolicyPort
    :members:
 
 .. autofunction:: create_simulation_expert_program_adapter
+
+Parallel-safety implementation module
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_parallel_safety
+
+.. autosummary::
+
+   CuroboParallelCommandSafetyValidator
+   CuroboParallelSafetyValidatorFactory
 
 Catalog implementation module
 -----------------------------
@@ -357,6 +370,8 @@ Extension declaration implementation module
 
 .. autosummary::
 
+   ControlPartEvidenceProviderDeclaration
+   ControlPartEvidenceProviderFactory
    EndpointAdapterDeclaration
    ParallelCommandSafetyValidatorFactory
    ParallelSafetyDeclaration
@@ -364,10 +379,16 @@ Extension declaration implementation module
    StandardExtensionDeclarations
    VersionedKey
    build_standard_extension_declarations
+   declare_control_part_evidence_factory
    declare_endpoint_adapter
    declare_parallel_safety_factory
    declare_runtime_transport
    validate_immutable_extension_declaration
+
+.. autoclass:: ControlPartEvidenceProviderDeclaration
+   :members:
+
+.. autoclass:: ControlPartEvidenceProviderFactory
 
 .. autoclass:: EndpointAdapterDeclaration
    :members:
@@ -387,6 +408,8 @@ Extension declaration implementation module
 
 .. autofunction:: build_standard_extension_declarations
 
+.. autofunction:: declare_control_part_evidence_factory
+
 .. autofunction:: declare_endpoint_adapter
 
 .. autofunction:: declare_parallel_safety_factory
@@ -394,13 +417,3 @@ Extension declaration implementation module
 .. autofunction:: declare_runtime_transport
 
 .. autofunction:: validate_immutable_extension_declaration
-
-Simulation parallel-safety implementation module
-------------------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_parallel_safety
-
-.. autosummary::
-
-   CuroboParallelCommandSafetyValidator
-   CuroboParallelSafetyValidatorFactory

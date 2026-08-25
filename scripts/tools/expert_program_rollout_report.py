@@ -179,10 +179,10 @@ _LANDED_INTEGRATIONS = (
         "UR5",
         "Cube Pick + Place",
         "Pick + Place(at)",
-        "pose relation; no task-local constraint observer",
+        "pose relation + dual-finger contact constraint",
         "schema-v2 sequential",
         "checked in",
-        "blocked: install grasp evidence before a physical gate",
+        "seed 0 three-cycle and physical-loss recovery slow gates passed",
     ),
     (
         "UR5",
@@ -298,8 +298,9 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
         "",
         (
             "This is a deterministic, static Phase 8 snapshot of checked-in "
-            "framework and integration code. It does not run simulation, report "
-            "physical acceptance, or certify production readiness for an embodiment."
+            "framework and integration code. Rendering does not run simulation; "
+            "physical-acceptance entries summarize checked-in regression gates and "
+            "do not certify release readiness for an embodiment."
         ),
         "",
         "## Framework Contract Matrix",
@@ -430,8 +431,9 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
             (
                 "The supported-simulation Open Drawer seed-0 regression is checked "
                 "in and passes locally; no multi-seed success-rate or release gate "
-                "is checked in yet. Repeated Cube needs an environment-qualified "
-                "grasp-evidence provider before a physical rate is meaningful."
+                "is checked in yet. Repeated Cube has a seed-0 three-cycle pass plus "
+                "a physical-loss/reacquisition pass backed by dual-finger contact "
+                "evidence; broader multi-seed qualification remains open."
             ),
             "",
             "## Drift Check",

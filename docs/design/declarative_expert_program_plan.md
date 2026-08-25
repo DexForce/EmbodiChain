@@ -308,6 +308,14 @@ channel. Simulation integrations must supply real contact, constraint, force,
 wrench, articulation, and pose observations as applicable. Missing channels
 remain invalid and fail closed.
 
+The standard registration may own a `ControlPartEvidenceProviderFactory` for
+the exact built-in control-part evidence route. Its immutable declaration is
+fingerprinted before simulation startup, and every runtime assembly receives a
+fresh live provider bound to the exact robot, scene registry, engine, and shared
+scene provider. The repeated-cube integration uses this extension with a
+`ContactSensor`: a grasp constraint is true only when the cube has valid contact
+with both configured gripper finger links in the same environment row.
+
 The following boundaries remain distinct:
 
 | Boundary | Meaning |
@@ -385,8 +393,8 @@ and the dual-UR5 reference adds `HandOver-v1`.
 
 | Environment ID | Declarative path | Atomic path | Application acceptance |
 |---|---|---|---|
-| `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; the task installs no contact or constraint observer | standard `object_near_target` validator checks the measured cube position against the selected cyclic target; physical rollout remains unqualified without grasp evidence |
-| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call whose executable-free payload names only the drawer handle | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal`; the selected policy preset is the sole owner of `SlideOptions` | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
+| `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; a registration-owned provider derives constraint evidence from cube contact with both physical finger links | standard `object_near_target` validator checks the measured cube position against the selected cyclic target; seed-0 three-cycle and physical-loss/reacquisition slow gates pass |
+| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call with a strict executable-free payload | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal` and `SlideOptions` for the live drawer-handle link | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
 | `HandOver-v1` | one `Segment(HandOver)` with a final object target | unified built-in `HandOver` over disjoint left/right arm-and-gripper resources, standalone grasp-pose generators, and physical gates/guards | rigid-object settling plus `object_near_target`; supported-simulation recovery qualification remains a later stack layer |
 
 Both configurations load their Expert Program through the top-level
@@ -555,7 +563,8 @@ Implemented on the current branch:
   bounded workflow retry/reacquisition;
 - official `ExpertProgramRepeatedPickPlace-v1` integration with a packaged
   three-cycle program, cyclic targets, rigid-object settling, segment
-  validation, and no task-local contact or constraint observer;
+  validation, a registration-owned dual-finger contact-evidence provider, and
+  supported-simulation three-cycle plus physical-loss/reacquisition gates;
 - official `ExpertProgramOpenDrawer-v1` integration with a strict registered
   call lowered to `Slide`, shared articulation settling, and declarative
   measured passive-joint application acceptance;
@@ -573,30 +582,31 @@ The registration follow-up makes
 standard runtime path. `SkillPolicyPreset` schema version 3 requires an exact
 typed action-option template for every reachable semantic call; lowering may
 replace only explicitly compiler-owned dynamic target fields. Endpoint
-adapters, ordered Gym transports, and a parallel-safety factory enter the
-provider-free registration fingerprint and are checked again against live
-endpoint resolution. Runtime assembly consumes those same registered objects,
-freezes the command encoder, takes runner policy from the selected preset, and
-creates a fresh safety validator for every runtime. Helper arguments cannot
-replace registered components after preflight. Stateful extension declarations
-must be frozen dataclasses with recursively immutable configuration so nested
-mutable values cannot become a post-registration runtime side channel.
+adapters, ordered Gym transports, a parallel-safety factory, and an optional
+control-part evidence factory enter the provider-free registration fingerprint
+and are checked again against live endpoint resolution. Runtime assembly
+consumes those same registered objects, freezes the command encoder, takes
+runner policy from the selected preset, and creates fresh safety/evidence
+providers for every runtime. Helper arguments cannot replace registered
+components after preflight. Stateful extension declarations must be frozen
+dataclasses with recursively immutable configuration so nested mutable values
+cannot become a post-registration runtime side channel.
 
 This slice covers command transport, not arbitrary closed-loop backend
 injection. Custom endpoint adapters on the standard path must declare empty
 tracking and effect-evidence routes, and therefore support only timed/open-loop
 completion. The built-in `ControlPartEndpoint` retains its built-in routes.
 Non-joint feedback providers, desired-state projectors, metric evaluators, and
-effect-evidence backends require separate registration-owned provider-factory
-contracts before they can be advertised as standard mobile or whole-body
-closed-loop support. Each transport owns a trusted `hold()` primitive; the
-parallel safety validator authorizes active merged command frames before
-dispatch.
+non-control-part effect-evidence backends require separate registration-owned
+provider-factory contracts before they can be advertised as standard mobile or
+whole-body closed-loop support. Each transport owns a trusted `hold()`
+primitive; the parallel safety validator authorizes active merged command
+frames before dispatch.
 
-Still required before claiming task-level physical completion:
+Still required before broader task-level qualification:
 
-- install an environment-qualified grasp-evidence provider before claiming
-  physical completion for repeated cube;
+- repeat the repeated-cube physical gates across controlled seeds and the
+  intended randomization envelope;
 - repeat the Open Drawer simulator qualification across controlled seeds and
   the intended randomization envelope, then inspect persisted metadata;
 - an environment-qualified parallel physical-safety validator before migrating
@@ -617,8 +627,8 @@ Focused validation for changes in this design should include:
 - `tests/gym/envs/test_demo.py` and
   `tests/gym/envs/test_embodied_env_expert_program.py`;
 - `tests/gym/envs/test_settling.py`;
-- `tests/gym/envs/tasks/test_expert_program_repeated_pick_place.py` and
-  `tests/gym/envs/tasks/test_expert_program_open_drawer.py`;
+- `tests/gym/envs/expert_program/test_task_vertical_slices.py` and
+  `tests/gym/envs/expert_program/test_task_hand_over.py`;
 - `tests/sim/skills/test_runtime.py` and parallel-runtime tests;
 - semantic tutorial tests;
 - CLI/config-path tests;
@@ -642,5 +652,6 @@ artifact contract are maintained in
 [`expert_program_rollout_report.md`](expert_program_rollout_report.md).
 
 The Open Drawer command completed with exit status 0 and committed one episode.
-Repeated cube retains structural coverage but no longer claims a physical
-success run because its task-local grasp-evidence observer was removed.
+Repeated cube completes a seed-0 three-cycle physical run, and a separate
+bounded gripper-open fault proves held-object loss, real semantic
+reacquisition, retried placement, and final segment acceptance.

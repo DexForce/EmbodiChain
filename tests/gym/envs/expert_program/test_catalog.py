@@ -42,12 +42,17 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AtomicActionEngine,
     PlanningContext,
+    SceneProvider,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.skills import (
+    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
     PLACEMENT_TARGET_AFFORDANCE_REVISION,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     BoundSemanticCall,
     ControlPartEndpoint,
+    EffectEvidenceProvider,
     HandOver,
     HandOverPoseProvider,
     HandOverPoseTargets,
@@ -230,6 +235,53 @@ class _AcceptParallelSafety:
         del branch_frames, merged_frame
 
 
+class _CatalogControlPartEvidenceProvider(EffectEvidenceProvider):
+    """Live evidence sentinel returned by the registration-owned factory."""
+
+    provider_id = CONTROL_PART_EVIDENCE_PROVIDER_ID
+    revision = CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+    def collect(self, queries: object, context: object) -> object:
+        """Remain unreachable in factory lifecycle tests."""
+        del queries, context
+        raise AssertionError("Catalog lifecycle tests must not collect evidence.")
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogControlPartEvidenceFactory:
+    """Frozen declaration for the built-in control-part evidence route."""
+
+    provider_id: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_ID
+    revision: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+    source: str = "test.contact"
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        scene_provider: SceneProvider,
+    ) -> EffectEvidenceProvider:
+        """Return one fresh provider for every runtime assembly."""
+        del simulation, robot, scene_registry, engine, scene_provider
+        return _CatalogControlPartEvidenceProvider()
+
+
+class _CatalogSceneProvider:
+    """Structurally satisfy the scene-provider runtime boundary."""
+
+    def snapshot(
+        self,
+        *,
+        timestamp: float,
+        env_ids: object,
+    ) -> SceneSnapshot:
+        del timestamp, env_ids
+        raise AssertionError("Catalog lifecycle tests must not snapshot scenes.")
+
+
 @dataclass(frozen=True, slots=True)
 class _CatalogParallelSafetyFactory:
     """Frozen declaration covering the built-in transport exactly."""
@@ -402,8 +454,12 @@ def _place_relation_catalog(
         call_catalog=base.call_catalog,
         relation_grounder_keys=grounder_keys,
         settle_preset_ids=base.settle_preset_ids,
-        extensions=base.extensions,
+        endpoint_adapter_declarations=base.endpoint_adapter_declarations,
+        runtime_transport_declarations=base.runtime_transport_declarations,
+        parallel_safety_declaration=base.parallel_safety_declaration,
+        control_part_evidence_declaration=(base.control_part_evidence_declaration),
         fingerprint="0" * 64,
+        _required_skills={},
     )
 
 
@@ -490,13 +546,50 @@ def test_catalog_declares_builtin_endpoint_and_ordered_transport_contracts() -> 
     """The standard provider-free catalog contains its exact built-in wiring."""
     catalog = _registration().catalog
 
-    adapter = catalog.extensions.endpoint_adapters[ControlPartEndpoint]
+    adapter = catalog.endpoint_adapter_declarations[ControlPartEndpoint]
 
     assert adapter.adapter_id == "control_part"
     assert adapter.runtime_transport_ids == frozenset({"robot.joint_position"})
     assert tuple(
-        value.transport_id for value in catalog.extensions.runtime_transports
+        value.transport_id for value in catalog.runtime_transport_declarations
     ) == ("robot.joint_position",)
+
+
+def test_control_part_evidence_factory_is_fingerprinted_and_fresh() -> None:
+    """The catalog owns the physical route and each assembly gets a provider."""
+    factory = _CatalogControlPartEvidenceFactory()
+    registration = SimulationExpertProgramRegistration(
+        scene_binding=create_cube_scene_binding(),
+        robot_profile_binding=create_cube_robot_profile_binding(),
+        control_part_evidence_factory=factory,
+    )
+    without_factory = _registration()
+    declaration = registration.catalog.control_part_evidence_declaration
+
+    assert declaration is not None
+    assert declaration.provider_id == CONTROL_PART_EVIDENCE_PROVIDER_ID
+    assert declaration.revision == CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+    assert registration.fingerprint != without_factory.fingerprint
+
+    robot, scene_registry, engine = _parallel_live_inputs()
+    first = registration.create_control_part_evidence_provider(
+        simulation=object(),
+        robot=robot,
+        scene_registry=scene_registry,
+        engine=engine,
+        scene_provider=_CatalogSceneProvider(),
+    )
+    second = registration.create_control_part_evidence_provider(
+        simulation=object(),
+        robot=robot,
+        scene_registry=scene_registry,
+        engine=engine,
+        scene_provider=_CatalogSceneProvider(),
+    )
+
+    assert isinstance(first, EffectEvidenceProvider)
+    assert isinstance(second, EffectEvidenceProvider)
+    assert first is not second
 
 
 def test_parallel_preflight_requires_registered_safety_factory_at_exact_path() -> None:

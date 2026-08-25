@@ -1,6 +1,6 @@
 # Declarative Expert Program Rollout Report
 
-This is a deterministic, static Phase 8 snapshot of checked-in framework and integration code. It does not run simulation, report physical acceptance, or certify production readiness for an embodiment.
+This is a deterministic, static Phase 8 snapshot of checked-in framework and integration code. Rendering does not run simulation; physical-acceptance entries summarize checked-in regression gates and do not certify release readiness for an embodiment.
 
 ## Framework Contract Matrix
 
@@ -26,7 +26,7 @@ Only the two checked-in vertical slices below are classified as integration/prod
 
 | Embodiment | Task | Skill contract | Terminal effect | Program schema | Code status | Physical acceptance |
 | --- | --- | --- | --- | --- | --- | --- |
-| UR5 | Cube Pick + Place | Pick + Place(at) | pose relation; no task-local constraint observer | schema-v2 sequential | checked in | blocked: install grasp evidence before a physical gate |
+| UR5 | Cube Pick + Place | Pick + Place(at) | pose relation + dual-finger contact constraint | schema-v2 sequential | checked in | seed 0 three-cycle and physical-loss recovery slow gates passed |
 | UR5 | Open Drawer | Registered call -> Slide | articulation joint validator | schema-v2 sequential | checked in | seed 0 regression passed; broader multi-seed gate remains |
 
 HandOver, Place relations (`on`/`inside`), and schema-v2 parallel are framework-tested but integration-required. They are intentionally not listed as checked-in integrations.
@@ -45,15 +45,15 @@ Counting rule: `lines` is the number of raw LF (`0x0A`) bytes; `bytes` is the ra
 
 | Task | Baseline lines | Current lines | Line delta | Baseline bytes | Current bytes | Byte delta | Current source files |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Cube | 598 | 200 | -398 (-66.6%) | 23912 | 6690 | -17222 (-72.0%) | `embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py`<br>`embodichain_tasks/configs/expert_program/repeated_pick_place.yaml` |
+| Cube | 598 | 399 | -199 (-33.3%) | 23912 | 14214 | -9698 (-40.6%) | `embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py`<br>`embodichain_tasks/configs/expert_program/repeated_pick_place.yaml` |
 | Drawer | 245 | 313 | +68 (+27.8%) | 8833 | 11352 | +2519 (+28.5%) | `embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py`<br>`embodichain_tasks/configs/expert_program/open_drawer.yaml` |
-| Total | 843 | 513 | -330 (-39.1%) | 32745 | 18042 | -14703 (-44.9%) | the four files above |
+| Total | 843 | 712 | -131 (-15.5%) | 32745 | 25566 | -7179 (-21.9%) | the four files above |
 
 ## Demo Success Measurement
 
 `scripts/benchmark/expert_program/demo_success.py` executes each fixed seed exactly once, always discards the episode buffer, and counts executor exceptions as failed rows. It writes raw JSON plus a three-table Markdown report. Its CLI supports offline raw-JSON re-aggregation and an explicit `--run-simulation` mode that constructs one standard Gym environment from Gym and Expert Program configurations.
 
-The supported-simulation Open Drawer seed-0 regression is checked in and passes locally; no multi-seed success-rate or release gate is checked in yet. Repeated Cube needs an environment-qualified grasp-evidence provider before a physical rate is meaningful.
+The supported-simulation Open Drawer seed-0 regression is checked in and passes locally; no multi-seed success-rate or release gate is checked in yet. Repeated Cube has a seed-0 three-cycle pass plus a physical-loss/reacquisition pass backed by dual-finger contact evidence; broader multi-seed qualification remains open.
 
 ## Drift Check
 

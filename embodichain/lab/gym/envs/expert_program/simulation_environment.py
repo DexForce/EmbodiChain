@@ -808,8 +808,21 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         scene_provider = observation_provider.scene_provider
         providers: list[EffectEvidenceProvider] = []
         if isinstance(self._robot, ControlPartRobotEvidenceSource):
+            registered_provider = (
+                None
+                if self._registration is None
+                else self._registration.create_control_part_evidence_provider(
+                    simulation=self._simulation,
+                    robot=self._robot,
+                    scene_registry=scene_registry,
+                    engine=engine,
+                    scene_provider=scene_provider,
+                )
+            )
             providers.append(
-                ControlPartSimulationEvidenceProvider(
+                registered_provider
+                if registered_provider is not None
+                else ControlPartSimulationEvidenceProvider(
                     self._robot,
                     scene_provider=scene_provider,
                     contact_observer=self._contact_observer,

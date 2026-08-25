@@ -58,8 +58,8 @@ from .bridge import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.atomic_actions import AtomicActionEngine
-    from embodichain.lab.sim.skills import SceneRegistry
+    from embodichain.lab.sim.atomic_actions import AtomicActionEngine, SceneProvider
+    from embodichain.lab.sim.skills import EffectEvidenceProvider, SceneRegistry
 
 VersionedKey = tuple[str, str]
 """Exact ``(provider_or_projector_id, revision)`` registry key."""
@@ -441,6 +441,36 @@ class ParallelSafetyDeclaration:
             raise ValueError("supported_transport_ids must not be empty.")
 
 
+@dataclass(frozen=True, slots=True)
+class ControlPartEvidenceProviderDeclaration:
+    """Provider-free identity of one control-part evidence factory.
+
+    Args:
+        factory_type: Exact immutable factory implementation type.
+        provider_id: Stable effect-evidence provider identifier.
+        revision: Exact provider contract revision.
+    """
+
+    factory_type: type[object]
+    provider_id: str
+    revision: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.factory_type, type):
+            raise TypeError("factory_type must be a type.")
+        _identifier(self.provider_id, field_name="provider_id")
+        _identifier(self.revision, field_name="revision")
+        expected = (
+            CONTROL_PART_EVIDENCE_PROVIDER_ID,
+            CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+        )
+        if (self.provider_id, self.revision) != expected:
+            raise ValueError(
+                "A control-part evidence factory must provide the exact built-in "
+                f"route {expected!r}."
+            )
+
+
 @runtime_checkable
 class ParallelCommandSafetyValidatorFactory(Protocol):
     """Registration-owned factory for one authoritative live safety gate."""
@@ -460,6 +490,36 @@ class ParallelCommandSafetyValidatorFactory(Protocol):
         """Create one live gate bound to the exact assembled runtime."""
 
 
+@runtime_checkable
+class ControlPartEvidenceProviderFactory(Protocol):
+    """Registration-owned factory for one live control-part evidence provider."""
+
+    provider_id: ClassVar[str]
+    revision: ClassVar[str]
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        scene_provider: SceneProvider,
+    ) -> EffectEvidenceProvider:
+        """Create one live provider bound to the exact assembled runtime.
+
+        Args:
+            simulation: Simulation that owns the selected robot and sensors.
+            robot: Exact robot selected by the environment factory.
+            scene_registry: Exact live semantic scene registry.
+            engine: Atomic-action engine assembled for the robot.
+            scene_provider: Shared synchronized live scene provider.
+
+        Returns:
+            Fresh effect-evidence provider for the assembled runtime.
+        """
+
+
 @dataclass(frozen=True, slots=True)
 class StandardExtensionDeclarations:
     """Cross-checked provider-free declarations for the standard factory."""
@@ -467,6 +527,7 @@ class StandardExtensionDeclarations:
     endpoint_adapters: Mapping[type[ResourceEndpoint], EndpointAdapterDeclaration]
     runtime_transports: tuple[RuntimeTransportDeclaration, ...]
     parallel_safety: ParallelSafetyDeclaration | None
+    control_part_evidence: ControlPartEvidenceProviderDeclaration | None
 
     def __post_init__(self) -> None:
         if not isinstance(self.endpoint_adapters, Mapping):
@@ -499,6 +560,15 @@ class StandardExtensionDeclarations:
         ):
             raise TypeError(
                 "parallel_safety must be ParallelSafetyDeclaration or None."
+            )
+        if (
+            self.control_part_evidence is not None
+            and type(self.control_part_evidence)
+            is not ControlPartEvidenceProviderDeclaration
+        ):
+            raise TypeError(
+                "control_part_evidence must be "
+                "ControlPartEvidenceProviderDeclaration or None."
             )
         adapter_ids = [value.adapter_id for value in normalized.values()]
         if len(set(adapter_ids)) != len(adapter_ids):
@@ -696,6 +766,45 @@ def declare_parallel_safety_factory(
     )
 
 
+def declare_control_part_evidence_factory(
+    factory: ControlPartEvidenceProviderFactory,
+) -> ControlPartEvidenceProviderDeclaration:
+    """Read one control-part evidence factory's exact static identity.
+
+    Args:
+        factory: Immutable registration-owned factory declaration.
+
+    Returns:
+        Provider-free exact factory identity.
+    """
+    create = getattr(factory, "create", None)
+    if not callable(create):
+        raise TypeError("control_part_evidence_factory must define create().")
+    validate_immutable_extension_declaration(
+        factory,
+        field_name="control_part_evidence_factory",
+    )
+    return ControlPartEvidenceProviderDeclaration(
+        factory_type=type(factory),
+        provider_id=_identifier(
+            _class_attribute(
+                factory,
+                "provider_id",
+                field_name="ControlPartEvidenceProviderFactory.provider_id",
+            ),
+            field_name="ControlPartEvidenceProviderFactory.provider_id",
+        ),
+        revision=_identifier(
+            _class_attribute(
+                factory,
+                "revision",
+                field_name="ControlPartEvidenceProviderFactory.revision",
+            ),
+            field_name="ControlPartEvidenceProviderFactory.revision",
+        ),
+    )
+
+
 def _profile_endpoint_types(
     profile: RobotSkillProfile,
 ) -> frozenset[type[ResourceEndpoint]]:
@@ -746,6 +855,7 @@ def build_standard_extension_declarations(
     endpoint_adapters: tuple[ResourceEndpointAdapter, ...],
     runtime_transports: tuple[RuntimeTransportActionEncoder, ...],
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
+    control_part_evidence_factory: ControlPartEvidenceProviderFactory | None = None,
 ) -> StandardExtensionDeclarations:
     """Cross-check standard-runtime extensions against one exact profile.
 
@@ -794,6 +904,8 @@ def build_standard_extension_declarations(
     if ControlPartEndpoint not in used_endpoint_types:
         installed_by_type.pop(ControlPartEndpoint)
 
+    _validate_builtin_routes(installed_by_type)
+
     builtin_transport = declare_runtime_transport(JointPositionGymTransportEncoder())
     custom_transports = tuple(
         declare_runtime_transport(transport) for transport in runtime_transports
@@ -805,14 +917,16 @@ def build_standard_extension_declarations(
             "Runtime transport declarations contain a duplicate transport ID or "
             "attempt to override the built-in joint-position transport."
         )
-    declared_transport_ids = set(transport_ids)
+    transport_by_id = {
+        declaration.transport_id: declaration for declaration in transport_declarations
+    }
     required_transport_ids = frozenset(
         transport_id
         for declaration in installed_by_type.values()
         for transport_id in declaration.runtime_transport_ids
     )
-    missing_transports = required_transport_ids - declared_transport_ids
-    unused_transports = declared_transport_ids - required_transport_ids
+    missing_transports = required_transport_ids - set(transport_by_id)
+    unused_transports = set(transport_by_id) - required_transport_ids
     unused_transports.discard(JointPositionTarget.TRANSPORT_ID)
     if missing_transports or unused_transports:
         raise ValueError(
@@ -822,6 +936,57 @@ def build_standard_extension_declarations(
         )
     if JointPositionTarget.TRANSPORT_ID not in required_transport_ids:
         transport_declarations = custom_transports
+        transport_by_id.pop(JointPositionTarget.TRANSPORT_ID)
+
+    target_owners: dict[type[RuntimeEndpointTarget], str] = {}
+    for transport in transport_declarations:
+        for target_type in transport.target_types:
+            previous = target_owners.get(target_type)
+            if previous is not None:
+                raise ValueError(
+                    f"Runtime target type {_qualified_name(target_type)!r} is "
+                    f"declared by both transports {previous!r} and "
+                    f"{transport.transport_id!r}."
+                )
+            target_owners[target_type] = transport.transport_id
+
+    adapter_target_types: set[type[RuntimeEndpointTarget]] = set()
+    for adapter in installed_by_type.values():
+        for transport_id in adapter.runtime_transport_ids:
+            if transport_id not in transport_by_id:
+                raise ValueError(
+                    f"Endpoint adapter {adapter.adapter_id!r} requires missing "
+                    f"transport {transport_id!r}."
+                )
+        per_transport_counts = {
+            transport_id: 0 for transport_id in adapter.runtime_transport_ids
+        }
+        for target_type in adapter.runtime_target_types:
+            owner = target_owners.get(target_type)
+            if owner is None or owner not in adapter.runtime_transport_ids:
+                raise ValueError(
+                    f"Endpoint adapter {adapter.adapter_id!r} target type "
+                    f"{_qualified_name(target_type)!r} is not covered by one of "
+                    f"its transports {sorted(adapter.runtime_transport_ids)}."
+                )
+            per_transport_counts[owner] += 1
+            adapter_target_types.add(target_type)
+        unused_adapter_transport_ids = sorted(
+            transport_id
+            for transport_id, count in per_transport_counts.items()
+            if count == 0
+        )
+        if unused_adapter_transport_ids:
+            raise ValueError(
+                f"Endpoint adapter {adapter.adapter_id!r} declares unused "
+                f"transport IDs {unused_adapter_transport_ids}."
+            )
+    extra_transport_target_types = set(target_owners) - adapter_target_types
+    if extra_transport_target_types:
+        raise ValueError(
+            "Runtime transports declare target types unused by endpoint adapters: "
+            f"{sorted(_qualified_name(value) for value in extra_transport_target_types)}."
+        )
 
     parallel_safety = (
         None
@@ -829,9 +994,7 @@ def build_standard_extension_declarations(
         else declare_parallel_safety_factory(parallel_safety_factory)
     )
     if parallel_safety is not None:
-        installed_transport_ids = frozenset(
-            declaration.transport_id for declaration in transport_declarations
-        )
+        installed_transport_ids = frozenset(transport_by_id)
         if parallel_safety.supported_transport_ids != installed_transport_ids:
             raise ValueError(
                 "parallel_safety_factory must support exactly the registered "
@@ -839,14 +1002,31 @@ def build_standard_extension_declarations(
                 f"got {sorted(parallel_safety.supported_transport_ids)}."
             )
 
+    control_part_evidence = (
+        None
+        if control_part_evidence_factory is None
+        else declare_control_part_evidence_factory(control_part_evidence_factory)
+    )
+    if (
+        control_part_evidence is not None
+        and ControlPartEndpoint not in installed_by_type
+    ):
+        raise ValueError(
+            "control_part_evidence_factory requires a registered "
+            "ControlPartEndpoint."
+        )
+
     return StandardExtensionDeclarations(
         endpoint_adapters=installed_by_type,
         runtime_transports=transport_declarations,
         parallel_safety=parallel_safety,
+        control_part_evidence=control_part_evidence,
     )
 
 
 __all__ = [
+    "ControlPartEvidenceProviderDeclaration",
+    "ControlPartEvidenceProviderFactory",
     "EndpointAdapterDeclaration",
     "ParallelCommandSafetyValidatorFactory",
     "ParallelSafetyDeclaration",
@@ -854,6 +1034,7 @@ __all__ = [
     "StandardExtensionDeclarations",
     "VersionedKey",
     "build_standard_extension_declarations",
+    "declare_control_part_evidence_factory",
     "declare_endpoint_adapter",
     "declare_parallel_safety_factory",
     "declare_runtime_transport",

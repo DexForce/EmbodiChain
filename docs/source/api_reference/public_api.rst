@@ -59,8 +59,6 @@ embodichain.data_pipeline.depth_video
 embodichain.gen_sim.env
 -----------------------
 
-Shared GenSim environment discovery and dotenv loading helpers.
-
 .. currentmodule:: embodichain.gen_sim.env
 
 .. autosummary::
@@ -71,8 +69,6 @@ Shared GenSim environment discovery and dotenv loading helpers.
 
 embodichain.gen_sim.gradio_ui.app_articraft
 -------------------------------------------
-
-Gradio callbacks and lifecycle helpers for Articraft asset generation.
 
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_articraft
 
@@ -87,8 +83,6 @@ Gradio callbacks and lifecycle helpers for Articraft asset generation.
 embodichain.gen_sim.gradio_ui.app_asset_engine
 ----------------------------------------------
 
-Asset-engine panel callbacks for previewing and generating SimReady assets.
-
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_asset_engine
 
 .. autosummary::
@@ -102,8 +96,6 @@ Asset-engine panel callbacks for previewing and generating SimReady assets.
 embodichain.gen_sim.gradio_ui.app_commands
 ------------------------------------------
 
-Command construction for launching the Action engine from Gradio.
-
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_commands
 
 .. autosummary::
@@ -112,9 +104,6 @@ Command construction for launching the Action engine from Gradio.
 
 embodichain.gen_sim.gradio_ui.app_env
 -------------------------------------
-
-Environment, networking, authentication, and artifact-path configuration for
-the Gradio workspace.
 
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_env
 
@@ -147,8 +136,6 @@ the Gradio workspace.
 embodichain.gen_sim.gradio_ui.app_media
 ---------------------------------------
 
-Media discovery helpers for Action-engine output.
-
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_media
 
 .. autosummary::
@@ -157,8 +144,6 @@ Media discovery helpers for Action-engine output.
 
 embodichain.gen_sim.gradio_ui.app_processes
 -------------------------------------------
-
-Session-scoped subprocess management and child-process environment helpers.
 
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_processes
 
@@ -181,8 +166,6 @@ Session-scoped subprocess management and child-process environment helpers.
 embodichain.gen_sim.gradio_ui.app_services
 ------------------------------------------
 
-Compatibility service entry point for constructing the Gradio application.
-
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_services
 
 .. autosummary::
@@ -191,8 +174,6 @@ Compatibility service entry point for constructing the Gradio application.
 
 embodichain.gen_sim.gradio_ui.app_state
 ---------------------------------------
-
-Session-owned runtime state and phase tracking for Scene and Action workflows.
 
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_state
 
@@ -209,8 +190,6 @@ Session-owned runtime state and phase tracking for Scene and Action workflows.
 embodichain.gen_sim.gradio_ui.app_ui
 ------------------------------------
 
-Top-level Gradio application composition.
-
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_ui
 
 .. autosummary::
@@ -219,8 +198,6 @@ Top-level Gradio application composition.
 
 embodichain.gen_sim.gradio_ui.app_workflows
 -------------------------------------------
-
-Scene and Action workflow callbacks, previews, status snapshots, and cleanup.
 
 .. currentmodule:: embodichain.gen_sim.gradio_ui.app_workflows
 
@@ -241,8 +218,6 @@ Scene and Action workflow callbacks, previews, status snapshots, and cleanup.
 embodichain.gen_sim.gradio_ui.gradio_app
 ----------------------------------------
 
-Executable entry point for the GenSim Gradio workspace.
-
 .. currentmodule:: embodichain.gen_sim.gradio_ui.gradio_app
 
 .. autosummary::
@@ -252,8 +227,6 @@ Executable entry point for the GenSim Gradio workspace.
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
-Validated scene-edit operations and immutable input-plan contracts.
-
 .. currentmodule:: embodichain.gen_sim.scene_engine.core.scene_edit_plan
 
 .. autosummary::
@@ -262,9 +235,7 @@ Validated scene-edit operations and immutable input-plan contracts.
    SceneEditPlan
 
 embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
-------------------------------------------------------------------------------
-
-Preparation of SimReady assets required by scene-edit add operations.
+-------------------------------------------------------------------------------
 
 .. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 
@@ -1148,6 +1119,7 @@ embodichain.lab.sim.skills.compiler
 .. autosummary::
 
    AnalyzedSemanticCall
+   ContainerRelationTargetGrounder
    GroundedHeldObjectGuard
    GroundedPhaseEffectGate
    GroundedSemanticCall
@@ -1164,6 +1136,7 @@ embodichain.lab.sim.skills.compiler
    SemanticRelationTarget
    SemanticSkillCompiler
    SemanticWorkflow
+   SupportSurfaceRelationTargetGrounder
 
 embodichain.lab.sim.skills.integration
 --------------------------------------

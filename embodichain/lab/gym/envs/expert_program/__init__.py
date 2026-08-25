@@ -99,6 +99,8 @@ from .catalog import (
     SimulationExpertProgramRegistration,
 )
 from .extensions import (
+    ControlPartEvidenceProviderDeclaration,
+    ControlPartEvidenceProviderFactory,
     EndpointAdapterDeclaration,
     ParallelCommandSafetyValidatorFactory,
     ParallelSafetyDeclaration,
@@ -131,6 +133,8 @@ __all__ = [
     "CompiledProgram",
     "ContainerAffordanceBinding",
     "ControlPartCommandPreset",
+    "ControlPartEvidenceProviderDeclaration",
+    "ControlPartEvidenceProviderFactory",
     "ControlPartEndpointBinding",
     "ControlPartResourceBinding",
     "ConfiguredHandOverPoseProvider",

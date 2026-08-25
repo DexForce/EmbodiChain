@@ -612,12 +612,8 @@ class SimulationSceneBinding:
             )
             defaults = dict(placement_defaults.get(binding.entity_id, {}))
             if binding.default_grasp_affordance is not None:
-                defaults.update(
-                    {
-                        GRASP_AFFORDANCE_CAPABILITY: SceneAffordanceRef(
-                            binding.default_grasp_affordance
-                        )
-                    }
+                defaults[GRASP_AFFORDANCE_CAPABILITY] = SceneAffordanceRef(
+                    binding.default_grasp_affordance
                 )
             entries.append(
                 SceneEntityManifest(
@@ -769,12 +765,8 @@ class SimulationSceneBinding:
                 binding = objects[entity_id]
                 defaults = dict(placement_defaults.get(entity_id, {}))
                 if binding.default_grasp_affordance is not None:
-                    defaults.update(
-                        {
-                            GRASP_AFFORDANCE_CAPABILITY: SceneAffordanceRef(
-                                binding.default_grasp_affordance
-                            )
-                        }
+                    defaults[GRASP_AFFORDANCE_CAPABILITY] = SceneAffordanceRef(
+                        binding.default_grasp_affordance
                     )
             else:
                 binding = articulations[entity_id]
@@ -888,21 +880,21 @@ class SimulationSceneBinding:
                     articulations=articulations,
                     links=links,
                 )
-                payload = payload_type(
-                    minimum_confidence=binding.minimum_confidence,
-                )
                 registrations.append(
                     SceneEntityRegistration(
                         ref=SceneAffordanceRef(binding.entity_id),
                         aliases=binding.aliases,
                         parent=parent,
                         native_name=binding.native_name,
-                        affordance=payload,
+                        affordance=payload_type(
+                            minimum_confidence=binding.minimum_confidence,
+                        ),
                         affordance_capabilities=frozenset({capability}),
                         affordance_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
                         relative_pose=_pose_tensor(binding.object_target_pose),
                     )
                 )
+
         return SceneRegistry(
             registrations,
             collision_world_mode=self.collision_world_mode,

@@ -45,6 +45,19 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
 )
 from embodichain.lab.sim.skills.calls import Pick, Place, RegisteredSemanticCall
+from embodichain.lab.sim.skills import (
+    BinaryEffectClause,
+    BinaryEffectEvidenceQuery,
+    BinaryEvidenceKind,
+    CONSTRAINT_EFFECT_CHANNEL,
+    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+    ControlPartEvidenceAddress,
+    EffectEvidenceCollectionContext,
+    EffectEvidenceSourceRef,
+    HeldObjectRelation,
+    HeldObjectStateExpectation,
+)
 from embodichain.lab.sim.skills.runtime import SkillResult, SkillStatus
 from embodichain.lab.sim.skills.scene import (
     SceneAffordanceRef,
@@ -86,6 +99,36 @@ class _FixedQposProvider:
             dtype=torch.float32,
             device=env_ids.device,
         )
+
+
+class _ContactSensorStub:
+    """Expose deterministic contact rows without constructing native simulation."""
+
+    def __init__(self, user_ids: torch.Tensor, valid: torch.Tensor) -> None:
+        self._data = {"user_ids": user_ids, "is_valid": valid}
+
+    def get_data(self) -> dict[str, torch.Tensor]:
+        return self._data
+
+
+class _RigidUserIdStub:
+    """Expose one rigid-body user ID per selected environment."""
+
+    def __init__(self, user_ids: torch.Tensor) -> None:
+        self._user_ids = user_ids
+
+    def get_user_ids(self, env_ids: list[int]) -> torch.Tensor:
+        return self._user_ids[env_ids]
+
+
+class _RobotUserIdStub:
+    """Expose deterministic user IDs for both cube-gripper finger links."""
+
+    def __init__(self, user_ids: dict[str, torch.Tensor]) -> None:
+        self._user_ids = user_ids
+
+    def get_user_ids(self, link_name: str, env_ids: list[int]) -> torch.Tensor:
+        return self._user_ids[link_name][env_ids]
 
 
 class _FreshObservationPort:
@@ -621,6 +664,107 @@ def test_cube_task_declares_the_canonical_scene_and_profile_ids() -> None:
     """The repeated task owns one canonical scene/profile integration."""
     assert cube_task.SCENE_REGISTRY_ID == "expert_program_repeated_pick_place"
     assert cube_task.ROBOT_PROFILE_ID == "expert_program_ur5_pick_place"
+
+
+def test_cube_profile_calibrates_physical_motion_and_recovery() -> None:
+    """The UR5 preset uses the physically qualified motion and retry bounds."""
+    binding = cube_task.create_repeated_pick_place_robot_profile_binding()
+    preset = binding.presets[0]
+
+    assert preset.preset_id == "safe"
+    assert preset.motion_policy.sample_count == 100
+    assert preset.workflow_recovery_policy.max_recovery_attempts == 2
+
+
+def test_cube_registration_owns_exact_contact_evidence_route() -> None:
+    """The physical cube gate is declared and backed by one contact sensor."""
+    declaration = (
+        cube_task.REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION.catalog.control_part_evidence_declaration
+    )
+    assert declaration is not None
+    assert declaration.provider_id == CONTROL_PART_EVIDENCE_PROVIDER_ID
+    assert declaration.revision == CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+    payload = _read_payload(Path("gym/expert_program/repeated_pick_place.json"))
+    sensors = payload["sensor"]
+    assert isinstance(sensors, list)
+    assert sensors == [
+        {
+            "sensor_type": "ContactSensor",
+            "uid": cube_task.CUBE_CONTACT_SENSOR_UID,
+            "rigid_uid_list": [cube_task.CUBE_ENTITY_ID],
+            "articulation_cfg_list": [
+                {
+                    "articulation_uid": "UR5",
+                    "link_name_list": list(cube_task.FINGER_LINK_NAMES),
+                }
+            ],
+            "filter_need_both_actor": True,
+            "max_contacts_per_env": 64,
+        }
+    ]
+
+
+def test_cube_constraint_observer_requires_both_finger_contacts() -> None:
+    """One finger or unrelated contact cannot qualify a physical grasp."""
+    user_ids = torch.zeros((2, 4, 2), dtype=torch.int32)
+    valid = torch.zeros((2, 4), dtype=torch.bool)
+    cube_ids = torch.tensor([10, 11], dtype=torch.int32)
+    finger1_ids = torch.tensor([20, 21], dtype=torch.int32)
+    finger2_ids = torch.tensor([30, 31], dtype=torch.int32)
+
+    user_ids[0, 0] = torch.tensor([10, 20])
+    user_ids[0, 1] = torch.tensor([30, 10])
+    valid[0, :2] = True
+    user_ids[1, 0] = torch.tensor([11, 21])
+    valid[1, 0] = True
+
+    observer = cube_task._CubeFingerConstraintObserver(
+        _ContactSensorStub(user_ids, valid),  # type: ignore[arg-type]
+        _RigidUserIdStub(cube_ids),  # type: ignore[arg-type]
+        _RobotUserIdStub(  # type: ignore[arg-type]
+            {
+                cube_task.FINGER_LINK_NAMES[0]: finger1_ids,
+                cube_task.FINGER_LINK_NAMES[1]: finger2_ids,
+            }
+        ),
+    )
+    expectation = HeldObjectStateExpectation(
+        expectation_id="source",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id=cube_task.CUBE_ENTITY_ID,
+        slot_id="object",
+        resource_id="manipulator",
+        task_state_key="manipulator",
+    )
+    query = BinaryEffectEvidenceQuery(
+        BinaryEffectClause(
+            clause_id="source.constraint",
+            expectation_id="source",
+            source=EffectEvidenceSourceRef(
+                CONTROL_PART_EVIDENCE_PROVIDER_ID,
+                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+                ControlPartEvidenceAddress(
+                    cube_task.HAND_CONTROL_PART,
+                    CONSTRAINT_EFFECT_CHANNEL,
+                ),
+            ),
+            evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+            expected=True,
+        ),
+        expectation,
+    )
+    context = EffectEvidenceCollectionContext(
+        timestamp=0.1,
+        observation_revision=2,
+        env_ids=torch.tensor([1, 0], dtype=torch.long),
+    )
+
+    observation = observer(query, context)
+
+    assert observation.values.tolist() == [False, True]
+    assert observation.valid is not None
+    assert observation.valid.tolist() == [True, True]
 
 
 def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:
