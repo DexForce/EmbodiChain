@@ -29,6 +29,7 @@ import torch.nn.functional as F
 
 import viser
 import viser.transforms as tf
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -491,6 +492,9 @@ class _AntipodalMeshBackend:
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool = True,
         visualize_collision: bool = False,
+        pose_cost_fn: (
+            Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ):
         """Filter valid grasps, optionally to one projected half of the object.
 
@@ -502,6 +506,8 @@ class _AntipodalMeshBackend:
             is_positive_part: When an axis is supplied, select the positive
                 projected half if true and the negative half otherwise.
             visualize_collision: Whether to visualize collision checks.
+            pose_cost_fn: Optional callback used to rerank collision-free poses
+                before the top-k candidate limit is applied.
 
         Returns:
             Success, grasp poses, opening lengths, and grasp costs.
@@ -753,6 +759,16 @@ class _AntipodalMeshBackend:
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.25 * angle_cost + 0.25 * length_cost + 0.5 * center_cost
+        if pose_cost_fn is not None:
+            adjusted_cost = pose_cost_fn(valid_grasp_poses, total_cost)
+            if not isinstance(adjusted_cost, torch.Tensor):
+                raise TypeError("pose_cost_fn must return a torch.Tensor.")
+            if adjusted_cost.shape != total_cost.shape:
+                raise ValueError("pose_cost_fn must preserve the grasp cost shape.")
+            total_cost = adjusted_cost.to(
+                device=total_cost.device,
+                dtype=total_cost.dtype,
+            )
 
         n_valid = valid_grasp_poses.shape[0]
         if n_valid == 0:

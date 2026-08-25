@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Literal, TypeVar
 from unittest.mock import Mock
@@ -136,6 +137,9 @@ class _StubGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        pose_cost_fn: (
+            Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         del (
             mesh_vertices,
@@ -144,13 +148,18 @@ class _StubGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             obj_longest_axis,
             is_positive_part,
         )
-        return [
-            (
-                torch.eye(4, dtype=torch.float32, device=obj_poses.device).unsqueeze(0),
-                torch.zeros(1, dtype=torch.float32, device=obj_poses.device),
-            )
-            for _ in range(obj_poses.shape[0])
-        ]
+        results = []
+        for object_pose in obj_poses:
+            grasp_poses = torch.eye(
+                4,
+                dtype=torch.float32,
+                device=obj_poses.device,
+            ).unsqueeze(0)
+            costs = torch.zeros(1, dtype=torch.float32, device=obj_poses.device)
+            if pose_cost_fn is not None:
+                costs = pose_cost_fn(object_pose, grasp_poses, costs)
+            results.append((grasp_poses, costs))
+        return results
 
     def get_best_grasp_poses(
         self,

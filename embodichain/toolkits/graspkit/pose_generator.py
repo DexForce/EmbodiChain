@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from copy import deepcopy
 import math
 
@@ -124,8 +125,26 @@ class GraspPoseGenerator(ABC):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        pose_cost_fn: (
+            Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return candidates, optionally restricted to one projected axis end."""
+        """Return candidates, optionally reranked before candidate truncation.
+
+        Args:
+            mesh_vertices: Target-local mesh vertices.
+            mesh_triangles: Target-local mesh triangle indices.
+            obj_poses: Batched world poses for the target object.
+            approach_direction: Shared or batched world-frame approach direction.
+            obj_longest_axis: Optional shared or batched object-selection axis.
+            is_positive_part: Whether to use the positive end of the selection axis.
+            pose_cost_fn: Optional callback receiving one object pose, its candidate
+                grasp poses, and their current costs. It must return costs with the
+                same shape and is applied before the implementation's top-k limit.
+
+        Returns:
+            Per-object candidate grasp poses and their ranked costs.
+        """
 
     @abstractmethod
     def get_best_grasp_poses(

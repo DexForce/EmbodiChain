@@ -255,6 +255,40 @@ def test_failed_candidates_receive_infinite_cost_and_refresh_is_service_owned(
     assert backend.instances[0].annotate_calls == 1
 
 
+def test_valid_candidates_apply_object_aware_cost_before_return(
+    backend: type[_Backend],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vertices, triangles = _geometry()
+    generator = _generator()
+    generator.prepare_mesh(mesh_vertices=vertices, mesh_triangles=triangles)
+    object_pose = torch.eye(4)
+    object_pose[0, 3] = 0.25
+    grasp_poses = torch.eye(4).repeat(2, 1, 1)
+
+    def get_valid_grasp_poses(**kwargs: object) -> tuple[object, ...]:
+        callback = kwargs["pose_cost_fn"]
+        assert callable(callback)
+        costs = callback(grasp_poses, torch.tensor([0.2, 0.4]))
+        return True, grasp_poses, torch.tensor([0.02, 0.03]), costs
+
+    monkeypatch.setattr(
+        backend.instances[0],
+        "get_valid_grasp_poses",
+        get_valid_grasp_poses,
+    )
+
+    results = generator.get_valid_grasp_poses(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=object_pose.unsqueeze(0),
+        approach_direction=torch.tensor([0, 0, -1]),
+        pose_cost_fn=lambda obj, _grasps, current: current + obj[0, 3],
+    )
+
+    assert torch.allclose(results[0][1], torch.tensor([0.45, 0.65]))
+
+
 def test_rejects_collision_margin_outside_gripper_opening() -> None:
     with pytest.raises(ValueError, match="opening_margin"):
         AntipodalGraspPoseGenerator(

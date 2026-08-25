@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 import math
 from typing import Literal
@@ -411,8 +412,13 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        pose_cost_fn: (
+            Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """Return ranked candidates, optionally from one projected axis end."""
+        if pose_cost_fn is not None and not callable(pose_cost_fn):
+            raise TypeError("pose_cost_fn must be callable or None.")
         backend = self._backend(mesh_vertices, mesh_triangles)
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
@@ -464,6 +470,15 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=directions[index],
                 obj_longest_axis=None if axes is None else axes[index],
                 is_positive_part=bool(positive_parts[index].item()),
+                pose_cost_fn=(
+                    None
+                    if pose_cost_fn is None
+                    else lambda grasp_poses, costs: pose_cost_fn(
+                        object_pose,
+                        grasp_poses,
+                        costs,
+                    )
+                ),
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)
