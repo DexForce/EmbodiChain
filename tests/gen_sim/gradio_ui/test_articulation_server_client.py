@@ -136,6 +136,7 @@ def test_download_writes_artifact_atomically(tmp_path: Path) -> None:
     assert downloaded.read_bytes() == b"usdc-data"
     assert not (destination.parent / ".model.usdc.part").exists()
     assert opener.requests[-1].full_url == f"{SERVER_URL}{artifact_url}"
+    assert opener.requests[-1].get_header("Accept") == "*/*"
 
 
 def test_download_rejects_absolute_artifact_url(tmp_path: Path) -> None:
@@ -185,6 +186,14 @@ def test_http_error_includes_server_detail() -> None:
     client.opener = _FakeOpener(error)
 
     with pytest.raises(ArticulationServerError, match="HTTP 401: invalid token"):
+        client.health()
+
+
+def test_http_error_without_response_body_is_wrapped() -> None:
+    client = ArticulationServerClient(SERVER_URL)
+    client.opener = _FakeOpener(HTTPError(SERVER_URL, 503, "Unavailable", {}, None))
+
+    with pytest.raises(ArticulationServerError, match="HTTP 503: Unavailable"):
         client.health()
 
 

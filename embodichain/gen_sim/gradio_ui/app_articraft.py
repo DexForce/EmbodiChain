@@ -83,6 +83,7 @@ _REMOTE_SERVER_PROVIDER = "Remote server"
 _LOCAL_CODEX_PROVIDER = "Local Codex"
 _DEFAULT_ARTICULATION_PROVIDER = _REMOTE_SERVER_PROVIDER
 _SERVER_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+_SERVER_LOG_LIMIT = 300
 _server_tasks_lock = threading.Lock()
 _server_tasks: dict[str, tuple[str, ArticulationServerClient, str]] = {}
 _ARTICRAFT_IDLE_PREVIEW = (
@@ -147,7 +148,9 @@ def _cancel_server_task(session_id: str) -> str | None:
     _token, client, request_id = active
     try:
         client.cancel(request_id)
-    except (ArticulationServerError, OSError, ValueError) as exc:
+    except ValueError:
+        return None
+    except (ArticulationServerError, OSError) as exc:
         with _server_tasks_lock:
             _server_tasks.setdefault(session_id, active)
         return redact_sensitive_text(str(exc))
@@ -742,6 +745,13 @@ def _server_task_line(task: dict[str, Any]) -> str:
     return f"status: {status}" + (f"; stage: {stage}" if stage else "")
 
 
+def _append_server_log(log_lines: list[str], line: str) -> None:
+    """Append one remote log line while bounding per-session memory."""
+    log_lines.append(line)
+    if len(log_lines) > _SERVER_LOG_LIMIT:
+        del log_lines[:-_SERVER_LOG_LIMIT]
+
+
 def _server_task_error(task: dict[str, Any]) -> str:
     """Return a redacted remote failure description."""
     detail = task.get("error")
@@ -823,7 +833,9 @@ def _generate_server_articulation_asset(
             cancellation_error = _cancel_server_task(session_id)
             detail = redact_sensitive_text(str(exc))
             if cancellation_error:
-                log_lines.append(f"Cancellation warning: {cancellation_error}")
+                _append_server_log(
+                    log_lines, f"Cancellation warning: {cancellation_error}"
+                )
             yield (
                 None,
                 "",
@@ -837,7 +849,7 @@ def _generate_server_articulation_asset(
 
         status_line = _server_task_line(task)
         if status_line != previous_line:
-            log_lines.append(status_line)
+            _append_server_log(log_lines, status_line)
             previous_line = status_line
         status = task.get("status")
         if status in _SERVER_TERMINAL_STATUSES:
@@ -846,7 +858,9 @@ def _generate_server_articulation_asset(
         if time.monotonic() >= deadline:
             cancellation_error = _cancel_server_task(session_id)
             if cancellation_error:
-                log_lines.append(f"Cancellation warning: {cancellation_error}")
+                _append_server_log(
+                    log_lines, f"Cancellation warning: {cancellation_error}"
+                )
             yield (
                 None,
                 "",

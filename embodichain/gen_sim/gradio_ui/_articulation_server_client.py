@@ -123,7 +123,11 @@ class ArticulationServerClient:
         temporary = target.with_name(f".{target.name}.part")
         try:
             with (
-                self._open("GET", relative_url) as response,
+                self._open(
+                    "GET",
+                    relative_url,
+                    headers={"Accept": "*/*"},
+                ) as response,
                 temporary.open("wb") as output,
             ):
                 shutil.copyfileobj(response, output)
@@ -169,7 +173,11 @@ class ArticulationServerClient:
         try:
             return self.opener.open(request, timeout=self.timeout_seconds)
         except HTTPError as exc:
-            detail = _error_detail(exc.read())
+            try:
+                raw_error = exc.read()
+            except Exception:
+                raw_error = b""
+            detail = _error_detail(raw_error)
             raise ArticulationServerError(
                 f"server returned HTTP {exc.code}: {detail or exc.reason}"
             ) from exc

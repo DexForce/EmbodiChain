@@ -199,6 +199,17 @@ def test_remote_server_environment_check_uses_health_endpoint(
     assert (tmp_path / "server").is_dir()
 
 
+def test_remote_server_environment_check_requires_explicit_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_articraft, "ARTICULATION_SERVER_BASE_URL", "")
+
+    result = app_articraft._configure_selected_articulation_provider("Remote server")
+
+    assert "server is not ready" in result
+    assert "ARTICULATION_SERVER_BASE_URL" in result
+
+
 def test_local_codex_command_preserves_existing_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -233,6 +244,16 @@ def test_remote_server_rejects_non_finite_polling_configuration(
 
     with pytest.raises(ValueError, match=f"{setting}.*finite positive number"):
         app_articraft._server_output_root()
+
+
+def test_remote_server_log_is_bounded() -> None:
+    log_lines: list[str] = []
+
+    for index in range(app_articraft._SERVER_LOG_LIMIT + 5):
+        app_articraft._append_server_log(log_lines, f"line-{index}")
+
+    assert len(log_lines) == app_articraft._SERVER_LOG_LIMIT
+    assert log_lines[0] == "line-5"
 
 
 def test_remote_server_success_polls_and_downloads_usdc(
@@ -402,6 +423,24 @@ def test_reset_reports_remote_cancellation_error(
     client.cancel_error = None
     app_articraft.cleanup_articraft_session(session_id)
     assert list(generator) == []
+
+
+def test_invalid_remote_request_id_does_not_remain_registered() -> None:
+    client = _FakeServerClient(
+        [{"status": "running"}],
+        cancel_error=ValueError("invalid request id"),
+    )
+    session_id = "remote-invalid-request-id"
+    token = app_articraft._articraft_runs.begin(session_id)
+    assert app_articraft._register_server_task(
+        session_id, token, client, "not/a/request-id"
+    )
+
+    cancellation_error = app_articraft._cancel_server_task(session_id)
+
+    assert cancellation_error is None
+    assert session_id not in app_articraft._server_tasks
+    app_articraft._articraft_runs.reset(session_id)
 
 
 def test_new_request_cancels_replaced_remote_task(

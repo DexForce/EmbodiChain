@@ -61,7 +61,7 @@ conda run -n embodichain python gradio_app.py
 | `ARTICRAFT_REPOSITORY_URL` | `https://github.com/XuanchaoPENG/Articraft.git` | 带 Codex provider 的 Articraft fork。 |
 | `ARTICRAFT_CONDA_ENV` | `articraft` | 运行新版 Articraft 源码及其依赖的既有 Conda 环境。 |
 | `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.gen_sim/articraft` | Articraft run record 和 USDZ 产物。 |
-| `ARTICULATION_SERVER_BASE_URL` | `http://192.168.3.23:18688` | 默认 Remote server 的 HTTP(S) 地址。 |
+| `ARTICULATION_SERVER_BASE_URL` | 空 | Remote server 的 HTTP(S) 地址；使用前必须显式配置。 |
 | `ARTICULATION_SERVER_TIMEOUT_S` | `30` | 单次 HTTP 请求超时。 |
 | `ARTICULATION_SERVER_TASK_TIMEOUT_S` | `7200` | 服务端生成任务总等待时间。 |
 | `ARTICULATION_SERVER_POLL_INTERVAL_S` | `1` | 服务端任务状态轮询间隔。 |
