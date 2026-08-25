@@ -701,10 +701,15 @@ def compute_ik_kernel(
         + (wp.outer(usw, usw) @ R03_o)
     )
 
-    # TODO: judgment shoulder singularity
-    q1 = wp.atan2(R03[1, 1] * shoulder_config, R03[0, 1] * shoulder_config)
     q2 = safe_acos(R03[2, 1]) * shoulder_config
-    q3 = wp.atan2(-R03[2, 2] * shoulder_config, -R03[2, 0] * shoulder_config)
+    q1 = float(0.0)
+    q3 = float(0.0)
+    if wp.abs(wp.sin(q2)) <= 1e-6:
+        q1 = qpos_seed[target_idx * 7] * rotation_directions[0] + dh_params[3]
+        q3 = wp.atan2(R03[1, 0], R03[0, 0]) - q1
+    else:
+        q1 = wp.atan2(R03[1, 1] * shoulder_config, R03[0, 1] * shoulder_config)
+        q3 = wp.atan2(-R03[2, 2] * shoulder_config, -R03[2, 0] * shoulder_config)
 
     # Calculate wrist joint angles (q5, q6, q7)
     Aw = wp.transpose(R34) @ wp.transpose(As) @ R_target
@@ -713,10 +718,15 @@ def compute_ik_kernel(
     R47 = Aw * s_psi + Bw * c_psi + Cw
 
     q4 = joints_v[3]
-    # TODO: judgment wrist singularity
-    q5 = wp.atan2(R47[1, 2] * wrist_config, R47[0, 2] * wrist_config)
     q6 = safe_acos(R47[2, 2]) * wrist_config
-    q7 = wp.atan2(R47[2, 1] * wrist_config, -R47[2, 0] * wrist_config)
+    q5 = float(0.0)
+    q7 = float(0.0)
+    if wp.abs(wp.sin(q6)) <= 1e-6:
+        q5 = qpos_seed[target_idx * 7 + 4] * rotation_directions[4] + dh_params[19]
+        q7 = wp.atan2(-R47[2, 0], R47[0, 0]) - q5
+    else:
+        q5 = wp.atan2(R47[1, 2] * wrist_config, R47[0, 2] * wrist_config)
+        q7 = wp.atan2(R47[2, 1] * wrist_config, -R47[2, 0] * wrist_config)
 
     out_of_limits = int(0)
 

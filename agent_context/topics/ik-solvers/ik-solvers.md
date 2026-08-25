@@ -160,6 +160,9 @@ class RobotCfg(ArticulationCfg):
   signed arm-angle, shoulder-azimuth degeneracy rule, and periodic
   nearest-solution formulas. Shoulder azimuth is set to zero only when the
   shoulder-to-wrist projection onto the XY plane is near zero.
+- At shoulder or wrist Euler singularities, both analytical backends preserve
+  the seed's free coupled joint and solve the remaining coupled angle, avoiding
+  arbitrary equivalent-angle jumps near singular configurations.
 - Candidate revolute angles are shifted by integer multiples of `2*pi` into
   the configured joint limits, choosing the representation nearest the seed.
 - Runtime `set_tcp()` and `set_ik_nearest_weight()` calls synchronize the CPU

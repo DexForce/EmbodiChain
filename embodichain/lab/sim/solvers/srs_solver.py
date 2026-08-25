@@ -670,9 +670,17 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         R03 = A_s * s_psi + B_s * c_psi + C_s
 
         # Calculate shoulder joint angles
-        angle1 = np.arctan2(R03[1, 1] * shoulder_config, R03[0, 1] * shoulder_config)
         angle2 = np.arccos(np.clip(R03[2, 1], -1.0, 1.0)) * shoulder_config
-        angle3 = np.arctan2(-R03[2, 2] * shoulder_config, -R03[2, 0] * shoulder_config)
+        if abs(np.sin(angle2)) <= 1e-6:
+            angle1 = qpos_seed[0] * rotation_directions[0] + dh_params[0, 3]
+            angle3 = np.arctan2(R03[1, 0], R03[0, 0]) - angle1
+        else:
+            angle1 = np.arctan2(
+                R03[1, 1] * shoulder_config, R03[0, 1] * shoulder_config
+            )
+            angle3 = np.arctan2(
+                -R03[2, 2] * shoulder_config, -R03[2, 0] * shoulder_config
+            )
 
         # Calculate wrist joint angles
         A_w = R34.T @ A_s.T @ R_target
@@ -680,9 +688,13 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         C_w = R34.T @ C_s.T @ R_target
         R47 = A_w * s_psi + B_w * c_psi + C_w
 
-        angle5 = np.arctan2(R47[1, 2] * wrist_config, R47[0, 2] * wrist_config)
         angle6 = np.arccos(np.clip(R47[2, 2], -1.0, 1.0)) * wrist_config
-        angle7 = np.arctan2(R47[2, 1] * wrist_config, -R47[2, 0] * wrist_config)
+        if abs(np.sin(angle6)) <= 1e-6:
+            angle5 = qpos_seed[4] * rotation_directions[4] + dh_params[4, 3]
+            angle7 = np.arctan2(-R47[2, 0], R47[0, 0]) - angle5
+        else:
+            angle5 = np.arctan2(R47[1, 2] * wrist_config, R47[0, 2] * wrist_config)
+            angle7 = np.arctan2(R47[2, 1] * wrist_config, -R47[2, 0] * wrist_config)
 
         joints_output[0] = (angle1 - dh_params[0, 3]) * rotation_directions[0]
         joints_output[1] = (angle2 - dh_params[1, 3]) * rotation_directions[1]
