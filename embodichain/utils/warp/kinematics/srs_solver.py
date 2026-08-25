@@ -205,7 +205,7 @@ def calculate_arm_joint_angles(
     joints_val[3] = elbow_GC4 * safe_acos(elbow_cos_angle)
 
     # Compute shoulder angle
-    joints_val[0] = wp.atan2(y, x) if wp.abs(z) > 1e-6 else 0.0
+    joints_val[0] = wp.atan2(y, x) if horizontal_distance > 1e-6 else 0.0
 
     # Compute joint 2 angle
     angle_phi = safe_acos(
@@ -430,9 +430,14 @@ def compute_arm_angle_kernel(
         + wp.pow(distance, 2.0)
         - wp.pow(link_lengths[2], 2.0)
     ) / (2.0 * link_lengths[1] * distance)
-    q1_reference = wp.atan2(shoulder_to_wrist[1], shoulder_to_wrist[0])
+    horizontal_distance = wp.length(wp.vec2(shoulder_to_wrist[0], shoulder_to_wrist[1]))
+    q1_reference = (
+        wp.atan2(shoulder_to_wrist[1], shoulder_to_wrist[0])
+        if horizontal_distance > 1e-6
+        else 0.0
+    )
     q2_reference = wp.atan2(
-        wp.length(wp.vec2(shoulder_to_wrist[0], shoulder_to_wrist[1])),
+        horizontal_distance,
         shoulder_to_wrist[2],
     ) + elbow_config * safe_acos(shoulder_cosine)
 
@@ -794,79 +799,6 @@ def compute_ik_kernel(
         success[tid] = 1  # Mark as successful
     else:
         success[tid] = 0  # Mark as failed
-
-
-@wp.kernel
-def sort_ik_kernel(
-    qpos_out: wp.array(dtype=float),  # [N * N_SOL, 7]
-    success: wp.array(dtype=int),  # [N * N_SOL]
-    qpos_seed: wp.array(dtype=float),  # [N, 7]
-    ik_weight: wp.array(dtype=float),  # [7]
-    distances: wp.array(dtype=float),  # [N, N_SOL]
-    indices: wp.array(dtype=int),  # [N, N_SOL]
-    N_SOL: int,
-    sorted_qpos: wp.array(dtype=float),  # [N, N_SOL, 7]
-    sorted_valid: wp.array(dtype=int),  # [N, N_SOL]
-):
-    """
-    Sort inverse kinematics (IK) solutions for multiple targets based on their distances
-    to a seed configuration.
-
-    Args:
-        qpos_out (wp.array): Array of computed joint positions for all solutions
-            ([N * N_SOL, 7]).
-        success (wp.array): Array indicating whether each solution is valid ([N * N_SOL]).
-        qpos_seed (wp.array): Array of seed joint positions for each target ([N, 7]).
-        ik_weight (wp.array): Array of weights for each joint to compute distance ([7]).
-        distances (wp.array): Output array to store computed distances ([N, N_SOL]).
-        indices (wp.array): Output array to store sorted indices ([N, N_SOL]).
-        N_SOL (int): Number of solutions per target.
-        sorted_qpos (wp.array): Output array for sorted joint positions ([N, N_SOL, 7]).
-        sorted_valid (wp.array): Output array for sorted validity flags ([N, N_SOL]).
-    """
-    tid = wp.tid()  # target index
-
-    # 1. compute distances
-    for i in range(N_SOL):
-        idx = tid * N_SOL + i
-        valid = success[idx]
-        dist = 0.0
-        if valid:
-            for j in range(7):
-                raw_diff = qpos_out[idx * 7 + j] - qpos_seed[tid * 7 + j]
-                diff = wp.atan2(wp.sin(raw_diff), wp.cos(raw_diff))
-                dist += ik_weight[j] * diff * diff
-        else:
-            dist = 1e10
-
-        distances[idx] = dist
-        indices[idx] = i
-
-    # 2. bubble sort (only sort the N_SOL solutions for the current target)
-    for i in range(N_SOL):
-        min_idx = i
-        for j in range(i + 1, N_SOL):
-            idx_a = tid * N_SOL + min_idx
-            idx_b = tid * N_SOL + j
-            if distances[idx_b] < distances[idx_a]:
-                min_idx = j
-        # Swap
-        if min_idx != i:
-            idx_i = tid * N_SOL + i
-            idx_min = tid * N_SOL + min_idx
-            tmp_dist = distances[idx_i]
-            distances[idx_i] = distances[idx_min]
-            distances[idx_min] = tmp_dist
-            tmp_idx = indices[idx_i]
-            indices[idx_i] = indices[idx_min]
-            indices[idx_min] = tmp_idx
-
-    # 3. reorder qpos_out and success according to sorted indices
-    for i in range(N_SOL):
-        src_idx = tid * N_SOL + indices[tid * N_SOL + i]
-        for j in range(7):
-            sorted_qpos[(tid * N_SOL + i) * 7 + j] = qpos_out[src_idx * 7 + j]
-        sorted_valid[tid * N_SOL + i] = success[src_idx]
 
 
 @wp.kernel

@@ -208,16 +208,30 @@ class _BaseSRSSolverImpl:
     def _deduplicate_solutions(
         solutions: torch.Tensor, tolerance: float = 1e-5
     ) -> torch.Tensor:
-        """Remove periodic-equivalent solutions while preserving their order."""
+        """Greedily retain periodic-unique representatives in input order."""
         if solutions.shape[0] < 2:
             return solutions
-        pairwise_diff = solutions[:, None, :] - solutions[None, :, :]
-        wrapped_diff = (
-            torch.remainder(pairwise_diff + torch.pi, 2.0 * torch.pi) - torch.pi
+
+        cpu_solutions = solutions.detach().cpu().numpy()
+        retained = np.empty_like(cpu_solutions)
+        retained_indices = np.empty(cpu_solutions.shape[0], dtype=np.int64)
+        retained_count = 0
+        for index, candidate in enumerate(cpu_solutions):
+            if retained_count:
+                difference = candidate - retained[:retained_count]
+                wrapped = np.remainder(difference + np.pi, 2.0 * np.pi) - np.pi
+                if np.any(np.max(np.abs(wrapped), axis=1) <= tolerance):
+                    continue
+            retained[retained_count] = candidate
+            retained_indices[retained_count] = index
+            retained_count += 1
+
+        index_tensor = torch.as_tensor(
+            retained_indices[:retained_count],
+            dtype=torch.long,
+            device=solutions.device,
         )
-        equivalent = torch.amax(torch.abs(wrapped_diff), dim=-1) <= tolerance
-        has_equivalent_predecessor = torch.tril(equivalent, diagonal=-1).any(dim=1)
-        return solutions[~has_equivalent_predecessor]
+        return solutions[index_tensor]
 
 
 class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
@@ -376,12 +390,12 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
 
         joints[3] = elbow_config * np.arccos(np.clip(elbow_cos_angle, -1.0, 1.0))
 
-        if abs(P26[2]) > 1e-6:
+        euclidean_norm = np.hypot(P26[0], P26[1])
+        if euclidean_norm > 1e-6:
             joints[0] = np.arctan2(P26[1], P26[0])
         else:
             joints[0] = 0
 
-        euclidean_norm = np.hypot(P26[0], P26[1])
         angle_phi_cos = (d_se**2 + norm_P26**2 - d_ew**2) / (2 * d_se * norm_P26)
         angle_phi = np.arccos(np.clip(angle_phi_cos, -1.0, 1.0))
         joints[1] = np.arctan2(euclidean_norm, P26[2]) + elbow_config * angle_phi
@@ -786,7 +800,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             return (
                 torch.zeros(num_targets, dtype=torch.bool, device=self.device),
                 torch.zeros(
-                    (num_targets, 7),
+                    (num_targets, 0 if return_all_solutions else 1, 7),
                     dtype=qpos_seed.dtype,
                     device=self.device,
                 ),
@@ -1302,7 +1316,7 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
             return (
                 torch.zeros(num_targets, dtype=torch.bool, device=self.device),
                 torch.zeros(
-                    (num_targets, 7),
+                    (num_targets, 0 if return_all_solutions else 1, 7),
                     dtype=torch.float32,
                     device=self.device,
                 ),

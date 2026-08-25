@@ -106,6 +106,33 @@ class BaseSolverTest:
             fk_xpos, ik_xpos, atol=1e-3, rtol=1e-3
         ), f"FK and IK results do not match for {arm_name}"
 
+    @pytest.mark.parametrize(
+        "return_all_solutions, expected_shape",
+        [(False, (2, 1, 7)), (True, (2, 0, 7))],
+    )
+    def test_no_solution_preserves_output_rank(
+        self, return_all_solutions: bool, expected_shape: tuple[int, int, int]
+    ):
+        """Test an entirely failed batch still follows the IK output contract."""
+        solver = self.solver[next(iter(self.solver))]
+        target_xpos = torch.eye(4, dtype=torch.float32, device=solver.device).repeat(
+            2, 1, 1
+        )
+        target_xpos[:, :3, 3] = torch.tensor(
+            [100.0, 100.0, 100.0], dtype=torch.float32, device=solver.device
+        )
+        qpos_seed = torch.zeros((2, 7), dtype=torch.float32, device=solver.device)
+
+        success, solutions = solver.get_ik(
+            target_xpos,
+            qpos_seed=qpos_seed,
+            return_all_solutions=return_all_solutions,
+        )
+
+        assert success.shape == (2,)
+        assert not success.any()
+        assert solutions.shape == expected_shape
+
     def test_update_with_robot_limit_intersects_existing_solver_limits(self):
         """Test robot limit sync only tightens solver limits and never widens them."""
         solver_key = next(iter(self.solver))
@@ -210,6 +237,25 @@ class BaseSolverTest:
         ).unsqueeze(0)
         assert torch.all(wrapped_delta.masked_fill(diagonal, torch.inf) > 1e-6)
 
+    def test_horizontal_shoulder_wrist_seed_recovers_its_fk_pose(self):
+        """Test horizontal shoulder-wrist geometry retains its shoulder azimuth."""
+        seed = torch.tensor(
+            [[0.0, -np.pi / 2, 0.0, -np.pi / 2, 0.0, 0.0, 0.0]],
+            dtype=torch.float32,
+        )
+
+        for solver in self.solver.values():
+            device_seed = seed.to(solver.device)
+            target = solver.get_fk(device_seed)
+            arm_angle = solver.impl._get_seed_arm_angles(device_seed)
+            success, solution = solver.get_ik(target, device_seed)
+
+            assert torch.all(torch.isfinite(arm_angle))
+            assert torch.all(success)
+            assert torch.allclose(
+                solver.get_fk(solution[:, 0]), target, atol=1e-4, rtol=1e-4
+            )
+
     def test_redundancy_step_larger_than_pi_is_rejected(self):
         """Test invalid seeded-search steps fail instead of silently using one sample."""
         solver = self.solver[next(iter(self.solver))]
@@ -234,7 +280,7 @@ class BaseSolverTest:
         assert np.all(wrapped <= limits[:, 1])
 
     def test_all_solution_deduplication_is_periodic_and_order_preserving(self):
-        """Test vectorized deduplication retains the first periodic representative."""
+        """Test deduplication retains the first periodic representative."""
         solver = self.solver[next(iter(self.solver))]
         first = torch.tensor(
             [0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7], device=solver.device
@@ -251,6 +297,22 @@ class BaseSolverTest:
         assert unique.shape == (2, 7)
         assert torch.allclose(unique[0], first)
         assert torch.allclose(unique[1], second)
+
+    def test_all_solution_deduplication_compares_retained_representatives(self):
+        """Test a discarded chain neighbor cannot remove a later unique row."""
+        solver = self.solver[next(iter(self.solver))]
+        tolerance = 1e-5
+        solutions = torch.zeros((3, 7), device=solver.device)
+        solutions[:, 0] = torch.tensor(
+            [0.0, 0.9 * tolerance, 1.8 * tolerance],
+            device=solver.device,
+        )
+
+        unique = solver.impl._deduplicate_solutions(solutions, tolerance=tolerance)
+
+        assert unique.shape == (2, 7)
+        assert torch.equal(unique[0], solutions[0])
+        assert torch.equal(unique[1], solutions[2])
 
     def test_runtime_tcp_and_weight_updates_reach_backend(self):
         """Test mutable solver settings synchronize analytical backend caches."""
@@ -444,6 +506,7 @@ class TestSRSCUDASolver(BaseSolverTest):
             [
                 [0.15, -0.35, 0.25, -0.70, 0.20, 0.30, -0.15],
                 [-0.20, 0.25, -0.30, -0.55, 0.35, -0.20, 0.10],
+                [0.0, -np.pi / 2, 0.0, -np.pi / 2, 0.0, 0.0, 0.0],
             ],
             dtype=torch.float32,
         )

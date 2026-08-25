@@ -157,7 +157,9 @@ class RobotCfg(ArticulationCfg):
 - `redundancy_step`: angular increment used by seed-centered search.
 - Requesting all solutions always uses full-space redundancy sampling.
 - CPU and CUDA derive the reference plane in the base frame and use the same
-  signed arm-angle and periodic nearest-solution formulas.
+  signed arm-angle, shoulder-azimuth degeneracy rule, and periodic
+  nearest-solution formulas. Shoulder azimuth is set to zero only when the
+  shoulder-to-wrist projection onto the XY plane is near zero.
 - Candidate revolute angles are shifted by integer multiples of `2*pi` into
   the configured joint limits, choosing the representation nearest the seed.
 - Runtime `set_tcp()` and `set_ik_nearest_weight()` calls synchronize the CPU
@@ -168,7 +170,9 @@ class RobotCfg(ArticulationCfg):
   than a serial quadratic Warp sort.
 - Warp arm-angle and IK scratch arrays are reused by shape within a solver
   instance to avoid repeated device allocations during steady-state calls.
-- Periodic-equivalent all-solutions candidates are deduplicated before return.
+- Periodic-equivalent all-solutions candidates are greedily deduplicated
+  against retained representatives on CPU before indexing the original device
+  tensor, preserving order without allocating quadratic GPU scratch space.
 - Requires `num_envs` in `init_solver()`.
 
 Focused performance and accuracy validation is available at
