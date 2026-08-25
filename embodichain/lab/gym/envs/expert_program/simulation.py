@@ -632,6 +632,7 @@ class SimulationSceneBinding:
                 if binding.simulation_uid == binding.entity_id
                 else (binding.simulation_uid,)
             )
+            defaults = dict(placement_defaults.get(binding.entity_id, {}))
             entries.append(
                 SceneEntityManifest(
                     ref=SceneArticulationRef(binding.entity_id),
@@ -639,10 +640,7 @@ class SimulationSceneBinding:
                     dynamics=binding.dynamics,
                     collision_role=binding.collision_role,
                     semantic_type=binding.semantic_type,
-                    default_affordances=placement_defaults.get(
-                        binding.entity_id,
-                        {},
-                    ),
+                    default_affordances=defaults,
                 )
             )
 

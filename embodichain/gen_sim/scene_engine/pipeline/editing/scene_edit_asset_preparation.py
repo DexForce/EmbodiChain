@@ -50,6 +50,8 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessorConfig,
 )
 
+__all__ = ["prepare_scene_edit_assets"]
+
 
 @dataclass(frozen=True)
 class _AddedAssetInfo:

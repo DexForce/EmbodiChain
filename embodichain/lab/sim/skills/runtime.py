@@ -45,7 +45,7 @@ from ..atomic_actions.execution import (
     PhaseEffectGateRequest,
     PhaseEffectGateResult,
 )
-from ..atomic_actions.plans import TrajectorySegment
+from ..atomic_actions.plans import ActionPlan, TrajectorySegment
 from ..atomic_actions.policies import MotionPolicy, RecoveryPolicy
 from ..atomic_actions.runner import (
     CommandSink,
@@ -2939,7 +2939,7 @@ class SkillRuntime:
             env_mask=request.env_mask,
             expected_effects=self._phase_effect_gate_expected_effects(
                 gate,
-                session.active_plan.expected_effects,
+                session.active_plan,
             ),
         )
         self._next_gate_verification_id += 1
@@ -2976,26 +2976,33 @@ class SkillRuntime:
     @staticmethod
     def _phase_effect_gate_expected_effects(
         gate: GroundedPhaseEffectGate,
-        action_effects: StateDelta,
+        action_plan: ActionPlan,
     ) -> StateDelta:
         """Project the action-owned held relation required by one gate."""
         expectation = gate.effect_spec.state_expectations[0]
         if type(expectation) is not HeldObjectStateExpectation:
             raise TypeError("Built-in phase-effect gates require held-object state.")
         key = expectation.task_state_key
-        if key not in action_effects.held_object_updates:
-            raise ValueError(f"Active action does not declare gate state key {key!r}.")
-        candidate = action_effects.held_object_updates[key]
         if expectation.relation is HeldObjectRelation.ATTACHED:
+            candidate = action_plan.effect_candidates.held_object_updates.get(key)
+            if candidate is None:
+                candidate = action_plan.expected_effects.held_object_updates.get(key)
             if not isinstance(candidate, HeldObjectState):
                 raise ValueError(
                     f"Attached gate {gate.gate_id!r} requires an action-owned "
                     "HeldObjectState candidate."
                 )
-        elif candidate is not None:
-            raise ValueError(
-                f"Detached gate {gate.gate_id!r} requires an action-owned removal."
-            )
+        else:
+            if key not in action_plan.expected_effects.held_object_updates:
+                raise ValueError(
+                    f"Active action does not declare gate state key {key!r}."
+                )
+            candidate = action_plan.expected_effects.held_object_updates[key]
+            if candidate is not None:
+                raise ValueError(
+                    f"Detached gate {gate.gate_id!r} requires an action-owned "
+                    "removal."
+                )
         return StateDelta(held_object_updates={key: candidate})
 
     def _held_object_guard_verifier(
@@ -3033,9 +3040,15 @@ class SkillRuntime:
         if guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE:
             candidate = session.task_state.get_held_object(guard.task_state_key)
         else:
-            candidate = session.active_plan.expected_effects.held_object_updates.get(
+            candidate = session.active_plan.effect_candidates.held_object_updates.get(
                 guard.task_state_key
             )
+            if candidate is None:
+                candidate = (
+                    session.active_plan.expected_effects.held_object_updates.get(
+                        guard.task_state_key
+                    )
+                )
         covered = torch.zeros_like(request.env_mask)
         if isinstance(candidate, HeldObjectState):
             covered = (

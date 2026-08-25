@@ -819,6 +819,7 @@ class CuroboPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    supports_collision_world_updates = True
     supports_joint_trajectory_validation = True
 
     @property
