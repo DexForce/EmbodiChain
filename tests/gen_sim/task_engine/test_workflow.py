@@ -273,7 +273,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert planning.candidate_count == 3
     assert planning.planning_mode == "offline"
     assert planning.max_episodes == 1
-    assert planning.max_episode_steps == 4000
+    assert planning.max_episode_steps == 6000
     assert execution.num_envs == 1
     assert execution.required_successes == 1
 

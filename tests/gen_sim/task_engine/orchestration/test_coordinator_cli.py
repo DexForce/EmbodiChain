@@ -833,6 +833,7 @@ def test_unified_cli_accepts_exactly_four_modes(
     assert request["scene_edit_prompt"] == edit
     assert captured["kwargs"]["base_seed"] == 9
     assert captured["kwargs"]["dataset_saving"] is (mode == "image")
+    assert captured["kwargs"]["failure_policy"] == "stop"
     assert captured["kwargs"]["execute"] is True
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "succeeded"
@@ -975,6 +976,7 @@ def test_public_cli_exposes_prepare_run_and_run_all_modes() -> None:
     )
     assert arguments.command == "prepare"
     assert arguments.dataset_saving is True
+    assert arguments.failure_policy == "stop"
 
 
 def test_prepare_cli_stops_before_simulator_execution(
@@ -1033,6 +1035,7 @@ def test_run_cli_executes_an_existing_bundle(
         def __call__(self, _bundle, output, **kwargs):
             Path(output).mkdir()
             assert kwargs["num_envs"] == 2
+            assert kwargs["failure_policy"] == "continue"
             return {
                 "status": "failed",
                 "environments": [
@@ -1052,6 +1055,8 @@ def test_run_cli_executes_an_existing_bundle(
             str(tmp_path / "history"),
             "--num-envs",
             "2",
+            "--failure-policy",
+            "continue",
         ]
     )
 

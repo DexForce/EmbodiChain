@@ -184,11 +184,17 @@ class ProgramExecutor:
         runtime_policy: RuntimePolicyCfg | None = None,
         capability_registry: Any | None = None,
         scene_provider: SceneProvider | None = None,
+        failure_policy: str = "stop",
     ) -> None:
         self.program = program
         self.env = env
         self.record_runtime = bool(record_runtime)
         self.record_root = record_root
+        if failure_policy not in {"stop", "continue"}:
+            raise ValueError(
+                "ProgramExecutor failure_policy must be 'stop' or 'continue'."
+            )
+        self.failure_policy = str(failure_policy)
         if runtime_policy is None:
             profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
             runtime_policy = default_runtime_policy(profile)
@@ -359,6 +365,7 @@ class ProgramExecutor:
             enabled=self.record_runtime,
             runtime_policy=self.runtime_policy.as_mapping(),
             runtime_policy_hash=runtime_policy_hash(self.runtime_policy),
+            failure_policy=self.failure_policy,
         )
         aggregate_failed = torch.zeros(
             int(self.env.num_envs),
@@ -366,6 +373,7 @@ class ProgramExecutor:
             device=self.env.device,
         )
         edge_failures: dict[str, torch.Tensor] = {}
+        step_failures: dict[str, torch.Tensor] = {}
         semantic_success: dict[str, torch.Tensor] = {}
         failure_events: list[dict[str, Any]] = []
         completed: set[str] = set()
@@ -383,16 +391,24 @@ class ProgramExecutor:
                     raise RuntimeError(
                         "Execution program is deadlocked: no remaining edge is ready."
                     )
-                ready_blocked = {
+                dependency_failed = {
                     edge.id: self._dependency_failures(edge, edge_failures)
                     for edge in ready
                 }
+                scheduling_blocked = {
+                    edge_id: (
+                        failed
+                        if self.failure_policy == "stop"
+                        else torch.zeros_like(failed)
+                    )
+                    for edge_id, failed in dependency_failed.items()
+                }
                 batch = self._pack_ready_edges(
                     ready,
-                    inactive=ready_blocked,
+                    inactive=scheduling_blocked,
                     completed=completed,
                 )
-                blocked = {edge.id: ready_blocked[edge.id] for edge in batch}
+                blocked = {edge.id: scheduling_blocked[edge.id] for edge in batch}
                 # A synchronized pair needs the same active rows. Execute a
                 # healthy independent branch separately when its peer is blocked.
                 if len(batch) == 2 and not torch.equal(
@@ -530,9 +546,14 @@ class ProgramExecutor:
                     completed.add(edge.id)
                     remaining.remove(edge.id)
                     step = self.step_by_edge[edge.id]
+                    historical_step_failure = step_failures.setdefault(
+                        step.id,
+                        torch.zeros_like(edge_failures[edge.id]),
+                    )
+                    historical_step_failure |= edge_failures[edge.id]
                     if edge.id != step.edge_ids[-1]:
                         continue
-                    prior_failed = edge_failures[edge.id]
+                    prior_failed = historical_step_failure
                     verified_failed, step_success, observed = self._verify_step(
                         step, prior_failed
                     )

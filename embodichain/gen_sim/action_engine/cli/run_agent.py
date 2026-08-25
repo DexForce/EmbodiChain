@@ -44,6 +44,7 @@ from embodichain.gen_sim.action_engine.runtime import (
     load_agent_execution_program,
     write_execution_report,
 )
+from embodichain.gen_sim.video_archive import _archive_task_recording
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -88,6 +89,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("independent",),
         default="independent",
         help="Execution backend. Action Engine owns the production runtime.",
+    )
+    parser.add_argument(
+        "--failure-policy",
+        choices=("stop", "continue"),
+        default="stop",
+        help=(
+            "Whether dependency failures stop affected downstream execution or "
+            "allow diagnostic continuation."
+        ),
     )
     parser.add_argument(
         "--vlm-model",
@@ -181,6 +191,7 @@ def cli() -> int | None:
     runtime_arguments = {
         "agent_config": str(Path(args.agent_config).expanduser().resolve()),
         "base_seed": args.seed,
+        "failure_policy": str(args.failure_policy),
         "gym_config": str(Path(args.gym_config).expanduser().resolve()),
         "max_episodes": episodes,
         "planning_mode": planning_mode,
@@ -211,6 +222,7 @@ def cli() -> int | None:
             execute = env.get_wrapper_attr("create_demo_action_list")
             result = execute(
                 regenerate=bool(args.regenerate),
+                failure_policy=str(args.failure_policy),
                 runtime_run_id=run_id,
                 episode_index=episode_index,
             )
@@ -257,6 +269,9 @@ def cli() -> int | None:
         # the final episode as well; otherwise only episodes followed by a next
         # iteration reach the configured dataset recorder.
         env.reset(options={"final": True})
+        archived_video = _archive_task_recording(env, str(args.task_name))
+        if archived_video is not None:
+            log_info(f"Archived task video: {archived_video}", color="green")
     except KeyboardInterrupt:
         log_warning("Action Engine run interrupted by user.")
         return 130 if args.task_engine_report else None
@@ -344,10 +359,12 @@ class _BranchExecutor:
         env: gymnasium.Env,
         *,
         record_root: Path,
+        failure_policy: str = "stop",
     ) -> None:
         self.graph = graph
         self.env = env
         self.record_root = record_root
+        self.failure_policy = failure_policy
 
     def preflight(self) -> bool:
         """Compile and capability-check the branch without sending motion."""
@@ -390,6 +407,7 @@ class _BranchExecutor:
             runtime_run_id=run_id,
             episode_index=episode_index,
             record_root=self.record_root.as_posix(),
+            failure_policy=self.failure_policy,
         )
 
 
@@ -408,6 +426,7 @@ class _ABWorkerConfig:
     seed: int
     camera_uids: tuple[str, ...]
     staging_dir: str
+    failure_policy: str = "stop"
 
 
 class _ABBranchWorker:
@@ -911,6 +930,7 @@ def _ab_worker_main(connection: Any, config: _ABWorkerConfig) -> None:
                         graph,
                         env,
                         record_root=Path(config.staging_dir).parent / "runtime",
+                        failure_policy=config.failure_policy,
                     ).preflight()
                 elif operation == "run":
                     graph = _worker_graph(request.get("graph"))
@@ -928,6 +948,7 @@ def _ab_worker_main(connection: Any, config: _ABWorkerConfig) -> None:
                         graph,
                         env,
                         record_root=Path(record_root).expanduser().resolve(),
+                        failure_policy=config.failure_policy,
                     ).run(
                         run_id=run_id,
                         episode_index=int(request.get("episode_index", 0)),
@@ -1172,6 +1193,7 @@ def _run_ab(
                     seed=episode_seed,
                     camera_uids=tuple(str(uid) for uid in camera_uids),
                     staging_dir=(episode_root / ".work" / route / "video").as_posix(),
+                    failure_policy=str(args.failure_policy),
                 )
                 for route in ("offline", "online")
             }

@@ -86,7 +86,10 @@ class RuntimeRecorder:
         enabled: bool = True,
         runtime_policy: Mapping[str, Any] | None = None,
         runtime_policy_hash: str | None = None,
+        failure_policy: str = "stop",
     ) -> None:
+        if failure_policy not in {"stop", "continue"}:
+            raise ValueError("failure_policy must be 'stop' or 'continue'.")
         self.enabled = enabled
         self.num_envs = int(num_envs)
         self.run_id = _safe_name(
@@ -125,6 +128,7 @@ class RuntimeRecorder:
             "episode_index": int(episode_index),
             "program_schema_version": self.seed_topology.get("schema_version"),
             "seed_graph_hash": self.program_hash,
+            "failure_policy": failure_policy,
         }
         if runtime_policy is not None:
             if not isinstance(runtime_policy_hash, str) or not runtime_policy_hash:
@@ -291,6 +295,7 @@ class RuntimeRecorder:
             "run_id": self.run_id,
             "episode_index": self.program_metadata["episode_index"],
             "env_id": env_id,
+            "failure_policy": self.program_metadata["failure_policy"],
             "semantic_step": deepcopy(self.step_specs[step.id]),
             "status": event["status"],
             "events": related_events,

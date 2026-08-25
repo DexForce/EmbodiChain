@@ -108,7 +108,7 @@ class TaskEnginePlanningCfg:
     candidate_count: int = 3
     planning_mode: str = "offline"
     max_episodes: int = 1
-    max_episode_steps: int = 4000
+    max_episode_steps: int = 6000
 
     def __post_init__(self) -> None:
         for field_name in (

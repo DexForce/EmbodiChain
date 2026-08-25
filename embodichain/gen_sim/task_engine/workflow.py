@@ -106,6 +106,7 @@ class SubprocessActionExecutor:
         seed: int,
         num_envs: int,
         dataset_saving: bool = False,
+        failure_policy: str = "stop",
     ) -> Mapping[str, Any]:
         """Run one simulator attempt and preserve its report and trajectory.
 
@@ -115,12 +116,16 @@ class SubprocessActionExecutor:
             seed: Action Engine random seed.
             num_envs: Number of vectorized scene replicas.
             dataset_saving: Whether to enable the Gym project's dataset recorder.
+            failure_policy: Whether failed dependencies stop or permit downstream
+                diagnostic execution.
 
         Returns:
             Validated Action Engine execution report.
         """
         bundle_root = Path(bundle).expanduser().resolve()
         attempt_root = Path(output_root).expanduser().resolve()
+        if failure_policy not in {"stop", "continue"}:
+            raise ValueError("failure_policy must be 'stop' or 'continue'.")
         attempt_root.mkdir(parents=True, exist_ok=False)
         command = [
             sys.executable,
@@ -137,11 +142,12 @@ class SubprocessActionExecutor:
         ]
         if not dataset_saving:
             command.append("--filter_dataset_saving")
+        command.extend(["--failure-policy", failure_policy])
         log_path = attempt_root / "action.log"
         print(
             "[Task Engine] Starting "
             f"{attempt_root.name}: seed={seed}, num_envs={num_envs}, "
-            f"dataset_saving={dataset_saving}",
+            f"dataset_saving={dataset_saving}, failure_policy={failure_policy}",
             flush=True,
         )
         completed = _run_streaming_process(command, log_path)
@@ -177,6 +183,7 @@ class SubprocessActionExecutor:
                 "seed": seed,
                 "num_envs": num_envs,
                 "dataset_saving": dataset_saving,
+                "failure_policy": failure_policy,
                 "returncode": completed.returncode,
                 "trajectory_copy": trajectory_copy,
                 "report": report,
@@ -288,6 +295,7 @@ class TaskEngineWorkflow:
         vlm_model: str | None = None,
         base_seed: int = 0,
         dataset_saving: bool = False,
+        failure_policy: str = "stop",
         run_id: str | None = None,
         created_at: datetime | None = None,
         overwrite: bool = False,
@@ -305,6 +313,8 @@ class TaskEngineWorkflow:
             vlm_model: Optional Action Engine VLM override.
             base_seed: First audited scene and action attempt seed.
             dataset_saving: Whether Action attempts may initialize dataset recording.
+            failure_policy: Whether failed dependencies stop or permit downstream
+                diagnostic execution.
             run_id: Optional externally allocated run identifier.
             created_at: Optional timezone-aware run creation timestamp.
             overwrite: Whether to atomically replace an existing run directory.
@@ -316,6 +326,8 @@ class TaskEngineWorkflow:
         normalized = validate_task_run_request(request)
         if not isinstance(dataset_saving, bool):
             raise TypeError("dataset_saving must be a boolean.")
+        if failure_policy not in {"stop", "continue"}:
+            raise ValueError("failure_policy must be 'stop' or 'continue'.")
         if workflow_cfg is None or planning_cfg is None or execution_cfg is None:
             loaded_workflow, loaded_planning, loaded_execution = (
                 load_task_engine_config(config_path)
@@ -337,6 +349,7 @@ class TaskEngineWorkflow:
             "run_id": effective_run_id,
             "created_at": effective_created_at.isoformat(),
             "dataset_saving": bool(dataset_saving),
+            "failure_policy": str(failure_policy),
         }
         state = initial_state(normalized)
         attempts: list[dict[str, Any]] = []
@@ -851,6 +864,7 @@ class TaskEngineWorkflow:
                         seed=action_seed,
                         num_envs=execution_cfg.num_envs,
                         dataset_saving=bool(dataset_saving),
+                        failure_policy=failure_policy,
                     )
                     successes = _environment_successes(
                         report,
@@ -1029,6 +1043,7 @@ class TaskEngineWorkflow:
                         "success_policy": execution_cfg.success_policy,
                         "min_successful_envs": execution_cfg.min_successful_envs,
                         "dataset_saving": bool(run_metadata["dataset_saving"]),
+                        "failure_policy": str(run_metadata["failure_policy"]),
                     },
                 },
                 "attempts": deepcopy(list(attempts)),

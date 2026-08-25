@@ -286,11 +286,13 @@ class _Executor:
         seed: int,
         num_envs: int,
         dataset_saving: bool = False,
+        failure_policy: str = "stop",
     ):
         values = self.successes[min(self.calls, len(self.successes) - 1)]
         self.calls += 1
         assert len(values) == num_envs
         assert dataset_saving is self.expected_dataset_saving
+        assert failure_policy == "stop"
         return {
             "status": "succeeded" if all(values) else "failed",
             "seed": seed,
@@ -384,7 +386,7 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
             candidate_count=3,
             planning_mode="offline",
             max_episodes=1,
-            max_episode_steps=4000,
+            max_episode_steps=6000,
         ),
         execution_cfg=TaskEngineExecutionCfg(num_envs=4),
         base_seed=11,
@@ -403,10 +405,10 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
         "candidate_count": 3,
         "planning_mode": "offline",
         "max_episodes": 1,
-        "max_episode_steps": 4000,
+        "max_episode_steps": 6000,
     }
     assert manifest["configuration"]["execution"]["dataset_saving"] is False
-    assert coordinator.kwargs[0]["max_episode_steps"] == 4000
+    assert coordinator.kwargs[0]["max_episode_steps"] == 6000
     assert coordinator.kwargs[0]["final_inspection"]["scene_revision_id"] == "0" * 64
     assert (
         coordinator.kwargs[0]["unbound_action_plan"]["candidate_id"] == "candidate_01"
@@ -546,6 +548,7 @@ def test_subprocess_executor_controls_dataset_saving_and_copies_trajectory(
         seed=7,
         num_envs=4,
         dataset_saving=dataset_saving,
+        failure_policy="continue",
     )
 
     assert report["status"] == "succeeded"
@@ -558,6 +561,7 @@ def test_subprocess_executor_controls_dataset_saving_and_copies_trajectory(
     assert " prepare" not in " ".join(captured["command"])
     assert " workflow" not in " ".join(captured["command"])
     assert ("--filter_dataset_saving" in captured["command"]) is expects_filter
+    assert captured["command"][-2:] == ["--failure-policy", "continue"]
     assert captured["log_path"] == attempt / "action.log"
     assert (attempt / "action.log").read_text(encoding="utf-8") == "child output\n"
     assert (attempt / "trajectory" / "episode.json").is_file()
