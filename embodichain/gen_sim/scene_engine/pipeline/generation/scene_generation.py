@@ -126,12 +126,12 @@ def generate_scene_and_refine(
     coarse_layout_by_id = {
         layout_object["id"]: layout_object for layout_object in coarse_layout
     }
-    # Coarse poses already preserve lying and unconstrained assets; only standing
-    # assets need a VLM semantic-axis correction before later z-up calibration.
-    standing_orientation_states_by_id = {
+    # Explicit graph orientations use VLM front/top views before SimReady
+    # canonicalization; null leaves the geometry-server pose unchanged.
+    orientation_states_by_id = {
         node.object_id: node.orientation_state
         for node in scene_graph.nodes
-        if node.orientation_state == "standing"
+        if node.orientation_state is not None
     }
     simready_processor = SimReadyProcessor(
         scene=scene,
@@ -139,11 +139,11 @@ def generate_scene_and_refine(
         coarse_geometry_root=coarse_geometry_output_root,
         simready_geometry_root=simready_geometry_output_root,
         debug_output_root=debug_output_root,
-        # Keep the geometry-server scale and only correct unstable standing poses.
+        # Keep geometry-server scale while applying explicit orientation semantics.
         config=SimReadyProcessorConfig(
             use_vlm_scale=False,
             use_vlm_rotation=False,
-            orientation_states_by_id=standing_orientation_states_by_id,
+            orientation_states_by_id=orientation_states_by_id,
         ),
         vlm_client=vlm_client,
     )
