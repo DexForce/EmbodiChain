@@ -79,24 +79,6 @@ DEFAULT_TRANSLATION_AXIS = (0.0, 1.0, 0.0)
 _SLIDE_DESCRIPTOR = Slide.descriptor()
 
 
-def _finite_float(value: object, *, field_name: str, positive: bool) -> float:
-    """Return one finite declarative number."""
-    if type(value) not in (int, float):
-        raise TypeError(f"{field_name} must be an int or float.")
-    normalized = float(value)
-    if not math.isfinite(normalized) or (positive and normalized <= 0.0):
-        qualifier = "finite and positive" if positive else "finite"
-        raise ValueError(f"{field_name} must be {qualifier}.")
-    return normalized
-
-
-def _positive_int(value: object, *, field_name: str) -> int:
-    """Return one exact positive integer."""
-    if type(value) is not int or value < 1:
-        raise ValueError(f"{field_name} must be a positive integer.")
-    return value
-
-
 def _axis(value: object) -> tuple[float, float, float]:
     """Return one finite non-zero three-dimensional axis."""
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
@@ -137,63 +119,27 @@ class _OpenDrawerSlideLowerer(RegisteredSemanticLowerer):
         del context, bound
         if type(option_template) is not SlideOptions:
             raise TypeError("Open Drawer requires an exact SlideOptions template.")
-        expected_keys = {
-            "handle",
-            "direction",
-            "hand_interp_steps",
-            "approach_distance",
-            "translation_distance",
+        arguments = dict(call.arguments)
+        task_arguments = {"handle": HANDLE_ENTITY_ID}
+        legacy_arguments = {
+            **task_arguments,
+            "direction": option_template.direction,
+            "hand_interp_steps": option_template.hand_interp_steps,
+            "approach_distance": option_template.approach_distance,
+            "translation_distance": option_template.translation_distance,
         }
-        if set(call.arguments) != expected_keys:
+        if arguments not in (task_arguments, legacy_arguments):
             raise ValueError(
-                f"{OPEN_DRAWER_CALL_ID} arguments must be exactly "
-                f"{sorted(expected_keys)}."
+                f"{OPEN_DRAWER_CALL_ID} arguments must name only the canonical "
+                "handle; legacy option fields, when present, must exactly match "
+                "the selected policy preset."
             )
-        handle = call.arguments["handle"]
-        if type(handle) is not str or handle != HANDLE_ENTITY_ID:
-            raise ValueError(
-                f"handle must be exactly the canonical ID {HANDLE_ENTITY_ID!r}."
-            )
-        direction = call.arguments["direction"]
-        if type(direction) is not str or direction not in ("pull", "push"):
-            raise ValueError("direction must be exactly 'pull' or 'push'.")
-        hand_interp_steps = _positive_int(
-            call.arguments["hand_interp_steps"],
-            field_name="hand_interp_steps",
-        )
-        approach_distance = _finite_float(
-            call.arguments["approach_distance"],
-            field_name="approach_distance",
-            positive=False,
-        )
-        if approach_distance < 0.0:
-            raise ValueError("approach_distance must be non-negative.")
-        translation_distance = _finite_float(
-            call.arguments["translation_distance"],
-            field_name="translation_distance",
-            positive=True,
-        )
-        declared_values = (
-            direction,
-            hand_interp_steps,
-            approach_distance,
-            translation_distance,
-        )
-        configured_values = (
-            option_template.direction,
-            option_template.hand_interp_steps,
-            option_template.approach_distance,
-            option_template.translation_distance,
-        )
-        if declared_values != configured_values:
-            raise ValueError(
-                "Open Drawer call arguments must match the registered policy "
-                "preset's SlideOptions template."
-            )
+        handle = arguments["handle"]
+        assert type(handle) is str
         return SemanticLowering(
             goal=SlideGoal(
                 semantics=self._semantics,
-                target_pose=SceneEntityPose(HANDLE_ENTITY_ID),
+                target_pose=SceneEntityPose(handle),
             )
         )
 
