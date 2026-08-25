@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import socket
 import sys
 from pathlib import Path
 
@@ -29,20 +28,29 @@ sys.path.insert(0, str(GRADIO_UI_ROOT))
 
 import app_articraft  # noqa: E402
 
+VIEWER_PORT = 54_321
 
-def test_preview_selects_another_port_when_preferred_port_is_occupied() -> None:
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen()
-    occupied_port = int(listener.getsockname()[1])
-    previews = app_articraft._ArticraftViserPreview(occupied_port)
-    try:
-        selected_port = previews._select_available_port()
-    finally:
-        listener.close()
 
-    assert selected_port != occupied_port
-    assert selected_port > 0
+@pytest.mark.parametrize("hostname", ["127.0.0.1", "localhost"])
+def test_articraft_viewer_port_accepts_local_http_url(hostname: str) -> None:
+    viewer_output = f"Viewer URL: http://{hostname}:{VIEWER_PORT}/"
+
+    assert app_articraft._articraft_viewer_port(viewer_output) == VIEWER_PORT
+
+
+@pytest.mark.parametrize(
+    "viewer_output",
+    [
+        f"Viewer URL: https://localhost:{VIEWER_PORT}",
+        f"Viewer URL: http://example.com:{VIEWER_PORT}",
+        "Viewer URL: http://localhost:not-a-port",
+        "Articraft viewer is starting",
+    ],
+)
+def test_articraft_viewer_port_rejects_untrusted_or_invalid_output(
+    viewer_output: str,
+) -> None:
+    assert app_articraft._articraft_viewer_port(viewer_output) is None
 
 
 def test_codex_checkout_cannot_be_the_embodichain_repository(
