@@ -54,6 +54,7 @@ dependencies = [
 [project.optional-dependencies]
 gensim = [
   "bpy",
+  "gradio>=6.17.3,<6.18",
   "pyrender==0.1.45",
   "requests",
   "Pillow",

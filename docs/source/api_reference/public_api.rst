@@ -56,6 +56,222 @@ embodichain.data_pipeline.depth_video
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
 
+embodichain.gen_sim.env
+-----------------------
+
+Shared GenSim environment discovery and dotenv loading helpers.
+
+.. currentmodule:: embodichain.gen_sim.env
+
+.. autosummary::
+
+   find_gen_sim_env_file
+   get_embodichain_root
+   load_gen_sim_env
+
+embodichain.gen_sim.gradio_ui.app_articraft
+-------------------------------------------
+
+Gradio callbacks and lifecycle helpers for Articraft asset generation.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_articraft
+
+.. autosummary::
+
+   build_articraft_panel
+   cleanup_articraft_session
+   configure_articraft_environment
+   generate_articraft_asset
+   reset_articraft_asset
+
+embodichain.gen_sim.gradio_ui.app_asset_engine
+----------------------------------------------
+
+Asset-engine panel callbacks for previewing and generating SimReady assets.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_asset_engine
+
+.. autosummary::
+
+   build_asset_engine_panel
+   cleanup_asset_engine_session
+   prepare_asset_input_preview
+   reset_simready_asset
+   run_simready_asset
+
+embodichain.gen_sim.gradio_ui.app_commands
+------------------------------------------
+
+Command construction for launching the Action engine from Gradio.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_commands
+
+.. autosummary::
+
+   build_run_agent_command
+
+embodichain.gen_sim.gradio_ui.app_env
+-------------------------------------
+
+Environment, networking, authentication, and artifact-path configuration for
+the Gradio workspace.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_env
+
+.. autosummary::
+
+   ACTION_ENGINE_VISER_PORT
+   ARTICRAFT_CONDA_ENV
+   ARTICRAFT_OUTPUT_ROOT
+   ARTICRAFT_REPOSITORY_URL
+   ARTICRAFT_ROOT
+   DIRECT_NO_PROXY_VALUE
+   EMBODICHAIN_ROOT
+   GRADIO_AUTH_PASSWORD
+   GRADIO_AUTH_USERNAME
+   PROXY_ENV_KEYS
+   SCENE_ENGINE_VISER_PORT
+   SERVER_NAME
+   SERVER_PORT
+   SIMREADY_OPENAI_API_KEY
+   SIMREADY_OPENAI_BASE_URL
+   SIMREADY_OPENAI_MODEL
+   build_gradio_allowed_paths
+   build_gradio_blocked_paths
+   configure_direct_network_env
+   configure_simready_llm_env
+   get_inherited_network_env
+   get_gradio_auth
+   validate_gradio_artifact_root
+
+embodichain.gen_sim.gradio_ui.app_media
+---------------------------------------
+
+Media discovery helpers for Action-engine output.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_media
+
+.. autosummary::
+
+   latest_audience_output_video
+
+embodichain.gen_sim.gradio_ui.app_processes
+-------------------------------------------
+
+Session-scoped subprocess management and child-process environment helpers.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_processes
+
+.. autosummary::
+
+   SessionProcessRegistry
+   build_codex_env
+   build_pipeline_env
+   build_run_agent_command
+   force_stop_all_child_processes
+   get_request_session_id
+   kill_process_group
+   read_process_output
+   register_managed_process
+   run_agent_cli_supports_robot_profile
+   start_pipeline
+   terminate_process_group
+   redact_sensitive_text
+
+embodichain.gen_sim.gradio_ui.app_services
+------------------------------------------
+
+Compatibility service entry point for constructing the Gradio application.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_services
+
+.. autosummary::
+
+   build_app
+
+embodichain.gen_sim.gradio_ui.app_state
+---------------------------------------
+
+Session-owned runtime state and phase tracking for Scene and Action workflows.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_state
+
+.. autosummary::
+
+   PHASES
+   Phase
+   RuntimeState
+   SessionRuntimeRegistry
+   runtime_lock
+   runtime_registry
+   set_runtime_phase_locked
+
+embodichain.gen_sim.gradio_ui.app_ui
+------------------------------------
+
+Top-level Gradio application composition.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_ui
+
+.. autosummary::
+
+   build_app
+
+embodichain.gen_sim.gradio_ui.app_workflows
+-------------------------------------------
+
+Scene and Action workflow callbacks, previews, status snapshots, and cleanup.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_workflows
+
+.. autosummary::
+
+   cleanup_workflow_session
+   format_status
+   preview_editable_scene
+   preview_saved_scene
+   refresh_saved_scenes
+   reset_scene_engine
+   run_action_engine_from_current
+   run_scene_edit
+   run_scene_engine
+   stop_action_engine
+   ui_snapshot
+
+embodichain.gen_sim.gradio_ui.gradio_app
+----------------------------------------
+
+Executable entry point for the GenSim Gradio workspace.
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.gradio_app
+
+.. autosummary::
+
+   main
+
+embodichain.gen_sim.scene_engine.core.scene_edit_plan
+-----------------------------------------------------
+
+Validated scene-edit operations and immutable input-plan contracts.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.core.scene_edit_plan
+
+.. autosummary::
+
+   SceneEditOperation
+   SceneEditPlan
+
+embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
+------------------------------------------------------------------------------
+
+Preparation of SimReady assets required by scene-edit add operations.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
+
+.. autosummary::
+
+   prepare_scene_edit_assets
+
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------
 
