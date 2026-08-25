@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from embodichain.gen_sim.action_engine.domain.motion import MOTION_MODIFIER_MODES
+from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
 from embodichain.utils import configclass
 from embodichain.utils.utility import load_config
 
@@ -42,7 +43,8 @@ __all__ = [
 ]
 
 ACTION_ENGINE_DEFAULTS_SCHEMA: Final = "action_engine_defaults_v1"
-RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v7"
+RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v8"
+_PRE_GRIPPER_PROFILE_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v7"
 _PRE_AXIS_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v6"
 _PREVIOUS_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v5"
 _PRE_GRASP_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v4"
@@ -99,9 +101,6 @@ _GROUNDING_KEYS = {
 _GRASP_KEYS = {
     "antipodal_n_sample",
     "antipodal_max_angle",
-    "max_open_length",
-    "min_open_length",
-    "finger_length",
     "point_sample_dense",
     "max_deviation_angle",
     "n_deviated_approach_directions",
@@ -340,12 +339,6 @@ class RuntimePolicyCfg:
             _PREDICATE_KEYS,
             "predicate_fallbacks",
         )
-        if float(self.grasp.get("min_open_length", -1.0)) < 0.0:
-            raise ValueError("grasp.min_open_length must be non-negative.")
-        if float(self.grasp.get("max_open_length", 0.0)) <= float(
-            self.grasp.get("min_open_length", 0.0)
-        ):
-            raise ValueError("grasp.max_open_length must exceed min_open_length.")
         direction_count = self.grasp.get("n_deviated_approach_directions")
         if (
             isinstance(direction_count, bool)
@@ -445,6 +438,10 @@ def generation_defaults() -> dict[str, Any]:
     }
     if set(value) != required:
         raise ValueError("Generation defaults do not match the expected sections.")
+    task = value.get("task")
+    if not isinstance(task, Mapping):
+        raise ValueError("Generation task defaults must be a mapping.")
+    get_gripper_profile(task.get("default_gripper_model"))
     return deepcopy(dict(value))
 
 
@@ -635,6 +632,14 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         raise ValueError(
             "agent_config runtime policy hash does not match its snapshot."
         )
+    if snapshot.get("schema_version") == _PRE_GRIPPER_PROFILE_RUNTIME_POLICY_SCHEMA:
+        migrated = deepcopy(dict(snapshot))
+        migrated["schema_version"] = RUNTIME_POLICY_SCHEMA
+        grasp = deepcopy(dict(migrated.get("grasp", {})))
+        for key in ("min_open_length", "max_open_length", "finger_length"):
+            grasp.pop(key, None)
+        migrated["grasp"] = grasp
+        return RuntimePolicyCfg.from_mapping(migrated)
     if snapshot.get("schema_version") == _LEGACY_RUNTIME_POLICY_SCHEMA:
         if set(snapshot) != {"schema_version", "arm_selection"} or not isinstance(
             snapshot.get("arm_selection"), Mapping

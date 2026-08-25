@@ -600,6 +600,7 @@ def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
 
     assert result.bound
     assert generator_calls
+    assert generator_calls[0]["gripper_model"] == "pgi"
     assert not (result.output_dir / ".task_engine_input").exists()
     grounded = json.loads(
         (result.output_dir / "grounded_task_plan.json").read_text(encoding="utf-8")

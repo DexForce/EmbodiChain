@@ -107,6 +107,7 @@ class TaskEnginePlanningCfg:
 
     candidate_count: int = 3
     planning_mode: str = "offline"
+    gripper_model: str = "pgi"
     max_episodes: int = 1
     max_episode_steps: int = 6000
 
@@ -121,6 +122,11 @@ class TaskEnginePlanningCfg:
                 raise ValueError(f"{field_name} must be a positive integer.")
         if self.planning_mode not in {"offline", "ab"}:
             raise ValueError("planning_mode must be offline or ab.")
+        if self.gripper_model not in {"pgi", "robotiq"}:
+            raise ValueError(
+                f"Unsupported gripper model {self.gripper_model!r}; expected one "
+                "of: pgi, robotiq."
+            )
 
 
 def load_task_engine_config(
@@ -167,6 +173,7 @@ def load_task_engine_config(
     if set(planning) != {
         "candidate_count",
         "planning_mode",
+        "gripper_model",
         "max_episodes",
         "max_episode_steps",
     }:

@@ -404,11 +404,13 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
     assert manifest["configuration"]["planning"] == {
         "candidate_count": 3,
         "planning_mode": "offline",
+        "gripper_model": "pgi",
         "max_episodes": 1,
         "max_episode_steps": 6000,
     }
     assert manifest["configuration"]["execution"]["dataset_saving"] is False
     assert coordinator.kwargs[0]["max_episode_steps"] == 6000
+    assert coordinator.kwargs[0]["gripper_model"] == "pgi"
     assert coordinator.kwargs[0]["final_inspection"]["scene_revision_id"] == "0" * 64
     assert (
         coordinator.kwargs[0]["unbound_action_plan"]["candidate_id"] == "candidate_01"

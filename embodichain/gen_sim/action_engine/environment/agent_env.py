@@ -33,6 +33,7 @@ from embodichain.gen_sim.action_engine.capabilities import (
 )
 from embodichain.gen_sim.action_engine.domain import validate_seed_graph
 from embodichain.gen_sim.action_engine.protocol import ACTION_ENGINE_ENV_ID
+from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
 from embodichain.gen_sim.action_engine.runtime import (
     ProgramExecutor,
     evaluate_predicate,
@@ -88,6 +89,20 @@ class ActionEngineEnv(EmbodiedEnv):
         self._runtime_state_ready = False
         repair_action_engine_ur5_solver_cfg(getattr(cfg, "robot", None))
         super().__init__(cfg, **kwargs)
+        selected_gripper = get_gripper_profile(
+            getattr(
+                self,
+                "agent_gripper_model",
+                self.agent_config.get("gripper_model", "pgi"),
+            )
+        )
+        agent_gripper = self.agent_config.get(
+            "gripper_model", selected_gripper.model.value
+        )
+        if agent_gripper != selected_gripper.model.value:
+            raise ValueError(
+                "ActionEngineEnv gym and agent gripper selections do not match."
+            )
         install_action_engine_solver_compat(self.robot)
         if bool(getattr(self, "ignore_terminations_during_agent", False)):
             # Atomic trajectories execute online through env.step(). Prevent a

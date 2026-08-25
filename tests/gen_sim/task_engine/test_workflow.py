@@ -272,6 +272,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert workflow.max_action_attempts == 3
     assert planning.candidate_count == 3
     assert planning.planning_mode == "offline"
+    assert planning.gripper_model == "pgi"
     assert planning.max_episodes == 1
     assert planning.max_episode_steps == 6000
     assert execution.num_envs == 1
@@ -290,6 +291,7 @@ workflow:
 planning:
   candidate_count: 7
   planning_mode: offline
+  gripper_model: robotiq
   max_episodes: 2
   max_episode_steps: 5000
 execution:
@@ -306,6 +308,7 @@ execution:
     assert workflow.max_scene_attempts == 4
     assert workflow.max_action_attempts == 5
     assert planning.candidate_count == 7
+    assert planning.gripper_model == "robotiq"
     assert planning.max_episodes == 2
     assert planning.max_episode_steps == 5000
     assert execution.num_envs == 6
@@ -335,3 +338,5 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(candidate_count=0)
     with pytest.raises(ValueError, match="planning_mode"):
         TaskEnginePlanningCfg(planning_mode="unsupported")
+    with pytest.raises(ValueError, match="pgi.*robotiq"):
+        TaskEnginePlanningCfg(gripper_model="unsupported")

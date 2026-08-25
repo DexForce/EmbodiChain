@@ -31,6 +31,7 @@ from embodichain.gen_sim.action_engine.generation import (
     generate_action_engine_config,
 )
 from embodichain.gen_sim.action_engine.generation.artifacts import artifact_paths
+from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
 from embodichain.gen_sim.action_engine.agent import ActionAgent
 from embodichain.gen_sim.action_engine.unbound import ActionCapabilityError
 from embodichain.gen_sim.action_engine.domain.task_contracts import (
@@ -180,6 +181,7 @@ class TaskEngineCoordinator:
         candidate_count: int = 3,
         overwrite: bool = False,
         planning_mode: str = "offline",
+        gripper_model: str = "pgi",
         vlm_model: str | None = None,
         max_episodes: int | None = None,
         max_episode_steps: int | None = None,
@@ -196,6 +198,7 @@ class TaskEngineCoordinator:
         They publish the complete audit hand-off but never publish a TaskSpec,
         SeedGraph, Gym configuration, or GroundedTaskPlan.
         """
+        gripper_model = get_gripper_profile(gripper_model).model.value
         normalized_source = self._coerce_source(source)
         validate_scene_output_separation(normalized_source.path, output_dir)
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
@@ -354,6 +357,7 @@ class TaskEngineCoordinator:
                 "task_name": grounded_plan["task_id"],
                 "task_spec": grounded_plan["task_spec"],
                 "robot_profile": robot_profile,
+                "gripper_model": gripper_model,
                 "source_scene_z_rotation_degrees": (
                     adaptation.prepared_scene.z_rotation_degrees
                 ),

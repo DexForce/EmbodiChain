@@ -651,6 +651,7 @@ class TaskEngineWorkflow:
                         model=model,
                         candidate_count=effective_candidate_count,
                         planning_mode=planning_cfg.planning_mode,
+                        gripper_model=planning_cfg.gripper_model,
                         vlm_model=vlm_model,
                         max_episodes=planning_cfg.max_episodes,
                         max_episode_steps=planning_cfg.max_episode_steps,
@@ -1035,6 +1036,7 @@ class TaskEngineWorkflow:
                     "planning": {
                         "candidate_count": planning_cfg.candidate_count,
                         "planning_mode": planning_cfg.planning_mode,
+                        "gripper_model": planning_cfg.gripper_model,
                         "max_episodes": planning_cfg.max_episodes,
                         "max_episode_steps": planning_cfg.max_episode_steps,
                     },

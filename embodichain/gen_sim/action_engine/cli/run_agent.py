@@ -126,6 +126,8 @@ def _validate_run_contract(
     task_name: str,
 ) -> None:
     """Validate the small cross-artifact contract before simulator startup."""
+    from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
+
     configured_task = agent_config.get("task_name")
     if configured_task != task_name:
         raise ValueError(
@@ -145,6 +147,15 @@ def _validate_run_contract(
         raise ValueError(
             f"Gym and agent configs have different planning modes: "
             f"gym={gym_mode!r}, agent={agent_mode!r}."
+        )
+    gym_gripper = extension.get("gripper_model")
+    agent_gripper = agent_config.get("gripper_model")
+    get_gripper_profile(gym_gripper)
+    get_gripper_profile(agent_gripper)
+    if gym_gripper != agent_gripper:
+        raise ValueError(
+            "Gym and agent configs have different gripper models: "
+            f"gym={gym_gripper!r}, agent={agent_gripper!r}."
         )
 
 

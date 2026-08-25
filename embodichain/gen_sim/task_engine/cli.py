@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -100,6 +101,12 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
         choices=_ROBOT_PROFILES,
         default="franka",
     )
+    parser.add_argument(
+        "--gripper-model",
+        choices=("pgi", "robotiq"),
+        default=None,
+        help="Override the Task Engine planning gripper profile.",
+    )
     _add_failure_policy_argument(parser)
 
 
@@ -152,6 +159,9 @@ def _run_workflow(
     instruction = _instruction(args)
     adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
     workflow = TaskEngineWorkflow(scene_adapter=adapter)
+    workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
+    if args.gripper_model is not None:
+        planning_cfg = replace(planning_cfg, gripper_model=args.gripper_model)
     with reserve_run_directory(args.output_root) as allocation:
         if scene is not None:
             validate_scene_output_separation(scene, allocation.path)
@@ -166,6 +176,9 @@ def _run_workflow(
                 "output_dir": allocation.path.as_posix(),
             },
             config_path=args.config,
+            workflow_cfg=workflow_cfg,
+            planning_cfg=planning_cfg,
+            execution_cfg=execution_cfg,
             model=args.model,
             vlm_model=args.vlm_model,
             base_seed=args.base_seed,

@@ -1,7 +1,7 @@
 {
   "uid": "DualFrankaPanda",
   "urdf_cfg": {
-    "fname": "dual_franka_panda_basket",
+    "fname": "dual_franka_dh_pgi_140_80_basket",
     "name_case": {
       "joint": "original",
       "link": "original"
@@ -19,7 +19,7 @@
       },
       {
         "component_type": "left_hand",
-        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf",
+        "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf",
         "transform": [
           [1.0, 0.0, 0.0, 0.0],
           [0.0, 1.0, 0.0, 0.0],
@@ -39,7 +39,7 @@
       },
       {
         "component_type": "right_hand",
-        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf",
+        "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf",
         "transform": [
           [1.0, 0.0, 0.0, 0.0],
           [0.0, 1.0, 0.0, 0.0],
@@ -70,34 +70,26 @@
     0.0,
     0.0,
     0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
     0.0
   ],
   "drive_pros": {
     "stiffness": {
       "left_arm": 10000.0,
       "right_arm": 10000.0,
-      "left_eef": 50.0,
-      "right_eef": 50.0
+      "left_eef": 1000.0,
+      "right_eef": 1000.0
     },
     "damping": {
       "left_arm": 1000.0,
       "right_arm": 1000.0,
-      "left_eef": 5.0,
-      "right_eef": 5.0
+      "left_eef": 100.0,
+      "right_eef": 100.0
     },
     "max_effort": {
       "left_arm": 10000.0,
       "right_arm": 10000.0,
-      "left_eef": 500.0,
-      "right_eef": 500.0
+      "left_eef": 10000.0,
+      "right_eef": 10000.0
     }
   },
   "control_parts": {
@@ -110,14 +102,7 @@
       "left_fr3_joint6",
       "left_fr3_joint7"
     ],
-    "left_eef": [
-      "left_finger_joint",
-      "left_inner_knuckle_joint",
-      "left_inner_finger_joint",
-      "left_right_outer_knuckle_joint",
-      "left_right_inner_knuckle_joint",
-      "left_right_inner_finger_joint"
-    ],
+    "left_eef": ["left_gripper_finger1_joint_1"],
     "right_arm": [
       "right_fr3_joint1",
       "right_fr3_joint2",
@@ -127,14 +112,7 @@
       "right_fr3_joint6",
       "right_fr3_joint7"
     ],
-    "right_eef": [
-      "right_finger_joint",
-      "right_left_inner_knuckle_joint",
-      "right_left_inner_finger_joint",
-      "right_outer_knuckle_joint",
-      "right_inner_knuckle_joint",
-      "right_inner_finger_joint"
-    ],
+    "right_eef": ["right_gripper_finger1_joint_1"],
     "dual_arm": [
       "left_fr3_joint1",
       "left_fr3_joint2",
@@ -161,9 +139,9 @@
       "end_link_name": "left_fr3_link8",
       "root_link_name": "left_base",
       "tcp": [
-        [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.2],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.121],
         [0.0, 0.0, 0.0, 1.0]
       ],
       "num_samples": 15
@@ -174,9 +152,9 @@
       "end_link_name": "right_fr3_link8",
       "root_link_name": "right_base",
       "tcp": [
-        [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.2],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.121],
         [0.0, 0.0, 0.0, 1.0]
       ],
       "num_samples": 15

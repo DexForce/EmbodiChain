@@ -48,6 +48,7 @@ from embodichain.gen_sim.action_engine.generation.config_builder import (
     build_agent_config,
     build_fast_gym_config,
 )
+from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
 from embodichain.gen_sim.action_engine.generation.generator import (
     _add_ab_camera_requirements,
     _scene_requirements_from_bindings,
@@ -390,7 +391,7 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
     )
     assert config["env"]["observations"]["norm_robot_eef_joint"]["params"][
         "joint_ids"
-    ] == list(range(14, 26))
+    ] == [14, 16]
 
 
 def test_offline_recording_can_be_disabled_but_ab_keeps_audience_recorder(
@@ -669,12 +670,7 @@ def test_fast_gym_config_supports_all_robot_profiles(
     robot_uid: str,
     solver_type: str | None,
 ) -> None:
-    rotated_tcp = [
-        [0.0, -1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.2],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
+    pgi = get_gripper_profile("pgi")
     identity_hand_mount = [
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
@@ -694,8 +690,11 @@ def test_fast_gym_config_supports_all_robot_profiles(
 
     assert config["robot"]["uid"] == robot_uid
     assert config["env"]["extensions"]["agent_robot_profile"] == profile
+    assert config["env"]["extensions"]["agent_gripper_model"] == "pgi"
     for arm in ("left_arm", "right_arm"):
-        assert config["robot"]["solver_cfg"][arm]["tcp"] == rotated_tcp
+        assert config["robot"]["solver_cfg"][arm]["tcp"] == [
+            list(row) for row in pgi.tcp_transform
+        ]
     components = {
         component["component_type"]: component
         for component in config["robot"]["urdf_cfg"]["components"]
@@ -704,6 +703,83 @@ def test_fast_gym_config_supports_all_robot_profiles(
         assert components[hand]["transform"] == identity_hand_mount
     if solver_type is not None:
         assert config["robot"]["solver_cfg"]["left_arm"]["ur_type"] == solver_type
+
+
+@pytest.mark.parametrize("gripper_model", ["pgi", "robotiq"])
+def test_fast_gym_config_applies_one_complete_gripper_profile(
+    gym_export: Path,
+    gripper_model: str,
+) -> None:
+    scene = prepare_scene(gym_export)
+    config = build_fast_gym_config(
+        scene,
+        task_name="gripper_profile_task",
+        task_description="Profile smoke test.",
+        robot_profile="ur10",
+        gripper_model=gripper_model,
+        execution_program_hash="a" * 64,
+        max_episodes=1,
+        max_episode_steps=20,
+    )
+    profile = get_gripper_profile(gripper_model)
+    robot = config["robot"]
+    extensions = config["env"]["extensions"]
+    components = {
+        component["component_type"]: component
+        for component in robot["urdf_cfg"]["components"]
+    }
+
+    assert extensions["agent_gripper_model"] == gripper_model
+    assert extensions["gripper_open_state"] == list(profile.open_positions)
+    assert extensions["gripper_close_state"] == list(profile.close_positions)
+    assert extensions["gripper_profile"]["model"] == gripper_model
+    assert robot["control_parts"]["left_eef"] == list(
+        profile.control_joint_names("left")
+    )
+    assert robot["control_parts"]["right_eef"] == list(
+        profile.control_joint_names("right")
+    )
+    assert components["left_hand"]["urdf_path"] == profile.asset_path
+    assert components["right_hand"]["urdf_path"] == profile.asset_path
+    assert robot["solver_cfg"]["left_arm"]["tcp"] == [
+        list(row) for row in profile.tcp_transform
+    ]
+    assert robot["solver_cfg"]["right_arm"]["tcp"] == [
+        list(row) for row in profile.tcp_transform
+    ]
+    assert robot["urdf_cfg"]["fname"].endswith(f"{profile.assembly_name}_basket")
+
+
+def test_config_builders_reject_unknown_gripper_before_materialization(
+    gym_export: Path,
+) -> None:
+    scene = prepare_scene(gym_export)
+
+    with pytest.raises(ValueError, match="pgi.*robotiq"):
+        build_fast_gym_config(
+            scene,
+            task_name="invalid_gripper",
+            task_description="Invalid profile.",
+            robot_profile="ur10",
+            gripper_model="parallel_jaw",
+            execution_program_hash="a" * 64,
+            max_episodes=1,
+            max_episode_steps=20,
+        )
+
+
+def test_agent_config_serializes_selected_gripper(gym_export: Path) -> None:
+    scene = prepare_scene(gym_export)
+    config = build_agent_config(
+        task_name="gripper_profile_task",
+        robot_profile="ur10",
+        gripper_model="robotiq",
+        execution_program_hash="a" * 64,
+        source_config_path=scene.source_config_path,
+        uid_map=scene.uid_map,
+    )
+
+    assert config["gripper_model"] == "robotiq"
 
 
 @pytest.mark.parametrize(
@@ -998,7 +1074,7 @@ def test_generation_calls_interpreter_recipe_and_renderer_once(
     assert agent_config["seed_task_graph"] == "seed_task_graph.json"
     assert len(agent_config["seed_task_graph_hash"]) == 64
     assert agent_config["runtime_policy"]["schema_version"] == (
-        "action_engine_runtime_policy_v7"
+        "action_engine_runtime_policy_v8"
     )
     assert agent_config["runtime_policy"]["planner"]["dynamic_collision"] is True
     assert agent_config["runtime_policy"]["planner"]["static_obstacle_uids"] == [
@@ -1415,7 +1491,7 @@ def test_agent_config_uses_relative_program_paths(gym_export: Path) -> None:
     assert config["runtime_policy"]["motion_defaults"]["PickUp"][
         "lift_height"
     ] == pytest.approx(0.16)
-    assert config["runtime_policy"]["grasp"]["max_open_length"] == pytest.approx(0.15)
+    assert "max_open_length" not in config["runtime_policy"]["grasp"]
     assert len(config["runtime_policy_hash"]) == 64
 
 

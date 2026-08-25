@@ -33,6 +33,10 @@ from embodichain.gen_sim.action_engine.config import (
     generation_defaults,
     runtime_policy_hash,
 )
+from embodichain.gen_sim.action_engine.gripper_profiles import (
+    GripperProfile,
+    get_gripper_profile,
+)
 from embodichain.gen_sim.action_engine.protocol import (
     ACTION_ENGINE_CONFIG_SCHEMA,
     ACTION_ENGINE_ENV_ID,
@@ -46,6 +50,7 @@ from .models import PreparedScene
 __all__ = [
     "build_agent_config",
     "build_fast_gym_config",
+    "canonical_gripper_model",
     "canonical_robot_profile",
     "VLM_CAMERA_UIDS",
     "validate_fast_gym_config",
@@ -54,6 +59,7 @@ __all__ = [
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 _GENERATION_DEFAULTS = generation_defaults()
 _DEFAULT_TABLETOP_Z = float(_GENERATION_DEFAULTS["scene"]["default_tabletop_z"])
+_DEFAULT_GRIPPER_MODEL = str(_GENERATION_DEFAULTS["task"]["default_gripper_model"])
 
 _ARM_SLOTS = {
     "left": {"arm": "left_arm", "eef": "left_eef"},
@@ -85,6 +91,11 @@ def canonical_robot_profile(profile: str) -> str:
     )
 
 
+def canonical_gripper_model(model: str) -> str:
+    """Validate and return one exact GenSim gripper model ID."""
+    return get_gripper_profile(model).model.value
+
+
 def build_agent_config(
     *,
     task_name: str,
@@ -92,6 +103,7 @@ def build_agent_config(
     execution_program_hash: str,
     source_config_path: Path,
     uid_map: dict[str, str],
+    gripper_model: str = _DEFAULT_GRIPPER_MODEL,
     static_obstacle_uids: Sequence[str] | None = None,
     dynamic_obstacle_uids: Sequence[str] | None = None,
     table_top_z: float | None = None,
@@ -103,6 +115,7 @@ def build_agent_config(
 ) -> dict[str, Any]:
     """Build the small manifest consumed by ``run_agent``."""
     profile = canonical_robot_profile(robot_profile)
+    selected_gripper = canonical_gripper_model(gripper_model)
     runtime_policy = default_runtime_policy(profile)
     if (
         static_obstacle_uids is not None
@@ -143,6 +156,7 @@ def build_agent_config(
         "schema_version": ACTION_ENGINE_CONFIG_SCHEMA,
         "task_name": task_name,
         "robot_profile": profile,
+        "gripper_model": selected_gripper,
         "planning_mode": planning_mode,
         "task_spec": TASK_SPEC_FILENAME,
         "scene_requirements": SCENE_REQUIREMENTS_FILENAME,
@@ -213,6 +227,7 @@ def build_fast_gym_config(
     execution_program_hash: str,
     max_episodes: int,
     max_episode_steps: int,
+    gripper_model: str = _DEFAULT_GRIPPER_MODEL,
     randomize_scene: bool = False,
     randomize_table_material: bool = False,
     planning_mode: str = "offline",
@@ -228,10 +243,16 @@ def build_fast_gym_config(
     if planning_mode == "ab" and graph_path == EXECUTION_PROGRAM_FILENAME:
         graph_path = f"offline/{EXECUTION_PROGRAM_FILENAME}"
     profile = canonical_robot_profile(robot_profile)
+    gripper_profile = get_gripper_profile(gripper_model)
 
     profile_config = _profile(profile)
-    robot = _make_robot(profile, profile_config, scene.table_top_z)
-    observations = _make_observations(robot)
+    robot = _make_robot(
+        profile,
+        profile_config,
+        scene.table_top_z,
+        gripper_profile=gripper_profile,
+    )
+    observations = _make_observations(robot, gripper_profile)
     # These two template fields describe serialization order to generation, not
     # RobotCfg. Remove them after deriving observation IDs to avoid parser noise.
     robot.pop("observation_joint_parts", None)
@@ -260,6 +281,7 @@ def build_fast_gym_config(
         "defaults_schema_version": ACTION_ENGINE_DEFAULTS_SCHEMA,
         "task_name": task_name,
         "robot_profile": profile,
+        "gripper_model": gripper_profile.model.value,
         "planning_mode": planning_mode,
         "task_spec": TASK_SPEC_FILENAME,
         "scene_requirements": SCENE_REQUIREMENTS_FILENAME,
@@ -277,11 +299,18 @@ def build_fast_gym_config(
     extensions = {
         "action_engine": engine_extension,
         "agent_robot_profile": profile,
+        "agent_gripper_model": gripper_profile.model.value,
         "agent_arm_slots": deepcopy(_ARM_SLOTS),
         "agent_static_obstacle_uids": background_uids,
         "agent_dynamic_obstacle_uids": rigid_uids,
-        "gripper_open_state": list(profile_config["gripper_open_state"]),
-        "gripper_close_state": list(profile_config["gripper_close_state"]),
+        "gripper_open_state": list(gripper_profile.open_positions),
+        "gripper_close_state": list(gripper_profile.close_positions),
+        "gripper_profile": gripper_profile.runtime_manifest(
+            tcp_parent_frames={
+                "left": str(robot["solver_cfg"]["left_arm"]["end_link_name"]),
+                "right": str(robot["solver_cfg"]["right_arm"]["end_link_name"]),
+            }
+        ),
         "arm_aim_yaw_offset": deepcopy(environment_policy["arm_aim_yaw_offset"]),
         "ignore_terminations_during_agent": bool(
             environment_policy["ignore_terminations_during_agent"]
@@ -375,6 +404,11 @@ def validate_fast_gym_config(config: dict[str, Any]) -> None:
         raise ValueError("Gym config points to an unexpected TaskSpec artifact.")
     if action_engine.get("scene_requirements") != SCENE_REQUIREMENTS_FILENAME:
         raise ValueError("Gym config points to unexpected SceneRequirements.")
+    gripper_profile = get_gripper_profile(action_engine.get("gripper_model"))
+    extensions = config["env"]["extensions"]
+    if extensions.get("agent_gripper_model") != gripper_profile.model.value:
+        raise ValueError("Gym config gripper model fields do not match.")
+    _validate_robot_gripper_contract(config["robot"], gripper_profile)
     graph_path = action_engine.get("seed_task_graph")
     if (
         not isinstance(graph_path, str)
@@ -413,6 +447,8 @@ def _make_robot(
     profile_id: str,
     profile: dict[str, Any],
     table_top_z: float | None,
+    *,
+    gripper_profile: GripperProfile,
 ) -> dict[str, Any]:
     robot = _load_template(str(profile["template"]))
     tabletop_z = _DEFAULT_TABLETOP_Z if table_top_z is None else float(table_top_z)
@@ -427,7 +463,9 @@ def _make_robot(
         display = family.upper()
         urdf_dir = display
         robot["uid"] = f"Dual{display}"
-        robot["urdf_cfg"]["fname"] = f"dual_{family}_robotiq_arg2f_140_basket"
+        robot["urdf_cfg"][
+            "fname"
+        ] = f"dual_{family}_{gripper_profile.assembly_name}_basket"
         for component in robot["urdf_cfg"]["components"]:
             if str(component.get("component_type", "")).endswith("_arm"):
                 component["urdf_path"] = f"UniversalRobots/{urdf_dir}/{urdf_dir}.urdf"
@@ -443,9 +481,101 @@ def _make_robot(
             "right_eef",
         ]
         robot["observation_joint_parts"] = ["left_eef", "right_eef"]
+    else:
+        robot["urdf_cfg"][
+            "fname"
+        ] = f"dual_{family}_{gripper_profile.assembly_name}_basket"
+    _apply_gripper_profile(robot, gripper_profile)
     if profile_id != canonical_robot_profile(profile_id):
         raise ValueError(f"Invalid canonical robot profile {profile_id!r}.")
     return robot
+
+
+def _apply_gripper_profile(
+    robot: dict[str, Any],
+    profile: GripperProfile,
+) -> None:
+    """Apply one profile atomically to simulator, controller, and solver config."""
+    control_parts = robot.get("control_parts")
+    init_qpos = robot.get("init_qpos")
+    if not isinstance(control_parts, dict) or not isinstance(init_qpos, list):
+        raise ValueError("Robot template requires control_parts and init_qpos.")
+    arm_dof = sum(
+        len(control_parts.get(f"{side}_arm", ())) for side in ("left", "right")
+    )
+    if arm_dof <= 0 or len(init_qpos) < arm_dof:
+        raise ValueError("Robot template has an invalid initial arm posture.")
+    arm_init_qpos = list(init_qpos[:arm_dof])
+
+    components = robot.get("urdf_cfg", {}).get("components")
+    if not isinstance(components, list):
+        raise ValueError("Robot template requires a URDF component list.")
+    hands = {
+        str(component.get("component_type")): component
+        for component in components
+        if str(component.get("component_type", "")).endswith("_hand")
+    }
+    if set(hands) != {"left_hand", "right_hand"}:
+        raise ValueError("Robot template requires exactly one left and right hand.")
+    for component in hands.values():
+        component["urdf_path"] = profile.asset_path
+
+    for side in ("left", "right"):
+        control_parts[f"{side}_eef"] = list(profile.control_joint_names(side))
+    robot["init_qpos"] = (
+        arm_init_qpos + list(profile.simulated_joint_initial_positions) * 2
+    )
+
+    drive = robot.get("drive_pros")
+    if not isinstance(drive, dict):
+        raise ValueError("Robot template requires drive_pros.")
+    for section, value in (
+        ("stiffness", profile.drive_stiffness),
+        ("damping", profile.drive_damping),
+        ("max_effort", profile.drive_max_effort),
+    ):
+        values = drive.get(section)
+        if not isinstance(values, dict):
+            raise ValueError(f"Robot drive_pros.{section} must be a mapping.")
+        for side in ("left", "right"):
+            values[f"{side}_eef"] = value
+
+    solvers = robot.get("solver_cfg")
+    if not isinstance(solvers, dict):
+        raise ValueError("Robot template requires solver_cfg.")
+    tcp = [list(row) for row in profile.tcp_transform]
+    for arm in ("left_arm", "right_arm"):
+        if not isinstance(solvers.get(arm), dict):
+            raise ValueError(f"Robot template requires solver_cfg.{arm}.")
+        solvers[arm]["tcp"] = deepcopy(tcp)
+
+
+def _validate_robot_gripper_contract(
+    robot: Mapping[str, Any],
+    profile: GripperProfile,
+) -> None:
+    """Reject generated artifacts whose physical and planning profiles drift."""
+    components = robot.get("urdf_cfg", {}).get("components", [])
+    hand_assets = {
+        str(component.get("urdf_path"))
+        for component in components
+        if isinstance(component, Mapping)
+        and str(component.get("component_type", "")).endswith("_hand")
+    }
+    if hand_assets != {profile.asset_path}:
+        raise ValueError("Robot hand assets do not match the selected gripper profile.")
+    control_parts = robot.get("control_parts", {})
+    for side in ("left", "right"):
+        if control_parts.get(f"{side}_eef") != list(profile.control_joint_names(side)):
+            raise ValueError(
+                f"Robot {side} gripper controls do not match the selected profile."
+            )
+    expected_tcp = [list(row) for row in profile.tcp_transform]
+    for arm in ("left_arm", "right_arm"):
+        if robot.get("solver_cfg", {}).get(arm, {}).get("tcp") != expected_tcp:
+            raise ValueError(
+                f"Robot {arm} TCP does not match the selected gripper profile."
+            )
 
 
 @lru_cache(maxsize=1)
@@ -464,8 +594,6 @@ def _profile(profile_id: str) -> dict[str, Any]:
         "robot_family",
         "tabletop_clearance",
         "arm_component_z",
-        "gripper_open_state",
-        "gripper_close_state",
     }
     missing = sorted(required - set(profile))
     if missing:
@@ -665,17 +793,22 @@ def _recording_policy(planning_mode: str) -> tuple[bool, tuple[int, int], int]:
     )
 
 
-def _make_observations(robot: dict[str, Any]) -> dict[str, Any]:
-    control_parts = robot["control_parts"]
-    qpos_order = robot["qpos_control_part_order"]
-    observed_parts = set(robot["observation_joint_parts"])
-    offset = 0
+def _make_observations(
+    robot: dict[str, Any],
+    gripper_profile: GripperProfile,
+) -> dict[str, Any]:
+    per_hand_dof = len(gripper_profile.simulated_joint_initial_positions)
+    arm_dof = len(robot["init_qpos"]) - 2 * per_hand_dof
+    if arm_dof <= 0:
+        raise ValueError("Robot initial posture does not contain arm joints.")
     joint_ids: list[int] = []
-    for part in qpos_order:
-        count = len(control_parts[part])
-        if part in observed_parts:
-            joint_ids.extend(range(offset, offset + count))
-        offset += count
+    for side_index, side in enumerate(("left", "right")):
+        simulated = gripper_profile.simulated_joint_names(side)
+        base = arm_dof + side_index * per_hand_dof
+        joint_ids.extend(
+            base + simulated.index(name)
+            for name in gripper_profile.control_joint_names(side)
+        )
     return {
         "norm_robot_eef_joint": {
             "func": "normalize_robot_joint_data",
