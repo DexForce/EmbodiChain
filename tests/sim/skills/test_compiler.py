@@ -511,8 +511,6 @@ def _integration(
             SemanticCallDescriptor(
                 call_id="vendor.inspect",
                 spec_type=RegisteredSemanticCall,
-                skill_id=_PICK_TARGET.skill_id,
-                binding_contract=_PICK_TARGET.binding_contract,
                 target_descriptor=_PICK_TARGET,
             )
         )

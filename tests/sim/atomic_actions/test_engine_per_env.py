@@ -315,6 +315,27 @@ class FailedEffectAction(EffectAction):
         return replace(plan, plan_success=torch.zeros_like(plan.plan_success))
 
 
+class NonRetryablePlanningFailureAction(DynamicAction):
+    """Reject one invalid goal without consuming action-retry budget."""
+
+    skill_id: ClassVar[str] = "non_retryable_failure"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        self.plan_count += 1
+        return self.failed_plan(
+            request,
+            context,
+            message="The grounded target violates the action contract.",
+            failure_code="invalid_goal",
+            retryable=False,
+        )
+
+
 class DiagnosticAction(DynamicAction):
     """Dynamic action exposing its installed plan for snapshot isolation tests."""
 
@@ -1352,6 +1373,61 @@ def test_all_rows_planning_failure_skips_inactive_command_frames() -> None:
         event.kind is ExecutionEventKind.ACTION_PLANNING_FAILED
         for event in failed.events
     )
+
+
+def test_non_retryable_planning_failure_fails_without_spending_retry_budget() -> None:
+    engine, _ = _engine()
+    action = NonRetryablePlanningFailureAction()
+    engine.register(action)
+    invocation = _invocation(
+        engine,
+        skill_id=action.skill_id,
+        max_action_retries=5,
+    )
+
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    failed = session.tick(_context(0.0, 0.0, 0.2, 0))
+
+    assert failed.status is ExecutionStatus.FAILED
+    assert action.plan_count == 1
+    assert len(session.plan_attempts) == 1
+    assert not any(
+        event.kind is ExecutionEventKind.ACTION_RETRY for event in failed.events
+    )
+    planning_event = next(
+        event
+        for event in failed.events
+        if event.kind is ExecutionEventKind.ACTION_PLANNING_FAILED
+    )
+    assert planning_event.failure_code == "invalid_goal"
+    assert planning_event.retryable is False
+    failure = session.plan_attempts[0].plan.diagnostics.failure
+    assert failure is not None
+    assert failure.code == "invalid_goal"
+    assert not failure.retryable
+
+
+def test_execution_events_report_named_trajectory_segment_entries() -> None:
+    engine, _ = _engine()
+    action = PhaseGateAction()
+    engine.register(action)
+    invocation = _invocation(engine, skill_id=action.skill_id)
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+
+    ticks = (
+        session.tick(_context(0.0, 0.0, 0.2, 0)),
+        session.tick(_context(0.1, 0.0, 0.2, 0)),
+        session.tick(_context(0.2, 0.1, 0.2, 0)),
+    )
+    entries = [
+        event
+        for tick in ticks
+        for event in tick.events
+        if event.kind is ExecutionEventKind.TRAJECTORY_SEGMENT_ENTERED
+    ]
+
+    assert [event.segment_name for event in entries] == ["prepare", "commit"]
+    assert [event.env_mask.tolist() for event in entries] == [[True], [True]]
 
 
 def test_plan_attempt_records_snapshot_nested_metadata_at_installation() -> None:

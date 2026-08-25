@@ -108,6 +108,7 @@ topics:
       - simulation-system
       - manager-functor
       - sim-visualization
+      - expert-programs
     status: active
 
   - id: manager-functor
@@ -568,10 +569,13 @@ topics:
       - ParallelJawGripperModelCfg
       - grasp pose generator
       - ActionPlan
+      - PlanningFailure
       - TrajectorySegment
       - TimedTrajectory
       - PlanningContext
       - ExecutionSession
+      - ExecutionEvent
+      - TRAJECTORY_SEGMENT_ENTERED
       - EffectVerificationRequest
       - EffectVerificationResult
       - eligible_mask
@@ -658,6 +662,7 @@ topics:
       - SemanticSkillCompiler
       - SkillRuntime
       - AtomicSkills
+      - SemanticCallAvailability
       - SkillResult
       - SkillFailure
       - execution_prefix_length
@@ -784,6 +789,7 @@ topics:
       - embodichain/lab/sim/skills/parallel.py
       - embodichain/lab/sim/skills/parallel_runtime.py
       - embodichain/lab/sim/skills/runtime.py
+      - embodichain/lab/sim/skills/_assembly.py
       - embodichain/lab/sim/skills/__init__.py
       - scripts/tutorials/semantic_skill/
     related_topics:
@@ -791,4 +797,68 @@ topics:
       - motion-planning
       - robot-system
       - ik-solvers
+      - expert-programs
+    status: active
+
+  - id: expert-programs
+    title: Declarative Expert Programs
+    aliases:
+      - expert program
+      - expert programs
+      - declarative expert program
+      - declarative expert programs
+      - expert program schema
+      - expert program compiler
+      - expert program bridge
+      - expert program registration
+      - 专家程序
+      - 声明式专家程序
+    keywords:
+      - ExpertProgramCfg
+      - EXPERT_PROGRAM_SCHEMA_VERSION
+      - REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION
+      - ExpertProgramCompiler
+      - CompiledProgram
+      - ExpertProgramEnvironmentAdapter
+      - SimulationExpertProgramRegistration
+      - RegisteredSemanticLowererFactory
+      - RegisteredSemanticLowererDeclaration
+      - AtomicDemoBridge
+      - DemoSegment
+      - SimulationSceneBinding
+      - SimulationRobotSkillProfileBinding
+      - create_simulation_expert_program_adapter
+      - load_expert_program
+      - decode_expert_program
+      - expert_program_path
+      - SequenceCfg
+      - RepeatCfg
+      - SegmentCfg
+      - InvokeCfg
+      - ParallelCfg
+      - BarrierCfg
+      - RegisteredSemanticCallCfg
+      - ObjectNearTargetValidatorCfg
+      - ArticulationJointPositionValidatorCfg
+      - integration fingerprint
+      - provider-aware preflight
+      - segment acceptance
+      - program completion mask
+      - repeated pick place
+      - open drawer
+    paths:
+      - topics/expert-programs/expert-programs.md
+    source_of_truth:
+      - embodichain/lab/gym/envs/expert_program/
+      - embodichain/lab/gym/envs/embodied_env.py
+      - embodichain/lab/gym/envs/demo.py
+      - embodichain/lab/scripts/run_env.py
+      - embodichain_tasks/embodichain_tasks/expert_program/
+      - embodichain_tasks/configs/expert_program/
+      - embodichain_tasks/configs/gym/expert_program/
+    related_topics:
+      - atomic-actions
+      - env-framework
+      - simulation-system
+      - motion-planning
     status: active

@@ -25,7 +25,7 @@ instances, while its provider-free catalog owns the exact declarations below.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from types import MappingProxyType
 from typing import ClassVar, Protocol, runtime_checkable, TYPE_CHECKING
@@ -59,7 +59,11 @@ from .bridge import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.atomic_actions import AtomicActionEngine, SceneProvider
-    from embodichain.lab.sim.skills import EffectEvidenceProvider, SceneRegistry
+    from embodichain.lab.sim.skills import (
+        EffectEvidenceProvider,
+        RegisteredSemanticLowerer,
+        SceneRegistry,
+    )
 
 VersionedKey = tuple[str, str]
 """Exact ``(provider_or_projector_id, revision)`` registry key."""
@@ -471,6 +475,27 @@ class ControlPartEvidenceProviderDeclaration:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class RegisteredSemanticLowererDeclaration:
+    """Provider-free identity of one registered semantic lowerer factory.
+
+    Args:
+        factory_type: Exact immutable factory implementation type.
+        call_id: Registered semantic-call ID owned by the factory.
+        revision: Exact factory contract revision.
+    """
+
+    factory_type: type[object]
+    call_id: str
+    revision: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.factory_type, type):
+            raise TypeError("factory_type must be a type.")
+        _identifier(self.call_id, field_name="call_id")
+        _identifier(self.revision, field_name="revision")
+
+
 @runtime_checkable
 class ParallelCommandSafetyValidatorFactory(Protocol):
     """Registration-owned factory for one authoritative live safety gate."""
@@ -520,6 +545,34 @@ class ControlPartEvidenceProviderFactory(Protocol):
         """
 
 
+@runtime_checkable
+class RegisteredSemanticLowererFactory(Protocol):
+    """Registration-owned factory for one fresh live semantic lowerer."""
+
+    call_id: ClassVar[str]
+    revision: ClassVar[str]
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Create a lowerer bound to the exact assembled simulation runtime.
+
+        Args:
+            simulation: Simulation that owns the selected robot and entities.
+            robot: Exact robot selected by the environment factory.
+            scene_registry: Exact live semantic scene registry.
+            engine: Atomic-action engine assembled for the robot.
+
+        Returns:
+            A fresh registered semantic lowerer matching the declared call.
+        """
+
+
 @dataclass(frozen=True, slots=True)
 class StandardExtensionDeclarations:
     """Cross-checked provider-free declarations for the standard factory."""
@@ -528,6 +581,9 @@ class StandardExtensionDeclarations:
     runtime_transports: tuple[RuntimeTransportDeclaration, ...]
     parallel_safety: ParallelSafetyDeclaration | None
     control_part_evidence: ControlPartEvidenceProviderDeclaration | None
+    registered_semantic_lowerers: Mapping[str, RegisteredSemanticLowererDeclaration] = (
+        field(default_factory=dict)
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.endpoint_adapters, Mapping):
@@ -570,6 +626,26 @@ class StandardExtensionDeclarations:
                 "control_part_evidence must be "
                 "ControlPartEvidenceProviderDeclaration or None."
             )
+        if not isinstance(self.registered_semantic_lowerers, Mapping):
+            raise TypeError("registered_semantic_lowerers must be a mapping.")
+        normalized_lowerers: dict[str, RegisteredSemanticLowererDeclaration] = {}
+        for call_id, declaration in self.registered_semantic_lowerers.items():
+            if type(declaration) is not RegisteredSemanticLowererDeclaration:
+                raise TypeError(
+                    "registered_semantic_lowerers values must be "
+                    "RegisteredSemanticLowererDeclaration values."
+                )
+            if call_id != declaration.call_id:
+                raise ValueError(
+                    "registered_semantic_lowerers keys must exactly match "
+                    "declaration call_id values."
+                )
+            normalized_lowerers[call_id] = declaration
+        object.__setattr__(
+            self,
+            "registered_semantic_lowerers",
+            MappingProxyType(normalized_lowerers),
+        )
         adapter_ids = [value.adapter_id for value in normalized.values()]
         if len(set(adapter_ids)) != len(adapter_ids):
             raise ValueError("Endpoint adapter IDs must be unique.")
@@ -805,6 +881,49 @@ def declare_control_part_evidence_factory(
     )
 
 
+def declare_registered_semantic_lowerer_factory(
+    factory: RegisteredSemanticLowererFactory,
+) -> RegisteredSemanticLowererDeclaration:
+    """Read one semantic lowerer factory's exact static identity.
+
+    Args:
+        factory: Immutable registration-owned lowerer factory.
+
+    Returns:
+        Provider-free call, revision, and factory-type declaration.
+
+    Raises:
+        TypeError: If the factory has no callable creator or is mutable.
+        ValueError: If its call ID or revision is not an exact identifier.
+    """
+    create = getattr(factory, "create", None)
+    if not callable(create):
+        raise TypeError("registered_semantic_lowerer_factories must define create().")
+    validate_immutable_extension_declaration(
+        factory,
+        field_name="registered_semantic_lowerer_factories",
+    )
+    return RegisteredSemanticLowererDeclaration(
+        factory_type=type(factory),
+        call_id=_identifier(
+            _class_attribute(
+                factory,
+                "call_id",
+                field_name="RegisteredSemanticLowererFactory.call_id",
+            ),
+            field_name="RegisteredSemanticLowererFactory.call_id",
+        ),
+        revision=_identifier(
+            _class_attribute(
+                factory,
+                "revision",
+                field_name="RegisteredSemanticLowererFactory.revision",
+            ),
+            field_name="RegisteredSemanticLowererFactory.revision",
+        ),
+    )
+
+
 def _profile_endpoint_types(
     profile: RobotSkillProfile,
 ) -> frozenset[type[ResourceEndpoint]]:
@@ -856,6 +975,9 @@ def build_standard_extension_declarations(
     runtime_transports: tuple[RuntimeTransportActionEncoder, ...],
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None = None,
+    registered_semantic_lowerer_factories: tuple[
+        RegisteredSemanticLowererFactory, ...
+    ] = (),
 ) -> StandardExtensionDeclarations:
     """Cross-check standard-runtime extensions against one exact profile.
 
@@ -870,6 +992,8 @@ def build_standard_extension_declarations(
         raise TypeError("endpoint_adapters must be an exact tuple.")
     if type(runtime_transports) is not tuple:
         raise TypeError("runtime_transports must be an exact tuple.")
+    if type(registered_semantic_lowerer_factories) is not tuple:
+        raise TypeError("registered_semantic_lowerer_factories must be an exact tuple.")
 
     builtin_adapter = declare_endpoint_adapter(ControlPartEndpointAdapter())
     custom_adapters = tuple(
@@ -1015,12 +1139,22 @@ def build_standard_extension_declarations(
             "control_part_evidence_factory requires a registered "
             "ControlPartEndpoint."
         )
+    lowerer_declarations = tuple(
+        declare_registered_semantic_lowerer_factory(factory)
+        for factory in registered_semantic_lowerer_factories
+    )
+    lowerer_ids = [declaration.call_id for declaration in lowerer_declarations]
+    if len(set(lowerer_ids)) != len(lowerer_ids):
+        raise ValueError("Registered semantic lowerer call IDs must be unique.")
 
     return StandardExtensionDeclarations(
         endpoint_adapters=installed_by_type,
         runtime_transports=transport_declarations,
         parallel_safety=parallel_safety,
         control_part_evidence=control_part_evidence,
+        registered_semantic_lowerers={
+            declaration.call_id: declaration for declaration in lowerer_declarations
+        },
     )
 
 
@@ -1030,6 +1164,8 @@ __all__ = [
     "EndpointAdapterDeclaration",
     "ParallelCommandSafetyValidatorFactory",
     "ParallelSafetyDeclaration",
+    "RegisteredSemanticLowererDeclaration",
+    "RegisteredSemanticLowererFactory",
     "RuntimeTransportDeclaration",
     "StandardExtensionDeclarations",
     "VersionedKey",
@@ -1037,6 +1173,7 @@ __all__ = [
     "declare_control_part_evidence_factory",
     "declare_endpoint_adapter",
     "declare_parallel_safety_factory",
+    "declare_registered_semantic_lowerer_factory",
     "declare_runtime_transport",
     "validate_immutable_extension_declaration",
 ]

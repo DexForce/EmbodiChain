@@ -44,6 +44,7 @@ from .plans import (
     ActionPlan,
     EffectVerificationRequirement,
     PlannerDiagnostics,
+    PlanningFailure,
     TimedTrajectory,
     TrajectorySegment,
     normalize_success_mask,
@@ -962,6 +963,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         context: PlanningContext,
         *,
         message: str | None = None,
+        failure_code: str = "planning_failed",
+        retryable: bool = True,
     ) -> ActionPlan:
         """Build a failed empty plan without changing task state.
 
@@ -969,6 +972,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             request: Resolved invocation that failed to plan.
             context: Planning input used for the attempt.
             message: Optional diagnostic message.
+            failure_code: Stable machine-readable planning failure code.
+            retryable: Whether execution may spend action-retry budget on the
+                failed rows.
 
         Returns:
             Failed action plan with an empty trajectory.
@@ -977,6 +983,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         diagnostics = PlannerDiagnostics(
             backend=self.planning_services.planner_name,
             messages=(() if message is None else (message,)),
+            failure=PlanningFailure(failure_code, retryable=retryable),
         )
         if request.binding.endpoints and all(
             isinstance(endpoint.target, JointPositionTarget)

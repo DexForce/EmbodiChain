@@ -28,9 +28,12 @@ explicit `control_dt` used only by action-owned interpolation. An `ActionPlan`
 contains per-environment planning success, an authoritative
 `TimedCommandSequence` in `commands`, an optional full-robot `TimedTrajectory`
 in `joint_trajectory`, action-level recovery and scene-invalidation metadata,
-planner diagnostics, named `TrajectorySegment` frame ranges, and an uncommitted
-`StateDelta`. Segments are inspection/tracing metadata inside one command
-sequence; they are not independently replannable execution boundaries.
+planner diagnostics with a typed retryable/non-retryable `PlanningFailure`,
+named `TrajectorySegment` frame ranges, and an uncommitted `StateDelta`.
+Segments are inspection/tracing metadata inside one command sequence; they are
+not independently replannable execution boundaries. Execution emits one
+`TRAJECTORY_SEGMENT_ENTERED` event at each named boundary and preserves the
+segment name on subsequent events for observability.
 
 `AtomicAction.build_plan()` is the planner-backed joint convenience path: it
 normalizes the success mask, freezes unsuccessful trajectory rows at the
@@ -385,7 +388,17 @@ trace metadata.
 It combines an optional application verifier and step observer with the typed
 terminal monitors, phase-effect gates, and held-object guards selected by the
 compiler. `AtomicSkills` is a small application facade over that same runtime;
-it does not own a second compiler or execution loop.
+it does not own a second compiler or execution loop. Its simulation constructor
+delegates to `SkillRuntime.from_simulation()`, `available_skills` exposes the
+bound profile's immutable atomic skill descriptors, and `availability()`
+returns a structured semantic diagnostic instead of reducing capability checks
+to a boolean.
+
+The core runtime and Expert Program adapter share one provider-free semantic
+assembly path for the scene manifest, robot-profile binding, catalog, and
+compiler. The standard Gym registration, compilation, bridge, and task
+integration contracts are routed separately through
+`agent_context/topics/expert-programs/expert-programs.md`.
 
 `ParallelSkillRuntime` coordinates two or more forked semantic lanes on one
 clock. It rejects overlapping `ResourceClaim` values and symbolic writes,
@@ -634,7 +647,11 @@ override poses.
 
 Cause events (`ACTION_PLANNING_FAILED`, `EFFECT_VERIFICATION_FAILED`, and
 `EFFECT_VERIFICATION_TIMEOUT`) are distinct from the `ACTION_RETRY` recovery
-event. `SESSION_COMPLETED` and `SESSION_FAILED` are distinct terminal events.
+event. An `ACTION_PLANNING_FAILED` event carries the plan's stable failure code
+and retryability. Non-retryable failures deactivate their affected rows without
+spending an action retry budget; legacy plans without an explicit
+classification receive the retryable `planning_failed` default.
+`SESSION_COMPLETED` and `SESSION_FAILED` are distinct terminal events.
 
 Recovery replans reuse the current immutable `ResolvedActionRequest`, including
 its owned goal snapshot. Mutable goal values are copied, while simulator-backed

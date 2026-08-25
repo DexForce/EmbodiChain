@@ -75,6 +75,7 @@ from .compiler import (
     ExpertProgramCompiler,
 )
 from .environment import (
+    ExpertProgramAdapterFactory,
     ExpertProgramEnvironmentAdapter,
     ExpertProgramEnvironmentFactory,
     ExpertProgramRuntimeAssembly,
@@ -104,11 +105,14 @@ from .extensions import (
     EndpointAdapterDeclaration,
     ParallelCommandSafetyValidatorFactory,
     ParallelSafetyDeclaration,
+    RegisteredSemanticLowererDeclaration,
+    RegisteredSemanticLowererFactory,
     RuntimeTransportDeclaration,
     StandardExtensionDeclarations,
     VersionedKey,
 )
 from .simulation_environment import (
+    SimulationExpertProgramAdapterFactory,
     SimulationExpertProgramFactory,
     create_simulation_expert_program_adapter,
 )
@@ -146,6 +150,7 @@ __all__ = [
     "EnvironmentStepClock",
     "EnvironmentStepTimingError",
     "EndpointAdapterDeclaration",
+    "ExpertProgramAdapterFactory",
     "ExpertProgramCfg",
     "ExpertProgramCompileError",
     "ExpertProgramCompiler",
@@ -171,6 +176,8 @@ __all__ = [
     "PlanningObservationPort",
     "PoseCfg",
     "RegisteredSemanticCallCfg",
+    "RegisteredSemanticLowererDeclaration",
+    "RegisteredSemanticLowererFactory",
     "RepeatCfg",
     "RuntimeCommandFrameEncoder",
     "RuntimeTransportDeclaration",
@@ -182,6 +189,7 @@ __all__ = [
     "SequenceCfg",
     "SimulationArticulationBinding",
     "SimulationArticulationLinkBinding",
+    "SimulationExpertProgramAdapterFactory",
     "SimulationExpertProgramFactory",
     "SimulationExpertProgramRegistration",
     "SimulationRigidObjectBinding",

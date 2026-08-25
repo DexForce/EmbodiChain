@@ -43,26 +43,7 @@ from .scene import (
     SceneLinkRef,
     SceneObjectRef,
 )
-
-
-def _validate_identifier(value: str, *, field_name: str) -> str:
-    """Return one exact, non-empty identifier.
-
-    Args:
-        value: Candidate identifier.
-        field_name: Diagnostic field name.
-
-    Returns:
-        The validated input value.
-
-    Raises:
-        ValueError: If the value is empty or has outer whitespace.
-    """
-    if type(value) is not str or not value or value != value.strip():
-        raise ValueError(
-            f"{field_name} must be a non-empty string without outer whitespace."
-        )
-    return value
+from ._validation import validate_identifier as _validate_identifier
 
 
 def _validate_registered_call_id(value: str) -> str:
@@ -636,8 +617,6 @@ class SemanticCallDescriptor:
     Args:
         call_id: Stable semantic call identifier.
         spec_type: Exact public call value type.
-        skill_id: Atomic skill identifier installed separately on an engine.
-        binding_contract: Robot-independent resource requirements.
         schema_version: Explicit configuration payload schema version.
         target_descriptor: Exact atomic goal/options/resource contract. It is
             inferred and non-overridable for curated calls and required for
@@ -646,8 +625,6 @@ class SemanticCallDescriptor:
 
     call_id: str
     spec_type: type[SemanticCallSpec]
-    skill_id: str | None = None
-    binding_contract: SkillBindingContract | None = None
     schema_version: int = 1
     target_descriptor: SkillDescriptor | None = None
 
@@ -663,16 +640,6 @@ class SemanticCallDescriptor:
                 "spec_type must be exactly Pick, Place, HandOver, or "
                 "RegisteredSemanticCall; extensions use the registered payload "
                 "contract rather than executable call subclasses."
-            )
-        if self.skill_id is not None:
-            _validate_identifier(
-                self.skill_id,
-                field_name="SemanticCallDescriptor.skill_id",
-            )
-        if self.binding_contract is not None:
-            _validate_static_binding_contract(
-                self.binding_contract,
-                field_name="SemanticCallDescriptor.binding_contract",
             )
         if not isinstance(self.schema_version, int) or isinstance(
             self.schema_version, bool
@@ -694,15 +661,8 @@ class SemanticCallDescriptor:
         if self.spec_type is not RegisteredSemanticCall:
             expected = _builtin_call_target(self.spec_type)
             if (
-                (self.skill_id is not None and self.skill_id != expected.skill_id)
-                or (
-                    self.binding_contract is not None
-                    and self.binding_contract != expected.binding_contract
-                )
-                or (
-                    self.target_descriptor is not None
-                    and self.target_descriptor != expected
-                )
+                self.target_descriptor is not None
+                and self.target_descriptor != expected
             ):
                 raise ValueError(
                     f"Built-in semantic call {self.call_id!r} must target skill "
@@ -710,8 +670,6 @@ class SemanticCallDescriptor:
                     "Use RegisteredSemanticCall for extensions."
                 )
             object.__setattr__(self, "target_descriptor", expected)
-            object.__setattr__(self, "skill_id", expected.skill_id)
-            object.__setattr__(self, "binding_contract", expected.binding_contract)
         else:
             if self.target_descriptor is None:
                 raise TypeError(
@@ -729,23 +687,6 @@ class SemanticCallDescriptor:
                     "Registered target_descriptor must be agent-visible and declare "
                     "a binding contract."
                 )
-            if (
-                self.skill_id is not None
-                and self.target_descriptor.skill_id != self.skill_id
-            ) or (
-                self.binding_contract is not None
-                and self.target_descriptor.binding_contract != self.binding_contract
-            ):
-                raise ValueError(
-                    "Registered target_descriptor must match an explicitly supplied "
-                    "skill_id and binding_contract."
-                )
-            object.__setattr__(self, "skill_id", self.target_descriptor.skill_id)
-            object.__setattr__(
-                self,
-                "binding_contract",
-                self.target_descriptor.binding_contract,
-            )
         if self.spec_type is RegisteredSemanticCall and self.call_id in {
             Pick.call_kind,
             Place.call_kind,
@@ -757,6 +698,19 @@ class SemanticCallDescriptor:
             )
         if self.spec_type is RegisteredSemanticCall:
             _validate_registered_call_id(self.call_id)
+
+    @property
+    def skill_id(self) -> str:
+        """Return the atomic skill ID from the canonical target descriptor."""
+        assert self.target_descriptor is not None
+        return self.target_descriptor.skill_id
+
+    @property
+    def binding_contract(self) -> SkillBindingContract:
+        """Return the resource contract from the canonical target descriptor."""
+        assert self.target_descriptor is not None
+        assert self.target_descriptor.binding_contract is not None
+        return self.target_descriptor.binding_contract
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -880,8 +834,6 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
         SemanticCallDescriptor(
             call_id=spec_type.call_kind,
             spec_type=spec_type,
-            skill_id=_builtin_call_target(spec_type).skill_id,
-            binding_contract=_builtin_call_target(spec_type).binding_contract,
         )
         for spec_type in (Pick, Place, HandOver)
     )

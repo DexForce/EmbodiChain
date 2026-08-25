@@ -214,8 +214,6 @@ def _compiler(
         SemanticCallDescriptor(
             call_id=CALL_ID,
             spec_type=RegisteredSemanticCall,
-            skill_id=_MOVE_TARGET.skill_id,
-            binding_contract=_MOVE_TARGET.binding_contract,
             target_descriptor=_MOVE_TARGET,
         )
     )

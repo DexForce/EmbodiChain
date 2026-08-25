@@ -438,6 +438,11 @@ class _Integration:
     engine: AtomicActionEngine
     scene_registry: SceneRegistry
 
+    @property
+    def robot_profile(self) -> object:
+        """Expose the production capability surface used by the facade."""
+        return SimpleNamespace(skills=self.engine.skills)
+
 
 class _Compiler(SemanticSkillCompiler):
     """Semantic compiler test double retaining the production call boundaries."""
@@ -2018,6 +2023,77 @@ def test_facade_varargs_and_programmatic_iterable_share_runtime_path() -> None:
     assert [item.skill_id for item in iterable_system.compiler.invocations] == [
         item.skill_id for item in facade_system.compiler.invocations
     ]
+
+
+def test_facade_reports_bound_robot_skills_and_call_availability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    facade = AtomicSkills(system.runtime)
+
+    available = facade.availability(_call("available"))
+
+    assert available.available
+    assert available.semantic_id == "test.available"
+    assert available.diagnostic is None
+    assert facade.available_skills == system.engine.skills
+
+    diagnostic = SemanticDiagnostic(
+        "unknown_entity",
+        ("workflow", 0, "call", "object"),
+        "The referenced object is unavailable.",
+        ("cube",),
+    )
+    monkeypatch.setattr(
+        system.compiler,
+        "analyze",
+        Mock(side_effect=SemanticValidationError(diagnostic)),
+    )
+
+    unavailable = facade.availability(_call("unavailable"))
+
+    assert not unavailable.available
+    assert unavailable.diagnostic == diagnostic
+
+
+def test_facade_from_simulation_delegates_to_canonical_runtime_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    factory = Mock(return_value=system.runtime)
+    monkeypatch.setattr(SkillRuntime, "from_simulation", factory)
+    registry = SceneRegistry()
+    verifier = Mock()
+
+    facade = AtomicSkills.from_simulation(
+        simulation="simulation",
+        robot="robot",
+        motion_generator="motion_generator",
+        scene_registry=registry,
+        robot_profile="robot_profile",
+        effect_verifier=verifier,
+        control_dt=0.01,
+    )
+
+    assert facade.runtime is system.runtime
+    factory.assert_called_once_with(
+        simulation="simulation",
+        robot="robot",
+        motion_generator="motion_generator",
+        scene_registry=registry,
+        robot_profile="robot_profile",
+        grasp_pose_generators=None,
+        call_catalog=None,
+        effect_verifier=verifier,
+        registered_lowerers=(),
+        relation_grounders=(),
+        handover_pose_providers=(),
+        endpoint_adapters=None,
+        runner_cfg=None,
+        control_dt=0.01,
+        scene_translation_threshold=1.0e-4,
+        scene_rotation_threshold=1.0e-3,
+    )
 
 
 def test_from_env_requires_an_explicit_runtime_provider() -> None:

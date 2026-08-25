@@ -31,6 +31,7 @@ import torch
 from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 from ..atomic_actions.bindings import EndpointBinding
+from ..atomic_actions.core import SkillDescriptor
 from ..atomic_actions.engine import AtomicActionEngine
 from ..atomic_actions.effects import StateDelta
 from ..atomic_actions.execution import (
@@ -45,7 +46,7 @@ from ..atomic_actions.execution import (
     PhaseEffectGateRequest,
     PhaseEffectGateResult,
 )
-from ..atomic_actions.plans import ActionPlan, TrajectorySegment
+from ..atomic_actions.plans import ActionPlan, PlanningFailure, TrajectorySegment
 from ..atomic_actions.policies import MotionPolicy, RecoveryPolicy
 from ..atomic_actions.runner import (
     CommandSink,
@@ -125,6 +126,9 @@ def _snapshot_event(event: ExecutionEvent) -> ExecutionEvent:
         invocation_index=event.invocation_index,
         env_mask=event.env_mask,
         message=event.message,
+        segment_name=event.segment_name,
+        failure_code=event.failure_code,
+        retryable=event.retryable,
     )
 
 
@@ -192,7 +196,7 @@ def _snapshot_metadata_mapping(value: Mapping[str, object]) -> Mapping[str, obje
 
 def _event_to_metadata(event: ExecutionEvent) -> dict[str, object]:
     """Serialize one execution/recovery event without exposing tensors."""
-    return {
+    metadata: dict[str, object] = {
         "kind": event.kind.value,
         "timestamp": _metadata_value(event.timestamp),
         "skill_id": event.skill_id,
@@ -202,6 +206,12 @@ def _event_to_metadata(event: ExecutionEvent) -> dict[str, object]:
         "env_mask": _metadata_value(event.env_mask),
         "message": event.message,
     }
+    if event.segment_name is not None:
+        metadata["segment_name"] = event.segment_name
+    if event.failure_code is not None:
+        metadata["failure_code"] = event.failure_code
+        metadata["retryable"] = event.retryable
+    return metadata
 
 
 def task_state_to_metadata(state: TaskState) -> dict[str, object]:
@@ -269,6 +279,28 @@ class SkillWorkflowRecoveryRole(str, Enum):
     RETRY_RETAINED = "retry_retained"
     REACQUIRE = "reacquire"
     RETRY_REACQUIRED = "retry_reacquired"
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticCallAvailability:
+    """Static scene-and-robot availability result for one semantic call."""
+
+    semantic_id: str
+    diagnostic: SemanticDiagnostic | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.semantic_id) is not str or not self.semantic_id:
+            raise ValueError("semantic_id must be a non-empty string.")
+        if self.diagnostic is not None and not isinstance(
+            self.diagnostic,
+            SemanticDiagnostic,
+        ):
+            raise TypeError("diagnostic must be a SemanticDiagnostic or None.")
+
+    @property
+    def available(self) -> bool:
+        """Return whether static analysis accepted the call."""
+        return self.diagnostic is None
 
 
 @dataclass(frozen=True, slots=True)
@@ -698,6 +730,7 @@ class SkillPlanAttemptTrace:
     planner_backend: str
     planner_messages: tuple[str, ...]
     planner_metadata: Mapping[str, object]
+    planner_failure: PlanningFailure | None
 
     def __post_init__(self) -> None:
         if type(self.attempt_generation) is not int or self.attempt_generation < 0:
@@ -799,6 +832,11 @@ class SkillPlanAttemptTrace:
             )
         if type(self.planner_backend) is not str or not self.planner_backend:
             raise ValueError("planner_backend must be a non-empty string.")
+        if (
+            self.planner_failure is not None
+            and type(self.planner_failure) is not PlanningFailure
+        ):
+            raise TypeError("planner_failure must be PlanningFailure or None.")
         messages = tuple(self.planner_messages)
         if not all(type(value) is str for value in messages):
             raise TypeError("planner_messages must contain strings.")
@@ -827,6 +865,15 @@ class SkillPlanAttemptTrace:
             self.resolved_core_policy.snapshot(),
         )
         object.__setattr__(self, "planner_messages", messages)
+        if self.planner_failure is not None:
+            object.__setattr__(
+                self,
+                "planner_failure",
+                PlanningFailure(
+                    self.planner_failure.code,
+                    self.planner_failure.retryable,
+                ),
+            )
         object.__setattr__(
             self,
             "planner_metadata",
@@ -886,6 +933,7 @@ class SkillPlanAttemptTrace:
             planner_backend=plan.diagnostics.backend,
             planner_messages=plan.diagnostics.messages,
             planner_metadata=plan.diagnostics.metadata,
+            planner_failure=plan.diagnostics.failure,
         )
 
     def snapshot(self) -> SkillPlanAttemptTrace:
@@ -917,10 +965,21 @@ class SkillPlanAttemptTrace:
             planner_backend=self.planner_backend,
             planner_messages=self.planner_messages,
             planner_metadata=self.planner_metadata,
+            planner_failure=self.planner_failure,
         )
 
     def to_metadata(self) -> dict[str, object]:
         """Return one plan generation as deterministic JSON-safe data."""
+        planner_diagnostics: dict[str, object] = {
+            "backend": self.planner_backend,
+            "messages": list(self.planner_messages),
+            "metadata": _metadata_value(self.planner_metadata),
+        }
+        if self.planner_failure is not None:
+            planner_diagnostics["failure"] = {
+                "code": self.planner_failure.code,
+                "retryable": self.planner_failure.retryable,
+            }
         return {
             "attempt_generation": self.attempt_generation,
             "trigger": self.trigger,
@@ -960,11 +1019,7 @@ class SkillPlanAttemptTrace:
             "tracking_contract": _tracking_sequence_to_metadata(self.tracking),
             "effect_verification_kind": self.effect_verification_kind,
             "resolved_core_policy": self.resolved_core_policy.to_metadata(),
-            "planner_diagnostics": {
-                "backend": self.planner_backend,
-                "messages": list(self.planner_messages),
-                "metadata": _metadata_value(self.planner_metadata),
-            },
+            "planner_diagnostics": planner_diagnostics,
         }
 
 
@@ -2047,14 +2102,14 @@ class SkillRuntime:
             SimulationExecutionAdapter,
         )
 
-        from .calls import SemanticCallCatalog, builtin_semantic_call_catalog
+        from ._assembly import assemble_semantic_runtime_components
+        from .calls import SemanticCallCatalog
         from .evidence import (
             ControlPartSimulationEvidenceProvider,
             EffectEvidenceCollector,
             EffectEvidenceProviderRegistry,
             SceneArticulationEvidenceProvider,
         )
-        from .integration import SceneManifest, SemanticIntegrationManifest
         from .profiles import RobotSkillProfile
 
         if not isinstance(scene_registry, SceneRegistry):
@@ -2089,22 +2144,12 @@ class SkillRuntime:
             control_profiles=robot_profile.action_control_profiles(),
             grasp_pose_generators=grasp_pose_generators,
         )
-        manifest = SemanticIntegrationManifest(
-            scene=SceneManifest.from_registry(scene_registry),
-            robot_profile=robot_profile,
-            call_catalog=(
-                builtin_semantic_call_catalog()
-                if call_catalog is None
-                else call_catalog
-            ),
-        )
-        integration = manifest.bind(
+        semantic = assemble_semantic_runtime_components(
             scene_registry,
+            robot_profile,
             engine,
+            call_catalog=call_catalog,
             endpoint_adapters=endpoint_adapters,
-        )
-        compiler = SemanticSkillCompiler(
-            integration,
             registered_lowerers=registered_lowerers,
             relation_grounders=relation_grounders,
             handover_pose_providers=handover_pose_providers,
@@ -2121,7 +2166,7 @@ class SkillRuntime:
             )
         )
         return cls(
-            compiler,
+            semantic.compiler,
             adapter,
             adapter,
             collector,
@@ -3932,6 +3977,7 @@ class AtomicSkills:
         task_state: TaskState | None = None,
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
+        effect_verifier: SemanticEffectVerifier | None = None,
     ) -> AtomicSkills:
         """Build a facade from explicit compiler and runtime ports."""
         return cls(
@@ -3943,6 +3989,50 @@ class AtomicSkills:
                 task_state=task_state,
                 clock=clock,
                 runner_cfg=runner_cfg,
+                effect_verifier=effect_verifier,
+            )
+        )
+
+    @classmethod
+    def from_simulation(
+        cls,
+        *,
+        simulation: object,
+        robot: object,
+        motion_generator: object,
+        scene_registry: SceneRegistry,
+        robot_profile: object,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+        call_catalog: object | None = None,
+        effect_verifier: SemanticEffectVerifier | None = None,
+        registered_lowerers: Iterable[object] = (),
+        relation_grounders: Iterable[object] = (),
+        handover_pose_providers: Iterable[object] = (),
+        endpoint_adapters: Mapping[type[object], object] | None = None,
+        runner_cfg: ExecutionRunnerCfg | None = None,
+        control_dt: float | None = None,
+        scene_translation_threshold: float = 1.0e-4,
+        scene_rotation_threshold: float = 1.0e-3,
+    ) -> AtomicSkills:
+        """Build the facade through the canonical explicit simulation factory."""
+        return cls(
+            SkillRuntime.from_simulation(
+                simulation=simulation,
+                robot=robot,
+                motion_generator=motion_generator,
+                scene_registry=scene_registry,
+                robot_profile=robot_profile,
+                grasp_pose_generators=grasp_pose_generators,
+                call_catalog=call_catalog,
+                effect_verifier=effect_verifier,
+                registered_lowerers=registered_lowerers,
+                relation_grounders=relation_grounders,
+                handover_pose_providers=handover_pose_providers,
+                endpoint_adapters=endpoint_adapters,
+                runner_cfg=runner_cfg,
+                control_dt=control_dt,
+                scene_translation_threshold=scene_translation_threshold,
+                scene_rotation_threshold=scene_rotation_threshold,
             )
         )
 
@@ -3984,6 +4074,26 @@ class AtomicSkills:
     def result(self) -> SkillResult:
         """Return the current immutable runtime result."""
         return self._runtime.result
+
+    @property
+    def available_skills(self) -> Mapping[str, SkillDescriptor]:
+        """Return atomic skills supported by the bound robot profile."""
+        return self._runtime.compiler.integration.robot_profile.skills
+
+    def availability(
+        self,
+        call: SemanticCallSpec,
+        *,
+        workflow_id: str = "semantic_capability_check",
+    ) -> SemanticCallAvailability:
+        """Check one call against the current catalog, scene, and robot profile."""
+        if not isinstance(call, SemanticCallSpec):
+            raise TypeError("call must be a SemanticCallSpec.")
+        try:
+            self._runtime.validate((call,), workflow_id=workflow_id)
+        except SemanticValidationError as exc:
+            return SemanticCallAvailability(call.semantic_id, exc.diagnostic)
+        return SemanticCallAvailability(call.semantic_id)
 
     def start(
         self,
@@ -4032,6 +4142,7 @@ __all__ = [
     "AtomicSkills",
     "EffectEvidenceCollectorPort",
     "ResolvedCorePolicyTrace",
+    "SemanticCallAvailability",
     "SemanticEffectVerifier",
     "SkillCallTrace",
     "SkillEndpointBindingTrace",

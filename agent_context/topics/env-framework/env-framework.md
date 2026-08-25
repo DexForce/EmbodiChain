@@ -86,8 +86,15 @@ gym.Env
 
 ### Expert Program completion (`embodied_env.py`, `expert_program/bridge.py`)
 
-- `EmbodiedEnvCfg.expert_program` remains opt-in and requires an explicit
-  `ExpertProgramEnvironmentAdapter` supplied by the concrete environment.
+- `EmbodiedEnvCfg.expert_program` remains opt-in. A registered task may attach
+  an `ExpertProgramAdapterFactory` to its `EnvSpec`; `EmbodiedEnv` binds the
+  exact adapter after `BaseEnv` has initialized the live scene and robot.
+- A standard simulation adapter factory exposes its immutable registration, so
+  `EnvSpec` derives the catalog used by `config_to_cfg()` preflight from the
+  same declaration that later creates the live adapter.
+- `create_demo_segments(expert_program=...)` accepts a config or trusted
+  `CompiledProgram` for one episode, allowing an MLLM frontend to use the same
+  bridge without mutating the environment's static config.
 - `create_demo_segments()` retains the active `AtomicDemoBridge` while its lazy
   segments execute.
 - For an enabled program, `is_task_success()` returns all false until the bridge

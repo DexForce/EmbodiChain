@@ -27,12 +27,11 @@ from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.envs.expert_program import (
     AntipodalGraspAffordanceBinding,
     ControlPartEvidenceProviderFactory,
-    ExpertProgramEnvironmentAdapter,
     SimulationRigidObjectBinding,
+    SimulationExpertProgramAdapterFactory,
     SimulationExpertProgramRegistration,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
-    create_simulation_expert_program_adapter,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim.atomic_actions import (
@@ -306,10 +305,30 @@ REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistr
 )
 
 
+def _create_repeated_pick_place_grasp_pose_generator():
+    """Create the task's fresh parallel-jaw grasp service."""
+    return create_parallel_jaw_grasp_pose_generator(
+        sample_count=DEFAULT_GRASP_SAMPLES,
+        opening_margin=0.002,
+    )
+
+
+_REPEATED_PICK_PLACE_EXPERT_PROGRAM_ADAPTER_FACTORY = (
+    SimulationExpertProgramAdapterFactory(
+        REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION,
+        grasp_pose_generator_factories={
+            HAND_CONTROL_PART: _create_repeated_pick_place_grasp_pose_generator,
+        },
+    )
+)
+
+
 @register_env(
     ENV_ID,
     max_episode_steps=1200,
-    expert_program_registration=REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION,
+    expert_program_adapter_factory=(
+        _REPEATED_PICK_PLACE_EXPERT_PROGRAM_ADAPTER_FACTORY
+    ),
 )
 class ExpertProgramRepeatedPickPlaceEnv(EmbodiedEnv):
     """Run three declarative Pick/Place cycles through the semantic runtime.
@@ -330,23 +349,8 @@ class ExpertProgramRepeatedPickPlaceEnv(EmbodiedEnv):
         if cfg.expert_program is None:
             cfg.expert_program = load_bundled_expert_program(PROGRAM_FILENAME)
 
+        kwargs.setdefault(
+            "expert_program_adapter_factory",
+            _REPEATED_PICK_PLACE_EXPERT_PROGRAM_ADAPTER_FACTORY,
+        )
         super().__init__(cfg, **kwargs)
-
-        grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
-            sample_count=DEFAULT_GRASP_SAMPLES,
-            opening_margin=0.002,
-        )
-        self._expert_program_adapter = create_simulation_expert_program_adapter(
-            self,
-            registration=REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION,
-            grasp_pose_generators={HAND_CONTROL_PART: grasp_pose_generator},
-        )
-
-    @property
-    def expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
-        """Return the exact production adapter used by ``EmbodiedEnv``.
-
-        Returns:
-            Adapter that compiles and executes the configured Expert Program.
-        """
-        return self._expert_program_adapter

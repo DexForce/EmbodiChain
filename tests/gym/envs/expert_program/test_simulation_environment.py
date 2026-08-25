@@ -44,6 +44,7 @@ from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramRuntimeAssembly,
     HandOverCfg,
     InvokeCfg,
+    SimulationExpertProgramAdapterFactory,
     SimulationExpertProgramRegistration,
     SimulationExpertProgramFactory,
     SimulationRigidObjectBinding,
@@ -51,6 +52,9 @@ from embodichain.lab.gym.envs.expert_program import (
     SimulationSceneBinding,
     create_simulation_expert_program_adapter,
     decode_expert_program,
+)
+from embodichain.lab.gym.envs.expert_program import (
+    simulation_environment as simulation_environment_module,
 )
 from embodichain.lab.gym.envs.expert_program.bridge import EnvironmentStepClock
 from embodichain.lab.gym.envs.expert_program.simulation_environment import (
@@ -1625,6 +1629,41 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert type(adapter) is ExpertProgramEnvironmentAdapter
     assert adapter.step_dt == pytest.approx(_STEP_DT)
     assert factory.segment_policy_port is not None
+
+
+def test_adapter_factory_binds_registration_to_initialized_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The EnvSpec-owned factory forwards one exact immutable integration."""
+    registration = SimulationExpertProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
+    factory = SimulationExpertProgramAdapterFactory(registration)
+    environment = object()
+    expected = object.__new__(ExpertProgramEnvironmentAdapter)
+    captured: dict[str, object] = {}
+
+    def _create_adapter(bound_environment: object, **kwargs: object):
+        captured["environment"] = bound_environment
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(
+        simulation_environment_module,
+        "create_simulation_expert_program_adapter",
+        _create_adapter,
+    )
+
+    adapter = factory.create_adapter(environment)
+
+    assert adapter is expected
+    assert factory.registration is registration
+    assert captured == {
+        "environment": environment,
+        "registration": registration,
+        "grasp_pose_generators": {},
+    }
 
 
 def test_standard_registration_owns_and_freezes_live_runtime_assembly() -> None:

@@ -95,17 +95,9 @@ from .scene import (
     SceneObjectRef,
     SupportSurfaceAffordance,
 )
+from ._validation import validate_identifier as _validate_identifier
 
 OptionT = TypeVar("OptionT", bound=ActionOptions)
-
-
-def _validate_identifier(value: str, *, field_name: str) -> str:
-    """Return one exact non-empty identifier."""
-    if type(value) is not str or not value or value != value.strip():
-        raise ValueError(
-            f"{field_name} must be a non-empty string without outer whitespace."
-        )
-    return value
 
 
 def _diagnostic(

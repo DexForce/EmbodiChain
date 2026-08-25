@@ -32,7 +32,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 import math
+from types import MappingProxyType
 from typing import Protocol, TYPE_CHECKING
 
 import torch
@@ -710,6 +712,22 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
             raise RuntimeError("This factory does not own a task registration.")
         return self._segment_policy_port, self._segment_policy_port
 
+    def create_registered_semantic_lowerers(
+        self,
+        *,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> tuple[RegisteredSemanticLowerer, ...]:
+        """Create fresh registration-owned lowerers for this runtime assembly."""
+        if self._registration is None:
+            raise RuntimeError("This factory does not own a task registration.")
+        return self._registration.create_registered_semantic_lowerers(
+            simulation=self._simulation,
+            robot=self._robot,
+            scene_registry=scene_registry,
+            engine=engine,
+        )
+
     def create_scene_registry(self) -> SceneRegistry:
         """Build one fresh authoritative registry from explicit bindings."""
         registry = self._scene_binding.build(self._simulation)
@@ -931,6 +949,91 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
                 "motion_generator_factory must return a MotionGenerator instance."
             )
         return generator
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SimulationExpertProgramAdapterFactory:
+    """Create one standard simulation adapter after an environment is initialized.
+
+    Args:
+        registration: Immutable provider-free task integration.
+        grasp_pose_generator_factories: Zero-argument factories keyed by runtime
+            grasp endpoint target ID. Each environment receives fresh services.
+    """
+
+    _registration: SimulationExpertProgramRegistration
+    _grasp_pose_generator_factories: Mapping[
+        str,
+        Callable[[], GraspPoseGenerator],
+    ]
+
+    def __init__(
+        self,
+        registration: SimulationExpertProgramRegistration,
+        *,
+        grasp_pose_generator_factories: (
+            Mapping[str, Callable[[], GraspPoseGenerator]] | None
+        ) = None,
+    ) -> None:
+        if type(registration) is not SimulationExpertProgramRegistration:
+            raise TypeError(
+                "registration must be exactly SimulationExpertProgramRegistration."
+            )
+        if grasp_pose_generator_factories is not None and not isinstance(
+            grasp_pose_generator_factories,
+            Mapping,
+        ):
+            raise TypeError("grasp_pose_generator_factories must be a mapping or None.")
+        factories: dict[str, Callable[[], GraspPoseGenerator]] = {}
+        for target_id, factory in (grasp_pose_generator_factories or {}).items():
+            if (
+                type(target_id) is not str
+                or not target_id
+                or target_id != target_id.strip()
+            ):
+                raise ValueError(
+                    "grasp_pose_generator_factories keys must be non-empty strings "
+                    "without outer whitespace."
+                )
+            if not callable(factory):
+                raise TypeError(
+                    "grasp_pose_generator_factories values must be callable."
+                )
+            factories[target_id] = factory
+        object.__setattr__(self, "_registration", registration)
+        object.__setattr__(
+            self,
+            "_grasp_pose_generator_factories",
+            MappingProxyType(factories),
+        )
+
+    @property
+    def registration(self) -> SimulationExpertProgramRegistration:
+        """Return the exact static registration owned by this factory."""
+        return self._registration
+
+    def create_adapter(
+        self,
+        environment: object,
+    ) -> ExpertProgramEnvironmentAdapter:
+        """Create fresh grasp services and bind the initialized environment."""
+        from embodichain.toolkits.graspkit import GraspPoseGenerator
+
+        self._registration.assert_unchanged()
+        generators: dict[str, GraspPoseGenerator] = {}
+        for target_id, factory in self._grasp_pose_generator_factories.items():
+            generator = factory()
+            if not isinstance(generator, GraspPoseGenerator):
+                raise TypeError(
+                    "A grasp-pose generator factory must return a "
+                    "GraspPoseGenerator instance."
+                )
+            generators[target_id] = generator
+        return create_simulation_expert_program_adapter(
+            environment,
+            registration=self._registration,
+            grasp_pose_generators=generators,
+        )
 
 
 def create_simulation_expert_program_adapter(

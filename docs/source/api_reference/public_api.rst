@@ -652,6 +652,7 @@ embodichain.lab.sim.atomic_actions.plans
    CompiledTrajectory
    EffectVerificationRequirement
    PlannerDiagnostics
+   PlanningFailure
    TimedTrajectory
    TrajectorySegment
    normalize_success_mask
@@ -1913,6 +1914,9 @@ embodichain_tasks.expert_program.open_drawer
 .. autosummary::
 
    ExpertProgramOpenDrawerEnv
+   OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION
+   create_open_drawer_robot_profile_binding
+   create_open_drawer_scene_binding
 
 embodichain_tasks.expert_program.repeated_pick_place
 ----------------------------------------------------

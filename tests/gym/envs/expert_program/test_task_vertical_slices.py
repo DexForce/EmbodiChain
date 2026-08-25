@@ -21,15 +21,18 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
 import yaml
 
+from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramCompiler,
     decode_expert_program,
 )
+from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.gym.envs.expert_program.bridge import (
     AtomicDemoBridge,
     BufferedGymCommandSink,
@@ -38,6 +41,7 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
 )
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
+    AtomicActionEngine,
     EntityState,
     ObjectSemantics,
     SlideAffordance,
@@ -63,6 +67,7 @@ from embodichain.lab.sim.skills.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRegistration,
+    SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
 )
@@ -587,6 +592,83 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     assert validator.minimum_position == 0.10
 
 
+def test_open_drawer_task_uses_registration_owned_lowerer_factory() -> None:
+    """The task registration owns call discovery and fresh live lowerers."""
+    registration = drawer_task.OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION
+    spec = REGISTERED_ENVS[drawer_task.ENV_ID]
+
+    assert spec.expert_program_registration is registration
+    assert (
+        spec.expert_program_adapter_factory
+        is drawer_task._OPEN_DRAWER_EXPERT_PROGRAM_ADAPTER_FACTORY
+    )
+    assert spec.expert_program_adapter_factory.registration is registration
+    assert tuple(registration.catalog.registered_semantic_lowerer_declarations) == (
+        drawer_task.OPEN_DRAWER_CALL_ID,
+    )
+    assert (
+        registration.catalog.call_catalog.discover(
+            drawer_task.OPEN_DRAWER_CALL_ID
+        ).target_descriptor
+        == drawer_task._SLIDE_DESCRIPTOR
+    )
+
+    class Drawer:
+        link_names = (drawer_task.HANDLE_LINK_NAME,)
+
+        @staticmethod
+        def get_link_vert_face(name: str) -> tuple[torch.Tensor, torch.Tensor]:
+            assert name == drawer_task.HANDLE_LINK_NAME
+            return (
+                torch.tensor([[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+                torch.tensor([[0, 1, 2]]),
+            )
+
+    drawer_ref = SceneArticulationRef(drawer_task.DRAWER_ENTITY_ID)
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=drawer_ref,
+                state_provider=_NeverObserveProvider(),
+            ),
+            SceneEntityRegistration(
+                ref=SceneLinkRef(drawer_task.HANDLE_ENTITY_ID),
+                state_provider=_NeverObserveProvider(),
+                parent=drawer_ref,
+                native_name=drawer_task.HANDLE_LINK_NAME,
+            ),
+        )
+    )
+    robot = object()
+    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
+        robot=robot,
+        device=torch.device("cpu"),
+    )
+    simulation = SimpleNamespace(
+        get_articulation=lambda identifier: (
+            Drawer() if identifier == drawer_task.DRAWER_ENTITY_ID else None
+        )
+    )
+
+    first = registration.create_registered_semantic_lowerers(
+        simulation=simulation,
+        robot=robot,
+        scene_registry=registry,
+        engine=engine,
+    )
+    second = registration.create_registered_semantic_lowerers(
+        simulation=simulation,
+        robot=robot,
+        scene_registry=registry,
+        engine=engine,
+    )
+
+    assert type(first[0]) is drawer_task._OpenDrawerSlideLowerer
+    assert type(second[0]) is drawer_task._OpenDrawerSlideLowerer
+    assert first[0] is not second[0]
+
+
 def test_open_drawer_lowerer_preserves_legacy_payload_compatibility() -> None:
     """Schema-v1 option fields remain accepted only as preset-matching input."""
     options = SlideOptions(
@@ -651,6 +733,7 @@ def test_task_classes_do_not_override_motion_or_demo_generation() -> None:
         "_initialize_atomic_actions",
         "_observe_grasp_constraint",
         "_plan_pick_place_cycle",
+        "expert_program_adapter",
     }
 
     for env_type in (
@@ -658,6 +741,63 @@ def test_task_classes_do_not_override_motion_or_demo_generation() -> None:
         drawer_task.ExpertProgramOpenDrawerEnv,
     ):
         assert forbidden_overrides.isdisjoint(env_type.__dict__)
+
+
+@pytest.mark.parametrize(
+    ("task_module", "env_type", "factory_name"),
+    (
+        (
+            cube_task,
+            cube_task.ExpertProgramRepeatedPickPlaceEnv,
+            "_REPEATED_PICK_PLACE_EXPERT_PROGRAM_ADAPTER_FACTORY",
+        ),
+        (
+            drawer_task,
+            drawer_task.ExpertProgramOpenDrawerEnv,
+            "_OPEN_DRAWER_EXPERT_PROGRAM_ADAPTER_FACTORY",
+        ),
+    ),
+)
+def test_task_constructors_delegate_runtime_binding_to_embodied_env(
+    monkeypatch: pytest.MonkeyPatch,
+    task_module: object,
+    env_type: type[EmbodiedEnv],
+    factory_name: str,
+) -> None:
+    """Direct construction uses the same factory as registered construction."""
+    captured: dict[str, object] = {}
+
+    def _capture_init(
+        self: EmbodiedEnv,
+        cfg: object,
+        **kwargs: object,
+    ) -> None:
+        del self
+        captured["cfg"] = cfg
+        captured.update(kwargs)
+
+    monkeypatch.setattr(EmbodiedEnv, "__init__", _capture_init)
+    cfg = SimpleNamespace(expert_program=object())
+
+    env_type(cfg)  # type: ignore[arg-type]
+
+    factory = getattr(task_module, factory_name)
+    assert captured["cfg"] is cfg
+    assert captured["expert_program_adapter_factory"] is factory
+    assert REGISTERED_ENVS[task_module.ENV_ID].expert_program_adapter_factory is factory
+
+
+def test_cube_task_registration_is_derived_from_runtime_factory() -> None:
+    """Repeated Pick/Place has one owner for preflight and live binding."""
+    registration = cube_task.REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
+    spec = REGISTERED_ENVS[cube_task.ENV_ID]
+
+    assert spec.expert_program_registration is registration
+    assert (
+        spec.expert_program_adapter_factory
+        is cube_task._REPEATED_PICK_PLACE_EXPERT_PROGRAM_ADAPTER_FACTORY
+    )
+    assert spec.expert_program_adapter_factory.registration is registration
 
 
 def test_cube_task_declares_the_canonical_scene_and_profile_ids() -> None:
