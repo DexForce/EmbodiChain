@@ -24,11 +24,13 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult
+from embodichain.lab.gym.envs.expert_program.loader import (
+    load_expert_program as _load_expert_program,
+)
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
 from embodichain.lab.scripts import run_env
 from embodichain.lab.scripts.run_env import (
     _create_parser,
-    _load_expert_program,
     _run_replay_control_loop,
     generate_function,
 )
@@ -549,7 +551,7 @@ def test_cli_aborts_before_closing_environment_once(monkeypatch) -> None:
     assert env.events == [abort_event, abort_event, ("close", None)]
 
 
-def test_cli_injects_decoded_expert_program_before_environment_creation(
+def test_cli_uses_program_already_loaded_by_config_builder(
     monkeypatch,
 ) -> None:
     """The CLI attaches the strict program config to the environment config."""
@@ -569,16 +571,13 @@ def test_cli_injects_decoded_expert_program_before_environment_creation(
     monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
     monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
     monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
-    monkeypatch.setattr(
-        run_env,
-        "build_env_cfg_from_args",
-        lambda parsed_args: (env_cfg, {"id": GYM_ID}, {}),
-    )
-    monkeypatch.setattr(
-        run_env,
-        "_load_expert_program",
-        MagicMock(return_value=decoded_program),
-    )
+
+    def build(parsed_args):
+        assert parsed_args is args
+        env_cfg.expert_program = decoded_program
+        return env_cfg, {"id": GYM_ID}, {}
+
+    monkeypatch.setattr(run_env, "build_env_cfg_from_args", build)
     monkeypatch.setattr(run_env.gymnasium, "make", make)
     monkeypatch.setattr(run_env, "main", lambda *args, **kwargs: None)
     monkeypatch.setattr(

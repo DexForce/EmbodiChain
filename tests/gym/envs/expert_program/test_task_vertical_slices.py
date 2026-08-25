@@ -36,7 +36,14 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
     EnvironmentStepClock,
     RuntimeCommandFrameEncoder,
 )
-from embodichain.lab.sim.atomic_actions import Affordance, EntityState, TaskState
+from embodichain.lab.sim.atomic_actions import (
+    Affordance,
+    EntityState,
+    ObjectSemantics,
+    SlideAffordance,
+    SlideOptions,
+    TaskState,
+)
 from embodichain.lab.sim.skills.calls import Pick, Place, RegisteredSemanticCall
 from embodichain.lab.sim.skills.runtime import SkillResult, SkillStatus
 from embodichain.lab.sim.skills.scene import (
@@ -529,16 +536,67 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     assert call.call_id == "embodichain_tasks.open_drawer"
     assert dict(call.arguments) == {
         "handle": "drawer_handle",
-        "direction": "pull",
-        "hand_interp_steps": 12,
-        "approach_distance": 0.10,
-        "translation_distance": 0.18,
     }
     assert dict(call.resources) == {"primary": "manipulator"}
     validator = segments[0].validators[0].cfg
     assert validator.articulation == "drawer"
     assert validator.joint == "cabinet_to_drawer"
     assert validator.minimum_position == 0.10
+
+
+def test_open_drawer_lowerer_preserves_legacy_payload_compatibility() -> None:
+    """Schema-v1 option fields remain accepted only as preset-matching input."""
+    options = SlideOptions(
+        direction="pull",
+        hand_interp_steps=12,
+        approach_distance=0.10,
+        translation_distance=0.18,
+    )
+    lowerer = drawer_task._OpenDrawerSlideLowerer(
+        ObjectSemantics(
+            label="drawer_handle",
+            entity_id=drawer_task.HANDLE_ENTITY_ID,
+            geometry={},
+            affordance=SlideAffordance(
+                mesh_vertices=torch.tensor(
+                    [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]
+                ),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+                translation_axis=torch.tensor([0.0, 1.0, 0.0]),
+            ),
+        )
+    )
+    minimal = {"handle": drawer_task.HANDLE_ENTITY_ID}
+    legacy = {
+        **minimal,
+        "direction": options.direction,
+        "hand_interp_steps": options.hand_interp_steps,
+        "approach_distance": options.approach_distance,
+        "translation_distance": options.translation_distance,
+    }
+
+    for arguments in (minimal, legacy):
+        lowering = lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=drawer_task.OPEN_DRAWER_CALL_ID,
+                arguments=arguments,
+            ),
+            context=None,  # type: ignore[arg-type]
+            bound=None,  # type: ignore[arg-type]
+            option_template=options,
+        )
+        assert lowering.goal.target_pose.entity_id == drawer_task.HANDLE_ENTITY_ID
+
+    with pytest.raises(ValueError, match="legacy option fields"):
+        lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=drawer_task.OPEN_DRAWER_CALL_ID,
+                arguments={**legacy, "direction": "push"},
+            ),
+            context=None,  # type: ignore[arg-type]
+            bound=None,  # type: ignore[arg-type]
+            option_template=options,
+        )
 
 
 def test_task_classes_do_not_override_motion_or_demo_generation() -> None:

@@ -91,11 +91,27 @@ from .simulation import (
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
 )
+from .catalog import (
+    ExpertProgramIntegrationCatalog,
+    IntegrationFingerprintMismatch,
+    SimulationExpertProgramRegistration,
+)
+from .extensions import (
+    EndpointAdapterDeclaration,
+    ParallelCommandSafetyValidatorFactory,
+    ParallelSafetyDeclaration,
+    RuntimeTransportDeclaration,
+    StandardExtensionDeclarations,
+    VersionedKey,
+)
 from .simulation_environment import (
     SimulationExpertProgramFactory,
     create_simulation_expert_program_adapter,
 )
-from .simulation_policies import SimulationSegmentPolicyPort
+from .simulation_policies import (
+    SimulationSegmentPolicyPort,
+    default_simulation_settle_presets,
+)
 
 __all__ = [
     "AntipodalGraspAffordanceBinding",
@@ -114,6 +130,7 @@ __all__ = [
     "EXPERT_PROGRAM_SCHEMA_VERSION",
     "EnvironmentStepClock",
     "EnvironmentStepTimingError",
+    "EndpointAdapterDeclaration",
     "ExpertProgramCfg",
     "ExpertProgramCompileError",
     "ExpertProgramCompiler",
@@ -122,14 +139,18 @@ __all__ = [
     "ExpertProgramEnvironmentAdapter",
     "ExpertProgramEnvironmentFactory",
     "ExpertProgramIntegrationCfg",
+    "ExpertProgramIntegrationCatalog",
     "ExpertProgramRuntimeAssembly",
     "ExpertProgramValidationContext",
     "ExpertProgramValidationError",
     "HandOverCfg",
     "GymPlanningObservationProvider",
     "InvokeCfg",
+    "IntegrationFingerprintMismatch",
     "ObjectNearTargetValidatorCfg",
     "ParallelCfg",
+    "ParallelCommandSafetyValidatorFactory",
+    "ParallelSafetyDeclaration",
     "PickCfg",
     "PlaceCfg",
     "PlanningObservationPort",
@@ -137,6 +158,7 @@ __all__ = [
     "RegisteredSemanticCallCfg",
     "RepeatCfg",
     "RuntimeCommandFrameEncoder",
+    "RuntimeTransportDeclaration",
     "RuntimeTransportActionEncoder",
     "SceneReferenceRole",
     "SegmentPostPolicyPort",
@@ -146,14 +168,18 @@ __all__ = [
     "SimulationArticulationBinding",
     "SimulationArticulationLinkBinding",
     "SimulationExpertProgramFactory",
+    "SimulationExpertProgramRegistration",
     "SimulationRigidObjectBinding",
     "SimulationRobotSkillProfileBinding",
     "SimulationSceneBinding",
     "SimulationSegmentPolicyPort",
+    "StandardExtensionDeclarations",
     "TargetRefCfg",
     "UnsupportedRuntimeTransportError",
+    "VersionedKey",
     "WaitStablePostCfg",
     "create_simulation_expert_program_adapter",
+    "default_simulation_settle_presets",
     "decode_expert_program",
     "load_expert_program",
     "loads_expert_program_json",

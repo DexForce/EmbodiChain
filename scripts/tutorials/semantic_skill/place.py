@@ -40,6 +40,8 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     EffectVerificationRequest,
     MotionPolicy,
+    PickUpOptions,
+    PlaceOptions,
     PlanningContext,
     RecoveryPolicy,
     TrackingPolicy,
@@ -144,6 +146,7 @@ def create_robot_profile(
         presets={
             "pick": SkillPolicyPreset(
                 "pick",
+                action_option_templates={"pick": PickUpOptions()},
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICK_SAMPLE_COUNT,
@@ -158,6 +161,7 @@ def create_robot_profile(
             ),
             "place": SkillPolicyPreset(
                 "place",
+                action_option_templates={"place": PlaceOptions()},
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PLACE_SAMPLE_COUNT,

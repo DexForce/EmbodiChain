@@ -341,7 +341,7 @@ Drawer likewise has one canonical integration, `ExpertProgramOpenDrawer-v1`.
 | Environment ID | Declarative path | Atomic path | Application acceptance |
 |---|---|---|---|
 | `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; the task installs no contact or constraint observer | standard `object_near_target` validator checks the measured cube position against the selected cyclic target; physical rollout remains unqualified without grasp evidence |
-| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call with a strict executable-free payload | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal` and `SlideOptions` for the live drawer-handle link | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
+| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call whose executable-free payload names only the drawer handle | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal`; the selected policy preset is the sole owner of `SlideOptions` | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
 
 Both configurations load their Expert Program through the top-level
 `expert_program_path`, bind the same UR5 parallel-gripper embodiment explicitly,
@@ -515,6 +515,31 @@ Implemented on the current branch:
   reference integrations;
 - one-episode Viser simulator smoke coverage for Open Drawer, reaching its
   declarative acceptance boundary and committing the episode.
+
+The registration follow-up makes
+`SimulationExpertProgramRegistration` the sole extension owner for the
+standard runtime path. `SkillPolicyPreset` schema version 2 requires an exact
+typed action-option template for every reachable semantic call; lowering may
+replace only explicitly compiler-owned dynamic target fields. Endpoint
+adapters, ordered Gym transports, and a parallel-safety factory enter the
+provider-free registration fingerprint and are checked again against live
+endpoint resolution. Runtime assembly consumes those same registered objects,
+freezes the command encoder, takes runner policy from the selected preset, and
+creates a fresh safety validator for every runtime. Helper arguments cannot
+replace registered components after preflight. Stateful extension declarations
+must be frozen dataclasses with recursively immutable configuration so nested
+mutable values cannot become a post-registration runtime side channel.
+
+This slice covers command transport, not arbitrary closed-loop backend
+injection. Custom endpoint adapters on the standard path must declare empty
+tracking and effect-evidence routes, and therefore support only timed/open-loop
+completion. The built-in `ControlPartEndpoint` retains its built-in routes.
+Non-joint feedback providers, desired-state projectors, metric evaluators, and
+effect-evidence backends require separate registration-owned provider-factory
+contracts before they can be advertised as standard mobile or whole-body
+closed-loop support. Each transport owns a trusted `hold()` primitive; the
+parallel safety validator authorizes active merged command frames before
+dispatch.
 
 Still required before claiming task-level physical completion:
 

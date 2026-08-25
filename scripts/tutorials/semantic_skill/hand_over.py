@@ -37,6 +37,7 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
+    ActionOptions,
     ControlPartCommandProfile,
     EffectVerificationRequest,
     HandOver as AtomicHandOver,
@@ -132,9 +133,12 @@ class TutorialHandOverLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
+        option_template: ActionOptions,
     ) -> SemanticLowering:
-        """Build tuned HandOver options from the latest planning device."""
+        """Build the HandOver goal from the latest planning device."""
         del bound
+        if type(option_template) is not HandOverOptions:
+            raise TypeError("tutorial.hand_over requires HandOverOptions.")
         if not isinstance(call.arguments, Mapping):
             raise TypeError("tutorial.hand_over arguments must be a mapping.")
         object_ref = call.arguments.get("object")
@@ -157,14 +161,7 @@ class TutorialHandOverLowerer(RegisteredSemanticLowerer):
             .to_matrix()
             .to(device)
         )
-        return SemanticLowering(
-            goal=HandOverGoal(semantics, target_pose=final_pose),
-            skill_options=HandOverOptions(
-                pre_grasp_distance=HANDOVER_PRE_GRASP_DISTANCE,
-                lift_height=HANDOVER_LIFT_HEIGHT,
-                hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
-            ),
-        )
+        return SemanticLowering(goal=HandOverGoal(semantics, target_pose=final_pose))
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -225,6 +222,13 @@ def create_robot_profile(
         presets={
             "hand_over": SkillPolicyPreset(
                 "hand_over",
+                action_option_templates={
+                    HANDOVER_CALL_ID: HandOverOptions(
+                        pre_grasp_distance=HANDOVER_PRE_GRASP_DISTANCE,
+                        lift_height=HANDOVER_LIFT_HEIGHT,
+                        hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
+                    )
+                },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=HANDOVER_SAMPLE_COUNT,

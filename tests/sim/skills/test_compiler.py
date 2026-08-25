@@ -26,6 +26,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
+    ActionOptions,
     Affordance,
     AntipodalAffordance,
     AtomicActionEngine,
@@ -45,6 +46,7 @@ from embodichain.lab.sim.atomic_actions import (
     PickUp,
     PickUpOptions,
     PlaceGoal,
+    PlaceOptions,
     PlanningContext,
     RobotObservation,
     SceneEntityPose,
@@ -128,6 +130,32 @@ _MOTION_CAPABILITIES = frozenset(
 _PICK_TARGET = PickUp.descriptor()
 
 
+def _action_option_templates(*, registered: bool = False) -> dict[str, ActionOptions]:
+    """Return complete exact options for the test semantic catalog."""
+    templates: dict[str, ActionOptions] = {
+        "pick": PickUpOptions(),
+        "place": PlaceOptions(),
+        "hand_over": HandOverOptions(),
+    }
+    if registered:
+        templates["vendor.inspect"] = PickUpOptions()
+    return templates
+
+
+def _preset(
+    preset_id: str,
+    *,
+    registered: bool = False,
+    **kwargs: object,
+) -> SkillPolicyPreset:
+    """Build one complete schema-v2 test preset."""
+    kwargs.setdefault(
+        "action_option_templates",
+        _action_option_templates(registered=registered),
+    )
+    return SkillPolicyPreset(preset_id, **kwargs)
+
+
 class _PoseProvider:
     """Return a fixed pose while exposing observation call count."""
 
@@ -178,14 +206,19 @@ class _InspectLowerer(RegisteredSemanticLowerer):
     schema_version: ClassVar[int] = 1
     target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
+    def __init__(self) -> None:
+        self.option_templates: list[ActionOptions] = []
+
     def lower(
         self,
         call: RegisteredSemanticCall,
         *,
         context: PlanningContext,
         bound: object,
+        option_template: ActionOptions,
     ) -> SemanticLowering:
         del call, context, bound
+        self.option_templates.append(option_template)
         return SemanticLowering(
             goal=GraspGoal(
                 semantics=ObjectSemantics(
@@ -193,17 +226,12 @@ class _InspectLowerer(RegisteredSemanticLowerer):
                     geometry={},
                     entity_id="cube",
                 )
-            ),
-            skill_options=PickUpOptions(),
+            )
         )
 
 
 class _DerivedGraspGoal(GraspGoal):
     """Executable subclass that an extension must not smuggle into the core."""
-
-
-class _DerivedPickUpOptions(PickUpOptions):
-    """Options subclass that must fail the registered target contract."""
 
 
 class _SubclassOutputLowerer(RegisteredSemanticLowerer):
@@ -222,21 +250,19 @@ class _SubclassOutputLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
+        option_template: ActionOptions,
     ) -> SemanticLowering:
-        del call, context, bound
+        del call, context, bound, option_template
         semantics = ObjectSemantics(
             affordance=AntipodalAffordance(),
             geometry={},
             entity_id="cube",
         )
         if self.output == "goal":
-            return SemanticLowering(
-                goal=_DerivedGraspGoal(semantics=semantics),
-                skill_options=PickUpOptions(),
-            )
+            return SemanticLowering(goal=_DerivedGraspGoal(semantics=semantics))
         return SemanticLowering(
             goal=GraspGoal(semantics=semantics),
-            skill_options=_DerivedPickUpOptions(),
+            skill_options=PickUpOptions(pre_grasp_distance=0.99),
         )
 
 
@@ -353,7 +379,11 @@ def _scene_registry(
     return registry, (cube_provider, table_provider)
 
 
-def _profile(*, preset: SkillPolicyPreset | None = None) -> RobotSkillProfile:
+def _profile(
+    *,
+    preset: SkillPolicyPreset | None = None,
+    registered: bool = False,
+) -> RobotSkillProfile:
     return RobotSkillProfile(
         profile_id="test_robot",
         resources={
@@ -377,12 +407,20 @@ def _profile(*, preset: SkillPolicyPreset | None = None) -> RobotSkillProfile:
                 grasp=torch.tensor([1.0]),
             )
         },
-        presets={"safe": SkillPolicyPreset("safe") if preset is None else preset},
+        presets={
+            "safe": (
+                _preset("safe", registered=registered) if preset is None else preset
+            )
+        },
         default_preset="safe",
     )
 
 
-def _dual_profile(*, provider_id: str | None = "dual_center") -> RobotSkillProfile:
+def _dual_profile(
+    *,
+    provider_id: str | None = "dual_center",
+    preset: SkillPolicyPreset | None = None,
+) -> RobotSkillProfile:
     resources = {
         side: RobotResource(
             resource_id=side,
@@ -413,7 +451,7 @@ def _dual_profile(*, provider_id: str | None = "dual_center") -> RobotSkillProfi
             "pick_up": ResourceBinding({"primary": "left"}),
             "hand_over": ResourceBinding({"source": "left", "destination": "right"}),
         },
-        presets={"safe": SkillPolicyPreset("safe")},
+        presets={"safe": _preset("safe") if preset is None else preset},
         default_preset="safe",
         grounding_providers=({} if provider_id is None else {"hand_over": provider_id}),
     )
@@ -458,7 +496,7 @@ def _integration(
     profile: RobotSkillProfile | None = None,
     supports_dynamic_collision_world: bool = False,
 ) -> tuple[SemanticIntegrationManifest, AtomicActionEngine]:
-    selected_profile = _profile() if profile is None else profile
+    selected_profile = _profile(registered=registered) if profile is None else profile
     catalog = builtin_semantic_call_catalog()
     if registered:
         assert _PICK_TARGET.binding_contract is not None
@@ -589,7 +627,7 @@ def test_curated_analysis_selects_exact_preset_monitor_without_creating_it() -> 
 def test_curated_analysis_rejects_explicitly_missing_monitor() -> None:
     registry, _ = _scene_registry()
     profile = _profile(
-        preset=SkillPolicyPreset("safe", effect_monitors={}),
+        preset=_preset("safe", effect_monitors={}),
     )
     compiler, _ = _compiler(registry, profile=profile)
 
@@ -603,7 +641,7 @@ def test_uninstalled_effect_monitor_fails_analysis_without_factory_creation() ->
     registry, providers = _scene_registry()
     factory = _CountingRelationMonitorFactory()
     profile = _profile(
-        preset=SkillPolicyPreset(
+        preset=_preset(
             "safe",
             effect_monitors={
                 "pick": EffectMonitorRef("test.not_installed", "1"),
@@ -628,7 +666,7 @@ def test_invalid_effect_monitor_config_fails_analysis_without_side_effects() -> 
     registry, providers = _scene_registry()
     factory = _CountingRelationMonitorFactory()
     profile = _profile(
-        preset=SkillPolicyPreset(
+        preset=_preset(
             "safe",
             effect_monitors={
                 "pick": EffectMonitorRef(
@@ -814,10 +852,21 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
 def test_registered_call_without_monitor_has_no_effect_contract() -> None:
     registry, _ = _scene_registry()
     factory = _CountingRelationMonitorFactory()
+    templates = _action_option_templates(registered=True)
+    templates["vendor.inspect"] = PickUpOptions(pre_grasp_distance=0.07)
+    profile = _profile(
+        preset=_preset(
+            "safe",
+            registered=True,
+            action_option_templates=templates,
+        )
+    )
+    lowerer = _InspectLowerer()
     compiler, _ = _compiler(
         registry,
         registered=True,
-        registered_lowerers=(_InspectLowerer(),),
+        registered_lowerers=(lowerer,),
+        profile=profile,
         effect_monitor_registry=EffectMonitorRegistry((factory,)),
     )
     workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
@@ -829,14 +878,20 @@ def test_registered_call_without_monitor_has_no_effect_contract() -> None:
     assert workflow.calls[0].effect_monitor_ref is None
     assert grounded.effect_spec is None
     assert grounded.effect_monitor is None
+    options = grounded.invocation.skill_options
+    assert type(options) is PickUpOptions
+    assert options.pre_grasp_distance == 0.07
+    assert len(lowerer.option_templates) == 1
+    assert lowerer.option_templates[0] is not options
     assert factory.calls == 0
 
 
 def test_registered_monitor_without_effect_grounder_fails_during_analysis() -> None:
     registry, _ = _scene_registry()
     profile = _profile(
-        preset=SkillPolicyPreset(
+        preset=_preset(
             "safe",
+            registered=True,
             effect_monitors={
                 "vendor.inspect": EffectMonitorRef(
                     COMPOSITE_EFFECT_MONITOR_ID,
@@ -878,7 +933,17 @@ def test_ground_wraps_effect_monitor_factory_contract_failure_with_path() -> Non
 
 def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     registry, providers = _scene_registry()
-    compiler, engine = _compiler(registry)
+    templates = _action_option_templates()
+    templates["pick"] = PickUpOptions(
+        pick_object_part="top",
+        pre_grasp_distance=0.08,
+    )
+    compiler, engine = _compiler(
+        registry,
+        profile=_profile(
+            preset=_preset("safe", action_option_templates=templates),
+        ),
+    )
     drop = SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0))
 
     workflow = compiler.analyze(
@@ -898,6 +963,8 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     assert grounded.invocation.goal.semantics.entity_id == "cube"
     options = grounded.invocation.skill_options
     assert type(options) is PickUpOptions
+    assert options.pick_object_part == "top"
+    assert options.pre_grasp_distance == 0.08
     torch.testing.assert_close(
         options.downstream_object_target_poses[0],
         drop.to_matrix(),
@@ -908,7 +975,7 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
 def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> None:
     registry, _ = _scene_registry(dynamic_collision=True)
     profile = _profile(
-        preset=SkillPolicyPreset(
+        preset=_preset(
             "safe",
             motion_policy=MotionPolicy(strategy="motion_gen"),
             tracking_policy=TrackingPolicy.joint_position(
@@ -1108,7 +1175,17 @@ def test_relation_call_requires_exact_typed_versioned_grounder() -> None:
 
 def test_place_uses_verified_object_to_eef_transform() -> None:
     registry, _ = _scene_registry()
-    compiler, engine = _compiler(registry)
+    templates = _action_option_templates()
+    templates["place"] = PlaceOptions(
+        lift_height=0.22,
+        cartesian_waypoint_count=3,
+    )
+    compiler, engine = _compiler(
+        registry,
+        profile=_profile(
+            preset=_preset("safe", action_option_templates=templates),
+        ),
+    )
     drop = SemanticPose((0.5, -0.2, 0.4), (1.0, 0.0, 0.0, 0.0))
     workflow = compiler.analyze((Place(object=SceneObjectRef("cube"), at=drop),))
     pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
@@ -1124,6 +1201,10 @@ def test_place_uses_verified_object_to_eef_transform() -> None:
     grounded = compiler.ground(workflow, 0, context)
 
     assert type(grounded.invocation.goal) is PlaceGoal
+    options = grounded.invocation.skill_options
+    assert type(options) is PlaceOptions
+    assert options.lift_height == 0.22
+    assert options.cartesian_waypoint_count == 3
     expected = torch.bmm(drop.to_matrix().repeat(2, 1, 1), object_to_eef)
     torch.testing.assert_close(grounded.invocation.goal.xpos, expected)
     engine.resolve(grounded.invocation)
@@ -1248,8 +1329,14 @@ def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
     engine.resolve(grounded.invocation)
 
 
-@pytest.mark.parametrize("output", ["goal", "options"])
-def test_registered_lowerer_cannot_return_target_subclasses(output: str) -> None:
+@pytest.mark.parametrize(
+    ("output", "message"),
+    (("goal", "produced"), ("options", "must not return skill_options")),
+)
+def test_registered_lowerer_cannot_replace_owned_contracts(
+    output: str,
+    message: str,
+) -> None:
     registry, _ = _scene_registry()
     compiler, _ = _compiler(
         registry,
@@ -1258,7 +1345,7 @@ def test_registered_lowerer_cannot_return_target_subclasses(output: str) -> None
     )
     workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
 
-    with pytest.raises(TypeError, match="produced|incompatible"):
+    with pytest.raises(TypeError, match=message):
         compiler.ground(workflow, 0, _context(registry))
 
 

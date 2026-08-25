@@ -335,9 +335,10 @@ def test_handover_tutorial_registers_tuned_atomic_lowering() -> None:
         calls[0],
         context=cast(PlanningContext, context),
         bound=cast("BoundSemanticCall", object()),
+        option_template=HandOverOptions(),
     )
     assert type(lowering.goal) is HandOverGoal
-    assert type(lowering.skill_options) is HandOverOptions
+    assert lowering.skill_options is None
     assert lowering.goal.semantics.entity_id == "workpiece"
     torch.testing.assert_close(
         lowering.goal.target_pose[:3, 3],
@@ -359,10 +360,11 @@ def test_handover_tutorial_profile_binds_disjoint_arms() -> None:
         "source": "left",
         "destination": "right",
     }
-    assert (
-        profile.presets["hand_over"].recovery_policy.tracking_error_threshold
-        == HANDOVER_TRACKING_ERROR_THRESHOLD
-    )
+    preset = profile.presets["hand_over"]
+    in_flight = preset.tracking_policy.in_flight
+    assert in_flight is not None
+    assert in_flight.metrics[0].tolerance == HANDOVER_TRACKING_ERROR_THRESHOLD
+    assert type(preset.action_option_templates[HANDOVER_CALL_ID]) is HandOverOptions
 
 
 def test_handover_application_installs_extension_and_default_verifier(

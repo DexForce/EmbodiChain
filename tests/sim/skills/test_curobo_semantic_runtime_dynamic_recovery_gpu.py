@@ -39,6 +39,7 @@ from embodichain.lab.sim.atomic_actions import (  # noqa: E402
     ExecutionRunnerCfg,
     MotionPolicy,
     MoveEndEffector,
+    MoveEndEffectorOptions,
     PlanningContext,
     RecoveryPolicy,
     RuntimeCommandFrame,
@@ -114,8 +115,9 @@ class _MoveEndEffectorLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
+        option_template: MoveEndEffectorOptions,
     ) -> SemanticLowering:
-        del bound
+        del bound, option_template
         values = call.arguments.get("xpos")
         if type(values) is not tuple or len(values) != 16:
             raise ValueError("xpos must contain one flattened 4x4 pose matrix.")
@@ -181,6 +183,9 @@ def _profile() -> RobotSkillProfile:
         presets={
             "safe": SkillPolicyPreset(
                 "safe",
+                action_option_templates={
+                    CALL_ID: MoveEndEffectorOptions(),
+                },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=SAMPLE_COUNT,

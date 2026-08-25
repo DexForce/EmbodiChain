@@ -79,6 +79,7 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     ExecutionRunnerCfg,
     MotionPolicy,
+    PickUpOptions,
 )
 from embodichain.lab.sim.skills import (
     ControlPartEndpoint,
@@ -138,6 +139,7 @@ profile = RobotSkillProfile(
     presets={
         "default": SkillPolicyPreset(
             preset_id="default",
+            action_option_templates={"pick": PickUpOptions()},
             motion_policy=MotionPolicy(strategy="ik_interp"),
             runner_cfg=ExecutionRunnerCfg(command_timeout=2.0),
         ),
@@ -159,6 +161,22 @@ time, an explicit `runner_cfg` supplied when constructing a `SkillRuntime` or
 `SkillRuntime` overrides the selected preset's runner configuration for
 every call; otherwise each call keeps its selected preset's transport timeouts,
 minimum cycle time, and completion-hold behavior.
+
+## Configure semantic action behavior with the preset
+
+`SkillPolicyPreset.action_option_templates` is the required typed behavior
+table for semantic calls that can select the preset. Each key is the exact
+semantic call ID (`pick`, `place`, `hand_over`, or a registered call ID), and
+each value is the target action's exact frozen `ActionOptions` dataclass.
+Static linking rejects a missing entry or a value of the wrong exact type
+before simulation starts.
+
+The preset owns independent snapshots of every template. Semantic lowering may
+replace only compiler-owned dynamic values—for example Pick's downstream target
+poses—while reusable distances, directions, waypoint counts, and other behavior
+remain configuration. A registered semantic lowerer builds the goal but cannot
+return replacement options. Planner choice, sample count, tracking, recovery,
+runner policy, and effect monitors remain in their dedicated preset fields.
 
 ## Select semantic grounding providers
 
@@ -369,6 +387,22 @@ Adapters are registered by exact endpoint type. The built-in
 endpoint subtype and adapter when controller semantics differ. An adapter may
 set `requires_command_profile=True` when a missing generic command-profile ID
 must make profile binding fail immediately.
+
+On the standard Expert Program path, endpoint adapters and their ordered Gym
+transports are declared by `SimulationExpertProgramRegistration`. Adapter
+classes publish their endpoint type, runtime target types, transport IDs, and
+versioned tracking/evidence routes; encoder classes publish their transport ID
+and exact target/payload types. Registration rejects missing, unused,
+duplicate, or conflicting declarations, and live profile binding checks the
+resolved routes against the fingerprinted declarations. Stateful adapters,
+transports, grounding providers, and safety factories must be frozen dataclasses
+whose configuration is recursively immutable.
+
+The standard factory currently accepts built-in closed-loop routes only for
+`ControlPartEndpoint`. Custom endpoint adapters must declare empty tracking and
+effect-evidence routes and therefore support timed/open-loop completion. Custom
+mobile or whole-body closed-loop tracking needs a registration-owned provider
+factory; it cannot be supplied later as a task-side callback.
 
 A resolved action binding is keyed only by the skill-local
 `(slot_id, endpoint_id)` pair. A reusable non-joint capability supplies a

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Gym environment registration and task-package discovery utilities."""
+
 from __future__ import annotations
 
 import importlib
@@ -37,8 +39,26 @@ from dexsim.utility import log_warning
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnvCfg
+    from embodichain.lab.gym.envs.expert_program import (
+        SimulationExpertProgramRegistration,
+    )
 
 _logger = logging.getLogger(__name__)
+
+__all__ = [
+    "EnvSpec",
+    "REGISTERED_ENVS",
+    "TimeLimitWrapper",
+    "build_env",
+    "discover_task_packages",
+    "execute_init_hooks",
+    "get_env_spec",
+    "make",
+    "make_vec",
+    "register",
+    "register_env",
+    "register_env_function",
+]
 
 
 class EnvSpec:
@@ -48,12 +68,27 @@ class EnvSpec:
         cls: Type[BaseEnv],
         max_episode_steps=None,
         default_kwargs: dict = None,
+        expert_program_registration: SimulationExpertProgramRegistration | None = None,
     ):
         """A specification for a Embodied environment."""
+        if expert_program_registration is not None:
+            from embodichain.lab.gym.envs.expert_program import (
+                SimulationExpertProgramRegistration,
+            )
+
+            if (
+                type(expert_program_registration)
+                is not SimulationExpertProgramRegistration
+            ):
+                raise TypeError(
+                    "expert_program_registration must be exactly "
+                    "SimulationExpertProgramRegistration or None."
+                )
         self.uid = uid
         self.cls = cls
         self.max_episode_steps = max_episode_steps
         self.default_kwargs = {} if default_kwargs is None else default_kwargs
+        self.expert_program_registration = expert_program_registration
 
     def make(self, **kwargs):
         _kwargs = self.default_kwargs.copy()
@@ -76,7 +111,11 @@ REGISTERED_ENVS: Dict[str, EnvSpec] = {}
 
 
 def register(
-    name: str, cls: Type[BaseEnv], max_episode_steps=None, default_kwargs: dict = None
+    name: str,
+    cls: Type[BaseEnv],
+    max_episode_steps=None,
+    default_kwargs: dict = None,
+    expert_program_registration: SimulationExpertProgramRegistration | None = None,
 ):
     """Register a Embodied environment."""
 
@@ -88,7 +127,11 @@ def register(
     if not (issubclass(cls, BaseEnv) or issubclass(cls, BaseEnv)):
         raise TypeError(f"Env {name} must inherit from BaseEnv or BaseEnv")
     REGISTERED_ENVS[name] = EnvSpec(
-        name, cls, max_episode_steps=max_episode_steps, default_kwargs=default_kwargs
+        name,
+        cls,
+        max_episode_steps=max_episode_steps,
+        default_kwargs=default_kwargs,
+        expert_program_registration=expert_program_registration,
     )
 
 
@@ -146,6 +189,16 @@ def make(env_id, **kwargs):
     return env
 
 
+def get_env_spec(env_id: str) -> EnvSpec:
+    """Return one registered environment specification or fail closed."""
+    if type(env_id) is not str or not env_id or env_id != env_id.strip():
+        raise ValueError("env_id must be a non-empty string without outer whitespace.")
+    try:
+        return REGISTERED_ENVS[env_id]
+    except KeyError as exc:
+        raise KeyError(f"Env {env_id!r} not found in registry.") from exc
+
+
 def build_env(env_id: str, base_env_cfg: EmbodiedEnvCfg):
     """Create an environment from a registered env id.
 
@@ -172,7 +225,14 @@ def make_vec(env_id, **kwargs):
     return env
 
 
-def register_env(uid: str, max_episode_steps=None, override=False, **kwargs):
+def register_env(
+    uid: str,
+    max_episode_steps=None,
+    override=False,
+    *,
+    expert_program_registration: SimulationExpertProgramRegistration | None = None,
+    **kwargs,
+):
     """A decorator to register Embodied environments.
 
     Args:
@@ -193,13 +253,28 @@ def register_env(uid: str, max_episode_steps=None, override=False, **kwargs):
         )
 
     def _register_env(cls):
-        cls = register_env_function(cls, uid, override, max_episode_steps, **kwargs)
+        cls = register_env_function(
+            cls,
+            uid,
+            override,
+            max_episode_steps,
+            expert_program_registration=expert_program_registration,
+            **kwargs,
+        )
         return cls
 
     return _register_env
 
 
-def register_env_function(cls, uid, override=False, max_episode_steps=None, **kwargs):
+def register_env_function(
+    cls,
+    uid,
+    override=False,
+    max_episode_steps=None,
+    *,
+    expert_program_registration: SimulationExpertProgramRegistration | None = None,
+    **kwargs,
+):
     if uid in REGISTERED_ENVS:
         if override:
             from gymnasium.envs.registration import registry
@@ -216,6 +291,7 @@ def register_env_function(cls, uid, override=False, max_episode_steps=None, **kw
         cls,
         max_episode_steps=max_episode_steps,
         default_kwargs=deepcopy(kwargs),
+        expert_program_registration=expert_program_registration,
     )
 
     # Register for gym

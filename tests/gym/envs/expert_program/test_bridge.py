@@ -44,6 +44,7 @@ from embodichain.lab.sim.atomic_actions.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
+from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
@@ -174,9 +175,9 @@ class _DummyPayload(RuntimeCommandPayload):
 class _DummyTransportEncoder:
     """Test registration proving the frame encoder is transport-extensible."""
 
-    @property
-    def transport_id(self) -> str:
-        return "test.transport"
+    transport_id = "test.transport"
+    target_types = (_DummyTarget,)
+    payload_types = (_DummyPayload,)
 
     def encode(
         self,
@@ -868,6 +869,7 @@ def _bridge(
     post_policy_port: object | None = None,
     validator_port: object | None = None,
     parallel_safety_validator: object | None = None,
+    runner_cfg: ExecutionRunnerCfg | None = None,
 ) -> tuple[AtomicDemoBridge, _FakeRuntime, EnvironmentStepClock]:
     clock = EnvironmentStepClock(STEP_DT)
     encoder = RuntimeCommandFrameEncoder(
@@ -882,9 +884,21 @@ def _bridge(
         clock,
         post_policy_port=post_policy_port,
         validator_port=validator_port,
+        runner_cfg=runner_cfg,
         parallel_safety_validator=parallel_safety_validator,
     )
     return bridge, runtime, clock
+
+
+def test_bridge_snapshots_runner_cfg_before_lazy_parallel_creation() -> None:
+    """Later advanced-path config mutation cannot change lazy bridge policy."""
+    runner_cfg = ExecutionRunnerCfg(command_timeout=0.25)
+    bridge, _, _ = _bridge(duration=STEP_DT, runner_cfg=runner_cfg)
+
+    runner_cfg.command_timeout = 9.0
+
+    assert bridge._runner_cfg is not runner_cfg
+    assert bridge._runner_cfg.command_timeout == pytest.approx(0.25)
 
 
 def test_environment_step_clock_advances_only_explicitly() -> None:
@@ -964,6 +978,133 @@ def test_frame_encoder_supports_registered_future_transport() -> None:
     assert isinstance(action, torch.Tensor)
     assert action[0, 0].item() == 4.0
     assert action[1, 0].item() == 0.0
+
+
+def test_frame_encoder_composes_in_registration_not_frame_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transport registration is the stable controller composition order."""
+    calls: list[str] = []
+    original_joint_encode = bridge_module.JointPositionGymTransportEncoder.encode
+    original_dummy_encode = _DummyTransportEncoder.encode
+
+    def record_joint(self: object, *args: object, **kwargs: object) -> object:
+        calls.append("joint")
+        return original_joint_encode(self, *args, **kwargs)
+
+    def record_dummy(self: object, *args: object, **kwargs: object) -> object:
+        calls.append("dummy")
+        return original_dummy_encode(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        bridge_module.JointPositionGymTransportEncoder,
+        "encode",
+        record_joint,
+    )
+    monkeypatch.setattr(_DummyTransportEncoder, "encode", record_dummy)
+    joint = _joint_frame(duration=STEP_DT).commands[0]
+    dummy = _dummy_frame().commands[0]
+    frame = RuntimeCommandFrame(
+        commands=(dummy, joint),
+        active_mask=torch.tensor([True, False]),
+        env_ids=torch.tensor([7, 3], dtype=torch.long),
+        hold_duration=torch.full((BATCH_SIZE,), STEP_DT),
+    )
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        transports=(_DummyTransportEncoder(),),
+    )
+
+    encoder.encode(frame)
+
+    assert calls == ["joint", "dummy"]
+
+
+def test_hold_encoder_composes_in_registration_not_target_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Safe-hold transport composition uses the same registered ordering."""
+    calls: list[str] = []
+    original_joint_hold = bridge_module.JointPositionGymTransportEncoder.hold
+    original_dummy_hold = _DummyTransportEncoder.hold
+
+    def record_joint(self: object, *args: object, **kwargs: object) -> object:
+        calls.append("joint")
+        return original_joint_hold(self, *args, **kwargs)
+
+    def record_dummy(self: object, *args: object, **kwargs: object) -> object:
+        calls.append("dummy")
+        return original_dummy_hold(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        bridge_module.JointPositionGymTransportEncoder,
+        "hold",
+        record_joint,
+    )
+    monkeypatch.setattr(_DummyTransportEncoder, "hold", record_dummy)
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        transports=(_DummyTransportEncoder(),),
+    )
+    dummy_target = _dummy_frame().targets[0]
+    joint_target = _joint_frame(duration=STEP_DT).targets[0]
+
+    encoder.encode_hold((dummy_target, joint_target), _context())
+
+    assert calls == ["joint", "dummy"]
+
+
+def test_frame_encoder_rejects_transport_without_static_type_declarations() -> None:
+    """Every runtime transport declares its exact pre-sim routing surface."""
+
+    class MissingDeclarations:
+        transport_id = "test.missing"
+
+        def encode(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError
+
+        def hold(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError
+
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))
+    )
+
+    with pytest.raises(TypeError, match="RuntimeTransportActionEncoder"):
+        encoder.register_transport(MissingDeclarations())  # type: ignore[arg-type]
+
+
+def test_frame_encoder_requires_exact_declared_target_coverage() -> None:
+    """Transport routing never widens a declaration through subclass checks."""
+
+    class WrongTargetCoverage(_DummyTransportEncoder):
+        target_types = (JointPositionTarget,)
+
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        transports=(WrongTargetCoverage(),),
+    )
+
+    with pytest.raises(TypeError, match="does not declare exact target type"):
+        encoder.encode(_dummy_frame())
+
+    with pytest.raises(TypeError, match="does not declare exact hold target type"):
+        encoder.encode_hold(_dummy_frame().targets, _context())
+
+
+def test_frame_encoder_requires_exact_declared_payload_coverage() -> None:
+    """Payload declarations are enforced independently of target coverage."""
+
+    class WrongPayloadCoverage(_DummyTransportEncoder):
+        payload_types = (JointPositionPayload,)
+
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        transports=(WrongPayloadCoverage(),),
+    )
+
+    with pytest.raises(TypeError, match="does not declare exact payload type"):
+        encoder.encode(_dummy_frame())
 
 
 def test_buffered_sink_rejects_off_grid_frame_before_buffering() -> None:
@@ -1843,6 +1984,7 @@ def test_parallel_segment_preserves_branches_barrier_and_adopts_state(
         *,
         timeout_steps: int,
         failure_policy: str,
+        runner_cfg: object,
         workflow_id: str,
         branch_paths: dict[str, tuple[object, ...]],
     ) -> _FakeParallelRuntime:
@@ -1856,6 +1998,7 @@ def test_parallel_segment_preserves_branches_barrier_and_adopts_state(
                 "safety_validator": supplied_safety_validator,
                 "timeout_steps": timeout_steps,
                 "failure_policy": failure_policy,
+                "runner_cfg": runner_cfg,
                 "workflow_id": workflow_id,
                 "branch_paths": branch_paths,
             }
@@ -1883,6 +2026,7 @@ def test_parallel_segment_preserves_branches_barrier_and_adopts_state(
     assert captured["safety_validator"] is safety_validator
     assert captured["timeout_steps"] == 17
     assert captured["failure_policy"] == "fail_fast"
+    assert captured["runner_cfg"] is not None
     assert captured["workflow_id"].endswith(":parallel_analysis")
     assert captured["branch_paths"] == {
         "branch_0": segment.source_path,

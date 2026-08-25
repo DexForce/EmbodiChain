@@ -1698,6 +1698,9 @@ embodichain_tasks.expert_program.repeated_pick_place
 .. autosummary::
 
    ExpertProgramRepeatedPickPlaceEnv
+   REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
+   create_repeated_pick_place_robot_profile_binding
+   create_repeated_pick_place_scene_binding
 
 embodichain_tasks.rl
 --------------------

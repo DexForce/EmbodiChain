@@ -310,6 +310,10 @@ atomic `target_descriptor`; its `skill_id` and `binding_contract` are derived
 views, not separately stored values. Curated call targets cannot be remapped.
 Registered calls require an explicit agent-visible target plus an installed
 `RegisteredSemanticLowerer` with a matching call ID and schema version.
+Their payloads carry task intent, while the selected `SkillPolicyPreset` is the
+sole action-option source; a lowerer may read its owned option template for goal
+grounding but must not mirror those options into the payload as a second policy
+configuration.
 
 `SemanticSkillCompiler.analyze()` performs provider-free linking, resource and
 affordance validation, held-object flow analysis, and first-release look-ahead.

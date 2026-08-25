@@ -25,10 +25,13 @@ from embodichain.lab.gym.envs.expert_program import (
     AntipodalGraspAffordanceBinding,
     ExpertProgramEnvironmentAdapter,
     SimulationRigidObjectBinding,
+    SimulationExpertProgramRegistration,
+    SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
     create_simulation_expert_program_adapter,
 )
 from embodichain.lab.gym.utils.registration import register_env
+from embodichain.lab.sim.atomic_actions import PickUpOptions, PlaceOptions
 from embodichain.lab.sim.skills import SceneDynamics
 
 from ._common import (
@@ -38,7 +41,12 @@ from ._common import (
     load_bundled_expert_program,
 )
 
-__all__ = ["ExpertProgramRepeatedPickPlaceEnv"]
+__all__ = [
+    "ExpertProgramRepeatedPickPlaceEnv",
+    "REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION",
+    "create_repeated_pick_place_robot_profile_binding",
+    "create_repeated_pick_place_scene_binding",
+]
 
 ENV_ID = "ExpertProgramRepeatedPickPlace-v1"
 PROGRAM_FILENAME = "repeated_pick_place.yaml"
@@ -50,7 +58,57 @@ SAFE_MOTION_SAMPLE_COUNT = 120
 DEFAULT_GRASP_SAMPLES = 10_000
 
 
-@register_env(ENV_ID, max_episode_steps=1200)
+def create_repeated_pick_place_scene_binding() -> SimulationSceneBinding:
+    """Declare the provider-free cube scene integration."""
+    return SimulationSceneBinding(
+        registry_id=SCENE_REGISTRY_ID,
+        rigid_objects=(
+            SimulationRigidObjectBinding(
+                entity_id=CUBE_ENTITY_ID,
+                simulation_uid=CUBE_ENTITY_ID,
+                dynamics=SceneDynamics.DYNAMIC,
+                semantic_type="cube",
+                default_grasp_affordance=CUBE_GRASP_ENTITY_ID,
+            ),
+        ),
+        antipodal_grasps=(
+            AntipodalGraspAffordanceBinding(
+                entity_id=CUBE_GRASP_ENTITY_ID,
+                object_id=CUBE_ENTITY_ID,
+                native_name="cube_mesh",
+                revision="cube-mesh-v1",
+            ),
+        ),
+    )
+
+
+def create_repeated_pick_place_robot_profile_binding() -> (
+    SimulationRobotSkillProfileBinding
+):
+    """Declare the provider-free UR5 Pick/Place profile."""
+    return create_ur5_skill_profile_binding(
+        None,
+        profile_id=ROBOT_PROFILE_ID,
+        sample_count=SAFE_MOTION_SAMPLE_COUNT,
+        skill_ids=("pick_up", "place"),
+        action_option_templates={
+            "pick": PickUpOptions(),
+            "place": PlaceOptions(),
+        },
+    )
+
+
+REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistration(
+    scene_binding=create_repeated_pick_place_scene_binding(),
+    robot_profile_binding=create_repeated_pick_place_robot_profile_binding(),
+)
+
+
+@register_env(
+    ENV_ID,
+    max_episode_steps=1200,
+    expert_program_registration=REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION,
+)
 class ExpertProgramRepeatedPickPlaceEnv(EmbodiedEnv):
     """Run three declarative Pick/Place cycles through the semantic runtime.
 
@@ -76,36 +134,9 @@ class ExpertProgramRepeatedPickPlaceEnv(EmbodiedEnv):
             sample_count=DEFAULT_GRASP_SAMPLES,
             opening_margin=0.002,
         )
-        scene_binding = SimulationSceneBinding(
-            registry_id=SCENE_REGISTRY_ID,
-            rigid_objects=(
-                SimulationRigidObjectBinding(
-                    entity_id=CUBE_ENTITY_ID,
-                    simulation_uid=CUBE_ENTITY_ID,
-                    dynamics=SceneDynamics.DYNAMIC,
-                    semantic_type="cube",
-                    default_grasp_affordance=CUBE_GRASP_ENTITY_ID,
-                ),
-            ),
-            antipodal_grasps=(
-                AntipodalGraspAffordanceBinding(
-                    entity_id=CUBE_GRASP_ENTITY_ID,
-                    object_id=CUBE_ENTITY_ID,
-                    native_name="cube_mesh",
-                    revision="cube-mesh-v1",
-                ),
-            ),
-        )
-        profile_binding = create_ur5_skill_profile_binding(
-            self.robot,
-            profile_id=ROBOT_PROFILE_ID,
-            sample_count=SAFE_MOTION_SAMPLE_COUNT,
-            skill_ids=("pick_up", "place"),
-        )
         self._expert_program_adapter = create_simulation_expert_program_adapter(
             self,
-            scene_binding=scene_binding,
-            robot_profile_binding=profile_binding,
+            registration=REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION,
             grasp_pose_generators={HAND_CONTROL_PART: grasp_pose_generator},
         )
 
