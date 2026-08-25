@@ -72,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--seed", type=int, default=0)
     run_parser.add_argument("--num-envs", type=int, default=None)
     run_parser.add_argument("--dataset-saving", action="store_true")
+    _add_failure_policy_argument(run_parser)
     return parser
 
 
@@ -98,6 +99,19 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
         "--robot-profile",
         choices=_ROBOT_PROFILES,
         default="franka",
+    )
+    _add_failure_policy_argument(parser)
+
+
+def _add_failure_policy_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--failure-policy",
+        choices=("stop", "continue"),
+        default="stop",
+        help=(
+            "Whether dependency failures stop affected downstream execution or "
+            "allow diagnostic continuation."
+        ),
     )
 
 
@@ -156,6 +170,7 @@ def _run_workflow(
             vlm_model=args.vlm_model,
             base_seed=args.base_seed,
             dataset_saving=args.dataset_saving,
+            failure_policy=args.failure_policy,
             run_id=allocation.run_id,
             created_at=allocation.created_at,
             execute=execute,
@@ -188,6 +203,7 @@ def _run_prepared_bundle(args: argparse.Namespace) -> int:
             seed=int(args.seed),
             num_envs=num_envs,
             dataset_saving=bool(args.dataset_saving),
+            failure_policy=args.failure_policy,
         )
     environments = report.get("environments", ())
     successes = [

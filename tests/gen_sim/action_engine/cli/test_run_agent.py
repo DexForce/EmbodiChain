@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
 
+from embodichain.gen_sim.action_engine.cli import run_agent as run_agent_module
 from embodichain.gen_sim.action_engine.cli.run_agent import (
     _ABWorkerConfig,
     _SerializedABBranch,
@@ -78,6 +80,88 @@ def test_capture_ab_initial_frame_invokes_only_audience_recorder() -> None:
 def test_capture_ab_initial_frame_requires_audience_recorder() -> None:
     with pytest.raises(RuntimeError, match="audience recorder"):
         _capture_ab_initial_frame(_FakeEnv())
+
+
+def test_cli_archives_task_video_after_final_reset_and_before_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = []
+
+    class Env:
+        def __init__(self) -> None:
+            self.unwrapped = self
+            self.final_reset = False
+
+        def reset(self, *, seed=None, options=None) -> None:
+            if options == {"final": True}:
+                self.final_reset = True
+                events.append("final_reset")
+
+        def get_wrapper_attr(self, _name):
+            return lambda **_kwargs: SimpleNamespace(
+                already_executed=True,
+                runtime_success=[True],
+                runtime_graph_output_dir=None,
+            )
+
+        def close(self) -> None:
+            events.append("close")
+
+    env = Env()
+    monkeypatch.setattr(
+        run_agent_module,
+        "build_env_cfg_from_args",
+        lambda _args: (
+            SimpleNamespace(seed=None),
+            {"id": "ActionEngine-v1", "max_episodes": 1},
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        run_agent_module,
+        "load_config",
+        lambda _path: {"planning_mode": "offline"},
+    )
+    monkeypatch.setattr(run_agent_module, "_validate_gym_id", lambda _cfg: None)
+    monkeypatch.setattr(
+        run_agent_module,
+        "_validate_run_contract",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        run_agent_module,
+        "load_agent_execution_program",
+        lambda *_args, **_kwargs: SimpleNamespace(seed_graph=None),
+    )
+    monkeypatch.setattr(
+        run_agent_module,
+        "_load_grounded_task_plan",
+        lambda _path: None,
+    )
+    monkeypatch.setattr(run_agent_module.gymnasium, "make", lambda **_kwargs: env)
+
+    def archive(completed_env, task_id):
+        assert completed_env is env
+        assert env.final_reset is True
+        events.append(f"archive:{task_id}")
+
+    monkeypatch.setattr(run_agent_module, "_archive_task_recording", archive)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_agent",
+            "--task_name",
+            "task2_1",
+            "--gym_config",
+            "gym.json",
+            "--agent_config",
+            "agent.json",
+        ],
+    )
+
+    assert run_agent_module.cli() is None
+    assert events == ["final_reset", "archive:task2_1", "close"]
 
 
 def _worker_config(route: str) -> _ABWorkerConfig:

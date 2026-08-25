@@ -543,6 +543,24 @@ def test_documented_run_command_arguments_remain_compatible() -> None:
     assert args.headless is True
     assert args.seed == 17
     assert args.runtime_backend == "independent"
+    assert args.failure_policy == "stop"
+
+
+def test_run_command_accepts_continue_failure_policy() -> None:
+    args = build_run_parser().parse_args(
+        [
+            "--task_name",
+            "task4_2",
+            "--gym_config",
+            "/tmp/fast_gym_config.json",
+            "--agent_config",
+            "/tmp/agent_config.json",
+            "--failure-policy",
+            "continue",
+        ]
+    )
+
+    assert args.failure_policy == "continue"
 
 
 def test_dual_ur5_policy_uses_short_reach_upright_lifts() -> None:
@@ -4958,6 +4976,139 @@ def test_failure_propagates_only_to_dependent_branch(monkeypatch: Any) -> None:
     assert not bool(result.success[0])
 
 
+def _run_dependent_failure_policy_chain(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    failure_policy: str,
+    record_root: Path | None = None,
+) -> tuple[ExecutionResult, dict[str, list[list[bool]]]]:
+    first = _hold_step("first", "can_a", "left_arm")
+    second = _hold_step("second", "can_b", "right_arm")
+    second["depends_on"] = ["first"]
+    env = _FakeEnv()
+    env.num_envs = 2
+    env.robot = _FakeRobot(env.num_envs)
+    executor = ProgramExecutor(
+        load_execution_program(compile_task_agent(_task_agent(first, second))),
+        env,
+        settle_steps=0,
+        record_runtime=record_root is not None,
+        record_root=record_root,
+        failure_policy=failure_policy,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_ensure_assignment",
+        lambda step, failed: executor._assignments.setdefault(
+            step.id,
+            [
+                None if bool(failed[env_id]) else str(step.actor["arm"])
+                for env_id in range(env.num_envs)
+            ],
+        ),
+    )
+    active_by_step: dict[str, list[list[bool]]] = {"first": [], "second": []}
+
+    def execute(
+        edge: ExecutionEdge,
+        step: SemanticStep,
+        *,
+        failed: torch.Tensor,
+    ) -> _EdgeResult:
+        active = ~failed
+        active_by_step[step.id].append(active.tolist())
+        result_failed = failed.clone()
+        if step.id == "first" and edge.id == step.edge_ids[0]:
+            result_failed[1] = True
+        return _EdgeResult(
+            actions=[],
+            failed=result_failed,
+            grounded=[],
+            executed=active,
+        )
+
+    monkeypatch.setattr(executor, "_execute_edge", execute)
+    monkeypatch.setattr(
+        executor,
+        "_step_runtime_metadata",
+        lambda _step: [{} for _ in range(env.num_envs)],
+    )
+    monkeypatch.setattr(
+        executor,
+        "_verify_step",
+        lambda _step, failed: (
+            failed,
+            ~failed,
+            torch.zeros(env.num_envs, 3),
+        ),
+    )
+    return executor.run(run_id=failure_policy), active_by_step
+
+
+def test_stop_failure_policy_blocks_only_failed_environment_downstream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, active_by_step = _run_dependent_failure_policy_chain(
+        monkeypatch,
+        failure_policy="stop",
+    )
+
+    assert all(active == [True, False] for active in active_by_step["second"])
+    assert result.semantic_success["second"].tolist() == [True, False]
+    assert result.success.tolist() == [True, False]
+
+
+def test_continue_failure_policy_executes_downstream_without_clearing_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, active_by_step = _run_dependent_failure_policy_chain(
+        monkeypatch,
+        failure_policy="continue",
+    )
+
+    assert all(active == [True, True] for active in active_by_step["second"])
+    assert result.semantic_success["first"].tolist() == [True, False]
+    assert result.semantic_success["second"].tolist() == [True, True]
+    assert result.success.tolist() == [True, False]
+
+
+def test_continue_failure_policy_records_failed_then_executed_checkpoints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    visualization = ModuleType("embodichain.gen_sim.action_engine.graph_visualization")
+    visualization.render_task_graph_png = lambda _document: b"\x89PNG\r\n\x1a\n"
+    monkeypatch.setitem(sys.modules, visualization.__name__, visualization)
+
+    result, _ = _run_dependent_failure_policy_chain(
+        monkeypatch,
+        failure_policy="continue",
+        record_root=tmp_path,
+    )
+
+    env_dir = Path(result.record_dir) / "env_0001"
+    checkpoints = {
+        document["semantic_step"]["id"]: document
+        for path in env_dir.joinpath("checkpoints").glob("*.json")
+        for document in [json.loads(path.read_text(encoding="utf-8"))]
+    }
+    task_graph = json.loads(
+        env_dir.joinpath("task_graph.json").read_text(encoding="utf-8")
+    )
+
+    assert checkpoints["first"]["status"] == "failed"
+    assert checkpoints["second"]["status"] == "success"
+    assert checkpoints["first"]["failure_policy"] == "continue"
+    assert any(
+        event["event"] == "edge"
+        and event["semantic_step_id"] == "second"
+        and event["status"] == "executed"
+        for event in task_graph["runtime"]["events"]
+    )
+    assert task_graph["runtime"]["failure_policy"] == "continue"
+    assert task_graph["runtime"]["status"] == "failed"
+
+
 def test_resource_ordering_waits_without_propagating_semantic_failure() -> None:
     task = {
         "schema_version": TASK_SPEC_SCHEMA,
@@ -6323,6 +6474,45 @@ def test_online_environment_preserves_result_and_disables_terminations(
     ]
     assert initialization_order[0][1] is robot_cfg
     assert env._normalize_demo_action_list(result) is result
+
+
+def test_environment_passes_failure_policy_to_program_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    expected = object()
+
+    class FakeExecutor:
+        def __init__(self, _program: Any, _env: Any, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def run(self, **kwargs: Any) -> Any:
+            captured["run"] = kwargs
+            return expected
+
+    monkeypatch.setattr(
+        env_module,
+        "load_agent_execution_program",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(env_module, "ProgramExecutor", FakeExecutor)
+    env = SimpleNamespace(
+        agent_config={},
+        agent_config_path="/tmp/agent_config.json",
+        runtime_policy=object(),
+        last_execution=None,
+    )
+
+    result = env_module.ActionEngineEnv.create_demo_action_list.__wrapped__(
+        env,
+        failure_policy="continue",
+        runtime_run_id="run",
+        episode_index=3,
+    )
+
+    assert result is expected
+    assert captured["failure_policy"] == "continue"
+    assert captured["run"] == {"run_id": "run", "episode_index": 3}
 
 
 def test_solver_compat_repairs_only_stale_action_engine_ur_dh_defaults() -> None:

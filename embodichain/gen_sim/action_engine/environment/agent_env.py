@@ -384,6 +384,7 @@ class ActionEngineEnv(EmbodiedEnv):
     def create_demo_action_list(
         self,
         regenerate: bool = False,
+        failure_policy: str = "stop",
         **kwargs: Any,
     ) -> Any:
         """Compile in memory when requested, then execute the program online."""
@@ -408,6 +409,7 @@ class ActionEngineEnv(EmbodiedEnv):
             record_runtime=bool(getattr(self, "action_engine_record_runtime", True)),
             record_root=getattr(self, "action_engine_record_root", None),
             runtime_policy=self.runtime_policy,
+            failure_policy=failure_policy,
         )
         self.last_execution = executor.run(
             run_id=kwargs.get("runtime_run_id"),
@@ -422,6 +424,7 @@ class ActionEngineEnv(EmbodiedEnv):
         runtime_run_id: str,
         episode_index: int,
         record_root: str | None = None,
+        failure_policy: str = "stop",
     ) -> Any:
         """Execute one already validated branch graph without rewriting config."""
         program = self.preflight_seed_graph(seed_graph)
@@ -448,6 +451,7 @@ class ActionEngineEnv(EmbodiedEnv):
             record_runtime=bool(getattr(self, "action_engine_record_runtime", True)),
             record_root=record_root,
             runtime_policy=self.runtime_policy,
+            failure_policy=failure_policy,
         )
         self.last_execution = executor.run(
             run_id=runtime_run_id,
