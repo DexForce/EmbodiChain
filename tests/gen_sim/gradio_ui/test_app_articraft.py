@@ -351,6 +351,30 @@ def test_remote_server_timeout_requests_cancellation(
     assert client.cancelled == [REQUEST_ID]
 
 
+def test_remote_server_poll_sleep_does_not_exceed_deadline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client = _FakeServerClient([{"status": "running"}])
+    clock = iter([0.0, 0.0, 0.0, 5.0])
+    sleeps: list[float] = []
+    monkeypatch.setattr(app_articraft, "ARTICRAFT_OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(app_articraft, "ARTICULATION_SERVER_TASK_TIMEOUT_S", 5.0)
+    monkeypatch.setattr(app_articraft, "ARTICULATION_SERVER_POLL_INTERVAL_S", 60.0)
+    monkeypatch.setattr(app_articraft, "_articulation_server_client", lambda: client)
+    monkeypatch.setattr(app_articraft.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(app_articraft.time, "sleep", sleeps.append)
+
+    results = list(
+        app_articraft._generate_server_articulation_asset(
+            "a service bell", None, _request("remote-bounded-sleep")
+        )
+    )
+
+    assert sleeps == [5.0]
+    assert "timed out" in results[-1][2]
+    assert client.cancelled == [REQUEST_ID]
+
+
 def test_remote_server_submit_error_does_not_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

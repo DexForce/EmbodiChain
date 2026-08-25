@@ -842,6 +842,22 @@ def _generate_server_articulation_asset(
     while True:
         if not _articraft_runs.is_active(session_id, token):
             return
+        if time.monotonic() >= deadline:
+            cancellation_error = _cancel_server_task(session_id)
+            if cancellation_error:
+                _append_server_log(
+                    log_lines, f"Cancellation warning: {cancellation_error}"
+                )
+            yield (
+                None,
+                "",
+                "**Remote Articulation request timed out and cancellation was requested.**\n\n"
+                f"- Request: `{request_id}`\n"
+                "- The request was not retried with Local Codex.",
+                "\n".join(log_lines[-300:]),
+                "",
+            )
+            return
         try:
             task = client.status(request_id)
         except (ArticulationServerError, OSError, ValueError) as exc:
@@ -870,22 +886,6 @@ def _generate_server_articulation_asset(
         if status in _SERVER_TERMINAL_STATUSES:
             _finish_server_task(session_id, token, request_id)
             break
-        if time.monotonic() >= deadline:
-            cancellation_error = _cancel_server_task(session_id)
-            if cancellation_error:
-                _append_server_log(
-                    log_lines, f"Cancellation warning: {cancellation_error}"
-                )
-            yield (
-                None,
-                "",
-                "**Remote Articulation request timed out and cancellation was requested.**\n\n"
-                f"- Request: `{request_id}`\n"
-                "- The request was not retried with Local Codex.",
-                "\n".join(log_lines[-300:]),
-                "",
-            )
-            return
         yield (
             None,
             "",
@@ -893,7 +893,8 @@ def _generate_server_articulation_asset(
             "\n".join(log_lines[-300:]),
             "",
         )
-        time.sleep(poll_interval_seconds)
+        remaining_seconds = max(0.0, deadline - time.monotonic())
+        time.sleep(min(poll_interval_seconds, remaining_seconds))
 
     if not _articraft_runs.is_active(session_id, token):
         return
