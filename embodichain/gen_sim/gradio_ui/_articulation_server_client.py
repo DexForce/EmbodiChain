@@ -115,7 +115,7 @@ class ArticulationServerClient:
         result = task.get("result")
         artifacts = result.get("artifacts") if isinstance(result, dict) else None
         relative_url = artifacts.get(artifact) if isinstance(artifacts, dict) else None
-        if not isinstance(relative_url, str):
+        if not isinstance(relative_url, str) or not relative_url.strip():
             raise ArticulationServerError(
                 f"task {request_id} has no artifact named {artifact!r}"
             )

@@ -157,6 +157,25 @@ def test_download_rejects_absolute_artifact_url(tmp_path: Path) -> None:
         client.download(REQUEST_ID, "usdc", tmp_path / "model.usdc")
 
 
+@pytest.mark.parametrize("artifact_url", ["", "   "])
+def test_download_rejects_empty_artifact_url(tmp_path: Path, artifact_url: str) -> None:
+    opener = _FakeOpener(
+        _json_response(
+            {
+                "status": "succeeded",
+                "result": {"artifacts": {"usdc": artifact_url}},
+            }
+        )
+    )
+    client = ArticulationServerClient(SERVER_URL)
+    client.opener = opener
+
+    with pytest.raises(ArticulationServerError, match="has no artifact"):
+        client.download(REQUEST_ID, "usdc", tmp_path / "model.usdc")
+
+    assert len(opener.requests) == 1
+
+
 def test_download_removes_partial_file_after_network_error(tmp_path: Path) -> None:
     artifact_url = f"/tasks/{REQUEST_ID}/artifacts/usdc"
     opener = _FakeOpener(
