@@ -23,12 +23,8 @@ from dataclasses import dataclass
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionPlan,
-    HeldObjectPoseGoal,
     MoveHeldObject,
     MoveHeldObjectOptions,
-    PlanningContext,
-    ResolvedActionRequest,
 )
 
 __all__ = ["ExactTargetMoveHeldObject", "ExactTargetMoveHeldObjectOptions"]
@@ -36,10 +32,7 @@ __all__ = ["ExactTargetMoveHeldObject", "ExactTargetMoveHeldObjectOptions"]
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ExactTargetMoveHeldObjectOptions(MoveHeldObjectOptions):
-    """Action Engine transport options with an exact-orientation switch."""
-
-    allow_automatic_transport_rotation: bool = True
-    """Whether the mainline transport heuristic may replace target rotation."""
+    """Action Engine transport options for a grounded object target."""
 
 
 class ExactTargetMoveHeldObject(MoveHeldObject):
@@ -48,38 +41,10 @@ class ExactTargetMoveHeldObject(MoveHeldObject):
     OptionsType = ExactTargetMoveHeldObjectOptions
     binding_contract = MoveHeldObject.binding_contract
 
-    def __init__(
-        self,
-        default_options: ExactTargetMoveHeldObjectOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-        self._allow_automatic_transport_rotation = True
-
-    def _plan(
-        self,
-        request: ResolvedActionRequest[
-            HeldObjectPoseGoal,
-            ExactTargetMoveHeldObjectOptions,
-        ],
-        context: PlanningContext,
-    ) -> ActionPlan:
-        previous = self._allow_automatic_transport_rotation
-        self._allow_automatic_transport_rotation = (
-            request.skill_options.allow_automatic_transport_rotation
-        )
-        try:
-            return super()._plan(request, context)
-        finally:
-            self._allow_automatic_transport_rotation = previous
-
     def _apply_automatic_transport_rotation(
         self,
         move_eef_xpos: torch.Tensor,
         end_arm_xpos: torch.Tensor,
     ) -> None:
-        """Apply the heuristic unless semantic grounding selected exact yaw."""
-        if self._allow_automatic_transport_rotation:
-            super()._apply_automatic_transport_rotation(
-                move_eef_xpos,
-                end_arm_xpos,
-            )
+        """Keep target shaping in GenSim grounding and free-yaw search."""
+        del move_eef_xpos, end_arm_xpos

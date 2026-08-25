@@ -102,6 +102,7 @@ _DEFAULT_PLANNER_POLICY: dict[str, Any] = {
 _COLLISION_PARKING_Z_OFFSET = -100.0
 _BODY_GRASP_CANDIDATE_LIMIT = 500
 _BODY_GRASP_SEED = 17_392
+_FREE_YAW_SAMPLE_COUNT = 8
 
 
 def _collision_cache_for_world(
@@ -226,7 +227,7 @@ class AtomicActionAdapter:
         """
         capability = self.capabilities.require_executable(grounded.action_class)
         state = state or self.initial_state()
-        grounded = self._select_upright_transport_yaw(grounded, state)
+        grounded = self._select_transport_yaw(grounded, state)
         context = self._planning_context(state, grounded)
         invocation = self._invocation(grounded, capability)
         return self._engine().start((invocation,), context)
@@ -340,7 +341,7 @@ class AtomicActionAdapter:
         """Plan one grounded primitive through the mainline typed contract."""
         capability = self.capabilities.require_executable(grounded.action_class)
         state = state or self.initial_state()
-        grounded = self._select_upright_transport_yaw(grounded, state)
+        grounded = self._select_transport_yaw(grounded, state)
         context = self._planning_context(state, grounded)
         grounded_candidates = self._adapt_axis_align_body_grasps(
             grounded,
@@ -838,13 +839,13 @@ class AtomicActionAdapter:
             trace["body_grasp"] = deepcopy(dict(body_grasp))
         return trace
 
-    def _select_upright_transport_yaw(
+    def _select_transport_yaw(
         self,
         grounded: GroundedAction,
         state: ExecutionState,
     ) -> GroundedAction:
-        """Choose the closest IK-feasible yaw for an upright object target."""
-        sample_count = int(grounded.cfg.get("upright_yaw_samples", 1))
+        """Choose the closest IK-feasible yaw when task semantics leave it free."""
+        sample_count = _FREE_YAW_SAMPLE_COUNT if grounded.allow_yaw_search else 1
         capability = self.capabilities.get(grounded.action_class)
         if (
             capability.target_materializer != "semantic_held_object"
@@ -858,9 +859,7 @@ class AtomicActionAdapter:
         if target_pose.shape == (4, 4):
             target_pose = target_pose.unsqueeze(0).repeat(self.num_envs, 1, 1)
         if target_pose.shape != (self.num_envs, 4, 4):
-            raise ValueError(
-                "Upright transport target must have shape (4, 4) or (N, 4, 4)."
-            )
+            raise ValueError("Transport target must have shape (4, 4) or (N, 4, 4).")
 
         arm_part, _, _ = self._parts(grounded.arm)
         held = state.get_held_object(arm_part)
@@ -872,7 +871,7 @@ class AtomicActionAdapter:
         )
         if object_to_eef.shape == (4, 4):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.num_envs, 1, 1)
-        variants = self._upright_yaw_variants(target_pose, sample_count)
+        variants = self._yaw_variants(target_pose, sample_count)
         eef_variants = torch.matmul(variants, object_to_eef[:, None])
         joint_ids = list(self.env.robot.get_joint_ids(name=arm_part))
         start_qpos = state.last_qpos[:, joint_ids]
@@ -895,7 +894,30 @@ class AtomicActionAdapter:
             distance,
             torch.full_like(distance, torch.inf),
         )
-        best = distance.argmin(dim=1)
+        yaw_offsets = torch.matmul(
+            variants[:, :, :3, :3],
+            target_pose[:, None, :3, :3].transpose(-1, -2),
+        )
+        yaw_distance = torch.atan2(
+            yaw_offsets[:, :, 1, 0],
+            yaw_offsets[:, :, 0, 0],
+        ).abs()
+        minimum_yaw = torch.where(
+            success,
+            yaw_distance,
+            torch.full_like(yaw_distance, torch.inf),
+        ).amin(dim=1)
+        minimum_rotation = success & torch.isclose(
+            yaw_distance,
+            minimum_yaw[:, None],
+            atol=1.0e-6,
+            rtol=0.0,
+        )
+        best = torch.where(
+            minimum_rotation,
+            distance,
+            torch.full_like(distance, torch.inf),
+        ).argmin(dim=1)
         env_ids = torch.arange(self.num_envs, device=self.device)
         selected = variants[env_ids, best]
         selected = torch.where(
@@ -910,7 +932,7 @@ class AtomicActionAdapter:
         )
 
     @staticmethod
-    def _upright_yaw_variants(
+    def _yaw_variants(
         target_pose: torch.Tensor,
         sample_count: int,
     ) -> torch.Tensor:
@@ -1254,8 +1276,6 @@ class AtomicActionAdapter:
             from .atomic_compat import ExactTargetMoveHeldObjectOptions
 
             config_type = ExactTargetMoveHeldObjectOptions
-            if int(action.cfg.get("upright_yaw_samples", 1)) > 1:
-                policy["allow_automatic_transport_rotation"] = False
         if capability.target_materializer == "press":
             press_depth = policy.pop("press_depth", None)
             if press_depth is not None and "press_distance" not in policy:
@@ -1506,6 +1526,10 @@ class AtomicActionAdapter:
 
     def _engine(self) -> AtomicActionEngine:
         if self._atomic_engine is None:
+            from embodichain.gen_sim.action_engine.capabilities import (
+                HeldObjectHandOver,
+            )
+
             from .atomic_compat import ExactTargetMoveHeldObject
 
             engine = AtomicActionEngine(
@@ -1514,6 +1538,7 @@ class AtomicActionAdapter:
                 grasp_pose_generators=self._grasp_pose_generators(),
             )
             engine.register(ExactTargetMoveHeldObject(), replace=True)
+            engine.register(HeldObjectHandOver(), replace=True)
             self._atomic_engine = engine
         return self._atomic_engine
 

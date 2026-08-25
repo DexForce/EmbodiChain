@@ -23,7 +23,11 @@ from embodichain.gen_sim.action_engine.orientation import (
     MatchRotationConstraint,
     compile_orientation_constraint,
 )
-from embodichain.gen_sim.action_engine.protocol import TASK_SPEC_SCHEMA
+from embodichain.gen_sim.action_engine.compiler import compile_task_agent
+from embodichain.gen_sim.action_engine.protocol import (
+    TASK_AGENT_SCHEMA,
+    TASK_SPEC_SCHEMA,
+)
 from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
 
 
@@ -40,6 +44,24 @@ def test_explicit_preserve_compiles_to_rotation_match() -> None:
 
     assert constraint.terms == (MatchRotationConstraint(reference="step_start"),)
     assert constraint.requires_reference
+
+
+def test_match_rotation_requires_an_explicit_serialized_term() -> None:
+    constraint = compile_orientation_constraint(
+        {
+            "orientation_constraint": {
+                "terms": [
+                    {
+                        "type": "match_rotation",
+                        "reference": "target_pose",
+                    }
+                ]
+            }
+        }
+    )
+
+    assert constraint.terms == (MatchRotationConstraint(reference="target_pose"),)
+    assert not constraint.allows_yaw_search
 
 
 def test_upright_compiles_to_directed_axis_when_requested() -> None:
@@ -85,6 +107,44 @@ def test_legacy_long_axis_upright_remains_undirected() -> None:
             directed=False,
         ),
     )
+    assert constraint.allows_yaw_search
+
+
+def test_lay_flat_compiles_to_short_axis_alignment_with_free_yaw() -> None:
+    constraint = compile_orientation_constraint({"orientation_goal": "lay_flat"})
+
+    assert constraint.terms == (
+        AlignAxisConstraint(
+            local_axis="short_axis",
+            target_axis="world_up",
+            directed=False,
+        ),
+    )
+    assert constraint.allows_yaw_search
+
+
+def test_hold_hover_without_orientation_request_has_no_rotation_match() -> None:
+    compiled = compile_task_agent(
+        {
+            "schema_version": TASK_AGENT_SCHEMA,
+            "task": "hold",
+            "goal": "Hold the can above its initial position.",
+            "semantic_steps": [
+                {
+                    "id": "hold",
+                    "operator": "hold_hover",
+                    "object": "can",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {},
+                    "depends_on": [],
+                }
+            ],
+        }
+    )
+
+    goal = compiled["semantic_steps"][0]["goal"]
+    assert goal["orientation_goal"] == "none"
+    assert compile_orientation_constraint(goal).terms == ()
 
 
 def test_serialized_constraint_keeps_term_local_tolerance() -> None:

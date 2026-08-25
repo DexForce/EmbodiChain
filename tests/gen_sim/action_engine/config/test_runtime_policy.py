@@ -86,6 +86,14 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
     assert runtime.motion_modifiers["orientation"]["upright"]["MoveHeldObject"][
         "surface_clearance"
     ] == pytest.approx(0.05)
+    assert (
+        "upright_yaw_samples"
+        not in runtime.motion_modifiers["orientation"]["upright"]["PickUp"]
+    )
+    assert (
+        "upright_yaw_samples"
+        not in runtime.motion_modifiers["orientation"]["upright"]["MoveHeldObject"]
+    )
     assert runtime.motion_modifiers["handover_role"]["transfer"]["PickUp"] == {
         "sample_interval": 80,
         "hand_interp_steps": 5,

@@ -74,8 +74,16 @@ class OrientationConstraint:
         )
 
     @property
-    def allows_upright_yaw_search(self) -> bool:
-        """Return whether all hard terms leave world-up yaw unconstrained."""
+    def allows_yaw_search(self) -> bool:
+        """Return whether hard constraints leave world-Z yaw unconstrained."""
+        return all(
+            isinstance(term, AlignAxisConstraint) and term.target_axis == "world_up"
+            for term in self.terms
+        )
+
+    @property
+    def requires_upright_axis_alignment(self) -> bool:
+        """Return whether a hard term requires alignment with world up."""
         return bool(self.terms) and all(
             isinstance(term, AlignAxisConstraint) and term.target_axis == "world_up"
             for term in self.terms
@@ -116,9 +124,18 @@ def compile_orientation_constraint(
                 directed=directed,
             ),
         )
-    elif orientation_goal in {"lay_flat", "axis_align"}:
-        # These established modes materialize a full target rotation. Keep that
-        # contract until semantic face/axis metadata can express narrower terms.
+    elif orientation_goal == "lay_flat":
+        terms = (
+            AlignAxisConstraint(
+                local_axis="short_axis",
+                target_axis="world_up",
+                directed=False,
+            ),
+        )
+    elif orientation_goal == "axis_align":
+        # axis_align explicitly requests a horizontal heading. Its established
+        # target-pose contract remains strict until it is replaced by a typed
+        # non-world-up axis term.
         terms = (MatchRotationConstraint(reference="target_pose"),)
     else:
         raise ValueError(f"Unsupported orientation_goal {orientation_goal!r}.")
@@ -172,7 +189,7 @@ def _compile_term(value: Any, index: int) -> OrientationTerm:
                 f"{context} contains unsupported fields: {sorted(unknown)}."
             )
         local_axis = str(value.get("local_axis", ""))
-        if local_axis not in {"x", "y", "z", "long_axis"}:
+        if local_axis not in {"x", "y", "z", "long_axis", "short_axis"}:
             raise ValueError(f"{context}.local_axis {local_axis!r} is unsupported.")
         target_axis = str(value.get("target_axis", "world_up"))
         if target_axis != "world_up":

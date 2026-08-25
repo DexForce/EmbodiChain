@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 import torch
 
+from embodichain.gen_sim.action_engine.capabilities import HeldObjectHandOver
 from embodichain.gen_sim.action_engine.runtime import actions
 from embodichain.gen_sim.action_engine.runtime.atomic_compat import (
     ExactTargetMoveHeldObject,
@@ -45,6 +46,7 @@ from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
     EntityState,
     GraspGoal,
+    HeldObjectPoseGoal,
     HeldObjectState,
     JointPositionGoal,
     ObjectSemantics,
@@ -156,7 +158,7 @@ class _FakeEngine:
         return self._plan(invocation, context)
 
 
-def test_adapter_registers_only_move_held_object_compat_action(
+def test_adapter_registers_gen_sim_compat_actions(
     monkeypatch: Any,
 ) -> None:
     registered: list[tuple[type, bool]] = []
@@ -179,7 +181,81 @@ def test_adapter_registers_only_move_held_object_compat_action(
     assert isinstance(engine, Engine)
     assert registered == [
         (ExactTargetMoveHeldObject, True),
+        (HeldObjectHandOver, True),
     ]
+
+
+def test_free_yaw_search_uses_an_internal_reachability_sample_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = _planner_env()
+    adapter = AtomicActionAdapter(env)
+    target = torch.eye(4).repeat(2, 1, 1)
+    target[:, :3, 3] = torch.tensor([0.1, -0.2, 0.9])
+    semantics = ObjectSemantics(label="can", geometry={}, affordance=Affordance())
+    held = HeldObjectState(
+        semantics=semantics,
+        object_to_eef=torch.eye(4).repeat(2, 1, 1),
+        grasp_xpos=torch.eye(4).repeat(2, 1, 1),
+    )
+    state = ExecutionState(
+        last_qpos=torch.zeros(2, 8),
+        held_objects={"physical_left_arm": held},
+    )
+    grounded = GroundedAction(
+        "MoveHeldObject",
+        "left_arm",
+        "arm",
+        HeldObjectPoseGoal(object_target_pose=target),
+        {},
+        target_object_pose=target,
+        allow_yaw_search=True,
+    )
+
+    def compute_batch_ik(
+        *,
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert name == "physical_left_arm"
+        assert pose.shape[:2] == (2, 8)
+        success = torch.zeros(2, 8, dtype=torch.bool)
+        success[:, 3] = True
+        return success, joint_seed.clone()
+
+    monkeypatch.setattr(env.robot, "compute_batch_ik", compute_batch_ik)
+
+    selected = adapter._select_transport_yaw(grounded, state)
+
+    assert selected.target_object_pose is not None
+    torch.testing.assert_close(selected.target_object_pose[:, :3, 3], target[:, :3, 3])
+    torch.testing.assert_close(
+        selected.target_object_pose[:, :3, :3],
+        torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]).repeat(
+            2, 1, 1
+        ),
+        atol=1.0e-6,
+        rtol=1.0e-6,
+    )
+
+    def all_yaws_reachable(
+        *,
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del pose, name
+        qpos = joint_seed.clone()
+        qpos[:, 0] += 1.0
+        return torch.ones(2, 8, dtype=torch.bool), qpos
+
+    monkeypatch.setattr(env.robot, "compute_batch_ik", all_yaws_reachable)
+
+    minimum_rotation = adapter._select_transport_yaw(grounded, state)
+
+    assert minimum_rotation.target_object_pose is not None
+    torch.testing.assert_close(minimum_rotation.target_object_pose, target)
 
 
 def test_adapter_lowers_axis_align_from_live_pose_with_a_stable_seed() -> None:
