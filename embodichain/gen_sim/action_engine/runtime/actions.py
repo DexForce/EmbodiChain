@@ -31,6 +31,7 @@ from embodichain.gen_sim.action_engine.capabilities import (
     build_atomic_capability_registry,
 )
 from embodichain.gen_sim.action_engine.config import default_runtime_policy
+from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
@@ -168,6 +169,9 @@ class AtomicActionAdapter:
         self.env = env
         self.num_envs = int(env.num_envs)
         self.device = env.device
+        self.gripper_profile = get_gripper_profile(
+            getattr(env, "agent_gripper_model", "pgi")
+        )
         if grasp_policy is None:
             profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
             grasp_policy = default_runtime_policy(profile).grasp
@@ -980,6 +984,7 @@ class AtomicActionAdapter:
         trace = {
             "action_class": grounded.action_class,
             "arm": grounded.arm,
+            "gripper_model": self.gripper_profile.model.value,
             "planner": str(self.planner_policy["backend"]),
             "primary_strategy": invocation.motion_policy.strategy,
             "dynamic_collision_mode": invocation.motion_policy.dynamic_collision_mode.value,
@@ -1857,14 +1862,15 @@ class AtomicActionAdapter:
         if not isinstance(filter_ground_collision, bool):
             raise TypeError("filter_ground_collision must be a boolean.")
         options = self.grasp_policy
+        geometry = self.gripper_profile.grasp_model
         model = ParallelJawGripperModelCfg(
-            model_id="gen_sim_parallel_jaw",
-            min_opening_width=float(options["min_open_length"]),
-            max_opening_width=float(options["max_open_length"]),
-            finger_length=float(options["finger_length"]),
-            finger_width=0.03,
-            finger_thickness=0.01,
-            palm_depth=0.08,
+            model_id=geometry.model_id,
+            min_opening_width=geometry.min_opening_width,
+            max_opening_width=geometry.max_opening_width,
+            finger_length=geometry.finger_length,
+            finger_width=geometry.finger_width,
+            finger_thickness=geometry.finger_thickness,
+            palm_depth=geometry.palm_depth,
         )
         algorithm = AntipodalGraspPoseGeneratorCfg(
             sample_count=int(options["antipodal_n_sample"]),
@@ -1876,7 +1882,7 @@ class AtomicActionAdapter:
         collision = ParallelJawGraspCollisionCfg(
             point_sample_density=float(options["point_sample_dense"]),
             max_decomposition_hulls=int(options["max_decomposition_hulls"]),
-            opening_margin=0.01,
+            opening_margin=geometry.opening_margin,
             filter_ground_collision=filter_ground_collision,
         )
         annotation = GraspAnnotationCfg(

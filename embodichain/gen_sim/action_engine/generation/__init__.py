@@ -18,7 +18,11 @@
 
 from __future__ import annotations
 
-from .config_builder import VLM_CAMERA_UIDS, canonical_robot_profile
+from .config_builder import (
+    VLM_CAMERA_UIDS,
+    canonical_gripper_model,
+    canonical_robot_profile,
+)
 from .assets import normalize_scene_assets
 from .generator import generate_action_engine_config
 from .models import GeneratedConfigPaths, PreparedScene
@@ -27,6 +31,7 @@ __all__ = [
     "GeneratedConfigPaths",
     "PreparedScene",
     "VLM_CAMERA_UIDS",
+    "canonical_gripper_model",
     "canonical_robot_profile",
     "generate_action_engine_config",
     "normalize_scene_assets",

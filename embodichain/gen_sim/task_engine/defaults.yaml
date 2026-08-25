@@ -24,6 +24,7 @@ workflow:
 planning:
   candidate_count: 3
   planning_mode: offline
+  gripper_model: robotiq
   max_episodes: 1
   max_episode_steps: 6000
 

@@ -98,6 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Robot template used in fast_gym_config.json.",
     )
     parser.add_argument(
+        "--gripper-model",
+        "--gripper_model",
+        choices=("pgi", "robotiq"),
+        default=str(_TASK_DEFAULTS["default_gripper_model"]),
+        help="Gripper asset, control, TCP, and grasp profile used by both arms.",
+    )
+    parser.add_argument(
         "--llm_model",
         "--llm-model",
         default=None,
@@ -183,6 +190,7 @@ def cli() -> None:
         task_description=task_description,
         task_spec=args.task_spec,
         robot_profile=args.robot_profile,
+        gripper_model=args.gripper_model,
         llm_model=args.llm_model,
         source_scene_z_rotation_degrees=args.source_scene_z_rotation_degrees,
         body_scale_policy=args.body_scale_policy,

@@ -21,6 +21,7 @@ schema_version: action_engine_defaults_v1
 generation:
   task:
     default_robot_profile: ur10
+    default_gripper_model: pgi
     max_episodes: 1
     max_episode_steps: 2000
   environment:
@@ -158,9 +159,6 @@ runtime:
     grasp:
       antipodal_n_sample: 10000
       antipodal_max_angle: 0.2617993877991494
-      max_open_length: 0.15
-      min_open_length: 0.01
-      finger_length: 0.13
       point_sample_dense: 0.012
       max_deviation_angle: 0.3490658503988659
       n_deviated_approach_directions: 4

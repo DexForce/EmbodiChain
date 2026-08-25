@@ -83,6 +83,9 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
     }
     assert runtime.grounding["arrangement"]["row_search_radius"] == 0.25
     assert runtime.grasp["antipodal_n_sample"] == 10000
+    assert "max_open_length" not in runtime.grasp
+    assert "min_open_length" not in runtime.grasp
+    assert "finger_length" not in runtime.grasp
     assert runtime.motion_modifiers["orientation"]["upright"]["MoveHeldObject"][
         "surface_clearance"
     ] == pytest.approx(0.05)
@@ -117,6 +120,7 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
         0.2617993877991494
     )
     assert generation["physics"]["rigid_object"]["mass"] == pytest.approx(0.1)
+    assert generation["task"]["default_gripper_model"] == "pgi"
     assert generation["environment"]["arm_aim_yaw_offset"] == {
         "left": pytest.approx(0.0),
         "right": pytest.approx(0.0),
@@ -299,9 +303,40 @@ def test_v6_policy_snapshot_adds_axis_align_defaults_without_rewriting_e1() -> N
         }
     )
 
-    assert resolved.schema_version == "action_engine_runtime_policy_v7"
+    assert resolved.schema_version == "action_engine_runtime_policy_v8"
     assert resolved.motion_defaults["AxisAlign"]["sample_interval"] == 180
     assert resolved.motion_defaults["PickUp"]["lift_height"] == pytest.approx(0.11)
+
+
+def test_v7_policy_snapshot_drops_legacy_gripper_geometry() -> None:
+    snapshot = default_runtime_policy("dual_ur10").as_mapping()
+    snapshot["schema_version"] = "action_engine_runtime_policy_v7"
+    snapshot["grasp"].update(
+        {
+            "min_open_length": 0.01,
+            "max_open_length": 0.15,
+            "finger_length": 0.13,
+        }
+    )
+    payload = json.dumps(
+        snapshot,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+    resolved = resolve_agent_runtime_policy(
+        {
+            "robot_profile": "dual_ur10",
+            "runtime_policy": snapshot,
+            "runtime_policy_hash": hashlib.sha256(payload).hexdigest(),
+        }
+    )
+
+    assert resolved.schema_version == "action_engine_runtime_policy_v8"
+    assert "min_open_length" not in resolved.grasp
+    assert "max_open_length" not in resolved.grasp
+    assert "finger_length" not in resolved.grasp
 
 
 def test_narrow_v1_policy_snapshot_is_migrated_to_complete_runtime_policy() -> None:
@@ -354,7 +389,7 @@ def test_v3_policy_snapshot_is_migrated_with_default_planner_policy() -> None:
         }
     )
 
-    assert resolved.schema_version == "action_engine_runtime_policy_v7"
+    assert resolved.schema_version == "action_engine_runtime_policy_v8"
     assert resolved.planner == expected.planner
 
 

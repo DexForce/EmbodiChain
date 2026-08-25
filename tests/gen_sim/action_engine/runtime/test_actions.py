@@ -35,6 +35,7 @@ from embodichain.gen_sim.action_engine.runtime.models import (
     GroundedAction,
 )
 from embodichain.gen_sim.action_engine.runtime.state import ExecutionState
+from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
     ActionBinding,
@@ -419,6 +420,7 @@ def _planner_env(
     *,
     table: Any | None = None,
     rigid_objects: dict[str, Any] | None = None,
+    gripper_model: str = "pgi",
 ) -> SimpleNamespace:
     entities = dict(rigid_objects or {})
     if table is not None:
@@ -434,6 +436,7 @@ def _planner_env(
         right_eef_joints=[6, 7],
         open_state=torch.zeros(2),
         close_state=torch.ones(2),
+        agent_gripper_model=gripper_model,
         get_agent_arm_control_part=lambda is_left: (
             "physical_left_arm" if is_left else "physical_right_arm"
         ),
@@ -661,7 +664,7 @@ def test_coordinated_pickment_geometry_candidates_are_deterministic_for_tray() -
 
 
 def test_grasp_generators_follow_mainline_service_contract() -> None:
-    adapter = AtomicActionAdapter(_planner_env())
+    adapter = AtomicActionAdapter(_planner_env(gripper_model="pgi"))
 
     generators = adapter._grasp_pose_generators()
 
@@ -669,11 +672,82 @@ def test_grasp_generators_follow_mainline_service_contract() -> None:
     generator = generators["physical_left_eef"]
     assert generators["physical_right_eef"] is generator
     assert isinstance(generator, AntipodalGraspPoseGenerator)
+    assert generator.gripper_model.model_id == "dh_pgi_140_80"
+    assert generator.gripper_model.max_opening_width == pytest.approx(0.100)
+    assert generator.gripper_model.finger_length == pytest.approx(0.10)
+    assert generator.collision_cfg.opening_margin == pytest.approx(0.03)
     assert generator.algorithm_cfg.sample_count == 10000
     assert generator.algorithm_cfg.approach_direction_samples == 4
     assert generator.algorithm_cfg.max_candidates == 500
     assert generator.collision_cfg.max_decomposition_hulls == 16
     assert generator.collision_cfg.filter_ground_collision is True
+
+
+def test_robotiq_grasp_generator_preserves_existing_geometry() -> None:
+    adapter = AtomicActionAdapter(_planner_env(gripper_model="robotiq"))
+
+    generators = adapter._grasp_pose_generators()
+    generator = generators["physical_left_eef"]
+
+    assert generators["physical_right_eef"] is generator
+    assert generator.gripper_model.model_id == "robotiq_arg2f_140"
+    assert generator.gripper_model.max_opening_width == pytest.approx(0.15)
+    assert generator.gripper_model.finger_length == pytest.approx(0.13)
+    assert generator.collision_cfg.opening_margin == pytest.approx(0.01)
+
+
+@pytest.mark.parametrize("gripper_model", ["pgi", "robotiq"])
+def test_control_profiles_use_selected_gripper_joint_semantics(
+    gripper_model: str,
+) -> None:
+    selected = get_gripper_profile(gripper_model)
+    hand_dof = len(selected.open_positions)
+    joint_ids = {
+        "physical_left_arm": [0, 1],
+        "physical_left_eef": list(range(2, 2 + hand_dof)),
+        "physical_right_arm": [2 + hand_dof, 3 + hand_dof],
+        "physical_right_eef": list(range(4 + hand_dof, 4 + 2 * hand_dof)),
+    }
+    robot = SimpleNamespace(
+        uid="profile_robot",
+        dof=4 + 2 * hand_dof,
+        control_parts=joint_ids,
+        get_joint_ids=lambda *, name: list(joint_ids[name]),
+    )
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        robot=robot,
+        sim=SimpleNamespace(get_rigid_object=lambda _uid: None),
+        agent_gripper_model=gripper_model,
+        open_state=torch.tensor(selected.open_positions),
+        close_state=torch.tensor(selected.close_positions),
+        get_agent_arm_control_part=lambda is_left: (
+            "physical_left_arm" if is_left else "physical_right_arm"
+        ),
+        get_agent_eef_control_part=lambda is_left: (
+            "physical_left_eef" if is_left else "physical_right_eef"
+        ),
+    )
+
+    profiles = AtomicActionAdapter(env)._control_profiles()
+
+    assert set(profiles) == {"physical_left_eef", "physical_right_eef"}
+    for command_profile in profiles.values():
+        open_qpos = command_profile.commands["open"].resolve(
+            num_envs=1,
+            control_dof=hand_dof,
+            device="cpu",
+        )
+        grasp_qpos = command_profile.commands["grasp"].resolve(
+            num_envs=1,
+            control_dof=hand_dof,
+            device="cpu",
+        )
+        torch.testing.assert_close(open_qpos[0], torch.tensor(selected.open_positions))
+        torch.testing.assert_close(
+            grasp_qpos[0], torch.tensor(selected.close_positions)
+        )
 
 
 def test_coordinated_grasp_generator_honors_ground_filter_policy() -> None:
@@ -1173,6 +1247,7 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
     )
     assert outcome.planner_trace["primary_action_diagnostics"]["marker"] == 1.0
     assert outcome.planner_trace["fallback_action_diagnostics"]["marker"] == 2.0
+    assert outcome.planner_trace["gripper_model"] == "pgi"
 
 
 def test_collision_required_cleanup_does_not_use_unsafe_fallback(
