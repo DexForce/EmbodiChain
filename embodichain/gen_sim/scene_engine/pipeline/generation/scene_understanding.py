@@ -45,11 +45,13 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils im
     render_image_without_masks,
     render_numbered_mask_candidates,
     save_binary_mask,
+    save_visible_rgba_crop,
     union_overlapping_mask_candidates,
 )
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_VISIBLE_RGBA_IMAGE_SIZE = (512, 512)
 _SYSTEM_PROMPT = """You inspect one tabletop-scene image.
 Identify the main table and every visible, physically distinct object that should
 be segmented and later generated as an independent 3D asset.
@@ -79,26 +81,39 @@ Rules:
    Structural direction words are allowed when they describe the object itself:
    "bottle with a black cap on top" is valid, while "bottle on the left of the
    table" is not.
+9. is_articulated is true only for articulated objects with functional movable
+   parts that matter in simulation. Typical true examples are a microwave with
+   a door, cabinet, button, or drawer. Treat every other object as false unless
+   its independently movable links or joints are clearly visible; in particular,
+   rigid objects such as bottles, mugs, bowls, books, utensils, and boxes are false.
 
 Return JSON only: no Markdown, comments, or prose outside this exact schema:
 {
   "table": {
     "category": "coffee_table",
     "name": "light wood coffee table",
-    "description": "low rectangular light wood coffee table with a smooth wood surface"
+    "description": "low rectangular light wood coffee table with a smooth wood surface",
+    "is_articulated": false
   },
   "assets": [
     {
       "category": "mug",
       "name": "blue ceramic mug",
-      "description": "small blue ceramic mug with a curved handle"
+      "description": "small blue ceramic mug with a curved handle",
+      "is_articulated": false
+    },
+    {
+      "category": "drawer",
+      "name": "white storage drawer",
+      "description": "white rectangular storage drawer with a horizontal pull handle",
+      "is_articulated": true
     }
   ]
 }
 For two identical blue mugs, output two asset entries with the same category,
 name, and description. Do not infer objects that are not visible. Use an empty
 assets array when no objects are visible. Every field must be a non-empty
-string."""
+string. is_articulated must be a boolean."""
 
 _USER_PROMPT = "Analyze the provided image and return only the required JSON object."
 
@@ -490,18 +505,19 @@ def _parse_scene_object_fields(
     value: object,
     *,
     field_name: str,
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     if not isinstance(value, dict) or set(value) != {
         "category",
         "name",
         "description",
+        "is_articulated",
     }:
         raise ValueError(
             f"VLM JSON key {field_name} must contain exactly category, name, and "
-            "description."
+            "description, and is_articulated."
         )
 
-    fields = {}
+    fields: dict[str, str | bool] = {}
     for key in ("category", "name", "description"):
         raw_value = value[key]
         if not isinstance(raw_value, str) or not raw_value.strip():
@@ -510,7 +526,14 @@ def _parse_scene_object_fields(
             )
         fields[key] = raw_value.strip()
 
-    if not _CATEGORY_PATTERN.fullmatch(fields["category"]):
+    is_articulated = value["is_articulated"]
+    if not isinstance(is_articulated, bool):
+        raise ValueError(f"VLM JSON key {field_name}.is_articulated must be a boolean.")
+    fields["is_articulated"] = is_articulated
+
+    category = fields["category"]
+    assert isinstance(category, str)
+    if not _CATEGORY_PATTERN.fullmatch(category):
         raise ValueError(
             f"VLM JSON key {field_name}.category must be a lower-case snake_case "
             "class name."
@@ -539,8 +562,12 @@ def _segment_scene(
     masks_output_root = (
         Path(stage_output_root) / "masks"
     )  # Keeps the validated masked images of each assets (include the table)
+    object_images_output_root = (
+        Path(stage_output_root) / "object_images"
+    )  # Keeps fixed-size RGBA visual observations outside the debug directory.
     debug_output_root.mkdir()
     masks_output_root.mkdir()
+    object_images_output_root.mkdir()
 
     # Segment the table and assets with VLM validation separately.
     _segment_assets(
@@ -574,6 +601,12 @@ def _segment_scene(
         vlm_client=vlm_client,
         image_segmentation_client=image_segmentation_client,
     )
+    # Save the visible RGBA observations.
+    _save_visible_rgba_observations(
+        image_path=image_path,
+        output_root=object_images_output_root,
+        scene=scene,
+    )
     asset_masks: list[tuple[str, str]] = []
     for asset in scene.assets:
         if asset.mask_path is None:
@@ -584,6 +617,28 @@ def _segment_scene(
         asset_masks=asset_masks,
         output_path=Path(masks_output_root) / "asset_masks_with_ids.png",
     )
+
+
+def _save_visible_rgba_observations(
+    *,
+    image_path: str | Path,
+    output_root: str | Path,
+    scene: Scene,
+) -> None:
+    """Save visual evidence only for objects with a validated binary mask."""
+    for scene_object in scene.objects:
+        # No mask means no trustworthy image observation; later tools can use semantics instead.
+        scene_object.visible_rgba_path = None
+        if scene_object.mask_path is None:
+            continue
+        scene_object.visible_rgba_path = str(
+            save_visible_rgba_crop(
+                image_path=image_path,
+                mask_path=scene_object.mask_path,
+                output_path=Path(output_root) / f"{scene_object.id}_rgba.png",
+                output_size=_VISIBLE_RGBA_IMAGE_SIZE,
+            )
+        )
 
 
 def _segment_table(

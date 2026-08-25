@@ -146,6 +146,7 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
         physics=_physics("dynamic"),
     )
     asset.center_xy = [0.25, -0.5]
+    asset.is_articulated = True
 
     scene = Scene(objects=[table, asset])
     export_path = SceneExporter(
@@ -163,6 +164,7 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert entry["uid"] == "cup"
     assert entry["category"] == "asset"
     assert entry["name"] == "cup"
+    assert entry["is_articulated"] is True
     assert entry["body_type"] == "dynamic"
     assert entry["init_pos"] == [1.0, -3.0, 2.0]
     assert entry["body_scale"] == [1.0, 2.0, 3.0]
@@ -194,6 +196,7 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert [asset.id for asset in imported_scene.assets] == ["cup"]
     assert imported_scene.assets[0].category == "asset"
     assert imported_scene.assets[0].name == "cup"
+    assert imported_scene.assets[0].is_articulated is True
     assert imported_graph.to_dict() == _scene_graph(scene).to_dict()
 
 
