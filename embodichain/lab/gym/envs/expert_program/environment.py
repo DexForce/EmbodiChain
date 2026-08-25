@@ -683,9 +683,7 @@ class ExpertProgramEnvironmentAdapter:
         if self._registration is not None:
             expected_transport_ids = tuple(
                 declaration.transport_id
-                for declaration in (
-                    self._registration.catalog.runtime_transport_declarations
-                )
+                for declaration in self._registration.catalog.extensions.runtime_transports
             )
             include_joint_position = (
                 JointPositionGymTransportEncoder.transport_id in expected_transport_ids

@@ -341,7 +341,7 @@ Drawer likewise has one canonical integration, `ExpertProgramOpenDrawer-v1`.
 | Environment ID | Declarative path | Atomic path | Application acceptance |
 |---|---|---|---|
 | `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; the task installs no contact or constraint observer | standard `object_near_target` validator checks the measured cube position against the selected cyclic target; physical rollout remains unqualified without grasp evidence |
-| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call with a strict executable-free payload | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal` and `SlideOptions` for the live drawer-handle link | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
+| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call whose executable-free payload names only the drawer handle | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal`; the selected policy preset is the sole owner of `SlideOptions` | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
 
 Both configurations load their Expert Program through the top-level
 `expert_program_path`, bind the same UR5 parallel-gripper embodiment explicitly,

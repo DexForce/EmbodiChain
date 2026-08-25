@@ -1637,7 +1637,7 @@ def test_standard_registration_owns_and_freezes_live_runtime_assembly() -> None:
     assert factory.expert_program_registration is registration
     assert assembly.command_encoder.transport_ids == tuple(
         declaration.transport_id
-        for declaration in registration.catalog.runtime_transport_declarations
+        for declaration in registration.catalog.extensions.runtime_transports
     )
     assert assembly.command_encoder.is_frozen
 

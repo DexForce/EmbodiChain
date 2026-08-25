@@ -36,7 +36,6 @@ from embodichain.lab.sim.atomic_actions import (
     EndpointTrackingFeedbackAddress,
     GRASP_CAPABILITY,
     JOINT_POSITION_CHANNEL,
-    SkillDescriptor,
 )
 from embodichain.lab.sim.atomic_actions.primitives import BUILTIN_ACTION_TYPES
 from embodichain.lab.sim.atomic_actions.tracking import (
@@ -100,10 +99,7 @@ from .decoder import (
 )
 from .bridge import RuntimeTransportActionEncoder
 from .extensions import (
-    EndpointAdapterDeclaration,
     ParallelCommandSafetyValidatorFactory,
-    ParallelSafetyDeclaration,
-    RuntimeTransportDeclaration,
     StandardExtensionDeclarations,
     build_standard_extension_declarations,
     validate_immutable_extension_declaration,
@@ -425,16 +421,8 @@ class ExpertProgramIntegrationCatalog:
     call_catalog: SemanticCallCatalog
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]]
     settle_preset_ids: frozenset[str]
-    endpoint_adapter_declarations: Mapping[
-        type[ResourceEndpoint], EndpointAdapterDeclaration
-    ]
-    runtime_transport_declarations: tuple[RuntimeTransportDeclaration, ...]
-    parallel_safety_declaration: ParallelSafetyDeclaration | None
+    extensions: StandardExtensionDeclarations
     fingerprint: str
-    _required_skills: Mapping[str, SkillDescriptor] = field(
-        repr=False,
-        compare=False,
-    )
 
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
@@ -452,36 +440,18 @@ class ExpertProgramIntegrationCatalog:
             "relation_grounder_keys",
             _snapshot_relation_grounder_keys(self.relation_grounder_keys),
         )
-        extensions = StandardExtensionDeclarations(
-            endpoint_adapters=self.endpoint_adapter_declarations,
-            runtime_transports=self.runtime_transport_declarations,
-            parallel_safety=self.parallel_safety_declaration,
-        )
+        if type(self.extensions) is not StandardExtensionDeclarations:
+            raise TypeError("extensions must be exactly StandardExtensionDeclarations.")
         profile_endpoint_types = frozenset(
             type(endpoint)
             for resource in self.robot_profile.resources.values()
             for endpoint in resource.endpoints.values()
         )
-        if profile_endpoint_types != frozenset(extensions.endpoint_adapters):
+        if profile_endpoint_types != frozenset(self.extensions.endpoint_adapters):
             raise ValueError(
-                "endpoint_adapter_declarations must cover every exact robot "
+                "extensions.endpoint_adapters must cover every exact robot "
                 "profile endpoint type and no others."
             )
-        object.__setattr__(
-            self,
-            "endpoint_adapter_declarations",
-            extensions.endpoint_adapters,
-        )
-        object.__setattr__(
-            self,
-            "runtime_transport_declarations",
-            extensions.runtime_transports,
-        )
-        object.__setattr__(
-            self,
-            "parallel_safety_declaration",
-            extensions.parallel_safety,
-        )
         if self.robot_profile.profile_id != self.robot_profile_id:
             raise ValueError("robot_profile_id must match robot_profile.profile_id.")
         preset_ids = frozenset(self.settle_preset_ids)
@@ -496,11 +466,6 @@ class ExpertProgramIntegrationCatalog:
             )
         ):
             raise ValueError("fingerprint must be a lowercase SHA-256 digest.")
-        object.__setattr__(
-            self,
-            "_required_skills",
-            MappingProxyType(dict(self._required_skills)),
-        )
 
     def validate_integration(
         self,
@@ -658,7 +623,7 @@ class ExpertProgramIntegrationCatalog:
         for segment in compiled.iter_segments():
             if (
                 segment.parallel_block is not None
-                and self.parallel_safety_declaration is None
+                and self.extensions.parallel_safety is None
             ):
                 raise ExpertProgramValidationError(
                     "parallel_safety_factory_not_registered",
@@ -686,7 +651,10 @@ class ExpertProgramIntegrationCatalog:
         """Require the live engine to expose every statically selected skill."""
         if not isinstance(engine, AtomicActionEngine):
             raise TypeError("engine must be an AtomicActionEngine.")
-        for skill_id, expected in self._required_skills.items():
+        for descriptor in self.call_catalog.descriptors.values():
+            skill_id = descriptor.skill_id
+            expected = descriptor.target_descriptor
+            assert skill_id is not None and expected is not None
             actual = engine.skills.get(skill_id)
             if actual != expected:
                 raise IntegrationFingerprintMismatch(
@@ -714,7 +682,7 @@ class ExpertProgramIntegrationCatalog:
 
         transport_owner_by_target_type = {
             target_type: transport
-            for transport in self.runtime_transport_declarations
+            for transport in self.extensions.runtime_transports
             for target_type in transport.target_types
         }
         expected_resource_ids = frozenset(self.robot_profile.resources)
@@ -757,7 +725,7 @@ class ExpertProgramIntegrationCatalog:
                         "registered robot profile."
                     )
                 endpoint_type = type(endpoint.endpoint)
-                declaration = self.endpoint_adapter_declarations.get(endpoint_type)
+                declaration = self.extensions.endpoint_adapters.get(endpoint_type)
                 if declaration is None:
                     raise IntegrationFingerprintMismatch(
                         f"Bound endpoint {location!r} has undeclared exact type "
@@ -1072,7 +1040,6 @@ class SimulationExpertProgramRegistration:
             if (descriptor := action_type.descriptor()).agent_visible
             and descriptor.binding_contract is not None
         }
-        required_skills: dict[str, SkillDescriptor] = {}
         for descriptor in self.call_catalog.descriptors.values():
             target = descriptor.target_descriptor
             installed = builtin_skills.get(descriptor.skill_id)
@@ -1082,7 +1049,6 @@ class SimulationExpertProgramRegistration:
                     f"{descriptor.skill_id!r}, which is not installed by the "
                     "standard simulation factory."
                 )
-            required_skills[descriptor.skill_id] = target
 
         fingerprint = _digest(
             _registration_payload(
@@ -1112,11 +1078,8 @@ class SimulationExpertProgramRegistration:
                 call_catalog=self.call_catalog,
                 relation_grounder_keys=relation_grounder_keys,
                 settle_preset_ids=frozenset(settle_presets),
-                endpoint_adapter_declarations=extensions.endpoint_adapters,
-                runtime_transport_declarations=extensions.runtime_transports,
-                parallel_safety_declaration=extensions.parallel_safety,
+                extensions=extensions,
                 fingerprint=fingerprint,
-                _required_skills=required_skills,
             ),
         )
         object.__setattr__(self, "_parallel_safety_validator_history", [])
