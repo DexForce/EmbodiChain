@@ -45,9 +45,9 @@ Counting rule: `lines` is the number of raw LF (`0x0A`) bytes; `bytes` is the ra
 
 | Task | Baseline lines | Current lines | Line delta | Baseline bytes | Current bytes | Byte delta | Current source files |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Cube | 598 | 166 | -432 (-72.2%) | 23912 | 5645 | -18267 (-76.4%) | `embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py`<br>`embodichain_tasks/configs/expert_program/repeated_pick_place.yaml` |
-| Drawer | 245 | 348 | +103 (+42.0%) | 8833 | 12600 | +3767 (+42.6%) | `embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py`<br>`embodichain_tasks/configs/expert_program/open_drawer.yaml` |
-| Total | 843 | 514 | -329 (-39.0%) | 32745 | 18245 | -14500 (-44.3%) | the four files above |
+| Cube | 598 | 200 | -398 (-66.6%) | 23912 | 6690 | -17222 (-72.0%) | `embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py`<br>`embodichain_tasks/configs/expert_program/repeated_pick_place.yaml` |
+| Drawer | 245 | 313 | +68 (+27.8%) | 8833 | 11352 | +2519 (+28.5%) | `embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py`<br>`embodichain_tasks/configs/expert_program/open_drawer.yaml` |
+| Total | 843 | 513 | -330 (-39.1%) | 32745 | 18042 | -14703 (-44.9%) | the four files above |
 
 ## Demo Success Measurement
 

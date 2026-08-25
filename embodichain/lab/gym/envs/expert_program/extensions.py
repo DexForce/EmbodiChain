@@ -794,8 +794,6 @@ def build_standard_extension_declarations(
     if ControlPartEndpoint not in used_endpoint_types:
         installed_by_type.pop(ControlPartEndpoint)
 
-    _validate_builtin_routes(installed_by_type)
-
     builtin_transport = declare_runtime_transport(JointPositionGymTransportEncoder())
     custom_transports = tuple(
         declare_runtime_transport(transport) for transport in runtime_transports
@@ -807,16 +805,14 @@ def build_standard_extension_declarations(
             "Runtime transport declarations contain a duplicate transport ID or "
             "attempt to override the built-in joint-position transport."
         )
-    transport_by_id = {
-        declaration.transport_id: declaration for declaration in transport_declarations
-    }
+    declared_transport_ids = set(transport_ids)
     required_transport_ids = frozenset(
         transport_id
         for declaration in installed_by_type.values()
         for transport_id in declaration.runtime_transport_ids
     )
-    missing_transports = required_transport_ids - set(transport_by_id)
-    unused_transports = set(transport_by_id) - required_transport_ids
+    missing_transports = required_transport_ids - declared_transport_ids
+    unused_transports = declared_transport_ids - required_transport_ids
     unused_transports.discard(JointPositionTarget.TRANSPORT_ID)
     if missing_transports or unused_transports:
         raise ValueError(
@@ -826,57 +822,6 @@ def build_standard_extension_declarations(
         )
     if JointPositionTarget.TRANSPORT_ID not in required_transport_ids:
         transport_declarations = custom_transports
-        transport_by_id.pop(JointPositionTarget.TRANSPORT_ID)
-
-    target_owners: dict[type[RuntimeEndpointTarget], str] = {}
-    for transport in transport_declarations:
-        for target_type in transport.target_types:
-            previous = target_owners.get(target_type)
-            if previous is not None:
-                raise ValueError(
-                    f"Runtime target type {_qualified_name(target_type)!r} is "
-                    f"declared by both transports {previous!r} and "
-                    f"{transport.transport_id!r}."
-                )
-            target_owners[target_type] = transport.transport_id
-
-    adapter_target_types: set[type[RuntimeEndpointTarget]] = set()
-    for adapter in installed_by_type.values():
-        for transport_id in adapter.runtime_transport_ids:
-            if transport_id not in transport_by_id:
-                raise ValueError(
-                    f"Endpoint adapter {adapter.adapter_id!r} requires missing "
-                    f"transport {transport_id!r}."
-                )
-        per_transport_counts = {
-            transport_id: 0 for transport_id in adapter.runtime_transport_ids
-        }
-        for target_type in adapter.runtime_target_types:
-            owner = target_owners.get(target_type)
-            if owner is None or owner not in adapter.runtime_transport_ids:
-                raise ValueError(
-                    f"Endpoint adapter {adapter.adapter_id!r} target type "
-                    f"{_qualified_name(target_type)!r} is not covered by one of "
-                    f"its transports {sorted(adapter.runtime_transport_ids)}."
-                )
-            per_transport_counts[owner] += 1
-            adapter_target_types.add(target_type)
-        unused_adapter_transport_ids = sorted(
-            transport_id
-            for transport_id, count in per_transport_counts.items()
-            if count == 0
-        )
-        if unused_adapter_transport_ids:
-            raise ValueError(
-                f"Endpoint adapter {adapter.adapter_id!r} declares unused "
-                f"transport IDs {unused_adapter_transport_ids}."
-            )
-    extra_transport_target_types = set(target_owners) - adapter_target_types
-    if extra_transport_target_types:
-        raise ValueError(
-            "Runtime transports declare target types unused by endpoint adapters: "
-            f"{sorted(_qualified_name(value) for value in extra_transport_target_types)}."
-        )
 
     parallel_safety = (
         None
@@ -884,7 +829,9 @@ def build_standard_extension_declarations(
         else declare_parallel_safety_factory(parallel_safety_factory)
     )
     if parallel_safety is not None:
-        installed_transport_ids = frozenset(transport_by_id)
+        installed_transport_ids = frozenset(
+            declaration.transport_id for declaration in transport_declarations
+        )
         if parallel_safety.supported_transport_ids != installed_transport_ids:
             raise ValueError(
                 "parallel_safety_factory must support exactly the registered "

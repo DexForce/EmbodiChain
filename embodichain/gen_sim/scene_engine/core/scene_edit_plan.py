@@ -28,6 +28,8 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
     TABLE_OBJECT_ID,
 )
 
+__all__ = ["SceneEditOperation", "SceneEditPlan"]
+
 SceneEditOperationType = Literal["add", "move", "delete"]
 
 

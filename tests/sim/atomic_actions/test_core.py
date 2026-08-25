@@ -203,6 +203,7 @@ def _action_plan(
     tracking_policy: TrackingPolicy | None = None,
     tracking: TimedTrackingSequence | None = None,
     expected_effects: StateDelta | None = None,
+    effect_candidates: StateDelta | None = None,
     effect_verification: EffectVerificationRequirement | None = None,
     diagnostics: PlannerDiagnostics | None = None,
     scene_dependencies: tuple[str, ...] = (),
@@ -236,6 +237,9 @@ def _action_plan(
             else scene_dependency_monitor_until
         ),
         expected_effects=StateDelta() if expected_effects is None else expected_effects,
+        effect_candidates=(
+            StateDelta() if effect_candidates is None else effect_candidates
+        ),
         effect_verification=effect_verification,
     )
 
@@ -311,6 +315,36 @@ def test_action_plan_implicitly_verifies_nonempty_state_delta() -> None:
     assert implicit.effect_verification is None
     assert implicit.requires_effect_verification is True
     assert no_effect.requires_effect_verification is False
+
+
+def test_action_plan_owns_nonterminal_attachment_candidates() -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=1,
+    )
+    held = _held(batch_size=1)
+    candidates = StateDelta(held_object_updates={"arm": held})
+
+    plan = _action_plan(commands, effect_candidates=candidates)
+    owned = plan.effect_candidates.held_object_updates["arm"]
+
+    assert owned is not held
+    assert isinstance(owned, HeldObjectState)
+    assert plan.requires_effect_verification is False
+    assert plan.snapshot().effect_candidates is not plan.effect_candidates
+
+
+def test_action_plan_rejects_effect_candidate_removals() -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=1,
+    )
+
+    with pytest.raises(ValueError, match="attached held-object states"):
+        _action_plan(
+            commands,
+            effect_candidates=StateDelta(held_object_updates={"arm": None}),
+        )
 
 
 def test_action_plan_rejects_untyped_effect_verification_requirement() -> None:
