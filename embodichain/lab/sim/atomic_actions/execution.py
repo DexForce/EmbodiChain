@@ -2900,6 +2900,9 @@ class ExecutionSession:
         for key, candidate in self._plan.expected_effects.held_object_updates.items():
             if candidate is not None and candidate.semantics.entity_id is not None:
                 held_relations.add((key, candidate.semantics.entity_id))
+        for key, candidate in self._plan.effect_candidates.held_object_updates.items():
+            if candidate is not None and candidate.semantics.entity_id is not None:
+                held_relations.add((key, candidate.semantics.entity_id))
 
         related_keys = {key for key, _ in held_relations}
         coordinated_relations: set[tuple[str, str, str]] = set()

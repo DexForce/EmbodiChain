@@ -932,7 +932,6 @@ embodichain.lab.sim.skills.compiler
 .. autosummary::
 
    AnalyzedSemanticCall
-   ContainerRelationTargetGrounder
    GroundedHeldObjectGuard
    GroundedPhaseEffectGate
    GroundedSemanticCall
@@ -949,7 +948,6 @@ embodichain.lab.sim.skills.compiler
    SemanticRelationTarget
    SemanticSkillCompiler
    SemanticWorkflow
-   SupportSurfaceRelationTargetGrounder
 
 embodichain.lab.sim.skills.integration
 --------------------------------------

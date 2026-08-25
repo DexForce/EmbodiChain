@@ -514,6 +514,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         success: bool | torch.Tensor,
         trajectory: TimedTrajectory,
         expected_effects: StateDelta | None = None,
+        effect_candidates: StateDelta | None = None,
         effect_verification: EffectVerificationRequirement | None = None,
         replannable: bool = True,
         diagnostics: PlannerDiagnostics | None = None,
@@ -529,6 +530,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             success: Per-environment planning success or scalar planner result.
             trajectory: Full-robot trajectory with explicit timing.
             expected_effects: Symbolic effects to verify after execution.
+            effect_candidates: Planned attachment baselines used by phase gates
+                and in-flight held-object guards without committing task state.
             effect_verification: Optional explicit physical-effect boundary.
                 Use this when verification is required without a symbolic task-
                 state delta.
@@ -579,6 +582,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             success=success_mask,
             commands=commands,
             expected_effects=expected_effects,
+            effect_candidates=effect_candidates,
             effect_verification=effect_verification,
             replannable=replannable,
             diagnostics=diagnostics,
@@ -596,6 +600,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         success: bool | torch.Tensor,
         commands: TimedCommandSequence,
         expected_effects: StateDelta | None = None,
+        effect_candidates: StateDelta | None = None,
         effect_verification: EffectVerificationRequirement | None = None,
         replannable: bool = True,
         diagnostics: PlannerDiagnostics | None = None,
@@ -616,6 +621,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             success: Per-environment planning success or scalar planner result.
             commands: Transport-neutral command sequence for the action.
             expected_effects: Symbolic effects to verify after execution.
+            effect_candidates: Planned attachment baselines used by phase gates
+                and in-flight held-object guards without committing task state.
             effect_verification: Optional explicit physical-effect boundary.
             replannable: Whether the execution runtime may replan this action.
             diagnostics: Optional retained planner diagnostics.
@@ -688,6 +695,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             collision_world_sensitive=self._uses_collision_world(request, context),
             replannable=replannable,
             expected_effects=expected_effects or StateDelta(),
+            effect_candidates=effect_candidates or StateDelta(),
             effect_verification=effect_verification,
             invocation_id=request.invocation_id,
             invocation_revision=request.revision,

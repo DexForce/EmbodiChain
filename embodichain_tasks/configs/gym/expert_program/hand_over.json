@@ -80,28 +80,39 @@
             "stiffness": {
                 "left_joint[0-9]": 10000.0,
                 "right_joint[0-9]": 10000.0,
-                "left_gripper_finger1_joint_1": 2000.0,
-                "right_gripper_finger1_joint_1": 2000.0,
+                "left_gripper_finger1_joint_1": 1000.0,
+                "right_gripper_finger1_joint_1": 1000.0,
                 "left_gripper_finger2_joint_1": 0.0,
                 "right_gripper_finger2_joint_1": 0.0
             },
             "damping": {
                 "left_joint[0-9]": 1000.0,
                 "right_joint[0-9]": 1000.0,
-                "left_gripper_finger1_joint_1": 50.0,
-                "right_gripper_finger1_joint_1": 50.0,
+                "left_gripper_finger1_joint_1": 100.0,
+                "right_gripper_finger1_joint_1": 100.0,
                 "left_gripper_finger2_joint_1": 0.0,
                 "right_gripper_finger2_joint_1": 0.0
             },
             "max_effort": {
                 "left_joint[0-9]": 100000.0,
                 "right_joint[0-9]": 100000.0,
-                "left_gripper_finger1_joint_1": 140.0,
-                "right_gripper_finger1_joint_1": 140.0,
+                "left_gripper_finger1_joint_1": 10000.0,
+                "right_gripper_finger1_joint_1": 10000.0,
                 "left_gripper_finger2_joint_1": 0.0,
                 "right_gripper_finger2_joint_1": 0.0
             },
             "drive_type": "force"
+        },
+        "link_attrs": {
+            "gripper_fingers": {
+                "link_names_expr": [
+                    "(left|right)_gripper_finger[12]_link_1"
+                ],
+                "attrs": {
+                    "dynamic_friction": 2.0,
+                    "static_friction": 2.0
+                }
+            }
         },
         "solver_cfg": {
             "left_arm": {

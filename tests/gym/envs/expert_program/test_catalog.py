@@ -384,11 +384,8 @@ def _place_relation_catalog(
         call_catalog=base.call_catalog,
         relation_grounder_keys=grounder_keys,
         settle_preset_ids=base.settle_preset_ids,
-        endpoint_adapter_declarations=base.endpoint_adapter_declarations,
-        runtime_transport_declarations=base.runtime_transport_declarations,
-        parallel_safety_declaration=base.parallel_safety_declaration,
+        extensions=base.extensions,
         fingerprint="0" * 64,
-        _required_skills={},
     )
 
 
@@ -475,12 +472,12 @@ def test_catalog_declares_builtin_endpoint_and_ordered_transport_contracts() -> 
     """The standard provider-free catalog contains its exact built-in wiring."""
     catalog = _registration().catalog
 
-    adapter = catalog.endpoint_adapter_declarations[ControlPartEndpoint]
+    adapter = catalog.extensions.endpoint_adapters[ControlPartEndpoint]
 
     assert adapter.adapter_id == "control_part"
     assert adapter.runtime_transport_ids == frozenset({"robot.joint_position"})
     assert tuple(
-        value.transport_id for value in catalog.runtime_transport_declarations
+        value.transport_id for value in catalog.extensions.runtime_transports
     ) == ("robot.joint_position",)
 
 

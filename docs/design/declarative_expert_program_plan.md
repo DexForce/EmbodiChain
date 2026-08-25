@@ -386,7 +386,7 @@ and the dual-UR5 reference adds `HandOver-v1`.
 | Environment ID | Declarative path | Atomic path | Application acceptance |
 |---|---|---|---|
 | `ExpertProgramRepeatedPickPlace-v1` | schema-v2 `Repeat(Segment(Sequence(Pick, Place)))` with a cyclic pose target | built-in `PickUp` and `Place` through the semantic compiler; the task installs no contact or constraint observer | standard `object_near_target` validator checks the measured cube position against the selected cyclic target; physical rollout remains unqualified without grasp evidence |
-| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call with a strict executable-free payload | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal` and `SlideOptions` for the live drawer-handle link | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
+| `ExpertProgramOpenDrawer-v1` | registered `embodichain_tasks.open_drawer` call whose executable-free payload names only the drawer handle | a task-owned `RegisteredSemanticLowerer` produces the built-in `SlideGoal`; the selected policy preset is the sole owner of `SlideOptions` | standard `articulation_joint_position` validator checks the measured passive drawer joint against the configured threshold |
 | `HandOver-v1` | one `Segment(HandOver)` with a final object target | unified built-in `HandOver` over disjoint left/right arm-and-gripper resources, standalone grasp-pose generators, and physical gates/guards | rigid-object settling plus `object_near_target`; supported-simulation recovery qualification remains a later stack layer |
 
 Both configurations load their Expert Program through the top-level

@@ -86,6 +86,7 @@ def create_parallel_jaw_grasp_pose_generator(
     *,
     sample_count: int,
     opening_margin: float,
+    approach_direction_samples: int = 4,
     force_refresh: bool = False,
 ) -> AntipodalGraspPoseGenerator:
     """Create the shared antipodal service for the configured parallel jaws."""
@@ -98,7 +99,10 @@ def create_parallel_jaw_grasp_pose_generator(
 
     return AntipodalGraspPoseGenerator(
         DH_PGI_140_80_GRIPPER_MODEL,
-        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=sample_count),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+            sample_count=sample_count,
+            approach_direction_samples=approach_direction_samples,
+        ),
         collision_cfg=ParallelJawGraspCollisionCfg(
             opening_margin=opening_margin,
             point_sample_density=0.012,

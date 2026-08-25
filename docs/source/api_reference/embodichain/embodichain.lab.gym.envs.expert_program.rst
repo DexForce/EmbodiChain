@@ -13,8 +13,8 @@ embodichain.lab.gym.envs.expert_program
       ConfigPath
       ConfigPathPart
       CompiledProgram
-      ConfiguredHandOverPoseProvider
       ContainerAffordanceBinding
+      ConfiguredHandOverPoseProvider
       ControlPartCommandPreset
       ControlPartEndpointBinding
       ControlPartResourceBinding
@@ -298,6 +298,12 @@ use the core ``RobotResource`` type directly.
 .. autoclass:: AntipodalGraspAffordanceBinding
    :members:
 
+.. autoclass:: ContainerAffordanceBinding
+   :members:
+
+.. autoclass:: SupportSurfaceAffordanceBinding
+   :members:
+
 .. autoclass:: ControlPartCommandPreset
    :members:
 
@@ -314,12 +320,6 @@ use the core ``RobotResource`` type directly.
    :members:
 
 .. autoclass:: ConfiguredHandOverPoseProvider
-   :members:
-
-.. autoclass:: ContainerAffordanceBinding
-   :members:
-
-.. autoclass:: SupportSurfaceAffordanceBinding
    :members:
 
 .. autoclass:: SimulationSegmentPolicyPort
