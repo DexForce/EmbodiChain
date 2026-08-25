@@ -3686,7 +3686,7 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
     assert handover_pickup.target.semantics.affordance is semantics.affordance
 
 
-def test_pour_grounding_targets_receiver_and_requires_physical_contents() -> None:
+def test_pour_grounding_targets_receiver_without_physical_contents() -> None:
     task = {
         "schema_version": TASK_SPEC_SCHEMA,
         "task_id": "pour_grounding",
@@ -3700,7 +3700,6 @@ def test_pour_grounding_targets_receiver_and_requires_physical_contents() -> Non
                 "params": {
                     "source_role": "cup",
                     "target_role": "bin",
-                    "content_roles": ["ball"],
                     "required_arm": "right_arm",
                 },
                 "depends_on": [],
@@ -3711,14 +3710,23 @@ def test_pour_grounding_targets_receiver_and_requires_physical_contents() -> Non
         "oracle": {},
         "metadata": {},
     }
-    bindings = {"cup": "source", "bin": "target", "ball": "content"}
+    bindings = {"cup": "source", "bin": "target"}
     program = load_execution_program(instantiate_seed_graph(task, bindings))
     step = program.semantic_steps[0]
     edges = {edge.actions[0]["atomic_action_class"]: edge for edge in program.edges}
+    staging_edge = next(
+        edge
+        for edge in program.edges
+        if edge.actions[0]["atomic_action_class"] == "MoveHeldObject"
+        and edge.actions[0]["target_binding"].get("phase") == "final"
+    )
     source = _FakeEntity("source", _pose(-0.2, 0.0, 0.7), _box_vertices(0.05))
     target = _FakeEntity("target", _pose(0.2, 0.0, 0.7), _box_vertices(0.10))
-    content = _FakeEntity("content", _pose(-0.2, 0.0, 0.7), _box_vertices(0.01))
-    env = _FakeEnv({"source": source, "target": target, "content": content})
+    env = _FakeEnv({"source": source, "target": target})
+    env.agent_initial_object_poses = {
+        "source": source.get_local_pose(to_matrix=True),
+        "target": target.get_local_pose(to_matrix=True),
+    }
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(
             object_label="source",
@@ -3735,7 +3743,7 @@ def test_pour_grounding_targets_receiver_and_requires_physical_contents() -> Non
         edges["PickUp"].actions[0], step, arm="right_arm", state=state
     )
     staging = grounder.ground(
-        edges["MoveHeldObject"].actions[0],
+        staging_edge.actions[0],
         step,
         arm="right_arm",
         state=state,
@@ -3755,24 +3763,7 @@ def test_pour_grounding_targets_receiver_and_requires_physical_contents() -> Non
     assert isinstance(pouring.target, PourGoal)
     assert pouring.cfg["rotate_angle"] == pytest.approx(torch.pi / 2.0)
 
-    task["task_instances"][0]["params"]["content_roles"] = []
-    blocked = load_execution_program(
-        instantiate_seed_graph(task, {"cup": "source", "bin": "target"})
-    )
-    blocked_step = blocked.semantic_steps[0]
-    blocked_pour = next(
-        edge
-        for edge in blocked.edges
-        if edge.actions[0]["atomic_action_class"] == "Pour"
-    )
-    blocked_grounder = ActionGrounder(blocked, env, lambda _uid: semantics)
-    with pytest.raises(ValueError, match="independently observable"):
-        blocked_grounder.ground(
-            blocked_pour.actions[0],
-            blocked_step,
-            arm="right_arm",
-            state=state,
-        )
+    assert step.postcondition["verification"] == "action_completion"
 
 
 @pytest.mark.parametrize(

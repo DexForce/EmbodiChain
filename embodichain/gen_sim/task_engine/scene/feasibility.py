@@ -116,31 +116,6 @@ class FeasibilityBroker:
                             evidence={"action": str(action_name)},
                         )
                     )
-            if task_type == "E3":
-                runtime_observation = bool(
-                    manifest.get("adapter_capabilities", {}).get(
-                        "runtime_scene_observation", False
-                    )
-                )
-                checks.append(
-                    _check(
-                        "content_observation",
-                        step_id,
-                        "runtime_probe" if runtime_observation else "contradicted",
-                        (
-                            "Runtime scene observation can verify independently "
-                            "modeled contents after pouring."
-                            if runtime_observation
-                            else "E3 requires independently observable content "
-                            "bodies or fluid state; contents baked into one source "
-                            "mesh cannot prove physical transfer."
-                        ),
-                        evidence={
-                            "runtime_scene_observation": runtime_observation,
-                            "required_evidence": "content_inside_target_container",
-                        },
-                    )
-                )
             if task_type == "E8":
                 reference_id = f"{step_id}.object"
                 raw_uids = bindings.get(reference_id, ())

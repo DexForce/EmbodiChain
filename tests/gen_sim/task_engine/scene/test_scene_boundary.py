@@ -263,7 +263,7 @@ def test_planning_only_action_is_reported_as_contradicted(tmp_path: Path) -> Non
     assert any("planning-only" in blocker for blocker in report["blockers"])
 
 
-def test_e3_requires_runtime_content_observation_before_execution(
+def test_e3_does_not_require_runtime_content_observation_before_execution(
     tmp_path: Path,
 ) -> None:
     manifest = SceneEngineV1Adapter().adapt_prepared_scene(
@@ -279,15 +279,8 @@ def test_e3_requires_runtime_content_observation_before_execution(
         task_actions={"E3": ("PickUp", "MoveHeldObject", "Pour")},
     )
 
-    assert report["status"] == "contradicted"
-    assert report["remediation_class"] == "terminal"
-    assert any(
-        check["kind"] == "content_observation" and check["status"] == "contradicted"
-        for check in report["checks"]
-    )
-    assert any(
-        "baked into one source mesh" in blocker for blocker in report["blockers"]
-    )
+    assert report["status"] != "contradicted"
+    assert all(check["kind"] != "content_observation" for check in report["checks"])
 
 
 def test_e8_requires_explicit_setting_to_angle_mapping(tmp_path: Path) -> None:

@@ -135,8 +135,8 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
         ),
         "E3": _contract(
             "E3",
-            "Pick up when needed and pour contents from a source container "
-            "into a target container.",
+            "Pick up a source container, execute a tilt-and-restore pour over "
+            "a fixed target container, then place and home.",
             frozenset({"target", "relation", "required_arm"}),
             "rigid_object",
             frozenset({"graspable", "pourable"}),
