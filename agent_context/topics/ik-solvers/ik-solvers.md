@@ -143,7 +143,9 @@ class RobotCfg(ArticulationCfg):
 
 ### PinkSolver-specific
 
-- `variable_input_tasks` / `fixed_input_tasks`: lists of `pink.tasks.FrameTask` for QP optimisation.
+- `variable_input_tasks` contains exactly one `pink.tasks.FrameTask` targeted
+  by the single-pose IK API and may include other task types. Additional fixed
+  frame constraints belong in `fixed_input_tasks`.
 - `mesh_path`: path for Pinocchio URDF mesh loading.
 - `show_ik_warnings` / `fail_on_joint_limit_violation`: error-handling behaviour.
 - Supports single-pose and sequential batch IK while preserving one seed per
@@ -151,7 +153,7 @@ class RobotCfg(ArticulationCfg):
 - End-effector targets are interpreted as TCP poses; the configured TCP is
   removed before setting the controlled Pink frame target. Targets remain
   relative to `root_link_name` even when that link is offset from the URDF root.
-- Convergence is checked across all variable frame tasks. Maximum-iteration,
+- Convergence is checked against the single targeted variable FrameTask. Maximum-iteration,
   stagnation, and solver-exception exits report failure and preserve the
   corresponding input seed.
 - Adaptive controls (`stagnation_tolerance`, `stagnation_iterations`,

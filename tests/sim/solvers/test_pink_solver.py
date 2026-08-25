@@ -23,6 +23,9 @@ import numpy as np
 import pytest
 import torch
 
+pin = pytest.importorskip("pinocchio")
+pink = pytest.importorskip("pink")
+
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
@@ -223,7 +226,6 @@ class TestPinkSolverUnit:
 
     def test_zero_cost_frame_axes_do_not_block_convergence(self, tmp_path: Path):
         """Test unconstrained task axes are excluded from residual checks."""
-        pink = pytest.importorskip("pink")
         urdf_path = tmp_path / "planar_axis_costs.urdf"
         urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
         frame_task = pink.tasks.FrameTask(
@@ -248,6 +250,30 @@ class TestPinkSolverUnit:
 
         assert torch.all(success)
         assert torch.allclose(solution[:, 0], torch.zeros(1, 2))
+
+    def test_multiple_variable_frame_tasks_are_rejected(self, tmp_path: Path):
+        """Test the single-pose IK API rejects ambiguous frame targets."""
+        urdf_path = tmp_path / "planar_multiple_targets.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        frame_tasks = [
+            pink.tasks.FrameTask(
+                frame="tool",
+                position_cost=1.0,
+                orientation_cost=1.0,
+            )
+            for _ in range(2)
+        ]
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            variable_input_tasks=frame_tasks,
+            show_ik_warnings=False,
+        )
+
+        with pytest.raises(ValueError, match="exactly one FrameTask"):
+            cfg.init_solver(num_envs=1, device=torch.device("cpu"))
 
     def test_invalid_tcp_update_is_transactional(self, tmp_path: Path):
         """Test a singular TCP is rejected without replacing the active TCP."""
@@ -469,6 +495,29 @@ class TestPinkSolverUnit:
             solver.get_fk(solution[:, 0]), target, atol=1e-4, rtol=1e-4
         )
 
+    def test_posture_secondary_merit_uses_cost_once(self, tmp_path: Path):
+        """Test posture cost follows Pink's cost-squared objective scaling."""
+        urdf_path = tmp_path / "planar_posture_merit_cost.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        posture_task = NullSpacePostureTask(cost=1.0)
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            fixed_input_tasks=[posture_task],
+            show_ik_warnings=False,
+        )
+        solver = cfg.init_solver(num_envs=1, device=torch.device("cpu"))
+        posture_task.set_target(np.array([0.3, -0.2]))
+        solver.pink_cfg.update(np.zeros(2))
+
+        _, unit_cost_merit, _, _ = solver._task_metrics()
+        posture_task.cost = 2.0
+        _, doubled_cost_merit, _, _ = solver._task_metrics()
+
+        assert doubled_cost_merit == pytest.approx(4.0 * unit_cost_merit)
+
     def test_null_space_posture_task_rejects_unknown_entities(self, tmp_path: Path):
         """Test invalid joint and frame selectors fail with useful errors."""
         solver = self._make_solver(tmp_path / "planar_unknown.urdf")
@@ -484,8 +533,6 @@ class TestPinkSolverUnit:
 
     def test_null_space_posture_default_excludes_floating_base(self):
         """Test the default posture mask contains only actuated coordinates."""
-        pin = pytest.importorskip("pinocchio")
-        pink = pytest.importorskip("pink")
         model = pin.Model()
         root_id = model.addJoint(
             0,

@@ -189,8 +189,13 @@ class PinkSolver(BaseSolver):
         ]
         if not self._frame_tasks:
             raise ValueError("variable_input_tasks must contain at least one FrameTask")
-        self._frame_task_ids = {id(task) for task in self._frame_tasks}
+        if len(self._frame_tasks) != 1:
+            raise ValueError(
+                "PinkSolver expects exactly one FrameTask in variable_input_tasks; "
+                "additional FrameTask instances should be passed via fixed_input_tasks"
+            )
         self._target_task = self._frame_tasks[0]
+        self._frame_task_ids = {id(self._target_task)}
 
         pink_joint_names = self.robot.model.names.tolist()[1:]
         if self.joint_names:
@@ -539,7 +544,7 @@ class PinkSolver(BaseSolver):
             elif isinstance(task, NullSpacePostureTask):
                 jacobian = np.asarray(task.compute_jacobian(self.pink_cfg), dtype=float)
                 weighted_error = cost * float(task.gain) * error
-                controllable_gradient = jacobian.T @ (cost * weighted_error)
+                controllable_gradient = jacobian.T @ weighted_error
                 secondary_objective += 0.5 * float(
                     controllable_gradient @ controllable_gradient
                 )
