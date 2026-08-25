@@ -123,6 +123,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``control_dt.py``
 * ``pickup.py``
 * ``move_held_object.py``
+* ``pour.py``
 * ``place.py``
 * ``assemble.py``
 * ``press.py``
@@ -143,6 +144,7 @@ video under ``outputs/videos``:
    python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/control_dt.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/pour.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/assemble.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
 
@@ -307,6 +309,7 @@ must be resolved from the latest scene snapshot:
        EndEffectorPoseGoal,
        RecoveryPolicy,
        SceneEntityPose,
+       TrackingPolicy,
    )
 
    invocation = ActionInvocation(
@@ -320,8 +323,11 @@ must be resolved from the latest scene snapshot:
        ),
        recovery_policy=RecoveryPolicy(
            max_replans=3,
-           tracking_error_threshold=0.05,
            goal_translation_threshold=0.02,
+       ),
+       tracking_policy=TrackingPolicy.joint_position(
+           in_flight_max_abs_error=0.05,
+           terminal_max_abs_error=0.05,
        ),
    )
 
@@ -495,7 +501,7 @@ tracking and collision-world revision checks are unaffected.
 Task-state effects
 ------------------
 
-Pick, place, handover, and coordinated skills declare attachment changes as a
+Pick, place, and coordinated skills declare attachment changes as a
 :class:`~embodichain.lab.sim.atomic_actions.StateDelta`. Planning does not commit
 those changes. During closed-loop execution, a non-empty effect requires a
 correlated per-environment verification result:

@@ -34,8 +34,8 @@ The repeated-cube task is configured entirely as semantic calls:
 schema_version: 2
 program_id: repeated_cube_pick_place
 integration:
-  robot_profile: ur5_parallel_gripper_v1
-  scene_registry: multi_segments_cube_v1
+  robot_profile: expert_program_ur5_pick_place
+  scene_registry: expert_program_repeated_pick_place
   runtime_preset: safe
 targets:
   drop_pose:
@@ -98,13 +98,18 @@ task then delegates runtime assembly to the shared factory; it does not
 construct approach, grasp, pull, or placement trajectories:
 
 ```python
+MY_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistration(
+    scene_binding=create_my_scene_binding(),
+    robot_profile_binding=create_my_robot_profile_binding(),
+)
+
+
 class MyTaskEnv(EmbodiedEnv):
     def __init__(self, cfg, **kwargs):
         super().__init__(cfg, **kwargs)
         self._expert_program_adapter = create_simulation_expert_program_adapter(
             self,
-            scene_binding=create_my_scene_binding(),
-            robot_profile_binding=create_my_robot_profile_binding(),
+            registration=MY_EXPERT_PROGRAM_REGISTRATION,
         )
 
     @property
@@ -118,10 +123,21 @@ resources, endpoint capabilities, semantic commands, policy presets, and effect
 monitor selection. `SimulationRobotSkillProfileBinding` accepts generic
 core `RobotResource` declarations containing arbitrary typed `ResourceEndpoint`
 values directly; `ControlPartResourceBinding` is the joint-backed convenience.
-Endpoint adapters and runtime transports are the
-extension boundary for mobile-base, whole-body, or non-joint controllers and
-are accepted by the standard simulation helper. Task programs keep the same
-semantic calls and do not gain controller-shaped fields.
+Endpoint adapters and runtime transports are the extension boundary for
+mobile-base, whole-body, or non-joint controllers. On the standard path they
+are owned by `SimulationExpertProgramRegistration`, not passed as live helper
+overrides. Their exact target, payload, route, and transport declarations enter
+the catalog fingerprint, while transport tuple order defines deterministic
+Gym-action composition order. Task programs keep the same semantic calls and
+do not gain controller-shaped fields.
+
+The standard registration currently installs built-in joint tracking and
+effect-evidence routes only for `ControlPartEndpoint`. A custom endpoint adapter
+must declare empty tracking and evidence routes, so it uses timed/open-loop
+completion. Non-joint closed-loop projectors, feedback sources, metric
+evaluators, and effect-evidence backends still require registration-owned
+provider-factory contracts. Whole-body controllers expressed through existing
+joint control parts continue to use the built-in joint route.
 
 Relation and rendezvous semantics are also explicit integration capabilities.
 `Place(on=...)` and `Place(inside=...)` require an exact typed/versioned
@@ -150,9 +166,10 @@ re-observes and grounds each call just in time after prior verified effects.
 
 The standard simulation integration never treats an accepted controller command
 as physical evidence. Grasp, release, and hand-over verification consume live
-pose evidence together with explicit contact, constraint, force, or wrench
-callbacks supplied by the integration. Missing physical channels remain invalid
-and fail closed.
+pose evidence together with registered physical evidence routes. The standard
+registration path does not accept task-side contact, constraint, force, or
+wrench callback overrides; missing physical channels remain invalid and fail
+closed. Advanced integrations may still assemble explicit providers directly.
 
 Program/demo-segment metadata records runtime call results, named trajectory
 segments, effect decisions, recovery events, scene and collision revisions,
@@ -164,7 +181,9 @@ Parallel blocks additionally require an authoritative
 `ParallelCommandSafetyValidator`. Resource-claim disjointness is necessary but
 is not treated as proof of physical safety. If no validator is installed, the
 parallel block refuses to start; the standard simulation adapter intentionally
-does not invent one from resource names. Every parallel frame must occupy
+does not invent one from resource names. Its task registration must declare a
+safety factory for the exact transport set, and each runtime assembly receives
+a fresh validator from that factory. Every parallel frame must occupy
 exactly one `BaseEnv.step_dt`; shorter lanes repeat their last safe target as
 hold padding, while fractional frames are rejected rather than resampled.
 The runtime also uses strict symbolic key-level conflict detection at the barrier:

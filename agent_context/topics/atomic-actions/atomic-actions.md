@@ -310,6 +310,10 @@ atomic `target_descriptor`; its `skill_id` and `binding_contract` are derived
 views, not separately stored values. Curated call targets cannot be remapped.
 Registered calls require an explicit agent-visible target plus an installed
 `RegisteredSemanticLowerer` with a matching call ID and schema version.
+Their payloads carry task intent, while the selected `SkillPolicyPreset` is the
+sole action-option source; a lowerer may read its owned option template for goal
+grounding but must not mirror those options into the payload as a second policy
+configuration.
 
 `SemanticSkillCompiler.analyze()` performs provider-free linking, resource and
 affordance validation, held-object flow analysis, and first-release look-ahead.
@@ -521,16 +525,22 @@ authoritative `TimedCommandSequence`. A frame contains one or more
 per-environment `hold_duration`. Every command pairs a
 `RuntimeEndpointTarget` with a `RuntimeCommandPayload`; their `transport_id`
 values must match, destinations must be unique within the frame, and joint
-targets may not overlap. `ExecutionFeedbackMode.JOINT_POSITION` requires an
-owned `joint_trajectory` and joint-position targets/payloads; generic command
-plans default to timed completion and retain external semantic-effect
-verification. Framework authorization replaces every emitted target with its
-binding-owned snapshot and rejects unbound destinations, target substitution,
-and endpoint claim conflicts. A plan's non-empty frames and its recovery
-replans retain a stable destination set. Empty failed plans retain previously
-active targets so the caller can still hold them. The session monitors:
+targets may not overlap. `TrackingPolicy` separates optional in-flight checks
+from terminal acceptance. `AtomicAction` projects command payloads into a
+command-aligned `TimedTrackingSequence` through each endpoint's typed tracking
+channel, while `TrackingRuntime` resolves exact-version feedback providers,
+command projectors, and metric evaluators. `TrackingPolicy.joint_position()`
+installs feedback-based in-flight and terminal joint metrics;
+`TrackingPolicy.timed()` uses explicit terminal settling without feedback.
+Invalid required feedback fails only the affected rows closed, while feedback
+that exceeds the configured consecutive-violation budget can trigger a replan.
+Framework authorization replaces every emitted target with its binding-owned
+snapshot and rejects unbound destinations, target substitution, and endpoint
+claim conflicts. A plan's non-empty frames and its recovery replans retain a
+stable destination set. Empty failed plans retain previously active targets so
+the caller can still hold them. The session monitors:
 
-- joint tracking error against the previous command in joint-position mode;
+- typed in-flight tracking metrics and terminal acceptance;
 - translation/rotation drift of referenced scene entities;
 - per-environment collision-world revision changes for collision-sensitive
   actions;

@@ -36,7 +36,6 @@ embodichain.lab.sim.atomic_actions
       TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
-      ExecutionFeedbackMode
       ActionPlan
       CompiledTrajectory
 
@@ -88,7 +87,13 @@ embodichain.lab.sim.atomic_actions
       EndEffectorPoseGoal
       JointPositionGoal
       GraspGoal
+      HandOverGoal
+      AxisAlignGoal
+      AxisAlignOptions
+      AxisAlignAffordance
       HeldObjectPoseGoal
+      PourGoal
+      PourOptions
       PlaceGoal
       AssembleGoal
       PressGoal
@@ -105,7 +110,9 @@ embodichain.lab.sim.atomic_actions
       MoveEndEffector
       MoveJoints
       PickUp
+      AxisAlign
       MoveHeldObject
+      Pour
       Place
       Press
       Slide
@@ -119,6 +126,7 @@ embodichain.lab.sim.atomic_actions
    :hidden:
 
    embodichain.lab.sim.atomic_actions.primitives
+   embodichain.lab.sim.atomic_actions.tracking
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
 
@@ -236,9 +244,6 @@ Planning and state
    :members:
 
 .. autoclass:: TimedCommandSequence
-   :members:
-
-.. autoclass:: ExecutionFeedbackMode
    :members:
 
 .. autoclass:: ActionPlan

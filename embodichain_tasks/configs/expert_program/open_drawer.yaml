@@ -16,10 +16,6 @@ program:
       schema_version: 1
       arguments:
         handle: drawer_handle
-        direction: pull
-        hand_interp_steps: 12
-        approach_distance: 0.10
-        translation_distance: 0.18
       resources:
         primary: manipulator
   post:

@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from importlib import resources
 from typing import TYPE_CHECKING
 
@@ -34,11 +34,12 @@ from embodichain.lab.gym.envs.expert_program import (
 )
 from embodichain.lab.sim.atomic_actions import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
+    ActionOptions,
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     MotionPolicy,
-    RecoveryPolicy,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.skills import SkillPolicyPreset
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
@@ -47,10 +48,6 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 
-GRIPPER_FINGER_LINKS = (
-    "gripper_finger1_link_1",
-    "gripper_finger2_link_1",
-)
 DH_PGI_140_80_GRIPPER_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgi_140_80",
     min_opening_width=0.005,
@@ -116,13 +113,14 @@ def create_parallel_jaw_grasp_pose_generator(
 
 
 def create_ur5_skill_profile_binding(
-    robot: Robot,
+    robot: Robot | None,
     *,
     profile_id: str,
     sample_count: int,
     skill_ids: Sequence[str],
+    action_option_templates: Mapping[str, ActionOptions],
 ) -> SimulationRobotSkillProfileBinding:
-    """Bind semantic manipulation resources to the common live UR5 robot."""
+    """Declare semantic manipulation resources for the common UR5 robot."""
     if type(sample_count) is not int or sample_count < 2:
         raise ValueError("sample_count must be an integer of at least 2.")
     normalized_skill_ids = tuple(skill_ids)
@@ -131,15 +129,27 @@ def create_ur5_skill_profile_binding(
     ):
         raise ValueError("skill_ids must contain non-empty strings.")
 
-    hand_limits = robot.get_qpos_limits(name=HAND_CONTROL_PART)[0].to(
-        device=robot.device, dtype=torch.float32
-    )
-    hand_open_qpos = hand_limits[:, 0]
-    hand_close_qpos = torch.clamp(
-        torch.full_like(hand_limits[:, 1], DEFAULT_GRIPPER_CLOSE_QPOS),
-        min=hand_limits[:, 0],
-        max=hand_limits[:, 1],
-    )
+    if not isinstance(action_option_templates, Mapping):
+        raise TypeError("action_option_templates must be a mapping.")
+    if robot is None:
+        hand_open_values = (0.0,)
+        hand_close_values = (DEFAULT_GRIPPER_CLOSE_QPOS,)
+    else:
+        hand_limits = robot.get_qpos_limits(name=HAND_CONTROL_PART)[0].to(
+            device=robot.device, dtype=torch.float32
+        )
+        hand_open_qpos = hand_limits[:, 0]
+        hand_close_qpos = torch.clamp(
+            torch.full_like(hand_limits[:, 1], DEFAULT_GRIPPER_CLOSE_QPOS),
+            min=hand_limits[:, 0],
+            max=hand_limits[:, 1],
+        )
+        hand_open_values = tuple(
+            float(value) for value in hand_open_qpos.detach().cpu().tolist()
+        )
+        hand_close_values = tuple(
+            float(value) for value in hand_close_qpos.detach().cpu().tolist()
+        )
     motion_capabilities = frozenset(
         {
             BATCH_INVERSE_KINEMATICS_CAPABILITY,
@@ -172,13 +182,8 @@ def create_ur5_skill_profile_binding(
                 preset_id="parallel_jaw_commands",
                 control_part=HAND_CONTROL_PART,
                 commands={
-                    "open": tuple(
-                        float(value) for value in hand_open_qpos.detach().cpu().tolist()
-                    ),
-                    "grasp": tuple(
-                        float(value)
-                        for value in hand_close_qpos.detach().cpu().tolist()
-                    ),
+                    "open": hand_open_values,
+                    "grasp": hand_close_values,
                 },
             ),
         ),
@@ -189,9 +194,11 @@ def create_ur5_skill_profile_binding(
         presets=(
             SkillPolicyPreset(
                 "safe",
+                action_option_templates=action_option_templates,
                 motion_policy=MotionPolicy(sample_count=sample_count),
-                recovery_policy=RecoveryPolicy(
-                    tracking_error_threshold=DEFAULT_TRACKING_ERROR_THRESHOLD,
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=DEFAULT_TRACKING_ERROR_THRESHOLD,
+                    terminal_max_abs_error=DEFAULT_TRACKING_ERROR_THRESHOLD,
                 ),
             ),
         ),

@@ -38,6 +38,7 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     CARTESIAN_POSE_CAPABILITY,
     GRASP_CAPABILITY,
+    PickUpOptions,
 )
 from embodichain.lab.sim.skills import (
     GRASP_AFFORDANCE_CAPABILITY,
@@ -220,7 +221,12 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
             ),
         ),
         defaults={"pick_up": {"primary": "manipulator"}},
-        presets=(SkillPolicyPreset("safe"),),
+        presets=(
+            SkillPolicyPreset(
+                "safe",
+                action_option_templates={"pick": PickUpOptions()},
+            ),
+        ),
         default_preset="safe",
     )
 

@@ -44,6 +44,7 @@ from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramRuntimeAssembly,
     HandOverCfg,
     InvokeCfg,
+    SimulationExpertProgramRegistration,
     SimulationExpertProgramFactory,
     SimulationRigidObjectBinding,
     SimulationRobotSkillProfileBinding,
@@ -65,10 +66,13 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
+    HandOverOptions,
     HeldObjectState,
     MotionPolicy,
     ObservedArticulationJointState,
     PlanningContext,
+    PickUpOptions,
+    PlaceOptions,
     StateDelta,
     TaskState,
     TimedTrajectory,
@@ -78,6 +82,7 @@ from embodichain.lab.sim.atomic_actions.bindings import RuntimeEndpointTarget
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
     RuntimeCommandFrame,
+    RuntimeCommandPayload,
 )
 from embodichain.lab.sim.planners import MotionGenerator
 from embodichain.lab.sim.skills import (
@@ -531,10 +536,12 @@ class _MobileTarget(RuntimeEndpointTarget):
 
     controller_id: str
 
+    TRANSPORT_ID: ClassVar[str] = "test.mobile_velocity"
+
     @property
     def transport_id(self) -> str:
         """Return the matching test Gym transport ID."""
-        return "test.mobile_velocity"
+        return self.TRANSPORT_ID
 
     @property
     def target_id(self) -> str:
@@ -547,6 +554,15 @@ class _MobileEndpointAdapter(ResourceEndpointAdapter):
 
     adapter_id: ClassVar[str] = "test.mobile_velocity"
     endpoint_type: ClassVar[type[ResourceEndpoint]] = _MobileEndpoint
+    runtime_transport_ids: ClassVar[frozenset[str]] = frozenset(
+        {_MobileTarget.TRANSPORT_ID}
+    )
+    runtime_target_types: ClassVar[tuple[type[RuntimeEndpointTarget], ...]] = (
+        _MobileTarget,
+    )
+    tracking_feedback_source_keys: ClassVar[frozenset[tuple[str, str]]] = frozenset()
+    tracking_projector_keys: ClassVar[frozenset[tuple[str, str]]] = frozenset()
+    effect_evidence_source_keys: ClassVar[frozenset[tuple[str, str]]] = frozenset()
 
     def resolve(
         self,
@@ -564,13 +580,36 @@ class _MobileEndpointAdapter(ResourceEndpointAdapter):
         )
 
 
-class _MobileTransportEncoder:
-    """Minimal Gym encoder registered for the custom mobile target."""
+@dataclass(frozen=True, slots=True, eq=False)
+class _MobilePayload(RuntimeCommandPayload):
+    """Minimal typed payload declaration for the mobile transport."""
+
+    values: torch.Tensor
+
+    TRANSPORT_ID: ClassVar[str] = _MobileTarget.TRANSPORT_ID
+
+    @property
+    def batch_size(self) -> int:
+        return int(self.values.shape[0])
+
+    @property
+    def device(self) -> torch.device:
+        return self.values.device
 
     @property
     def transport_id(self) -> str:
-        """Return the custom mobile transport ID."""
-        return "test.mobile_velocity"
+        return self.TRANSPORT_ID
+
+    def snapshot(self) -> _MobilePayload:
+        return type(self)(self.values.clone())
+
+
+class _MobileTransportEncoder:
+    """Minimal Gym encoder registered for the custom mobile target."""
+
+    transport_id: ClassVar[str] = _MobileTarget.TRANSPORT_ID
+    target_types: ClassVar[tuple[type[RuntimeEndpointTarget], ...]] = (_MobileTarget,)
+    payload_types: ClassVar[tuple[type[RuntimeCommandPayload], ...]] = (_MobilePayload,)
 
     def encode(
         self,
@@ -657,6 +696,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
+                action_option_templates={},
                 motion_policy=MotionPolicy(),
             ),
         ),
@@ -709,7 +749,12 @@ def _handover_profile_binding() -> SimulationRobotSkillProfileBinding:
         defaults={
             "hand_over": {"source": "left", "destination": "right"},
         },
-        presets=(SkillPolicyPreset("safe"),),
+        presets=(
+            SkillPolicyPreset(
+                "safe",
+                action_option_templates={"hand_over": HandOverOptions()},
+            ),
+        ),
         default_preset="safe",
         grounding_providers={
             "hand_over": _ForwardedHandOverPoseProvider.provider_id,
@@ -840,7 +885,15 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
             "pick_up": {"primary": "manipulator"},
             "place": {"primary": "manipulator"},
         },
-        presets=(SkillPolicyPreset("evidence"),),
+        presets=(
+            SkillPolicyPreset(
+                "evidence",
+                action_option_templates={
+                    "pick": PickUpOptions(),
+                    "place": PlaceOptions(),
+                },
+            ),
+        ),
         default_preset="evidence",
     )
 
@@ -1557,6 +1610,38 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert factory.segment_policy_port is not None
 
 
+def test_standard_registration_owns_and_freezes_live_runtime_assembly() -> None:
+    """The standard path preserves exact ownership through live assembly."""
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    registration = SimulationExpertProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
+    factory = SimulationExpertProgramFactory(
+        simulation,  # type: ignore[arg-type]
+        robot,  # type: ignore[arg-type]
+        registration,
+        step_dt=_STEP_DT,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+
+    assembly = factory.create_adapter().assemble_runtime(
+        ExpertProgramIntegrationCfg(
+            robot_profile="robot_profile",
+            scene_registry="scene",
+            runtime_preset="safe",
+        )
+    )
+
+    assert factory.expert_program_registration is registration
+    assert assembly.command_encoder.transport_ids == tuple(
+        declaration.transport_id
+        for declaration in registration.catalog.extensions.runtime_transports
+    )
+    assert assembly.command_encoder.is_frozen
+
+
 def test_simulation_helper_forwards_semantic_grounding_extensions() -> None:
     """Both explicit grounding seams reach the runtime compiler unchanged."""
     robot = _Robot()
@@ -1646,7 +1731,7 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
                 },
             ),
         ),
-        presets=(SkillPolicyPreset("runtime"),),
+        presets=(SkillPolicyPreset("runtime", action_option_templates={}),),
         default_preset="runtime",
     )
     environment = SimpleNamespace(

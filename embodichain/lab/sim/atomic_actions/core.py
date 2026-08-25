@@ -43,7 +43,6 @@ from .invocation import (
 from .plans import (
     ActionPlan,
     EffectVerificationRequirement,
-    ExecutionFeedbackMode,
     PlannerDiagnostics,
     TimedTrajectory,
     TrajectorySegment,
@@ -56,6 +55,12 @@ from .runtime_commands import (
     JointPositionPayload,
     RuntimeCommandFrame,
     TimedCommandSequence,
+)
+from .tracking import (
+    FeedbackTerminalAcceptance,
+    TimedTrackingSequence,
+    TrackingFrame,
+    TrackingSetpoint,
 )
 
 if TYPE_CHECKING:
@@ -374,6 +379,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 invocation.control_overrides,
             ),
             motion_policy=invocation.motion_policy,
+            tracking_policy=invocation.tracking_policy,
             recovery_policy=invocation.recovery_policy,
             skill_options=options,
             invocation_id=invocation.invocation_id,
@@ -578,7 +584,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             segment_lengths=segment_lengths,
             scene_dependency_monitor_until=scene_dependency_monitor_until,
             scene_dependency_end_segment=scene_dependency_end_segment,
-            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
             joint_trajectory=timed,
         )
 
@@ -596,14 +601,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         segment_lengths: Mapping[str, int] | None = None,
         scene_dependency_monitor_until: Mapping[str, int] | None = None,
         scene_dependency_end_segment: str | None = None,
-        feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED,
         joint_trajectory: TimedTrajectory | None = None,
     ) -> ActionPlan:
         """Build a plan from transport-neutral runtime command frames.
 
-        Non-joint command sequences use timed completion unless a future
-        endpoint-specific feedback evaluator is installed. Semantic effects
-        remain externally verified through the execution session.
+        Tracking targets are projected from the command payloads through the
+        typed channels declared by each bound endpoint. Semantic effects remain
+        externally verified through the execution session.
 
         Args:
             request: Resolved invocation snapshot being planned.
@@ -625,9 +629,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             scene_dependency_end_segment: Optional last segment during which
                 scene motion may invalidate and replan the action for every
                 dependency.
-            feedback_mode: Feedback contract used to determine target completion.
-            joint_trajectory: Optional joint trajectory retained for joint-position
-                feedback and inspection.
+            joint_trajectory: Optional joint trajectory retained for offline
+                compilation and inspection.
 
         Returns:
             Side-effect-free action plan.
@@ -651,6 +654,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             commands,
             active_mask=success_mask,
         )
+        tracking = self._tracking_sequence(request, commands)
         segments = self._build_segments(
             segment_lengths,
             frame_count=commands.frame_count,
@@ -664,12 +668,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             plan_success=success_mask,
             commands=commands,
             recovery_policy=request.recovery_policy,
+            tracking_policy=request.tracking_policy,
             planned_scene_version=context.scene.version,
             planned_collision_world_revision=(
                 context.scene.collision_world_revisions(context.batch_size)
             ),
             diagnostics=diagnostics,
-            feedback_mode=feedback_mode,
+            tracking=tracking,
             joint_trajectory=joint_trajectory,
             segments=segments,
             scene_dependencies=self._scene_dependencies(request),
@@ -685,6 +690,67 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             effect_verification=effect_verification,
             invocation_id=request.invocation_id,
             invocation_revision=request.revision,
+        )
+
+    def _tracking_sequence(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        commands: TimedCommandSequence,
+    ) -> TimedTrackingSequence | None:
+        """Project command payloads through binding-owned tracking channels."""
+        policy = request.tracking_policy
+        metrics = list(() if policy.in_flight is None else policy.in_flight.metrics)
+        if isinstance(policy.terminal, FeedbackTerminalAcceptance):
+            metrics.extend(policy.terminal.metrics)
+        if not metrics:
+            return None
+
+        runtime = self.planning_services.tracking_runtime
+        for metric in metrics:
+            runtime.evaluators.resolve(metric)
+        metrics_by_channel = {metric.channel_id: metric for metric in metrics}
+
+        endpoints_by_destination: dict[
+            tuple[str, str],
+            tuple[EndpointBinding, ...],
+        ] = {}
+        for endpoint in request.binding.endpoints:
+            endpoints_by_destination.setdefault(endpoint.destination_key, ())
+            endpoints_by_destination[endpoint.destination_key] += (endpoint,)
+
+        tracking_frames: list[TrackingFrame] = []
+        for frame_index, frame in enumerate(commands.frames):
+            setpoints: list[TrackingSetpoint] = []
+            for command in frame.commands:
+                endpoints = endpoints_by_destination[command.destination_key]
+                for endpoint in endpoints:
+                    for channel_id in metrics_by_channel:
+                        channel = endpoint.tracking_channels.get(channel_id)
+                        if channel is None:
+                            continue
+                        runtime.providers.resolve(channel.source)
+                        runtime.projectors.resolve(channel.projector)
+                        setpoints.append(
+                            TrackingSetpoint(
+                                endpoint_key=endpoint.key,
+                                binding=channel,
+                                desired=runtime.project(command, channel),
+                            )
+                        )
+            covered_channels = {setpoint.binding.channel_id for setpoint in setpoints}
+            missing_channels = sorted(
+                set(metrics_by_channel).difference(covered_channels)
+            )
+            if missing_channels:
+                raise ValueError(
+                    f"Command frame {frame_index} cannot project configured "
+                    f"tracking channels {missing_channels}; bound endpoints must "
+                    "declare a typed feedback source and projector."
+                )
+            tracking_frames.append(TrackingFrame(tuple(setpoints)))
+        return TimedTrackingSequence(
+            env_ids=commands.env_ids,
+            frames=tuple(tracking_frames),
         )
 
     @staticmethod

@@ -28,6 +28,7 @@ from embodichain.lab.sim.common import BatchEntity
 from .bindings import ActionBinding
 from .control import ActionControlOverrides
 from .policies import MotionPolicy, RecoveryPolicy
+from .tracking import TrackingPolicy
 
 GoalT = TypeVar("GoalT")
 
@@ -100,6 +101,11 @@ class ActionInvocation(Generic[GoalT, OptionsT]):
     motion_policy: MotionPolicy = field(default_factory=MotionPolicy)
     """Reusable motion-generation settings."""
 
+    tracking_policy: TrackingPolicy = field(
+        default_factory=TrackingPolicy.joint_position
+    )
+    """Typed in-flight tracking and terminal-acceptance settings."""
+
     recovery_policy: RecoveryPolicy = field(default_factory=RecoveryPolicy)
     """Bounded local execution recovery settings."""
 
@@ -124,6 +130,8 @@ class ActionInvocation(Generic[GoalT, OptionsT]):
             raise TypeError("binding must be an ActionBinding.")
         if not isinstance(self.motion_policy, MotionPolicy):
             raise TypeError("motion_policy must be a MotionPolicy.")
+        if not isinstance(self.tracking_policy, TrackingPolicy):
+            raise TypeError("tracking_policy must be a TrackingPolicy.")
         if not isinstance(self.recovery_policy, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
         if self.skill_options is not None and not isinstance(
@@ -154,6 +162,7 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
     goal: GoalT
     binding: ActionBinding
     motion_policy: MotionPolicy
+    tracking_policy: TrackingPolicy
     recovery_policy: RecoveryPolicy
     skill_options: OptionsT
     invocation_id: str | None = None
@@ -166,6 +175,8 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
             raise TypeError("binding must be an ActionBinding.")
         if not isinstance(self.motion_policy, MotionPolicy):
             raise TypeError("motion_policy must be a MotionPolicy.")
+        if not isinstance(self.tracking_policy, TrackingPolicy):
+            raise TypeError("tracking_policy must be a TrackingPolicy.")
         if not isinstance(self.recovery_policy, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
         if not isinstance(self.skill_options, ActionOptions):
@@ -190,6 +201,7 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
             ),
         )
         object.__setattr__(self, "motion_policy", deepcopy(self.motion_policy))
+        object.__setattr__(self, "tracking_policy", deepcopy(self.tracking_policy))
         object.__setattr__(self, "recovery_policy", deepcopy(self.recovery_policy))
         object.__setattr__(self, "skill_options", deepcopy(self.skill_options))
 
@@ -200,6 +212,7 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
             goal=self.goal,
             binding=self.binding,
             motion_policy=self.motion_policy,
+            tracking_policy=self.tracking_policy,
             recovery_policy=self.recovery_policy,
             skill_options=self.skill_options,
             invocation_id=self.invocation_id,

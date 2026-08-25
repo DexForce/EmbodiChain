@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_actions import (
     DynamicCollisionMode,
     DisjointResourceSlots,
     DisjointSlotEndpoints,
+    PickUpOptions,
     SkillResourceSlot,
 )
 
@@ -740,6 +741,61 @@ class SemanticIntegrationManifest:
                         tuple(self.call_catalog.descriptors),
                     )
                 )
+            unknown_option_ids = sorted(
+                set(preset.action_option_templates).difference(known_semantic_ids)
+            )
+            if unknown_option_ids:
+                semantic_id = unknown_option_ids[0]
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "unknown_action_option_call",
+                        (
+                            "integration",
+                            "robot_profile",
+                            "presets",
+                            preset_id,
+                            "action_option_templates",
+                            semantic_id,
+                        ),
+                        f"Action-option configuration references unknown semantic "
+                        f"call {semantic_id!r}.",
+                        tuple(self.call_catalog.descriptors),
+                    )
+                )
+            for semantic_id, options in preset.action_option_templates.items():
+                descriptor = self.call_catalog.descriptors[semantic_id]
+                target = descriptor.target_descriptor
+                assert target is not None
+                option_path = (
+                    "integration",
+                    "robot_profile",
+                    "presets",
+                    preset_id,
+                    "action_option_templates",
+                    semantic_id,
+                )
+                if type(options) is not target.options_type:
+                    raise SemanticValidationError(
+                        SemanticDiagnostic(
+                            "incompatible_action_option_template",
+                            option_path,
+                            f"Semantic call {semantic_id!r} targets options type "
+                            f"{target.options_type.__name__}, not "
+                            f"{type(options).__name__}.",
+                            (target.options_type.__name__,),
+                        )
+                    )
+                if semantic_id == Pick.call_kind:
+                    assert type(options) is PickUpOptions
+                    if options.downstream_object_target_poses:
+                        raise SemanticValidationError(
+                            SemanticDiagnostic(
+                                "reserved_action_option_field",
+                                (*option_path, "downstream_object_target_poses"),
+                                "Pick downstream targets are compiler-owned and "
+                                "the template field must be empty.",
+                            )
+                        )
         if self.runtime_preset is not None:
             _validate_identifier(
                 self.runtime_preset,
@@ -861,6 +917,26 @@ class SemanticIntegrationManifest:
             descriptor,
             path=(*path, "preset"),
         )
+        preset = self.robot_profile.presets[preset_id]
+        if descriptor.call_id not in preset.action_option_templates:
+            option_path = (
+                "integration",
+                "robot_profile",
+                "presets",
+                preset_id,
+                "action_option_templates",
+                descriptor.call_id,
+            )
+            raise SemanticValidationError(
+                SemanticDiagnostic(
+                    "missing_action_option_template",
+                    option_path,
+                    f"Policy preset {preset_id!r} has no action-option template "
+                    f"for semantic call {descriptor.call_id!r} selected at "
+                    f"{_render_path(path)}.",
+                    tuple(preset.action_option_templates),
+                )
+            )
         return LinkedSemanticCall(
             call=normalized_call,
             descriptor=descriptor,
@@ -1391,9 +1467,12 @@ class BoundSemanticIntegration:
                     preset.motion_policy,
                     dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
                 ),
+                tracking_policy=preset.tracking_policy,
                 recovery_policy=preset.recovery_policy,
                 runner_cfg=preset.runner_cfg,
                 effect_monitors=preset.effect_monitors,
+                required_planner=preset.required_planner,
+                action_option_templates=preset.action_option_templates,
             )
         return BoundSemanticCall._create(
             linked=linked,
