@@ -14,12 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Codex-backed Articraft generation for the Asset engine.
+"""Remote and Codex-backed Articulation generation for the Asset engine.
 
-The integration runs the configured Articraft fork with its ``codex-cli``
-provider, keeps its native USDZ viewer, and exposes the EmbodiChain-compatible
-USDC sidecar produced by Articraft. All mutable run data is kept under
-``ARTICRAFT_OUTPUT_ROOT``.
+Remote generation uses the configured articulation-server by default. The
+existing local integration continues to run the configured Articraft fork with
+its ``codex-cli`` provider and native USDZ viewer. All downloaded and generated
+artifacts are kept under ``ARTICRAFT_OUTPUT_ROOT``.
 """
 
 from __future__ import annotations
@@ -39,7 +39,15 @@ from urllib.parse import urlsplit
 
 import gradio as gr
 
+from _articulation_server_client import (
+    ArticulationServerClient,
+    ArticulationServerError,
+)
 from app_env import (
+    ARTICULATION_SERVER_BASE_URL,
+    ARTICULATION_SERVER_POLL_INTERVAL_S,
+    ARTICULATION_SERVER_TASK_TIMEOUT_S,
+    ARTICULATION_SERVER_TIMEOUT_S,
     ARTICRAFT_CONDA_ENV,
     ARTICRAFT_OUTPUT_ROOT,
     ARTICRAFT_REPOSITORY_URL,
@@ -52,6 +60,7 @@ from app_processes import (
     build_codex_env,
     get_request_session_id,
     read_process_output,
+    redact_sensitive_text,
     register_managed_process,
     terminate_process_group,
 )
@@ -69,9 +78,15 @@ _ARTICRAFT_ENVIRONMENT_SETUP_TIMEOUT_SECONDS = 1_200
 _articraft_environment_lock = threading.Lock()
 _articraft_runs = SessionProcessRegistry()
 _articraft_viewers = SessionProcessRegistry()
+_REMOTE_SERVER_PROVIDER = "Remote server"
+_LOCAL_CODEX_PROVIDER = "Local Codex"
+_DEFAULT_ARTICULATION_PROVIDER = _REMOTE_SERVER_PROVIDER
+_SERVER_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+_server_tasks_lock = threading.Lock()
+_server_tasks: dict[str, tuple[str, ArticulationServerClient, str]] = {}
 _ARTICRAFT_IDLE_PREVIEW = (
     "<div style='padding: 1rem; color: #6b7280;'>"
-    "The interactive Articraft USDZ viewer will appear here after generation."
+    "The Articulation result preview will appear here after generation."
     "</div>"
 )
 
@@ -85,14 +100,21 @@ def reset_articraft_asset(request: gr.Request) -> tuple[Any, ...]:
     Returns:
         Reset values for all Articraft panel widgets.
     """
-    cleanup_articraft_session(get_request_session_id(request))
+    cancellation_error = _cleanup_articraft_session(get_request_session_id(request))
+    status = "**Status:** waiting for a description."
+    if cancellation_error:
+        status = (
+            "**Reset completed, but the remote task could not be cancelled.**\n\n"
+            f"- {cancellation_error}\n"
+            "- Retry Reset before starting another generation."
+        )
     return (
         "**Environment:** not checked.",
         "",
         None,
         None,
         "",
-        "**Status:** waiting for a description.",
+        status,
         "",
         _ARTICRAFT_IDLE_PREVIEW,
     )
@@ -104,8 +126,67 @@ def cleanup_articraft_session(session_id: str) -> None:
     Args:
         session_id: Stable Gradio session identifier.
     """
+    _cleanup_articraft_session(session_id)
+
+
+def _cleanup_articraft_session(session_id: str) -> str | None:
+    """Stop local work and request cancellation of one remote task."""
     _articraft_runs.reset(session_id, force=True)
+    cancellation_error = _cancel_server_task(session_id)
     _articraft_viewers.reset(session_id, force=True)
+    return cancellation_error
+
+
+def _cancel_server_task(session_id: str) -> str | None:
+    """Cancel and forget one session's active remote task."""
+    with _server_tasks_lock:
+        active = _server_tasks.pop(session_id, None)
+    if active is None:
+        return None
+    _token, client, request_id = active
+    try:
+        client.cancel(request_id)
+    except (ArticulationServerError, OSError, ValueError) as exc:
+        with _server_tasks_lock:
+            _server_tasks.setdefault(session_id, active)
+        return redact_sensitive_text(str(exc))
+    return None
+
+
+def _register_server_task(
+    session_id: str,
+    token: str,
+    client: ArticulationServerClient,
+    request_id: str,
+) -> bool:
+    """Attach a submitted server task to its active logical run."""
+    if not _articraft_runs.is_active(session_id, token):
+        try:
+            client.cancel(request_id)
+        except (ArticulationServerError, OSError, ValueError):
+            pass
+        return False
+    with _server_tasks_lock:
+        _server_tasks[session_id] = (token, client, request_id)
+    if _articraft_runs.is_active(session_id, token):
+        return True
+    with _server_tasks_lock:
+        active = _server_tasks.get(session_id)
+        if active is not None and active[0] == token:
+            _server_tasks.pop(session_id, None)
+    try:
+        client.cancel(request_id)
+    except (ArticulationServerError, OSError, ValueError):
+        pass
+    return False
+
+
+def _finish_server_task(session_id: str, token: str, request_id: str) -> None:
+    """Forget a terminal server task without cancelling it."""
+    with _server_tasks_lock:
+        active = _server_tasks.get(session_id)
+        if active is not None and active[0] == token and active[2] == request_id:
+            _server_tasks.pop(session_id, None)
 
 
 def _command_path(name: str) -> str | None:
@@ -595,6 +676,229 @@ def _start_articraft_viewer(session_id: str, run_dir: Path) -> str:
     raise RuntimeError("Articraft viewer did not start.")
 
 
+def _articulation_server_client() -> ArticulationServerClient:
+    """Build a client from the shared Gradio deployment settings."""
+    return ArticulationServerClient(
+        ARTICULATION_SERVER_BASE_URL,
+        timeout_seconds=ARTICULATION_SERVER_TIMEOUT_S,
+    )
+
+
+def _server_output_root() -> Path:
+    """Validate remote task settings and return their local artifact root."""
+    if ARTICULATION_SERVER_TASK_TIMEOUT_S <= 0:
+        raise ValueError("ARTICULATION_SERVER_TASK_TIMEOUT_S must be greater than zero")
+    if ARTICULATION_SERVER_POLL_INTERVAL_S <= 0:
+        raise ValueError(
+            "ARTICULATION_SERVER_POLL_INTERVAL_S must be greater than zero"
+        )
+    return validate_gradio_artifact_root(ARTICRAFT_OUTPUT_ROOT) / "server"
+
+
+def _configure_selected_articulation_provider(provider: str) -> str:
+    """Check the selected remote or local generation backend."""
+    if provider == _LOCAL_CODEX_PROVIDER:
+        return configure_articraft_environment()
+    if provider != _REMOTE_SERVER_PROVIDER:
+        return f"**Unknown Articulation backend:** `{provider}`"
+
+    try:
+        output_root = _server_output_root()
+        health = _articulation_server_client().health()
+        output_root.mkdir(parents=True, exist_ok=True)
+    except (ArticulationServerError, OSError, ValueError) as exc:
+        detail = redact_sensitive_text(str(exc))
+        return (
+            "**Remote Articulation server is not ready.**\n\n"
+            f"- {detail}\n"
+            "- Check `ARTICULATION_SERVER_BASE_URL` and server connectivity."
+        )
+    if health.get("status") != "ready":
+        state = redact_sensitive_text(str(health.get("status") or "unknown"))
+        return (
+            "**Remote Articulation server is not ready.**\n\n"
+            f"- Health status: `{state}`"
+        )
+    return (
+        "**Remote Articulation server is ready.**\n\n"
+        f"- Endpoint: `{ARTICULATION_SERVER_BASE_URL}`\n"
+        f"- Local output: `{output_root}`"
+    )
+
+
+def _server_task_line(task: dict[str, Any]) -> str:
+    """Format one bounded status line for the remote generation log."""
+    status = str(task.get("status") or "unknown")
+    stage = str(task.get("stage") or "").strip()
+    return f"status: {status}" + (f"; stage: {stage}" if stage else "")
+
+
+def _server_task_error(task: dict[str, Any]) -> str:
+    """Return a redacted remote failure description."""
+    detail = task.get("error")
+    if not detail and isinstance(task.get("details"), dict):
+        detail = task["details"].get("message")
+    return redact_sensitive_text(str(detail or "The server reported no error detail."))
+
+
+def _generate_server_articulation_asset(
+    prompt_value: str,
+    image_value: Any,
+    request: gr.Request,
+) -> Iterator[tuple[Any, ...]]:
+    """Generate an articulation through the remote HTTP service."""
+    session_id = get_request_session_id(request)
+    token = _articraft_runs.begin(session_id)
+    replacement_error = _cancel_server_task(session_id)
+    if replacement_error:
+        yield (
+            None,
+            "",
+            "**The previous remote Articulation task could not be cancelled.**\n\n"
+            f"- {replacement_error}\n"
+            "- No replacement task was submitted; retry Reset before continuing.",
+            "",
+            "",
+        )
+        return
+    prompt = (prompt_value or "").strip()
+    if not prompt:
+        yield None, "", "**Input error:** enter an articulated-object description.", "", ""
+        return
+
+    try:
+        output_root = _server_output_root()
+        output_root.mkdir(parents=True, exist_ok=True)
+        reference_image = _validated_reference_image(image_value)
+        client = _articulation_server_client()
+        submitted = client.submit(prompt, image=reference_image)
+        request_id_value = submitted.get("request_id")
+        if not isinstance(request_id_value, str) or not request_id_value.strip():
+            raise ArticulationServerError("server response has no request_id")
+        request_id = request_id_value.strip()
+    except (ArticulationServerError, OSError, ValueError) as exc:
+        detail = redact_sensitive_text(str(exc))
+        yield (
+            None,
+            "",
+            "**Remote Articulation request could not start.**\n\n"
+            f"- {detail}\n"
+            "- The request was not retried with Local Codex.",
+            "",
+            "",
+        )
+        return
+
+    if not _register_server_task(session_id, token, client, request_id):
+        return
+    log_lines = [
+        f"Server: {ARTICULATION_SERVER_BASE_URL}",
+        f"Request: {request_id}",
+    ]
+    yield (
+        None,
+        "",
+        "**Remote server accepted the Articulation request.**",
+        "\n".join(log_lines),
+        "",
+    )
+
+    deadline = time.monotonic() + ARTICULATION_SERVER_TASK_TIMEOUT_S
+    previous_line = ""
+    while True:
+        if not _articraft_runs.is_active(session_id, token):
+            return
+        try:
+            task = client.status(request_id)
+        except (ArticulationServerError, OSError, ValueError) as exc:
+            cancellation_error = _cancel_server_task(session_id)
+            detail = redact_sensitive_text(str(exc))
+            if cancellation_error:
+                log_lines.append(f"Cancellation warning: {cancellation_error}")
+            yield (
+                None,
+                "",
+                "**Remote Articulation status check failed.**\n\n"
+                f"- {detail}\n"
+                "- The request was not retried with Local Codex.",
+                "\n".join(log_lines[-300:]),
+                "",
+            )
+            return
+
+        status_line = _server_task_line(task)
+        if status_line != previous_line:
+            log_lines.append(status_line)
+            previous_line = status_line
+        status = task.get("status")
+        if status in _SERVER_TERMINAL_STATUSES:
+            _finish_server_task(session_id, token, request_id)
+            break
+        if time.monotonic() >= deadline:
+            cancellation_error = _cancel_server_task(session_id)
+            if cancellation_error:
+                log_lines.append(f"Cancellation warning: {cancellation_error}")
+            yield (
+                None,
+                "",
+                "**Remote Articulation request timed out and cancellation was requested.**\n\n"
+                f"- Request: `{request_id}`\n"
+                "- The request was not retried with Local Codex.",
+                "\n".join(log_lines[-300:]),
+                "",
+            )
+            return
+        yield (
+            None,
+            "",
+            f"**Remote server is generating the Articulation.**\n\n- {status_line}",
+            "\n".join(log_lines[-300:]),
+            "",
+        )
+        time.sleep(ARTICULATION_SERVER_POLL_INTERVAL_S)
+
+    if not _articraft_runs.is_active(session_id, token):
+        return
+    if status != "succeeded":
+        detail = _server_task_error(task)
+        yield (
+            None,
+            "",
+            f"**Remote Articulation request {status}.**\n\n- {detail}\n"
+            "- The request was not retried with Local Codex.",
+            "\n".join(log_lines[-300:]),
+            "",
+        )
+        return
+
+    output_dir = output_root / request_id
+    try:
+        artifact = client.download(request_id, "usdc", output_dir / "model.usdc")
+    except (ArticulationServerError, OSError, ValueError) as exc:
+        detail = redact_sensitive_text(str(exc))
+        yield (
+            None,
+            output_dir.as_posix(),
+            "**Remote Articulation completed, but its USDC could not be downloaded.**\n\n"
+            f"- {detail}",
+            "\n".join(log_lines[-300:]),
+            "",
+        )
+        return
+
+    if not _articraft_runs.is_active(session_id, token):
+        return
+    yield (
+        artifact.as_posix(),
+        output_dir.as_posix(),
+        "**Remote Articulation generation completed.**\n\n"
+        f"- Request: `{request_id}`\n"
+        f"- EmbodiChain USDC: `{artifact}`",
+        "\n".join(log_lines[-300:]),
+        _articraft_result_preview(output_dir, artifact),
+    )
+
+
 def generate_articraft_asset(
     prompt_value: str,
     image_value: Any,
@@ -603,6 +907,18 @@ def generate_articraft_asset(
     """Generate native USDZ and EmbodiChain-compatible USDC artifacts."""
     session_id = get_request_session_id(request)
     token = _articraft_runs.begin(session_id)
+    cancellation_error = _cancel_server_task(session_id)
+    if cancellation_error:
+        yield (
+            None,
+            "",
+            "**The previous remote Articulation task could not be cancelled.**\n\n"
+            f"- {cancellation_error}\n"
+            "- Local Codex was not started; retry Reset before continuing.",
+            "",
+            "",
+        )
+        return
     prompt = (prompt_value or "").strip()
     if not prompt:
         yield None, "", "**Input error:** enter an articulated-object description.", "", ""
@@ -743,16 +1059,38 @@ def generate_articraft_asset(
     )
 
 
+def _generate_selected_articulation_asset(
+    provider: str,
+    prompt_value: str,
+    image_value: Any,
+    request: gr.Request,
+) -> Iterator[tuple[Any, ...]]:
+    """Route one request to the explicitly selected generation backend."""
+    if provider == _REMOTE_SERVER_PROVIDER:
+        yield from _generate_server_articulation_asset(
+            prompt_value, image_value, request
+        )
+        return
+    if provider == _LOCAL_CODEX_PROVIDER:
+        yield from generate_articraft_asset(prompt_value, image_value, request)
+        return
+    yield None, "", f"**Unknown Articulation backend:** `{provider}`", "", ""
+
+
 def build_articraft_panel() -> None:
     """Render the Articraft tab inside the Asset engine."""
     gr.Markdown(
         "### Articulation\n"
         "Generate an EmbodiChain-compatible articulated USDC from text and an optional "
-        "reference image. The Articraft fork also keeps its native USDZ for interactive "
-        "preview; only submit trusted requests."
+        "reference image; only submit trusted requests."
+    )
+    provider = gr.Radio(
+        choices=[_REMOTE_SERVER_PROVIDER, _LOCAL_CODEX_PROVIDER],
+        value=_DEFAULT_ARTICULATION_PROVIDER,
+        label="Generation backend",
     )
     with gr.Row():
-        configure_button = gr.Button("Configure Articulation & check Codex")
+        configure_button = gr.Button("Check Articulation backend")
         generate_button = gr.Button("Generate articulation", variant="primary")
         reset_button = gr.Button("Reset Articulation", variant="stop")
     environment_status = gr.Markdown("**Environment:** not checked.")
@@ -779,15 +1117,18 @@ def build_articraft_panel() -> None:
     articulation_preview = gr.HTML(_ARTICRAFT_IDLE_PREVIEW)
     generation_status = gr.Markdown("**Status:** waiting for a description.")
     generation_log = gr.Textbox(
-        label="Codex / Articraft log", lines=14, interactive=False
+        label="Articulation generation log", lines=14, interactive=False
     )
 
     configure_button.click(
-        configure_articraft_environment, outputs=[environment_status], queue=False
+        _configure_selected_articulation_provider,
+        inputs=[provider],
+        outputs=[environment_status],
+        queue=False,
     )
     generate_button.click(
-        generate_articraft_asset,
-        inputs=[prompt, image],
+        _generate_selected_articulation_asset,
+        inputs=[provider, prompt, image],
         outputs=[
             output_file,
             record_folder,
