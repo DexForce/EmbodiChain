@@ -701,6 +701,74 @@ def test_dynamic_update_uses_registry_id_in_curobo_backend():
     assert [(name, env_idx) for name, _, env_idx in updates] == [("registry_cube", 0)]
 
 
+def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
+    """The collision gate preserves samples and maps simulator joint order."""
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        world=CuroboWorldCfg(multi_env=True),
+    )
+    planner._curobo_device = torch.device("cpu")
+    joint_states = []
+    collision_queries = []
+
+    def from_position(position, *, joint_names):
+        joint_states.append((position.clone(), tuple(joint_names)))
+        return SimpleNamespace(position=position)
+
+    def validate(sample, *, env_query_idx):
+        collision_queries.append((sample.clone(), env_query_idx.clone()))
+        validity = torch.ones(sample.shape[:2], dtype=torch.bool)
+        if len(collision_queries) == 2:
+            validity[1, 0] = False
+        return validity
+
+    planner._bindings = SimpleNamespace(
+        JointState=SimpleNamespace(from_position=from_position),
+    )
+    backend = SimpleNamespace(
+        sim_joint_names=["sim_left", "sim_right"],
+        sim_to_curobo_col_idx=None,
+        collision_checker=SimpleNamespace(validate=validate),
+        profile=SimpleNamespace(
+            sim_to_curobo_joint_names={
+                "sim_left": "curobo_left",
+                "sim_right": "curobo_right",
+            },
+        ),
+        planner=SimpleNamespace(
+            joint_names=["curobo_right", "curobo_left"],
+        ),
+    )
+    planner._get_backend = lambda control_part, batch_size, move_type: backend
+    trajectory = torch.tensor(
+        (
+            ((0.0, 1.0), (0.1, 1.1), (0.2, 1.2)),
+            ((2.0, 3.0), (2.1, 3.1), (2.2, 3.2)),
+        ),
+        dtype=torch.float32,
+    )
+
+    validity = planner.validate_joint_trajectory(
+        trajectory,
+        control_part="dual_arm",
+    )
+
+    assert torch.equal(
+        validity,
+        torch.tensor(((True, True, True), (True, False, True))),
+    )
+    assert len(collision_queries) == trajectory.shape[1]
+    for sample_index, (sample, env_query_idx) in enumerate(collision_queries):
+        torch.testing.assert_close(
+            sample[:, 0],
+            trajectory[:, sample_index].flip(dims=(-1,)),
+        )
+        assert torch.equal(env_query_idx, torch.tensor((0, 1), dtype=torch.int32))
+    torch.testing.assert_close(joint_states[0][0], trajectory[:, 0].flip(dims=(-1,)))
+    assert joint_states[0][1] == ("curobo_right", "curobo_left")
+
+
 def test_generate_mesh_world_yaml_assembles_schema(tmp_path):
     rigid_object = _FakeRigidObject(
         "demo_block",

@@ -850,6 +850,8 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         validator = self._registration.create_parallel_safety_validator(
             simulation=self._simulation,
             robot=self._robot,
+            scene_registry=scene_registry,
+            engine=engine,
         )
         if validator is None:
             raise RuntimeError(

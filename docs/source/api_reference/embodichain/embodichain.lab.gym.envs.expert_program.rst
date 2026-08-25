@@ -19,6 +19,8 @@ embodichain.lab.gym.envs.expert_program
       ControlPartEndpointBinding
       ControlPartResourceBinding
       CyclicPoseTargetCfg
+      CuroboParallelCommandSafetyValidator
+      CuroboParallelSafetyValidatorFactory
       DemoBridgeError
       EXPERT_PROGRAM_SCHEMA_VERSION
       EnvironmentStepClock
@@ -319,6 +321,16 @@ use the core ``RobotResource`` type directly.
 .. autoclass:: SimulationExpertProgramFactory
    :members:
 
+The cuRobo parallel-safety gate densifies synchronized joint-position segments
+and checks every sample against robot limits, self-collision, and the live
+registry-backed collision world before transport dispatch.
+
+.. autoclass:: CuroboParallelCommandSafetyValidator
+   :members:
+
+.. autoclass:: CuroboParallelSafetyValidatorFactory
+   :members:
+
 .. autoclass:: ConfiguredHandOverPoseProvider
    :members:
 
@@ -382,3 +394,13 @@ Extension declaration implementation module
 .. autofunction:: declare_runtime_transport
 
 .. autofunction:: validate_immutable_extension_declaration
+
+Simulation parallel-safety implementation module
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_parallel_safety
+
+.. autosummary::
+
+   CuroboParallelCommandSafetyValidator
+   CuroboParallelSafetyValidatorFactory
