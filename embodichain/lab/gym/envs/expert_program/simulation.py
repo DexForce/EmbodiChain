@@ -50,17 +50,23 @@ from embodichain.lab.sim.skills.profiles import (
 )
 from embodichain.lab.sim.skills.integration import SceneEntityManifest, SceneManifest
 from embodichain.lab.sim.skills.scene import (
+    ContainerAffordance,
     GRASP_AFFORDANCE_CAPABILITY,
+    PLACEMENT_TARGET_AFFORDANCE_REVISION,
+    PLACE_IN_AFFORDANCE_CAPABILITY,
+    PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneCollisionRole,
     SceneCollisionWorldMode,
     SceneDynamics,
+    SceneEntityRef,
     SceneEntityRegistration,
     SceneGeometryProvider,
     SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
+    SupportSurfaceAffordance,
 )
 
 if TYPE_CHECKING:
@@ -291,6 +297,86 @@ class AntipodalGraspAffordanceBinding:
             raise ValueError("mesh_env_id must be a non-negative integer.")
 
 
+def _validate_placement_binding(value: object) -> None:
+    """Validate fields shared by built-in placement-frame declarations."""
+    for field_name in ("entity_id", "parent_id", "native_name"):
+        _identifier(getattr(value, field_name), field_name=field_name)
+    object.__setattr__(
+        value,
+        "aliases",
+        _identifier_tuple(getattr(value, "aliases"), field_name="aliases"),
+    )
+    object.__setattr__(
+        value,
+        "object_target_pose",
+        _pose_tuple(
+            getattr(value, "object_target_pose"),
+            field_name="object_target_pose",
+        ),
+    )
+    minimum_confidence = _finite(
+        getattr(value, "minimum_confidence"),
+        field_name="minimum_confidence",
+    )
+    if not 0.0 <= minimum_confidence <= 1.0:
+        raise ValueError("minimum_confidence must be in [0, 1].")
+    object.__setattr__(value, "minimum_confidence", minimum_confidence)
+    if type(getattr(value, "is_default")) is not bool:
+        raise TypeError("is_default must be a bool.")
+
+
+@dataclass(frozen=True, slots=True)
+class SupportSurfaceAffordanceBinding:
+    """Declare one exact object target frame on a support parent.
+
+    Args:
+        entity_id: Canonical ID of the placement affordance.
+        parent_id: Canonical object, articulation, or link parent ID.
+        native_name: Stable native name of this target frame.
+        aliases: Optional non-authoritative lookup aliases.
+        object_target_pose: Desired object pose relative to the parent.
+        minimum_confidence: Minimum parent/affordance observation confidence.
+        is_default: Whether this is the parent's default ``Place(on=...)`` frame.
+    """
+
+    entity_id: str
+    parent_id: str
+    native_name: str
+    aliases: tuple[str, ...] = ()
+    object_target_pose: tuple[float, ...] = _IDENTITY_POSE
+    minimum_confidence: float = 0.0
+    is_default: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_placement_binding(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ContainerAffordanceBinding:
+    """Declare one exact object target frame inside a container parent.
+
+    Args:
+        entity_id: Canonical ID of the placement affordance.
+        parent_id: Canonical object, articulation, or link parent ID.
+        native_name: Stable native name of this target frame.
+        aliases: Optional non-authoritative lookup aliases.
+        object_target_pose: Desired object pose relative to the parent.
+        minimum_confidence: Minimum parent/affordance observation confidence.
+        is_default: Whether this is the parent's default ``Place(inside=...)`` frame.
+    """
+
+    entity_id: str
+    parent_id: str
+    native_name: str
+    aliases: tuple[str, ...] = ()
+    object_target_pose: tuple[float, ...] = _IDENTITY_POSE
+    minimum_confidence: float = 0.0
+    is_default: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_placement_binding(self)
+
+
 @dataclass(frozen=True, slots=True)
 class _SimulationArticulationLinkStateProvider:
     """Read one selected native link pose with an optional local offset."""
@@ -419,6 +505,48 @@ def _antipodal_affordance(
     )
 
 
+def _placement_parent_ref(
+    parent_id: str,
+    *,
+    objects: Mapping[str, SimulationRigidObjectBinding],
+    articulations: Mapping[str, SimulationArticulationBinding],
+    links: Mapping[str, SimulationArticulationLinkBinding],
+) -> SceneEntityRef:
+    """Resolve an explicitly declared placement parent to its exact ref type."""
+    if parent_id in objects:
+        return SceneObjectRef(parent_id)
+    if parent_id in articulations:
+        return SceneArticulationRef(parent_id)
+    if parent_id in links:
+        return SceneLinkRef(parent_id)
+    raise KeyError(f"Placement affordance references unbound parent {parent_id!r}.")
+
+
+def _placement_defaults(
+    support_surfaces: tuple[SupportSurfaceAffordanceBinding, ...],
+    containers: tuple[ContainerAffordanceBinding, ...],
+) -> Mapping[str, Mapping[str, SceneAffordanceRef]]:
+    """Collect explicitly selected capability-scoped placement defaults."""
+    defaults: dict[str, dict[str, SceneAffordanceRef]] = {}
+    for capability, bindings in (
+        (PLACE_ON_AFFORDANCE_CAPABILITY, support_surfaces),
+        (PLACE_IN_AFFORDANCE_CAPABILITY, containers),
+    ):
+        for binding in bindings:
+            if not binding.is_default:
+                continue
+            parent_defaults = defaults.setdefault(binding.parent_id, {})
+            previous = parent_defaults.get(capability)
+            if previous is not None:
+                raise ValueError(
+                    f"Placement parent {binding.parent_id!r} has multiple default "
+                    f"affordances for capability {capability!r}: "
+                    f"{previous.entity_id!r} and {binding.entity_id!r}."
+                )
+            parent_defaults[capability] = SceneAffordanceRef(binding.entity_id)
+    return defaults
+
+
 @dataclass(frozen=True, slots=True)
 class SimulationSceneBinding:
     """Build one authoritative registry from explicit simulation bindings."""
@@ -428,6 +556,8 @@ class SimulationSceneBinding:
     articulations: tuple[SimulationArticulationBinding, ...] = ()
     links: tuple[SimulationArticulationLinkBinding, ...] = ()
     antipodal_grasps: tuple[AntipodalGraspAffordanceBinding, ...] = ()
+    support_surfaces: tuple[SupportSurfaceAffordanceBinding, ...] = ()
+    containers: tuple[ContainerAffordanceBinding, ...] = ()
     collision_world_mode: SceneCollisionWorldMode | None = None
 
     def __post_init__(self) -> None:
@@ -437,6 +567,8 @@ class SimulationSceneBinding:
             "articulations": SimulationArticulationBinding,
             "links": SimulationArticulationLinkBinding,
             "antipodal_grasps": AntipodalGraspAffordanceBinding,
+            "support_surfaces": SupportSurfaceAffordanceBinding,
+            "containers": ContainerAffordanceBinding,
         }
         all_ids: list[str] = []
         for field_name, expected_type in expected_types.items():
@@ -459,11 +591,17 @@ class SimulationSceneBinding:
             raise TypeError(
                 "collision_world_mode must be SceneCollisionWorldMode or None."
             )
+        _placement_defaults(self.support_surfaces, self.containers)
 
     def declare(self) -> SceneManifest:
         """Project the complete provider-free scene declaration."""
         objects = {item.entity_id: item for item in self.rigid_objects}
         articulations = {item.entity_id: item for item in self.articulations}
+        links = {item.entity_id: item for item in self.links}
+        placement_defaults = _placement_defaults(
+            self.support_surfaces,
+            self.containers,
+        )
         entries: list[SceneEntityManifest] = []
 
         for binding in self.rigid_objects:
@@ -472,15 +610,15 @@ class SimulationSceneBinding:
                 if binding.simulation_uid == binding.entity_id
                 else (binding.simulation_uid,)
             )
-            defaults = (
-                {}
-                if binding.default_grasp_affordance is None
-                else {
-                    GRASP_AFFORDANCE_CAPABILITY: SceneAffordanceRef(
-                        binding.default_grasp_affordance
-                    )
-                }
-            )
+            defaults = dict(placement_defaults.get(binding.entity_id, {}))
+            if binding.default_grasp_affordance is not None:
+                defaults.update(
+                    {
+                        GRASP_AFFORDANCE_CAPABILITY: SceneAffordanceRef(
+                            binding.default_grasp_affordance
+                        )
+                    }
+                )
             entries.append(
                 SceneEntityManifest(
                     ref=SceneObjectRef(binding.entity_id),
@@ -498,6 +636,7 @@ class SimulationSceneBinding:
                 if binding.simulation_uid == binding.entity_id
                 else (binding.simulation_uid,)
             )
+            defaults = dict(placement_defaults.get(binding.entity_id, {}))
             entries.append(
                 SceneEntityManifest(
                     ref=SceneArticulationRef(binding.entity_id),
@@ -505,6 +644,7 @@ class SimulationSceneBinding:
                     dynamics=binding.dynamics,
                     collision_role=binding.collision_role,
                     semantic_type=binding.semantic_type,
+                    default_affordances=defaults,
                 )
             )
 
@@ -522,6 +662,10 @@ class SimulationSceneBinding:
                     native_name=binding.native_link_name,
                     dynamics=binding.dynamics,
                     semantic_type=binding.semantic_type,
+                    default_affordances=placement_defaults.get(
+                        binding.entity_id,
+                        {},
+                    ),
                 )
             )
 
@@ -544,6 +688,38 @@ class SimulationSceneBinding:
                 )
             )
 
+        for capability, payload_type, bindings in (
+            (
+                PLACE_ON_AFFORDANCE_CAPABILITY,
+                SupportSurfaceAffordance,
+                self.support_surfaces,
+            ),
+            (
+                PLACE_IN_AFFORDANCE_CAPABILITY,
+                ContainerAffordance,
+                self.containers,
+            ),
+        ):
+            for binding in bindings:
+                parent = _placement_parent_ref(
+                    binding.parent_id,
+                    objects=objects,
+                    articulations=articulations,
+                    links=links,
+                )
+                entries.append(
+                    SceneEntityManifest(
+                        ref=SceneAffordanceRef(binding.entity_id),
+                        aliases=binding.aliases,
+                        parent=parent,
+                        native_name=binding.native_name,
+                        affordance_capabilities=frozenset({capability}),
+                        affordance_payload_type=payload_type,
+                        affordance_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
+                        relative_pose=binding.object_target_pose,
+                    )
+                )
+
         return SceneManifest(
             entries,
             collision_world_mode=self.collision_world_mode,
@@ -560,6 +736,10 @@ class SimulationSceneBinding:
         """
         objects = {item.entity_id: item for item in self.rigid_objects}
         articulations = {item.entity_id: item for item in self.articulations}
+        placement_defaults = _placement_defaults(
+            self.support_surfaces,
+            self.containers,
+        )
         geometry = {
             item.entity_id: item.geometry_provider
             for item in (*self.rigid_objects, *self.articulations)
@@ -587,18 +767,18 @@ class SimulationSceneBinding:
             entity_id = registration.ref.entity_id
             if isinstance(registration.ref, SceneObjectRef):
                 binding = objects[entity_id]
-                defaults = (
-                    {}
-                    if binding.default_grasp_affordance is None
-                    else {
-                        GRASP_AFFORDANCE_CAPABILITY: SceneAffordanceRef(
-                            binding.default_grasp_affordance
-                        )
-                    }
-                )
+                defaults = dict(placement_defaults.get(entity_id, {}))
+                if binding.default_grasp_affordance is not None:
+                    defaults.update(
+                        {
+                            GRASP_AFFORDANCE_CAPABILITY: SceneAffordanceRef(
+                                binding.default_grasp_affordance
+                            )
+                        }
+                    )
             else:
                 binding = articulations[entity_id]
-                defaults = {}
+                defaults = dict(placement_defaults.get(entity_id, {}))
             registrations.append(
                 replace(
                     registration,
@@ -652,6 +832,10 @@ class SimulationSceneBinding:
                     native_name=binding.native_link_name,
                     dynamics=binding.dynamics,
                     semantic_type=binding.semantic_type,
+                    default_affordances=placement_defaults.get(
+                        binding.entity_id,
+                        {},
+                    ),
                 )
             )
 
@@ -685,6 +869,40 @@ class SimulationSceneBinding:
                 )
             )
 
+        for capability, payload_type, bindings in (
+            (
+                PLACE_ON_AFFORDANCE_CAPABILITY,
+                SupportSurfaceAffordance,
+                self.support_surfaces,
+            ),
+            (
+                PLACE_IN_AFFORDANCE_CAPABILITY,
+                ContainerAffordance,
+                self.containers,
+            ),
+        ):
+            for binding in bindings:
+                parent = _placement_parent_ref(
+                    binding.parent_id,
+                    objects=objects,
+                    articulations=articulations,
+                    links=links,
+                )
+                payload = payload_type(
+                    minimum_confidence=binding.minimum_confidence,
+                )
+                registrations.append(
+                    SceneEntityRegistration(
+                        ref=SceneAffordanceRef(binding.entity_id),
+                        aliases=binding.aliases,
+                        parent=parent,
+                        native_name=binding.native_name,
+                        affordance=payload,
+                        affordance_capabilities=frozenset({capability}),
+                        affordance_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
+                        relative_pose=_pose_tensor(binding.object_target_pose),
+                    )
+                )
         return SceneRegistry(
             registrations,
             collision_world_mode=self.collision_world_mode,

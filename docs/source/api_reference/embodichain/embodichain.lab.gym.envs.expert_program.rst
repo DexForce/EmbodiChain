@@ -13,6 +13,7 @@ embodichain.lab.gym.envs.expert_program
       ConfigPath
       ConfigPathPart
       CompiledProgram
+      ContainerAffordanceBinding
       ConfiguredHandOverPoseProvider
       ControlPartCommandPreset
       ControlPartEndpointBinding
@@ -66,6 +67,7 @@ embodichain.lab.gym.envs.expert_program
       SimulationSceneBinding
       SimulationSegmentPolicyPort
       StandardExtensionDeclarations
+      SupportSurfaceAffordanceBinding
       TargetRefCfg
       UnsupportedRuntimeTransportError
       VersionedKey
@@ -294,6 +296,12 @@ use the core ``RobotResource`` type directly.
    :members:
 
 .. autoclass:: AntipodalGraspAffordanceBinding
+   :members:
+
+.. autoclass:: ContainerAffordanceBinding
+   :members:
+
+.. autoclass:: SupportSurfaceAffordanceBinding
    :members:
 
 .. autoclass:: ControlPartCommandPreset

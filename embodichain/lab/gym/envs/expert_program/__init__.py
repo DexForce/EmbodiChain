@@ -82,6 +82,7 @@ from .environment import (
 )
 from .simulation import (
     AntipodalGraspAffordanceBinding,
+    ContainerAffordanceBinding,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
@@ -90,6 +91,7 @@ from .simulation import (
     SimulationRigidObjectBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
+    SupportSurfaceAffordanceBinding,
 )
 from .catalog import (
     ExpertProgramIntegrationCatalog,
@@ -123,6 +125,7 @@ __all__ = [
     "ConfigPath",
     "ConfigPathPart",
     "CompiledProgram",
+    "ContainerAffordanceBinding",
     "ControlPartCommandPreset",
     "ControlPartEndpointBinding",
     "ControlPartResourceBinding",
@@ -176,6 +179,7 @@ __all__ = [
     "SimulationSceneBinding",
     "SimulationSegmentPolicyPort",
     "StandardExtensionDeclarations",
+    "SupportSurfaceAffordanceBinding",
     "TargetRefCfg",
     "UnsupportedRuntimeTransportError",
     "VersionedKey",

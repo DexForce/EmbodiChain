@@ -30,6 +30,8 @@ embodichain.lab.sim.skills
       SemanticRelationTarget
       RegisteredSemanticLowerer
       RelationTargetGrounder
+      ~embodichain.lab.sim.skills.compiler.ContainerRelationTargetGrounder
+      ~embodichain.lab.sim.skills.compiler.SupportSurfaceRelationTargetGrounder
       HandOverPoseTargets
       HandOverPoseProvider
       SemanticSkillCompiler
@@ -165,6 +167,12 @@ Semantic compilation and grounding
    :members:
 
 .. autoclass:: RelationTargetGrounder
+   :members:
+
+.. autoclass:: embodichain.lab.sim.skills.compiler.ContainerRelationTargetGrounder
+   :members:
+
+.. autoclass:: embodichain.lab.sim.skills.compiler.SupportSurfaceRelationTargetGrounder
    :members:
 
 .. autoclass:: HandOverPoseTargets

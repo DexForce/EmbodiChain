@@ -87,10 +87,13 @@ from .integration import (
     SemanticValidationError,
 )
 from .scene import (
+    ContainerAffordance,
+    PLACEMENT_TARGET_AFFORDANCE_REVISION,
     PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneObjectRef,
+    SupportSurfaceAffordance,
 )
 
 OptionT = TypeVar("OptionT", bound=ActionOptions)
@@ -168,6 +171,54 @@ class RelationTargetGrounder(ABC):
         Returns:
             Direct or scene-relative desired object pose.
         """
+
+
+class SupportSurfaceRelationTargetGrounder(RelationTargetGrounder):
+    """Ground a declared support target frame to a late-bound object pose."""
+
+    capability: ClassVar[str] = PLACE_ON_AFFORDANCE_CAPABILITY
+    affordance_type: ClassVar[type[Affordance]] = SupportSurfaceAffordance
+    affordance_revision: ClassVar[str] = PLACEMENT_TARGET_AFFORDANCE_REVISION
+
+    def ground(
+        self,
+        relation: SemanticRelationTarget,
+        *,
+        affordance: Affordance,
+        context: PlanningContext,
+    ) -> SceneEntityPose:
+        """Return the current support-relative target frame."""
+        del context
+        if type(affordance) is not SupportSurfaceAffordance:
+            raise TypeError("affordance must be exactly SupportSurfaceAffordance.")
+        return SceneEntityPose(
+            relation.affordance.entity_id,
+            minimum_confidence=affordance.minimum_confidence,
+        )
+
+
+class ContainerRelationTargetGrounder(RelationTargetGrounder):
+    """Ground a declared container target frame to a late-bound object pose."""
+
+    capability: ClassVar[str] = PLACE_IN_AFFORDANCE_CAPABILITY
+    affordance_type: ClassVar[type[Affordance]] = ContainerAffordance
+    affordance_revision: ClassVar[str] = PLACEMENT_TARGET_AFFORDANCE_REVISION
+
+    def ground(
+        self,
+        relation: SemanticRelationTarget,
+        *,
+        affordance: Affordance,
+        context: PlanningContext,
+    ) -> SceneEntityPose:
+        """Return the current container-relative target frame."""
+        del context
+        if type(affordance) is not ContainerAffordance:
+            raise TypeError("affordance must be exactly ContainerAffordance.")
+        return SceneEntityPose(
+            relation.affordance.entity_id,
+            minimum_confidence=affordance.minimum_confidence,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2453,6 +2504,7 @@ class SemanticSkillCompiler:
 
 __all__ = [
     "AnalyzedSemanticCall",
+    "ContainerRelationTargetGrounder",
     "GroundedHeldObjectGuard",
     "GroundedPhaseEffectGate",
     "GroundedSemanticCall",
@@ -2469,4 +2521,5 @@ __all__ = [
     "SemanticRelationTarget",
     "SemanticSkillCompiler",
     "SemanticWorkflow",
+    "SupportSurfaceRelationTargetGrounder",
 ]
