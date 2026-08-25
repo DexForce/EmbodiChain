@@ -75,9 +75,10 @@ solver.update_null_space_joint_targets([0.0] * 6)
   Computes joint positions (inverse kinematics) for the given target end-effector pose.
 
   **Parameters:**
-  + `target_xpos` (`torch.Tensor`): Target end-effector pose(s), shape `(num_envs, 4, 4)`.
-  + `qpos_seed` (`torch.Tensor`, optional): Initial guess for joint positions, shape `(num_envs, num_joints)`. If `None`, a default is used.
-  + `return_all_solutions` (`bool`, optional): If `True`, returns all possible solutions. Default is `False`.
+  + `target_xpos` (`torch.Tensor`): Target TCP pose(s), shape `(4, 4)` or `(num_envs, 4, 4)`.
+  + `qpos_seed` (`torch.Tensor`, optional): Initial guess(es) for joint positions, shape `(num_joints,)`, `(1, num_joints)` (broadcast), `(num_envs, num_joints)`, or `(num_envs, 1, num_joints)`. If `None`, a default is used.
+  + `return_all_solutions` (`bool`, optional): Accepted for solver-interface compatibility. Pink returns one locally optimal solution per target even when this is `True`. Default is `False`.
+
   **Returns:**
   + `Tuple[torch.Tensor, torch.Tensor]`:
     - First element: Success flags, shape `(num_envs,)`.

@@ -660,8 +660,9 @@ class PinkSolver(BaseSolver):
         Args:
             target_xpos: Target TCP pose with shape ``(4, 4)`` or
                 ``(N, 4, 4)``.
-            qpos_seed: Joint seed with shape ``(dof,)``, ``(N, dof)``, or
-                ``(N, 1, dof)``. A single seed is broadcast over the batch.
+            qpos_seed: Joint seed with shape ``(dof,)``, ``(1, dof)``,
+                ``(N, dof)``, or ``(N, 1, dof)``. A single seed is broadcast
+                over the batch.
             return_all_solutions: Accepted for solver-interface compatibility;
                 Pink returns one locally optimal solution per target.
             **kwargs: Reserved for future solver options.
