@@ -232,55 +232,8 @@ def _generate_coarse_results_from_masks(
         json.dumps(coarse_layout, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    _write_baked_coarse_layout_debug_glbs(
-        coarse_layout=coarse_layout,
-        coarse_geometry_root=coarse_geometry_output_root,
-        debug_output_root=debug_output_root,
-    )
     # Nothing to be returned.
     return None
-
-
-def _write_baked_coarse_layout_debug_glbs(
-    *,
-    coarse_layout: list[dict[str, object]],
-    coarse_geometry_root: str | Path,
-    debug_output_root: str | Path,
-) -> Path:
-    """Write per-object and combined GLBs with each coarse pose baked in."""
-    resolved_geometry_root = Path(coarse_geometry_root).expanduser().resolve()
-    baked_root = (
-        Path(debug_output_root).expanduser().resolve() / "coarse_layout_baked_glbs"
-    )
-    baked_root.mkdir(parents=True, exist_ok=True)
-
-    baked_scene = trimesh.Scene()
-    baked_object_ids: set[str] = set()
-    for layout_object in coarse_layout:
-        object_id = layout_object.get("id")
-        if not isinstance(object_id, str) or not object_id:
-            raise ValueError(
-                "Each coarse layout object must contain a non-empty string id."
-            )
-        if object_id in baked_object_ids:
-            raise ValueError(f"Coarse layout contains duplicate id {object_id!r}.")
-        baked_object_ids.add(object_id)
-
-        # The geometry server declares these poses in the GLB y-up convention.
-        baked_mesh = load_glb_mesh(resolved_geometry_root / f"{object_id}.glb")
-        baked_mesh.apply_transform(layout_object_to_transform_matrix(layout_object))
-        baked_mesh.export(baked_root / f"{object_id}.glb", file_type="glb")
-        baked_scene.add_geometry(
-            baked_mesh,
-            node_name=object_id,
-            geom_name=object_id,
-        )
-
-    if not baked_object_ids:
-        raise ValueError("Cannot write baked coarse debug GLBs for an empty layout.")
-    baked_scene.export(baked_root / "scene.glb", file_type="glb")
-    log_info(f"Wrote baked coarse-pose debug GLBs: {baked_root}")
-    return baked_root
 
 
 def _update_scene_final_y_up_layout_and_z_up_centers(
