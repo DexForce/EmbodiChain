@@ -264,11 +264,9 @@ runtime:
         upright:
           PickUp:
             rotate_upright: 0.7853981633974483
-            upright_yaw_samples: 8
           MoveHeldObject:
             staging_lift_height: 0.25
             surface_clearance: 0.05
-            upright_yaw_samples: 8
             upright_xy_tolerance: 0.05
             upright_max_tilt: 0.2617993877991494
           Place:

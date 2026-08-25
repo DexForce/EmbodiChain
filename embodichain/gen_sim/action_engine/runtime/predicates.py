@@ -234,7 +234,15 @@ def _local_axis_index(env: Any, uid: str, axis: Any) -> int:
     name = str(axis).lower()
     if name in {"x", "y", "z"}:
         return {"x": 0, "y": 1, "z": 2}[name]
-    if name not in {"long", "long_axis", "longest"}:
+    geometry_axis = {
+        "long": "long",
+        "long_axis": "long",
+        "longest": "long",
+        "short": "short",
+        "short_axis": "short",
+        "shortest": "short",
+    }.get(name)
+    if geometry_axis is None:
         raise ValueError(f"Unsupported upright local axis {axis!r}.")
     entity = env.sim.get_rigid_object(uid)
     if entity is None:
@@ -247,7 +255,8 @@ def _local_axis_index(env: Any, uid: str, axis: Any) -> int:
         vertices = vertices[0]
     if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
         raise ValueError(f"Rigid object {uid!r} has invalid mesh vertices.")
-    return analyze_local_geometry_axes(vertices).long_axis_index
+    axes = analyze_local_geometry_axes(vertices)
+    return axes.long_axis_index if geometry_axis == "long" else axes.short_axis_index
 
 
 def _arm_values(
@@ -592,7 +601,15 @@ def evaluate_predicate(
         cosine = axis[:, 2].clamp(-1.0, 1.0)
         directed = spec.get(
             "directed",
-            str(local_axis).lower() not in {"long", "long_axis", "longest"},
+            str(local_axis).lower()
+            not in {
+                "long",
+                "long_axis",
+                "longest",
+                "short",
+                "short_axis",
+                "shortest",
+            },
         )
         if not isinstance(directed, bool):
             raise ValueError("object_upright directed must be a boolean.")

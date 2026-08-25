@@ -30,6 +30,7 @@ from .atomic import (
     capability_precondition,
 )
 from .builtins import build_default_registry
+from .held_hand_over import HeldObjectHandOver, HeldObjectHandOverOptions
 from .registry import (
     ActionCapability,
     ActionTemplate,
@@ -45,6 +46,8 @@ __all__ = [
     "AtomicCapability",
     "AtomicCapabilityRegistry",
     "CapabilityRegistry",
+    "HeldObjectHandOver",
+    "HeldObjectHandOverOptions",
     "OperatorCapability",
     "PhaseTemplate",
     "ResolvedActionContract",

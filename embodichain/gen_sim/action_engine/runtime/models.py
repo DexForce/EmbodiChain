@@ -144,6 +144,8 @@ class GroundedAction:
     motion_policy: dict[str, Any] = field(default_factory=dict)
     object_uid: str | None = None
     """Scene UID of the object whose semantic step produced this action."""
+    allow_yaw_search: bool = False
+    """Whether planning may vary world-Z yaw without changing task semantics."""
 
 
 @dataclass

@@ -35,6 +35,7 @@ from embodichain.gen_sim.action_engine.config import (
     resolve_agent_runtime_policy,
     runtime_policy_hash,
 )
+from embodichain.gen_sim.action_engine.capabilities import HeldObjectHandOverOptions
 from embodichain.gen_sim.action_engine.compiler import (
     compile_task_agent,
     compile_task_agent_v2,
@@ -95,7 +96,6 @@ from embodichain.lab.sim.atomic_actions import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
     EndEffectorPoseGoal,
-    HandOverOptions,
     HeldObjectPoseGoal,
     HeldObjectState,
     ObjectSemantics,
@@ -1559,7 +1559,7 @@ def test_handover_grounding_uses_bottom_region_and_diagonal_receive() -> None:
     )
     middle = grounded.cfg["middle_object_pose"]
     final = grounded.cfg["final_object_pose"]
-    cfg = AtomicActionAdapter(env)._build_config(grounded, HandOverOptions)
+    cfg = AtomicActionAdapter(env)._build_config(grounded, HeldObjectHandOverOptions)
 
     staging_edge = next(
         edge
@@ -1579,7 +1579,7 @@ def test_handover_grounding_uses_bottom_region_and_diagonal_receive() -> None:
     assert cfg.receive_pick_object_part == "bottom"
     assert cfg.receive_approach_direction[1] < 0.0
     assert cfg.receive_approach_direction[2] < 0.0
-    assert staging.motion_policy["upright_yaw_samples"] == 8
+    assert staging.allow_yaw_search
 
 
 def test_handover_rejects_receiver_motion_during_internal_final_phase() -> None:
@@ -1591,7 +1591,7 @@ def test_handover_rejects_receiver_motion_during_internal_final_phase() -> None:
         target=SimpleNamespace(),
         cfg={"transfer_arm": "left_arm"},
     )
-    options = HandOverOptions(retreat_steps=4)
+    options = HeldObjectHandOverOptions(retreat_steps=4)
     trajectory = torch.zeros(1, 12, adapter.env.robot.dof)
 
     assert bool(
@@ -1732,8 +1732,8 @@ def test_handover_continuation_uses_stable_upright_policies() -> None:
     release_defaults = resolve_motion_policy("dual_ur10", "Place", upright)
     retreat_defaults = resolve_motion_policy("dual_ur10", "MoveEndEffector", upright)
 
-    assert grounded_staging.cfg["upright_yaw_samples"] == 8
-    assert grounded_final.cfg["upright_yaw_samples"] == 8
+    assert grounded_staging.allow_yaw_search
+    assert grounded_final.allow_yaw_search
     assert grounded_final_with_reference.target_object_pose is not None
     assert grounded_final_with_reference.target_object_pose[0, 2, 3] == pytest.approx(
         0.90
@@ -1797,12 +1797,58 @@ def test_preserve_handover_continuation_does_not_enable_yaw_search() -> None:
         orientation_reference_pose=reference,
     )
 
-    assert "upright_yaw_samples" not in grounded.cfg
+    assert not grounded.allow_yaw_search
     assert grounded.target_object_pose is not None
     torch.testing.assert_close(
         grounded.target_object_pose[:, :3, :3],
         reference[:, :3, :3],
     )
+
+
+def test_unconstrained_handover_continuation_has_free_yaw() -> None:
+    entities = {
+        "can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03)),
+        "target": _FakeEntity("target", _pose(0.2, 0.0, 0.75), _box_vertices(0.03)),
+        "table": _FakeEntity("table", _pose(0.0, 0.0, 0.5), _box_vertices(0.5)),
+    }
+    env = _FakeEnv(entities)
+    task = deepcopy(_handover_then_place_task())
+    task["task_instances"][0]["params"]["orientation_goal"] = "none"
+    program = load_execution_program(
+        instantiate_seed_graph(task, {"can": "can", "target": "target"})
+    )
+    step = next(
+        candidate
+        for candidate in program.semantic_steps
+        if candidate.operator == "place_relative"
+    )
+    state = _held_state(env, entities["can"], arm="right_arm")
+    held = state.get_held_object("physical_right_arm")
+    assert held is not None
+    grounder = ActionGrounder(program, env, lambda _uid: held.semantics)
+    grounded = [
+        grounder.ground(edge.actions[0], step, arm="right_arm", state=state)
+        for edge in program.edges
+        if edge.id in step.edge_ids
+        and edge.actions[0]["atomic_action_class"] in {"MoveHeldObject", "Place"}
+    ]
+
+    assert [item.action_class for item in grounded] == [
+        "MoveHeldObject",
+        "MoveHeldObject",
+        "Place",
+    ]
+    assert all(item.allow_yaw_search for item in grounded)
+
+    yawed = entities["can"]._pose.clone()
+    yawed[:, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    entities["can"]._pose = yawed
+    executor = ProgramExecutor(program, env, settle_steps=0, record_runtime=False)
+    executor._target_poses[step.id] = _pose(0.0, 0.2, 0.75)
+
+    assert bool(executor._placement_orientation_satisfied(step, yawed)[0])
 
 
 def test_dual_franka_handover_uses_explicit_exchange_clearance() -> None:
@@ -3944,7 +3990,7 @@ def test_handover_receiver_uses_the_mirrored_diagonal_approach(
         },
     )
 
-    cfg = AtomicActionAdapter(env)._build_config(action, HandOverOptions)
+    cfg = AtomicActionAdapter(env)._build_config(action, HeldObjectHandOverOptions)
 
     diagonal = 2.0**-0.5
     assert cfg.receive_approach_direction[0] == pytest.approx(0.0)
@@ -3989,7 +4035,7 @@ def test_handover_receiver_approach_tracks_rotated_robot_lateral_axis(
         },
     )
 
-    cfg = AtomicActionAdapter(env)._build_config(action, HandOverOptions)
+    cfg = AtomicActionAdapter(env)._build_config(action, HeldObjectHandOverOptions)
 
     diagonal = 2.0**-0.5
     assert cfg.receive_approach_direction[0] == pytest.approx(expected_x * diagonal)
@@ -5808,10 +5854,10 @@ def test_orient_grounding_uses_mature_robot_profile_policy() -> None:
         torch.tensor([0.0, 0.0, 1.0]),
     )
     assert pickup.motion_policy["rotate_upright"] == pytest.approx(torch.pi / 4)
-    assert pickup.motion_policy["upright_yaw_samples"] == 8
+    assert "upright_yaw_samples" not in pickup.motion_policy
     assert final.target_object_pose[0, 2, 3] == pytest.approx(expected_z)
     assert final.motion_policy["upright_local_axis"] == "long_axis"
-    assert final.motion_policy["upright_yaw_samples"] == 8
+    assert final.allow_yaw_search
 
 
 def test_orient_verification_requires_upright_pose_near_initial_xy() -> None:
@@ -5861,6 +5907,60 @@ def test_orient_verification_requires_upright_pose_near_initial_xy() -> None:
     failed, success, _ = executor._verify_step(step, torch.tensor([False]))
     assert not bool(success[0])
     assert bool(failed[0])
+
+
+@pytest.mark.parametrize("yaw", [0.0, torch.pi / 3, torch.pi, -torch.pi / 2])
+def test_orient_verification_accepts_any_upright_yaw(yaw: float) -> None:
+    pose = _pose(0.10, 0.20, 0.823)
+    pose[:, :3, :3] = torch.tensor(
+        [
+            [torch.cos(torch.tensor(yaw)), -torch.sin(torch.tensor(yaw)), 0.0],
+            [torch.sin(torch.tensor(yaw)), torch.cos(torch.tensor(yaw)), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    bottle = _FakeEntity(
+        "bottle",
+        pose,
+        _rect_vertices(0.02, 0.03, 0.10),
+    )
+    env = _FakeEnv({"bottle": bottle})
+    env.agent_initial_object_poses = {"bottle": _pose(0.10, 0.20, 0.78)}
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "orient",
+                        "operator": "orient_object",
+                        "object": "bottle",
+                        "actor": {"mode": "auto"},
+                        "goal": {
+                            "orientation_goal": "upright",
+                            "orientation_axis": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        env,
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    executor._target_poses[step.id] = _pose(0.10, 0.20, 0.823)
+    executor._policies[step.id] = {
+        "upright_max_tilt": torch.pi / 12,
+        "upright_xy_tolerance": 0.05,
+        "upright_local_axis": "z",
+    }
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert bool(success[0])
+    assert not bool(failed[0])
+    assert executor.retry_count == 0
 
 
 def test_orient_verification_accepts_grounded_live_xy_anchor() -> None:

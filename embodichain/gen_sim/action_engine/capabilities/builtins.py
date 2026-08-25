@@ -346,7 +346,6 @@ def _expand_hold_hover(step: Mapping[str, Any]) -> list[dict[str, Any]]:
     orientation_goal, orientation_axis = _orientation(
         goal,
         "hold_hover",
-        allow_change=False,
     )
     reference = str(goal.get("reference_object", object_uid))
     return [
@@ -984,17 +983,10 @@ def _required_string(
 def _orientation(
     goal: Mapping[str, Any],
     operator: str,
-    *,
-    allow_change: bool = True,
 ) -> tuple[str, str]:
-    default_goal = "none" if allow_change else "preserve"
-    orientation_goal = str(goal.get("orientation_goal", default_goal))
+    orientation_goal = str(goal.get("orientation_goal", "none"))
     orientation_axis = str(goal.get("orientation_axis", "none"))
-    allowed_goals = (
-        {"none", "preserve", "upright", "lay_flat", "axis_align"}
-        if allow_change
-        else {"preserve"}
-    )
+    allowed_goals = {"none", "preserve", "upright", "lay_flat", "axis_align"}
     if orientation_goal not in allowed_goals:
         raise ValueError(
             f"{operator} orientation_goal {orientation_goal!r} is unsupported."

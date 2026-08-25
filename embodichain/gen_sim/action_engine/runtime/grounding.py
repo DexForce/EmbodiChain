@@ -698,16 +698,16 @@ class ActionGrounder:
             kind == "handover_staging"
             and capability.target_materializer == "semantic_held_object"
         )
-        use_upright_yaw_search = (
+        use_upright_transport_policy = (
             is_handover_continuation or uses_handover_staging
-        ) and self._uses_upright_yaw_search(
+        ) and self._uses_upright_transport_policy(
             step,
             orientation,
         )
         extra_modifiers: tuple[tuple[str, str], ...] = ()
         if (
             is_handover_continuation
-            and use_upright_yaw_search
+            and use_upright_transport_policy
             and capability.target_materializer
             in {
                 "semantic_held_object",
@@ -733,15 +733,6 @@ class ActionGrounder:
                 # collision-aware planner cannot find a route, do not silently
                 # replace it with collision-unaware joint interpolation.
                 policy["collision_safety"] = "required"
-        if uses_handover_staging and use_upright_yaw_search:
-            # Handover consumes the live payload pose immediately after this
-            # move.  Use the existing upright-yaw feasibility search instead
-            # of the generic transport orientation heuristic, which can tilt
-            # a payload while moving it to the exchange point.
-            policy["upright_yaw_samples"] = max(
-                int(policy.get("upright_yaw_samples", 1)),
-                8,
-            )
         object_pose = _live_pose(self.env, step.object_uid)
         if step.operator == "orient_object":
             policy["upright_local_axis"] = self._upright_local_axis(step)
@@ -769,7 +760,10 @@ class ActionGrounder:
                     f"AtomicAction {action_class!r} target materializer must "
                     "return GroundedAction."
                 )
-            return grounded
+            return replace(
+                grounded,
+                allow_yaw_search=orientation.allows_yaw_search,
+            )
 
         if kind == "object":
             semantics = self.semantics_factory(
@@ -1063,6 +1057,7 @@ class ActionGrounder:
             target_object_pose=target_object_pose,
             motion_policy=policy,
             object_uid=step.object_uid,
+            allow_yaw_search=orientation.allows_yaw_search,
         )
 
     def _handover_role_axis(
@@ -2544,27 +2539,28 @@ class ActionGrounder:
         axis = self._upright_local_axis(step)
         entity = _object(self.env, step.object_uid)
         vertices = _local_vertices(entity, self.env, 0)
-        if axis == "long_axis":
-            axis_index = analyze_local_geometry_axes(vertices).long_axis_index
+        if axis in {"long_axis", "short_axis"}:
+            axes = analyze_local_geometry_axes(vertices)
+            axis_index = (
+                axes.long_axis_index if axis == "long_axis" else axes.short_axis_index
+            )
         else:
             axis_index = {"x": 0, "y": 1, "z": 2}[axis]
         direction = torch.zeros(3, dtype=torch.float32, device=self.env.device)
         direction[axis_index] = 1.0
         return direction
 
-    def _uses_upright_yaw_search(
+    def _uses_upright_transport_policy(
         self,
         step: SemanticStep,
         constraint: OrientationConstraint,
     ) -> bool:
-        """Preserve a live upright state as a planning preference.
+        """Return whether transport should retain upright-specific tuning.
 
-        Explicit full-frame matching cannot admit yaw search. With no hard
-        orientation terms, yaw search is enabled only when the live object's
-        long axis is already upright, so a preceding upright operation remains
-        stable without turning that state into a sticky acceptance constraint.
+        A preceding upright operation may use higher-clearance motion settings
+        without turning that live posture into a hard terminal constraint.
         """
-        if constraint.allows_upright_yaw_search:
+        if constraint.requires_upright_axis_alignment:
             return True
         if (
             constraint.terms
@@ -2573,7 +2569,10 @@ class ActionGrounder:
             return False
         entity = _object(self.env, step.object_uid)
         vertices = _local_vertices(entity, self.env, 0)
-        axis_index = analyze_local_geometry_axes(vertices).long_axis_index
+        try:
+            axis_index = analyze_local_geometry_axes(vertices).long_axis_index
+        except ValueError:
+            return False
         pose = _live_pose(self.env, step.object_uid)
         cosine = pose[:, 2, axis_index].abs().clamp(0.0, 1.0)
         tolerance = float(self.runtime_policy.predicate_fallbacks["upright_max_tilt"])
@@ -2640,7 +2639,11 @@ class ActionGrounder:
                 vertical_axis = (
                     int(longest_to_shortest[0])
                     if upright_axis == "long_axis"
-                    else {"x": 0, "y": 1, "z": 2}[upright_axis]
+                    else (
+                        int(longest_to_shortest[-1])
+                        if upright_axis == "short_axis"
+                        else {"x": 0, "y": 1, "z": 2}[upright_axis]
+                    )
                 )
                 horizontal_axis = next(
                     int(axis)

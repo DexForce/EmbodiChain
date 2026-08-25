@@ -29,7 +29,7 @@ from embodichain.gen_sim.action_engine.runtime.atomic_compat import (
 from embodichain.lab.sim.atomic_actions import MoveHeldObject, MoveHeldObjectOptions
 
 
-def test_exact_target_transport_only_disables_rotation_when_requested(
+def test_grounded_target_transport_never_applies_an_implicit_rotation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     applied = []
@@ -52,31 +52,15 @@ def test_exact_target_transport_only_disables_rotation_when_requested(
     monkeypatch.setattr(MoveHeldObject, "_plan", fake_plan)
     action = ExactTargetMoveHeldObject()
     assert type(action).__dict__["binding_contract"] is MoveHeldObject.binding_contract
-    disabled_request = SimpleNamespace(
-        skill_options=ExactTargetMoveHeldObjectOptions(
-            allow_automatic_transport_rotation=False,
-        )
-    )
-    enabled_request = SimpleNamespace(
-        skill_options=ExactTargetMoveHeldObjectOptions(),
-    )
+    request = SimpleNamespace(skill_options=ExactTargetMoveHeldObjectOptions())
 
-    assert action._plan(disabled_request, object()) is result
+    assert action._plan(request, object()) is result
     assert not applied
-    assert action._plan(enabled_request, object()) is result
-    assert applied == [True]
 
 
-@pytest.mark.parametrize(
-    ("yaw_samples", "expected"),
-    [(1, True), (8, False)],
-)
-def test_semantic_transport_config_scopes_rotation_override(
-    yaw_samples: int,
-    expected: bool,
-) -> None:
+def test_semantic_transport_config_has_no_task_facing_rotation_switch() -> None:
     adapter = AtomicActionAdapter.__new__(AtomicActionAdapter)
-    action = SimpleNamespace(cfg={"upright_yaw_samples": yaw_samples})
+    action = SimpleNamespace(cfg={})
     capability = SimpleNamespace(
         config_type=MoveHeldObjectOptions,
         target_materializer="semantic_held_object",
@@ -85,4 +69,4 @@ def test_semantic_transport_config_scopes_rotation_override(
     options = adapter._build_single_arm_config(action, capability)
 
     assert isinstance(options, ExactTargetMoveHeldObjectOptions)
-    assert options.allow_automatic_transport_rotation is expected
+    assert not hasattr(options, "allow_automatic_transport_rotation")

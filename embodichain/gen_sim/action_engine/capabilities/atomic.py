@@ -352,8 +352,6 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
         CoordinatedPlacement,
         CoordinatedPlacementOptions,
         AxisAlignOptions,
-        HandOver,
-        HandOverOptions,
         MoveEndEffector,
         MoveEndEffectorOptions,
         MoveHeldObject,
@@ -373,6 +371,7 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
         Twist,
         TwistOptions,
     )
+    from .held_hand_over import HeldObjectHandOver, HeldObjectHandOverOptions
 
     registry = AtomicCapabilityRegistry()
     definitions = (
@@ -545,8 +544,8 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
         ),
         AtomicCapability(
             "HandOver",
-            HandOver,
-            HandOverOptions,
+            HeldObjectHandOver,
+            HeldObjectHandOverOptions,
             frozenset({"handover_goal"}),
             frozenset({"coordinated"}),
             "coordinated_object",
