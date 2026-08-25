@@ -175,6 +175,36 @@ class _BaseSRSSolverImpl:
             if offset < np.pi - 1e-12 and len(offsets) < self.cfg.num_samples:
                 offsets.append(-offset)
             layer += 1
+
+        # A fixed radial step has only finitely many distinct positions on one
+        # revolution. If it cannot provide num_samples entries, retain the
+        # seed-first radial prefix and fill the remaining slots from a uniform
+        # full-circle grid. This preserves the configured local search order
+        # while honoring num_samples and covering intermediate arm angles.
+        if len(offsets) < self.cfg.num_samples:
+            uniform_offsets = np.linspace(
+                -np.pi,
+                np.pi,
+                self.cfg.num_samples,
+                endpoint=False,
+                dtype=np.float64,
+            )
+            uniform_offsets = sorted(
+                uniform_offsets,
+                key=lambda value: abs((float(value) + np.pi) % (2.0 * np.pi) - np.pi),
+            )
+            for candidate in uniform_offsets:
+                wrapped_candidate = (float(candidate) + np.pi) % (2.0 * np.pi) - np.pi
+                if any(
+                    abs((wrapped_candidate - existing + np.pi) % (2.0 * np.pi) - np.pi)
+                    <= 1e-12
+                    for existing in offsets
+                ):
+                    continue
+                offsets.append(wrapped_candidate)
+                if len(offsets) == self.cfg.num_samples:
+                    break
+
         offset_tensor = torch.tensor(offsets, dtype=qpos_seed.dtype, device=self.device)
         seed_arm_angles = self._get_seed_arm_angles(qpos_seed)
         angles = seed_arm_angles.unsqueeze(1) + offset_tensor.unsqueeze(0)
@@ -758,12 +788,10 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         target_xpos_np = target_xpos.detach().cpu().numpy()
 
         # Iterate over target poses
-        for target_idx, xpos in enumerate(target_xpos):
+        for target_idx in range(num_targets):
+            target_np = target_xpos_np[target_idx]
             transformed = (
-                self.T_b_ob_inv_np
-                @ target_xpos_np[target_idx]
-                @ self.tcp_inv_np
-                @ self.T_e_oe_inv_np
+                self.T_b_ob_inv_np @ target_np @ self.tcp_inv_np @ self.T_e_oe_inv_np
             )
             rotation = transformed[:3, :3]
             shoulder = np.array([0.0, 0.0, self.link_lengths_np[0]])
@@ -789,7 +817,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
                     if prepared is None:
                         continue
                     success, qpos = self._get_each_ik(
-                        xpos,
+                        target_np,
                         psi.item(),
                         config,
                         qpos_seed_np[target_idx],
@@ -797,7 +825,6 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
                     )
                     if success:
                         fk_xpos = self._get_fk(qpos)
-                        target_np = xpos.detach().cpu().numpy()
                         if np.linalg.norm(fk_xpos - target_np) <= 1e-4:
                             all_solutions[target_idx, sol_idx, :] = qpos
                             sol_idx += 1

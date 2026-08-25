@@ -225,7 +225,7 @@ class BaseSolverTest:
         )
         expected = torch.remainder(expected + torch.pi, 2.0 * torch.pi) - torch.pi
         assert torch.allclose(angles[:, :3], expected, atol=1e-6)
-        assert angles.shape[1] <= solver.cfg.num_samples
+        assert angles.shape[1] == solver.cfg.num_samples
         assert torch.all(angles >= -torch.pi)
         assert torch.all(angles < torch.pi)
         wrapped_delta = torch.atan2(
