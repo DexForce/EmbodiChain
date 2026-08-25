@@ -22,6 +22,7 @@ import json
 import mimetypes
 import shutil
 import uuid
+from math import isfinite
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -58,8 +59,8 @@ class ArticulationServerClient:
             raise ValueError("base_url must be an absolute HTTP(S) URL")
         if parsed.query or parsed.fragment:
             raise ValueError("base_url must not contain a query or fragment")
-        if timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be greater than zero")
+        if not isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be a finite positive number")
         self.base_url = base_url.rstrip("/") + "/"
         self.timeout_seconds = timeout_seconds
         self.opener: OpenerDirector = build_opener(ProxyHandler({}))

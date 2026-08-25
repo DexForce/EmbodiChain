@@ -33,6 +33,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Iterator
+from math import isfinite
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -686,11 +687,19 @@ def _articulation_server_client() -> ArticulationServerClient:
 
 def _server_output_root() -> Path:
     """Validate remote task settings and return their local artifact root."""
-    if ARTICULATION_SERVER_TASK_TIMEOUT_S <= 0:
-        raise ValueError("ARTICULATION_SERVER_TASK_TIMEOUT_S must be greater than zero")
-    if ARTICULATION_SERVER_POLL_INTERVAL_S <= 0:
+    if (
+        not isfinite(ARTICULATION_SERVER_TASK_TIMEOUT_S)
+        or ARTICULATION_SERVER_TASK_TIMEOUT_S <= 0
+    ):
         raise ValueError(
-            "ARTICULATION_SERVER_POLL_INTERVAL_S must be greater than zero"
+            "ARTICULATION_SERVER_TASK_TIMEOUT_S must be a finite positive number"
+        )
+    if (
+        not isfinite(ARTICULATION_SERVER_POLL_INTERVAL_S)
+        or ARTICULATION_SERVER_POLL_INTERVAL_S <= 0
+    ):
+        raise ValueError(
+            "ARTICULATION_SERVER_POLL_INTERVAL_S must be a finite positive number"
         )
     return validate_gradio_artifact_root(ARTICRAFT_OUTPUT_ROOT) / "server"
 

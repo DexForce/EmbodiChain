@@ -72,6 +72,15 @@ def _json_response(payload: object) -> io.BytesIO:
     return io.BytesIO(json.dumps(payload).encode("utf-8"))
 
 
+@pytest.mark.parametrize(
+    "timeout_seconds",
+    [float("nan"), float("inf"), float("-inf")],
+)
+def test_client_rejects_non_finite_timeout(timeout_seconds: float) -> None:
+    with pytest.raises(ValueError, match="finite positive number"):
+        ArticulationServerClient(SERVER_URL, timeout_seconds=timeout_seconds)
+
+
 def test_submit_text_uses_json_without_authorization_header() -> None:
     opener = _FakeOpener(_json_response({"request_id": REQUEST_ID}))
     client = ArticulationServerClient(SERVER_URL)

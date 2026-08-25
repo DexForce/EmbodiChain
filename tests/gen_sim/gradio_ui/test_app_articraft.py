@@ -213,6 +213,28 @@ def test_local_codex_command_preserves_existing_provider(
     assert command[-1] == "prompt"
 
 
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("ARTICULATION_SERVER_TASK_TIMEOUT_S", float("nan")),
+        ("ARTICULATION_SERVER_TASK_TIMEOUT_S", float("inf")),
+        ("ARTICULATION_SERVER_POLL_INTERVAL_S", float("nan")),
+        ("ARTICULATION_SERVER_POLL_INTERVAL_S", float("inf")),
+    ],
+)
+def test_remote_server_rejects_non_finite_polling_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    setting: str,
+    value: float,
+) -> None:
+    monkeypatch.setattr(app_articraft, "ARTICRAFT_OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(app_articraft, setting, value)
+
+    with pytest.raises(ValueError, match=f"{setting}.*finite positive number"):
+        app_articraft._server_output_root()
+
+
 def test_remote_server_success_polls_and_downloads_usdc(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
