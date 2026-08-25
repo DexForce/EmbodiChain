@@ -387,7 +387,8 @@ topics:
       - embodichain/lab/sim/planners/utils.py
       - embodichain/lab/sim/skills/scene.py
       - embodichain/toolkits/graspkit/pose_generator.py
-      - embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py
+      - embodichain_tasks/embodichain_tasks/manipulation/repeated_pick_place/task.py
+      - embodichain_tasks/embodichain_tasks/manipulation/repeated_pick_place/expert/binding.py
     related_topics:
       - simulation-system
       - robot-system
@@ -460,8 +461,11 @@ topics:
       - embodichain/lab/gym/utils/gym_utils.py
       - embodichain/lab/gym/utils/registration.py
       - embodichain/utils/utility.py
-      - embodichain_tasks/configs/agents/rl/
-      - embodichain_tasks/embodichain_tasks/rl/
+      - embodichain_tasks/configs/tasks/
+      - embodichain_tasks/configs/tasks/classic_control/
+      - embodichain_tasks/configs/tasks/manipulation/push_cube/
+      - embodichain_tasks/embodichain_tasks/classic_control/
+      - embodichain_tasks/embodichain_tasks/manipulation/push_cube/
     related_topics:
       - simulation-system
       - env-framework

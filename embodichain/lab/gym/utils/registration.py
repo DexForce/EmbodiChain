@@ -205,10 +205,8 @@ def build_env(env_id: str, base_env_cfg: EmbodiedEnvCfg):
     A thin convenience wrapper around :func:`make` that deep-copies the base
     config so callers can safely mutate the resulting environment's cfg
     without affecting shared defaults. This helper used to live in the task
-    package (``embodichain_tasks.rl``); it now lives with the registry so
-    that core code paths such as RL training do not need to depend on a task
-    package. ``embodichain_tasks.rl`` re-exports it for backward
-    compatibility.
+    package; it now lives with the registry so that core code paths such as RL
+    training do not need to depend on an official task package.
 
     Args:
         env_id: Registered environment id (see :func:`register_env`).

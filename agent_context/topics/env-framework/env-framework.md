@@ -241,37 +241,32 @@ from the event config before the event manager is created.
 
 Use the `/add-task-env` skill. It scaffolds:
 
-1. A new file under `embodichain_tasks/embodichain_tasks/<category>/`.
-2. `@register_env("<GymId>")` decorator on the class.
-3. `EmbodiedEnvCfg` subclass with robot, sensor, object configs.
-4. Stub implementations of `_setup_robot()`, `evaluate()`, `get_reward()`.
-5. Export entry in the category package's `__init__.py`.
-6. Test stub.
+1. A task package under
+   `embodichain_tasks/embodichain_tasks/<domain>/<task>/`.
+2. A `task.py` entry point with the `@register_env("<GymId>")` decorator.
+3. A task-local `configs/tasks/<domain>/<task>/env.{json,yaml}` containing the
+   scene and MDP configuration.
+4. Optional sibling Expert Program, scripted expert, or RL artifacts.
+5. Task-package exports and a focused test stub.
+
+Do not organize task ownership around a solution method such as `rl` or
+`expert_program`. Keep registration in `task.py`; use `expert/binding.py` only
+for runtime wiring that cannot be expressed in task config.
 
 ### Minimal manual skeleton
 
 ```python
+from typing import Any
+
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
-@configclass
-class MyTaskCfg(EmbodiedEnvCfg):
-    robot: RobotCfg = MISSING
-
 @register_env("MyTask-v1", max_episode_steps=300)
 class MyTaskEnv(EmbodiedEnv):
-    def __init__(self, cfg: MyTaskCfg = MyTaskCfg(), **kwargs):
+    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs: Any) -> None:
         super().__init__(cfg, **kwargs)
 
-    def _setup_robot(self, **kwargs) -> Robot:
-        # load robot, set self.single_action_space
-        ...
-
-    def evaluate(self, **kwargs) -> dict:
-        return {"success": ..., "fail": ...}
-
-    def get_reward(self, obs, action, info) -> torch.Tensor:
-        ...
+    # Keep only behavior that cannot be expressed by task-local config here.
 ```
 
 ---

@@ -98,9 +98,12 @@ _TASK_SIZE_SPECS = (
         baseline_bytes=23_912,
         baseline_blob="1965563b060d1fc889f03ad13d47655c2edcd99b",
         source_paths=(
-            "embodichain_tasks/embodichain_tasks/expert_program/"
-            "repeated_pick_place.py",
-            "embodichain_tasks/configs/expert_program/repeated_pick_place.yaml",
+            "embodichain_tasks/embodichain_tasks/manipulation/"
+            "repeated_pick_place/task.py",
+            "embodichain_tasks/embodichain_tasks/manipulation/"
+            "repeated_pick_place/expert/binding.py",
+            "embodichain_tasks/configs/tasks/manipulation/"
+            "repeated_pick_place/expert/program.yaml",
         ),
     ),
     _TaskSizeSpec(
@@ -109,8 +112,11 @@ _TASK_SIZE_SPECS = (
         baseline_bytes=8_833,
         baseline_blob="3b4cbdc09537098b4f109d46efb8785b88f31ce1",
         source_paths=(
-            "embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py",
-            "embodichain_tasks/configs/expert_program/open_drawer.yaml",
+            "embodichain_tasks/embodichain_tasks/manipulation/" "open_drawer/task.py",
+            "embodichain_tasks/embodichain_tasks/manipulation/"
+            "open_drawer/expert/binding.py",
+            "embodichain_tasks/configs/tasks/manipulation/"
+            "open_drawer/expert/program.yaml",
         ),
     ),
 )
@@ -209,7 +215,7 @@ def _count_source(repository_root: Path, relative_path: str) -> SourceSnapshot:
 def build_task_size_metrics(
     repository_root: str | Path = REPOSITORY_ROOT,
 ) -> tuple[TaskSizeMetric, ...]:
-    """Build deterministic migration metrics from the four declared source files.
+    """Build deterministic migration metrics from the six declared source files.
 
     Args:
         repository_root: EmbodiChain checkout root containing the declared files.
@@ -289,7 +295,7 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
             str(total_baseline_bytes),
             str(total_current_bytes),
             _format_delta(total_current_bytes, total_baseline_bytes),
-            "the four files above",
+            "the six files above",
         )
     )
 
@@ -373,7 +379,7 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
                 "The baseline is a fixed, manually recorded pre-migration snapshot: "
                 "Cube is 598 lines / 23912 bytes and Drawer is 245 lines / 8833 bytes. "
                 "The tool does not inspect Git history. Current values are recomputed "
-                "only from the four explicit files in the table."
+                "only from the six explicit files in the table."
             ),
             "",
             (

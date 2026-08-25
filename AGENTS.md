@@ -101,6 +101,19 @@ EmbodiChain/
 └── VERSION                       # Package version file
 ```
 
+Official tasks use a task-first layout:
+
+- Python entry point: `embodichain_tasks/embodichain_tasks/<domain>/<task>/task.py`
+- Scene and MDP config: `embodichain_tasks/configs/tasks/<domain>/<task>/env.{json,yaml}`
+- Optional Expert Program: `<task config>/expert/program.yaml`
+- Optional expert runtime binding: `<task package>/expert/binding.py`
+- Optional RL configuration: `<task config>/agents/<algorithm>.{json,yaml}`
+
+Keep `@register_env` in `task.py`. Do not create Python `scenario` or `mdp`
+modules when the existing JSON/YAML config and manager functors express the
+task. Organize tasks by domain and task identity, not by solution method such
+as `expert_program` or `rl`.
+
 ---
 
 ## Code Style

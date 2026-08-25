@@ -114,7 +114,7 @@ def test_simulation_and_rl_topics_cover_their_primary_entry_points() -> None:
         "embodichain/__main__.py",
         "embodichain/learning/rl/train.py",
         "embodichain/learning/rl/utils/trainer.py",
-        "embodichain_tasks/configs/agents/rl/",
+        "embodichain_tasks/configs/tasks/",
     } <= set(topics["rl-learning"]["source_of_truth"])
 
 

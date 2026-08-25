@@ -49,8 +49,8 @@ task uses the action bank, pass its action graph separately:
 
 ```bash
 embodichain run-env \
-    --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json \
-    --action_config embodichain_tasks/configs/gym/pour_water/action_config.json
+    --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json \
+    --action_config embodichain_tasks/configs/tasks/tableware/pour_water/expert/action_bank.json
 ```
 
 At startup, `run-env`:
@@ -243,7 +243,7 @@ episode count.
 #### Run the built-in three-cycle example
 
 The shipped
-`embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json` config uses
+`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json` config uses
 a specified UR5 with a parallel gripper to pick up and freely place the same
 cube three times. Each cycle is a separate lazy segment. The next pickup is
 planned only after the previous placement has fallen and become stable, so the
@@ -254,7 +254,7 @@ No action-bank config is needed:
 
 ```bash
 embodichain run-env \
-    --gym_config embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json \
+    --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json \
     --headless \
     --device cuda \
     --max_episodes 1

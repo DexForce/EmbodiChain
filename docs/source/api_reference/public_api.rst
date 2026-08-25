@@ -1869,6 +1869,46 @@ embodichain.workspace_cache_cli
 
    main
 
+embodichain_tasks.classic_control.cart_pole
+--------------------------------------------
+
+Cart-pole environment registration under the task-first import path.
+
+.. currentmodule:: embodichain_tasks.classic_control.cart_pole
+
+.. autosummary::
+
+   CartPoleEnv
+
+embodichain_tasks.classic_control.cart_pole.task
+-------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.classic_control.cart_pole.task
+
+.. autosummary::
+
+   CartPoleEnv
+
+embodichain_tasks.classic_control.point_mass
+---------------------------------------------
+
+Differentiable lightweight point-mass task and learning-environment registration.
+
+.. currentmodule:: embodichain_tasks.classic_control.point_mass
+
+.. autosummary::
+
+   PointMassEnv
+
+embodichain_tasks.classic_control.point_mass.task
+--------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.classic_control.point_mass.task
+
+.. autosummary::
+
+   PointMassEnv
+
 embodichain_tasks.configs
 -------------------------
 
@@ -1878,86 +1918,159 @@ embodichain_tasks.configs
 
    get_config_path
 
-embodichain_tasks.expert_program
---------------------------------
+embodichain_tasks.manipulation.hand_over
+----------------------------------------
 
-Declarative task references that bind packaged Expert Programs to live
-simulation scenes, robot skill profiles, and atomic actions.
+Dual-arm hand-over task registration. Scene and MDP state are supplied by the
+task-local environment config; Expert Program runtime wiring stays under
+``expert``.
 
-.. currentmodule:: embodichain_tasks.expert_program
-
-.. autosummary::
-
-   ExpertProgramOpenDrawerEnv
-   ExpertProgramRepeatedPickPlaceEnv
-   HandOverEnv
-
-embodichain_tasks.expert_program.hand_over
-------------------------------------------
-
-.. currentmodule:: embodichain_tasks.expert_program.hand_over
+.. currentmodule:: embodichain_tasks.manipulation.hand_over
 
 .. autosummary::
 
    HandOverEnv
+
+embodichain_tasks.manipulation.hand_over.expert
+-----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.hand_over.expert
+
+.. autosummary::
+
    HAND_OVER_EXPERT_PROGRAM_REGISTRATION
    HAND_OVER_POSE_PROVIDER
    create_hand_over_robot_profile_binding
    create_hand_over_scene_binding
 
-embodichain_tasks.expert_program.open_drawer
---------------------------------------------
+embodichain_tasks.manipulation.hand_over.expert.binding
+-------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.expert_program.open_drawer
+.. currentmodule:: embodichain_tasks.manipulation.hand_over.expert.binding
+
+.. autosummary::
+
+   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
+   HAND_OVER_POSE_PROVIDER
+   create_hand_over_robot_profile_binding
+   create_hand_over_scene_binding
+
+embodichain_tasks.manipulation.hand_over.task
+---------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.hand_over.task
+
+.. autosummary::
+
+   HandOverEnv
+
+embodichain_tasks.manipulation.open_drawer
+------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.open_drawer
 
 .. autosummary::
 
    ExpertProgramOpenDrawerEnv
 
-embodichain_tasks.expert_program.repeated_pick_place
-----------------------------------------------------
+embodichain_tasks.manipulation.open_drawer.expert
+-------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.expert_program.repeated_pick_place
+.. currentmodule:: embodichain_tasks.manipulation.open_drawer.expert
+
+.. autosummary::
+
+   create_open_drawer_expert_program_adapter
+
+embodichain_tasks.manipulation.open_drawer.expert.binding
+---------------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.open_drawer.expert.binding
+
+.. autosummary::
+
+   create_open_drawer_expert_program_adapter
+
+embodichain_tasks.manipulation.open_drawer.task
+-----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.open_drawer.task
+
+.. autosummary::
+
+   ExpertProgramOpenDrawerEnv
+
+embodichain_tasks.manipulation.push_cube
+----------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.push_cube
+
+.. autosummary::
+
+   PushCubeEnv
+
+embodichain_tasks.manipulation.push_cube.task
+---------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.push_cube.task
+
+.. autosummary::
+
+   PushCubeEnv
+
+embodichain_tasks.manipulation.repeated_pick_place
+--------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place
 
 .. autosummary::
 
    ExpertProgramRepeatedPickPlaceEnv
+
+embodichain_tasks.manipulation.repeated_pick_place.expert
+---------------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place.expert
+
+.. autosummary::
+
    REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
    create_repeated_pick_place_robot_profile_binding
    create_repeated_pick_place_scene_binding
 
-embodichain_tasks.rl
---------------------
+embodichain_tasks.manipulation.repeated_pick_place.expert.binding
+-----------------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.rl
-
-.. autosummary::
-
-   build_env
-
-embodichain_tasks.rl.basic
---------------------------
-
-.. currentmodule:: embodichain_tasks.rl.basic
+.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place.expert.binding
 
 .. autosummary::
 
-   CartPoleEnv
-   PointMassEnv
+   REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
+   create_repeated_pick_place_robot_profile_binding
+   create_repeated_pick_place_scene_binding
 
-embodichain_tasks.rl.basic.point_mass
--------------------------------------
+embodichain_tasks.manipulation.repeated_pick_place.task
+-------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.rl.basic.point_mass
+.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place.task
 
 .. autosummary::
 
-   PointMassEnv
+   ExpertProgramRepeatedPickPlaceEnv
 
 embodichain_tasks.special.simple_task
 -------------------------------------
 
 .. currentmodule:: embodichain_tasks.special.simple_task
+
+.. autosummary::
+
+   SimpleTaskEnv
+
+embodichain_tasks.special.simple_task.task
+------------------------------------------
+
+.. currentmodule:: embodichain_tasks.special.simple_task.task
 
 .. autosummary::
 
@@ -1972,10 +2085,28 @@ embodichain_tasks.special.stay_still_save
 
    StayStillSaveEnv
 
+embodichain_tasks.special.stay_still_save.task
+----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.special.stay_still_save.task
+
+.. autosummary::
+
+   StayStillSaveEnv
+
 embodichain_tasks.tableware.blocks_ranking_rgb
 ----------------------------------------------
 
 .. currentmodule:: embodichain_tasks.tableware.blocks_ranking_rgb
+
+.. autosummary::
+
+   BlocksRankingRGBEnv
+
+embodichain_tasks.tableware.blocks_ranking_rgb.task
+---------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.blocks_ranking_rgb.task
 
 .. autosummary::
 
@@ -1990,10 +2121,28 @@ embodichain_tasks.tableware.blocks_ranking_size
 
    BlocksRankingSizeEnv
 
+embodichain_tasks.tableware.blocks_ranking_size.task
+----------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.blocks_ranking_size.task
+
+.. autosummary::
+
+   BlocksRankingSizeEnv
+
 embodichain_tasks.tableware.match_object_container
 --------------------------------------------------
 
 .. currentmodule:: embodichain_tasks.tableware.match_object_container
+
+.. autosummary::
+
+   MatchObjectContainerEnv
+
+embodichain_tasks.tableware.match_object_container.task
+-------------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.match_object_container.task
 
 .. autosummary::
 
@@ -2008,19 +2157,47 @@ embodichain_tasks.tableware.place_object_drawer
 
    PlaceObjectDrawerEnv
 
-embodichain_tasks.tableware.pour_water.action_bank
---------------------------------------------------
+embodichain_tasks.tableware.place_object_drawer.task
+----------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.tableware.pour_water.action_bank
+.. currentmodule:: embodichain_tasks.tableware.place_object_drawer.task
+
+.. autosummary::
+
+   PlaceObjectDrawerEnv
+
+embodichain_tasks.tableware.pour_water
+--------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.pour_water
+
+.. autosummary::
+
+   PourWaterAgentEnv
+   PourWaterEnv
+
+embodichain_tasks.tableware.pour_water.expert
+---------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.pour_water.expert
 
 .. autosummary::
 
    PourWaterActionBank
 
-embodichain_tasks.tableware.pour_water.pour_water
--------------------------------------------------
+embodichain_tasks.tableware.pour_water.expert.action_bank
+---------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.tableware.pour_water.pour_water
+.. currentmodule:: embodichain_tasks.tableware.pour_water.expert.action_bank
+
+.. autosummary::
+
+   PourWaterActionBank
+
+embodichain_tasks.tableware.pour_water.task
+-------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.pour_water.task
 
 .. autosummary::
 
@@ -2037,10 +2214,29 @@ embodichain_tasks.tableware.rearrangement
    RearrangementEnv
    RearrangementAgentEnv
 
+embodichain_tasks.tableware.rearrangement.task
+----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.rearrangement.task
+
+.. autosummary::
+
+   RearrangementEnv
+   RearrangementAgentEnv
+
 embodichain_tasks.tableware.scoop_ice
 -------------------------------------
 
 .. currentmodule:: embodichain_tasks.tableware.scoop_ice
+
+.. autosummary::
+
+   ScoopIce
+
+embodichain_tasks.tableware.scoop_ice.task
+------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.scoop_ice.task
 
 .. autosummary::
 
@@ -2055,10 +2251,28 @@ embodichain_tasks.tableware.stack_blocks_two
 
    StackBlocksTwoEnv
 
+embodichain_tasks.tableware.stack_blocks_two.task
+-------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.stack_blocks_two.task
+
+.. autosummary::
+
+   StackBlocksTwoEnv
+
 embodichain_tasks.tableware.stack_cups
 --------------------------------------
 
 .. currentmodule:: embodichain_tasks.tableware.stack_cups
+
+.. autosummary::
+
+   StackCupsEnv
+
+embodichain_tasks.tableware.stack_cups.task
+-------------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.stack_cups.task
 
 .. autosummary::
 

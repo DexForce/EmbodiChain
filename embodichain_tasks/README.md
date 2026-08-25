@@ -2,12 +2,38 @@
 
 Official task environments for [EmbodiChain](https://github.com/DexForce/EmbodiChain).
 
-This source tree contains the tableware, reinforcement-learning, and special
-task environments that used to live inside the core `embodichain` import
-package. It is bundled into the main `embodichain` wheel as the separate
-`embodichain_tasks` import package and registered through the
-`embodichain.tasks` entry point. It has no independent distribution metadata or
-version.
+This source tree contains the official task environments that used to live
+inside the core `embodichain` import package. It is bundled into the main
+`embodichain` wheel as the separate `embodichain_tasks` import package and
+registered through the `embodichain.tasks` entry point. It has no independent
+distribution metadata or version.
+
+Tasks are organized by domain and task identity, not by solution method. Every
+task package keeps its environment registration in `task.py`; simulator scene
+and MDP settings remain in JSON/YAML. Optional expert bindings and policy
+configs live below the same task:
+
+```text
+embodichain_tasks/<domain>/<task>/task.py
+configs/tasks/<domain>/<task>/env.{json,yaml}
+configs/tasks/<domain>/<task>/expert/program.yaml
+configs/tasks/<domain>/<task>/agents/<algorithm>.yaml
+```
+
+Simple tasks contain only `task.py` and an environment config. Expert or RL
+files are added only when that task provides the corresponding solution.
+
+## Migrating from the solution-first layout
+
+Gym IDs are unchanged, but direct module imports and repository-style config
+paths must use the task-first locations:
+
+| Previous owner | Task-first owner |
+| --- | --- |
+| `embodichain_tasks.rl.basic.<task>` | `embodichain_tasks.classic_control.<task>.task` |
+| `embodichain_tasks.rl.push_cube` | `embodichain_tasks.manipulation.push_cube.task` |
+| `embodichain_tasks.expert_program.<task>` | `embodichain_tasks.manipulation.<task>.task` and `<task>.expert.binding` |
+| `configs/gym/`, `configs/expert_program/`, `configs/agents/rl/` | `configs/tasks/<domain>/<task>/` |
 
 ## Installation
 
@@ -46,14 +72,14 @@ selected by the `"id"` field of the gym config.
 
 ```bash
 # Data generation mode
-embodichain run-env --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json
+embodichain run-env --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json
 
 # Preview mode
-embodichain run-env --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json --preview
+embodichain run-env --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json --preview
 
 # Equivalent invocations
-python -m embodichain run-env --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json
-python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json
+python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json
+python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json
 ```
 
 ## How registration works
@@ -82,9 +108,9 @@ To add a task environment:
    [project.entry-points."embodichain.tasks"]
    "your_package" = "your_package"
    ```
-2. **Implement the environment** as an `EmbodiedEnv` subclass and register it
-   with `@register_env("YourTask-v1")` (see `embodichain_tasks/tableware/` for
-   examples). Importing your package must reach every task module so the
+2. **Implement the environment** in `<domain>/<task>/task.py` as an
+   `EmbodiedEnv` subclass and register it there with
+   `@register_env("YourTask-v1")`. Importing your package must reach every task module so the
    decorator runs -- the template uses explicit imports in `__init__.py`;
    `embodichain_tasks` uses the `import_packages()` helper for recursive import.
 3. **Write a gym config** (`.json`/`.yaml`) whose `"id"` matches the registered

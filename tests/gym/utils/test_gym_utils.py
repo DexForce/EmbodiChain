@@ -1,5 +1,6 @@
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -40,7 +41,7 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.utils.utility import load_config, save_config
-from embodichain_tasks.expert_program.repeated_pick_place import (
+from embodichain_tasks.manipulation.repeated_pick_place.expert.binding import (
     REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION as CUBE_EXPERT_PROGRAM_REGISTRATION,
     ROBOT_PROFILE_ID as CUBE_ROBOT_PROFILE_ID,
     SCENE_REGISTRY_ID as CUBE_SCENE_REGISTRY_ID,

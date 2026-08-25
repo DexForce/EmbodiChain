@@ -83,7 +83,7 @@ from embodichain.lab.sim.skills.effects import EffectMonitorRef
 from embodichain.lab.sim.skills.parallel_runtime import (
     ParallelCommandSafetyValidator,
 )
-from embodichain_tasks.expert_program.repeated_pick_place import (
+from embodichain_tasks.manipulation.repeated_pick_place.expert.binding import (
     ROBOT_PROFILE_ID as CUBE_ROBOT_PROFILE_ID,
     SCENE_REGISTRY_ID as CUBE_SCENE_REGISTRY_ID,
     create_repeated_pick_place_robot_profile_binding as create_cube_robot_profile_binding,

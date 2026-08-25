@@ -220,7 +220,7 @@ program:
 ```
 
 This is the packaged program at
-`embodichain_tasks/configs/expert_program/repeated_pick_place.yaml`; its
+`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/expert/program.yaml`; its
 integration IDs are matched exactly by the reference environment rather than
 being inferred from simulator names.
 
@@ -386,7 +386,7 @@ action.
 ### 7.7 Official reference task integrations
 
 The current branch keeps the canonical task examples under
-`embodichain_tasks.expert_program`. The repeated cube task has one Gym ID and
+`embodichain_tasks.manipulation`. The repeated cube task has one Gym ID and
 implementation; its former compatibility package and ID are removed. Open
 Drawer likewise has one canonical integration, `ExpertProgramOpenDrawer-v1`,
 and the dual-UR5 reference adds `HandOver-v1`.
@@ -643,7 +643,7 @@ The retained supported-simulation smoke surface is:
 
 ```bash
 embodichain run-env \
-  --gym_config embodichain_tasks/configs/gym/expert_program/open_drawer.json \
+  --gym_config embodichain_tasks/configs/tasks/manipulation/open_drawer/env.json \
   --viser --max_episodes 1
 ```
 

@@ -36,8 +36,8 @@ Example Task
 
 As a concrete example, this tutorial uses a real action-bank task shipped in the repository:
 
-- ``embodichain_tasks/configs/gym/pour_water/gym_config.json`` defines the simulation scene and dataset recording behavior (YAML equivalents such as ``embodichain_tasks/configs/gym/cobotmagic.yaml`` are also supported).
-- ``embodichain_tasks/configs/gym/pour_water/action_config.json`` defines the action-bank graph used to solve the task.
+- ``embodichain_tasks/configs/tasks/tableware/pour_water/env.json`` defines the simulation scene and dataset recording behavior (YAML equivalents such as ``embodichain_tasks/configs/environments/cobotmagic.yaml`` are also supported).
+- ``embodichain_tasks/configs/tasks/tableware/pour_water/expert/action_bank.json`` defines the action-bank graph used to solve the task.
 
 The Code
 ~~~~~~~~
@@ -64,13 +64,13 @@ The first input to the pipeline is the task gym config file. In the example belo
 
 The rollout settings include the episode count:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/gym_config.json
+.. literalinclude:: ../../../embodichain_tasks/configs/tasks/tableware/pour_water/env.json
    :language: json
    :lines: 2-4
 
 The dataset-related part looks like this:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/gym_config.json
+.. literalinclude:: ../../../embodichain_tasks/configs/tasks/tableware/pour_water/env.json
    :language: json
    :start-at: "dataset": {
    :end-before: "control_parts":
@@ -125,25 +125,25 @@ For tasks that use the action bank, the second input is ``action_config.json``. 
 
    **Scope Configuration**
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/tableware/pour_water/expert/action_bank.json
       :language: json
       :lines: 2-57
 
    **Node Configuration**
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/tableware/pour_water/expert/action_bank.json
       :language: json
       :lines: 96-177
 
    **Edge Configuration**
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/tableware/pour_water/expert/action_bank.json
       :language: json
       :lines: 763-790
 
    **Synchronization**
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/tableware/pour_water/expert/action_bank.json
       :language: json
       :lines: 906-932
 
@@ -184,8 +184,8 @@ The recommended CLI entrypoint is:
 .. code-block:: bash
 
    embodichain run-env \
-       --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json \
-       --action_config embodichain_tasks/configs/gym/pour_water/action_config.json \
+       --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json \
+       --action_config embodichain_tasks/configs/tasks/tableware/pour_water/expert/action_bank.json \
        --headless
 
 For interactive inspection, you can use preview mode: replace ``--headless`` with ``--preview``.
@@ -233,7 +233,7 @@ Repeated Pick-and-Place Expert Program Example
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The repository includes a complete repeated pick-and-place example at
-``embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json``. It uses
+``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json``. It uses
 the specified UR5 robot and parallel gripper to pick up the same cube and place
 it three times in one episode. No separate action-bank config is required.
 
@@ -247,7 +247,7 @@ Generate one episode with:
 .. code-block:: bash
 
    embodichain run-env \
-       --gym_config embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json \
+       --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json \
        --headless \
        --device cuda \
        --max_episodes 1

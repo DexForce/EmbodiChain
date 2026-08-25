@@ -41,13 +41,9 @@ from embodichain.lab.sim.skills import HandOver
 # Trigger official task auto-registration (idempotent).
 discover_task_packages()
 
-from embodichain_tasks.expert_program.hand_over import (  # noqa: E402
+from embodichain_tasks.manipulation.hand_over.expert.binding import (  # noqa: E402
     CAN_SIMULATION_UID,
     CAN_UID,
-    CAN_MASS,
-    GRIPPER_MASTER_DRIVE_DAMPING,
-    GRIPPER_MASTER_DRIVE_MAX_EFFORT,
-    GRIPPER_MASTER_DRIVE_STIFFNESS,
     GRIPPER_GRASP_QPOS,
     GRIPPER_OPEN_QPOS,
     HAND_OVER_EXPERT_PROGRAM_REGISTRATION,
@@ -56,20 +52,26 @@ from embodichain_tasks.expert_program.hand_over import (  # noqa: E402
     HAND_OVER_SCENE_REGISTRY_ID,
     HAND_OVER_SAMPLE_COUNT,
     SUPPORT_SURFACE_UID,
-    HandOverEnv,
-    _create_default_env_cfg,
     create_hand_over_robot_profile_binding,
     create_hand_over_scene_binding,
 )
+from embodichain_tasks.manipulation.hand_over.task import (  # noqa: E402
+    HandOverEnv,
+    _create_default_env_cfg,
+)
 
 EXPECTED_GRIPPER_GRASP_QPOS = 0.011
+CAN_MASS = 0.33
+GRIPPER_MASTER_DRIVE_STIFFNESS = 2e3
+GRIPPER_MASTER_DRIVE_DAMPING = 5e1
+GRIPPER_MASTER_DRIVE_MAX_EFFORT = 140.0
 
 
 def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "embodichain_tasks/configs/gym/expert_program/hand_over.json"
+        / "embodichain_tasks/configs/tasks/manipulation/hand_over/env.json"
     )
 
 
@@ -82,7 +84,7 @@ def _gym_payload() -> dict[str, object]:
 
 def test_registered_hand_over_task_uses_shared_expert_program_registration() -> None:
     """The task registers one semantic environment without local demo code."""
-    from embodichain_tasks.expert_program import __all__
+    from embodichain_tasks.manipulation.hand_over import __all__
 
     assert "HandOverEnv" in __all__
     spec = REGISTERED_ENVS["HandOver-v1"]
@@ -99,7 +101,7 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
     payload = _gym_payload()
 
     assert payload["id"] == "HandOver-v1"
-    assert payload["expert_program_path"] == "../../expert_program/hand_over.yaml"
+    assert payload["expert_program_path"] == "expert/program.yaml"
     assert payload["sensor"] == []
     assert payload["env"]["extensions"] == {}
     settle = payload["env"]["events"]["settle_can_on_reset"]
@@ -165,7 +167,7 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
 
 
 def test_hand_over_physics_configs_match_tuned_can_and_pgi_parameters() -> None:
-    """Python and JSON configs share real can and master-only PGI dynamics."""
+    """Default and explicit config loading share tuned physical parameters."""
     direct_cfg = _create_default_env_cfg()
     json_cfg = config_to_cfg(_gym_payload(), source_path=_gym_config_path())
 
@@ -264,7 +266,7 @@ def test_direct_default_cfg_loads_the_registered_semantic_program() -> None:
     assert cfg.expert_program.integration.scene_registry == HAND_OVER_SCENE_REGISTRY_ID
     assert cfg.expert_program.integration.robot_profile == HAND_OVER_ROBOT_PROFILE_ID
     assert cfg.expert_program.integration.runtime_preset == "safe"
-    settle = cfg.events["settle_can_on_reset"]
+    settle = cfg.events.settle_can_on_reset
     assert settle.params["entity_cfgs"][0].uid == CAN_SIMULATION_UID
 
 

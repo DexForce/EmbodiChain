@@ -52,7 +52,9 @@ def test_resolve_config_path_redirects_packaged_task_config(
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
-    resolved = resolve_config_path("embodichain_tasks/configs/gym/cobotmagic.json")
+    resolved = resolve_config_path(
+        "embodichain_tasks/configs/environments/cobotmagic.json"
+    )
 
     assert resolved.is_file()
     assert resolved.name == "cobotmagic.json"

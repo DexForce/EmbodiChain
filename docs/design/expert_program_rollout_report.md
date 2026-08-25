@@ -35,7 +35,7 @@ Both checked-in environment classes have zero task-local motion or demo-generati
 
 ## Migration Size Snapshot
 
-The baseline is a fixed, manually recorded pre-migration snapshot: Cube is 598 lines / 23912 bytes and Drawer is 245 lines / 8833 bytes. The tool does not inspect Git history. Current values are recomputed only from the four explicit files in the table.
+The baseline is a fixed, manually recorded pre-migration snapshot: Cube is 598 lines / 23912 bytes and Drawer is 245 lines / 8833 bytes. The tool does not inspect Git history. Current values are recomputed only from the six explicit files in the table.
 
 Baseline identity: Cube uses legacy Git blob `1965563b060d1fc889f03ad13d47655c2edcd99b` and Drawer uses legacy Git blob `3b4cbdc09537098b4f109d46efb8785b88f31ce1`. Current Python paths point to the consolidated canonical integrations; blob IDs remain stable across stack rebases.
 
@@ -45,9 +45,9 @@ Counting rule: `lines` is the number of raw LF (`0x0A`) bytes; `bytes` is the ra
 
 | Task | Baseline lines | Current lines | Line delta | Baseline bytes | Current bytes | Byte delta | Current source files |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Cube | 598 | 399 | -199 (-33.3%) | 23912 | 14214 | -9698 (-40.6%) | `embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py`<br>`embodichain_tasks/configs/expert_program/repeated_pick_place.yaml` |
-| Drawer | 245 | 313 | +68 (+27.8%) | 8833 | 11352 | +2519 (+28.5%) | `embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py`<br>`embodichain_tasks/configs/expert_program/open_drawer.yaml` |
-| Total | 843 | 712 | -131 (-15.5%) | 32745 | 25566 | -7179 (-21.9%) | the four files above |
+| Cube | 598 | 426 | -172 (-28.8%) | 23912 | 15079 | -8833 (-36.9%) | `embodichain_tasks/embodichain_tasks/manipulation/repeated_pick_place/task.py`<br>`embodichain_tasks/embodichain_tasks/manipulation/repeated_pick_place/expert/binding.py`<br>`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/expert/program.yaml` |
+| Drawer | 245 | 360 | +115 (+46.9%) | 8833 | 12609 | +3776 (+42.7%) | `embodichain_tasks/embodichain_tasks/manipulation/open_drawer/task.py`<br>`embodichain_tasks/embodichain_tasks/manipulation/open_drawer/expert/binding.py`<br>`embodichain_tasks/configs/tasks/manipulation/open_drawer/expert/program.yaml` |
+| Total | 843 | 786 | -57 (-6.8%) | 32745 | 27688 | -5057 (-15.4%) | the six files above |
 
 ## Demo Success Measurement
 

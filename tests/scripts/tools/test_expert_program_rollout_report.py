@@ -27,24 +27,31 @@ from scripts.tools.expert_program_rollout_report import (
 )
 
 EXPECTED_CURRENT_COUNTS = {
-    # Each tuple is (raw LF bytes, raw file bytes) for the explicit task pair.
-    "Cube": (399, 14_214),
-    "Drawer": (313, 11_352),
+    # Each tuple is (raw LF bytes, raw file bytes) for the explicit task sources.
+    "Cube": (426, 15_079),
+    "Drawer": (360, 12_609),
 }
 
 EXPECTED_SOURCE_PATHS = {
     "Cube": (
-        "embodichain_tasks/embodichain_tasks/expert_program/" "repeated_pick_place.py",
-        "embodichain_tasks/configs/expert_program/repeated_pick_place.yaml",
+        "embodichain_tasks/embodichain_tasks/manipulation/"
+        "repeated_pick_place/task.py",
+        "embodichain_tasks/embodichain_tasks/manipulation/"
+        "repeated_pick_place/expert/binding.py",
+        "embodichain_tasks/configs/tasks/manipulation/"
+        "repeated_pick_place/expert/program.yaml",
     ),
     "Drawer": (
-        "embodichain_tasks/embodichain_tasks/expert_program/open_drawer.py",
-        "embodichain_tasks/configs/expert_program/open_drawer.yaml",
+        "embodichain_tasks/embodichain_tasks/manipulation/open_drawer/task.py",
+        "embodichain_tasks/embodichain_tasks/manipulation/"
+        "open_drawer/expert/binding.py",
+        "embodichain_tasks/configs/tasks/manipulation/"
+        "open_drawer/expert/program.yaml",
     ),
 }
 
 
-def test_current_counts_use_only_the_four_declared_sources() -> None:
+def test_current_counts_use_only_the_six_declared_sources() -> None:
     metrics = build_task_size_metrics(REPOSITORY_ROOT)
 
     actual = {

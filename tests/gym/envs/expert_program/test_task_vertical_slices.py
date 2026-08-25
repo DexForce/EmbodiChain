@@ -66,12 +66,18 @@ from embodichain.lab.sim.skills.scene import (
     SceneObjectRef,
     SceneRegistry,
 )
-from embodichain_tasks.expert_program import open_drawer as drawer_task
-from embodichain_tasks.expert_program import repeated_pick_place as cube_task
+from embodichain_tasks.manipulation.open_drawer import task as drawer_task
+from embodichain_tasks.manipulation.open_drawer.expert import binding as drawer_binding
+from embodichain_tasks.manipulation.repeated_pick_place import task as cube_task
+from embodichain_tasks.manipulation.repeated_pick_place.expert import (
+    binding as cube_binding,
+)
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_REPEATED_CUBE_PROGRAM = Path("expert_program/repeated_pick_place.yaml")
-_OPEN_DRAWER_PROGRAM = Path("expert_program/open_drawer.yaml")
+_REPEATED_CUBE_PROGRAM = Path(
+    "tasks/manipulation/repeated_pick_place/expert/program.yaml"
+)
+_OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/expert/program.yaml")
 _LIFECYCLE_BATCH_SIZE = 2
 _LIFECYCLE_ROBOT_DOF = 3
 _LIFECYCLE_STEP_DT = 0.02
@@ -385,8 +391,8 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
     """The packaged cube task expands to three independently scoped cycles."""
     config = decode_expert_program(_read_payload(_REPEATED_CUBE_PROGRAM))
 
-    assert config.integration.scene_registry == cube_task.SCENE_REGISTRY_ID
-    assert config.integration.robot_profile == cube_task.ROBOT_PROFILE_ID
+    assert config.integration.scene_registry == cube_binding.SCENE_REGISTRY_ID
+    assert config.integration.robot_profile == cube_binding.ROBOT_PROFILE_ID
 
     segments = tuple(_cube_compiler().compile(config))
 
@@ -566,8 +572,8 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     payload = _read_payload(_OPEN_DRAWER_PROGRAM)
     config = decode_expert_program(payload)
 
-    assert config.integration.scene_registry == drawer_task.SCENE_REGISTRY_ID
-    assert config.integration.robot_profile == drawer_task.ROBOT_PROFILE_ID
+    assert config.integration.scene_registry == drawer_binding.SCENE_REGISTRY_ID
+    assert config.integration.robot_profile == drawer_binding.ROBOT_PROFILE_ID
 
     segments = tuple(_drawer_compiler().compile(config))
 
@@ -595,10 +601,10 @@ def test_open_drawer_lowerer_preserves_legacy_payload_compatibility() -> None:
         approach_distance=0.10,
         translation_distance=0.18,
     )
-    lowerer = drawer_task._OpenDrawerSlideLowerer(
+    lowerer = drawer_binding._OpenDrawerSlideLowerer(
         ObjectSemantics(
             label="drawer_handle",
-            entity_id=drawer_task.HANDLE_ENTITY_ID,
+            entity_id=drawer_binding.HANDLE_ENTITY_ID,
             geometry={},
             affordance=SlideAffordance(
                 mesh_vertices=torch.tensor(
@@ -609,7 +615,7 @@ def test_open_drawer_lowerer_preserves_legacy_payload_compatibility() -> None:
             ),
         )
     )
-    minimal = {"handle": drawer_task.HANDLE_ENTITY_ID}
+    minimal = {"handle": drawer_binding.HANDLE_ENTITY_ID}
     legacy = {
         **minimal,
         "direction": options.direction,
@@ -621,19 +627,19 @@ def test_open_drawer_lowerer_preserves_legacy_payload_compatibility() -> None:
     for arguments in (minimal, legacy):
         lowering = lowerer.lower(
             RegisteredSemanticCall(
-                call_id=drawer_task.OPEN_DRAWER_CALL_ID,
+                call_id=drawer_binding.OPEN_DRAWER_CALL_ID,
                 arguments=arguments,
             ),
             context=None,  # type: ignore[arg-type]
             bound=None,  # type: ignore[arg-type]
             option_template=options,
         )
-        assert lowering.goal.target_pose.entity_id == drawer_task.HANDLE_ENTITY_ID
+        assert lowering.goal.target_pose.entity_id == drawer_binding.HANDLE_ENTITY_ID
 
     with pytest.raises(ValueError, match="legacy option fields"):
         lowerer.lower(
             RegisteredSemanticCall(
-                call_id=drawer_task.OPEN_DRAWER_CALL_ID,
+                call_id=drawer_binding.OPEN_DRAWER_CALL_ID,
                 arguments={**legacy, "direction": "push"},
             ),
             context=None,  # type: ignore[arg-type]
@@ -662,13 +668,13 @@ def test_task_classes_do_not_override_motion_or_demo_generation() -> None:
 
 def test_cube_task_declares_the_canonical_scene_and_profile_ids() -> None:
     """The repeated task owns one canonical scene/profile integration."""
-    assert cube_task.SCENE_REGISTRY_ID == "expert_program_repeated_pick_place"
-    assert cube_task.ROBOT_PROFILE_ID == "expert_program_ur5_pick_place"
+    assert cube_binding.SCENE_REGISTRY_ID == "expert_program_repeated_pick_place"
+    assert cube_binding.ROBOT_PROFILE_ID == "expert_program_ur5_pick_place"
 
 
 def test_cube_profile_calibrates_physical_motion_and_recovery() -> None:
     """The UR5 preset uses the physically qualified motion and retry bounds."""
-    binding = cube_task.create_repeated_pick_place_robot_profile_binding()
+    binding = cube_binding.create_repeated_pick_place_robot_profile_binding()
     preset = binding.presets[0]
 
     assert preset.preset_id == "safe"
@@ -679,24 +685,24 @@ def test_cube_profile_calibrates_physical_motion_and_recovery() -> None:
 def test_cube_registration_owns_exact_contact_evidence_route() -> None:
     """The physical cube gate is declared and backed by one contact sensor."""
     declaration = (
-        cube_task.REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION.catalog.control_part_evidence_declaration
+        cube_binding.REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION.catalog.control_part_evidence_declaration
     )
     assert declaration is not None
     assert declaration.provider_id == CONTROL_PART_EVIDENCE_PROVIDER_ID
     assert declaration.revision == CONTROL_PART_EVIDENCE_PROVIDER_REVISION
 
-    payload = _read_payload(Path("gym/expert_program/repeated_pick_place.json"))
+    payload = _read_payload(Path("tasks/manipulation/repeated_pick_place/env.json"))
     sensors = payload["sensor"]
     assert isinstance(sensors, list)
     assert sensors == [
         {
             "sensor_type": "ContactSensor",
-            "uid": cube_task.CUBE_CONTACT_SENSOR_UID,
-            "rigid_uid_list": [cube_task.CUBE_ENTITY_ID],
+            "uid": cube_binding.CUBE_CONTACT_SENSOR_UID,
+            "rigid_uid_list": [cube_binding.CUBE_ENTITY_ID],
             "articulation_cfg_list": [
                 {
                     "articulation_uid": "UR5",
-                    "link_name_list": list(cube_task.FINGER_LINK_NAMES),
+                    "link_name_list": list(cube_binding.FINGER_LINK_NAMES),
                 }
             ],
             "filter_need_both_actor": True,
@@ -719,20 +725,20 @@ def test_cube_constraint_observer_requires_both_finger_contacts() -> None:
     user_ids[1, 0] = torch.tensor([11, 21])
     valid[1, 0] = True
 
-    observer = cube_task._CubeFingerConstraintObserver(
+    observer = cube_binding._CubeFingerConstraintObserver(
         _ContactSensorStub(user_ids, valid),  # type: ignore[arg-type]
         _RigidUserIdStub(cube_ids),  # type: ignore[arg-type]
         _RobotUserIdStub(  # type: ignore[arg-type]
             {
-                cube_task.FINGER_LINK_NAMES[0]: finger1_ids,
-                cube_task.FINGER_LINK_NAMES[1]: finger2_ids,
+                cube_binding.FINGER_LINK_NAMES[0]: finger1_ids,
+                cube_binding.FINGER_LINK_NAMES[1]: finger2_ids,
             }
         ),
     )
     expectation = HeldObjectStateExpectation(
         expectation_id="source",
         relation=HeldObjectRelation.ATTACHED,
-        object_id=cube_task.CUBE_ENTITY_ID,
+        object_id=cube_binding.CUBE_ENTITY_ID,
         slot_id="object",
         resource_id="manipulator",
         task_state_key="manipulator",
@@ -745,7 +751,7 @@ def test_cube_constraint_observer_requires_both_finger_contacts() -> None:
                 CONTROL_PART_EVIDENCE_PROVIDER_ID,
                 CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
                 ControlPartEvidenceAddress(
-                    cube_task.HAND_CONTROL_PART,
+                    cube_binding.HAND_CONTROL_PART,
                     CONSTRAINT_EFFECT_CHANNEL,
                 ),
             ),
