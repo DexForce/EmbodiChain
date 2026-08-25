@@ -221,6 +221,34 @@ class EffectAction(DynamicAction):
         )
 
 
+class CandidateEffectAction(DynamicAction):
+    """Dynamic action that owns an uncommitted attachment baseline."""
+
+    skill_id: ClassVar[str] = "candidate_effect"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        plan = super()._plan(request, context)
+        held = HeldObjectState(
+            semantics=ObjectSemantics(
+                affordance=Affordance(),
+                geometry={},
+                label="object",
+                entity_id="object",
+            ),
+            object_to_eef=torch.eye(4),
+            grasp_xpos=torch.eye(4),
+        )
+        return replace(
+            plan,
+            effect_candidates=StateDelta(held_object_updates={"arm": held}),
+        )
+
+
 class StagedDynamicAction(DynamicAction):
     """Monitor its scene target only during a pre-contact segment."""
 
@@ -1112,6 +1140,37 @@ def test_held_object_loss_result_requires_state_invalidation() -> None:
             state_invalidation=StateDelta(),
             retry_mask=torch.tensor([False]),
         )
+
+
+def test_held_object_guard_authorizes_action_owned_effect_candidate() -> None:
+    engine, _ = _engine()
+    engine.register(CandidateEffectAction())
+    initial = _context(0.0, 0.0, 0.2, 0)
+    session = engine.start(
+        (_invocation(engine, skill_id=CandidateEffectAction.skill_id),),
+        initial,
+    )
+    request = session.held_object_guard_request
+    assert request is not None
+    assert request.allowed_held_object_relations == (("arm", "object"),)
+
+    result = HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=torch.tensor([True]),
+        state_invalidation=StateDelta(held_object_updates={"arm": None}),
+        retry_mask=torch.tensor([False]),
+    )
+
+    tick = session.tick(initial, held_object_guard_result=result)
+
+    assert tick.status is ExecutionStatus.FAILED
+    assert any(
+        event.kind is ExecutionEventKind.HELD_OBJECT_LOST for event in tick.events
+    )
 
 
 def test_held_object_guard_rejects_unauthorized_state_invalidation() -> None:
