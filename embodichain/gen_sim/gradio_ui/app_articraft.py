@@ -684,26 +684,40 @@ def _articulation_server_client() -> ArticulationServerClient:
     """Build a client from the shared Gradio deployment settings."""
     return ArticulationServerClient(
         ARTICULATION_SERVER_BASE_URL,
-        timeout_seconds=ARTICULATION_SERVER_TIMEOUT_S,
+        timeout_seconds=_server_positive_float(
+            "ARTICULATION_SERVER_TIMEOUT_S", ARTICULATION_SERVER_TIMEOUT_S
+        ),
+    )
+
+
+def _server_positive_float(name: str, value: object) -> float:
+    """Parse one optional remote setting only when that backend is used."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite positive number") from exc
+    if not isfinite(parsed) or parsed <= 0:
+        raise ValueError(f"{name} must be a finite positive number")
+    return parsed
+
+
+def _server_polling_settings() -> tuple[float, float]:
+    """Return validated task timeout and polling interval values."""
+    return (
+        _server_positive_float(
+            "ARTICULATION_SERVER_TASK_TIMEOUT_S",
+            ARTICULATION_SERVER_TASK_TIMEOUT_S,
+        ),
+        _server_positive_float(
+            "ARTICULATION_SERVER_POLL_INTERVAL_S",
+            ARTICULATION_SERVER_POLL_INTERVAL_S,
+        ),
     )
 
 
 def _server_output_root() -> Path:
     """Validate remote task settings and return their local artifact root."""
-    if (
-        not isfinite(ARTICULATION_SERVER_TASK_TIMEOUT_S)
-        or ARTICULATION_SERVER_TASK_TIMEOUT_S <= 0
-    ):
-        raise ValueError(
-            "ARTICULATION_SERVER_TASK_TIMEOUT_S must be a finite positive number"
-        )
-    if (
-        not isfinite(ARTICULATION_SERVER_POLL_INTERVAL_S)
-        or ARTICULATION_SERVER_POLL_INTERVAL_S <= 0
-    ):
-        raise ValueError(
-            "ARTICULATION_SERVER_POLL_INTERVAL_S must be a finite positive number"
-        )
+    _server_polling_settings()
     return validate_gradio_artifact_root(ARTICRAFT_OUTPUT_ROOT) / "server"
 
 
@@ -822,7 +836,8 @@ def _generate_server_articulation_asset(
         "",
     )
 
-    deadline = time.monotonic() + ARTICULATION_SERVER_TASK_TIMEOUT_S
+    task_timeout_seconds, poll_interval_seconds = _server_polling_settings()
+    deadline = time.monotonic() + task_timeout_seconds
     previous_line = ""
     while True:
         if not _articraft_runs.is_active(session_id, token):
@@ -878,7 +893,7 @@ def _generate_server_articulation_asset(
             "\n".join(log_lines[-300:]),
             "",
         )
-        time.sleep(ARTICULATION_SERVER_POLL_INTERVAL_S)
+        time.sleep(poll_interval_seconds)
 
     if not _articraft_runs.is_active(session_id, token):
         return

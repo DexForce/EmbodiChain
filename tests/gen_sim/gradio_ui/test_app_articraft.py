@@ -180,6 +180,11 @@ def test_local_codex_provider_uses_existing_environment_check(
         "configure_articraft_environment",
         lambda: "local environment ready",
     )
+    monkeypatch.setattr(app_articraft, "ARTICULATION_SERVER_TIMEOUT_S", "30s")
+    monkeypatch.setattr(
+        app_articraft, "ARTICULATION_SERVER_TASK_TIMEOUT_S", "eventually"
+    )
+    monkeypatch.setattr(app_articraft, "ARTICULATION_SERVER_POLL_INTERVAL_S", "often")
 
     result = app_articraft._configure_selected_articulation_provider("Local Codex")
 
@@ -244,6 +249,29 @@ def test_remote_server_rejects_non_finite_polling_configuration(
 
     with pytest.raises(ValueError, match=f"{setting}.*finite positive number"):
         app_articraft._server_output_root()
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "ARTICULATION_SERVER_TIMEOUT_S",
+        "ARTICULATION_SERVER_TASK_TIMEOUT_S",
+        "ARTICULATION_SERVER_POLL_INTERVAL_S",
+    ],
+)
+def test_remote_server_reports_malformed_timing_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    setting: str,
+) -> None:
+    monkeypatch.setattr(app_articraft, "ARTICRAFT_OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(app_articraft, setting, "30s")
+
+    result = app_articraft._configure_selected_articulation_provider("Remote server")
+
+    assert "server is not ready" in result
+    assert setting in result
+    assert "finite positive number" in result
 
 
 def test_remote_server_log_is_bounded() -> None:
