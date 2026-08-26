@@ -569,7 +569,12 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
 def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     """The drawer task supplies a validated call, never a trajectory."""
     payload = _read_payload(_OPEN_DRAWER_PROGRAM)
-    config = decode_expert_program(payload)
+    config = decode_expert_program(
+        payload,
+        validation_context=(
+            drawer_task.OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION.catalog
+        ),
+    )
 
     assert config.integration.scene_registry == drawer_task.SCENE_REGISTRY_ID
     assert config.integration.robot_profile == drawer_task.ROBOT_PROFILE_ID
