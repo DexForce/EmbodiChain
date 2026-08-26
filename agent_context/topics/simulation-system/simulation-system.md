@@ -161,6 +161,9 @@ Newton's `suppress_warp_kernel_logs=True` suppresses Warp module compile/load
 chatter only during build and facade initialization and restores the
 process-wide setting afterward.
 
+EmbodiChain-authored Newton collision shapes use a default margin and gap of
+`0.001 m` each unless an object-specific Newton collision config overrides them.
+
 `EnvCfg` embeds `SimulationManagerCfg` and supplies the control-to-physics
 step ratio. CLI and task config loaders may override runtime fields before
 constructing the environment. Trace those overrides through the caller rather

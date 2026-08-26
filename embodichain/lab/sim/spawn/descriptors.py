@@ -324,6 +324,7 @@ def rigid_desc_from_cfg(
     collision.newton = _compile_newton_collision(
         physics,
         newton_solver_type=newton_solver_type,
+        author_shape_defaults=True,
         sdf_resolution=(
             _resolved_mesh_collision_settings(cfg)[2]
             if isinstance(cfg.shape, MeshCfg)
@@ -507,6 +508,7 @@ def _compile_link_properties(
     physics: _RigidPhysicsSpec,
     *,
     newton_solver_type: str | None,
+    author_newton_shape_defaults: bool,
 ) -> tuple[RigidBodyPhysicsDesc, CollisionDesc]:
     collision = CollisionDesc(
         enable_collision=physics.collision_enabled,
@@ -514,6 +516,7 @@ def _compile_link_properties(
         newton=_compile_newton_collision(
             physics,
             newton_solver_type=newton_solver_type,
+            author_shape_defaults=author_newton_shape_defaults,
         ),
     )
     return _compile_rigid_physics(physics, "dynamic"), collision
@@ -558,9 +561,11 @@ def configure_articulation_desc(
         cfg.attrs,
         newton_solver_type=newton_solver_type,
     )
+    author_newton_shape_defaults = not _is_usd_path(cfg.fpath)
     default_link_properties = _compile_link_properties(
         default_physics,
         newton_solver_type=newton_solver_type,
+        author_newton_shape_defaults=author_newton_shape_defaults,
     )
     link_properties = {
         link.name: (*default_link_properties, False) for link in desc.links
@@ -581,6 +586,7 @@ def configure_articulation_desc(
                 )
             ),
             newton_solver_type=newton_solver_type,
+            author_newton_shape_defaults=author_newton_shape_defaults,
         )
         for link_name in matched_names:
             previous = claimed_links.get(link_name)
@@ -939,10 +945,11 @@ def _compile_newton_collision(
     *,
     sdf_resolution: int = 0,
     newton_solver_type: str | None = None,
+    author_shape_defaults: bool = False,
 ) -> NewtonCollisionDesc | None:
-    # ``None`` means "leave the backend default untouched". Initializing every
-    # field avoids accidentally authoring NewtonCollisionDesc's convenience
-    # defaults when the EmbodiChain Newton sub-config did not set them.
+    # Keep partial descriptors sparse for source overlays. Once a newly authored
+    # shape has a Newton override, fill the Spawn margin/gap defaults because a
+    # non-None descriptor suppresses DexSim's descriptor factory defaults.
     values = {field.name: None for field in fields(NewtonCollisionDesc)}
     values.update(physics.newton_collision_props)
     values.update(physics.newton_material_props)
@@ -962,6 +969,12 @@ def _compile_newton_collision(
             values["sdf_max_resolution"] = int(sdf_resolution)
     if all(value is None for value in values.values()):
         return None
+    if author_shape_defaults:
+        defaults = NewtonCollisionDesc()
+        if values["margin"] is None:
+            values["margin"] = defaults.margin
+        if values["gap"] is None:
+            values["gap"] = defaults.gap
     return NewtonCollisionDesc(**values)
 
 
