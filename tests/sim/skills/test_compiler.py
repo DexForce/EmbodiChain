@@ -155,7 +155,7 @@ def _preset(
     registered: bool = False,
     **kwargs: object,
 ) -> SkillPolicyPreset:
-    """Build one complete schema-v3 test preset."""
+    """Build one complete test preset."""
     kwargs.setdefault(
         "action_option_templates",
         _action_option_templates(registered=registered),
@@ -210,7 +210,6 @@ class _InspectLowerer(RegisteredSemanticLowerer):
     """Test extension proving a lowerer cannot replace compiler ownership."""
 
     call_id: ClassVar[str] = "vendor.inspect"
-    schema_version: ClassVar[int] = 1
     target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def __init__(self) -> None:
@@ -245,7 +244,6 @@ class _SubclassOutputLowerer(RegisteredSemanticLowerer):
     """Try to bypass exact target contracts with executable subclasses."""
 
     call_id: ClassVar[str] = "vendor.inspect"
-    schema_version: ClassVar[int] = 1
     target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def __init__(self, output: str) -> None:
@@ -291,12 +289,6 @@ class _DualCenterHandOverProvider(HandOverPoseProvider):
         del call, context, bound
         self.calls += 1
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(
-                pose=SemanticPose(
-                    (0.5, 0.0, 0.4),
-                    (1.0, 0.0, 0.0, 0.0),
-                )
-            ),
             final=SemanticObjectTarget(pose=SceneEntityPose("table_top")),
         )
 
@@ -670,17 +662,64 @@ def test_curated_analysis_selects_exact_preset_monitor_without_creating_it() -> 
     assert [provider.calls for provider in providers] == [0, 0]
 
 
-def test_curated_analysis_rejects_explicitly_missing_monitor() -> None:
+def test_curated_analysis_selects_monitors_per_semantic_call() -> None:
+    registry, _ = _scene_registry()
+    profile = _profile(
+        preset=_preset(
+            "safe",
+            effect_monitors={
+                "pick": EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                )
+            },
+        )
+    )
+    compiler, _ = _compiler(registry, profile=profile)
+
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            Place(
+                object=SceneObjectRef("cube"),
+                at=SemanticPose((0.5, 0.0, 0.3), (1.0, 0.0, 0.0, 0.0)),
+            ),
+        )
+    )
+
+    assert workflow.calls[0].effect_monitor_ref is not None
+    assert workflow.calls[1].effect_monitor_ref is None
+
+
+def test_curated_analysis_omits_explicitly_unconfigured_monitor() -> None:
     registry, _ = _scene_registry()
     profile = _profile(
         preset=_preset("safe", effect_monitors={}),
     )
     compiler, _ = _compiler(registry, profile=profile)
 
-    with pytest.raises(SemanticValidationError) as error:
-        compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
 
-    assert error.value.diagnostic.code == "missing_effect_monitor"
+    assert workflow.calls[0].effect_monitor_ref is None
+
+
+def test_trajectory_only_analysis_omits_effect_contracts_gates_and_guards() -> None:
+    """Open-loop presets lower Pick without installing physical verification."""
+    registry, _ = _scene_registry()
+    profile = _profile(
+        preset=_preset("safe", effect_monitors={}),
+    )
+    compiler, _ = _compiler(registry, profile=profile)
+
+    workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    grounded = compiler.ground(workflow, 0, _context(registry))
+
+    assert workflow.calls[0].effect_monitor_ref is None
+    assert grounded.effect_spec is None
+    assert grounded.effect_monitor is None
+    assert grounded.effect_gates == ()
+    assert grounded.effect_guards == ()
+    assert grounded.invocation.phase_effect_gates == ()
 
 
 def test_uninstalled_effect_monitor_fails_analysis_without_factory_creation() -> None:

@@ -327,13 +327,18 @@ The packaged tasks demonstrate three different integration paths:
 
 | Environment | Declarative path | Acceptance boundary |
 | --- | --- | --- |
-| `ExpertProgramRepeatedPickPlace-v1` | Bounded repeat of built-in `Pick` and `Place` calls with cyclic targets | Rigid-object settling plus measured object-near-target validation |
-| `ExpertProgramOpenDrawer-v1` | Registered task call lowered by a registration-owned factory to the built-in `Slide` primitive | Articulation settling plus measured passive-joint position validation |
+| `ExpertProgramRepeatedPickPlace-v1` | Bounded repeat of built-in `Pick` and `Place` calls with cyclic targets | Trajectory completion only; effect checks, settling, validation, and recovery are disabled |
+| `ExpertProgramOpenDrawer-v1` | Registered simulation call lowered to the built-in `Slide` primitive | Trajectory completion only; effect checks, settling, validation, and recovery are disabled |
 | `HandOver-v1` | Built-in coordinated `HandOver` over disjoint source and destination resources | Rigid-object settling plus measured object-near-target validation |
 
-Open Drawer intentionally keeps articulation success at the application
-boundary: `Slide` proves motion completion, not drawer travel. A dedicated
-drawer-specific atomic primitive would duplicate that existing motion contract.
+All three IDs are created while their Gym JSON is loaded. The shared configured
+runtime decoder builds a provider-free scene, robot profile, and allowlisted
+live services, then registers the existing `EmbodiedEnv` under the JSON-selected
+ID. The task package contains no task-specific environment subclasses.
+
+The two trajectory-only examples are demonstrations, not physical task-success
+claims. Open Drawer's `Slide` completion, in particular, does not prove measured
+drawer travel.
 
 For the lower-level planning and execution contracts, see {doc}`index`. For
 robot resource and endpoint declarations, see {doc}`robot_skill_profiles`.

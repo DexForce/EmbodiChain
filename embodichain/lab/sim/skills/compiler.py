@@ -218,23 +218,17 @@ class SemanticObjectTarget:
     """One object-space look-ahead target.
 
     Exactly one source is set. Relation targets remain late-bound and require
-    an explicitly installed typed/versioned grounder. Handover targets defer
-    to the embodiment-selected provider and are used only for workflow
-    look-ahead.
+    an explicitly installed typed/versioned grounder.
     """
 
     pose: SemanticPose | SceneEntityPose | None = None
     relation: SemanticRelationTarget | None = None
-    handover: SemanticHandOverTarget | None = None
 
     def __post_init__(self) -> None:
-        selected = sum(
-            value is not None for value in (self.pose, self.relation, self.handover)
-        )
+        selected = sum(value is not None for value in (self.pose, self.relation))
         if selected != 1:
             raise ValueError(
-                "SemanticObjectTarget requires exactly one of pose, relation, "
-                "or handover."
+                "SemanticObjectTarget requires exactly one of pose or relation."
             )
         if self.pose is not None:
             if type(self.pose) is SemanticPose:
@@ -249,25 +243,6 @@ class SemanticObjectTarget:
             type(self.relation) is not SemanticRelationTarget
         ):
             raise TypeError("relation must be exactly SemanticRelationTarget or None.")
-        if self.handover is not None and (
-            type(self.handover) is not SemanticHandOverTarget
-        ):
-            raise TypeError("handover must be exactly SemanticHandOverTarget or None.")
-
-
-@dataclass(frozen=True, slots=True)
-class SemanticHandOverTarget:
-    """Deferred middle pose selected by one named embodiment provider."""
-
-    provider_id: str
-    bound: BoundSemanticCall
-
-    def __post_init__(self) -> None:
-        _validate_identifier(self.provider_id, field_name="handover provider_id")
-        if type(self.bound) is not BoundSemanticCall:
-            raise TypeError("bound must be exactly BoundSemanticCall.")
-        if type(self.bound.linked.call) is not HandOver:
-            raise TypeError("bound must contain an exact HandOver call.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,7 +424,6 @@ class RegisteredSemanticLowerer(ABC):
     """Explicitly installed implementation for one registered call ID."""
 
     call_id: ClassVar[str]
-    schema_version: ClassVar[int]
     target_descriptor: ClassVar[SkillDescriptor]
 
     @abstractmethod
@@ -472,19 +446,11 @@ class RegisteredSemanticLowerer(ABC):
 
 @dataclass(frozen=True, slots=True)
 class HandOverPoseTargets:
-    """Embodiment-owned handover poses, including the final delivery target.
+    """Embodiment-owned final delivery target for handover."""
 
-    ``middle`` is retained for provider compatibility. The unified atomic
-    action computes its central transfer pose from the bound arm roots and the
-    compiler consumes only ``final``.
-    """
-
-    middle: SemanticObjectTarget
     final: SemanticObjectTarget
 
     def __post_init__(self) -> None:
-        if type(self.middle) is not SemanticObjectTarget:
-            raise TypeError("middle must be exactly SemanticObjectTarget.")
         if type(self.final) is not SemanticObjectTarget:
             raise TypeError("final must be exactly SemanticObjectTarget.")
 
@@ -502,7 +468,7 @@ class HandOverPoseProvider(ABC):
         context: PlanningContext,
         bound: BoundSemanticCall,
     ) -> HandOverPoseTargets:
-        """Return compatible middle and final object-space targets.
+        """Return the embodiment-owned final object-space target.
 
         Args:
             call: Canonical handover semantic value.
@@ -510,8 +476,8 @@ class HandOverPoseProvider(ABC):
             bound: Engine/profile-bound handover call.
 
         Returns:
-            Provider-compatible targets. The unified primitive derives its
-            middle pose internally and consumes the final target.
+            Final delivery target. The unified primitive derives its transfer
+            pose internally from the bound arm roots.
         """
 
 
@@ -808,14 +774,6 @@ class SemanticSkillCompiler:
                 raise ValueError(
                     f"Lowerer {call_id!r} cannot replace curated call semantics."
                 )
-            schema_version = getattr(type(lowerer), "schema_version", None)
-            if type(schema_version) is not int or (
-                schema_version != descriptor.schema_version
-            ):
-                raise ValueError(
-                    f"Lowerer {call_id!r} schema_version must exactly match "
-                    f"descriptor version {descriptor.schema_version}."
-                )
             target_descriptor = getattr(type(lowerer), "target_descriptor", None)
             if type(target_descriptor) is not SkillDescriptor or (
                 target_descriptor != descriptor.target_descriptor
@@ -1072,7 +1030,7 @@ class SemanticSkillCompiler:
             else:
                 effect_kind = SemanticEffectKind.REGISTERED
                 # A registered extension has no declarative state-flow contract
-                # in Version 1. Treat it as an opaque effect boundary.
+                # and therefore forms an opaque effect boundary.
                 latest_holder.clear()
             downstream_targets = (
                 self._downstream_targets(index, bound_calls)
@@ -1081,7 +1039,6 @@ class SemanticSkillCompiler:
             )
             effect_monitor_ref = self._effect_monitor_ref(
                 bound,
-                effect_kind,
                 path=(*path, index, "effect_monitor"),
             )
             symbolic_writes, opaque_symbolic_effect = self._static_symbolic_writes(
@@ -1398,7 +1355,6 @@ class SemanticSkillCompiler:
     def _effect_monitor_ref(
         self,
         bound: BoundSemanticCall,
-        effect_kind: SemanticEffectKind,
         *,
         path: tuple[PathPart, ...],
     ) -> EffectMonitorRef | None:
@@ -1406,18 +1362,6 @@ class SemanticSkillCompiler:
         semantic_id = bound.linked.call.semantic_id
         monitor_ref = bound.preset.effect_monitors.get(semantic_id)
         if monitor_ref is None:
-            if type(bound.linked.call) in (
-                Pick,
-                Place,
-                HandOver,
-            ):
-                raise _diagnostic(
-                    "missing_effect_monitor",
-                    path,
-                    f"Semantic call {semantic_id!r} requires an effect monitor "
-                    f"for its {effect_kind.value!r} postcondition.",
-                    tuple(bound.preset.effect_monitors),
-                )
             return None
         if type(bound.linked.call) is RegisteredSemanticCall:
             raise _diagnostic(
@@ -1460,10 +1404,7 @@ class SemanticSkillCompiler:
         assert type(pick) is Pick
         object_id = pick.object.entity_id
         targets: list[SemanticObjectTarget] = []
-        for call_index, bound in enumerate(
-            bound_calls[pick_index + 1 :],
-            start=pick_index + 1,
-        ):
+        for bound in bound_calls[pick_index + 1 :]:
             call = bound.linked.call
             if type(call) is RegisteredSemanticCall:
                 break
@@ -1475,18 +1416,6 @@ class SemanticSkillCompiler:
             if type(call) is Pick:
                 break
             if type(call) is HandOver:
-                provider_id, _ = self._require_handover_pose_provider(
-                    call,
-                    path=("workflow", call_index, "call"),
-                )
-                targets.append(
-                    SemanticObjectTarget(
-                        handover=SemanticHandOverTarget(
-                            provider_id=provider_id,
-                            bound=bound,
-                        )
-                    )
-                )
                 break
             if type(call) is Place:
                 if call.at is not None:
@@ -2293,28 +2222,6 @@ class SemanticSkillCompiler:
             return target.pose.to_matrix()
         if type(target.pose) is SceneEntityPose:
             return target.pose
-        deferred_handover = target.handover
-        if deferred_handover is not None:
-            call = deferred_handover.bound.linked.call
-            assert type(call) is HandOver
-            provider_id, provider = self._require_handover_pose_provider(
-                call,
-                path=("handover", "provider"),
-            )
-            if provider_id != deferred_handover.provider_id:
-                raise _diagnostic(
-                    "semantic_program_stale",
-                    ("handover", "provider"),
-                    "The profile-selected handover provider changed after "
-                    "workflow analysis.",
-                )
-            targets = self._resolve_handover_targets(
-                provider,
-                call,
-                context=context,
-                bound=deferred_handover.bound,
-            )
-            return self._ground_object_target(targets.middle, context)
         relation = target.relation
         assert relation is not None
         grounder = self._require_relation_grounder(
@@ -2389,17 +2296,12 @@ class SemanticSkillCompiler:
         context: PlanningContext,
         bound: BoundSemanticCall,
     ) -> HandOverPoseTargets:
-        """Run one provider and reject recursive deferred target values."""
+        """Run one provider and validate its exact result type."""
         targets = provider.resolve(call, context=context, bound=bound)
         if type(targets) is not HandOverPoseTargets:
             raise TypeError(
                 "HandOverPoseProvider.resolve() must return exactly "
                 "HandOverPoseTargets."
-            )
-        if targets.middle.handover is not None or targets.final.handover is not None:
-            raise TypeError(
-                "HandOverPoseProvider targets cannot recursively defer to another "
-                "handover provider."
             )
         return targets
 
@@ -2507,7 +2409,6 @@ __all__ = [
     "RegisteredSemanticLowerer",
     "SemanticEffectDependency",
     "SemanticEffectKind",
-    "SemanticHandOverTarget",
     "SemanticLowering",
     "SemanticObjectTarget",
     "SemanticRelationTarget",

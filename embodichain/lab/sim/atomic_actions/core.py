@@ -27,8 +27,6 @@ from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.common import BatchEntity
-
 from .affordance import Affordance
 from .bindings import EndpointBinding, JointPositionTarget
 from .effects import StateDelta
@@ -103,17 +101,14 @@ class ObjectSemantics:
     geometry: dict[str, Any]
     """Non-affordance geometric metadata."""
 
+    entity_id: str
+    """Stable scene identifier used by snapshot grounding and object identity."""
+
     properties: dict[str, Any] = field(default_factory=dict)
     """Physical properties such as mass and friction."""
 
     label: str = "none"
     """Semantic object category."""
-
-    entity: BatchEntity | None = None
-    """Optional simulation entity used by deterministic grounding."""
-
-    entity_id: str | None = None
-    """Stable scene identifier used by snapshot grounding and explicit identity."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.affordance, Affordance):
@@ -124,17 +119,9 @@ class ObjectSemantics:
             raise TypeError("properties must be a dict.")
         if not isinstance(self.label, str) or not self.label:
             raise ValueError("label must be a non-empty string.")
-        if self.entity_id is not None and (
-            not isinstance(self.entity_id, str) or not self.entity_id.strip()
-        ):
-            raise ValueError("entity_id must be a non-empty string when set.")
+        if not isinstance(self.entity_id, str) or not self.entity_id.strip():
+            raise ValueError("entity_id must be a non-empty string.")
         self.affordance.object_label = self.label
-
-
-def _legacy_object_uid(semantics: ObjectSemantics) -> str | None:
-    """Return a valid legacy simulation UID without alias normalization."""
-    uid = getattr(semantics.entity, "uid", None)
-    return uid if isinstance(uid, str) and uid.strip() else None
 
 
 def _same_object_identity(
@@ -142,19 +129,7 @@ def _same_object_identity(
     right: ObjectSemantics,
 ) -> bool:
     """Return whether two semantic snapshots identify the same object."""
-    if left is right:
-        return True
-    if left.entity_id is not None or right.entity_id is not None:
-        return (
-            left.entity_id is not None
-            and right.entity_id is not None
-            and left.entity_id == right.entity_id
-        )
-    left_uid = _legacy_object_uid(left)
-    right_uid = _legacy_object_uid(right)
-    if left_uid is not None or right_uid is not None:
-        return left_uid is not None and right_uid is not None and left_uid == right_uid
-    return left.entity is not None and left.entity is right.entity
+    return left is right or left.entity_id == right.entity_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -672,6 +647,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             diagnostics = PlannerDiagnostics(
                 backend=self.planning_services.planner_name
             )
+        if (~success_mask).any() and diagnostics.failure is None:
+            diagnostics = PlannerDiagnostics(
+                backend=diagnostics.backend,
+                messages=diagnostics.messages,
+                metadata=diagnostics.metadata,
+                failure=PlanningFailure("planning_failed", retryable=True),
+            )
         return ActionPlan(
             skill_id=self.skill_id,
             plan_success=success_mask,
@@ -914,8 +896,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             )
             # ``dt[:, i]`` is the arrival interval for waypoint ``i``. After
             # dispatching it, wait for the next arrival interval; the terminal
-            # frame deliberately reuses its own interval as a settling window,
-            # preserving the closed-loop runner's pre-PR2C timing contract.
+            # frame reuses its own interval as the action's settling window.
             frames.append(
                 RuntimeCommandFrame(
                     commands=tuple(endpoint_commands),

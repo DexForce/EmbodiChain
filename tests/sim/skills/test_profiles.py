@@ -1406,7 +1406,6 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     second = bound.preset()
 
     assert first is not second
-    assert first.schema_version == 3
     assert first.required_planner == "stub_planner"
     assert first.motion_policy.sample_count == 80
     assert first.tracking_policy is not second.tracking_policy
@@ -1428,8 +1427,6 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         bound.preset(skill_id="typo")
     with pytest.raises(KeyError, match="not an installed"):
         bound.preset("safe", skill_id="typo")
-    with pytest.raises(ValueError, match=r"supported versions are \[3\]"):
-        SkillPolicyPreset("legacy", action_option_templates={}, schema_version=2)
     with pytest.raises(ValueError, match="required_planner"):
         SkillPolicyPreset("invalid", action_option_templates={}, required_planner="")
 

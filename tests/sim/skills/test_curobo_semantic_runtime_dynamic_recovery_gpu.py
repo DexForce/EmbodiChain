@@ -106,7 +106,6 @@ class _MoveEndEffectorLowerer(RegisteredSemanticLowerer):
     """Lower a declarative matrix into the built-in Cartesian motion goal."""
 
     call_id: ClassVar[str] = CALL_ID
-    schema_version: ClassVar[int] = 1
     target_descriptor: ClassVar[SkillDescriptor] = _MOVE_TARGET
 
     def lower(

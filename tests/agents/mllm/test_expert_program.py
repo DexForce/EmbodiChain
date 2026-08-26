@@ -65,14 +65,12 @@ def _invoke(call: dict[str, object]) -> dict[str, object]:
 def _model_data(
     call: dict[str, object] | None = None,
     *,
-    schema_version: int = 2,
     program: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the integration-free JSON envelope exposed to the model."""
     if call is None:
         call = {"kind": "pick", "object": "cube"}
     return {
-        "schema_version": schema_version,
         "program_id": "model_program",
         "targets": {},
         "program": _invoke(call) if program is None else program,
@@ -82,14 +80,12 @@ def _model_data(
 def _model_json(
     call: dict[str, object] | None = None,
     *,
-    schema_version: int = 2,
     program: dict[str, object] | None = None,
 ) -> str:
     """Serialize one integration-free model response."""
     return json.dumps(
         _model_data(
             call,
-            schema_version=schema_version,
             program=program,
         )
     )
@@ -220,14 +216,17 @@ def test_decoder_rejects_parallel_program() -> None:
     assert error.value.path == ("program", "kind")
 
 
-def test_decoder_rejects_unsupported_schema_version() -> None:
+def test_decoder_rejects_removed_schema_version() -> None:
+    response = _model_data()
+    response["schema_version"] = 2
+
     with pytest.raises(ExpertProgramDecodeError) as error:
         decode_mllm_expert_program(
-            _model_json(schema_version=1),
+            json.dumps(response),
             integration=_integration(),
         )
 
-    assert error.value.code == "unsupported_schema_version"
+    assert error.value.code == "unknown_field"
     assert error.value.path == ("schema_version",)
 
 
@@ -235,7 +234,6 @@ def test_decoder_rejects_registered_semantic_calls() -> None:
     registered = {
         "kind": "registered",
         "call_id": "vendor.inspect",
-        "schema_version": 1,
         "arguments": {},
     }
 
@@ -262,7 +260,6 @@ def test_decoder_rejects_registered_semantic_calls() -> None:
         {
             "kind": "hand_over",
             "object": "cube",
-            "receiver": "right",
             "resources": {"destination": "right"},
         },
     ],
@@ -289,7 +286,7 @@ def test_decoder_allows_explicit_empty_resources() -> None:
     assert config.program.call.resources == {}  # type: ignore[union-attr]
 
 
-def test_decoder_rejects_handover_receiver_resource_selection() -> None:
+def test_decoder_rejects_removed_handover_receiver_alias() -> None:
     with pytest.raises(ExpertProgramDecodeError) as error:
         decode_mllm_expert_program(
             _model_json(
@@ -302,7 +299,7 @@ def test_decoder_rejects_handover_receiver_resource_selection() -> None:
             integration=_integration(),
         )
 
-    assert error.value.code == "mllm_resource_override_not_allowed"
+    assert error.value.code == "unknown_field"
     assert error.value.path == ("program", "call", "receiver")
 
 
@@ -333,9 +330,9 @@ def test_decoder_reuses_executable_free_value_validation(
     ("response", "code"),
     [
         ("```json\n{}\n```", "invalid_json"),
-        ('{"schema_version": 2, "schema_version": 2}', "duplicate_json_key"),
-        ('{"schema_version": NaN}', "non_finite_number"),
-        ('{"schema_version": 1e400}', "non_finite_number"),
+        ('{"program_id": "one", "program_id": "two"}', "duplicate_json_key"),
+        ('{"value": NaN}', "non_finite_number"),
+        ('{"value": 1e400}', "non_finite_number"),
     ],
 )
 def test_decoder_propagates_strict_json_failures(response: str, code: str) -> None:
@@ -378,7 +375,6 @@ def test_policy_failure_does_not_touch_adapter_or_runtime() -> None:
     registered = {
         "kind": "registered",
         "call_id": "vendor.inspect",
-        "schema_version": 1,
     }
 
     with pytest.raises(ExpertProgramDecodeError):

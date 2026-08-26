@@ -1255,7 +1255,6 @@ class BoundSemanticIntegration:
         ):
             preset = SkillPolicyPreset(
                 preset_id=preset.preset_id,
-                schema_version=preset.schema_version,
                 motion_policy=replace(
                     preset.motion_policy,
                     dynamic_collision_mode=DynamicCollisionMode.REQUIRED,

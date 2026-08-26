@@ -95,7 +95,7 @@ def _action_option_templates() -> dict[str, object]:
 
 
 def _preset(preset_id: str, **kwargs: object) -> SkillPolicyPreset:
-    """Build one complete schema-v3 test preset."""
+    """Build one complete test preset."""
     kwargs.setdefault("action_option_templates", _action_option_templates())
     return SkillPolicyPreset(preset_id, **kwargs)
 

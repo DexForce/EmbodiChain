@@ -1879,57 +1879,6 @@ embodichain_tasks.configs
 
    get_config_path
 
-embodichain_tasks.expert_program
---------------------------------
-
-Declarative task references that bind packaged Expert Programs to live
-simulation scenes, robot skill profiles, and atomic actions.
-
-.. currentmodule:: embodichain_tasks.expert_program
-
-.. autosummary::
-
-   ExpertProgramOpenDrawerEnv
-   ExpertProgramRepeatedPickPlaceEnv
-   HandOverEnv
-
-embodichain_tasks.expert_program.hand_over
-------------------------------------------
-
-.. currentmodule:: embodichain_tasks.expert_program.hand_over
-
-.. autosummary::
-
-   HandOverEnv
-   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
-   HAND_OVER_POSE_PROVIDER
-   create_hand_over_robot_profile_binding
-   create_hand_over_scene_binding
-
-embodichain_tasks.expert_program.open_drawer
---------------------------------------------
-
-.. currentmodule:: embodichain_tasks.expert_program.open_drawer
-
-.. autosummary::
-
-   ExpertProgramOpenDrawerEnv
-   OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION
-   create_open_drawer_robot_profile_binding
-   create_open_drawer_scene_binding
-
-embodichain_tasks.expert_program.repeated_pick_place
-----------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.expert_program.repeated_pick_place
-
-.. autosummary::
-
-   ExpertProgramRepeatedPickPlaceEnv
-   REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
-   create_repeated_pick_place_robot_profile_binding
-   create_repeated_pick_place_scene_binding
-
 embodichain_tasks.rl
 --------------------
 

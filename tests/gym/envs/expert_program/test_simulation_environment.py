@@ -64,6 +64,7 @@ from embodichain.lab.gym.envs.expert_program.simulation_environment import (
 from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     Affordance,
+    AtomicActionEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     CommandAcknowledgement,
@@ -77,6 +78,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlanningContext,
     PickUpOptions,
     PlaceOptions,
+    SceneProvider,
     StateDelta,
     TaskState,
     TimedTrajectory,
@@ -109,7 +111,6 @@ from embodichain.lab.sim.skills import (
     SemanticObjectTarget,
     SemanticPose,
     SemanticRelationTarget,
-    SemanticValidationError,
     SkillPolicyPreset,
 )
 from embodichain.lab.sim.skills.effects import (
@@ -127,6 +128,7 @@ from embodichain.lab.sim.skills.evidence import (
     BinaryEffectEvidenceQuery,
     BinaryEffectEvidenceBatch,
     BinaryEffectObservation,
+    ControlPartSimulationEvidenceProvider,
     EffectEvidenceCollectionContext,
     PoseRelationEvidenceBatch,
 )
@@ -392,6 +394,45 @@ class _EvidenceRobot(_Robot):
         return self.endpoint_pose[rows].clone()
 
 
+class _ConstraintEvidenceFactory:
+    """Create fresh built-in providers backed by the fixture constraint sensor."""
+
+    provider_id: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_ID
+    revision: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        scene_provider: SceneProvider,
+    ) -> ControlPartSimulationEvidenceProvider:
+        """Bind the current robot's explicit physical constraint observation."""
+        del simulation, scene_registry, engine
+        if not isinstance(robot, _EvidenceRobot):
+            raise TypeError("_ConstraintEvidenceFactory requires _EvidenceRobot.")
+
+        def observe_constraint(
+            query: BinaryEffectEvidenceQuery,
+            context: EffectEvidenceCollectionContext,
+        ) -> BinaryEffectObservation:
+            del query
+            rows = context.env_ids.to(device=robot.constraint_state.device)
+            values = robot.constraint_state.index_select(0, rows)
+            return BinaryEffectObservation(
+                values=values,
+                valid=torch.ones_like(values),
+            )
+
+        return ControlPartSimulationEvidenceProvider(
+            robot,
+            scene_provider=scene_provider,
+            constraint_observer=observe_constraint,
+        )
+
+
 class _DualRobot(_Robot):
     """Four-part dual-arm robot used for provider-aware helper preflight."""
 
@@ -504,9 +545,6 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
 
     provider_id: ClassVar[str] = "test.handover_pose"
 
-    def __init__(self) -> None:
-        self.calls = 0
-
     def resolve(
         self,
         call: HandOver,
@@ -516,13 +554,11 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
     ) -> HandOverPoseTargets:
         """Return owned direct targets without embedding task-side motion code."""
         del call, context, bound
-        self.calls += 1
         pose = SemanticPose(
             position=(0.0, 0.0, 0.5),
             quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
         )
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(pose=pose),
             final=SemanticObjectTarget(pose=pose),
         )
 
@@ -805,7 +841,6 @@ def _handover_helper_inputs() -> tuple[
 def _handover_program() -> ExpertProgramCfg:
     """Build one external-held-state HandOver call for static preflight."""
     return ExpertProgramCfg(
-        schema_version=2,
         program_id="handover_preflight",
         integration=ExpertProgramIntegrationCfg(
             robot_profile="handover_profile",
@@ -834,12 +869,15 @@ def _factory() -> tuple[SimulationExpertProgramFactory, _Robot]:
     """Create one production factory around CPU-only test doubles."""
     robot = _Robot()
     simulation = _Simulation(robot)
+    registration = SimulationExpertProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
     return (
         SimulationExpertProgramFactory(
             simulation,  # type: ignore[arg-type]
             robot,  # type: ignore[arg-type]
-            SimulationSceneBinding(registry_id="scene"),
-            _profile_binding(),
+            registration,
             step_dt=_STEP_DT,
             motion_generator_factory=lambda: _motion_generator(robot),
         ),
@@ -985,19 +1023,6 @@ def _evidence_adapter_runtime() -> tuple[
     cube = _RigidObject()
     simulation = _Simulation(robot, {"cube_native": cube})
 
-    def observe_constraint(
-        query: BinaryEffectEvidenceQuery,
-        context: EffectEvidenceCollectionContext,
-    ) -> BinaryEffectObservation:
-        """Read the fixture's explicit physical constraint sensor state."""
-        del query
-        rows = context.env_ids.to(device=robot.constraint_state.device)
-        values = robot.constraint_state.index_select(0, rows)
-        return BinaryEffectObservation(
-            values=values,
-            valid=torch.ones_like(values),
-        )
-
     scene_binding = SimulationSceneBinding(
         registry_id="evidence_scene",
         rigid_objects=(
@@ -1016,21 +1041,19 @@ def _evidence_adapter_runtime() -> tuple[
             ),
         ),
     )
+    registration = SimulationExpertProgramRegistration(
+        scene_binding,
+        _evidence_profile_binding(),
+        control_part_evidence_factory=_ConstraintEvidenceFactory(),
+    )
     factory = SimulationExpertProgramFactory(
         simulation,  # type: ignore[arg-type]
         robot,  # type: ignore[arg-type]
-        scene_binding,
-        _evidence_profile_binding(),
+        registration,
         step_dt=_STEP_DT,
         motion_generator_factory=lambda: _motion_generator(robot),
-        constraint_observer=observe_constraint,
     )
-    adapter = factory.create_adapter(
-        runner_cfg=ExecutionRunnerCfg(
-            minimum_cycle_time=0.0,
-            hold_on_completion=False,
-        )
-    )
+    adapter = factory.create_adapter()
     assembly = adapter.assemble_runtime(_evidence_integration())
     pick_action = assembly.engine.actions["pick_up"]
     place_action = assembly.engine.actions["place"]
@@ -1224,7 +1247,6 @@ def _python_pick_place_calls() -> tuple[SemanticCallSpec, ...]:
 def _pick_place_program_data() -> dict[str, object]:
     """Return the integration-free program shared with the MLLM frontend."""
     return {
-        "schema_version": 2,
         "program_id": "pick_place_equivalence",
         "targets": {
             "place_target": {
@@ -1698,8 +1720,8 @@ def test_standard_registration_owns_and_freezes_live_runtime_assembly() -> None:
     assert assembly.command_encoder.is_frozen
 
 
-def test_simulation_helper_forwards_semantic_grounding_extensions() -> None:
-    """Both explicit grounding seams reach the runtime compiler unchanged."""
+def test_simulation_registration_owns_semantic_grounding_extensions() -> None:
+    """The immutable registration supplies both grounding extension types."""
     robot = _Robot()
     environment = SimpleNamespace(
         sim=_Simulation(robot),
@@ -1708,13 +1730,16 @@ def test_simulation_helper_forwards_semantic_grounding_extensions() -> None:
     )
     relation_grounder = _ForwardedRelationGrounder()
     handover_provider = _ForwardedHandOverPoseProvider()
-    adapter = create_simulation_expert_program_adapter(
-        environment,  # type: ignore[arg-type]
-        scene_binding=SimulationSceneBinding(registry_id="scene"),
-        robot_profile_binding=_profile_binding(),
-        motion_generator_factory=lambda: _motion_generator(robot),
+    registration = SimulationExpertProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
         relation_grounders=(relation_grounder,),
         handover_pose_providers=(handover_provider,),
+    )
+    adapter = create_simulation_expert_program_adapter(
+        environment,  # type: ignore[arg-type]
+        registration=registration,
+        motion_generator_factory=lambda: _motion_generator(robot),
     )
 
     assembly = adapter.assemble_runtime(
@@ -1731,22 +1756,12 @@ def test_simulation_helper_forwards_semantic_grounding_extensions() -> None:
     )
 
 
-def test_simulation_helper_handover_preflight_is_fail_closed_by_default() -> None:
-    """Selecting a provider ID does not infer or auto-install an implementation."""
-    environment, scene_binding, profile_binding = _handover_helper_inputs()
-    robot = environment.robot
-    adapter = create_simulation_expert_program_adapter(
-        environment,  # type: ignore[arg-type]
-        scene_binding=scene_binding,
-        robot_profile_binding=profile_binding,
-        motion_generator_factory=lambda: _motion_generator(robot),
-    )
-    compiled = adapter.compile(_handover_program())
+def test_simulation_registration_rejects_missing_handover_provider() -> None:
+    """A selected provider ID must be installed by the same registration."""
+    _, scene_binding, profile_binding = _handover_helper_inputs()
 
-    with pytest.raises(SemanticValidationError) as error:
-        adapter.create_bridge(compiled)
-
-    assert error.value.diagnostic.code == "handover_grounding_provider_not_installed"
+    with pytest.raises(ValueError, match="did not install"):
+        SimulationExpertProgramRegistration(scene_binding, profile_binding)
 
 
 def test_simulation_helper_forwards_handover_provider_to_preflight() -> None:
@@ -1754,18 +1769,20 @@ def test_simulation_helper_forwards_handover_provider_to_preflight() -> None:
     environment, scene_binding, profile_binding = _handover_helper_inputs()
     robot = environment.robot
     provider = _ForwardedHandOverPoseProvider()
+    registration = SimulationExpertProgramRegistration(
+        scene_binding,
+        profile_binding,
+        handover_pose_providers=(provider,),
+    )
     adapter = create_simulation_expert_program_adapter(
         environment,  # type: ignore[arg-type]
-        scene_binding=scene_binding,
-        robot_profile_binding=profile_binding,
+        registration=registration,
         motion_generator_factory=lambda: _motion_generator(robot),
-        handover_pose_providers=(provider,),
     )
 
     bridge = adapter.create_bridge(adapter.compile(_handover_program()))
 
     assert bridge is not None
-    assert provider.calls == 0
 
 
 def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joints() -> (
@@ -1795,14 +1812,17 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
         robot=robot,
         step_dt=_STEP_DT,
     )
+    registration = SimulationExpertProgramRegistration(
+        SimulationSceneBinding(registry_id="mobile_scene"),
+        profile_binding,
+        endpoint_adapters=(_MobileEndpointAdapter(),),
+        runtime_transports=(_MobileTransportEncoder(),),
+    )
 
     adapter = create_simulation_expert_program_adapter(
         environment,  # type: ignore[arg-type]
-        scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
-        robot_profile_binding=profile_binding,
+        registration=registration,
         motion_generator_factory=lambda: _motion_generator(robot),  # type: ignore[arg-type]
-        endpoint_adapters={_MobileEndpoint: _MobileEndpointAdapter()},
-        runtime_transports=(_MobileTransportEncoder(),),
     )
     assembly = adapter.assemble_runtime(
         ExpertProgramIntegrationCfg(

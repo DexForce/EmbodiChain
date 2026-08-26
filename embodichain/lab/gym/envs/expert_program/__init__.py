@@ -14,12 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Versioned declarative Expert Program schema, compiler, and runtime types."""
+"""Declarative Expert Program schema, compiler, and runtime types."""
 
 from __future__ import annotations
 
 from .cfg import (
-    EXPERT_PROGRAM_SCHEMA_VERSION,
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
     CyclicPoseTargetCfg,
@@ -146,7 +145,6 @@ __all__ = [
     "CuroboParallelCommandSafetyValidator",
     "CuroboParallelSafetyValidatorFactory",
     "DemoBridgeError",
-    "EXPERT_PROGRAM_SCHEMA_VERSION",
     "EnvironmentStepClock",
     "EnvironmentStepTimingError",
     "EndpointAdapterDeclaration",

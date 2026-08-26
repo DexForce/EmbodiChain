@@ -580,16 +580,9 @@ class ExpertProgramIntegrationCatalog:
         *,
         path: ConfigPath,
     ) -> None:
-        """Validate semantic-call catalog and payload revision references."""
+        """Validate that the semantic call is present in the integration catalog."""
         call_id = call.call_id if type(call) is RegisteredSemanticCallCfg else call.kind
-        descriptor = self.call_catalog.discover(call_id)
-        if type(call) is RegisteredSemanticCallCfg and (
-            call.schema_version != descriptor.schema_version
-        ):
-            raise ValueError(
-                f"Semantic call {call_id!r} requires schema_version "
-                f"{descriptor.schema_version}, got {call.schema_version}."
-            )
+        self.call_catalog.discover(call_id)
 
     def _validate_place_relation_grounder(
         self,
@@ -1379,14 +1372,6 @@ class SimulationExpertProgramRegistration:
                     raise ValueError(
                         "The live registered lowerer call_id must match its "
                         "factory declaration."
-                    )
-                if (
-                    getattr(lowerer_type, "schema_version", None)
-                    != descriptor.schema_version
-                ):
-                    raise ValueError(
-                        f"Live lowerer {call_id!r} schema_version must exactly "
-                        f"match descriptor version {descriptor.schema_version}."
                     )
                 if (
                     getattr(lowerer_type, "target_descriptor", None)

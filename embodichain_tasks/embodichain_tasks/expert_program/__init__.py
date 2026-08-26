@@ -14,16 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Declarative Expert Program task examples."""
+"""Configuration-defined Expert Program task examples.
+
+The runnable environments in this package are assembled from the bundled Gym
+JSON files at configuration-load time.  No task-specific environment classes
+or import-time registrations are required.
+"""
 
 from __future__ import annotations
 
-from .hand_over import HandOverEnv
-from .open_drawer import ExpertProgramOpenDrawerEnv
-from .repeated_pick_place import ExpertProgramRepeatedPickPlaceEnv
-
-__all__ = [
-    "ExpertProgramOpenDrawerEnv",
-    "ExpertProgramRepeatedPickPlaceEnv",
-    "HandOverEnv",
-]
+__all__: list[str] = []

@@ -936,8 +936,10 @@ class ExecutionSession:
     The session never steps a simulator itself. Each :meth:`tick` consumes the
     latest observation and scene snapshot and emits at most one synchronized
     endpoint-command frame. A declared physical-effect boundary resolves only
-    after the caller supplies a correlated :class:`EffectVerificationResult`.
-    Non-empty expected symbolic effects are committed for verified rows only.
+    after the caller supplies a correlated :class:`EffectVerificationResult`,
+    and non-empty expected symbolic effects are committed for accepted rows
+    only. Higher-level runtimes decide how to produce that result from their
+    configured monitor selection.
 
     Environment eligibility and recovery budgets are tracked per row. The
     waypoint cursor is batch-synchronized: a recoverable row replans the active

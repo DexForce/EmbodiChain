@@ -546,7 +546,7 @@ class CoordinatedHeldObjectCleanupExpectation:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ArticulationJointStateExpectation:
-    """Future-compatible symbolic articulation-joint postcondition."""
+    """Symbolic articulation-joint postcondition."""
 
     expectation_id: str
     articulation_id: str
@@ -1656,14 +1656,9 @@ class EffectMonitor(ABC):
         """Return an independently owned effect contract."""
 
     @property
+    @abstractmethod
     def resolved_params(self) -> Mapping[str, EffectMonitorParam]:
-        """Return resolved monitor thresholds for trace metadata.
-
-        Custom monitors may override this property.  The empty default keeps
-        third-party implementations source-compatible while built-ins expose
-        every effective threshold, including defaults omitted by configuration.
-        """
-        return MappingProxyType({})
+        """Return all resolved monitor thresholds for trace metadata."""
 
     @abstractmethod
     def observe(

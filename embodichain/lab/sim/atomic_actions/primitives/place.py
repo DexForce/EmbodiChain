@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from typing import ClassVar, Literal
 
@@ -102,10 +101,8 @@ class PlaceGoal:
 class AssembleGoal:
     """Place a held assemble object onto a base object at a relative pose.
 
-    The preferred base object pose is a late-bound :class:`SceneEntityPose`.
-    Omitting it temporarily falls back to
-    :attr:`AssembleAffordance.base_object_entity`. The assemble object's target
-    pose is ``base_pose @ assemble_to_base_pose``. The held-object transform
+    The base object pose is a late-bound :class:`SceneEntityPose`. The assemble
+    object's target pose is ``base_pose @ assemble_to_base_pose``. The held-object transform
     (``object_to_eef``) is read from :class:`PlanningContext` for the place
     control part, which a prior :class:`PickUp` populates.
     """
@@ -113,17 +110,14 @@ class AssembleGoal:
     affordance: AssembleAffordance
     """Assembly affordance anchoring the assemble object to the base object."""
 
-    base_pose: SceneEntityPose | None = None
+    base_pose: SceneEntityPose
     """Late-bound base-object pose used for snapshot-consistent planning."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.affordance, AssembleAffordance):
             raise TypeError("affordance must be an AssembleAffordance instance.")
-        if self.base_pose is not None and not isinstance(
-            self.base_pose,
-            SceneEntityPose,
-        ):
-            raise TypeError("base_pose must be a SceneEntityPose or None.")
+        if not isinstance(self.base_pose, SceneEntityPose):
+            raise TypeError("base_pose must be a SceneEntityPose.")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -164,7 +158,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
 
     An :class:`AssembleGoal` replaces the explicit EEF pose with an assembly
     affordance: the place pose is derived from the base object's snapshot pose
-    (or deprecated live fallback) and ``assemble_to_base_pose``, converted to an
+    and ``assemble_to_base_pose``, converted to an
     EEF pose through the held object's ``object_to_eef`` (read from
     :class:`PlanningContext`).
     """
@@ -408,36 +402,16 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 f"resource {task_state_key!r} (run PickUp first)."
             )
         affordance = target.affordance
-        if target.base_pose is not None:
-            base_pose = resolve_object_target(
-                resolve_pose_goal(
-                    target.base_pose,
-                    state,
-                    name="base_pose",
-                ),
-                num_envs=self.num_envs,
-                device=self.device,
+        base_pose = resolve_object_target(
+            resolve_pose_goal(
+                target.base_pose,
+                state,
                 name="base_pose",
-            )
-        else:
-            if affordance.base_object_entity is None:
-                raise ValueError(
-                    "AssembleGoal requires base_pose or "
-                    "AssembleAffordance.base_object_entity."
-                )
-            warnings.warn(
-                "AssembleGoal without base_pose reads "
-                "AssembleAffordance.base_object_entity live; provide "
-                "base_pose=SceneEntityPose(...) instead.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-            base_pose = resolve_object_target(
-                affordance.base_object_entity.get_local_pose(to_matrix=True),
-                num_envs=self.num_envs,
-                device=self.device,
-                name="legacy_base_pose",
-            )
+            ),
+            num_envs=self.num_envs,
+            device=self.device,
+            name="base_pose",
+        )
         assemble_object_pose = affordance.get_assemble_object_pose(base_pose)
         object_to_eef = resolve_object_target(
             held.object_to_eef,

@@ -438,34 +438,20 @@ class HandOver(SemanticCallSpec):
     Args:
         object: Authoritative scene-object reference. The object must not
             already be held when the unified action starts.
-        receiver: Optional second candidate resource ID. It is equivalent to
-            the ``destination`` resource slot and must agree with an explicit
-            map. The primitive chooses which candidate performs pickup from the
-            live object-to-root distances.
         final_target: Optional final object-space delivery pose.
-        resources: Optional skill-local resource overrides.
+        resources: Optional skill-local resource overrides. Select the second
+            candidate with the ``destination`` slot when needed.
     """
 
     call_kind: ClassVar[str] = "hand_over"
 
     object: SceneObjectRef
-    receiver: str | None = None
     final_target: SemanticPose | None = None
 
     def __post_init__(self) -> None:
         SemanticCallSpec.__post_init__(self)
         if type(self.object) is not SceneObjectRef:
             raise TypeError("HandOver.object must be a SceneObjectRef.")
-        resources = dict(self.resources)
-        if self.receiver is not None:
-            _validate_identifier(self.receiver, field_name="HandOver.receiver")
-            selected = resources.get("destination")
-            if selected is not None and selected != self.receiver:
-                raise ValueError(
-                    "HandOver.receiver conflicts with resources['destination']."
-                )
-            resources["destination"] = self.receiver
-        object.__setattr__(self, "resources", _snapshot_resources(resources))
         if self.final_target is not None:
             if type(self.final_target) is not SemanticPose:
                 raise TypeError("HandOver.final_target must be a SemanticPose or None.")
@@ -617,7 +603,6 @@ class SemanticCallDescriptor:
     Args:
         call_id: Stable semantic call identifier.
         spec_type: Exact public call value type.
-        schema_version: Explicit configuration payload schema version.
         target_descriptor: Exact atomic goal/options/resource contract. It is
             inferred and non-overridable for curated calls and required for
             registered extensions.
@@ -625,7 +610,6 @@ class SemanticCallDescriptor:
 
     call_id: str
     spec_type: type[SemanticCallSpec]
-    schema_version: int = 1
     target_descriptor: SkillDescriptor | None = None
 
     def __post_init__(self) -> None:
@@ -640,15 +624,6 @@ class SemanticCallDescriptor:
                 "spec_type must be exactly Pick, Place, HandOver, or "
                 "RegisteredSemanticCall; extensions use the registered payload "
                 "contract rather than executable call subclasses."
-            )
-        if not isinstance(self.schema_version, int) or isinstance(
-            self.schema_version, bool
-        ):
-            raise TypeError("schema_version must be an integer.")
-        if self.schema_version != 1:
-            raise ValueError(
-                "Unsupported semantic call schema_version "
-                f"{self.schema_version}; supported versions are [1]."
             )
         if self.spec_type is not RegisteredSemanticCall and (
             self.call_id != self.spec_type.call_kind

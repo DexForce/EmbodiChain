@@ -689,24 +689,36 @@ class ExpertProgramEnvironmentAdapter:
                 "create_planning_observation_provider() must return a port "
                 "implementing both ObservationProvider and CurrentQposProvider."
             )
-        providers = self._factory.create_effect_evidence_providers(
-            scene_registry=semantic.scene_registry,
-            engine=semantic.engine,
-            observation_provider=observation_provider,
-        )
-        self._validate_registration_ownership()
-        if isinstance(providers, (str, bytes)):
-            raise TypeError(
-                "create_effect_evidence_providers() must return an iterable of "
-                "EffectEvidenceProvider values."
-            )
         try:
-            provider_values = tuple(providers)
-        except TypeError as exc:
-            raise TypeError(
-                "create_effect_evidence_providers() must return an iterable of "
-                "EffectEvidenceProvider values."
+            selected_preset = semantic.robot_profile.presets[
+                semantic.integration.runtime_preset
+            ]
+        except KeyError as exc:
+            raise ValueError(
+                "The selected runtime preset is absent from the assembled robot "
+                "profile."
             ) from exc
+        if selected_preset.effect_monitors:
+            providers = self._factory.create_effect_evidence_providers(
+                scene_registry=semantic.scene_registry,
+                engine=semantic.engine,
+                observation_provider=observation_provider,
+            )
+            self._validate_registration_ownership()
+            if isinstance(providers, (str, bytes)):
+                raise TypeError(
+                    "create_effect_evidence_providers() must return an iterable of "
+                    "EffectEvidenceProvider values."
+                )
+            try:
+                provider_values = tuple(providers)
+            except TypeError as exc:
+                raise TypeError(
+                    "create_effect_evidence_providers() must return an iterable of "
+                    "EffectEvidenceProvider values."
+                ) from exc
+        else:
+            provider_values = ()
         evidence_collector = EffectEvidenceCollector(
             EffectEvidenceProviderRegistry(provider_values)
         )
@@ -735,15 +747,6 @@ class ExpertProgramEnvironmentAdapter:
                 )
             command_encoder.freeze()
         command_sink = BufferedGymCommandSink(command_encoder, clock)
-        try:
-            selected_preset = semantic.robot_profile.presets[
-                semantic.integration.runtime_preset
-            ]
-        except KeyError as exc:
-            raise ValueError(
-                "The selected runtime preset is absent from the assembled robot "
-                "profile."
-            ) from exc
         selected_runner_cfg = selected_preset.runner_cfg
         if self._registration is None and self._runner_cfg is not None:
             selected_runner_cfg = deepcopy(self._runner_cfg)

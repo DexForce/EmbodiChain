@@ -715,11 +715,9 @@ class ActionPlan:
         planning_failed = bool((~self.plan_success).any().item())
         diagnostics = self.diagnostics
         if planning_failed and diagnostics.failure is None:
-            diagnostics = PlannerDiagnostics(
-                backend=diagnostics.backend,
-                messages=diagnostics.messages,
-                metadata=diagnostics.metadata,
-                failure=PlanningFailure("planning_failed", retryable=True),
+            raise ValueError(
+                "PlannerDiagnostics.failure is required when any planning row "
+                "failed."
             )
         elif not planning_failed and diagnostics.failure is not None:
             raise ValueError(

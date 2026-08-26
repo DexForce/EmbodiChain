@@ -95,7 +95,7 @@ def _effect_result(
     invalidation_mask: torch.Tensor | None = None,
     retry_mask: torch.Tensor | None = None,
 ) -> EffectVerificationResult:
-    """Build an explicit terminal decision with legacy retry semantics."""
+    """Build an explicit terminal decision that retries failed rows by default."""
     return EffectVerificationResult(
         verification_id=verification_id,
         success_mask=success_mask,
@@ -360,7 +360,10 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         effects = StateDelta()
         if self.with_effect:
             semantics = ObjectSemantics(
-                affordance=Affordance(), geometry={}, label="runner-object"
+                affordance=Affordance(),
+                geometry={},
+                entity_id="runner-object",
+                label="runner-object",
             )
             held = HeldObjectState(
                 semantics=semantics,
