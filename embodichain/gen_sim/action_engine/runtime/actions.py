@@ -1492,7 +1492,7 @@ class AtomicActionAdapter:
             )
         elif approach_mode is not None:
             raise ValueError(f"Unknown approach_direction_mode {approach_mode!r}.")
-        for name in ("approach_direction", "obj_upright_direction"):
+        for name in ("approach_direction", "obj_upright_direction", "target_axis"):
             if name in policy and not isinstance(policy[name], torch.Tensor):
                 policy[name] = torch.as_tensor(
                     policy[name], dtype=torch.float32, device=self.device

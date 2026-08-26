@@ -406,7 +406,7 @@ def _recipe(
             "orientation_axis": str(params.get("orientation_axis", "none")),
             "position_anchor": "initial_xy",
             "support_object": str(params.get("support_role", "table")),
-            "upright_local_axis": str(params.get("upright_local_axis", "long_axis")),
+            "upright_local_axis": str(params.get("upright_local_axis", "z")),
             **_orientation_extensions(params),
         }
         if terminal_behavior == "hold":

@@ -310,6 +310,9 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
         "object_01": "purple_can",
         "object_02": "orange_can",
     }
+    assert (
+        grounded.task_spec["task_instances"][0]["params"]["upright_local_axis"] == "z"
+    )
     placement_actions = [
         node["atomic_action"] for node in graph["nodes"] if node["task_type"] == "E1"
     ]

@@ -238,6 +238,8 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
         "MoveEndEffector",
         "MoveJoints",
     ]
+    assert orient["goal"]["upright_local_axis"] == "z"
+    assert orient_nodes[0]["postcondition"]["local_axis"] == "z"
     assert orient_nodes[0]["motion_policy"] == {"modifiers": []}
     assert [node["role"] for node in orient_nodes] == [
         "primary",
