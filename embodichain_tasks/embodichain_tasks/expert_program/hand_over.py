@@ -129,7 +129,7 @@ _DUAL_UR5_INIT_QPOS = (*_LEFT_ARM_HOME, *_RIGHT_ARM_HOME, 0.0, 0.0, 0.0, 0.0)
 HAND_OVER_POSE_PROVIDER = ConfiguredHandOverPoseProvider(
     middle_position=(0.0, 0.0, 0.7),
     middle_quaternion_wxyz=(0.7071067812, 0.7071067812, 0.0, 0.0),
-    final_position=(0.0, -0.2, 0.7),
+    final_position=(0.0, -0.2, 0.6),
     final_quaternion_wxyz=(0.7071067812, 0.7071067812, 0.0, 0.0),
 )
 
