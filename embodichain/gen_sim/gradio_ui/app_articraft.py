@@ -29,7 +29,9 @@ import json
 import os
 import queue
 import shutil
+import socket
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -63,6 +65,7 @@ from app_processes import (
     read_process_output,
     redact_sensitive_text,
     register_managed_process,
+    start_pipeline,
     terminate_process_group,
 )
 from embodichain.gen_sim.env import find_gen_sim_env_file
@@ -680,6 +683,91 @@ def _start_articraft_viewer(session_id: str, run_dir: Path) -> str:
     raise RuntimeError("Articraft viewer did not start.")
 
 
+def _select_available_viser_port() -> int:
+    """Reserve an ephemeral loopback port for a session-owned Viser preview."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def _wait_for_articulation_viser(port: int, process: subprocess.Popen[str]) -> bool:
+    """Wait until Viser accepts local connections or its process exits."""
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return True
+        except OSError:
+            time.sleep(0.25)
+    return False
+
+
+def _articulation_viser_iframe(run_id: str, port: int) -> str:
+    """Embed a Viser asset preview through the Gradio page hostname."""
+    srcdoc = (
+        "<script>window.location.replace(window.top.location.protocol + '//' + "
+        f"window.top.location.hostname + ':{port}');</script>"
+    )
+    escaped_run_id = html.escape(run_id)
+    return (
+        "<div style='margin-top:0.5rem'><strong>Viser preview: "
+        f"{escaped_run_id}</strong>"
+        f"<iframe title='Viser articulation preview {escaped_run_id}' "
+        f'srcdoc="{html.escape(srcdoc, quote=True)}" '
+        "style='width:100%; height:680px; border:1px solid #d1d5db; "
+        "border-radius:8px; margin-top:0.5rem;'></iframe></div>"
+    )
+
+
+def _discard_preview_output(process: subprocess.Popen[str]) -> None:
+    """Drain verbose asset-loading output so the preview pipe cannot block."""
+    if process.stdout is None:
+        return
+    for _line in process.stdout:
+        pass
+
+
+def _start_remote_viser_preview(session_id: str, artifact: Path) -> str:
+    """Start EmbodiChain's Viser articulation preview for a remote USDC."""
+    token = _articraft_viewers.begin(session_id)
+    port = _select_available_viser_port()
+    command = [
+        sys.executable,
+        "-m",
+        "embodichain",
+        "preview-asset",
+        "--asset_path",
+        str(artifact.resolve()),
+        "--asset_type",
+        "articulation",
+        "--use_usd_properties",
+        "--viser",
+        "--viser-host",
+        "0.0.0.0",
+        "--viser-port",
+        str(port),
+    ]
+    process = start_pipeline(command)
+    threading.Thread(
+        target=_discard_preview_output,
+        args=(process,),
+        daemon=True,
+    ).start()
+    if not _articraft_viewers.attach(session_id, token, process):
+        terminate_process_group(process)
+        raise RuntimeError("Viser preview request was superseded.")
+    if not _wait_for_articulation_viser(port, process):
+        terminate_process_group(process)
+        _articraft_viewers.finish(session_id, token, process)
+        raise RuntimeError("Viser articulation preview did not start.")
+    if not _articraft_viewers.is_active(session_id, token, process):
+        terminate_process_group(process)
+        raise RuntimeError("Viser preview request was superseded.")
+    return _articulation_viser_iframe(artifact.parent.name, port)
+
+
 def _articulation_server_client() -> ArticulationServerClient:
     """Build a client from the shared Gradio deployment settings."""
     return ArticulationServerClient(
@@ -927,14 +1015,28 @@ def _generate_server_articulation_asset(
 
     if not _articraft_runs.is_active(session_id, token):
         return
+    status = (
+        "**Remote Articulation generation completed.**\n\n"
+        f"- Request: `{request_id}`\n"
+        f"- EmbodiChain USDC: `{artifact}`"
+    )
+    preview_html = _articraft_result_preview(output_dir, artifact)
+    try:
+        preview_html = _start_remote_viser_preview(session_id, artifact)
+        status += "\n- Interactive Viser preview: ready"
+    except (OSError, RuntimeError) as exc:
+        detail = redact_sensitive_text(str(exc))
+        status += f"\n- Interactive preview could not start: `{detail}`"
+
+    if not _articraft_runs.is_active(session_id, token):
+        _articraft_viewers.reset(session_id, force=True)
+        return
     yield (
         artifact.as_posix(),
         output_dir.as_posix(),
-        "**Remote Articulation generation completed.**\n\n"
-        f"- Request: `{request_id}`\n"
-        f"- EmbodiChain USDC: `{artifact}`",
+        status,
         "\n".join(log_lines[-300:]),
-        _articraft_result_preview(output_dir, artifact),
+        preview_html,
     )
 
 

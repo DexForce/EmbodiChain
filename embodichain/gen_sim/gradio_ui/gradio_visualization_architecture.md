@@ -75,7 +75,7 @@ conda run -n embodichain python gradio_app.py
 | Engine | 输入 | 预览/下载 | 实际产物 | 是否启动 DexSim |
 | --- | --- | --- | --- | --- |
 | Asset engine / SimReady | 一个网格、可选材质附件、类别 | 输入 GLB、SimReady GLB、原始输出下载 | `.gen_sim/assets/runs/<token>/` | 否 |
-| Asset engine / Articulation | 文字、可选参考图 | EmbodiChain USDC 下载；Remote server 显示结果摘要，Local Codex 提供 Articraft USDZ 交互预览 | Remote: `.gen_sim/articraft/server/<request-id>/`；Local: `.gen_sim/articraft/runs/` | 否 |
+| Asset engine / Articulation | 文字、可选参考图 | EmbodiChain USDC 下载；Remote 使用 EmbodiChain Viser，Local Codex 使用 Articraft USDZ viewer | Remote: `.gen_sim/articraft/server/<request-id>/`；Local: `.gen_sim/articraft/runs/` | Remote 预览：是；Local：否 |
 | Scene engine | 一张图片，或已保存场景 + 文本编辑指令 | Scene Engine 的 Viser | `.gen_sim/scenes/<image-sha256-前16位>/` | 否 |
 | Action engine | 已生成场景列表、任务、机器人 | 选中场景的 Viser 和 DexSim 视频 | 场景预览来自 `.gen_sim/scenes/`；DexSim 暂沿用现有命令 | 是 |
 
@@ -124,7 +124,8 @@ description + optional image
   ├─ Remote server（默认）
   │    → POST /generate_articulation
   │    → GET /tasks/<request-id> 轮询至终态
-  │    → 下载 usdc artifact 到本地产物目录
+  │    → 下载 USDC 到本地产物目录
+  │    → 当前 Gradio Python 启动 embodichain preview-asset --viser
   └─ Local Codex（显式选择）
        → conda run -n articraft python -m articraft.app generate --provider codex-cli --no-tui
        → Articraft 内部 agent loop 调用 Codex CLI
@@ -133,9 +134,9 @@ description + optional image
        → articraft view <run-dir> → Gradio iframe
 ```
 
-两种方式的本地产物均在 `ARTICRAFT_OUTPUT_ROOT` 下。Remote server 返回的 USDC 使用结果摘要预览；Local Codex 的原生 USDZ 保持 Articraft 的 `/World` 结构供其 viewer 使用，USDC sidecar 将单个 assembly 设为 `defaultPrim` 和 articulation root。Local Codex 生成成功后，Gradio 使用同一 Articraft Conda 环境启动原生 USDZ Viewer，并将随机本地端口嵌入当前页面。
+两种方式的本地产物均在 `ARTICRAFT_OUTPUT_ROOT` 下。Remote server 的 USDC sidecar 将单个 assembly 设为 `defaultPrim` 和 articulation root，Gradio 使用当前 Python 环境启动 `embodichain preview-asset --asset_type articulation --use_usd_properties --viser`，并把动态 Viser 端口嵌入页面；Viser 启动失败时仍保留成功 USDC，并回退到结果摘要。Local Codex 继续使用隔离的 Articraft Conda 环境和原生 USDZ Viewer。
 
-`Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，终止该会话的 Articraft 生成和 Viewer 进程组，并请求取消仍在运行的远程任务。新请求替换旧请求时也执行相同的会话级取消。
+`Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，终止该会话的 Articraft 生成、Articraft/Viser Viewer 进程组，并请求取消仍在运行的远程任务。新请求替换旧请求时也执行相同的会话级取消。
 
 ## 独立 Scene engine、文本编辑和 Viser
 
@@ -242,7 +243,7 @@ embodichain/gen_sim/scene_engine/cli/preview.py
 .env
 ```
 
-默认 Remote server 只需要可达的 `ARTICULATION_SERVER_BASE_URL`，不发送认证 Header。Local Codex 还需要 Git（首次 clone）、配置的 Articraft Conda 环境和已通过独立凭据存储完成登录的 Codex CLI。Articraft/Codex 子进程不继承 `.env` 中的 API key、token 或密码，输出在返回浏览器前还会按已知敏感环境值脱敏。
+默认 Remote server 只需要可达的 `ARTICULATION_SERVER_BASE_URL`，不发送认证 Header；交互预览复用运行 Gradio 的 EmbodiChain/DexSim/Viser 环境。Local Codex 生成还需要 Git（首次 clone）、独立 Articraft Conda 环境和已通过凭据存储登录的 Codex CLI。Articraft/Codex 子进程不继承 `.env` 中的 API key、token 或密码，输出在返回浏览器前还会按已知敏感环境值脱敏。
 
 每次修改后至少执行：
 
@@ -261,6 +262,6 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 手动检查：
 
 1. SimReady 上传简单网格后能显示输入预览；执行后显示 SimReady 输出或明确错误。
-2. Articulation 默认检查 Remote server 并下载 USDC；选择 Local Codex 后仍能检查 checkout、Conda 和 Codex，并生成 USDZ 与 run 目录。
+2. Articulation 默认检查 Remote server、下载 USDC 并使用当前 Gradio 环境启动 Viser；Viser 不可用时回退摘要。选择 Local Codex 后仍能检查 checkout、Conda 和 Codex，并生成 USDZ 与 run 目录。
 3. Scene engine 从图像生成 `scene_export/scene_config.json`，也能选择已保存场景预览并通过文本修改；编辑后应重启该场景的 Viser，且不改写 `gym_project/current`。
 4. Action engine 在没有 `current` Gym/action 配置或缺少 CLI 时给出预检错误。

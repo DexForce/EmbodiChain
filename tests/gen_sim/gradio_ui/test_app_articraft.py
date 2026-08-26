@@ -284,7 +284,7 @@ def test_remote_server_log_is_bounded() -> None:
     assert log_lines[0] == "line-5"
 
 
-def test_remote_server_success_polls_and_downloads_usdc(
+def test_remote_server_success_starts_viser_preview(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     client = _FakeServerClient(
@@ -293,6 +293,13 @@ def test_remote_server_success_polls_and_downloads_usdc(
     monkeypatch.setattr(app_articraft, "ARTICRAFT_OUTPUT_ROOT", tmp_path)
     monkeypatch.setattr(app_articraft, "_articulation_server_client", lambda: client)
     monkeypatch.setattr(app_articraft.time, "sleep", lambda _seconds: None)
+    viewer_calls: list[tuple[str, Path]] = []
+
+    def start_viewer(session_id: str, artifact: Path) -> str:
+        viewer_calls.append((session_id, artifact))
+        return "<iframe>Viser</iframe>"
+
+    monkeypatch.setattr(app_articraft, "_start_remote_viser_preview", start_viewer)
 
     results = list(
         app_articraft._generate_server_articulation_asset(
@@ -304,8 +311,86 @@ def test_remote_server_success_polls_and_downloads_usdc(
     assert results[-1][0] == artifact.resolve().as_posix()
     assert results[-1][1] == artifact.parent.as_posix()
     assert "generation completed" in results[-1][2]
+    assert "Interactive Viser preview: ready" in results[-1][2]
+    assert results[-1][4] == "<iframe>Viser</iframe>"
     assert client.downloaded == [(REQUEST_ID, "usdc")]
+    assert viewer_calls == [("remote-success", artifact.resolve())]
     assert artifact.read_bytes() == b"usdc"
+
+
+def test_remote_viser_preview_uses_current_python_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifact = tmp_path / "model.usdc"
+    artifact.write_bytes(b"usdc")
+    process = SimpleNamespace(stdout=None)
+    commands: list[list[str]] = []
+    registry = SimpleNamespace(
+        begin=lambda _session_id: "viewer-token",
+        attach=lambda _session_id, _token, _process: True,
+        is_active=lambda _session_id, _token, _process: True,
+    )
+    monkeypatch.setattr(app_articraft, "_articraft_viewers", registry)
+    monkeypatch.setattr(
+        app_articraft, "_select_available_viser_port", lambda: VIEWER_PORT
+    )
+    monkeypatch.setattr(
+        app_articraft, "_wait_for_articulation_viser", lambda _port, _process: True
+    )
+
+    def start_pipeline(command: list[str]):
+        commands.append(command)
+        return process
+
+    monkeypatch.setattr(app_articraft, "start_pipeline", start_pipeline)
+
+    preview = app_articraft._start_remote_viser_preview("remote-viser", artifact)
+
+    assert commands == [
+        [
+            app_articraft.sys.executable,
+            "-m",
+            "embodichain",
+            "preview-asset",
+            "--asset_path",
+            str(artifact.resolve()),
+            "--asset_type",
+            "articulation",
+            "--use_usd_properties",
+            "--viser",
+            "--viser-host",
+            "0.0.0.0",
+            "--viser-port",
+            str(VIEWER_PORT),
+        ]
+    ]
+    assert "Viser preview" in preview
+    assert str(VIEWER_PORT) in preview
+
+
+def test_remote_server_viewer_failure_keeps_usdc_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client = _FakeServerClient([{"status": "succeeded"}])
+    monkeypatch.setattr(app_articraft, "ARTICRAFT_OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(app_articraft, "_articulation_server_client", lambda: client)
+
+    def fail_viewer(_session_id: str, _artifact: Path) -> str:
+        raise RuntimeError("viewer unavailable")
+
+    monkeypatch.setattr(app_articraft, "_start_remote_viser_preview", fail_viewer)
+
+    results = list(
+        app_articraft._generate_server_articulation_asset(
+            "a service bell", None, _request("remote-viewer-failure")
+        )
+    )
+
+    artifact = tmp_path / "server" / REQUEST_ID / "model.usdc"
+    assert results[-1][0] == artifact.resolve().as_posix()
+    assert "Interactive preview could not start" in results[-1][2]
+    assert "viewer unavailable" in results[-1][2]
+    assert "USDC generated successfully" in results[-1][4]
 
 
 @pytest.mark.parametrize("terminal_status", ["failed", "cancelled"])
