@@ -76,6 +76,7 @@ def generate_action_engine_config(
     randomize_table_material: bool = False,
     planning_mode: str = "offline",
     vlm_model: str | None = None,
+    planner_policy: Mapping[str, Any] | None = None,
 ) -> GeneratedConfigPaths:
     """Generate the complete Action Engine input bundle.
 
@@ -250,6 +251,7 @@ def generate_action_engine_config(
         seed_task_graph_path=graph_relative_path,
         vlm_model=vlm_model,
         vlm_camera_uids=vlm_camera_uids,
+        planner_policy=planner_policy,
     )
     gym_config = build_fast_gym_config(
         scene,

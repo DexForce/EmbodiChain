@@ -14,23 +14,5 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-schema_version: embodichain.task-engine-defaults/v1
-
-workflow:
-  max_parallel_workers: 2
-  max_scene_attempts: 2
-  max_action_attempts: 1
-
-planning:
-  candidate_count: 3
-  planning_mode: offline
-  gripper_model: robotiq
-  max_episodes: 1
-  max_episode_steps: 6000
-  planner:
-    mode: ik_interp
-
-execution:
-  num_envs: 1
-  success_policy: any
-  min_successful_envs: 1
+planner:
+  mode: curobo

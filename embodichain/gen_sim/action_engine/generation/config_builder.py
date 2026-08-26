@@ -33,6 +33,9 @@ from embodichain.gen_sim.action_engine.config import (
     generation_defaults,
     runtime_policy_hash,
 )
+from embodichain.gen_sim.action_engine.config.runtime_policy import (
+    _resolve_planner_policy,
+)
 from embodichain.gen_sim.action_engine.gripper_profiles import (
     GripperProfile,
     get_gripper_profile,
@@ -112,11 +115,22 @@ def build_agent_config(
     seed_task_graph_path: str | Path | None = EXECUTION_PROGRAM_FILENAME,
     vlm_model: str | None = None,
     vlm_camera_uids: Sequence[str] | None = None,
+    planner_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the small manifest consumed by ``run_agent``."""
     profile = canonical_robot_profile(robot_profile)
     selected_gripper = canonical_gripper_model(gripper_model)
     runtime_policy = default_runtime_policy(profile)
+    explicit_dynamic_collision = (
+        planner_policy is not None and "dynamic_collision" in planner_policy
+    )
+    if planner_policy is not None:
+        policy = runtime_policy.as_mapping()
+        policy["planner"] = _resolve_planner_policy(
+            planner_policy,
+            robot_profile=profile,
+        )
+        runtime_policy = RuntimePolicyCfg.from_mapping(policy)
     if (
         static_obstacle_uids is not None
         or dynamic_obstacle_uids is not None
@@ -130,7 +144,10 @@ def build_agent_config(
             planner["dynamic_obstacle_uids"] = [
                 str(uid) for uid in dynamic_obstacle_uids
             ]
-            planner["dynamic_collision"] = bool(dynamic_obstacle_uids)
+            if not explicit_dynamic_collision:
+                planner["dynamic_collision"] = bool(dynamic_obstacle_uids) and (
+                    planner["backend"] == "curobo"
+                )
         if table_top_z is not None:
             tabletop = float(table_top_z)
             if not math.isfinite(tabletop):

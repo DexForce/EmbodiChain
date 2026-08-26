@@ -19,9 +19,17 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from pathlib import Path
 
+import yaml
+
 from embodichain.gen_sim.action_engine.config import generation_defaults
+from embodichain.gen_sim.action_engine.config.runtime_policy import (
+    _PLANNER_MODES,
+    _planner_policy_with_mode,
+    _resolve_planner_policy,
+)
 from embodichain.gen_sim.action_engine.generation import (
     generate_action_engine_config,
 )
@@ -124,6 +132,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate one offline bundle or an offline/online A/B bundle.",
     )
     parser.add_argument(
+        "--planner-config",
+        default=None,
+        help=(
+            "Optional YAML file containing a planner mapping. The canonical "
+            "policy and runtime_policy_hash are regenerated into agent_config.json."
+        ),
+    )
+    parser.add_argument(
+        "--planner-mode",
+        choices=_PLANNER_MODES,
+        default=None,
+        help=(
+            "Explicit planner mode override. When omitted, planner YAML/defaults "
+            "remain authoritative."
+        ),
+    )
+    parser.add_argument(
         "--source_scene_z_rotation_degrees",
         "--source-scene-z-rotation-degrees",
         type=float,
@@ -183,6 +208,12 @@ def cli() -> None:
     """Generate and report the canonical Action Engine artifact bundle."""
     args = build_parser().parse_args()
     task_description = _resolve_task_description(args)
+    planner_policy = _load_planner_config(args.planner_config)
+    if args.planner_mode is not None:
+        planner_policy = _planner_policy_with_mode(
+            planner_policy,
+            args.planner_mode,
+        )
     paths = generate_action_engine_config(
         args.gym_project,
         args.output_dir,
@@ -202,6 +233,7 @@ def cli() -> None:
         randomize_table_material=args.randomize_table_material,
         planning_mode=args.planning_mode,
         vlm_model=args.vlm_model,
+        planner_policy=planner_policy,
     )
 
     print(f"Generated gym config: {paths.gym_config}")
@@ -218,6 +250,21 @@ def cli() -> None:
         f'--agent_config "{paths.agent_config}" '
         "--regenerate"
     )
+
+
+def _load_planner_config(path: str | None) -> dict[str, object] | None:
+    if path is None:
+        return None
+    config_path = Path(path).expanduser().resolve()
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, Mapping):
+        raise TypeError("Planner YAML must contain a mapping.")
+    planner = raw.get("planner") if set(raw) == {"planner"} else raw
+    if not isinstance(planner, Mapping):
+        raise TypeError("Planner YAML 'planner' must be a mapping.")
+    resolved = dict(planner)
+    _resolve_planner_policy(resolved)
+    return resolved
 
 
 def _resolve_task_description(args: argparse.Namespace) -> str:

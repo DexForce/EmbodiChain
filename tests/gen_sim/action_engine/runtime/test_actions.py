@@ -60,7 +60,7 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
     TrackingPolicy,
 )
-from embodichain.lab.sim.planners import CuroboPlannerCfg
+from embodichain.lab.sim.planners import CuroboPlannerCfg, ToppraPlannerCfg
 from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 
 
@@ -537,6 +537,96 @@ def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None
         torch.tensor([0.0, -1.0, 0.0]),
     )
     assert hand.motion_policy.strategy == "ik_interp"
+
+
+@pytest.mark.parametrize(
+    ("planner_policy", "single_strategy"),
+    [
+        (
+            {
+                "backend": "toppra",
+                "single_arm_strategy": "motion_gen",
+                "coordinated_strategy": "ik_interp",
+                "dynamic_collision": False,
+            },
+            "motion_gen",
+        ),
+        (
+            {
+                "backend": "toppra",
+                "single_arm_strategy": "ik_interp",
+                "coordinated_strategy": "ik_interp",
+                "dynamic_collision": False,
+            },
+            "ik_interp",
+        ),
+    ],
+)
+def test_toppra_and_ik_interp_policies_reach_runtime_factory_and_strategy(
+    planner_policy: dict[str, object],
+    single_strategy: str,
+) -> None:
+    adapter = AtomicActionAdapter(_planner_env(), planner_policy=planner_policy)
+    adapter._atomic_engine = _FakeEngine()
+    goal = JointPositionGoal(target=torch.zeros(2, 2))
+
+    invocation = adapter._invocation(
+        GroundedAction("MoveJoints", "left_arm", "arm", goal, {}),
+        adapter.capabilities.get("MoveJoints"),
+    )
+
+    assert isinstance(adapter._motion_generator_cfg().planner_cfg, ToppraPlannerCfg)
+    assert invocation.motion_policy.strategy == single_strategy
+    assert invocation.motion_policy.dynamic_collision_mode.value == "off"
+
+
+def test_runtime_rejects_requested_and_effective_backend_mismatch(
+    monkeypatch: Any,
+) -> None:
+    env = _planner_env()
+    adapter = AtomicActionAdapter(
+        env,
+        planner_policy={
+            "backend": "toppra",
+            "single_arm_strategy": "motion_gen",
+            "coordinated_strategy": "ik_interp",
+            "dynamic_collision": False,
+        },
+    )
+    trajectory = TimedTrajectory.from_uniform_step(
+        torch.zeros(2, 2, 8),
+        env_ids=torch.arange(2),
+        step_dt=0.01,
+    )
+    wrong_backend_plan = ActionPlan(
+        skill_id="move_joints",
+        plan_success=torch.ones(2, dtype=torch.bool),
+        commands=_commands_for(trajectory),
+        joint_trajectory=trajectory,
+        recovery_policy=RecoveryPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
+        planned_scene_version=0,
+        planned_collision_world_revision=(0, 0),
+        diagnostics=PlannerDiagnostics(backend="curobo"),
+        expected_effects=StateDelta(),
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_engine",
+        lambda: _FakeEngine(lambda *_args: wrong_backend_plan),
+    )
+
+    with pytest.raises(RuntimeError, match="requested 'toppra'.*reported 'curobo'"):
+        adapter.plan(
+            GroundedAction(
+                "MoveJoints",
+                "left_arm",
+                "arm",
+                JointPositionGoal(target=torch.zeros(2, 2)),
+                {},
+            ),
+            ExecutionState(last_qpos=torch.zeros(2, 8)),
+        )
 
 
 def test_coordinated_pickment_uses_engine_scoped_grasp_generator() -> None:
@@ -1173,6 +1263,8 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
         success: torch.Tensor,
         terminal: float,
         held: HeldObjectState,
+        *,
+        messages: tuple[str, ...] = (),
     ) -> ActionPlan:
         positions = torch.full((2, 2, 8), terminal)
         trajectory = TimedTrajectory.from_uniform_step(
@@ -1190,7 +1282,8 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
             planned_scene_version=0,
             planned_collision_world_revision=(0, 0),
             diagnostics=PlannerDiagnostics(
-                backend="fake",
+                backend="curobo",
+                messages=messages,
                 metadata={"marker": terminal},
             ),
             expected_effects=StateDelta(
@@ -1200,7 +1293,12 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
 
     plans = iter(
         (
-            action_plan(torch.tensor([True, False]), 1.0, held_at(1.0)),
+            action_plan(
+                torch.tensor([True, False]),
+                1.0,
+                held_at(1.0),
+                messages=("IK unreachable",),
+            ),
             action_plan(torch.tensor([True, True]), 2.0, held_at(2.0)),
         )
     )
@@ -1248,6 +1346,13 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
     assert outcome.planner_trace["primary_action_diagnostics"]["marker"] == 1.0
     assert outcome.planner_trace["fallback_action_diagnostics"]["marker"] == 2.0
     assert outcome.planner_trace["gripper_model"] == "pgi"
+    assert outcome.planner_trace["requested_backend"] == "curobo"
+    assert outcome.planner_trace["effective_backend"] == "mixed"
+    assert outcome.planner_trace["effective_strategy"] == "mixed"
+    assert outcome.planner_trace["primary_effective_backend"] == "curobo"
+    assert bool(outcome.planner_trace["fallback_occurred"].any())
+    assert outcome.planner_trace["planner_failure_reason"] == "IK unreachable"
+    assert outcome.planner_trace["collision_planning_capable"] is False
 
 
 def test_collision_required_cleanup_does_not_use_unsafe_fallback(

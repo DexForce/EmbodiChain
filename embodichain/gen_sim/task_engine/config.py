@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, Final
@@ -110,6 +111,7 @@ class TaskEnginePlanningCfg:
     gripper_model: str = "pgi"
     max_episodes: int = 1
     max_episode_steps: int = 6000
+    planner: dict[str, Any] = {}
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -127,6 +129,14 @@ class TaskEnginePlanningCfg:
                 f"Unsupported gripper model {self.gripper_model!r}; expected one "
                 "of: pgi, robotiq."
             )
+        if not isinstance(self.planner, Mapping):
+            raise TypeError("planner must be a mapping.")
+        from embodichain.gen_sim.action_engine.config.runtime_policy import (
+            _resolve_planner_policy,
+        )
+
+        _resolve_planner_policy(self.planner)
+        self.planner = deepcopy(dict(self.planner))
 
 
 def load_task_engine_config(
@@ -170,14 +180,20 @@ def load_task_engine_config(
         "max_action_attempts",
     }:
         raise ValueError("Task Engine workflow configuration fields are invalid.")
-    if set(planning) != {
+    required_planning = {
         "candidate_count",
         "planning_mode",
         "gripper_model",
         "max_episodes",
         "max_episode_steps",
+    }
+    if set(planning) not in {
+        frozenset(required_planning),
+        frozenset((*required_planning, "planner")),
     }:
         raise ValueError("Task Engine planning configuration fields are invalid.")
+    if "planner" in planning:
+        planning["planner"] = _mapping(planning["planner"], "planning.planner")
     if set(execution) != {
         "num_envs",
         "success_policy",
