@@ -872,6 +872,10 @@ class ProgramExecutor:
         trace = {
             "action_class": str(action.get("atomic_action_class")),
             "arm": arm,
+            "requested_backend": self._planner_search_budget()["requested_backend"],
+            "effective_backend": "none",
+            "effective_strategy": "planner_exception",
+            "planner_failure_reason": f"{type(exc).__name__}: {exc}",
             "primary_strategy": "planner_exception",
             "primary_success": torch.zeros_like(inherited_failed),
             "fallback_attempted": torch.zeros_like(inherited_failed),
@@ -2503,14 +2507,20 @@ class ProgramExecutor:
         ]
 
     def _planner_search_budget(self) -> dict[str, Any]:
-        """Return the configured finite search budget used by motion planning."""
+        """Return backend-neutral configured motion-planning search limits."""
         runtime_policy = getattr(self, "runtime_policy", None)
         planner = getattr(runtime_policy, "planner", {})
-        curobo = planner.get("curobo", {}) if isinstance(planner, Mapping) else {}
-        return {
-            "primary_max_attempts": int(curobo.get("max_attempts", 1)),
+        planner = planner if isinstance(planner, Mapping) else {}
+        backend = str(planner.get("backend", "unknown"))
+        budget = {
+            "requested_backend": backend,
             "fallback_enabled": bool(planner.get("allow_fallback", False)),
         }
+        if backend == "curobo":
+            curobo = planner.get("curobo", {})
+            curobo = curobo if isinstance(curobo, Mapping) else {}
+            budget["primary_max_attempts"] = int(curobo.get("max_attempts", 1))
+        return budget
 
     def _planner_failure_details(
         self,
@@ -2528,6 +2538,9 @@ class ProgramExecutor:
         )
         attempts = reachability.get("attempts", ())
         evidence: dict[str, Any] = {
+            "requested_backend": str(trace.get("requested_backend", "unknown")),
+            "effective_backend": str(trace.get("effective_backend", "unknown")),
+            "effective_strategy": str(trace.get("effective_strategy", strategy)),
             "primary_success": bool(
                 self._row_trace_value(trace.get("primary_success", False), env_id)
             ),
@@ -2538,6 +2551,8 @@ class ProgramExecutor:
                 self._row_trace_value(trace.get("fallback_success", False), env_id)
             ),
         }
+        if trace.get("planner_failure_reason") is not None:
+            evidence["planner_failure_reason"] = str(trace["planner_failure_reason"])
         if trace.get("exception") is not None:
             evidence["exception"] = str(trace["exception"])
         if isinstance(attempts, Sequence) and not isinstance(

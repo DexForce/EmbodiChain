@@ -521,6 +521,7 @@ class AtomicActionAdapter:
                     context=context,
                     state=state,
                     primary_success=primary_success,
+                    primary_diagnostics=plan.diagnostics,
                     fallback_allowed=fallback_allowed,
                     fallback_strategy=(
                         str(fallback_strategy)
@@ -963,6 +964,7 @@ class AtomicActionAdapter:
         context: PlanningContext,
         state: ExecutionState,
         primary_success: torch.Tensor,
+        primary_diagnostics: Any,
         fallback_allowed: bool,
         fallback_strategy: str | None,
         fallback_attempted: torch.Tensor,
@@ -981,25 +983,81 @@ class AtomicActionAdapter:
             dtype=torch.int64,
             device=self.device,
         )
+        requested_backend = str(self.planner_policy["backend"])
+        primary_strategy = invocation.motion_policy.strategy
+        diagnostic_backend = str(primary_diagnostics.backend)
+        if (
+            primary_strategy == "motion_gen"
+            and diagnostic_backend in {"curobo", "toppra"}
+            and diagnostic_backend != requested_backend
+        ):
+            raise RuntimeError(
+                "Planner backend mismatch: runtime policy requested "
+                f"{requested_backend!r}, but the action plan reported "
+                f"{diagnostic_backend!r}."
+            )
+        primary_effective_backend = (
+            diagnostic_backend if primary_strategy == "motion_gen" else "ik_interp"
+        )
+        if bool(fallback_used.all()) and bool(fallback_used.any()):
+            effective_backend = "ik_interp"
+            effective_strategy = "ik_interp"
+        elif bool(fallback_used.any()):
+            effective_backend = "mixed"
+            effective_strategy = "mixed"
+        else:
+            effective_backend = primary_effective_backend
+            effective_strategy = primary_strategy
+        planner_failure_reason = None
+        if not bool(primary_success.all()):
+            if primary_diagnostics.messages:
+                planner_failure_reason = "; ".join(primary_diagnostics.messages)
+            else:
+                metadata = primary_diagnostics.metadata
+                for key in ("failure_reason", "reason", "error"):
+                    if metadata.get(key) is not None:
+                        planner_failure_reason = str(metadata[key])
+                        break
+            if planner_failure_reason is None:
+                planner_failure_reason = "planner_reported_failure"
+        collision_planning_capable = (
+            effective_backend == "curobo" and effective_strategy == "motion_gen"
+        )
+        search_budget: dict[str, Any] = {
+            "requested_backend": requested_backend,
+            "fallback_enabled": bool(fallback_allowed),
+        }
+        if requested_backend == "curobo":
+            search_budget["primary_max_attempts"] = int(
+                self.planner_policy.get("curobo", {}).get("max_attempts", 1)
+            )
         trace = {
             "action_class": grounded.action_class,
             "arm": grounded.arm,
             "gripper_model": self.gripper_profile.model.value,
-            "planner": str(self.planner_policy["backend"]),
-            "primary_strategy": invocation.motion_policy.strategy,
+            "planner": requested_backend,
+            "requested_backend": requested_backend,
+            "effective_backend": effective_backend,
+            "effective_strategy": effective_strategy,
+            "primary_effective_backend": primary_effective_backend,
+            "primary_strategy": primary_strategy,
             "dynamic_collision_mode": invocation.motion_policy.dynamic_collision_mode.value,
+            "collision_planning_capable": collision_planning_capable,
+            "collision_check_scope": (
+                "static_and_dynamic"
+                if collision_planning_capable
+                and invocation.motion_policy.dynamic_collision_mode.value != "off"
+                else ("static" if collision_planning_capable else "not_supported")
+            ),
             "primary_success": primary_success.detach().clone(),
+            "planner_failure_reason": planner_failure_reason,
             "fallback_allowed": fallback_allowed,
             "fallback_strategy": fallback_strategy,
             "fallback_attempted": fallback_attempted.detach().clone(),
             "fallback_success": fallback_success.detach().clone(),
             "fallback_used": fallback_used.detach().clone(),
-            "search_budget": {
-                "primary_max_attempts": int(
-                    self.planner_policy.get("curobo", {}).get("max_attempts", 1)
-                ),
-                "fallback_enabled": bool(fallback_allowed),
-            },
+            "fallback_occurred": fallback_attempted.detach().clone(),
+            "search_budget": search_budget,
             "collision_world_revision": revisions,
             "collision_obstacle_positions": obstacle_positions,
             "collision_exclusions": {

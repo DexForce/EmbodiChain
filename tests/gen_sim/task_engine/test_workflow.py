@@ -279,6 +279,12 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert execution.required_successes == 1
 
 
+def test_packaged_planner_mode_defaults_to_curobo() -> None:
+    _, planning, _ = load_task_engine_config()
+
+    assert planning.planner == {"mode": "curobo"}
+
+
 def test_workflow_configuration_can_be_tuned_from_yaml(tmp_path: Path) -> None:
     config = tmp_path / "task_engine.yaml"
     config.write_text(
@@ -294,6 +300,8 @@ planning:
   gripper_model: robotiq
   max_episodes: 2
   max_episode_steps: 5000
+  planner:
+    mode: toppra
 execution:
   num_envs: 6
   success_policy: at_least
@@ -311,6 +319,7 @@ execution:
     assert planning.gripper_model == "robotiq"
     assert planning.max_episodes == 2
     assert planning.max_episode_steps == 5000
+    assert planning.planner == {"mode": "toppra"}
     assert execution.num_envs == 6
     assert execution.required_successes == 2
 
@@ -340,3 +349,5 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(planning_mode="unsupported")
     with pytest.raises(ValueError, match="pgi.*robotiq"):
         TaskEnginePlanningCfg(gripper_model="unsupported")
+    with pytest.raises(ValueError, match="mode cannot be combined"):
+        TaskEnginePlanningCfg(planner={"mode": "toppra", "dynamic_collision": True})

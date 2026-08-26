@@ -655,6 +655,7 @@ class TaskEngineWorkflow:
                         vlm_model=vlm_model,
                         max_episodes=planning_cfg.max_episodes,
                         max_episode_steps=planning_cfg.max_episode_steps,
+                        planner_policy=planning_cfg.planner,
                         candidate_set=candidate_set,
                         force_most_likely=True,
                         final_inspection=final_inspection,
@@ -1039,6 +1040,7 @@ class TaskEngineWorkflow:
                         "gripper_model": planning_cfg.gripper_model,
                         "max_episodes": planning_cfg.max_episodes,
                         "max_episode_steps": planning_cfg.max_episode_steps,
+                        "planner": deepcopy(planning_cfg.planner),
                     },
                     "execution": {
                         "num_envs": execution_cfg.num_envs,

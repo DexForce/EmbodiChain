@@ -27,6 +27,8 @@ planning:
   gripper_model: robotiq
   max_episodes: 1
   max_episode_steps: 6000
+  planner:
+    mode: ik_interp
 
 execution:
   num_envs: 1

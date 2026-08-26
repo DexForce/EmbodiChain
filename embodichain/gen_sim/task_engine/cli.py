@@ -25,6 +25,11 @@ from pathlib import Path
 import sys
 from typing import Any, Final, Sequence
 
+from embodichain.gen_sim.action_engine.config.runtime_policy import (
+    _PLANNER_MODES,
+    _planner_policy_with_mode,
+)
+
 from .config import load_task_engine_config
 from .orchestration.scene_adapter import SceneAdapter
 from .run_directory import reserve_run_directory
@@ -107,6 +112,12 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Override the Task Engine planning gripper profile.",
     )
+    parser.add_argument(
+        "--planner-mode",
+        choices=_PLANNER_MODES,
+        default=None,
+        help="Override planning.planner.mode from the Task Engine YAML.",
+    )
     _add_failure_policy_argument(parser)
 
 
@@ -162,6 +173,14 @@ def _run_workflow(
     workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
     if args.gripper_model is not None:
         planning_cfg = replace(planning_cfg, gripper_model=args.gripper_model)
+    if args.planner_mode is not None:
+        planning_cfg = replace(
+            planning_cfg,
+            planner=_planner_policy_with_mode(
+                planning_cfg.planner,
+                args.planner_mode,
+            ),
+        )
     with reserve_run_directory(args.output_root) as allocation:
         if scene is not None:
             validate_scene_output_separation(scene, allocation.path)

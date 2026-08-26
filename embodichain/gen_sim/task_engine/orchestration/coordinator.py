@@ -185,6 +185,7 @@ class TaskEngineCoordinator:
         vlm_model: str | None = None,
         max_episodes: int | None = None,
         max_episode_steps: int | None = None,
+        planner_policy: Mapping[str, Any] | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
         candidate_set: TaskCandidateSet | Mapping[str, Any] | None = None,
@@ -371,6 +372,7 @@ class TaskEngineCoordinator:
                 "randomize_table_material": randomize_table_material,
                 "planning_mode": planning_mode,
                 "vlm_model": vlm_model,
+                "planner_policy": planner_policy,
             }
             if max_episodes is not None:
                 generator_kwargs["max_episodes"] = max_episodes

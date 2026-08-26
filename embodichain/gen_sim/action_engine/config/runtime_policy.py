@@ -128,6 +128,32 @@ _CUROBO_KEYS = {
     "max_attempts",
     "collision_activation_distance",
 }
+_PLANNER_MODES = ("curobo", "toppra", "ik_interp")
+_PLANNER_MODE_FIELDS = frozenset(
+    {
+        "backend",
+        "single_arm_strategy",
+        "coordinated_strategy",
+        "dynamic_collision",
+    }
+)
+_PLANNER_MODE_PATCHES: dict[str, dict[str, Any]] = {
+    "curobo": {
+        "backend": "curobo",
+        "single_arm_strategy": "motion_gen",
+        "coordinated_strategy": "ik_interp",
+    },
+    "toppra": {
+        "backend": "toppra",
+        "single_arm_strategy": "motion_gen",
+        "coordinated_strategy": "ik_interp",
+    },
+    "ik_interp": {
+        "backend": "toppra",
+        "single_arm_strategy": "ik_interp",
+        "coordinated_strategy": "ik_interp",
+    },
+}
 _MOTION_DEFAULT_ACTIONS = {
     "AxisAlign",
     "CoordinatedPickment",
@@ -445,6 +471,80 @@ def generation_defaults() -> dict[str, Any]:
     return deepcopy(dict(value))
 
 
+def _resolve_planner_policy(
+    planner_policy: Mapping[str, Any] | None = None,
+    *,
+    robot_profile: str = "dual_ur10",
+) -> dict[str, Any]:
+    """Merge and validate a partial generation-time planner policy.
+
+    ``mode`` is a generation-only shorthand for the backend and strategy
+    fields. The returned mapping is the canonical runtime snapshot fragment.
+    Backend-specific overrides are rejected when that backend is not selected,
+    while package defaults remain present but dormant for stable hashes.
+
+    Args:
+        planner_policy: Optional partial planner mapping loaded from YAML.
+        robot_profile: Runtime profile used to resolve package defaults.
+
+    Returns:
+        A detached, fully materialized planner policy mapping.
+    """
+    base = default_runtime_policy(robot_profile).planner
+    if planner_policy is None:
+        return deepcopy(base)
+    if not isinstance(planner_policy, Mapping):
+        raise TypeError("planner policy must be a mapping.")
+    override = deepcopy(dict(planner_policy))
+    mode = override.pop("mode", None)
+    if mode is not None:
+        mode = _validate_planner_mode(mode)
+        conflicts = set(override).intersection(_PLANNER_MODE_FIELDS)
+        if conflicts:
+            raise ValueError(
+                "planner.mode cannot be combined with mode-owned fields: "
+                f"{sorted(conflicts)}."
+            )
+        override = _deep_merge(override, _PLANNER_MODE_PATCHES[mode])
+    unknown = set(override).difference(_PLANNER_KEYS)
+    if unknown:
+        raise ValueError(f"planner policy contains unknown fields: {sorted(unknown)}.")
+    resolved = _deep_merge(base, override)
+    backend = resolved.get("backend")
+    if backend != "curobo" and "curobo" in override:
+        raise ValueError("planner.curobo options require the cuRobo backend.")
+    _validate_finite_numbers(resolved, "planner")
+    _validate_planner(resolved)
+    return resolved
+
+
+def _planner_policy_with_mode(
+    planner_policy: Mapping[str, Any] | None,
+    planner_mode: str,
+) -> dict[str, Any]:
+    """Apply an explicit CLI mode after YAML planner configuration."""
+    mode = _validate_planner_mode(planner_mode)
+    if planner_policy is not None and not isinstance(planner_policy, Mapping):
+        raise TypeError("planner policy must be a mapping.")
+    result = deepcopy(dict(planner_policy or {}))
+    result.pop("mode", None)
+    for field_name in _PLANNER_MODE_FIELDS:
+        result.pop(field_name, None)
+    if mode != "curobo":
+        result.pop("curobo", None)
+    result["mode"] = mode
+    _resolve_planner_policy(result)
+    return result
+
+
+def _validate_planner_mode(value: Any) -> str:
+    if not isinstance(value, str) or value not in _PLANNER_MODES:
+        raise ValueError(
+            f"planner mode must be one of {list(_PLANNER_MODES)}, got {value!r}."
+        )
+    return value
+
+
 def _load_defaults() -> dict[str, Any]:
     document = load_config(_DEFAULTS_PATH)
     if not isinstance(document, dict) or set(document) != {
@@ -515,10 +615,8 @@ def _validate_planner(value: Mapping[str, Any]) -> None:
             raise ValueError(f"planner.{name} must be 'motion_gen' or 'ik_interp'.")
     if value.get("fallback_strategy") != "ik_interp":
         raise ValueError("planner.fallback_strategy must be 'ik_interp'.")
-    if value.get("coordinated_strategy") == "motion_gen" and backend == "curobo":
-        raise ValueError(
-            "planner.coordinated_strategy must be 'ik_interp' with cuRobo."
-        )
+    if value.get("coordinated_strategy") != "ik_interp":
+        raise ValueError("planner.coordinated_strategy must be 'ik_interp'.")
     for name in ("allow_fallback", "dynamic_collision"):
         if not isinstance(value.get(name), bool):
             raise ValueError(f"planner.{name} must be a boolean.")

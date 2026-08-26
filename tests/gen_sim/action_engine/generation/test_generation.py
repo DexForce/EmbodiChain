@@ -35,6 +35,7 @@ from embodichain.gen_sim.action_engine.cli import (
     generate_action_agent_config as cli_module,
 )
 from embodichain.gen_sim.action_engine.cli.generate_action_agent_config import (
+    _load_planner_config,
     build_parser,
 )
 from embodichain.gen_sim.action_engine.generation.artifacts import (
@@ -490,6 +491,104 @@ def test_fast_gym_config_preserves_unicode_instruction_and_uses_task_name_label(
     assert params["instruction"]["lang"] == task_description
     assert params["extra"]["task_name"] == task_name
     assert params["extra"]["task_description"] == task_name
+
+
+@pytest.mark.parametrize(
+    ("name", "planner_policy", "expected"),
+    [
+        (
+            "curobo",
+            {"mode": "curobo"},
+            ("curobo", "motion_gen", "ik_interp", True),
+        ),
+        (
+            "toppra",
+            {"mode": "toppra"},
+            ("toppra", "motion_gen", "ik_interp", False),
+        ),
+        (
+            "ik_interp",
+            {"mode": "ik_interp"},
+            ("toppra", "ik_interp", "ik_interp", False),
+        ),
+    ],
+)
+def test_agent_config_materializes_yaml_planner_policy_and_hash(
+    tmp_path: Path,
+    name: str,
+    planner_policy: dict[str, object],
+    expected: tuple[str, str, str, bool],
+) -> None:
+    config = build_agent_config(
+        task_name=name,
+        robot_profile="ur10",
+        execution_program_hash="d" * 64,
+        source_config_path=tmp_path / "gym_config.json",
+        uid_map={"table": "table", "cube": "cube"},
+        static_obstacle_uids=["table"],
+        dynamic_obstacle_uids=["cube"],
+        planner_policy=planner_policy,
+    )
+
+    planner = config["runtime_policy"]["planner"]
+    assert (
+        planner["backend"],
+        planner["single_arm_strategy"],
+        planner["coordinated_strategy"],
+        planner["dynamic_collision"],
+    ) == expected
+    assert planner["static_obstacle_uids"] == ["table"]
+    assert planner["dynamic_obstacle_uids"] == ["cube"]
+    assert len(config["runtime_policy_hash"]) == 64
+
+    from embodichain.gen_sim.action_engine.config import resolve_agent_runtime_policy
+
+    resolved = resolve_agent_runtime_policy(config)
+    assert resolved.planner == planner
+
+
+def test_agent_config_rejects_toppra_dynamic_collision_before_writing(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="dynamic_collision.*cuRobo"):
+        build_agent_config(
+            task_name="invalid_toppra",
+            robot_profile="ur10",
+            execution_program_hash="d" * 64,
+            source_config_path=tmp_path / "gym_config.json",
+            uid_map={"cube": "cube"},
+            dynamic_obstacle_uids=["cube"],
+            planner_policy={"backend": "toppra", "dynamic_collision": True},
+        )
+
+
+def test_planner_yaml_loader_accepts_wrapped_policy_and_rejects_backend_leaks(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "toppra.yaml"
+    config_path.write_text(
+        """\
+planner:
+  mode: toppra
+""",
+        encoding="utf-8",
+    )
+
+    assert _load_planner_config(str(config_path)) == {
+        "mode": "toppra",
+    }
+
+    config_path.write_text(
+        """\
+planner:
+  mode: toppra
+  curobo:
+    max_attempts: 2
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="curobo.*cuRobo backend"):
+        _load_planner_config(str(config_path))
 
 
 def test_ab_config_uses_offline_branch_and_four_vlm_cameras(
@@ -1552,6 +1651,7 @@ def test_generation_cli_defaults_to_mature_robot_without_scene_randomization() -
     assert args.robot_profile == "ur10"
     assert args.randomize_scene is False
     assert args.planning_mode == "offline"
+    assert args.planner_mode is None
     assert not hasattr(args, "instruction_parser")
     assert not hasattr(args, "task_agent")
 
@@ -1632,6 +1732,60 @@ def test_generation_cli_reports_seed_png_path(
         f"Generated Seed graph PNG: {paths.seed_task_graph_png}"
         in capsys.readouterr().out
     )
+
+
+def test_generation_cli_explicit_mode_overrides_planner_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = artifact_paths(tmp_path / "output")
+    planner_path = tmp_path / "planner.yaml"
+    planner_path.write_text(
+        """\
+planner:
+  backend: curobo
+  single_arm_strategy: motion_gen
+  coordinated_strategy: ik_interp
+  dynamic_collision: true
+  allow_fallback: false
+  curobo:
+    max_attempts: 2
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def generate(*_args, **kwargs):
+        captured.update(kwargs)
+        return paths
+
+    monkeypatch.setattr(cli_module, "generate_action_engine_config", generate)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_action_agent_config",
+            "--gym-project",
+            "gym_export",
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--task-name",
+            "task",
+            "--task-description",
+            "test-instruction",
+            "--planner-config",
+            str(planner_path),
+            "--planner-mode",
+            "ik_interp",
+        ],
+    )
+
+    cli_module.cli()
+
+    assert captured["planner_policy"] == {
+        "allow_fallback": False,
+        "mode": "ik_interp",
+    }
 
 
 @pytest.mark.parametrize(

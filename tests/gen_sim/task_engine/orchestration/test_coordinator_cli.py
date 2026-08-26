@@ -843,6 +843,58 @@ def test_unified_cli_accepts_exactly_four_modes(
     assert Path(payload["output_dir"]).parent == tmp_path / "history"
 
 
+def test_unified_cli_explicit_planner_mode_overrides_packaged_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeWorkflow:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def run(self, request, **kwargs):
+            captured.update(kwargs)
+            output = Path(request["output_dir"])
+            return SimpleNamespace(
+                status="prepared",
+                succeeded=False,
+                failure_class=None,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=output / "final" / "bundle",
+            )
+
+    monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", FakeWorkflow)
+
+    assert (
+        cli.main(
+            [
+                "prepare",
+                "--mode",
+                "image",
+                "--task-id",
+                "task",
+                "--instruction",
+                "place the cup",
+                "--image",
+                str(tmp_path / "input.png"),
+                "--output-root",
+                str(tmp_path / "history"),
+                "--planner-mode",
+                "ik_interp",
+            ]
+        )
+        == 0
+    )
+
+    planning_cfg = captured["planning_cfg"]
+    assert planning_cfg.planner == {"mode": "ik_interp"}
+    assert json.loads(capsys.readouterr().out)["status"] == "prepared"
+
+
 def test_unified_cli_reuses_history_root_without_modifying_prior_scene(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -978,6 +1030,7 @@ def test_public_cli_exposes_prepare_run_and_run_all_modes() -> None:
     assert arguments.command == "prepare"
     assert arguments.dataset_saving is True
     assert arguments.failure_policy == "stop"
+    assert arguments.planner_mode is None
 
 
 def test_prepare_cli_stops_before_simulator_execution(
