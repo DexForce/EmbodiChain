@@ -273,7 +273,11 @@ new scene version for every material dynamic-state change.
 the `OpenDoorAffordance` closed legal endpoint and `1` to its open endpoint.
 `OpenDoorAffordance.opening_direction` owns the closed-to-open joint-coordinate
 direction and defaults to increasing qpos; reverse-coordinate hinges configure
-`-1` at affordance construction. The planner automatically matches the
+`-1` at affordance construction. `OpenDoorAffordance.from_articulation()`
+consumes only `Articulation.get_parent_joint_chain()`: automatic hinge
+selection skips fixed joints and requires exactly one active revolute ancestor;
+prismatic ancestors, latch joints, and other multi-active chains require an
+explicit `hinge_joint_name`. The planner automatically matches the
 affordance-resolved parent revolute joint name to one unique
 `SceneSnapshot.articulation_joints` observation, computes a row-local opening
 delta from measured qpos, holds rows already at target, and fails rows with

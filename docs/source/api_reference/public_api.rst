@@ -817,6 +817,7 @@ embodichain.lab.sim.objects.articulation
 
    ArticulationData
    Articulation
+   ArticulationJointKinematics
 
 embodichain.lab.sim.objects.cloth_object
 ----------------------------------------

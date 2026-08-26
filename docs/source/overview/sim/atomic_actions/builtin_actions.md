@@ -689,14 +689,17 @@ post-pull link pose.
 Plans **approach -> reach -> close -> open -> release -> retract** for a door
 handle. Construct `OpenDoorAffordance` with
 `OpenDoorAffordance.from_articulation(articulation, link_name)`. Starting at the
-configured handle link, the factory walks toward the articulation root, skips
-fixed intermediate joints, and selects the first parent revolute joint. Its
-axis and origin are converted into the handle-link frame, so callers do not
-configure a hinge name or axis. The affordance owns the joint-coordinate
-opening direction: it defaults to increasing qpos, while reverse-coordinate
-hinges pass `opening_direction=-1` to the factory. The affordance stores only
-this local geometry, the handle mesh, resolved joint name, limits, and opening
-direction; it does not retain the live articulation.
+configured handle link, the factory consumes
+`Articulation.get_parent_joint_chain()`, skips only fixed intermediates, and
+automatically selects the hinge only when the chain has one active revolute
+ancestor. A prismatic ancestor, revolute latch/handle joint, or any other
+multi-active chain is ambiguous and requires `hinge_joint_name`. The selected
+axis and origin are converted into the handle-link frame without exposing
+native simulator joint-info objects to the affordance. The affordance owns the
+joint-coordinate opening direction: it defaults to increasing qpos, while
+reverse-coordinate hinges pass `opening_direction=-1` to the factory. It
+stores only local geometry, the handle mesh, resolved joint name, limits, and
+opening direction; it does not retain the live articulation.
 
 The action infers the positive-opening approach direction from the hinge axis
 and the hinge-to-handle radial vector, then samples a handle grasp as `Slide`

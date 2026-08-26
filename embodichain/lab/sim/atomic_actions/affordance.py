@@ -367,12 +367,13 @@ class SlideAffordance(AntipodalAffordance):
 
 @dataclass
 class OpenDoorAffordance(AntipodalAffordance):
-    """Target-local handle geometry and an automatically resolved hinge axis.
+    """Target-local handle geometry and a resolved hinge axis.
 
     Use :meth:`from_articulation` to start from a graspable handle link. The
-    factory walks the link's parent chain and stores the first revolute joint's
-    axis and origin in the handle-link frame. The resulting affordance owns no
-    simulator entity or live pose.
+    factory consumes the articulation's public parent-joint chain, skips only
+    fixed joints, and automatically accepts one unambiguous active revolute
+    ancestor. Ambiguous mechanisms require an explicit hinge joint name. The
+    resulting affordance owns no simulator entity or live pose.
     """
 
     mesh_vertices: torch.Tensor = field(kw_only=True)
@@ -425,18 +426,24 @@ class OpenDoorAffordance(AntipodalAffordance):
         articulation: Articulation,
         link_name: str,
         *,
+        hinge_joint_name: str | None = None,
         opening_direction: int = 1,
     ) -> OpenDoorAffordance:
-        """Build handle semantics from the first parent revolute joint.
+        """Build handle semantics from a parent revolute joint.
 
-        The traversal starts at ``link_name`` and follows each owning joint's
-        parent link. Fixed intermediate links therefore require no user
-        configuration. Hinge geometry is converted from the joint frame into
-        the requested handle-link frame using the current articulation pose.
+        Automatic resolution skips only fixed joints. It succeeds when the
+        handle chain contains exactly one active ancestor and that joint is
+        revolute. A chain with multiple active ancestors can represent a latch,
+        handle joint, or another mechanism and therefore requires an explicit
+        ``hinge_joint_name``. Hinge geometry is converted from the joint frame
+        into the requested handle-link frame using current public link poses.
 
         Args:
             articulation: Articulation containing the graspable handle link.
             link_name: Graspable handle link from which to start the traversal.
+            hinge_joint_name: Optional explicit revolute ancestor. Required
+                when more than one active ancestor makes automatic resolution
+                ambiguous.
             opening_direction: Joint-coordinate direction from the closed legal
                 endpoint toward the open endpoint. Defaults to increasing qpos.
 
@@ -444,47 +451,63 @@ class OpenDoorAffordance(AntipodalAffordance):
             Pure target-local handle and hinge semantics.
 
         Raises:
-            TypeError: If ``link_name`` is not a string.
-            ValueError: If the link is unknown, no parent revolute joint exists,
+            TypeError: If a supplied name is not a string.
+            ValueError: If the link or explicit joint is unknown, automatic
+                resolution is ambiguous, the selected joint is not revolute,
                 or the resolved joint geometry is invalid.
         """
-        if not isinstance(link_name, str):
+        if type(link_name) is not str:
             raise TypeError("link_name must be a string.")
-        if not link_name:
+        if not link_name or link_name != link_name.strip():
             raise ValueError("link_name must be non-empty.")
-        link_names = tuple(articulation.link_names)
-        if link_name not in link_names:
-            raise ValueError(
-                f"Unknown articulation link {link_name!r}. Available links: "
-                f"{list(link_names)}."
-            )
-        entities = getattr(articulation, "_entities", None)
-        if not entities:
-            raise ValueError("articulation must contain at least one entity.")
-        entity = entities[0]
-        joint_infos = {
-            info.child_link_name: info
-            for info in (
-                entity.get_joint_info(joint_name)
-                for joint_name in entity.get_joint_names()
-            )
-        }
+        if hinge_joint_name is not None and type(hinge_joint_name) is not str:
+            raise TypeError("hinge_joint_name must be a string or None.")
+        if hinge_joint_name is not None and (
+            not hinge_joint_name or hinge_joint_name != hinge_joint_name.strip()
+        ):
+            raise ValueError("hinge_joint_name must be non-empty when provided.")
 
-        current_link = link_name
-        visited: set[str] = set()
-        hinge = None
-        while current_link not in visited:
-            visited.add(current_link)
-            joint_info = joint_infos.get(current_link)
-            if joint_info is None:
-                break
-            joint_type = getattr(joint_info.joint_type, "name", joint_info.joint_type)
-            if str(joint_type).lower() == "revolute":
-                hinge = joint_info
-                break
-            current_link = joint_info.parent_link_name
-        if hinge is None:
-            raise ValueError(f"No parent revolute joint found for link {link_name!r}.")
+        parent_chain = articulation.get_parent_joint_chain(link_name)
+        if not parent_chain:
+            raise ValueError(
+                f"Link {link_name!r} has no parent joint and cannot resolve a hinge."
+            )
+
+        if hinge_joint_name is not None:
+            hinge = next(
+                (joint for joint in parent_chain if joint.name == hinge_joint_name),
+                None,
+            )
+            if hinge is None:
+                available = [joint.name for joint in parent_chain]
+                raise ValueError(
+                    f"Joint {hinge_joint_name!r} is not an ancestor of link "
+                    f"{link_name!r}. Available ancestors: {available}."
+                )
+        else:
+            active_ancestors = tuple(
+                joint for joint in parent_chain if joint.joint_type != "fixed"
+            )
+            if not active_ancestors:
+                raise ValueError(
+                    f"No active parent joint found for link {link_name!r}."
+                )
+            if len(active_ancestors) != 1:
+                active_names = [joint.name for joint in active_ancestors]
+                raise ValueError(
+                    f"Ambiguous active ancestors {active_names} for link "
+                    f"{link_name!r}; provide hinge_joint_name explicitly."
+                )
+            hinge = active_ancestors[0]
+        if hinge.joint_type != "revolute":
+            raise ValueError(
+                f"Selected hinge joint {hinge.name!r} must be revolute, got "
+                f"{hinge.joint_type!r}."
+            )
+        if hinge.joint_limits is None:
+            raise ValueError(
+                f"Selected hinge joint {hinge.name!r} must expose position limits."
+            )
 
         handle_pose = articulation.get_link_pose(
             link_name, env_ids=[0], to_matrix=True
@@ -492,13 +515,11 @@ class OpenDoorAffordance(AntipodalAffordance):
         parent_pose = articulation.get_link_pose(
             hinge.parent_link_name, env_ids=[0], to_matrix=True
         )[0].to(device=handle_pose.device, dtype=torch.float32)
-        joint_origin = torch.as_tensor(
-            hinge.origin_pose,
+        joint_origin = hinge.origin_pose.to(
             device=handle_pose.device,
             dtype=torch.float32,
         )
-        joint_axis = torch.as_tensor(
-            hinge.axis,
+        joint_axis = hinge.axis.to(
             device=handle_pose.device,
             dtype=torch.float32,
         )
@@ -527,8 +548,7 @@ class OpenDoorAffordance(AntipodalAffordance):
             joint_pose_world[:3, 3] - handle_pose[:3, 3],
         )
         vertices, triangles = articulation.get_link_vert_face(link_name)
-        lower_limit = float(hinge.lower_limit)
-        upper_limit = float(hinge.upper_limit)
+        lower_limit, upper_limit = hinge.joint_limits
         return cls(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
