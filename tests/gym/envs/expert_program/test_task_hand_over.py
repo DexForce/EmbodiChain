@@ -36,7 +36,20 @@ from embodichain.lab.gym.utils.registration import (
 )
 from embodichain.lab.sim.atomic_actions import HandOverOptions
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.skills import HandOver
+from embodichain.lab.sim.skills import (
+    BinaryEffectClause,
+    BinaryEffectEvidenceQuery,
+    BinaryEvidenceKind,
+    CONSTRAINT_EFFECT_CHANNEL,
+    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+    ControlPartEvidenceAddress,
+    EffectEvidenceCollectionContext,
+    EffectEvidenceSourceRef,
+    HandOver,
+    HeldObjectRelation,
+    HeldObjectStateExpectation,
+)
 
 # Trigger official task auto-registration (idempotent).
 discover_task_packages()
@@ -45,24 +58,33 @@ from embodichain_tasks.expert_program.hand_over import (  # noqa: E402
     CAN_SIMULATION_UID,
     CAN_UID,
     CAN_MASS,
+    GRIPPER_FINGER_DYNAMIC_FRICTION,
+    GRIPPER_FINGER_STATIC_FRICTION,
     GRIPPER_MASTER_DRIVE_DAMPING,
     GRIPPER_MASTER_DRIVE_MAX_EFFORT,
     GRIPPER_MASTER_DRIVE_STIFFNESS,
+    GRIPPER_CONSTRAINT_QPOS_THRESHOLD,
     GRIPPER_GRASP_QPOS,
     GRIPPER_OPEN_QPOS,
+    HAND_OVER_APPROACH_DIRECTION_SAMPLES,
     HAND_OVER_EXPERT_PROGRAM_REGISTRATION,
+    HAND_OVER_CONTROL_DT,
+    HAND_OVER_EFFECT_CONSECUTIVE_SAMPLES,
+    HAND_OVER_GRASP_OPENING_MARGIN,
     HAND_OVER_POSE_PROVIDER,
     HAND_OVER_ROBOT_PROFILE_ID,
     HAND_OVER_SCENE_REGISTRY_ID,
     HAND_OVER_SAMPLE_COUNT,
+    HAND_OVER_TRACKING_ERROR_THRESHOLD,
     SUPPORT_SURFACE_UID,
     HandOverEnv,
+    _HandOverGripperConstraintObserver,
     _create_default_env_cfg,
     create_hand_over_robot_profile_binding,
     create_hand_over_scene_binding,
 )
 
-EXPECTED_GRIPPER_GRASP_QPOS = 0.011
+EXPECTED_GRIPPER_GRASP_QPOS = 0.025
 
 
 def _gym_config_path() -> Path:
@@ -184,6 +206,13 @@ def test_hand_over_physics_configs_match_tuned_can_and_pgi_parameters() -> None:
                     master_value
                 )
                 assert values[f"{side}_gripper_finger2_joint_1"] == pytest.approx(0.0)
+        finger_attrs = cfg.robot.link_attrs["gripper_fingers"].attrs
+        assert finger_attrs.dynamic_friction == pytest.approx(
+            GRIPPER_FINGER_DYNAMIC_FRICTION
+        )
+        assert finger_attrs.static_friction == pytest.approx(
+            GRIPPER_FINGER_STATIC_FRICTION
+        )
 
 
 def test_hand_over_registration_owns_scene_and_pose_provider() -> None:
@@ -209,7 +238,72 @@ def test_hand_over_registration_owns_scene_and_pose_provider() -> None:
         == "simulation.configured_handover_pose"
     )
     assert HAND_OVER_POSE_PROVIDER.middle_position == pytest.approx((0.0, 0.0, 0.7))
-    assert HAND_OVER_POSE_PROVIDER.final_position == pytest.approx((0.0, -0.2, 0.7))
+    assert HAND_OVER_POSE_PROVIDER.final_position == pytest.approx((0.0, -0.2, 0.6))
+
+
+def test_hand_over_registration_owns_control_part_evidence_route() -> None:
+    """The hand-over gates use one registration-owned built-in evidence route."""
+    declaration = (
+        HAND_OVER_EXPERT_PROGRAM_REGISTRATION.catalog.control_part_evidence_declaration
+    )
+
+    assert declaration is not None
+    assert declaration.provider_id == CONTROL_PART_EVIDENCE_PROVIDER_ID
+    assert declaration.revision == CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+
+def test_hand_over_gripper_constraint_observer_uses_measured_aperture() -> None:
+    """Constraint evidence follows measured closure for requested rows only."""
+
+    class FakeRobot:
+        @staticmethod
+        def get_qpos(*, name: str) -> torch.Tensor:
+            assert name == "left_hand"
+            return torch.tensor(
+                [
+                    [GRIPPER_OPEN_QPOS],
+                    [GRIPPER_CONSTRAINT_QPOS_THRESHOLD - 1.0e-4],
+                    [GRIPPER_CONSTRAINT_QPOS_THRESHOLD + 1.0e-4],
+                ],
+                dtype=torch.float32,
+            )
+
+    expectation = HeldObjectStateExpectation(
+        expectation_id="source",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id=CAN_UID,
+        slot_id="source",
+        resource_id="left",
+        task_state_key="left",
+    )
+    query = BinaryEffectEvidenceQuery(
+        BinaryEffectClause(
+            clause_id="source.constraint",
+            expectation_id="source",
+            source=EffectEvidenceSourceRef(
+                CONTROL_PART_EVIDENCE_PROVIDER_ID,
+                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+                ControlPartEvidenceAddress(
+                    "left_hand",
+                    CONSTRAINT_EFFECT_CHANNEL,
+                ),
+            ),
+            evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+            expected=True,
+        ),
+        expectation,
+    )
+    context = EffectEvidenceCollectionContext(
+        timestamp=0.1,
+        observation_revision=2,
+        env_ids=torch.tensor([2, 0], dtype=torch.long),
+    )
+
+    observation = _HandOverGripperConstraintObserver(FakeRobot())(query, context)
+
+    assert observation.values.tolist() == [True, False]
+    assert observation.valid is not None
+    assert observation.valid.tolist() == [True, True]
 
 
 def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
@@ -232,15 +326,30 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     }
     assert binding.presets[0].preset_id == "safe"
     assert binding.presets[0].motion_policy.sample_count == HAND_OVER_SAMPLE_COUNT
+    assert binding.presets[0].tracking_policy.in_flight is not None
+    assert binding.presets[0].tracking_policy.in_flight.metrics[0].tolerance == (
+        pytest.approx(HAND_OVER_TRACKING_ERROR_THRESHOLD)
+    )
+    assert binding.presets[0].tracking_policy.terminal.metrics[0].tolerance == (
+        pytest.approx(HAND_OVER_TRACKING_ERROR_THRESHOLD)
+    )
+    assert binding.presets[0].recovery_policy.max_action_retries == 0
     assert binding.presets[0].workflow_recovery_policy.max_recovery_attempts == 2
+    assert binding.presets[0].runner_cfg.minimum_cycle_time == pytest.approx(
+        HAND_OVER_CONTROL_DT
+    )
     assert binding.presets[0].runner_cfg.hold_during_effect_verification is False
     assert binding.presets[0].runner_cfg.hold_on_completion is False
+    assert (
+        binding.presets[0].effect_monitors["hand_over"].params["consecutive_samples"]
+        == HAND_OVER_EFFECT_CONSECUTIVE_SAMPLES
+    )
     templates = binding.presets[0].action_option_templates
     assert set(templates) == {"hand_over"}
     hand_over_options = templates["hand_over"]
     assert type(hand_over_options) is HandOverOptions
     assert hand_over_options.pre_grasp_distance == pytest.approx(0.08)
-    assert hand_over_options.lift_height == pytest.approx(0.08)
+    assert hand_over_options.lift_height == pytest.approx(0.15)
     assert hand_over_options.hand_interp_steps == 10
     assert dict(binding.grounding_providers) == {
         "hand_over": ConfiguredHandOverPoseProvider.provider_id,
@@ -268,12 +377,28 @@ def test_direct_default_cfg_loads_the_registered_semantic_program() -> None:
     assert settle.params["entity_cfgs"][0].uid == CAN_SIMULATION_UID
 
 
+def test_hand_over_task_has_downward_delivery_geometry() -> None:
+    """The declared delivery target stays below the transfer height."""
+    cfg = _create_default_env_cfg()
+    assert cfg.expert_program is not None
+    delivery = cfg.expert_program.targets["delivery_pose"].values[0]
+    options = (
+        create_hand_over_robot_profile_binding()
+        .presets[0]
+        .action_option_templates["hand_over"]
+    )
+
+    assert delivery.position == pytest.approx(HAND_OVER_POSE_PROVIDER.final_position)
+    assert delivery.position[2] < cfg.rigid_object[0].init_pos[2] + options.lift_height
+
+
 def test_task_initialization_passes_only_registration_to_shared_factory(
     monkeypatch,
 ) -> None:
     """Task setup passes registration plus explicit grasp-planning services."""
     adapter = object()
     generators = [object(), object()]
+    generator_configs: list[dict[str, object]] = []
     captured: dict[str, object] = {}
 
     def fake_base_init(self, cfg, **kwargs) -> None:
@@ -283,6 +408,10 @@ def test_task_initialization_passes_only_registration_to_shared_factory(
         captured["environment"] = environment
         captured.update(kwargs)
         return adapter
+
+    def fake_create_grasp_generator(**kwargs):
+        generator_configs.append(kwargs)
+        return generators.pop(0)
 
     monkeypatch.setattr(EmbodiedEnv, "__init__", fake_base_init)
     task_module = importlib.import_module(HandOverEnv.__module__)
@@ -294,7 +423,7 @@ def test_task_initialization_passes_only_registration_to_shared_factory(
     monkeypatch.setattr(
         task_module,
         "create_parallel_jaw_grasp_pose_generator",
-        lambda **kwargs: generators.pop(0),
+        fake_create_grasp_generator,
     )
 
     env = HandOverEnv(cfg=object())
@@ -305,6 +434,12 @@ def test_task_initialization_passes_only_registration_to_shared_factory(
     grasp_pose_generators = captured["grasp_pose_generators"]
     assert isinstance(grasp_pose_generators, dict)
     assert set(grasp_pose_generators) == {"left_hand", "right_hand"}
+    assert [config["approach_direction_samples"] for config in generator_configs] == [
+        HAND_OVER_APPROACH_DIRECTION_SAMPLES
+    ] * 2
+    assert [config["opening_margin"] for config in generator_configs] == [
+        HAND_OVER_GRASP_OPENING_MARGIN
+    ] * 2
 
 
 def test_task_config_compiles_through_real_simulation_factory(monkeypatch) -> None:

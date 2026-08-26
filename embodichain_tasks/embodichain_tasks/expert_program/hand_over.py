@@ -24,7 +24,10 @@ pickup, transfer, placement, and release motion.
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, ClassVar
+
+import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
@@ -32,6 +35,7 @@ from embodichain.lab.gym.envs.expert_program import (
     AntipodalGraspAffordanceBinding,
     ConfiguredHandOverPoseProvider,
     ControlPartCommandPreset,
+    ControlPartEvidenceProviderFactory,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
     ExpertProgramCfg,
@@ -52,9 +56,13 @@ from embodichain.lab.sim.atomic_actions import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
+    AtomicActionEngine,
     ExecutionRunnerCfg,
     HandOverOptions,
     MotionPolicy,
+    RecoveryPolicy,
+    SceneProvider,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.cfg import (
     LightCfg,
@@ -63,7 +71,25 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.skills import SceneCollisionRole, SceneDynamics
+from embodichain.lab.sim.skills import (
+    BinaryEffectEvidenceQuery,
+    BinaryEffectObservation,
+    BinaryEvidenceKind,
+    COMPOSITE_EFFECT_MONITOR_ID,
+    COMPOSITE_EFFECT_MONITOR_REVISION,
+    CONSTRAINT_EFFECT_CHANNEL,
+    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+    ControlPartEvidenceAddress,
+    ControlPartSimulationEvidenceProvider,
+    EffectEvidenceCollectionContext,
+    EffectEvidenceProvider,
+    EffectMonitorRef,
+    HeldObjectStateExpectation,
+    SceneCollisionRole,
+    SceneDynamics,
+    SceneRegistry,
+)
 from embodichain.lab.sim.skills.profiles import (
     SkillPolicyPreset,
     WorkflowRecoveryPolicy,
@@ -99,12 +125,20 @@ GRIPPER_FINGER_LENGTH = 0.12
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 GRIPPER_OPEN_QPOS = 0.0
-GRIPPER_GRASP_QPOS = 0.011
-GRIPPER_MASTER_DRIVE_STIFFNESS = 2e3
-GRIPPER_MASTER_DRIVE_DAMPING = 5e1
-GRIPPER_MASTER_DRIVE_MAX_EFFORT = 140.0
+GRIPPER_GRASP_QPOS = 0.025
+GRIPPER_MASTER_DRIVE_STIFFNESS = 1e3
+GRIPPER_MASTER_DRIVE_DAMPING = 1e2
+GRIPPER_MASTER_DRIVE_MAX_EFFORT = 1e4
+GRIPPER_FINGER_DYNAMIC_FRICTION = 2.0
+GRIPPER_FINGER_STATIC_FRICTION = 2.0
 HAND_OVER_SAMPLE_COUNT = 200
 HAND_OVER_GRASP_SAMPLE_COUNT = 10_000
+HAND_OVER_APPROACH_DIRECTION_SAMPLES = 1
+HAND_OVER_GRASP_OPENING_MARGIN = 0.03
+HAND_OVER_TRACKING_ERROR_THRESHOLD = 1.0
+HAND_OVER_CONTROL_DT = 0.04
+HAND_OVER_EFFECT_CONSECUTIVE_SAMPLES = 10
+GRIPPER_CONSTRAINT_QPOS_THRESHOLD = 0.004
 
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
@@ -129,9 +163,92 @@ _DUAL_UR5_INIT_QPOS = (*_LEFT_ARM_HOME, *_RIGHT_ARM_HOME, 0.0, 0.0, 0.0, 0.0)
 HAND_OVER_POSE_PROVIDER = ConfiguredHandOverPoseProvider(
     middle_position=(0.0, 0.0, 0.7),
     middle_quaternion_wxyz=(0.7071067812, 0.7071067812, 0.0, 0.0),
-    final_position=(0.0, -0.2, 0.7),
+    final_position=(0.0, -0.2, 0.6),
     final_quaternion_wxyz=(0.7071067812, 0.7071067812, 0.0, 0.0),
 )
+
+
+class _HandOverGripperConstraintObserver:
+    """Observe a task gripper constraint from its measured aperture."""
+
+    def __init__(self, robot: object) -> None:
+        self._robot = robot
+
+    def __call__(
+        self,
+        query: BinaryEffectEvidenceQuery,
+        context: EffectEvidenceCollectionContext,
+    ) -> BinaryEffectObservation:
+        """Return true for requested rows whose task gripper has closed."""
+        if type(query) is not BinaryEffectEvidenceQuery:
+            raise TypeError("HandOver grasp evidence requires a binary query.")
+        if query.clause.evidence_kind is not BinaryEvidenceKind.CONSTRAINT:
+            raise ValueError("HandOver grasp evidence serves only constraint queries.")
+        address = query.source.address
+        if (
+            type(address) is not ControlPartEvidenceAddress
+            or address.control_part not in {"left_hand", "right_hand"}
+            or address.channel != CONSTRAINT_EFFECT_CHANNEL
+        ):
+            raise ValueError(
+                "HandOver grasp evidence requires a task-hand constraint route."
+            )
+        expectation = query.expectation
+        if (
+            type(expectation) is not HeldObjectStateExpectation
+            or expectation.object_id != CAN_UID
+        ):
+            raise ValueError(
+                "HandOver grasp evidence requires the can held-object expectation."
+            )
+
+        get_qpos = getattr(self._robot, "get_qpos", None)
+        if not callable(get_qpos):
+            raise TypeError("HandOver grasp evidence requires robot.get_qpos().")
+        qpos = get_qpos(name=address.control_part)
+        if not isinstance(qpos, torch.Tensor) or qpos.dim() != 2 or qpos.shape[1] == 0:
+            raise ValueError("Gripper qpos must have non-empty shape (N, J).")
+        rows = context.env_ids.to(device=qpos.device)
+        if bool((rows < 0).any()) or int(rows.max().item()) >= qpos.shape[0]:
+            raise ValueError("Evidence env_ids must address valid robot rows.")
+        measured = qpos.index_select(0, rows)
+        closure = torch.amax(torch.abs(measured - GRIPPER_OPEN_QPOS), dim=1)
+        return BinaryEffectObservation(
+            values=(closure >= GRIPPER_CONSTRAINT_QPOS_THRESHOLD).to(
+                device=context.env_ids.device
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _HandOverControlPartEvidenceProviderFactory(ControlPartEvidenceProviderFactory):
+    """Create live control-part evidence from measured PGI aperture."""
+
+    provider_id: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_ID
+    revision: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        scene_provider: SceneProvider,
+    ) -> EffectEvidenceProvider:
+        """Bind a fresh evidence provider to the exact assembled robot."""
+        from embodichain.lab.sim.objects import Robot
+
+        del simulation, scene_registry
+        if not isinstance(robot, Robot):
+            raise TypeError("HandOver grasp evidence requires a simulation Robot.")
+        if engine.robot is not robot:
+            raise ValueError("HandOver grasp evidence requires the engine's robot.")
+        return ControlPartSimulationEvidenceProvider(
+            robot,
+            scene_provider=scene_provider,
+            constraint_observer=_HandOverGripperConstraintObserver(robot),
+        )
 
 
 def _dual_ur5_robot_dict() -> dict[str, object]:
@@ -205,6 +322,17 @@ def _dual_ur5_robot_dict() -> dict[str, object]:
                 "right_gripper_finger2_joint_1": 0.0,
             },
             "drive_type": "force",
+        },
+        "link_attrs": {
+            "gripper_fingers": {
+                "link_names_expr": [
+                    "(left|right)_gripper_finger[12]_link_1",
+                ],
+                "attrs": {
+                    "dynamic_friction": GRIPPER_FINGER_DYNAMIC_FRICTION,
+                    "static_friction": GRIPPER_FINGER_STATIC_FRICTION,
+                },
+            }
         },
         "solver_cfg": {
             "left_arm": {
@@ -397,18 +525,31 @@ def create_hand_over_robot_profile_binding() -> SimulationRobotSkillProfileBindi
                 action_option_templates={
                     "hand_over": HandOverOptions(
                         pre_grasp_distance=0.08,
-                        lift_height=0.08,
+                        lift_height=0.15,
                         hand_interp_steps=10,
                     ),
                 },
                 motion_policy=MotionPolicy(sample_count=HAND_OVER_SAMPLE_COUNT),
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=HAND_OVER_TRACKING_ERROR_THRESHOLD,
+                    terminal_max_abs_error=HAND_OVER_TRACKING_ERROR_THRESHOLD,
+                ),
+                recovery_policy=RecoveryPolicy(max_action_retries=0),
                 workflow_recovery_policy=WorkflowRecoveryPolicy(
                     max_recovery_attempts=2,
                 ),
                 runner_cfg=ExecutionRunnerCfg(
+                    minimum_cycle_time=HAND_OVER_CONTROL_DT,
                     hold_during_effect_verification=False,
                     hold_on_completion=False,
                 ),
+                effect_monitors={
+                    "hand_over": EffectMonitorRef(
+                        COMPOSITE_EFFECT_MONITOR_ID,
+                        COMPOSITE_EFFECT_MONITOR_REVISION,
+                        {"consecutive_samples": (HAND_OVER_EFFECT_CONSECUTIVE_SAMPLES)},
+                    )
+                },
             ),
         ),
         default_preset="safe",
@@ -422,6 +563,7 @@ HAND_OVER_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistration(
     scene_binding=create_hand_over_scene_binding(),
     robot_profile_binding=create_hand_over_robot_profile_binding(),
     handover_pose_providers=(HAND_OVER_POSE_PROVIDER,),
+    control_part_evidence_factory=_HandOverControlPartEvidenceProviderFactory(),
 )
 
 
@@ -445,7 +587,8 @@ class HandOverEnv(EmbodiedEnv):
         grasp_pose_generators = {
             f"{side}_hand": create_parallel_jaw_grasp_pose_generator(
                 sample_count=HAND_OVER_GRASP_SAMPLE_COUNT,
-                opening_margin=0.002,
+                opening_margin=HAND_OVER_GRASP_OPENING_MARGIN,
+                approach_direction_samples=HAND_OVER_APPROACH_DIRECTION_SAMPLES,
             )
             for side in ("left", "right")
         }

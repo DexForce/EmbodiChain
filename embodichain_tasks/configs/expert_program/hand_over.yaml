@@ -10,7 +10,7 @@ targets:
   delivery_pose:
     kind: cyclic_pose
     values:
-      - position: [0.0, -0.2, 0.7]
+      - position: [0.0, -0.2, 0.6]
         quaternion_wxyz: [0.7071067812, 0.7071067812, 0.0, 0.0]
 
 program:
