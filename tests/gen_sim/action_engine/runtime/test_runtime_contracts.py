@@ -3816,8 +3816,9 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
     )
     assert torch.equal(
         orient_alignment.target.semantics.affordance.internal_axis,
-        torch.tensor([1.0, 0.0, 0.0]),
+        torch.tensor([0.0, 0.0, 1.0]),
     )
+    assert orient_alignment.cfg["target_axis"] == (0.0, 0.0, 1.0)
     assert handover_pickup.target.grasp_xpos is None
     assert isinstance(
         handover_pickup.target.semantics.affordance,

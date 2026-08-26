@@ -76,6 +76,8 @@ from .state import ExecutionState
 __all__ = ["ActionGrounder", "LiveArrangementPlan", "LivePlacementPlan"]
 
 _E2_CLEARANCE_RETREAT_DISTANCE = 0.20
+DEFAULT_INTERNAL_AXIS = (0.0, 0.0, 1.0)
+DEFAULT_TARGET_AXIS = (0.0, 0.0, 1.0)
 
 
 def _batched_pose(value: Any, env: Any) -> torch.Tensor:
@@ -812,6 +814,7 @@ class ActionGrounder:
                         internal_axis=self._upright_local_direction(step),
                     ),
                 )
+                policy.setdefault("target_axis", DEFAULT_TARGET_AXIS)
                 policy.setdefault(
                     "surface_clearance",
                     float(self._policy_value(policy, "surface_clearance")),
@@ -2542,6 +2545,12 @@ class ActionGrounder:
 
     def _upright_local_direction(self, step: SemanticStep) -> torch.Tensor:
         axis = self._upright_local_axis(step)
+        if axis == "z":
+            return torch.tensor(
+                DEFAULT_INTERNAL_AXIS,
+                dtype=torch.float32,
+                device=self.env.device,
+            )
         entity = _object(self.env, step.object_uid)
         vertices = _local_vertices(entity, self.env, 0)
         if axis in {"long_axis", "short_axis"}:

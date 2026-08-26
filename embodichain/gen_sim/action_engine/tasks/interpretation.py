@@ -262,7 +262,7 @@ def _emit_step(
                 {
                     "orientation_goal": "upright",
                     "support_role": "table",
-                    "upright_local_axis": "long_axis",
+                    "upright_local_axis": "z",
                 }
             )
         elif task_type == "E3":
