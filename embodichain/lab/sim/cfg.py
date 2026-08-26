@@ -339,7 +339,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     """Whether to enable Newton debug mode."""
 
     suppress_warp_kernel_logs: bool = True
-    """Whether to hide Warp kernel compile/load messages during initialization."""
+    """Whether to hide Warp startup and kernel compile/load messages during Newton updates."""
 
     solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = None
     """Optional Newton solver configuration.

@@ -100,7 +100,7 @@ class DeformableObject(BatchEntity, ABC):
         self._visual_material: list[VisualMaterialInst | None] = [None] * len(entities)
         self.is_shared_visual_material = False
 
-        super().__init__(cfg=cfg, entities=entities, device=device, auto_reset=False)
+        super().__init__(cfg=cfg, entities=entities, device=device)
         self._initialize_existing_visual_material()
         self.reset()
         self._set_default_collision_filter()

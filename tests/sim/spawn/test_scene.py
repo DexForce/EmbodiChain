@@ -84,20 +84,23 @@ def test_bind_retries_only_incomplete_declarations() -> None:
     assert second.bind_attempts == 2
 
 
-def test_commit_resolves_and_configures_before_finalize() -> None:
+def test_commit_configures_materialized_newton_source_then_rebuilds_once() -> None:
     events: list[str] = []
     descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
-    result = object()
+    resolved = SimpleNamespace(name="robot", links=[SimpleNamespace(name="base")])
+    handle = SimpleNamespace(articulation_desc=resolved)
+    result = SimpleNamespace(
+        backend="newton",
+        needs_rebuild=False,
+        handles={"arena_0/robot": handle},
+    )
     builder = SimpleNamespace(
         is_finalized=False,
         result=None,
         replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
         add_articulation=lambda value: value,
+        has_pending_changes=False,
     )
-
-    def resolve_sources() -> None:
-        events.append("resolve")
-        descriptor.links = [SimpleNamespace(name="base")]
 
     def finalize() -> object:
         events.append("finalize")
@@ -105,8 +108,12 @@ def test_commit_resolves_and_configures_before_finalize() -> None:
         builder.result = result
         return result
 
-    builder.resolve_sources = resolve_sources
+    def rebuild(_builder: object) -> object:
+        events.append("rebuild")
+        return result
+
     builder.finalize = finalize
+    result.rebuild = rebuild
     scene = object.__new__(SpawnScene)
     scene.builder = builder
     scene._assets = {}
@@ -123,29 +130,33 @@ def test_commit_resolves_and_configures_before_finalize() -> None:
     )
 
     assert scene.commit() is result
-    scene.resolve_sources()
-    assert events == ["resolve", "configure", "finalize"]
+    assert events == ["finalize", "configure", "rebuild"]
 
 
-def test_dynamic_articulation_is_configured_before_backend_add() -> None:
+def test_default_articulation_is_configured_after_add_and_applied_native() -> None:
     events: list[str] = []
     descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
-    builder = SimpleNamespace(is_finalized=True, result=None)
-
-    def resolve_source(value: object) -> None:
-        events.append("resolve")
-        value.links = [SimpleNamespace(name="base")]
+    result = SimpleNamespace(backend="dexsim", handles={})
+    builder = SimpleNamespace(
+        is_finalized=True,
+        result=result,
+        replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
+    )
 
     def configure(value: object) -> None:
         assert value.links[0].name == "base"
         events.append("configure")
 
     def add_articulation(value: object) -> object:
-        assert value.links[0].name == "base"
         events.append("add")
+        value.links = [SimpleNamespace(name="base")]
+        handle = SimpleNamespace(
+            articulation_desc=value,
+            apply_dexsim_properties=lambda source: events.append("apply"),
+        )
+        result.handles["arena_0/robot"] = handle
         return value
 
-    builder.resolve_articulation_source = resolve_source
     builder.add_articulation = add_articulation
     scene = object.__new__(SpawnScene)
     scene.builder = builder
@@ -158,22 +169,32 @@ def test_dynamic_articulation_is_configured_before_backend_add() -> None:
         configure_source=configure,
     )
 
-    assert events == ["resolve", "configure", "add"]
+    assert events == ["add", "configure", "apply"]
 
 
 def test_source_configuration_retries_failure_then_runs_only_once() -> None:
     events: list[str] = []
-    descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
+    descriptor = SimpleNamespace(
+        name="robot",
+        per_env=True,
+        links=[SimpleNamespace(name="base")],
+    )
+    handle = SimpleNamespace(
+        articulation_desc=descriptor,
+        apply_dexsim_properties=lambda source: events.append("apply"),
+    )
+    result = SimpleNamespace(
+        backend="dexsim",
+        needs_rebuild=False,
+        handles={"arena_0/robot": handle},
+    )
     builder = SimpleNamespace(
-        is_finalized=False,
-        result=None,
+        is_finalized=True,
+        result=result,
         replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
         add_articulation=lambda value: value,
+        has_pending_changes=False,
     )
-
-    def resolve_sources() -> None:
-        events.append("resolve")
-        descriptor.links = [SimpleNamespace(name="base")]
 
     attempts = 0
 
@@ -184,30 +205,22 @@ def test_source_configuration_retries_failure_then_runs_only_once() -> None:
         if attempts == 1:
             raise RuntimeError("configuration failed")
 
-    builder.resolve_sources = resolve_sources
     scene = object.__new__(SpawnScene)
     scene.builder = builder
     scene._assets = {}
-    scene.declare(
-        "articulation",
-        "robot",
-        descriptor,
-        configure_source=configure,
-    )
 
     with pytest.raises(RuntimeError, match="configuration failed"):
-        scene.resolve_sources()
-    scene.resolve_sources()
-    scene.resolve_sources()
+        scene.declare(
+            "articulation",
+            "robot",
+            descriptor,
+            configure_source=configure,
+        )
+    scene.commit()
+    scene.commit()
 
     assert attempts == 2
-    assert events == [
-        "resolve",
-        "configure",
-        "resolve",
-        "configure",
-        "resolve",
-    ]
+    assert events == ["configure", "configure", "apply"]
 
 
 class _RetryableArticulation(Articulation):

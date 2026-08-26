@@ -215,9 +215,9 @@ class TestLightTypes:
             assert light.is_global, f"{light_type} should be a global light"
 
     def test_unknown_light_type_errors(self):
-        """Passing an invalid light_type raises RuntimeError."""
+        """Passing an invalid light_type raises ValueError."""
         cfg = LightCfg(uid="bad", light_type="invalid")
-        with pytest.raises(RuntimeError, match="Unsupported light type"):
+        with pytest.raises(ValueError, match="Unsupported light type"):
             self.sim.add_light(cfg=cfg)
 
     def test_mesh_light_empty_path_warns(self):

@@ -243,7 +243,7 @@ class RigidObjectGroup(BatchEntity):
             device=device,
         )
 
-        super().__init__(cfg, rows, device, auto_reset=False)
+        super().__init__(cfg, rows, device)
         self._capture_default_physical_properties()
         self.reset()
 

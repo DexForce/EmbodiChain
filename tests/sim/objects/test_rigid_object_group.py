@@ -37,6 +37,9 @@ DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 NUM_ARENAS = 4
 Z_TRANSLATION = 2.0
+# Newton converts principal-frame inertia diagonals through a float32 full
+# tensor, so imported non-axis-aligned COM frames are not bit-exact on readback.
+NEWTON_INERTIA_ROUND_TRIP_ATOL = 2e-4
 
 
 def _teardown_newton_physics() -> None:
@@ -180,11 +183,24 @@ class BaseRigidObjectGroupTest:
         com_after_partial = self.obj_group.get_com_pose(
             env_ids=env_ids, obj_ids=obj_ids
         )
+        inertia_atol = (
+            NEWTON_INERTIA_ROUND_TRIP_ATOL if self.physics == "newton" else 1e-5
+        )
 
         assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
         assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
-        assert torch.allclose(inertia_after_partial[0], default_inertia[0], atol=1e-5)
-        assert torch.allclose(inertia_after_partial[1], changed_inertia[1], atol=1e-5)
+        assert torch.allclose(
+            inertia_after_partial[0],
+            default_inertia[0],
+            atol=inertia_atol,
+            rtol=0.0,
+        )
+        assert torch.allclose(
+            inertia_after_partial[1],
+            changed_inertia[1],
+            atol=inertia_atol,
+            rtol=0.0,
+        )
         assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
         assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
 
@@ -197,7 +213,8 @@ class BaseRigidObjectGroupTest:
         assert torch.allclose(
             self.obj_group.get_inertia(env_ids=env_ids, obj_ids=obj_ids),
             default_inertia,
-            atol=1e-5,
+            atol=inertia_atol,
+            rtol=0.0,
         )
         assert torch.allclose(
             self.obj_group.get_com_pose(env_ids=env_ids, obj_ids=obj_ids),

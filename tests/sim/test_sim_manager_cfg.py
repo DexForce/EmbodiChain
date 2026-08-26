@@ -16,14 +16,20 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
 import torch
 
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import NewtonPhysicsCfg, WindowCameraPoseCfg
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import (
+    DefaultPhysicsCfg,
+    NewtonPhysicsCfg,
+    WindowCameraPoseCfg,
+)
 from embodichain.lab.sim.physics import NewtonPhysicsBackend
+from embodichain.lab.sim import sim_manager
 
 
 def test_physics_runtime_fields_are_stored_on_physics_cfg() -> None:
@@ -100,6 +106,72 @@ def test_newton_physics_cfg_passes_warp_log_suppression() -> None:
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
     assert dexsim_cfg.suppress_warp_kernel_logs is False
+
+
+@pytest.mark.parametrize(
+    ("physics_cfg", "expect_suppressed"),
+    [
+        (NewtonPhysicsCfg(), True),
+        (NewtonPhysicsCfg(suppress_warp_kernel_logs=False), False),
+        (DefaultPhysicsCfg(), False),
+    ],
+)
+def test_warp_runtime_init_honors_newton_log_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+    physics_cfg,
+    expect_suppressed: bool,
+) -> None:
+    previous_log_level = sim_manager.wp.config.log_level
+    observed_log_levels = []
+
+    def fake_init() -> None:
+        observed_log_levels.append(sim_manager.wp.config.log_level)
+
+    monkeypatch.setattr(sim_manager.wp, "init", fake_init)
+    try:
+        sim_manager._initialize_warp_runtime(physics_cfg)
+        expected_log_level = (
+            sim_manager.wp.LOG_WARNING if expect_suppressed else previous_log_level
+        )
+        assert observed_log_levels == [expected_log_level]
+        assert sim_manager.wp.config.log_level == previous_log_level
+    finally:
+        sim_manager.wp.config.log_level = previous_log_level
+
+
+def test_newton_warp_log_suppression_covers_world_update() -> None:
+    previous_log_level = sim_manager.wp.config.log_level
+    observed_log_levels = []
+
+    class NoopProfiler:
+        def section(self, *_args, **_kwargs):
+            return nullcontext()
+
+    class World:
+        def update(self, _physics_dt: float) -> None:
+            observed_log_levels.append(sim_manager.wp.config.log_level)
+
+    manager = SimpleNamespace(
+        profiler=NoopProfiler(),
+        prepare=lambda: None,
+        is_physics_manually_update=True,
+        sim_config=SimpleNamespace(
+            physics_dt=0.01,
+            physics_cfg=NewtonPhysicsCfg(),
+            visualization=SimpleNamespace(backend="none"),
+        ),
+        update_gizmos=lambda: None,
+        _world=World(),
+        _visualization_sim_step=0,
+        _visualization_sim_time=0.0,
+        _window_record_state=None,
+    )
+    try:
+        SimulationManager.update(manager, physics_dt=0.01)
+        assert observed_log_levels == [sim_manager.wp.LOG_WARNING]
+        assert sim_manager.wp.config.log_level == previous_log_level
+    finally:
+        sim_manager.wp.config.log_level = previous_log_level
 
 
 def test_newton_backend_exposes_resolved_solver_type() -> None:

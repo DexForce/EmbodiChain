@@ -22,9 +22,10 @@ component that chooses between DexSim and Newton. When supplied, the active
 Newton solver type only prevents common contact values from being authored to
 a solver that cannot consume them.
 
-Articulation source names are resolved by ``SceneBuilder.resolve_sources()``.
-EmbodiChain then owns regex/group selection and applies exact-name typed
-properties to the resolved descriptor before the selected backend is built.
+Articulation source names come from the handles produced by normal backend
+materialization. EmbodiChain owns regex/group selection, applies exact-name
+typed properties, and explicitly rebuilds Newton once when those post-load
+properties must be committed to its immutable model.
 """
 
 from __future__ import annotations
@@ -468,6 +469,10 @@ def articulation_desc_from_cfg(
         fixed_base=fixed_base,
         enable_self_collision=self_collision_enabled,
         urdf_fix_root_link=fixed_base,
+        # EmbodiChain's preserve/overlay policy starts from source-authored
+        # inertia. Individual link groups can still request recomputation via
+        # ``replace_inertial`` after exact source names are available.
+        urdf_read_inertia=True,
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
     )
@@ -540,13 +545,6 @@ def configure_articulation_desc(
         )
     if cfg.resolve_asset_physics_mode() == "preserve":
         return desc
-    if newton_solver_type is not None and (
-        cfg.min_position_iters != 4 or cfg.min_velocity_iters != 1
-    ):
-        logger.log_warning(
-            "Per-articulation solver iteration counts are not exposed by the "
-            "Newton Spawn facade and were not applied."
-        )
     if (
         newton_solver_type is not None
         and cfg.drive_pros is not None
@@ -602,10 +600,12 @@ def configure_articulation_desc(
                 group.replace_inertial,
             )
 
-    joint_properties, joint_common, joint_limits = _compile_joint_properties(
-        desc,
-        cfg,
-    )
+    (
+        joint_properties,
+        joint_common,
+        joint_limits,
+        joint_target_modes,
+    ) = _compile_joint_properties(desc, cfg)
 
     # Commit only after every regex, value, and limit has been validated. Each
     # source-resolved item receives one exact-name update.
@@ -614,9 +614,14 @@ def configure_articulation_desc(
         desc.set_link_properties(
             link_name,
             rigid_body=rigid_body,
-            # A property overlay cannot synthesize collision geometry for a
-            # source link that has no collision shapes.
-            collision=collision if link.collisions else None,
+            # The URDF resolver intentionally keeps source-owned collision
+            # geometry outside LinkDesc.  An attribute-only CollisionDesc is
+            # still required so the adapters can overlay properties onto the
+            # native source shapes; it does not synthesize geometry.  Explicit
+            # descriptors, including collisionless links, remain unchanged.
+            collision=(
+                collision if link.collisions or desc.urdf_path is not None else None
+            ),
             replace_inertial=replace_inertial,
         )
     for joint_name, (dexsim, newton) in joint_properties.items():
@@ -631,6 +636,7 @@ def configure_articulation_desc(
             armature=common.get("armature"),
             dexsim=dexsim,
             newton=newton,
+            newton_target_mode=joint_target_modes.get(joint_name),
         )
     return desc
 
@@ -642,6 +648,7 @@ def _compile_joint_properties(
     dict[str, tuple[DexsimJointDesc, NewtonJointDesc]],
     dict[str, dict[str, float]],
     dict[str, tuple[float, float]],
+    dict[str, int],
 ]:
     joint_names = [joint.name for joint in desc.joints]
     drive_type = None if cfg.drive_pros is None else cfg.drive_pros.drive_type
@@ -661,10 +668,13 @@ def _compile_joint_properties(
     joint_properties = {
         joint_name: (
             DexsimJointDesc(drive_mode=dexsim_mode),
-            NewtonJointDesc(target_mode=newton_mode),
+            NewtonJointDesc(),
         )
         for joint_name in joint_names
     }
+    joint_target_modes = (
+        {} if newton_mode is None else {name: newton_mode for name in joint_names}
+    )
     joint_common: dict[str, dict[str, float]] = {
         joint_name: {} for joint_name in joint_names
     }
@@ -675,6 +685,7 @@ def _compile_joint_properties(
         "max_velocity": ("max_velocity", "velocity_limit"),
         "friction": ("joint_friction", "friction"),
     }
+    control_parts = getattr(cfg, "control_parts", None)
 
     for property_name in (
         "stiffness",
@@ -693,6 +704,7 @@ def _compile_joint_properties(
             configured,
             joint_names,
             property_name=property_name,
+            control_parts=control_parts,
         )
         for joint_name, value in matches:
             if not isinstance(value, numbers.Number):
@@ -722,11 +734,10 @@ def _compile_joint_properties(
                 joint_names,
                 property_name="target_mode",
                 numeric_only=False,
+                control_parts=control_parts,
             )
             for joint_name, value in matches:
-                joint_properties[joint_name][1].target_mode = (
-                    _normalize_newton_target_mode(value)
-                )
+                joint_target_modes[joint_name] = _normalize_newton_target_mode(value)
 
     joint_limits: dict[str, tuple[float, float]] = {}
     if isinstance(cfg.qpos_limits, dict):
@@ -753,7 +764,7 @@ def _compile_joint_properties(
                 )
             joint_limits[joint_names[index]] = (lower_limit, upper_limit)
 
-    return joint_properties, joint_common, joint_limits
+    return joint_properties, joint_common, joint_limits, joint_target_modes
 
 
 def _joint_property_matches(
@@ -762,17 +773,55 @@ def _joint_property_matches(
     *,
     property_name: str,
     numeric_only: bool = True,
+    control_parts: dict[str, Sequence[str]] | None = None,
 ) -> list[tuple[str, object]]:
-    """Resolve a scalar or regex mapping against articulation joint names."""
+    """Resolve scalar, regex, and robot control-part drive rules."""
     scalar_types = (numbers.Number,) if numeric_only else (numbers.Number, str)
     if isinstance(configured, scalar_types):
         return [(name, configured) for name in joint_names]
     if isinstance(configured, dict):
-        indices, _, values = resolve_matching_names_values(
-            configured,
-            joint_names,
-        )
-        return [(joint_names[index], value) for index, value in zip(indices, values)]
+        control_parts = control_parts or {}
+        part_rules = {
+            name: value for name, value in configured.items() if name in control_parts
+        }
+        direct_rules = {
+            name: value
+            for name, value in configured.items()
+            if name not in control_parts
+        }
+
+        resolved: dict[str, object] = {}
+        owners: dict[str, str] = {}
+        for part_name, value in part_rules.items():
+            expressions = list(control_parts[part_name])
+            if not expressions:
+                raise ValueError(f"Robot control part {part_name!r} has no joints.")
+            indices, _, _ = resolve_matching_names_values(
+                {expression: value for expression in expressions},
+                joint_names,
+            )
+            for index in indices:
+                joint_name = joint_names[index]
+                previous = owners.get(joint_name)
+                if previous is not None:
+                    raise ValueError(
+                        f"Joint {joint_name!r} is selected by both control "
+                        f"parts {previous!r} and {part_name!r} for drive "
+                        f"property {property_name!r}."
+                    )
+                resolved[joint_name] = value
+                owners[joint_name] = part_name
+
+        if direct_rules:
+            indices, _, values = resolve_matching_names_values(
+                direct_rules,
+                joint_names,
+            )
+            # Exact/regex joint rules intentionally override a broader control
+            # part rule, matching RobotCfg's public configuration contract.
+            for index, value in zip(indices, values):
+                resolved[joint_names[index]] = value
+        return [(name, resolved[name]) for name in joint_names if name in resolved]
     expected = "number" if numeric_only else "string/integer"
     raise TypeError(
         f"Articulation drive property {property_name!r} must be a {expected} "

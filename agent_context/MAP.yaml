@@ -554,10 +554,10 @@ topics:
     source_of_truth:
       - embodichain/lab/gym/envs/differentiable_env.py
       - embodichain/lab/sim/diff/
-      - embodichain/lab/gym/envs/tasks/special/franka_reach_apg.py
+      - embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py
     related_topics:
       - env-framework
-      - rl-training
+      - rl-learning
     status: active
 
   - id: atomic-actions

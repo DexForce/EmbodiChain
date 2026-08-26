@@ -58,6 +58,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
+    RobotCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg
 from embodichain.lab.sim.objects import Articulation
@@ -512,6 +513,7 @@ def test_articulation_constructor_defers_newton_properties_until_configure() -> 
 
     assert descriptor.newton_collision is None
     assert descriptor.newton_drive is None
+    assert descriptor.urdf_read_inertia is True
 
     descriptor.links = _resolved_articulation_desc().links
     descriptor.joints = _resolved_articulation_desc().joints
@@ -572,6 +574,28 @@ def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
             cfg,
             newton_solver_type="mujoco_warp",
         )
+
+
+def test_newton_articulation_solver_iterations_do_not_warn() -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        min_position_iters=8,
+        min_velocity_iters=2,
+    )
+    descriptor = _resolved_articulation_desc()
+
+    with patch(
+        "embodichain.lab.sim.spawn.descriptors.logger.log_warning"
+    ) as log_warning:
+        configure_articulation_desc(
+            descriptor,
+            cfg,
+            newton_solver_type="mujoco_warp",
+        )
+
+    log_warning.assert_not_called()
 
 
 def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
@@ -651,6 +675,25 @@ def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
     assert joint.velocity_limit == 4.0
     assert joint.lower_limit == -1.0
     assert joint.upper_limit == 1.0
+
+
+def test_robot_control_part_drive_rule_expands_before_spawn() -> None:
+    cfg = RobotCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        control_parts={"arm": ["arm_joint"]},
+        drive_pros=JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness={"arm": 10.0, "arm_joint": 20.0},
+        ),
+    )
+    descriptor = _resolved_articulation_desc()
+
+    configure_articulation_desc(descriptor, cfg)
+
+    joint = descriptor.get_joint_desc("arm_joint")
+    assert joint.dexsim.stiffness == 20.0
+    assert joint.newton.target_ke == 20.0
 
 
 def test_articulation_config_applies_newton_joint_subclass() -> None:

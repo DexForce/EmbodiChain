@@ -114,6 +114,11 @@ class PhysicsBackend(ABC):
         """
         return None
 
+    @property
+    def differentiable_runtime(self):
+        """Return no differentiable runtime for non-Newton backends."""
+        return None
+
     # ------------------------------------------------------------------ #
     # Capabilities (override in subclasses; defaults are conservative)
     # ------------------------------------------------------------------ #

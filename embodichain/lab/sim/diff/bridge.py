@@ -30,6 +30,14 @@ if TYPE_CHECKING:
 __all__ = ["NewtonStepFunc", "differentiable_step", "tape_context"]
 
 
+def _differentiable_runtime(manager: Any) -> Any:
+    """Resolve Spawn's runtime while retaining lightweight test compatibility."""
+    runtime = getattr(manager, "differentiable_runtime", None)
+    if runtime is not None:
+        return runtime
+    return manager.physics.newton_manager
+
+
 def _physics_dt(nm: Any, sim_state: dict[str, Any]) -> float:
     """Resolve the outer Newton step duration represented by one control step."""
     physics_dt = sim_state.get("physics_dt")
@@ -137,7 +145,7 @@ def differentiable_step(
     """
     if not manager.is_newton_backend:
         raise RuntimeError("differentiable_step requires the Newton backend.")
-    nm = manager.physics.newton_manager
+    nm = _differentiable_runtime(manager)
     if isinstance(substeps, bool) or int(substeps) != substeps or substeps <= 0:
         raise ValueError("substeps must be a positive integer.")
     substeps = int(substeps)
@@ -248,7 +256,7 @@ class NewtonStepFunc(torch.autograd.Function):
         # Save the original action shape so backward can reshape the gradient.
         ctx.saved_action_shape = action_torch.shape
 
-        nm = manager.physics.newton_manager
+        nm = _differentiable_runtime(manager)
 
         action_flat = action_torch.detach().clone().reshape(-1).contiguous()
         needs_action_grad = bool(outer_grad_enabled and ctx.needs_input_grad[0])

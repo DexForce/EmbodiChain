@@ -417,10 +417,16 @@ class BaseArticulationTest:
             )
         )
 
-        expected_drive_types = [
-            [DriveType.NONE] * passive_articulation.dof for _ in range(NUM_ARENAS)
-        ]
-        assert passive_articulation.get_joint_drive_type() == expected_drive_types
+        if self.sim.is_newton_backend:
+            expected_target_modes = [
+                [0] * passive_articulation.dof for _ in range(NUM_ARENAS)
+            ]
+            assert passive_articulation.get_joint_target_mode() == expected_target_modes
+        else:
+            expected_drive_types = [
+                [DriveType.NONE] * passive_articulation.dof for _ in range(NUM_ARENAS)
+            ]
+            assert passive_articulation.get_joint_drive_type() == expected_drive_types
 
     def test_preserve_mode_ignores_urdf_physics_overrides(self):
         """Preserve mode keeps source-resolved URDF link and joint physics."""
@@ -1146,13 +1152,18 @@ class TestArticulationNewton(BaseArticulationTest):
     def test_set_physical_visible(self):
         super().test_set_physical_visible()
 
-    def test_set_link_physical_attr_rebuilds_mass_on_newton(self):
+    def test_set_mass_rebuilds_mass_on_newton(self):
         """A retained Newton per-link mass takes effect at prepare()."""
         link_name = self.art.link_names[0]
         original = self.art.get_mass(link_names=[link_name])[0, 0].item()
         new_mass = original + 1.5
-        self.art.set_link_physical_attr(
-            RigidBodyAttributesOverrideCfg(mass=new_mass),
+        self.art.set_mass(
+            torch.full(
+                (NUM_ARENAS, 1),
+                new_mass,
+                dtype=torch.float32,
+                device=self.sim.device,
+            ),
             link_names=[link_name],
         )
         self.sim.prepare()

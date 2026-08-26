@@ -26,6 +26,7 @@ from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     configure_articulation_desc,
 )
+from embodichain.lab.sim.spawn.scene import SpawnScene
 from scripts.tutorials.sim.create_robot import create_robot
 
 pytestmark = pytest.mark.requires_sim
@@ -43,15 +44,21 @@ class _ConfigCapture:
 
 
 def _resolve_tutorial_properties(world, cfg):
-    builder = dexsim.spawn.SceneBuilder(world)
+    scene = SpawnScene(world, num_envs=1)
+    scene.builder.prepare_arenas()
     descriptor = articulation_desc_from_cfg(cfg, per_env=False)
-    builder.add_articulation(descriptor)
-    builder.resolve_sources()
-    configure_articulation_desc(descriptor, cfg)
+    scene.declare(
+        "articulation",
+        "robot",
+        descriptor,
+        configure_source=lambda value: configure_articulation_desc(value, cfg),
+    )
+    result = scene.commit()
+    descriptor = scene.handles("robot")[0].desc
 
     base = descriptor.get_link_desc("arm_base_link")
     joint = descriptor.get_joint_desc("joint1")
-    return (
+    properties = (
         base.rigid_body.mass,
         base.rigid_body.inertia.copy(),
         joint.dexsim.stiffness,
@@ -61,6 +68,8 @@ def _resolve_tutorial_properties(world, cfg):
         joint.newton.target_kd,
         joint.effort_limit,
     )
+    result.close()
+    return properties
 
 
 def test_create_robot_preserves_source_inertia_and_arm_drive() -> None:

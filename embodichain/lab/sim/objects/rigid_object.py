@@ -36,6 +36,7 @@ from embodichain.lab.sim.objects.backends import (
     is_newton_scene,
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
+from embodichain.lab.sim.physics.newton import is_newton_gradient_mode
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim import (
     VisualMaterial,
@@ -409,7 +410,7 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-        super().__init__(cfg, entities, device, auto_reset=False)
+        super().__init__(cfg, entities, device)
 
         self._initialize_existing_visual_material()
 
@@ -1987,7 +1988,8 @@ class RigidObject(BatchEntity):
                 # Newton finalization materializes the descriptor pose without
                 # advancing simulation; only one-step dynamics buffers need
                 # clearing after batch binding.
-                self.clear_dynamics()
+                if not is_newton_gradient_mode(self._spawn_result):
+                    self.clear_dynamics()
             return
 
         if is_newton_scene(self._ps):

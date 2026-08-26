@@ -43,6 +43,10 @@ TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 CHAIR_PATH = "Chair/chair.glb"
 NUM_ARENAS = 2
 Z_TRANSLATION = 2.0
+# Newton stores a full inertia tensor and converts it to/from the principal-frame
+# diagonal in float32. The two quaternion rotations introduce small round-trip
+# error for imported meshes whose COM frame is not axis-aligned.
+NEWTON_INERTIA_ROUND_TRIP_ATOL = 2e-4
 
 
 def _make_test_com_pose(device: torch.device) -> torch.Tensor:
@@ -103,16 +107,11 @@ class BaseRigidObjectTest:
             ),
         )
 
-        self.direct_gpu_kinematic_unsupported = (
-            physics == "default" and device == "cuda"
-        )
         self.chair: RigidObject = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid="chair",
                 shape=MeshCfg(fpath=chair_path),
-                body_type=(
-                    "dynamic" if self.direct_gpu_kinematic_unsupported else "kinematic"
-                ),
+                body_type="kinematic",
             ),
         )
 
@@ -512,9 +511,16 @@ class BaseRigidObjectTest:
             # Inertia: set and verify round-trip
             new_inertia = torch.full((NUM_ARENAS, 3), 0.3, device=self.sim.device)
             self.duck.set_inertia(new_inertia)
+            actual_inertia = self.duck.get_inertia()
             assert torch.allclose(
-                self.duck.get_inertia(), new_inertia, atol=1e-5
-            ), f"Newton set_inertia round-trip failed: {self.duck.get_inertia()}"
+                actual_inertia,
+                new_inertia,
+                atol=NEWTON_INERTIA_ROUND_TRIP_ATOL,
+                rtol=0.0,
+            ), (
+                "Newton set_inertia round-trip failed: "
+                f"max_abs_error={(actual_inertia - new_inertia).abs().max().item()}"
+            )
 
             # Damping is a runtime no-op on Newton (not modelled per body) but
             # mirrors onto metadata so get_damping stays consistent.
@@ -878,17 +884,35 @@ class BaseRigidObjectTest:
         mass_after_partial = self.duck.get_mass()
         inertia_after_partial = self.duck.get_inertia()
         com_after_partial = data.com_pose
+        inertia_atol = (
+            NEWTON_INERTIA_ROUND_TRIP_ATOL if self.physics == "newton" else 1e-5
+        )
         assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
-        assert torch.allclose(inertia_after_partial[0], default_inertia[0], atol=1e-5)
+        assert torch.allclose(
+            inertia_after_partial[0],
+            default_inertia[0],
+            atol=inertia_atol,
+            rtol=0.0,
+        )
         assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
         assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
-        assert torch.allclose(inertia_after_partial[1], changed_inertia[1], atol=1e-5)
+        assert torch.allclose(
+            inertia_after_partial[1],
+            changed_inertia[1],
+            atol=inertia_atol,
+            rtol=0.0,
+        )
         assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
 
         self.duck.reset()
 
         assert torch.allclose(self.duck.get_mass(), default_mass, atol=1e-5)
-        assert torch.allclose(self.duck.get_inertia(), default_inertia, atol=1e-5)
+        assert torch.allclose(
+            self.duck.get_inertia(),
+            default_inertia,
+            atol=inertia_atol,
+            rtol=0.0,
+        )
         assert torch.allclose(data.com_pose, default_com_pose, atol=1e-5)
 
     def test_local_pose_matrix(self):
@@ -1042,15 +1066,22 @@ class TestRigidObjectCUDA(BaseRigidObjectTest):
     def setup_method(self):
         self.setup_simulation("cuda")
 
-    def test_kinematic_binding_fails_fast(self):
-        with pytest.raises(NotImplementedError, match="kinematic bodies"):
-            self.sim.add_rigid_object(
-                cfg=RigidObjectCfg(
-                    uid="unsupported_kinematic",
-                    shape=CubeCfg(size=(0.1, 0.1, 0.1)),
-                    body_type="kinematic",
-                )
+    def test_kinematic_binding_supports_pose_updates(self):
+        obj = self.sim.add_rigid_object(
+            cfg=RigidObjectCfg(
+                uid="gpu_kinematic",
+                shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+                body_type="kinematic",
             )
+        )
+        assert obj.body_data is not None
+
+        pose = torch.eye(4, device=self.sim.device).repeat(NUM_ARENAS, 1, 1)
+        pose[:, :3, 3] = torch.tensor([0.2, -0.1, 0.5], device=self.sim.device)
+        obj.set_local_pose(pose)
+        self.sim.update(0.01)
+
+        assert torch.allclose(obj.get_local_pose(to_matrix=True), pose, atol=1e-5)
 
 
 class TestRigidObjectNewton(BaseRigidObjectTest):

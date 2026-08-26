@@ -29,8 +29,10 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
+    MassPropertiesCfg,
     RenderCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     physics_cfg_for_backend,
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
@@ -77,11 +79,13 @@ def main():
             uid="cube",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=1.0),
+                material_props=RigidBodyMaterialCfg(
+                    dynamic_friction=0.5,
+                    static_friction=0.5,
+                    restitution=0.1,
+                ),
             ),
             init_pos=[0.0, 0.0, 1.0],
         )

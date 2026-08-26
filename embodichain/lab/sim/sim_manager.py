@@ -22,6 +22,7 @@ import sys
 import queue
 import time
 import threading
+from contextlib import contextmanager
 import dexsim
 import torch
 import numpy as np
@@ -31,7 +32,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property, partial
-from typing import TYPE_CHECKING, Callable, Dict, List, Sequence, Union
+from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Sequence, Union
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -141,6 +142,34 @@ __all__ = [
     "CONVEX_DECOMP_DIR",
     "REACHABLE_XPOS_DIR",
 ]
+
+
+@contextmanager
+def _temporary_warp_kernel_log_suppression(
+    physics_cfg: PhysicsBackendCfg,
+) -> Iterator[None]:
+    """Temporarily suppress informational Warp logs for Newton operations."""
+    if not (
+        isinstance(physics_cfg, NewtonPhysicsCfg)
+        and physics_cfg.suppress_warp_kernel_logs
+    ):
+        yield
+        return
+
+    previous_log_level = wp.config.log_level
+    try:
+        # Warp emits its startup banner and module-load timers at INFO level.
+        # Keep warnings and errors visible.
+        wp.config.log_level = wp.LOG_WARNING
+        yield
+    finally:
+        wp.config.log_level = previous_log_level
+
+
+def _initialize_warp_runtime(physics_cfg: PhysicsBackendCfg) -> None:
+    """Initialize Warp while honoring Newton startup-log suppression."""
+    with _temporary_warp_kernel_log_suppression(physics_cfg):
+        wp.init()
 
 
 # Deformable implementations remain backend-specific even though their public
@@ -459,8 +488,9 @@ class SimulationManager:
         world_config = self._convert_sim_config(sim_config)
         self.profiler = Profiler(sim_config.profiler, self.device)
 
-        # Initialize warp runtime context before creating the world.
-        wp.init()
+        # Initialize Warp before creating the world. For Newton, honor the
+        # configured startup/kernel-log suppression from the very first init.
+        _initialize_warp_runtime(sim_config.physics_cfg)
         self._world: dexsim.World = dexsim.World(world_config)
 
         self._window: Windows | None = None
@@ -523,7 +553,8 @@ class SimulationManager:
             num_envs=sim_config.num_envs,
             spacing=(sim_config.arena_space, sim_config.arena_space, 0.0),
         )
-        self._arenas = list(self._spawn_scene.builder.prepare_arenas(materialize=False))
+        self._arenas = list(self._spawn_scene.builder.prepare_arenas())
+        self._prepared_spawn_topology_revision = -1
 
         self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
@@ -698,6 +729,15 @@ class SimulationManager:
             logger.log_warning("Newton backend is not active.")
             return None
         return self.physics.newton_manager
+
+    @property
+    def differentiable_runtime(self):
+        """Return the differentiable facade over the Spawn-owned Newton runtime."""
+        if not self.is_newton_backend:
+            raise RuntimeError(
+                "differentiable_runtime requires the Newton physics backend."
+            )
+        return self.physics.differentiable_runtime
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -986,17 +1026,25 @@ class SimulationManager:
             if self._default_plane is None:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
-        # ``prepare_runtime`` is idempotent and internally skips backends that
-        # need no extra readiness work. Keep it and facade binding outside the
-        # topology-change branch so a failed attempt remains retryable.
-        with result.runtime_initialization_scope():
-            result.prepare_runtime()
-            scene.bind()
+        # Runtime readiness belongs to the SimulationManager. Keep this and
+        # facade binding outside the topology-change branch so a failed call
+        # remains retryable without rematerializing the scene.
+        self._prepare_spawn_runtime(result)
+        scene.bind()
 
-            while self._pending_sensor_attachments:
-                sensor = self._pending_sensor_attachments[0]
-                sensor.attach_to_parent()
-                self._pending_sensor_attachments.pop(0)
+        while self._pending_sensor_attachments:
+            sensor = self._pending_sensor_attachments[0]
+            sensor.attach_to_parent()
+            self._pending_sensor_attachments.pop(0)
+
+    def _prepare_spawn_runtime(self, result: dexsim.spawn.SpawnResult) -> None:
+        """Prepare backend runtime buffers for one Spawn topology revision."""
+        topology_revision = int(result.topology_revision)
+        if getattr(self, "_prepared_spawn_topology_revision", -1) == topology_revision:
+            return
+        if self.is_default_backend and self.device.type == "cuda":
+            self._world.init_gpu_physics()
+        self._prepared_spawn_topology_revision = topology_revision
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -1054,7 +1102,7 @@ class SimulationManager:
             logger.log_error(
                 "create_differentiable_stepper requires the Newton backend."
             )
-        return self.physics.newton_manager.create_differentiable_stepper()
+        return self.differentiable_runtime.create_differentiable_stepper()
 
     def create_gradient_rollout(
         self,
@@ -1082,7 +1130,7 @@ class SimulationManager:
         """
         if not self.is_newton_backend:
             logger.log_error("create_gradient_rollout requires the Newton backend.")
-        return self.physics.newton_manager.create_gradient_rollout(
+        return self.differentiable_runtime.create_gradient_rollout(
             record_steps=record_steps,
             substeps_per_record=substeps_per_record,
             record_dt=record_dt,
@@ -1119,7 +1167,10 @@ class SimulationManager:
                         with self.profiler.section("gizmo_update"):
                             self.update_gizmos()
                         with self.profiler.section("world_update"):
-                            self._world.update(physics_dt)
+                            with _temporary_warp_kernel_log_suppression(
+                                self.sim_config.physics_cfg
+                            ):
+                                self._world.update(physics_dt)
                         self._visualization_sim_step += 1
                         self._visualization_sim_time += physics_dt
                         if (

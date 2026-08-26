@@ -27,6 +27,7 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg
 from embodichain.lab.sim.profiler import Profiler
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
@@ -186,6 +187,7 @@ def _make_visualization_sim_manager() -> (
     runtime = FakeVisualizationRuntime()
     sim.sim_config = SimpleNamespace(
         physics_dt=0.01,
+        physics_cfg=DefaultPhysicsCfg(),
         visualization=SimpleNamespace(backend="viser"),
     )
     sim.device = SimpleNamespace(type="cpu")
@@ -522,19 +524,21 @@ def test_default_plane_authors_repeated_uv_before_spawn() -> None:
 
 
 @pytest.mark.parametrize(
-    ("backend", "device"),
+    ("backend", "device", "initializes_direct_gpu"),
     [
-        pytest.param("default", torch.device("cpu"), id="default-host"),
-        pytest.param("default", torch.device("cuda"), id="default-accelerator"),
-        pytest.param("newton", torch.device("cpu"), id="newton-host"),
-        pytest.param("newton", torch.device("cuda"), id="newton-accelerator"),
+        pytest.param("default", torch.device("cpu"), False, id="default-host"),
+        pytest.param("default", torch.device("cuda"), True, id="default-accelerator"),
+        pytest.param("newton", torch.device("cpu"), False, id="newton-host"),
+        pytest.param("newton", torch.device("cuda"), False, id="newton-accelerator"),
     ],
 )
 def test_prepare_initializes_runtime_for_backend_device_matrix(
     backend: str,
     device: torch.device,
+    initializes_direct_gpu: bool,
 ) -> None:
     result = MagicMock()
+    result.topology_revision = 3
     spawn_scene = MagicMock()
     spawn_scene.builder.is_finalized = False
     spawn_scene.builder.result = None
@@ -548,39 +552,48 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     sim._spawn_scene = spawn_scene
     sim._default_plane = object()
     sim._pending_sensor_attachments = []
+    sim._prepared_spawn_topology_revision = -1
 
     sim.prepare()
 
-    result.prepare_runtime.assert_called_once_with()
     spawn_scene.bind.assert_called_once_with()
-    sim._world.init_gpu_physics.assert_not_called()
+    if initializes_direct_gpu:
+        sim._world.init_gpu_physics.assert_called_once_with()
+    else:
+        sim._world.init_gpu_physics.assert_not_called()
 
 
 def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     result = MagicMock()
     result.needs_rebuild = False
-    result.prepare_runtime.side_effect = [RuntimeError("first attempt"), None]
+    result.topology_revision = 3
     spawn_scene = MagicMock()
     spawn_scene.builder.is_finalized = True
     spawn_scene.builder.result = result
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(name="default")
+    sim.device = torch.device("cuda")
+    sim._world = MagicMock()
+    sim._world.init_gpu_physics.side_effect = [RuntimeError("first attempt"), None]
     sim._spawn_scene = spawn_scene
     sim._pending_sensor_attachments = []
+    sim._prepared_spawn_topology_revision = -1
 
     with pytest.raises(RuntimeError, match="first attempt"):
         sim.prepare()
     sim.prepare()
 
     spawn_scene.commit.assert_not_called()
-    assert result.prepare_runtime.call_count == 2
+    assert sim._world.init_gpu_physics.call_count == 2
     spawn_scene.bind.assert_called_once_with()
 
 
 def test_prepare_removes_each_sensor_after_successful_attachment() -> None:
     result = MagicMock()
     result.needs_rebuild = False
+    result.topology_revision = 3
     first_sensor = MagicMock()
     second_sensor = MagicMock()
     second_sensor.attach_to_parent.side_effect = [RuntimeError("attach failed"), None]
@@ -590,8 +603,12 @@ def test_prepare_removes_each_sensor_after_successful_attachment() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(name="default")
+    sim.device = torch.device("cpu")
+    sim._world = MagicMock()
     sim._spawn_scene = spawn_scene
     sim._pending_sensor_attachments = [first_sensor, second_sensor]
+    sim._prepared_spawn_topology_revision = -1
 
     with pytest.raises(RuntimeError, match="attach failed"):
         sim.prepare()

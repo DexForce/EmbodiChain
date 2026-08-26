@@ -43,9 +43,9 @@ class _AssetDeclaration:
 class SpawnScene:
     """Map EmbodiChain asset declarations onto one DexSim Spawn scene.
 
-    DexSim's ``SceneBuilder`` and ``SpawnResult`` own lifecycle state and
-    revisions.  This class only remembers how logical asset ids map to Spawn
-    paths and how the resulting handles bind back into EmbodiChain facades.
+    DexSim owns declaration materialization, stable handles, and topology
+    revisions. EmbodiChain owns post-load source configuration and decides
+    when a configured Newton descriptor requires an explicit rebuild.
     """
 
     def __init__(
@@ -97,14 +97,6 @@ class SpawnScene:
                 self.builder.add_object(member) for member in descriptor
             )
         else:
-            if (
-                kind == "articulation"
-                and configure_source is not None
-                and self.builder.is_finalized
-            ):
-                self.builder.resolve_articulation_source(descriptor)
-                configure_source(descriptor)
-                declaration.source_configurator = None
             add_name = {
                 "rigid_object": "add_object",
                 "articulation": "add_articulation",
@@ -113,21 +105,10 @@ class SpawnScene:
             }[kind]
             declaration.descriptor = getattr(self.builder, add_name)(descriptor)
         self._assets[uid] = declaration
+        self._configure_materialized_source(uid)
         handles = self.handles(uid)
         if facade is not None and handles:
             facade.attach_spawn_handles(handles)
-
-    def resolve_sources(self) -> None:
-        """Resolve and configure declarations before backend materialization."""
-        if self.builder.is_finalized:
-            return
-        self.builder.resolve_sources()
-        for declaration in self._assets.values():
-            configure = declaration.source_configurator
-            if configure is None:
-                continue
-            configure(declaration.descriptor)
-            declaration.source_configurator = None
 
     def track(
         self,
@@ -170,13 +151,22 @@ class SpawnScene:
     def commit(self) -> Any:
         """Finalize once or let ``SpawnResult`` consume pending changes."""
         if not self.builder.is_finalized:
-            self.resolve_sources()
-            return self.builder.finalize()
-        result = self.builder.result
-        assert result is not None
-        if self.builder.has_pending_changes or result.needs_rebuild:
-            self.builder.result = result.rebuild(self.builder)
-        return self.builder.result
+            result = self.builder.finalize()
+        else:
+            result = self.builder.result
+            assert result is not None
+            if self.builder.has_pending_changes or result.needs_rebuild:
+                result = result.rebuild(self.builder)
+
+        configured_newton = False
+        for uid in self._assets:
+            configured_newton = (
+                self._configure_materialized_source(uid) or configured_newton
+            )
+        if configured_newton:
+            result = result.rebuild(self.builder)
+        self.builder.result = result
+        return result
 
     def bind(self) -> None:
         """Complete post-finalize runtime binding for declared facades.
@@ -228,3 +218,42 @@ class SpawnScene:
         if any(path not in result.handles for path in paths):
             return ()
         return tuple(result.handles[path] for path in paths)
+
+    def _configure_materialized_source(self, uid: str) -> bool:
+        """Configure one loaded articulation and report a Newton rebuild need."""
+        declaration = self._assets[uid]
+        configure = declaration.source_configurator
+        if configure is None or declaration.kind != "articulation":
+            return False
+
+        handles = self.handles(uid)
+        if not handles:
+            return False
+
+        prototype = declaration.descriptor
+        result = self.builder.result
+        assert result is not None
+        if result.backend == "dexsim":
+            source = (
+                prototype
+                if getattr(prototype, "links", None)
+                or getattr(prototype, "joints", None)
+                else handles[0].articulation_desc
+            )
+            configure(source)
+            for handle in handles:
+                handle.apply_dexsim_properties(source)
+            declaration.source_configurator = None
+            return False
+        if result.backend != "newton":
+            raise RuntimeError(f"Unsupported Spawn backend: {result.backend!r}.")
+
+        configured_ids: set[int] = set()
+        for handle in handles:
+            descriptor = handle.articulation_desc
+            if id(descriptor) in configured_ids:
+                continue
+            configure(descriptor)
+            configured_ids.add(id(descriptor))
+        declaration.source_configurator = None
+        return True

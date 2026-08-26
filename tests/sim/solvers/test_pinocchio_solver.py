@@ -35,7 +35,10 @@ class BaseSolverTest:
         # Set up simulation with specified device (CPU or CUDA)
         config = SimulationManagerCfg(headless=True, device="cpu")
         self.sim = SimulationManager(config)
-        self.sim.set_manual_update(False)
+        # Keep the scene fixed while FK/IK operate on the same robot state.
+        # Automatic stepping can race with the two solver calls and make the
+        # reconstructed pose depend on test timing.
+        self.sim.set_manual_update(True)
 
         # Load robot URDF file
         urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
