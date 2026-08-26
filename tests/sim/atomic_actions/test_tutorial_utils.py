@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import importlib
 import math
+import re
+import xml.etree.ElementTree as ET
 from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
@@ -41,6 +43,8 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     create_dual_tutorial_robot_cfg,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    ROBOTIQ_2F_140_TCP,
+    ROBOTIQ_HAND_JOINT_PATTERN,
     TUTORIAL_ROBOTS,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
@@ -50,6 +54,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_franka_panda_robot_cfg,
     create_tutorial_argument_parser,
     create_tutorial_robot_cfg,
+    create_ur10_robotiq_robot_cfg,
     create_ur5_gripper_robot_cfg,
     create_parallel_jaw_grasp_pose_generator,
     get_hand_open_close_qpos,
@@ -279,14 +284,49 @@ def test_ur5_and_franka_configs_share_place_binding_contract() -> None:
     )
 
 
+def test_ur10_robotiq_config_matches_six_active_hand_joints_and_tcp() -> None:
+    cfg = create_ur10_robotiq_robot_cfg()
+    hand_urdf = cfg.urdf_cfg.components["hand"]["urdf_path"]
+    active_hand_joints = [
+        joint.attrib["name"]
+        for joint in ET.parse(hand_urdf).getroot().findall("joint")
+        if joint.attrib.get("type") != "fixed"
+    ]
+
+    assert cfg.control_parts["hand"] == [ROBOTIQ_HAND_JOINT_PATTERN]
+    assert len(active_hand_joints) == 6
+    assert all(
+        re.fullmatch(ROBOTIQ_HAND_JOINT_PATTERN, joint_name)
+        for joint_name in active_hand_joints
+    )
+    assert len(cfg.init_qpos) == 12
+    assert cfg.init_qpos[-6:] == [0.0] * 6
+    assert torch.allclose(
+        torch.as_tensor(cfg.solver_cfg["arm"].tcp),
+        torch.as_tensor(ROBOTIQ_2F_140_TCP),
+    )
+
+
 @pytest.mark.parametrize(
-    ("robot_type", "arm_dof", "solver_name"),
-    (("ur5", 6, "URSolverCfg"), ("franka", 7, "PytorchSolverCfg")),
+    ("robot_type", "arm_dof", "solver_name", "hand_pattern", "expected_tcp"),
+    (
+        ("ur5", 6, "URSolverCfg", "gripper_finger1_joint_1", None),
+        ("franka", 7, "PytorchSolverCfg", "gripper_finger1_joint_1", None),
+        (
+            "ur10",
+            6,
+            "URSolverCfg",
+            ROBOTIQ_HAND_JOINT_PATTERN,
+            ROBOTIQ_2F_140_TCP,
+        ),
+    ),
 )
-def test_dual_tutorial_configs_share_pgi_binding_contract(
+def test_dual_tutorial_configs_share_hand_binding_contract(
     robot_type: str,
     arm_dof: int,
     solver_name: str,
+    hand_pattern: str,
+    expected_tcp: tuple[tuple[float, ...], ...] | None,
 ) -> None:
     single_cfg = create_tutorial_robot_cfg(robot_type)
     dual_cfg = create_dual_tutorial_robot_cfg(
@@ -295,8 +335,11 @@ def test_dual_tutorial_configs_share_pgi_binding_contract(
         urdf_name=f"test_dual_{robot_type}",
         tcp_z=0.121,
     )
-    expected_tcp = PGI_TUTORIAL_TCP.clone()
-    expected_tcp[2, 3] = 0.121
+    if expected_tcp is None:
+        expected_tcp_tensor = PGI_TUTORIAL_TCP.clone()
+        expected_tcp_tensor[2, 3] = 0.121
+    else:
+        expected_tcp_tensor = torch.as_tensor(expected_tcp)
 
     assert tuple(dual_cfg.urdf_cfg.components) == (
         "left_arm",
@@ -309,15 +352,17 @@ def test_dual_tutorial_configs_share_pgi_binding_contract(
     assert dual_cfg.init_qpos[1 : 2 * arm_dof : 2] == expected_arm_home
     for side in ("left", "right"):
         assert len(dual_cfg.control_parts[f"{side}_arm"]) == arm_dof
-        assert dual_cfg.control_parts[f"{side}_hand"] == [
-            f"{side}_gripper_finger1_joint_1"
-        ]
+        assert dual_cfg.control_parts[f"{side}_hand"] == [f"{side}_{hand_pattern}"]
         assert dual_cfg.urdf_cfg.components[f"{side}_hand"]["urdf_path"] == (
             single_cfg.urdf_cfg.components["hand"]["urdf_path"]
         )
         solver = dual_cfg.solver_cfg[f"{side}_arm"]
         assert type(solver).__name__ == solver_name
-        assert torch.allclose(torch.as_tensor(solver.tcp), expected_tcp)
+        assert torch.allclose(torch.as_tensor(solver.tcp), expected_tcp_tensor)
+
+    if robot_type == "ur10":
+        assert len(dual_cfg.init_qpos) == 24
+        assert dual_cfg.init_qpos[-12:] == [0.0] * 12
 
 
 def test_dual_franka_mount_preserves_single_arm_facing_direction() -> None:
@@ -351,6 +396,45 @@ def test_hand_commands_use_pgi_open_limit() -> None:
     assert torch.allclose(hand_close, torch.tensor([0.024]))
 
 
+def test_hand_commands_cover_all_six_robotiq_joints_with_mimic_directions() -> None:
+    robot = MagicMock()
+    robot.device = torch.device("cpu")
+    robot.cfg.control_parts = {
+        "left_hand": [
+            "left_finger_joint",
+            "left_left_inner_knuckle_joint",
+            "left_left_inner_finger_joint",
+            "left_right_outer_knuckle_joint",
+            "left_right_inner_knuckle_joint",
+            "left_right_inner_finger_joint",
+        ]
+    }
+    robot.get_qpos_limits.return_value = torch.tensor(
+        [
+            [
+                [0.0, 0.7],
+                [-0.8757, 0.8757],
+                [-0.8757, 0.8757],
+                [-0.725, 0.725],
+                [-0.8757, 0.8757],
+                [-0.8757, 0.8757],
+            ]
+        ]
+    )
+
+    hand_open, hand_close = get_hand_open_close_qpos(
+        robot,
+        hand_control_part="left_hand",
+        close_qpos=0.4,
+    )
+
+    assert torch.allclose(hand_open, torch.zeros(6))
+    assert torch.allclose(
+        hand_close,
+        torch.tensor([0.4, -0.4, 0.4, -0.4, -0.4, 0.4]),
+    )
+
+
 def test_curobo_motion_generator_factory_selects_curobo_backend() -> None:
     robot = MagicMock(uid="tutorial_robot")
 
@@ -365,14 +449,16 @@ def test_curobo_motion_generator_factory_selects_curobo_backend() -> None:
     assert cfg.planner_cfg.robot_uid == "tutorial_robot"
 
 
-def test_shared_robot_selection_keeps_ur5_default_and_accepts_franka() -> None:
+def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> None:
     parser = create_tutorial_argument_parser("test parser")
     default_args = parser.parse_args([])
     franka_args = parser.parse_args(["--robot", "franka"])
+    ur10_args = parser.parse_args(["--robot", "ur10"])
 
-    assert TUTORIAL_ROBOTS == ("ur5", "franka")
+    assert TUTORIAL_ROBOTS == ("ur5", "franka", "ur10")
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
+    assert ur10_args.robot == "ur10"
 
 
 def test_arm_direction_uses_selected_robot_solver_roots() -> None:
