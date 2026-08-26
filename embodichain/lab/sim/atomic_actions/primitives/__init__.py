@@ -42,6 +42,7 @@ from .move_held_object import (
     MoveHeldObjectOptions,
 )
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
+from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import Press, PressGoal, PressOptions
@@ -63,6 +64,7 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     Pour,
     Press,
     Slide,
+    OpenDoor,
     Twist,
     CoordinatedPickment,
     CoordinatedPlacement,
@@ -95,6 +97,9 @@ __all__ = [
     "MoveHeldObjectOptions",
     "MoveJoints",
     "MoveJointsOptions",
+    "OpenDoor",
+    "OpenDoorGoal",
+    "OpenDoorOptions",
     "PickUp",
     "PickUpOptions",
     "Place",

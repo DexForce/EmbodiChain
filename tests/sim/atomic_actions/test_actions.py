@@ -67,6 +67,10 @@ from embodichain.lab.sim.atomic_actions import (
     MoveJoints,
     MoveJointsOptions,
     ObjectSemantics,
+    OpenDoor,
+    OpenDoorAffordance,
+    OpenDoorGoal,
+    OpenDoorOptions,
     PickUp,
     PickUpOptions,
     Place,
@@ -709,6 +713,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert Pour.GoalType is PourGoal
     assert Press.GoalType is PressGoal
     assert Slide.GoalType is SlideGoal
+    assert OpenDoor.GoalType is OpenDoorGoal
     assert Twist.GoalType is TwistGoal
     assert CoordinatedPickment.GoalType is CoordinatedPickGoal
     assert CoordinatedPlacement.GoalType is CoordinatedPlacementGoal
@@ -743,9 +748,10 @@ def test_builtin_trajectory_segment_names_and_ranges_are_stable(
 
 
 def test_interaction_primitives_use_motion_centric_skill_ids() -> None:
-    assert (Press.skill_id, Slide.skill_id, Twist.skill_id) == (
+    assert (Press.skill_id, Slide.skill_id, OpenDoor.skill_id, Twist.skill_id) == (
         "press",
         "slide",
+        "open_door",
         "twist",
     )
 
@@ -760,6 +766,7 @@ def test_interaction_primitives_use_motion_centric_skill_ids() -> None:
         PourOptions(),
         PressOptions(),
         SlideOptions(),
+        OpenDoorOptions(),
         TwistOptions(),
         CoordinatedPickmentOptions(),
         CoordinatedPlacementOptions(),
@@ -2082,6 +2089,18 @@ def test_twist_rotates_grasp_about_explicit_axis_origin() -> None:
             ),
         ),
         (
+            OpenDoorGoal,
+            OpenDoorAffordance(
+                mesh_vertices=torch.tensor(
+                    [[0.9, 0.0, 0.0], [1.1, 0.0, 0.0], [1.0, 0.1, 0.0]]
+                ),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+                rotation_axis=torch.tensor([0.0, 0.0, 1.0]),
+                axis_origin=(0.0, 0.0, 0.0),
+                joint_name="door_hinge",
+            ),
+        ),
+        (
             TwistGoal,
             TwistAffordance(
                 grasp_position=(0.0, 0.0, 0.0),
@@ -2103,6 +2122,7 @@ def test_interaction_goal_collects_target_scene_dependency(
 def test_open_loop_interaction_primitives_are_explicitly_described() -> None:
     assert Press.descriptor().open_loop is True
     assert Slide.descriptor().open_loop is True
+    assert OpenDoor.descriptor().open_loop is True
     assert Twist.descriptor().open_loop is True
 
 
@@ -2402,6 +2422,235 @@ def test_slide_fk_path_remains_on_translation_axis() -> None:
     axis = torch.tensor([0.0, -1.0, 0.0])
     orthogonal = positions - (positions * axis).sum(dim=-1, keepdim=True) * axis
     assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+
+
+def _door_affordance() -> OpenDoorAffordance:
+    """Build a handle at local +X around a local +Z hinge for pure tests."""
+    return OpenDoorAffordance(
+        mesh_vertices=torch.tensor(
+            [
+                [0.9, -0.1, 0.0],
+                [1.1, -0.1, 0.0],
+                [1.0, 0.2, 0.0],
+            ]
+        ),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        rotation_axis=torch.tensor([0.0, 0.0, 1.0]),
+        axis_origin=(0.0, 0.0, 0.0),
+        joint_name="door_hinge",
+        joint_limits=(0.0, math.pi / 2),
+    )
+
+
+def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> None:
+    affordance = _door_affordance()
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="door_handle",
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, OpenDoor())
+    grasp_calls: list[torch.Tensor] = []
+
+    def sample_grasp(
+        *,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        grasp_calls.append(approach_direction)
+        grasp_pose = obj_poses.clone()
+        grasp_pose[:, 0, 3] = 1.0
+        return (
+            torch.ones(NUM_ENVS, dtype=torch.bool),
+            grasp_pose,
+            torch.full((NUM_ENVS,), 0.03),
+        )
+
+    _GRASP_GENERATORS[id(action)].get_best_grasp_poses = Mock(side_effect=sample_grasp)
+    options = OpenDoorOptions(
+        hand_interp_steps=3,
+        door_waypoint_count=4,
+        approach_distance=0.1,
+        retract_distance=0.1,
+        open_angle=math.pi / 6,
+    )
+    link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="open_door",
+            goal=OpenDoorGoal(semantics, SceneEntityPose("target")),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=options,
+        ),
+        _context(scene=_target_scene(link_pose, timestamp=0.0, version=0)),
+    )
+
+    trajectory = _joint_trajectory(plan)
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.scene_dependencies == ("target",)
+    assert plan.scene_dependency_end_segment == "reach"
+    assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert [segment.name for segment in plan.segments] == [
+        "approach",
+        "reach",
+        "close",
+        "open",
+        "release",
+        "retract",
+    ]
+    assert torch.all(
+        trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+    )
+    assert torch.all(
+        trajectory.positions[:, plan.segment("release").stop - 1, ARM_DOF:] == 0.0
+    )
+    assert torch.allclose(
+        grasp_calls[0],
+        torch.tensor([0.0, -1.0, 0.0]).expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+    planned_targets = [
+        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
+    ]
+    assert torch.allclose(
+        planned_targets[0][:, :3, 3],
+        torch.tensor([1.0, 0.1, 0.0]).expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+    angle = options.open_angle
+    expected_retract = torch.tensor(
+        [
+            math.cos(angle) - options.retract_distance * math.sin(angle),
+            math.sin(angle) + options.retract_distance * math.cos(angle),
+            0.0,
+        ]
+    )
+    assert torch.allclose(
+        planned_targets[-1][:, :3, 3],
+        expected_retract.expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+
+
+def test_open_door_interpolates_link_arc_and_recovers_eef_poses() -> None:
+    action = _bind_action(_motion_generator(), OpenDoor())
+    link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    grasp_pose = link_pose.clone()
+    grasp_pose[:, 0, 3] = 1.0
+
+    opened_links, opened_eef = action._opened_link_and_eef_poses(
+        link_pose,
+        grasp_pose,
+        torch.tensor([0.0, 0.0, 1.0]),
+        (0.0, 0.0, 0.0),
+        math.pi / 6,
+        4,
+    )
+
+    expected_position = torch.tensor(
+        [math.cos(math.pi / 6), math.sin(math.pi / 6), 0.0]
+    )
+    assert opened_links.shape == (NUM_ENVS, 4, 4, 4)
+    assert torch.allclose(
+        opened_eef[:, -1, :3, 3],
+        expected_position.expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+
+
+def test_open_door_holds_failed_grasp_environment() -> None:
+    semantics = ObjectSemantics(
+        affordance=_door_affordance(),
+        geometry={},
+        label="door_handle",
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, OpenDoor())
+    grasp_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    grasp_pose[:, 0, 3] = 1.0
+    _GRASP_GENERATORS[id(action)].get_best_grasp_poses = Mock(
+        return_value=(
+            torch.tensor([True, False]),
+            grasp_pose,
+            torch.full((NUM_ENVS,), 0.03),
+        )
+    )
+    context = _context()
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="open_door",
+            goal=OpenDoorGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=18),
+            skill_options=OpenDoorOptions(hand_interp_steps=3),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, False]
+    trajectory = _joint_trajectory(plan)
+    assert torch.allclose(
+        trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(18, -1),
+    )
+
+
+def test_open_door_rejects_wrong_affordance_and_invalid_angle() -> None:
+    action = _bind_action(_motion_generator(), OpenDoor())
+    semantics = ObjectSemantics(affordance=Affordance(), geometry={}, label="handle")
+
+    with pytest.raises(ValueError, match="OpenDoorAffordance"):
+        _plan_action(
+            action,
+            _invocation(action, OpenDoorGoal(semantics, torch.eye(4))),
+            _context(),
+        )
+    with pytest.raises(ValueError, match="open_angle must be non-zero"):
+        OpenDoorOptions(open_angle=0.0)
+
+
+def test_open_door_validates_goal_binding_owner_and_endpoint_coverage() -> None:
+    action = _bind_action(_motion_generator(), OpenDoor())
+    semantics = ObjectSemantics(
+        affordance=_door_affordance(),
+        geometry={},
+        label="door_handle",
+    )
+    valid_goal = OpenDoorGoal(semantics, torch.eye(4))
+
+    with pytest.raises(TypeError, match="expects goal OpenDoorGoal"):
+        action.resolve_request(
+            ActionInvocation(
+                skill_id="open_door",
+                goal=object(),
+                binding=_binding(action),
+            )
+        )
+    with pytest.raises(ValueError, match="another engine instance"):
+        action.resolve_request(
+            ActionInvocation(
+                skill_id="open_door",
+                goal=valid_goal,
+                binding=replace(_binding(action), owner_id="another-engine"),
+            )
+        )
+    with pytest.raises(ValueError, match="missing=.*grasp"):
+        action.resolve_request(
+            ActionInvocation(
+                skill_id="open_door",
+                goal=valid_goal,
+                binding=ActionBinding(
+                    owner_id=_ACTION_ENGINES[id(action)].binding_owner_id,
+                ),
+            )
+        )
 
 
 def test_press_plans_close_approach_press_and_retract() -> None:

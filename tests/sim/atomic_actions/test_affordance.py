@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import pytest
 import torch
 
@@ -27,6 +30,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     AssembleAffordance,
     AxisAlignAffordance,
     InteractionPoints,
+    OpenDoorAffordance,
     PressAffordance,
     SlideAffordance,
     TwistAffordance,
@@ -229,6 +233,84 @@ class TestSlideAffordance:
                 mesh_triangles=torch.tensor([[0, 1, 2]]),
                 translation_axis=translation_axis,
             )
+
+
+class TestOpenDoorAffordance:
+    @staticmethod
+    def _articulation_with_parent_hinge() -> Mock:
+        fixed_joint = SimpleNamespace(
+            name="door_to_door_handle_fixed",
+            parent_link_name="door",
+            child_link_name="door_handle",
+            joint_type=SimpleNamespace(name="FIXED"),
+            axis=torch.zeros(3).numpy(),
+            origin_pose=torch.eye(4).numpy(),
+            lower_limit=0.0,
+            upper_limit=0.0,
+        )
+        hinge_joint = SimpleNamespace(
+            name="door_hinge",
+            parent_link_name="body",
+            child_link_name="door",
+            joint_type=SimpleNamespace(name="REVOLUTE"),
+            axis=torch.tensor([0.0, 0.0, 1.0]).numpy(),
+            origin_pose=torch.eye(4).numpy(),
+            lower_limit=0.0,
+            upper_limit=2.0,
+        )
+        entity = Mock()
+        entity.get_joint_names.return_value = [fixed_joint.name, hinge_joint.name]
+        entity.get_joint_info.side_effect = {
+            fixed_joint.name: fixed_joint,
+            hinge_joint.name: hinge_joint,
+        }.get
+        articulation = Mock()
+        articulation.link_names = ["body", "door", "door_handle"]
+        articulation._entities = [entity]
+        body_pose = torch.eye(4).unsqueeze(0)
+        handle_pose = torch.eye(4).unsqueeze(0)
+        handle_pose[:, 0, 3] = 1.0
+        poses = {
+            "body": body_pose,
+            "door_handle": handle_pose,
+        }
+        articulation.get_link_pose.side_effect = lambda link_name, **_: poses[link_name]
+        articulation.get_link_vert_face.return_value = (
+            torch.tensor(
+                [
+                    [0.9, -0.1, 0.0],
+                    [1.1, -0.1, 0.0],
+                    [1.0, 0.1, 0.0],
+                ]
+            ),
+            torch.tensor([[0, 1, 2]]),
+        )
+        return articulation
+
+    def test_resolves_first_parent_revolute_joint_from_handle_link(self):
+        articulation = self._articulation_with_parent_hinge()
+
+        affordance = OpenDoorAffordance.from_articulation(
+            articulation,
+            "door_handle",
+        )
+
+        assert affordance.joint_name == "door_hinge"
+        assert torch.allclose(
+            affordance.rotation_axis,
+            torch.tensor([0.0, 0.0, 1.0]),
+        )
+        assert affordance.axis_origin == pytest.approx((-1.0, 0.0, 0.0))
+        assert affordance.joint_limits == pytest.approx((0.0, 2.0))
+
+    def test_rejects_handle_without_parent_revolute_joint(self):
+        articulation = self._articulation_with_parent_hinge()
+        articulation._entities[0].get_joint_names.return_value = [
+            "door_to_door_handle_fixed"
+        ]
+
+        with pytest.raises(ValueError, match="No parent revolute joint"):
+            OpenDoorAffordance.from_articulation(articulation, "door_handle")
 
 
 class TestPressAffordance:

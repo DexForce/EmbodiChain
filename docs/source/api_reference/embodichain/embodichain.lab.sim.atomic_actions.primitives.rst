@@ -37,6 +37,8 @@ full-robot timed trajectory and uncommitted expected effects.
       PressOptions
       Slide
       SlideOptions
+      OpenDoor
+      OpenDoorOptions
       Twist
       TwistOptions
       CoordinatedPickment
@@ -61,6 +63,7 @@ full-robot timed trajectory and uncommitted expected effects.
       AssembleGoal
       PressGoal
       SlideGoal
+      OpenDoorGoal
       TwistGoal
       CoordinatedPickGoal
       CoordinatedPlacementGoal
@@ -136,6 +139,14 @@ Slide
 -----
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.slide
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+OpenDoor
+--------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.open_door
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
