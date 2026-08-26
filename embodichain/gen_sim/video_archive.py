@@ -14,12 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Rename one completed GenSim recording to its task ID."""
+"""Copy one completed GenSim recording to its task ID."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import shutil
 import sys
 from typing import Any, Sequence
 
@@ -89,7 +90,7 @@ def _archive_task_video(
     source_stem: str,
     task_id: str,
 ) -> Path:
-    """Move a completed recording to ``<task_id>.<original extension>``.
+    """Copy a completed recording to ``<task_id>.<original extension>``.
 
     Args:
         video_directory: Directory containing the completed recording.
@@ -132,7 +133,9 @@ def _archive_task_video(
     source = candidates[0]
     extension = source.name[len(source_stem) :]
     destination = directory / f"{task_id}{extension}"
-    source.replace(destination)
+    if destination.exists() or destination.is_symlink():
+        destination.unlink()
+    shutil.copy2(source, destination)
     return destination
 
 
