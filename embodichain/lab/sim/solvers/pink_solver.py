@@ -101,16 +101,17 @@ class PinkSolverCfg(SolverCfg):
     max_damping: float = 1e6
     """Upper bound for adaptive damping."""
 
-    def init_solver(self, **kwargs: Any) -> PinkSolver:
+    def init_solver(self, device: torch.device, **kwargs: Any) -> PinkSolver:
         """Create a Pink solver and apply the configured TCP.
 
         Args:
+            device: Torch device used by the solver.
             **kwargs: Arguments forwarded to :class:`PinkSolver`.
 
         Returns:
             Initialized Pink solver.
         """
-        solver = PinkSolver(cfg=self, **kwargs)
+        solver = PinkSolver(cfg=self, device=device, **kwargs)
         solver.set_tcp(self._get_tcp_as_numpy())
         return solver
 
@@ -152,17 +153,19 @@ class PinkSolver(BaseSolver):
             self.robot.model, self.robot.data, self.init_qpos
         )
         if self.root_link_name is None:
-            self._root_to_world = np.eye(4)
+            self._world_from_root = np.eye(4)
         else:
             root_frame_id = self.robot.model.getFrameId(self.root_link_name)
             if root_frame_id >= self.robot.model.nframes:
                 raise ValueError(
                     f"Root link name '{self.root_link_name}' is not in the Pink model"
                 )
-            self._root_to_world = np.asarray(
+            # Pinocchio's oMf is ^world M_frame: it maps coordinates expressed
+            # in the root frame into the world frame.
+            self._world_from_root = np.asarray(
                 self.robot.data.oMf[root_frame_id].homogeneous, dtype=float
             ).copy()
-        self._world_to_root = np.linalg.inv(self._root_to_world)
+        self._root_from_world = np.linalg.inv(self._world_from_root)
         self._end_frame_id = self.robot.model.getFrameId(self.end_link_name)
         if self._end_frame_id >= self.robot.model.nframes:
             raise ValueError(
@@ -520,7 +523,7 @@ class PinkSolver(BaseSolver):
 
     def _set_target(self, target_xpos: np.ndarray) -> None:
         """Set the controlled frame target, removing TCP when appropriate."""
-        frame_target = self._root_to_world @ target_xpos
+        frame_target = self._world_from_root @ target_xpos
         if self._target_task.frame == self.end_link_name:
             frame_target = frame_target @ self._tcp_inverse
         self._target_task.set_target(self.pin.SE3(frame_target))
@@ -584,11 +587,11 @@ class PinkSolver(BaseSolver):
         self._set_target(target_xpos)
         pink_seed = self._to_pink_order(qpos_seed)
         self.pink_cfg.update(self._project_model_limits(pink_seed))
-        damping = self.cfg.damp
         damping_floor = min(
             self.cfg.max_damping,
             max(self.cfg.damp, float(np.sqrt(np.finfo(float).eps))),
         )
+        damping = damping_floor
         stagnant = 0
 
         for _ in range(self.cfg.max_iterations):
@@ -626,7 +629,7 @@ class PinkSolver(BaseSolver):
                 ):
                     improvement = max(0.0, primary_improvement)
                     accepted = True
-                    damping = max(self.cfg.damp, damping * self.cfg.damping_decay)
+                    damping = max(damping_floor, damping * self.cfg.damping_decay)
                     stagnant = (
                         stagnant + 1
                         if improvement <= self.cfg.stagnation_tolerance
@@ -725,8 +728,8 @@ class PinkSolver(BaseSolver):
         self.pin.framesForwardKinematics(
             self.robot.model, self.robot.data, configuration
         )
-        end_to_world = np.asarray(
+        world_from_end = np.asarray(
             self.robot.data.oMf[self._end_frame_id].homogeneous, dtype=float
         )
-        result = self._world_to_root @ end_to_world @ self.tcp_xpos
+        result = self._root_from_world @ world_from_end @ self.tcp_xpos
         return torch.as_tensor(result, dtype=torch.float32, device=self.device)

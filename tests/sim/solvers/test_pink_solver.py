@@ -198,6 +198,22 @@ class TestPinkSolverUnit:
         reconstructed = solver.get_fk(solutions[:, 0])
         assert torch.allclose(reconstructed, targets, atol=1e-4, rtol=1e-4)
 
+    def test_init_solver_accepts_positional_device(self, tmp_path: Path):
+        """Test the SolverCfg positional-device interface remains supported."""
+        urdf_path = tmp_path / "positional_device.urdf"
+        urdf_path.write_text(PLANAR_URDF, encoding="utf-8")
+        cfg = PinkSolverCfg(
+            urdf_path=str(urdf_path),
+            joint_names=["joint1", "joint2"],
+            root_link_name="base",
+            end_link_name="tool",
+            show_ik_warnings=False,
+        )
+
+        solver = cfg.init_solver(torch.device("cpu"), num_envs=1)
+
+        assert solver.device == torch.device("cpu")
+
     def test_non_convergence_returns_per_target_seed(self, tmp_path: Path):
         """Test failed targets are reported and preserve their individual seeds."""
         solver = self._make_solver(
@@ -212,6 +228,27 @@ class TestPinkSolverUnit:
         assert not torch.any(success)
         assert solutions.shape == (2, 1, 2)
         assert torch.allclose(solutions[:, 0], seeds)
+
+    def test_zero_configured_damping_uses_positive_floor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Test every QP solve receives positive damping when cfg.damp is zero."""
+        solver = self._make_solver(tmp_path / "zero_damping.urdf")
+        solver.cfg.damp = 0.0
+        target = solver.get_fk(torch.tensor([[0.4, -0.2]], dtype=torch.float32))
+        observed_damping: list[float] = []
+        original_solve_ik = solver.pink.solve_ik
+
+        def recording_solve_ik(**kwargs):
+            observed_damping.append(float(kwargs["damping"]))
+            return original_solve_ik(**kwargs)
+
+        monkeypatch.setattr(solver.pink, "solve_ik", recording_solve_ik)
+
+        solver.get_ik(target, torch.zeros((1, 2), dtype=torch.float32))
+
+        assert observed_damping
+        assert min(observed_damping) >= np.sqrt(np.finfo(float).eps)
 
     def test_single_batched_seed_is_broadcast(self, tmp_path: Path):
         """Test a ``(1, dof)`` seed can initialize a target batch."""
