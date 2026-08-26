@@ -30,7 +30,7 @@ generation:
     recording:
       enabled: true
       resolution: [640, 360]
-      interval_step: 1
+      interval_step: 5
     arm_aim_yaw_offset:
       left: 0.0
       right: 0.0

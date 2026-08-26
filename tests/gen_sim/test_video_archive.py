@@ -54,7 +54,7 @@ def _write_source(directory: Path, extension: str, content: bytes = b"video") ->
     return source
 
 
-def test_archive_task_video_renames_source_and_preserves_extension(
+def test_archive_task_video_copies_source_and_preserves_extension(
     tmp_path: Path,
 ) -> None:
     source = _write_source(tmp_path, ".webm")
@@ -67,7 +67,7 @@ def test_archive_task_video_renames_source_and_preserves_extension(
 
     assert destination == tmp_path / "task2_1.webm"
     assert destination.read_bytes() == b"video"
-    assert not source.exists()
+    assert source.read_bytes() == b"video"
 
 
 @pytest.mark.parametrize("task_id", ["../task2_1", "task2/1", r"task2\1", ".."])
@@ -113,7 +113,7 @@ def test_archive_task_video_overwrites_existing_target(
 
     assert result == destination
     assert destination.read_bytes() == b"new"
-    assert not source.exists()
+    assert source.read_bytes() == b"new"
 
 
 def test_consecutive_tasks_keep_independent_videos(tmp_path: Path) -> None:
@@ -127,7 +127,7 @@ def test_consecutive_tasks_keep_independent_videos(tmp_path: Path) -> None:
 
     assert (tmp_path / "task2_1.mp4").read_bytes() == b"first"
     assert (tmp_path / "task2_2.mp4").read_bytes() == b"second"
-    assert not (tmp_path / f"{SOURCE_STEM}.mp4").exists()
+    assert (tmp_path / f"{SOURCE_STEM}.mp4").read_bytes() == b"second"
 
 
 def test_task_recording_uses_runtime_recorder_path(tmp_path: Path) -> None:
@@ -138,7 +138,7 @@ def test_task_recording_uses_runtime_recorder_path(tmp_path: Path) -> None:
 
     assert destination == tmp_path / "task2_1.mkv"
     assert destination.read_bytes() == b"video"
-    assert not source.exists()
+    assert source.read_bytes() == b"video"
 
 
 def test_task_recording_is_noop_when_recording_is_disabled() -> None:
