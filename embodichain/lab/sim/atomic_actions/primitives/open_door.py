@@ -239,6 +239,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         n_approach, n_reach, n_open, n_retract = self._motion_segment_lengths(
             request.motion_policy.sample_count,
             options.hand_interp_steps,
+            options.door_waypoint_count,
         )
         approach_success, approach_arm = self._plan_pose_segment(
             approach_xpos,
@@ -398,16 +399,32 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
     def _motion_segment_lengths(
         sample_count: int,
         hand_interp_steps: int,
+        door_waypoint_count: int,
     ) -> tuple[int, int, int, int]:
-        motion_count = sample_count - 2 * hand_interp_steps
-        if motion_count < 8:
+        minimum_sample_count = 2 * hand_interp_steps + door_waypoint_count + 7
+        if sample_count < minimum_sample_count:
             raise ValueError(
-                "Not enough waypoints for OpenDoor. Increase sample_count or "
-                "decrease hand_interp_steps."
+                "Not enough waypoints for OpenDoor: sample_count must be at "
+                f"least {minimum_sample_count} for hand_interp_steps="
+                f"{hand_interp_steps} and door_waypoint_count="
+                f"{door_waypoint_count}."
             )
+        motion_count = sample_count - 2 * hand_interp_steps
         base, remainder = divmod(motion_count, 4)
         values = [base + (index < remainder) for index in range(4)]
-        return values[0], values[1], values[2], values[3]
+        minimum_open_count = door_waypoint_count + 1
+        if values[2] >= minimum_open_count:
+            return values[0], values[1], values[2], values[3]
+
+        remaining_count = motion_count - minimum_open_count
+        other_base, other_remainder = divmod(remaining_count, 3)
+        other_values = [other_base + (index < other_remainder) for index in range(3)]
+        return (
+            other_values[0],
+            other_values[1],
+            minimum_open_count,
+            other_values[2],
+        )
 
     def _plan_pose_segment(
         self,

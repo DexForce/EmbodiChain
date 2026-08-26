@@ -63,11 +63,11 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 
 MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
 HANDLE_LINK_NAME = "door_handle"
-MICROWAVE_POSITION = (-1.0, 0.00, 0.4)
+MICROWAVE_POSITION = (-1.0, 0.20, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90.0)  # degrees
 HANDLE_SCENE_ENTITY_ID = "microwave-door-handle"
-TRAJECTORY_SAMPLE_COUNT = 140
-HAND_INTERP_STEPS = 12
+TRAJECTORY_SAMPLE_COUNT = 300
+HAND_INTERP_STEPS = 30
 POST_TRAJECTORY_STEPS = 240
 
 
@@ -80,12 +80,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--open_angle",
         type=float,
-        default=math.radians(30.0),
-        help="Signed door-opening angle in radians (default: 30 degrees).",
+        default=math.radians(60.0),
+        help="Signed door-opening angle in radians (default: 60 degrees).",
     )
     parser.add_argument("--approach_distance", type=float, default=0.10)
     parser.add_argument("--retract_distance", type=float, default=0.10)
-    parser.add_argument("--door_waypoint_count", type=int, default=20)
+    parser.add_argument("--door_waypoint_count", type=int, default=50)
     return parser.parse_args()
 
 
@@ -132,7 +132,7 @@ def create_door_handle_semantics(microwave: Articulation) -> ObjectSemantics:
 
 
 def main() -> None:
-    """Plan and replay a 30-degree microwave-door opening by default."""
+    """Plan and replay a 60-degree microwave-door opening by default."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(

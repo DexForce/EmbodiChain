@@ -714,7 +714,10 @@ after it has rotated with the open door.
 `OpenDoorOptions` controls hand close/open interpolation, circular-arc
 keyframes, approach/retract distances, and the signed opening angle. The
 default angle is 30 degrees (`pi / 6` radians). The bound `primary.grasp`
-endpoint must provide `open` and `grasp`.
+endpoint must provide `open` and `grasp`. The planner reserves at least one
+opening-segment sample for the segment start plus one for every configured
+door-arc keyframe; the full motion policy therefore needs
+`sample_count >= 2 * hand_interp_steps + door_waypoint_count + 7`.
 
 **Example:** `scripts/tutorials/atomic_action/open_door.py` configures only the
 microwave's `door_handle` link. Automatic traversal resolves `door_hinge`
