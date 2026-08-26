@@ -691,6 +691,9 @@ topics:
       - PressGoal.target_pose
       - SlideGoal.target_pose
       - TwistGoal.target_pose
+      - OpenDoorGoal.open_fraction
+      - OpenDoorAffordance.opening_direction
+      - ObservedArticulationJointState
       - open_loop
       - axis_translation_keyframes
       - dynamic goal

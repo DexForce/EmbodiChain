@@ -393,6 +393,9 @@ class OpenDoorAffordance(AntipodalAffordance):
     joint_limits: tuple[float, float] | None = None
     """Optional lower and upper hinge limits in radians."""
 
+    opening_direction: int = 1
+    """Joint-coordinate direction from the closed limit toward the open limit."""
+
     def __post_init__(self) -> None:
         AntipodalAffordance.__post_init__(self)
         if (
@@ -410,12 +413,19 @@ class OpenDoorAffordance(AntipodalAffordance):
             self.axis_origin, "OpenDoorAffordance.axis_origin"
         )
         _validate_joint_metadata(self.joint_name, self.joint_limits)
+        if type(self.opening_direction) is not int or self.opening_direction not in (
+            -1,
+            1,
+        ):
+            raise ValueError("opening_direction must be either -1 or 1.")
 
     @classmethod
     def from_articulation(
         cls,
         articulation: Articulation,
         link_name: str,
+        *,
+        opening_direction: int = 1,
     ) -> OpenDoorAffordance:
         """Build handle semantics from the first parent revolute joint.
 
@@ -427,6 +437,8 @@ class OpenDoorAffordance(AntipodalAffordance):
         Args:
             articulation: Articulation containing the graspable handle link.
             link_name: Graspable handle link from which to start the traversal.
+            opening_direction: Joint-coordinate direction from the closed legal
+                endpoint toward the open endpoint. Defaults to increasing qpos.
 
         Returns:
             Pure target-local handle and hinge semantics.
@@ -515,13 +527,16 @@ class OpenDoorAffordance(AntipodalAffordance):
             joint_pose_world[:3, 3] - handle_pose[:3, 3],
         )
         vertices, triangles = articulation.get_link_vert_face(link_name)
+        lower_limit = float(hinge.lower_limit)
+        upper_limit = float(hinge.upper_limit)
         return cls(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
             rotation_axis=rotation_axis_local,
             axis_origin=tuple(float(value) for value in axis_origin_local),
             joint_name=hinge.name,
-            joint_limits=(float(hinge.lower_limit), float(hinge.upper_limit)),
+            joint_limits=(lower_limit, upper_limit),
+            opening_direction=opening_direction,
         )
 
 

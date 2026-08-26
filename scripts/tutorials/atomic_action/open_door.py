@@ -35,6 +35,7 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     MotionPolicy,
     ObjectSemantics,
+    ObservedArticulationJointState,
     OpenDoorAffordance,
     OpenDoorGoal,
     OpenDoorOptions,
@@ -63,6 +64,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 
 MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
 HANDLE_LINK_NAME = "door_handle"
+MICROWAVE_SCENE_ENTITY_ID = "microwave"
 MICROWAVE_POSITION = (-1.0, 0.20, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90.0)  # degrees
 HANDLE_SCENE_ENTITY_ID = "microwave-door-handle"
@@ -81,7 +83,7 @@ def parse_arguments() -> argparse.Namespace:
         "--open_angle",
         type=float,
         default=math.radians(60.0),
-        help="Signed door-opening angle in radians (default: 60 degrees).",
+        help="Desired absolute hinge opening in radians (default: 60 degrees).",
     )
     parser.add_argument("--approach_distance", type=float, default=0.10)
     parser.add_argument("--retract_distance", type=float, default=0.10)
@@ -145,7 +147,18 @@ def main() -> None:
     semantics = create_door_handle_semantics(microwave)
     affordance = semantics.affordance
     assert isinstance(affordance, OpenDoorAffordance)
+    assert affordance.joint_limits is not None
+    lower_limit, upper_limit = affordance.joint_limits
+    closed_position = lower_limit if affordance.opening_direction > 0 else upper_limit
+    open_position = upper_limit if affordance.opening_direction > 0 else lower_limit
+    open_fraction = (args.open_angle - closed_position) / (
+        open_position - closed_position
+    )
     handle_pose = microwave.get_link_pose(HANDLE_LINK_NAME, to_matrix=True)
+    hinge_joint_index = microwave.joint_names.index(affordance.joint_name)
+    hinge_position = microwave.get_qpos(target=False)[
+        :, hinge_joint_index : hinge_joint_index + 1
+    ]
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "door_handle_link_pose", handle_pose)
 
@@ -176,6 +189,7 @@ def main() -> None:
                 OpenDoorGoal(
                     semantics,
                     SceneEntityPose(HANDLE_SCENE_ENTITY_ID),
+                    open_fraction=open_fraction,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
                 motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
@@ -184,7 +198,6 @@ def main() -> None:
                     door_waypoint_count=args.door_waypoint_count,
                     approach_distance=args.approach_distance,
                     retract_distance=args.retract_distance,
-                    open_angle=args.open_angle,
                 ),
             ),
         ),
@@ -193,6 +206,12 @@ def main() -> None:
                 timestamp=0.0,
                 version=0,
                 entities={HANDLE_SCENE_ENTITY_ID: EntityState(handle_pose)},
+                articulation_joints={
+                    (
+                        MICROWAVE_SCENE_ENTITY_ID,
+                        affordance.joint_name,
+                    ): ObservedArticulationJointState(hinge_position)
+                },
             ),
             control_dt=sim.sim_config.physics_dt,
         ),

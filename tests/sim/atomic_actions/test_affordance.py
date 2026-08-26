@@ -302,6 +302,18 @@ class TestOpenDoorAffordance:
         )
         assert affordance.axis_origin == pytest.approx((-1.0, 0.0, 0.0))
         assert affordance.joint_limits == pytest.approx((0.0, 2.0))
+        assert affordance.opening_direction == 1
+
+    def test_accepts_affordance_owned_negative_opening_direction(self):
+        articulation = self._articulation_with_parent_hinge()
+
+        affordance = OpenDoorAffordance.from_articulation(
+            articulation,
+            "door_handle",
+            opening_direction=-1,
+        )
+
+        assert affordance.opening_direction == -1
 
     def test_rejects_handle_without_parent_revolute_joint(self):
         articulation = self._articulation_with_parent_hinge()

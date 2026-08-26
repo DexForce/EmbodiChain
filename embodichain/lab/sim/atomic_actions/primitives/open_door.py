@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from numbers import Real
 from typing import ClassVar
 
 import torch
@@ -45,6 +46,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
+    PlannerDiagnostics,
     TimedTrajectory,
     normalize_success_mask,
 )
@@ -56,7 +58,10 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     SkillBindingContract,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.state import (
+    ObservedArticulationJointState,
+    PlanningContext,
+)
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     axis_translation_keyframes,
     build_pose_plan_states,
@@ -69,21 +74,39 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 @dataclass(frozen=True, slots=True, eq=False)
 class OpenDoorGoal(ObjectActionGoal):
-    """Door handle described by local grasp and parent-hinge semantics."""
+    """Door handle and desired absolute opening state."""
 
     goal_kind: ClassVar[str] = "open_door"
 
     target_pose: PoseGoalValue
     """Handle-link pose snapshot or late-bound scene-entity reference."""
 
+    open_fraction: float | torch.Tensor
+    """Desired hinge position normalized from its closed to open legal endpoint."""
+
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
         validate_pose_goal(self.target_pose, "target_pose", allow_waypoints=False)
+        if isinstance(self.open_fraction, bool) or not isinstance(
+            self.open_fraction,
+            (Real, torch.Tensor),
+        ):
+            raise TypeError("open_fraction must be a real number or torch.Tensor.")
+        if isinstance(self.open_fraction, torch.Tensor):
+            if self.open_fraction.dim() > 1 or self.open_fraction.numel() == 0:
+                raise ValueError(
+                    "open_fraction tensor must be scalar or have shape (B,)."
+                )
+            if not self.open_fraction.is_floating_point():
+                raise TypeError("open_fraction tensor must be floating point.")
+            object.__setattr__(self, "open_fraction", self.open_fraction.clone())
+        else:
+            object.__setattr__(self, "open_fraction", float(self.open_fraction))
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class OpenDoorOptions(ActionOptions):
-    """Per-invocation approach, opening, release, and retract behavior."""
+    """Per-invocation approach, interpolation, release, and retract behavior."""
 
     hand_interp_steps: int = 5
     """Number of waypoints used for each close/open hand segment."""
@@ -97,8 +120,8 @@ class OpenDoorOptions(ActionOptions):
     retract_distance: float = 0.1
     """Post-release retreat distance opposite the rotated approach axis."""
 
-    open_angle: float = math.pi / 6
-    """Signed requested hinge rotation in radians; defaults to 30 degrees."""
+    joint_position_tolerance: float = 1.0e-4
+    """Tolerance for legal-limit and already-open comparisons in radians."""
 
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
@@ -113,10 +136,10 @@ class OpenDoorOptions(ActionOptions):
             raise ValueError("retract_distance must be finite.")
         if self.retract_distance < 0.0:
             raise ValueError("retract_distance must be non-negative.")
-        if not math.isfinite(self.open_angle):
-            raise ValueError("open_angle must be finite.")
-        if abs(self.open_angle) <= 1.0e-6:
-            raise ValueError("open_angle must be non-zero.")
+        if not math.isfinite(self.joint_position_tolerance):
+            raise ValueError("joint_position_tolerance must be finite.")
+        if self.joint_position_tolerance < 0.0:
+            raise ValueError("joint_position_tolerance must be non-negative.")
 
 
 class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
@@ -167,6 +190,52 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
+
+        n_approach, n_reach, n_open, n_retract = self._motion_segment_lengths(
+            request.motion_policy.sample_count,
+            options.hand_interp_steps,
+            options.door_waypoint_count,
+        )
+        segment_lengths = {
+            "approach": n_approach,
+            "reach": n_reach,
+            "close": options.hand_interp_steps,
+            "open": n_open,
+            "release": options.hand_interp_steps,
+            "retract": n_retract,
+        }
+        hinge_state, hinge_error = self._resolve_hinge_state(
+            context,
+            affordance.joint_name,
+        )
+        if hinge_state is None:
+            return self.failed_plan(request, context, message=hinge_error)
+        hinge_rotation, active, already_open, semantic_valid = (
+            self._resolve_hinge_rotation(
+                target.open_fraction,
+                hinge_state.position,
+                hinge_state.valid_mask,
+                affordance.joint_limits,
+                affordance.opening_direction,
+                context,
+                tolerance=options.joint_position_tolerance,
+            )
+        )
+        if not active.any():
+            message = None
+            if not semantic_valid.all():
+                message = (
+                    "OpenDoor target or observed hinge state is invalid for one or "
+                    "more environments."
+                )
+            return self._hold_plan(
+                request,
+                context,
+                success=already_open,
+                segment_lengths=segment_lengths,
+                diagnostics_message=message,
+            )
+
         hand_open_qpos = grasp.joint_positions(
             OPEN_COMMAND,
             num_envs=context.batch_size,
@@ -185,10 +254,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             num_envs=self.num_envs,
             device=self.device,
         )
-        approach_direction_local = self._approach_direction_local(
-            affordance,
-            options.open_angle,
-        )
+        approach_direction_local = self._approach_direction_local(affordance)
         approach_direction_world = torch.matmul(
             link_pose[:, :3, :3], approach_direction_local
         )
@@ -208,11 +274,14 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             device=self.device,
             name="OpenDoor grasp-pose success",
         )
-        if not grasp_success.any():
-            return self.failed_plan(
+        actionable_grasp = active & grasp_success
+        if not actionable_grasp.any():
+            return self._hold_plan(
                 request,
                 context,
-                message="Failed to resolve a door-handle grasp pose.",
+                success=already_open,
+                segment_lengths=segment_lengths,
+                diagnostics_message="Failed to resolve a door-handle grasp pose.",
             )
 
         approach_xpos = translate_pose_world(
@@ -224,7 +293,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             grasp_xpos,
             affordance.rotation_axis,
             affordance.axis_origin,
-            options.open_angle,
+            hinge_rotation,
             options.door_waypoint_count,
         )
         rotated_approach_direction = torch.matmul(
@@ -236,11 +305,6 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             -rotated_approach_direction * options.retract_distance,
         )
 
-        n_approach, n_reach, n_open, n_retract = self._motion_segment_lengths(
-            request.motion_policy.sample_count,
-            options.hand_interp_steps,
-            options.door_waypoint_count,
-        )
         approach_success, approach_arm = self._plan_pose_segment(
             approach_xpos,
             start_arm_qpos,
@@ -287,13 +351,14 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             interpolation_dt=interpolation_dt,
             cartesian_linear=True,
         )
-        success = (
-            grasp_success
+        planned_success = (
+            actionable_grasp
             & approach_success
             & reach_success
             & open_success
             & retract_success
         )
+        success = already_open | planned_success
 
         hand_close = interpolate_hand_qpos(
             hand_open_qpos,
@@ -305,15 +370,6 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             hand_open_qpos,
             n_waypoints=options.hand_interp_steps,
         )
-        named_parts = (
-            ("approach", approach_arm),
-            ("reach", reach_arm),
-            ("close", hand_close),
-            ("open", open_arm),
-            ("release", hand_open),
-            ("retract", retract_arm),
-        )
-        segment_lengths = {name: part.shape[1] for name, part in named_parts}
         full = torch.empty(
             (self.num_envs, sum(segment_lengths.values()), self.robot_dof),
             dtype=context.robot.qpos.dtype,
@@ -340,6 +396,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         offset = stop
         full[:, offset:, arm_joint_ids] = retract_arm
         full[:, offset:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+        full[already_open] = context.last_qpos[already_open].unsqueeze(1)
 
         return self.build_plan(
             request,
@@ -351,6 +408,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
                 step_dt=interpolation_dt,
             ),
             expected_effects=StateDelta(),
+            diagnostics=self._semantic_diagnostics(semantic_valid),
             segment_lengths=segment_lengths,
             scene_dependency_end_segment=(
                 "reach" if self._scene_dependencies(request) else None
@@ -369,9 +427,8 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
     @staticmethod
     def _approach_direction_local(
         affordance: OpenDoorAffordance,
-        open_angle: float,
     ) -> torch.Tensor:
-        """Infer approach opposite the initial signed door-opening tangent."""
+        """Infer approach opposite the positive hinge-opening tangent."""
         axis = affordance.rotation_axis.to(dtype=torch.float32)
         axis = axis / torch.linalg.vector_norm(axis)
         origin = torch.tensor(
@@ -392,8 +449,170 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             )
         opening_tangent = torch.linalg.cross(axis, radial)
         opening_tangent = opening_tangent / torch.linalg.vector_norm(opening_tangent)
-        angle_sign = 1.0 if open_angle > 0.0 else -1.0
-        return -angle_sign * opening_tangent
+        return -affordance.opening_direction * opening_tangent
+
+    @staticmethod
+    def _resolve_hinge_state(
+        context: PlanningContext,
+        joint_name: str,
+    ) -> tuple[ObservedArticulationJointState | None, str | None]:
+        """Resolve one live hinge observation by its affordance-owned joint name."""
+        matches = [
+            state
+            for (
+                _,
+                observed_joint_name,
+            ), state in context.scene.articulation_joints.items()
+            if observed_joint_name == joint_name
+        ]
+        if not matches:
+            return None, f"No observed articulation joint named {joint_name!r}."
+        if len(matches) > 1:
+            return (
+                None,
+                f"Observed articulation joint name {joint_name!r} is ambiguous.",
+            )
+        return matches[0], None
+
+    def _resolve_hinge_rotation(
+        self,
+        open_fraction: float | torch.Tensor,
+        observed_position: torch.Tensor,
+        observed_valid_mask: torch.Tensor | None,
+        joint_limits: tuple[float, float] | None,
+        opening_direction: int,
+        context: PlanningContext,
+        *,
+        tolerance: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Resolve an opening-directed row-local delta from an absolute fraction."""
+        if joint_limits is None:
+            invalid = torch.zeros(
+                context.batch_size,
+                dtype=torch.bool,
+                device=self.device,
+            )
+            return (
+                torch.zeros_like(invalid, dtype=torch.float32),
+                invalid,
+                invalid,
+                invalid,
+            )
+        lower, upper = joint_limits
+        if not math.isfinite(lower) or not math.isfinite(upper) or upper <= lower:
+            invalid = torch.zeros(
+                context.batch_size,
+                dtype=torch.bool,
+                device=self.device,
+            )
+            return (
+                torch.zeros_like(invalid, dtype=torch.float32),
+                invalid,
+                invalid,
+                invalid,
+            )
+
+        fractions = torch.as_tensor(
+            open_fraction,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if fractions.dim() == 0 or fractions.shape == (1,):
+            fractions = fractions.reshape(1).expand(context.batch_size)
+        elif fractions.shape != (context.batch_size,):
+            raise ValueError(
+                "OpenDoorGoal.open_fraction must be scalar or match the planning "
+                f"batch size ({context.batch_size},)."
+            )
+
+        position = observed_position.to(device=self.device, dtype=torch.float32)
+        if position.shape == (1,):
+            position = position.expand(context.batch_size)
+        elif position.shape == (context.batch_size, 1):
+            position = position[:, 0]
+        else:
+            raise ValueError(
+                "OpenDoor hinge observation must have shape (1,) or (B, 1)."
+            )
+        if observed_valid_mask is None:
+            observation_valid = torch.ones(
+                context.batch_size,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        else:
+            observation_valid = observed_valid_mask.to(device=self.device)
+
+        closed_position = lower if opening_direction > 0 else upper
+        open_position = upper if opening_direction > 0 else lower
+        target_position = closed_position + fractions * (
+            open_position - closed_position
+        )
+        fraction_valid = (
+            torch.isfinite(fractions) & (fractions >= 0.0) & (fractions <= 1.0)
+        )
+        position_valid = (
+            observation_valid
+            & torch.isfinite(position)
+            & (position >= lower - tolerance)
+            & (position <= upper + tolerance)
+        )
+        rotation = target_position - position
+        directed_rotation = rotation * opening_direction
+        forward_or_reached = directed_rotation >= -tolerance
+        semantic_valid = fraction_valid & position_valid & forward_or_reached
+        already_open = semantic_valid & (directed_rotation.abs() <= tolerance)
+        active = semantic_valid & (directed_rotation > tolerance)
+        safe_rotation = torch.where(active, rotation, torch.zeros_like(rotation))
+        return safe_rotation, active, already_open, semantic_valid
+
+    def _hold_plan(
+        self,
+        request: ResolvedActionRequest[OpenDoorGoal, OpenDoorOptions],
+        context: PlanningContext,
+        *,
+        success: torch.Tensor,
+        segment_lengths: dict[str, int],
+        diagnostics_message: str | None,
+    ) -> ActionPlan:
+        """Return a segmented full-robot hold for reached and failed rows."""
+        frame_count = sum(segment_lengths.values())
+        positions = context.last_qpos.unsqueeze(1).expand(-1, frame_count, -1).clone()
+        diagnostics = PlannerDiagnostics(
+            backend=self.planning_services.planner_name,
+            messages=(() if diagnostics_message is None else (diagnostics_message,)),
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=TimedTrajectory.from_uniform_step(
+                positions,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
+            diagnostics=diagnostics,
+            segment_lengths=segment_lengths,
+            scene_dependency_end_segment=(
+                "reach" if self._scene_dependencies(request) else None
+            ),
+        )
+
+    def _semantic_diagnostics(
+        self,
+        semantic_valid: torch.Tensor,
+    ) -> PlannerDiagnostics:
+        """Describe row-local semantic rejection without changing success masking."""
+        messages = ()
+        if not semantic_valid.all():
+            messages = (
+                "OpenDoor target or observed hinge state is invalid for one or "
+                "more environments.",
+            )
+        return PlannerDiagnostics(
+            backend=self.planning_services.planner_name,
+            messages=messages,
+        )
 
     @staticmethod
     def _motion_segment_lengths(
@@ -457,38 +676,39 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         grasp_xpos: torch.Tensor,
         rotation_axis: torch.Tensor,
         axis_origin: tuple[float, float, float],
-        open_angle: float,
+        hinge_rotation: torch.Tensor,
         waypoint_count: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Rotate link poses about the hinge and recover corresponding EEF poses."""
         axis = rotation_axis.to(device=self.device, dtype=torch.float32)
         axis = axis / torch.linalg.vector_norm(axis)
-        angles = torch.linspace(
-            open_angle / waypoint_count,
-            open_angle,
+        fractions = torch.linspace(
+            1.0 / waypoint_count,
+            1.0,
             waypoint_count,
             dtype=torch.float32,
             device=self.device,
         )
+        angles = hinge_rotation.to(device=self.device, dtype=torch.float32)[:, None]
+        angles = angles * fractions[None]
         rotations = (
             torch.eye(4, dtype=torch.float32, device=self.device)
-            .unsqueeze(0)
-            .repeat(waypoint_count, 1, 1)
+            .reshape(1, 1, 4, 4)
+            .repeat(link_pose.shape[0], waypoint_count, 1, 1)
         )
-        rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
+        rotations[:, :, :3, :3] = axis_angle_to_rotation_matrix(
+            angles[:, :, None] * axis
+        )
         origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
         to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
         from_origin = torch.eye(4, dtype=torch.float32, device=self.device)
         to_origin[:3, 3] = origin
         from_origin[:3, 3] = -origin
         local_rotations = torch.matmul(
-            torch.matmul(to_origin.unsqueeze(0), rotations),
-            from_origin.unsqueeze(0),
+            torch.matmul(to_origin.reshape(1, 1, 4, 4), rotations),
+            from_origin.reshape(1, 1, 4, 4),
         )
-        opened_link_poses = torch.matmul(
-            link_pose[:, None],
-            local_rotations[None],
-        )
+        opened_link_poses = torch.matmul(link_pose[:, None], local_rotations)
         link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
         opened_eef_poses = torch.matmul(opened_link_poses, link_to_eef[:, None])
         return opened_link_poses, opened_eef_poses

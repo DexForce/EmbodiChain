@@ -269,6 +269,18 @@ remain mutable, but they never establish identity.
 or a previously returned pose cannot change the published snapshot. Publish a
 new scene version for every material dynamic-state change.
 
+`OpenDoorGoal.open_fraction` owns the desired absolute hinge state: `0` maps to
+the `OpenDoorAffordance` closed legal endpoint and `1` to its open endpoint.
+`OpenDoorAffordance.opening_direction` owns the closed-to-open joint-coordinate
+direction and defaults to increasing qpos; reverse-coordinate hinges configure
+`-1` at affordance construction. The planner automatically matches the
+affordance-resolved parent revolute joint name to one unique
+`SceneSnapshot.articulation_joints` observation, computes a row-local opening
+delta from measured qpos, holds rows already at target, and fails rows with
+invalid observations, illegal targets, or targets behind the current opening
+state. Interpolation density, approach/retract distances, and joint comparison
+tolerance remain `OpenDoorOptions` policy values.
+
 ## Scene registry integration
 
 `embodichain.lab.sim.skills.SceneRegistry` is the canonical integration catalog.

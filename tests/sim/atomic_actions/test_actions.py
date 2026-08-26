@@ -67,6 +67,7 @@ from embodichain.lab.sim.atomic_actions import (
     MoveJoints,
     MoveJointsOptions,
     ObjectSemantics,
+    ObservedArticulationJointState,
     OpenDoor,
     OpenDoorAffordance,
     OpenDoorGoal,
@@ -366,6 +367,30 @@ def _target_scene(
         timestamp=timestamp,
         version=version,
         entities={"target": EntityState(pose)},
+    )
+
+
+def _door_scene(
+    pose: torch.Tensor | None = None,
+    *,
+    hinge_position: torch.Tensor | None = None,
+    valid_mask: torch.Tensor | None = None,
+) -> SceneSnapshot:
+    """Build a handle pose and live parent-hinge observation."""
+    if pose is None:
+        pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    if hinge_position is None:
+        hinge_position = torch.zeros(NUM_ENVS, 1)
+    return SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"target": EntityState(pose)},
+        articulation_joints={
+            ("door", "door_hinge"): ObservedArticulationJointState(
+                hinge_position,
+                valid_mask,
+            )
+        },
     )
 
 
@@ -2089,7 +2114,11 @@ def test_twist_rotates_grasp_about_explicit_axis_origin() -> None:
             ),
         ),
         (
-            OpenDoorGoal,
+            lambda semantics, target_pose: OpenDoorGoal(
+                semantics,
+                target_pose,
+                open_fraction=0.5,
+            ),
             OpenDoorAffordance(
                 mesh_vertices=torch.tensor(
                     [[0.9, 0.0, 0.0], [1.1, 0.0, 0.0], [1.0, 0.1, 0.0]]
@@ -2424,7 +2453,7 @@ def test_slide_fk_path_remains_on_translation_axis() -> None:
     assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
 
 
-def _door_affordance() -> OpenDoorAffordance:
+def _door_affordance(*, opening_direction: int = 1) -> OpenDoorAffordance:
     """Build a handle at local +X around a local +Z hinge for pure tests."""
     return OpenDoorAffordance(
         mesh_vertices=torch.tensor(
@@ -2439,6 +2468,7 @@ def _door_affordance() -> OpenDoorAffordance:
         axis_origin=(0.0, 0.0, 0.0),
         joint_name="door_hinge",
         joint_limits=(0.0, math.pi / 2),
+        opening_direction=opening_direction,
     )
 
 
@@ -2474,7 +2504,6 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> Non
         door_waypoint_count=4,
         approach_distance=0.1,
         retract_distance=0.1,
-        open_angle=math.pi / 6,
     )
     link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
 
@@ -2482,12 +2511,16 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> Non
         action,
         ActionInvocation(
             skill_id="open_door",
-            goal=OpenDoorGoal(semantics, SceneEntityPose("target")),
+            goal=OpenDoorGoal(
+                semantics,
+                SceneEntityPose("target"),
+                open_fraction=1.0 / 3.0,
+            ),
             binding=_binding(action),
             motion_policy=MotionPolicy(sample_count=24),
             skill_options=options,
         ),
-        _context(scene=_target_scene(link_pose, timestamp=0.0, version=0)),
+        _context(scene=_door_scene(link_pose)),
     )
 
     trajectory = _joint_trajectory(plan)
@@ -2522,7 +2555,7 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> Non
         torch.tensor([1.0, 0.1, 0.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
-    angle = options.open_angle
+    angle = math.pi / 6
     expected_retract = torch.tensor(
         [
             math.cos(angle) - options.retract_distance * math.sin(angle),
@@ -2548,19 +2581,42 @@ def test_open_door_interpolates_link_arc_and_recovers_eef_poses() -> None:
         grasp_pose,
         torch.tensor([0.0, 0.0, 1.0]),
         (0.0, 0.0, 0.0),
-        math.pi / 6,
+        torch.tensor([math.pi / 6, math.pi / 4]),
         4,
     )
 
-    expected_position = torch.tensor(
-        [math.cos(math.pi / 6), math.sin(math.pi / 6), 0.0]
+    expected_positions = torch.tensor(
+        [
+            [math.cos(math.pi / 6), math.sin(math.pi / 6), 0.0],
+            [math.cos(math.pi / 4), math.sin(math.pi / 4), 0.0],
+        ]
     )
     assert opened_links.shape == (NUM_ENVS, 4, 4, 4)
     assert torch.allclose(
         opened_eef[:, -1, :3, 3],
-        expected_position.expand(NUM_ENVS, -1),
+        expected_positions,
         atol=1.0e-6,
     )
+
+
+def test_open_door_uses_affordance_owned_negative_opening_direction() -> None:
+    action = _bind_action(_motion_generator(), OpenDoor())
+    context = _context()
+
+    rotation, active, already_open, valid = action._resolve_hinge_rotation(
+        0.5,
+        torch.full((NUM_ENVS, 1), math.pi / 2),
+        None,
+        (0.0, math.pi / 2),
+        -1,
+        context,
+        tolerance=1.0e-4,
+    )
+
+    assert torch.allclose(rotation, torch.full((NUM_ENVS,), -math.pi / 4))
+    assert active.tolist() == [True, True]
+    assert already_open.tolist() == [False, False]
+    assert valid.tolist() == [True, True]
 
 
 def test_open_door_holds_failed_grasp_environment() -> None:
@@ -2586,12 +2642,15 @@ def test_open_door_holds_failed_grasp_environment() -> None:
         action,
         ActionInvocation(
             skill_id="open_door",
-            goal=OpenDoorGoal(semantics, torch.eye(4)),
+            goal=OpenDoorGoal(semantics, torch.eye(4), open_fraction=0.5),
             binding=_binding(action),
             motion_policy=MotionPolicy(sample_count=18),
-            skill_options=OpenDoorOptions(hand_interp_steps=3),
+            skill_options=OpenDoorOptions(
+                hand_interp_steps=3,
+                door_waypoint_count=4,
+            ),
         ),
-        context,
+        replace(context, scene=_door_scene()),
     )
 
     assert plan.plan_success.tolist() == [True, False]
@@ -2602,18 +2661,168 @@ def test_open_door_holds_failed_grasp_environment() -> None:
     )
 
 
-def test_open_door_rejects_wrong_affordance_and_invalid_angle() -> None:
+def test_open_door_fails_row_whose_target_would_close_hinge() -> None:
+    semantics = ObjectSemantics(
+        affordance=_door_affordance(),
+        geometry={},
+        label="door_handle",
+    )
+    action = _bind_action(_motion_generator(), OpenDoor())
+    context = _context(
+        scene=_door_scene(
+            hinge_position=torch.tensor([[0.0], [math.pi / 2]]),
+        )
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="open_door",
+            goal=OpenDoorGoal(
+                semantics,
+                SceneEntityPose("target"),
+                open_fraction=torch.tensor([0.5, 0.25]),
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=OpenDoorOptions(
+                hand_interp_steps=3,
+                door_waypoint_count=4,
+            ),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, False]
+    assert torch.allclose(
+        _joint_trajectory(plan).positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(24, -1),
+    )
+
+
+def test_open_door_fails_rows_with_invalid_fraction_or_out_of_limit_hinge() -> None:
+    semantics = ObjectSemantics(
+        affordance=_door_affordance(),
+        geometry={},
+        label="door_handle",
+    )
+    action = _bind_action(_motion_generator(), OpenDoor())
+    context = _context(
+        scene=_door_scene(
+            hinge_position=torch.tensor([[0.0], [math.pi]]),
+        )
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="open_door",
+            goal=OpenDoorGoal(
+                semantics,
+                SceneEntityPose("target"),
+                open_fraction=torch.tensor([1.1, 0.5]),
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=OpenDoorOptions(
+                hand_interp_steps=3,
+                door_waypoint_count=4,
+            ),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [False, False]
+    assert "invalid" in plan.diagnostics.messages[0]
+
+
+def test_open_door_holds_row_already_at_requested_open_fraction() -> None:
+    semantics = ObjectSemantics(
+        affordance=_door_affordance(),
+        geometry={},
+        label="door_handle",
+    )
+    action = _bind_action(_motion_generator(), OpenDoor())
+    context = _context(
+        scene=_door_scene(
+            hinge_position=torch.tensor([[math.pi / 4], [0.0]]),
+        )
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="open_door",
+            goal=OpenDoorGoal(
+                semantics,
+                SceneEntityPose("target"),
+                open_fraction=0.5,
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=OpenDoorOptions(
+                hand_interp_steps=3,
+                door_waypoint_count=4,
+            ),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert torch.allclose(
+        _joint_trajectory(plan).positions[0],
+        context.robot.qpos[0].unsqueeze(0).expand(24, -1),
+    )
+
+
+def test_open_door_fails_when_live_hinge_observation_is_missing() -> None:
+    semantics = ObjectSemantics(
+        affordance=_door_affordance(),
+        geometry={},
+        label="door_handle",
+    )
+    action = _bind_action(_motion_generator(), OpenDoor())
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="open_door",
+            goal=OpenDoorGoal(semantics, torch.eye(4), open_fraction=0.5),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=OpenDoorOptions(
+                hand_interp_steps=3,
+                door_waypoint_count=4,
+            ),
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [False, False]
+    assert plan.diagnostics.messages == (
+        "No observed articulation joint named 'door_hinge'.",
+    )
+
+
+def test_open_door_rejects_wrong_affordance_and_invalid_goal_shape() -> None:
     action = _bind_action(_motion_generator(), OpenDoor())
     semantics = ObjectSemantics(affordance=Affordance(), geometry={}, label="handle")
 
     with pytest.raises(ValueError, match="OpenDoorAffordance"):
         _plan_action(
             action,
-            _invocation(action, OpenDoorGoal(semantics, torch.eye(4))),
+            _invocation(
+                action,
+                OpenDoorGoal(semantics, torch.eye(4), open_fraction=0.5),
+            ),
             _context(),
         )
-    with pytest.raises(ValueError, match="open_angle must be non-zero"):
-        OpenDoorOptions(open_angle=0.0)
+    with pytest.raises(ValueError, match="scalar or have shape"):
+        OpenDoorGoal(
+            semantics,
+            torch.eye(4),
+            open_fraction=torch.zeros(2, 1),
+        )
 
 
 def test_open_door_validates_goal_binding_owner_and_endpoint_coverage() -> None:
@@ -2623,7 +2832,7 @@ def test_open_door_validates_goal_binding_owner_and_endpoint_coverage() -> None:
         geometry={},
         label="door_handle",
     )
-    valid_goal = OpenDoorGoal(semantics, torch.eye(4))
+    valid_goal = OpenDoorGoal(semantics, torch.eye(4), open_fraction=0.5)
 
     with pytest.raises(TypeError, match="expects goal OpenDoorGoal"):
         action.resolve_request(
