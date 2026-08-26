@@ -48,6 +48,7 @@ class BaseSolverTest:
         ]
 
     def setup_solver(self, solver_type: str, device: str = "cpu"):
+        self.solver = {}
         for arm_side, arm_name in self.get_arm_config():
             arm_params = W1ArmKineParams(
                 arm_side=arm_side,
@@ -334,9 +335,10 @@ class BaseSolverTest:
 
     @classmethod
     def teardown_class(cls):
-        if cls.solver is not None:
+        solver = getattr(cls, "solver", None)
+        if solver is not None:
             try:
-                del cls.solver
+                solver.clear()
                 print("solver destroyed successfully")
             except Exception as e:
                 print(f"Error during solver destruction: {e}")
@@ -544,15 +546,38 @@ class TestSRSCUDASolver(BaseSolverTest):
                 torch.sin(cuda_solution - cpu_solution),
                 torch.cos(cuda_solution - cpu_solution),
             )
+            dh_params = np.asarray(cuda_solver.cfg.dh_params)
+            directions = np.asarray(cuda_solver.cfg.rotation_directions)
+            model_q2 = sample_qpos[:, 1].numpy() * directions[1] + dh_params[1, 3]
+            model_q6 = sample_qpos[:, 5].numpy() * directions[5] + dh_params[5, 3]
+            singular = torch.from_numpy(
+                (np.abs(np.sin(model_q2)) <= 1e-6) | (np.abs(np.sin(model_q6)) <= 1e-6)
+            )
             assert torch.allclose(
-                wrapped_delta,
-                torch.zeros_like(wrapped_delta),
+                wrapped_delta[~singular],
+                torch.zeros_like(wrapped_delta[~singular]),
                 atol=1e-4,
                 rtol=1e-4,
             )
 
+            # Euler singularities have a free coupled joint, so backends may
+            # choose different nearby parameterizations after full sample-space
+            # completion. Both choices must remain close to the seed.
+            for solution in (cuda_solution, cpu_solution):
+                seed_delta = torch.atan2(
+                    torch.sin(solution[singular] - sample_qpos[singular]),
+                    torch.cos(solution[singular] - sample_qpos[singular]),
+                )
+                assert torch.all(
+                    seed_delta.abs() <= cuda_solver.cfg.redundancy_step + 1e-4
+                )
+
             cuda_reconstructed = cuda_solver.get_fk(cuda_qpos[:, 0]).cpu()
             cpu_reconstructed = cpu_solver.get_fk(cpu_qpos[:, 0]).cpu()
+            assert torch.allclose(
+                cuda_reconstructed, target.cpu(), atol=1e-4, rtol=1e-4
+            )
+            assert torch.allclose(cpu_reconstructed, target.cpu(), atol=1e-4, rtol=1e-4)
             assert torch.allclose(
                 cuda_reconstructed, cpu_reconstructed, atol=1e-4, rtol=1e-4
             )
