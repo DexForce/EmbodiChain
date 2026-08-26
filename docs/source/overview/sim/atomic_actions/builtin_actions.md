@@ -259,6 +259,7 @@ entity as a recovery dependency.
 | `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; monitored through `approach` only |
 | `AxisAlign.grasp_xpos` | yes | yes |
 | `AxisAlign` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `OpenDoorGoal.target_pose` | yes | yes; monitored through `reach` only |
 | `HandOverGoal.target_pose` | yes | yes |
 | `HandOver` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the initial object pose |
 | Coordinated pickup implicit initial pose via `ObjectSemantics.entity_id` | implicit snapshot reference | yes; only when `object_initial_pose` is omitted |

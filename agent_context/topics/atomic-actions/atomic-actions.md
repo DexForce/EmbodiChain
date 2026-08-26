@@ -477,6 +477,7 @@ Scene dependencies must match the poses each primitive actually consumes:
 | `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
 | `Press` | `PressGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `Slide` | `SlideGoal.target_pose` when it is a `SceneEntityPose`; the local grasp mesh does not own the link. |
+| `OpenDoor` | `OpenDoorGoal.target_pose` when it is a `SceneEntityPose`; monitoring stops after the `reach` segment so grasp- and hinge-induced handle motion does not trigger recovery. |
 | `Twist` | `TwistGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
 | `HandOver` | Its semantic object ID, when present, plus a `SceneEntityPose` in `HandOverGoal.target_pose`. The unified action observes the object before pickup, derives its middle transfer pose from the two arm roots, and owns pickup through final release. |

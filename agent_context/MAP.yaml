@@ -693,6 +693,7 @@ topics:
       - SceneEntityPose
       - PressGoal.target_pose
       - SlideGoal.target_pose
+      - OpenDoorGoal.target_pose
       - TwistGoal.target_pose
       - OpenDoorGoal.open_fraction
       - OpenDoorAffordance.opening_direction
