@@ -50,6 +50,7 @@ import torch
 
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
+    NewtonJointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
 )
@@ -288,13 +289,16 @@ def _mirror_drive_pros(
     Returns:
         A fresh :class:`JointDrivePropertiesCfg` for the dual arm.
     """
-    new = JointDrivePropertiesCfg(drive_type=base_drive.drive_type)
-    for prop in _DRIVE_PROPS:
+    new = type(base_drive)(drive_type=base_drive.drive_type)
+    properties = list(_DRIVE_PROPS)
+    if isinstance(base_drive, NewtonJointDrivePropertiesCfg):
+        properties.append("target_mode")
+    for prop in properties:
         val = getattr(base_drive, prop, None)
         if val is None:
             continue
         if isinstance(val, dict):
-            mirrored: Dict[str, float] = {}
+            mirrored: Dict[str, object] = {}
             for pattern, v in val.items():
                 mirrored[_prefixed_name(str(pattern), "left_", "joint", name_case)] = v
                 mirrored[_prefixed_name(str(pattern), "right_", "joint", name_case)] = v

@@ -56,7 +56,7 @@ class BaseUsdTest:
                 uid="sugar_box",
                 shape=MeshCfg(fpath=sugar_box_path),
                 body_type="dynamic",
-                use_usd_properties=False,
+                asset_physics_mode="overlay",
                 init_pos=[0.0, 1.0, 0.1],
                 attrs=default_attr,
             )
@@ -78,14 +78,22 @@ class BaseUsdTest:
         assert len(handles) == NUM_ARENAS
 
     def test_import_articulation(self):
-        default_drive = JointDrivePropertiesCfg()
+        default_drive = JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness=1e4,
+            damping=1e3,
+            max_effort=1e10,
+            max_velocity=1e10,
+            friction=0.0,
+            armature=0.0,
+        )
         h1_path = get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
         h1: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg(
                 uid="h1",
                 fpath=h1_path,
                 build_pk_chain=False,
-                use_usd_properties=False,
+                asset_physics_mode="overlay",
                 init_pos=[0.0, 0.0, 1.2],
                 drive_pros=default_drive,
             )
@@ -108,14 +116,14 @@ class BaseUsdTest:
         )
 
     def test_usd_properties(self):
-        """In this test, we set use_usd_properties=True to verify that the USD properties are correctly applied."""
+        """Verify that preserve mode keeps physics authored in USD assets."""
         h1_path = get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
         h1: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg(
                 uid="h1_beta",
                 fpath=h1_path,
                 build_pk_chain=False,
-                use_usd_properties=True,
+                asset_physics_mode="preserve",
                 init_pos=[1.0, 0.0, 1.2],
             )
         )
@@ -155,7 +163,7 @@ class BaseUsdTest:
                 uid="sugar_box_beta",
                 shape=MeshCfg(fpath=sugar_box_path),
                 body_type="dynamic",
-                use_usd_properties=True,
+                asset_physics_mode="preserve",
                 init_pos=[1.0, 1.0, 0.1],
             )
         )

@@ -117,6 +117,7 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
         cfg=ArticulationCfg(
             uid="drawer",
             fpath=get_data_path(DRAWER_ASSET),
+            asset_physics_mode="overlay",
             init_pos=(0.72, 0.0, 0.42),
             init_rot=(0.0, 0.0, 180.0),
             fix_base=True,

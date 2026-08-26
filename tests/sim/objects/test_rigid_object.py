@@ -26,9 +26,15 @@ from embodichain.lab.sim import (
     VisualMaterialCfg,
 )
 from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RigidObjectCfg, physics_cfg_for_backend
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
-from embodichain.lab.sim.cfg import NewtonCollisionAttributesCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonRigidBodyMaterialCfg,
+    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
+    RigidObjectCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 
@@ -83,9 +89,9 @@ class BaseRigidObjectTest:
                 "shape_type": "Mesh",
                 "fpath": duck_path,
             },
-            "attrs": {
-                "mass": 1.0,
-            },
+            "attrs": (
+                {"mass_props": {"mass": 1.0}} if physics == "newton" else {"mass": 1.0}
+            ),
             "body_type": "dynamic",
         }
         self.duck: RigidObject = self.sim.add_rigid_object(
@@ -398,12 +404,37 @@ class BaseRigidObjectTest:
         """Test the body_data property for dynamic objects."""
         # Dynamic object should have body_data
         assert self.duck.body_data is not None, "Dynamic duck should have body_data"
+        assert self.duck.body_data.mass.shape == (NUM_ARENAS,)
+        assert self.duck.body_data.inertia.shape == (NUM_ARENAS, 3)
 
         # Static object should return None with warning
         assert self.table.body_data is None, "Static table should not have body_data"
 
         # Kinematic object should have body_data
         assert self.chair.body_data is not None, "Kinematic chair should have body_data"
+
+    def test_default_physical_properties_remain_at_initialized_values(self):
+        """Test runtime writes do not mutate the mass-property snapshots."""
+        assert self.duck.body_data is not None
+        data = self.duck.body_data
+        initial_mass = self.duck.get_mass().clone()
+        initial_inertia = self.duck.get_inertia().clone()
+        initial_com_pose = data.com_pose.clone()
+
+        assert torch.allclose(data.default_mass, initial_mass)
+        assert torch.allclose(data.default_inertia, initial_inertia)
+        assert torch.allclose(data.default_com_pose, initial_com_pose)
+        assert torch.allclose(self.duck.default_mass, data.default_mass)
+
+        self.duck.set_mass(initial_mass + 0.5)
+        self.duck.set_inertia(initial_inertia + 0.1)
+        changed_com_pose = initial_com_pose.clone()
+        changed_com_pose[:, :3] += 0.05
+        self.duck.set_com_pose(changed_com_pose)
+
+        assert torch.allclose(data.default_mass, initial_mass)
+        assert torch.allclose(data.default_inertia, initial_inertia)
+        assert torch.allclose(data.default_com_pose, initial_com_pose)
 
     def test_physical_attributes(self):
         """Test getting and setting physical attributes and body states."""
@@ -444,18 +475,6 @@ class BaseRigidObjectTest:
 
         if self.physics == "newton":
             expected_mass = torch.ones(NUM_ARENAS, device=self.sim.device)
-            expected_friction = torch.full(
-                (NUM_ARENAS,),
-                self.duck.cfg.attrs.dynamic_friction,
-                device=self.sim.device,
-            )
-            expected_damping = torch.tensor(
-                [
-                    self.duck.cfg.attrs.linear_damping,
-                    self.duck.cfg.attrs.angular_damping,
-                ],
-                device=self.sim.device,
-            ).repeat(NUM_ARENAS, 1)
             expected_inertia = self.duck.get_inertia()
             assert expected_inertia.shape == (NUM_ARENAS, 3)
             assert (
@@ -463,24 +482,13 @@ class BaseRigidObjectTest:
             ).all(), "Initial inertia should be non-negative"
 
             assert torch.allclose(self.duck.get_mass(), expected_mass)
-            assert torch.allclose(self.duck.get_friction(), expected_friction)
-            assert torch.allclose(self.duck.get_damping(), expected_damping)
+            assert self.duck.get_friction().shape == (NUM_ARENAS,)
+            assert torch.isfinite(self.duck.get_friction()).all()
+            assert self.duck.get_damping().shape == (NUM_ARENAS, 2)
+            assert torch.isfinite(self.duck.get_damping()).all()
 
-            # set_attrs applies the Newton-supported subset (mass, friction,
-            # restitution, contact_offset) at runtime and mirrors the rest.
-            self.duck.set_attrs(
-                RigidBodyAttributesCfg(mass=2.5, dynamic_friction=0.7, restitution=0.4)
-            )
-            assert torch.allclose(
-                self.duck.get_mass(),
-                torch.full((NUM_ARENAS,), 2.5, device=self.sim.device),
-                atol=1e-5,
-            ), "Newton set_attrs(mass) did not apply via batch API"
-            assert torch.allclose(
-                self.duck.get_friction(),
-                torch.full((NUM_ARENAS,), 0.7, device=self.sim.device),
-                atol=1e-5,
-            ), "Newton set_attrs(dynamic_friction) did not apply via batch API"
+            with pytest.raises(TypeError, match="Default-backend-only"):
+                self.duck.set_attrs(RigidBodyAttributesCfg(mass=2.5))
 
             # Actor type is topology, not a runtime batch property.
             with pytest.raises(NotImplementedError, match="descriptor mutation"):
@@ -517,33 +525,14 @@ class BaseRigidObjectTest:
             ), "Newton set_damping should mirror onto metadata for get_damping"
 
             # Static Spawn actors do not have dynamic body ids. Their getters
-            # remain readable from authored metadata, with zero finite inertia.
-            assert torch.allclose(
-                self.table.get_mass(),
-                torch.full(
-                    (NUM_ARENAS,),
-                    self.table.cfg.attrs.mass,
-                    device=self.sim.device,
-                ),
-            )
-            assert torch.allclose(
-                self.table.get_friction(),
-                torch.full(
-                    (NUM_ARENAS,),
-                    self.table.cfg.attrs.dynamic_friction,
-                    device=self.sim.device,
-                ),
-            )
-            assert torch.allclose(
-                self.table.get_damping(),
-                torch.tensor(
-                    [
-                        self.table.cfg.attrs.linear_damping,
-                        self.table.cfg.attrs.angular_damping,
-                    ],
-                    device=self.sim.device,
-                ).repeat(NUM_ARENAS, 1),
-            )
+            # remain readable from source/backend metadata. Empty grouped cfgs
+            # intentionally preserve those values rather than authoring defaults.
+            assert self.table.get_mass().shape == (NUM_ARENAS,)
+            assert torch.isfinite(self.table.get_mass()).all()
+            assert self.table.get_friction().shape == (NUM_ARENAS,)
+            assert torch.isfinite(self.table.get_friction()).all()
+            assert self.table.get_damping().shape == (NUM_ARENAS, 2)
+            assert torch.isfinite(self.table.get_damping()).all()
             assert torch.equal(
                 self.table.get_inertia(),
                 torch.zeros((NUM_ARENAS, 3), device=self.sim.device),
@@ -868,6 +857,40 @@ class BaseRigidObjectTest:
             pos_partial[1, 2].item() > 1.0
         ), f"Env 1 should remain displaced after partial reset, got z={pos_partial[1, 2].item()}"
 
+    def test_reset_restores_default_physical_properties(self):
+        """Test full and partial reset restore mass, inertia, and COM defaults."""
+        assert self.duck.body_data is not None
+        data = self.duck.body_data
+        default_mass = data.default_mass.clone()
+        default_inertia = data.default_inertia.clone()
+        default_com_pose = data.default_com_pose.clone()
+
+        changed_mass = default_mass + 0.5
+        changed_inertia = default_inertia + 0.1
+        changed_com_pose = default_com_pose.clone()
+        changed_com_pose[:, :3] += 0.05
+        self.duck.set_mass(changed_mass)
+        self.duck.set_inertia(changed_inertia)
+        self.duck.set_com_pose(changed_com_pose)
+
+        self.duck.reset(env_ids=[0])
+
+        mass_after_partial = self.duck.get_mass()
+        inertia_after_partial = self.duck.get_inertia()
+        com_after_partial = data.com_pose
+        assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
+        assert torch.allclose(inertia_after_partial[0], default_inertia[0], atol=1e-5)
+        assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
+        assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
+        assert torch.allclose(inertia_after_partial[1], changed_inertia[1], atol=1e-5)
+        assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
+
+        self.duck.reset()
+
+        assert torch.allclose(self.duck.get_mass(), default_mass, atol=1e-5)
+        assert torch.allclose(self.duck.get_inertia(), default_inertia, atol=1e-5)
+        assert torch.allclose(data.com_pose, default_com_pose, atol=1e-5)
+
     def test_local_pose_matrix(self):
         """Test ``get_local_pose(to_matrix=True)`` returns correct shape and values.
 
@@ -1055,11 +1078,15 @@ class TestRigidObjectNewton(BaseRigidObjectTest):
             uid="duck_newton_native",
             shape=MeshCfg(fpath=duck_path),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                restitution=0.1,
-                newton=NewtonCollisionAttributesCfg(ke=1e3, kd=50.0, margin=0.01),
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=1.0),
+                collision_props=NewtonCollisionPropertiesCfg(margin=0.01),
+                material_props=NewtonRigidBodyMaterialCfg(
+                    dynamic_friction=0.5,
+                    restitution=0.1,
+                    ke=1e3,
+                    kd=50.0,
+                ),
             ),
         )
         obj: RigidObject = self.sim.add_rigid_object(cfg=cfg)

@@ -345,7 +345,11 @@ def _build_asset_robot_cfg(
     cfg.init_pos = tuple(args.init_pos)
     cfg.init_rot = tuple(args.init_rot)
     cfg.fix_base = args.fix_base
-    cfg.use_usd_properties = args.use_usd_properties
+    cfg.asset_physics_mode = getattr(args, "asset_physics_mode", None)
+    if cfg.asset_physics_mode is None:
+        cfg.asset_physics_mode = (
+            "preserve" if getattr(args, "use_usd_properties", False) else "overlay"
+        )
     cfg.control_parts = {control_part: joints}
     cfg.solver_cfg = {control_part: solver_cfg}
     return cfg, control_part, solver_urdf
@@ -864,11 +868,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=True,
         help="Fix the robot base (default: fixed).",
     )
-    asset_opts.add_argument(
+    asset_physics = asset_opts.add_mutually_exclusive_group()
+    asset_physics.add_argument(
+        "--asset-physics-mode",
+        choices=("preserve", "overlay"),
+        default="overlay",
+        help=(
+            "How asset physics is handled: preserve source-authored values or "
+            "overlay explicitly configured values (default: overlay for robots)."
+        ),
+    )
+    asset_physics.add_argument(
         "--use-usd-properties",
-        action="store_true",
-        default=False,
-        help="Use physical properties from the USD file (USD assets only).",
+        dest="asset_physics_mode",
+        action="store_const",
+        const="preserve",
+        help=(
+            "Deprecated alias for --asset-physics-mode preserve; also applies "
+            "to URDF assets."
+        ),
     )
 
     # --- Analysis -----------------------------------------------------------

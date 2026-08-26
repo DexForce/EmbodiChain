@@ -14,9 +14,29 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from embodichain.lab.sim.cfg import RobotCfg
+from typing import TypeVar
+
+from embodichain.lab.sim.cfg import (
+    JointDrivePropertiesCfg,
+    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
+    RobotCfg,
+)
 from embodichain.lab.sim.solvers import SolverCfg
 from embodichain.utils import logger
+
+_ConfigT = TypeVar("_ConfigT")
+
+
+def _merge_non_none_config(base: _ConfigT | None, override: _ConfigT) -> _ConfigT:
+    """Merge non-None configclass fields without discarding base defaults."""
+    if base is None:
+        return override
+    for field_name in override.__dataclass_fields__:
+        value = getattr(override, field_name)
+        if value is not None:
+            setattr(base, field_name, value)
+    return base
 
 
 def merge_solver_cfg(
@@ -146,7 +166,18 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge joint drive properties
             user_drive_pros_dict = override_cfg_dict.get("drive_pros")
             if isinstance(user_drive_pros_dict, dict):
+                if (
+                    user_drive_pros_dict.get("backend") == "newton"
+                    or "target_mode" in user_drive_pros_dict
+                ):
+                    base_cfg.drive_pros = JointDrivePropertiesCfg.from_dict(
+                        user_drive_pros_dict,
+                        defaults=base_cfg.drive_pros,
+                    )
+                    continue
                 for prop, val in user_drive_pros_dict.items():
+                    if prop == "backend":
+                        continue
                     # Get the current value in cfg (which has defaults)
                     default_val = getattr(base_cfg.drive_pros, prop, None)
 
@@ -164,8 +195,37 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge physics attributes
             user_attrs_dict = override_cfg_dict.get("attrs")
             if isinstance(user_attrs_dict, dict):
+                grouped_fields = set(RigidBodyPhysicsCfg.__dataclass_fields__)
+                if grouped_fields.intersection(user_attrs_dict):
+                    parsed = RigidBodyPhysicsCfg.from_dict(user_attrs_dict)
+                    if isinstance(base_cfg.attrs, RigidBodyPhysicsCfg):
+                        for field_name in grouped_fields:
+                            override = getattr(parsed, field_name)
+                            if override is None:
+                                continue
+                            base = getattr(base_cfg.attrs, field_name)
+                            if base is not None and type(base) is type(override):
+                                _merge_non_none_config(base, override)
+                            else:
+                                setattr(base_cfg.attrs, field_name, override)
+                    else:
+                        base_cfg.attrs = parsed
+                    continue
+                if "newton" in user_attrs_dict:
+                    raise ValueError(
+                        "Deprecated flat attrs are Default-backend-only and no "
+                        "longer accept attrs.newton. Use grouped "
+                        "RigidBodyPhysicsCfg properties for Newton."
+                    )
+                if user_attrs_dict and isinstance(base_cfg.attrs, RigidBodyPhysicsCfg):
+                    base_cfg.attrs = RigidBodyAttributesCfg.from_grouped(base_cfg.attrs)
                 for attr_key, attr_val in user_attrs_dict.items():
-                    setattr(base_cfg.attrs, attr_key, attr_val)
+                    if hasattr(base_cfg.attrs, attr_key):
+                        setattr(base_cfg.attrs, attr_key, attr_val)
+                    else:
+                        logger.log_warning(
+                            f"Key '{attr_key}' not found in " "RigidBodyAttributesCfg."
+                        )
             else:
                 logger.log_warning(
                     "attrs should be a dictionary. Skipping attrs merge."

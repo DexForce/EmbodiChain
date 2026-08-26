@@ -263,8 +263,7 @@ class _RigidConstraintTestSim:
         self._robots = {}
         self._rigid_objects = {}
         self._rigid_object_groups = {}
-        self._soft_objects = {}
-        self._cloth_objects = {}
+        self._deformable_objects = {}
         self._articulations = {}
         self._constraints = {}
         self.device = torch.device("cpu")

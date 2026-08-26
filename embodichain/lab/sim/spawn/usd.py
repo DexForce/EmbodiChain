@@ -18,13 +18,16 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
+from dataclasses import fields, replace
+from typing import TypeVar
 
 from dexsim.spawn import (
     ArticulationDesc,
+    CollisionDesc,
     MaterialDesc,
     ObjectDesc,
     RenderDesc,
+    RigidBodyPhysicsDesc,
 )
 from dexsim.types import ActorType
 
@@ -34,12 +37,67 @@ from embodichain.lab.sim.spawn.descriptors import (
     _compile_newton_collision,
     _compile_rigid_physics,
     _compile_visual_material,
+    _articulation_root_values,
     _pose_from_cfg,
     _required_uid,
+    _resolve_rigid_physics,
+    _validate_articulation_rigid_physics,
     _vector3,
 )
 
 __all__ = ["articulation_desc_from_usd", "rigid_desc_from_usd"]
+
+_PropertyCfgT = TypeVar("_PropertyCfgT")
+
+
+def _overlay_optional_properties(
+    source: _PropertyCfgT | None,
+    configured: _PropertyCfgT | None,
+) -> _PropertyCfgT | None:
+    """Overlay non-None dataclass fields without erasing source values."""
+    if configured is None:
+        return source
+    if source is None:
+        return configured
+    for item in fields(configured):
+        value = getattr(configured, item.name)
+        if value is not None:
+            setattr(source, item.name, value)
+    return source
+
+
+def _overlay_rigid_body_properties(
+    source: RigidBodyPhysicsDesc | None,
+    configured: RigidBodyPhysicsDesc,
+) -> RigidBodyPhysicsDesc:
+    """Merge a partial body config into properties parsed from USD."""
+    if source is None:
+        return configured
+    source.actor_type = configured.actor_type
+    source.dexsim = _overlay_optional_properties(source.dexsim, configured.dexsim)
+    source.newton = _overlay_optional_properties(source.newton, configured.newton)
+    if configured.mass is not None:
+        source.mass = configured.mass
+        source.density = None
+    elif configured.density is not None:
+        source.mass = None
+        source.density = configured.density
+    for name in ("inertia", "com_position", "com_quaternion"):
+        value = getattr(configured, name)
+        if value is not None:
+            setattr(source, name, value)
+    return source
+
+
+def _overlay_collision_properties(
+    source: CollisionDesc,
+    configured: CollisionDesc,
+) -> None:
+    """Merge partial contact properties while retaining parsed geometry."""
+    if configured.enable_collision is not None:
+        source.enable_collision = configured.enable_collision
+    source.dexsim = _overlay_optional_properties(source.dexsim, configured.dexsim)
+    source.newton = _overlay_optional_properties(source.newton, configured.newton)
 
 
 def rigid_desc_from_usd(
@@ -58,7 +116,7 @@ def rigid_desc_from_usd(
     desc.per_env = per_env
     materials = _namespace_materials(desc.renders, scene.materials, uid)
 
-    if cfg.use_usd_properties:
+    if cfg.resolve_asset_physics_mode() == "preserve":
         if desc.physics is None:
             raise ValueError(f"USD rigid object {path!r} has no physics.")
         cfg.body_type = {
@@ -69,14 +127,24 @@ def rigid_desc_from_usd(
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
         return desc, materials
 
-    desc.physics = _compile_rigid_physics(cfg.attrs, cfg.body_type)
+    physics = _resolve_rigid_physics(
+        cfg.attrs,
+        newton_solver_type=newton_solver_type,
+    )
+    configured_body = _compile_rigid_physics(physics, cfg.body_type)
+    desc.physics = _overlay_rigid_body_properties(desc.physics, configured_body)
     desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
     for collision in desc.collisions:
-        collision.enable_collision = bool(cfg.attrs.enable_collision)
-        collision.dexsim = _compile_dexsim_collision(cfg.attrs)
-        collision.newton = _compile_newton_collision(
-            cfg.attrs,
-            newton_solver_type=newton_solver_type,
+        _overlay_collision_properties(
+            collision,
+            CollisionDesc(
+                enable_collision=physics.collision_enabled,
+                dexsim=_compile_dexsim_collision(physics),
+                newton=_compile_newton_collision(
+                    physics,
+                    newton_solver_type=newton_solver_type,
+                ),
+            ),
         )
 
     material_ref, material_entry = _compile_visual_material(
@@ -99,6 +167,12 @@ def articulation_desc_from_usd(
     newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
     """Select the sole articulation in a USD stage."""
+    preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
+    if not preserve_asset_physics:
+        _validate_articulation_rigid_physics(
+            cfg,
+            newton_solver_type=newton_solver_type,
+        )
     path = source_path or cfg.fpath
     scene, desc = _parse_singleton(path, "articulations", "articulation")
     uid = _required_uid(
@@ -112,13 +186,12 @@ def articulation_desc_from_usd(
     renders = [visual for link in desc.links for visual in link.visuals]
     materials = _namespace_materials(renders, scene.materials, uid)
 
-    if cfg.use_usd_properties:
+    if preserve_asset_physics:
         cfg.fix_base = bool(desc.fixed_base)
         cfg.disable_self_collision = not desc.enable_self_collision
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
     else:
-        desc.fixed_base = bool(cfg.fix_base)
-        desc.enable_self_collision = not bool(cfg.disable_self_collision)
+        desc.fixed_base, desc.enable_self_collision = _articulation_root_values(cfg)
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
     return desc, materials
 

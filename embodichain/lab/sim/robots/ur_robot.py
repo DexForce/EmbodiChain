@@ -23,7 +23,6 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -140,6 +139,7 @@ class URRobotCfg(RobotCfg):
         }
 
         self.drive_pros = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"arm": 1e4},
             damping={"arm": 1e3},
             max_effort={"arm": _UR_MAX_EFFORT[robot_type]},

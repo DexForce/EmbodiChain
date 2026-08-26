@@ -123,10 +123,13 @@ class RigidBodyData:
         self._ang_acc = torch.zeros(
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
+        # Initialization-time physical-property snapshots. These are captured
+        # after backend materialization and remain unchanged by runtime writes.
+        self._default_mass: torch.Tensor | None = None
+        self._default_inertia: torch.Tensor | None = None
+        self._default_com_pose: torch.Tensor | None = None
+
         # center of mass pose in format (x, y, z, qx, qy, qz, qw)
-        self.default_com_pose = torch.zeros(
-            (self.num_instances, 7), dtype=torch.float32, device=self.device
-        )
         self._com_pose = torch.zeros(
             (self.num_instances, 7), dtype=torch.float32, device=self.device
         )
@@ -140,6 +143,65 @@ class RigidBodyData:
         self._friction = torch.zeros(
             (self.num_instances, 1), dtype=torch.float32, device=self.device
         )
+
+    @property
+    def default_physical_properties_initialized(self) -> bool:
+        """Whether the backend-resolved physical-property defaults are available."""
+        return (
+            self._default_mass is not None
+            and self._default_inertia is not None
+            and self._default_com_pose is not None
+        )
+
+    @property
+    def default_mass(self) -> torch.Tensor:
+        """Initialization-time mass with shape ``(N,)``."""
+        if self._default_mass is None:
+            raise RuntimeError("Default rigid-body mass has not been captured yet.")
+        return self._default_mass
+
+    @property
+    def default_inertia(self) -> torch.Tensor:
+        """Initialization-time inertia diagonal with shape ``(N, 3)``."""
+        if self._default_inertia is None:
+            raise RuntimeError("Default rigid-body inertia has not been captured yet.")
+        return self._default_inertia
+
+    @property
+    def default_com_pose(self) -> torch.Tensor:
+        """Initialization-time local center-of-mass pose with shape ``(N, 7)``."""
+        if self._default_com_pose is None:
+            raise RuntimeError("Default rigid-body COM pose has not been captured yet.")
+        return self._default_com_pose
+
+    def capture_default_physical_properties(
+        self,
+        *,
+        mass: torch.Tensor,
+        inertia: torch.Tensor,
+        com_pose: torch.Tensor,
+    ) -> None:
+        """Capture backend-resolved physical properties exactly once."""
+        expected_shapes = {
+            "mass": (self.num_instances,),
+            "inertia": (self.num_instances, 3),
+            "com_pose": (self.num_instances, 7),
+        }
+        values = {"mass": mass, "inertia": inertia, "com_pose": com_pose}
+        for name, value in values.items():
+            if tuple(value.shape) != expected_shapes[name]:
+                raise ValueError(
+                    f"Expected {name} shape {expected_shapes[name]}, got {tuple(value.shape)}."
+                )
+
+        if self.default_physical_properties_initialized:
+            raise RuntimeError(
+                "Default rigid-body physical properties are already captured."
+            )
+
+        self._default_mass = mass.to(self.device, dtype=torch.float32).clone()
+        self._default_inertia = inertia.to(self.device, dtype=torch.float32).clone()
+        self._default_com_pose = com_pose.to(self.device, dtype=torch.float32).clone()
 
     @property
     def is_newton_backend(self) -> bool:
@@ -216,6 +278,24 @@ class RigidBodyData:
             torch.Tensor: The linear and angular accelerations concatenated, with shape (N, 6).
         """
         return torch.cat((self.lin_acc, self.ang_acc), dim=-1)
+
+    @property
+    def mass(self) -> torch.Tensor:
+        """Get current masses with shape ``(N,)``."""
+        if not self.body_view.is_ready:
+            logger.log_error("RigidBodyData mass requested but body view is not ready.")
+        self.body_view.fetch_mass(self._mass)
+        return self._mass.squeeze(-1)
+
+    @property
+    def inertia(self) -> torch.Tensor:
+        """Get current inertia diagonals with shape ``(N, 3)``."""
+        if not self.body_view.is_ready:
+            logger.log_error(
+                "RigidBodyData inertia requested but body view is not ready."
+            )
+        self.body_view.fetch_inertia_diagonal(self._inertia)
+        return self._inertia
 
     @property
     def com_pose(self) -> torch.Tensor:
@@ -303,8 +383,14 @@ class RigidObject(BatchEntity):
         self._visual_material: List[VisualMaterialInst] = [None] * len(entities)
         self.is_shared_visual_material = False
 
-        # Determine if we should use USD properties or cfg properties.
-        if spawn_result is None and not cfg.use_usd_properties:
+        source_path = getattr(cfg.shape, "fpath", None)
+        is_usd_source = str(source_path).lower().endswith((".usd", ".usda", ".usdc"))
+        preserve_asset_physics = (
+            is_usd_source and cfg.resolve_asset_physics_mode() == "preserve"
+        )
+
+        # Procedural/non-USD sources have no authored physics to preserve.
+        if spawn_result is None and not preserve_asset_physics:
             for entity in entities:
                 entity.set_body_scale(*cfg.body_scale)
                 if is_newton_scene(self._ps):
@@ -333,9 +419,9 @@ class RigidObject(BatchEntity):
 
         self._apply_initial_state()
 
-        # update default center of mass pose (only for non-static bodies with body data).
+        # Cache reset-relative physical properties after backend materialization.
         if self._data is not None:
-            self._data.default_com_pose = self._data.com_pose.clone()
+            self._capture_default_physical_properties()
 
         # TODO: Must be called after setting all attributes.
         # May be improved in the future.
@@ -455,6 +541,45 @@ class RigidObject(BatchEntity):
 
         return self._data
 
+    @property
+    def default_mass(self) -> torch.Tensor:
+        """Initialization-time mass retained for backward compatibility."""
+        if self._data is None:
+            raise RuntimeError(
+                "Static rigid objects do not have a default mass buffer."
+            )
+        return self._data.default_mass
+
+    def _capture_default_physical_properties(self) -> None:
+        """Capture materialized mass properties as immutable reset defaults."""
+        if self._data is None or self._data.default_physical_properties_initialized:
+            return
+        if not self._data.body_view.is_ready:
+            logger.log_error(
+                "Cannot capture default rigid-body physical properties before "
+                "the backend view is ready."
+            )
+        self._data.capture_default_physical_properties(
+            mass=self.get_mass(),
+            inertia=self.get_inertia(),
+            com_pose=self._data.com_pose,
+        )
+
+    def _restore_default_physical_properties(self, env_ids: Sequence[int]) -> None:
+        """Restore initialization-time mass properties for selected rows."""
+        if (
+            self._data is None
+            or not self._data.default_physical_properties_initialized
+            or self.is_non_dynamic
+            or len(env_ids) == 0
+        ):
+            return
+
+        index = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        self.set_mass(self._data.default_mass[index], env_ids=env_ids)
+        self.set_inertia(self._data.default_inertia[index], env_ids=env_ids)
+        self.set_com_pose(self._data.default_com_pose[index], env_ids=env_ids)
+
     def _get_newton_attr(self, env_idx: int):
         """Return DexSim Newton metadata physical attributes for an entity."""
         entity = self._entities[env_idx]
@@ -477,11 +602,9 @@ class RigidObject(BatchEntity):
     def _get_newton_attr_or_none(self, env_idx: int):
         """Return the Newton meta PhysicalAttr, or None when not present.
 
-        Unlike :meth:`_get_newton_attr` this does not raise: objects spawned via
-        the desc-native path (``attrs.newton`` set) carry ``newton_shape``/
-        ``newton_body`` descriptors instead of a legacy ``attr``, so they have
-        no meta ``PhysicalAttr`` to mirror onto. Used by the not-ready setter
-        paths to tolerate both spawn paths.
+        Unlike :meth:`_get_newton_attr` this does not raise: objects created
+        from grouped Spawn descriptors may not carry a legacy ``attr`` mirror.
+        Used by not-ready setter paths to tolerate that representation.
         """
         entity = self._entities[env_idx]
         entity_handle = int(entity.get_native_handle())
@@ -886,6 +1009,13 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        if self._data is not None and self._data.is_newton_backend:
+            raise TypeError(
+                "RigidBodyAttributesCfg is a deprecated Default-backend-only "
+                "configuration. Use grouped RigidBodyPhysicsCfg during Newton "
+                "asset declaration and the granular runtime setters afterward."
+            )
+
         if isinstance(attrs, List) and len(local_env_ids) != len(attrs):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match attrs length {len(attrs)}."
@@ -1044,8 +1174,14 @@ class RigidObject(BatchEntity):
             )
 
         if self._data is not None and self._data.body_view.is_ready:
+            if env_ids is None:
+                return self._data.mass
             body_ids = self._data.body_ids_for(local_env_ids)
-            buf = self._data._mass[: len(local_env_ids)]
+            buf = torch.empty(
+                (len(local_env_ids), 1),
+                dtype=torch.float32,
+                device=self.device,
+            )
             self._data.body_view.fetch_mass(buf, body_ids)
             return buf.squeeze(-1)
 
@@ -1291,8 +1427,14 @@ class RigidObject(BatchEntity):
             )
 
         if self._data is not None and self._data.body_view.is_ready:
+            if env_ids is None:
+                return self._data.inertia
             body_ids = self._data.body_ids_for(local_env_ids)
-            buf = self._data._inertia[: len(local_env_ids)]
+            buf = torch.empty(
+                (len(local_env_ids), 3),
+                dtype=torch.float32,
+                device=self.device,
+            )
             self._data.body_view.fetch_inertia_diagonal(buf, body_ids)
             return buf
 
@@ -1865,10 +2007,12 @@ class RigidObject(BatchEntity):
 
         self.restore_visual_material(env_ids=local_env_ids)
 
-        # Spawn descriptors and their live property APIs are the canonical
-        # physical configuration; reset changes state only.
+        # Preserve the legacy Default-backend attribute reset before restoring
+        # the backend-resolved mass-property snapshot below.
         if not self.is_spawn_bound and not is_newton_scene(self._ps):
             self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
+
+        self._restore_default_physical_properties(local_env_ids)
 
         self.clear_dynamics(env_ids=local_env_ids)
 

@@ -612,6 +612,7 @@ def test_remove_asset_marks_visualization_topology_dirty() -> None:
     sim.prepare = MagicMock()
     sim._rigid_objects = {"cube": rigid_object}
     sim._rigid_object_groups = {}
+    sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
     sim._lights = {}
@@ -737,7 +738,7 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
     assert sim._window_record_save_threads == []
 
 
-def test_reset_objects_state_includes_soft_and_cloth_assets() -> None:
+def test_reset_objects_state_includes_deformable_assets() -> None:
     sim = object.__new__(SimulationManager)
     sim._robots = {}
     sim._articulations = {}
@@ -745,10 +746,12 @@ def test_reset_objects_state_includes_soft_and_cloth_assets() -> None:
     sim._rigid_object_groups = {}
     sim._lights = {}
     sim._sensors = {}
-    sim._soft_objects = {"soft": MagicMock()}
-    sim._cloth_objects = {"cloth": MagicMock()}
+    sim._deformable_objects = {
+        "soft": MagicMock(),
+        "cloth": MagicMock(),
+    }
 
     sim.reset_objects_state(env_ids=[1])
 
-    sim._soft_objects["soft"].reset.assert_called_once_with([1])
-    sim._cloth_objects["cloth"].reset.assert_called_once_with([1])
+    sim._deformable_objects["soft"].reset.assert_called_once_with([1])
+    sim._deformable_objects["cloth"].reset.assert_called_once_with([1])

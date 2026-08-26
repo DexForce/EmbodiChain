@@ -227,6 +227,7 @@ def create_robot(sim):
         ),
         control_parts=CONTROL_PARTS,
         drive_pros=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"joint[1-6]": 1e4, "LEFT_.*": 1e3},
             damping={"joint[1-6]": 1e3, "LEFT_.*": 1e2},
         ),

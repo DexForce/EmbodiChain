@@ -37,10 +37,12 @@ topics:
       - embodichain/lab/sim/__init__.py
       - embodichain/lab/sim/sim_manager.py
       - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/_legacy_cfg.py
       - embodichain/lab/sim/common.py
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
       - embodichain/lab/sim/objects/__init__.py
+      - embodichain/lab/sim/objects/deformable/
       - embodichain/lab/sim/sensors/__init__.py
       - embodichain/lab/sim/solvers/__init__.py
       - embodichain/lab/sim/planners/__init__.py
@@ -235,6 +237,7 @@ topics:
       - embodichain/lab/sim/objects/robot.py
       - embodichain/lab/sim/robots/
       - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/_legacy_cfg.py
     related_topics:
       - simulation-system
       - ik-solvers
@@ -323,6 +326,7 @@ topics:
       - embodichain/lab/sim/objects/rigid_object_group.py
       - embodichain/lab/sim/objects/soft_object.py
       - embodichain/lab/sim/objects/cloth_object.py
+      - embodichain/lab/sim/objects/deformable/
     related_topics:
       - simulation-system
       - env-framework

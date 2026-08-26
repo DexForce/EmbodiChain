@@ -69,6 +69,19 @@ def test_joint_control_is_enabled_by_default_and_can_be_disabled() -> None:
     assert disabled.joint_control is False
 
 
+def test_asset_physics_mode_and_legacy_alias_share_one_policy() -> None:
+    parser = _create_parser()
+    default = parser.parse_args(["--asset_path", ASSET_PATH])
+    preserve = parser.parse_args(
+        ["--asset_path", ASSET_PATH, "--asset-physics-mode", "preserve"]
+    )
+    legacy = parser.parse_args(["--asset_path", ASSET_PATH, "--use_usd_properties"])
+
+    assert default.asset_physics_mode == "overlay"
+    assert preserve.asset_physics_mode == "preserve"
+    assert legacy.asset_physics_mode == "preserve"
+
+
 def test_loaded_assets_are_published_immediately_in_viser() -> None:
     """Assets added after manager construction should be captured before waiting."""
     sim = Mock()

@@ -95,7 +95,7 @@ def main():
             shape=MeshCfg(fpath=sugar_box_path),
             body_type="dynamic",
             init_pos=[0.2, 0.2, 1.0],
-            use_usd_properties=True,
+            asset_physics_mode="preserve",
         )
     )
 
@@ -108,7 +108,7 @@ def main():
             fpath=h1_path,
             build_pk_chain=False,
             init_pos=[-0.2, -0.2, 1.05],
-            use_usd_properties=False,
+            asset_physics_mode="overlay",
         )
     )
 

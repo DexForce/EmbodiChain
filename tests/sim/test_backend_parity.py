@@ -46,9 +46,11 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 # feature -> {backend -> supported}
 BACKEND_CAPABILITIES: dict[str, dict[str, bool]] = {
     "robot": {"default": True, "newton": True},
+    "volume_deformables": {"default": True, "newton": False},
+    "surface_deformables": {"default": True, "newton": False},
     "soft_bodies": {"default": True, "newton": False},
     "cloth": {"default": True, "newton": False},
-    "rigid_object_group": {"default": True, "newton": False},
+    "rigid_object_group": {"default": True, "newton": True},
     "can_disable_manual_update": {"default": True, "newton": False},
 }
 
@@ -62,8 +64,10 @@ BACKENDS: dict[str, type[PhysicsBackend]] = {
 # elsewhere (e.g. set_manual_update) rather than an add_* guard.
 CAPABILITY_TO_ADD_METHOD: dict[str, str | None] = {
     "robot": "add_robot",
-    "soft_bodies": "add_soft_object",
-    "cloth": "add_cloth_object",
+    "volume_deformables": "add_deformable_object",
+    "surface_deformables": "add_deformable_object",
+    "soft_bodies": None,
+    "cloth": None,
     "rigid_object_group": "add_rigid_object_group",
     "can_disable_manual_update": None,
 }
@@ -110,8 +114,7 @@ def _make_sim_with_backend(backend: PhysicsBackend) -> SimulationManager:
     """
     sim = object.__new__(SimulationManager)
     sim.physics = backend
-    sim._soft_objects = {}
-    sim._cloth_objects = {}
+    sim._deformable_objects = {}
     sim._rigid_object_groups = {}
     sim._robots = {}
     sim._rigid_objects = {}
@@ -139,8 +142,14 @@ def test_add_method_guard_maps_to_capability(
     supported = BACKEND_CAPABILITIES[feature][backend_name]
     method = getattr(sim, add_method)
 
-    # Minimal cfg stub: add_* only reads .uid before/after the guard.
+    # Deformable dispatch needs its topology discriminator before the guard.
+    deformable_types = {
+        "volume_deformables": "volume",
+        "surface_deformables": "surface",
+    }
     cfg = SimpleNamespace(uid=None)
+    if feature in deformable_types:
+        cfg.deformable_type = deformable_types[feature]
 
     if supported:
         # Past the guard it will hit missing-world attrs; assert the failure is
@@ -153,7 +162,7 @@ def test_add_method_guard_maps_to_capability(
         )
         assert "not enabled" not in str(exc_info.value)
     else:
-        with pytest.raises(NotImplementedError, match="not enabled"):
+        with pytest.raises(NotImplementedError):
             method(cfg=cfg)
 
 

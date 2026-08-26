@@ -101,11 +101,15 @@ def create_microwave(sim) -> Articulation:
         cfg=ArticulationCfg(
             uid="microwave",
             fpath=get_data_path(MICROWAVE_ASSET),
+            asset_physics_mode="overlay",
             init_pos=MICROWAVE_POSITION,
             init_qpos=(0, 0, 0, 0),
             init_rot=MICROWAVE_ORIENTATION,
             drive_pros=JointDrivePropertiesCfg(
-                stiffness=1e-3, damping=1e2, max_effort=1e-2
+                drive_type="force",
+                stiffness=1e-3,
+                damping=1e2,
+                max_effort=1e-2,
             ),
             fix_base=True,
         )

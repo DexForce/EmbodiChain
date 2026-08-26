@@ -24,7 +24,11 @@ import pytest
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import RigidBodyGroupData, RigidObjectGroup
-from embodichain.lab.sim.cfg import RigidObjectGroupCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    RigidObjectGroupCfg,
+    RigidObjectCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from dexsim.types import ActorType
@@ -33,6 +37,12 @@ DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 NUM_ARENAS = 4
 Z_TRANSLATION = 2.0
+
+
+def _teardown_newton_physics() -> None:
+    from dexsim.engine.newton_physics import teardown_newton_physics
+
+    teardown_newton_physics()
 
 
 @pytest.mark.no_sim
@@ -60,9 +70,15 @@ def test_cpu_body_data_reads_angular_velocity_from_angular_api():
 class BaseRigidObjectGroupTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, device):
-        config = SimulationManagerCfg(headless=True, device=device, num_envs=NUM_ARENAS)
+    def setup_simulation(self, device: str, physics: str = "default") -> None:
+        config = SimulationManagerCfg(
+            headless=True,
+            device=device,
+            num_envs=NUM_ARENAS,
+            physics_cfg=physics_cfg_for_backend(physics),
+        )
         self.sim = SimulationManager(config)
+        self.physics = physics
 
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
@@ -114,6 +130,80 @@ class BaseRigidObjectGroupTest:
             combined_pose[..., :3, 3],
             atol=1e-5,
         ), "FAIL: Local poses do not match after setting."
+
+    def test_body_data_exposes_mass_properties(self):
+        """Current and initialization-time properties use [env, object] layout."""
+        data = self.obj_group.body_data
+        expected_prefix = (NUM_ARENAS, self.obj_group.num_objects)
+
+        assert data.mass.shape == expected_prefix
+        assert data.inertia.shape == (*expected_prefix, 3)
+        assert data.com_pose.shape == (*expected_prefix, 7)
+        assert data.default_mass.shape == data.mass.shape
+        assert data.default_inertia.shape == data.inertia.shape
+        assert data.default_com_pose.shape == data.com_pose.shape
+
+    def test_reset_restores_default_mass_properties(self):
+        """Partial reset restores Group mass properties only in selected envs."""
+        data = self.obj_group.body_data
+        env_ids = [0, 1]
+        obj_ids = [0]
+        default_mass = data.default_mass[env_ids, :1].clone()
+        default_inertia = data.default_inertia[env_ids, :1].clone()
+        default_com_pose = data.default_com_pose[env_ids, :1].clone()
+        changed_mass = default_mass + 0.5
+        changed_inertia = default_inertia * 1.25
+        changed_com_pose = default_com_pose.clone()
+        changed_com_pose[..., 0] += 0.02
+
+        self.obj_group.set_mass(changed_mass, env_ids=env_ids, obj_ids=obj_ids)
+        self.obj_group.set_inertia(
+            changed_inertia,
+            env_ids=env_ids,
+            obj_ids=obj_ids,
+        )
+        self.obj_group.set_com_pose(
+            changed_com_pose,
+            env_ids=env_ids,
+            obj_ids=obj_ids,
+        )
+
+        assert torch.allclose(data.default_mass[env_ids, :1], default_mass)
+        assert torch.allclose(data.default_inertia[env_ids, :1], default_inertia)
+        assert torch.allclose(data.default_com_pose[env_ids, :1], default_com_pose)
+
+        self.obj_group.reset(env_ids=[env_ids[0]])
+        mass_after_partial = self.obj_group.get_mass(env_ids=env_ids, obj_ids=obj_ids)
+        inertia_after_partial = self.obj_group.get_inertia(
+            env_ids=env_ids, obj_ids=obj_ids
+        )
+        com_after_partial = self.obj_group.get_com_pose(
+            env_ids=env_ids, obj_ids=obj_ids
+        )
+
+        assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
+        assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
+        assert torch.allclose(inertia_after_partial[0], default_inertia[0], atol=1e-5)
+        assert torch.allclose(inertia_after_partial[1], changed_inertia[1], atol=1e-5)
+        assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
+        assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
+
+        self.obj_group.reset(env_ids=[env_ids[1]])
+        assert torch.allclose(
+            self.obj_group.get_mass(env_ids=env_ids, obj_ids=obj_ids),
+            default_mass,
+            atol=1e-5,
+        )
+        assert torch.allclose(
+            self.obj_group.get_inertia(env_ids=env_ids, obj_ids=obj_ids),
+            default_inertia,
+            atol=1e-5,
+        )
+        assert torch.allclose(
+            self.obj_group.get_com_pose(env_ids=env_ids, obj_ids=obj_ids),
+            default_com_pose,
+            atol=1e-5,
+        )
 
     def test_get_user_ids(self):
         """Test get_user_ids method."""
@@ -169,10 +259,18 @@ class TestRigidObjectGroupCPU(BaseRigidObjectGroupTest):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRigidObjectGroupCUDA(BaseRigidObjectGroupTest):
     def setup_method(self):
         self.setup_simulation("cuda")
+
+
+class TestRigidObjectGroupNewton(BaseRigidObjectGroupTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", physics="newton")
+
+    def teardown_method(self):
+        super().teardown_method()
+        _teardown_newton_physics()
 
 
 if __name__ == "__main__":

@@ -60,6 +60,9 @@ from dexsim.engine import GizmoController, ObjectManipulator
 from embodichain.lab.sim.objects import (
     RigidObject,
     RigidObjectGroup,
+    DeformableObject,
+    SurfaceDeformableObject,
+    VolumeDeformableObject,
     SoftObject,
     ClothObject,
     Articulation,
@@ -77,6 +80,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    PhysicsBackendCfg,
     PhysicsCfg,
     GPUMemoryCfg,
     DefaultPhysicsCfg,
@@ -87,6 +91,9 @@ from embodichain.lab.sim.cfg import (
     WindowCameraPoseCfg,
     LightCfg,
     RigidObjectCfg,
+    DeformableObjectCfg,
+    SurfaceDeformableObjectCfg,
+    VolumeDeformableObjectCfg,
     SoftObjectCfg,
     ClothObjectCfg,
     RigidObjectGroupCfg,
@@ -97,10 +104,10 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.physics import NewtonPhysicsBackend, make_physics_backend
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
-    cloth_desc_from_cfg,
     configure_articulation_desc,
     rigid_desc_from_cfg,
-    soft_desc_from_cfg,
+    surface_deformable_desc_from_cfg,
+    volume_deformable_desc_from_cfg,
 )
 from embodichain.lab.sim.spawn.usd import (
     articulation_desc_from_usd,
@@ -136,6 +143,28 @@ __all__ = [
 ]
 
 
+# Deformable implementations remain backend-specific even though their public
+# object/data contract is shared. Newton is an explicit empty placeholder until
+# its native object adapters are integrated and validated.
+_DEFORMABLE_BACKEND_IMPLEMENTATIONS = {
+    "default": {
+        "volume": (
+            VolumeDeformableObjectCfg,
+            VolumeDeformableObject,
+            volume_deformable_desc_from_cfg,
+            "soft_object",
+        ),
+        "surface": (
+            SurfaceDeformableObjectCfg,
+            SurfaceDeformableObject,
+            surface_deformable_desc_from_cfg,
+            "cloth_object",
+        ),
+    },
+    "newton": {},
+}
+
+
 @configclass
 class SimulationManagerCfg:
     """Global robot simulation configuration."""
@@ -153,7 +182,7 @@ class SimulationManagerCfg:
         arena_space: float = 5.0,
         physics_dt: float | None = None,
         device: str | torch.device | None = None,
-        physics_cfg: PhysicsCfg | NewtonPhysicsCfg | None = None,
+        physics_cfg: PhysicsBackendCfg | None = None,
         sim_device: str | torch.device | None = None,
         physics_config: PhysicsCfg | None = None,
         gpu_memory_config: GPUMemoryCfg | None = None,
@@ -250,9 +279,7 @@ class SimulationManagerCfg:
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
 
-    physics_cfg: PhysicsCfg | NewtonPhysicsCfg = field(
-        default_factory=DefaultPhysicsCfg
-    )
+    physics_cfg: PhysicsBackendCfg = field(default_factory=DefaultPhysicsCfg)
     """Physics backend configuration (type selects default vs Newton backend)."""
 
     profiler: ProfilerCfg | None = None
@@ -306,12 +333,12 @@ class SimulationManagerCfg:
         self.device = value
 
     @property
-    def physics_config(self) -> PhysicsCfg | NewtonPhysicsCfg:
+    def physics_config(self) -> PhysicsBackendCfg:
         """Legacy alias for :attr:`physics_cfg`."""
         return self.physics_cfg
 
     @physics_config.setter
-    def physics_config(self, value: PhysicsCfg | NewtonPhysicsCfg) -> None:
+    def physics_config(self, value: PhysicsBackendCfg) -> None:
         validate_physics_cfg(value)
         self.physics_cfg = value
 
@@ -483,8 +510,7 @@ class SimulationManager:
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._constraints: Dict[str, RigidConstraint] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
-        self._soft_objects: Dict[str, SoftObject] = dict()
-        self._cloth_objects: Dict[str, ClothObject] = dict()
+        self._deformable_objects: Dict[str, DeformableObject] = dict()
         self._articulations: Dict[str, Articulation] = dict()
         self._robots: Dict[str, Robot] = dict()
 
@@ -692,8 +718,7 @@ class SimulationManager:
         uid_list.extend(list(self._robots.keys()))
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
-        uid_list.extend(list(self._soft_objects.keys()))
-        uid_list.extend(list(self._cloth_objects.keys()))
+        uid_list.extend(list(self._deformable_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
@@ -1379,18 +1404,20 @@ class SimulationManager:
         | Robot
         | RigidObject
         | RigidObjectGroup
+        | DeformableObject
         | Articulation
         | None
     ):
         """Get an asset by its UID.
 
-        The asset can be a light, sensor, robot, rigid object or articulation.
+        The asset can be a light, sensor, robot, rigid object, deformable, or
+        articulation.
 
         Args:
             uid (str): The UID of the asset.
 
         Returns:
-            Light | BaseSensor | Robot | RigidObject | Articulation | None: The asset instance if found, otherwise None.
+            The asset instance if found, otherwise ``None``.
         """
         if uid in self._lights:
             return self._lights[uid]
@@ -1402,10 +1429,8 @@ class SimulationManager:
             return self._rigid_objects[uid]
         if uid in self._rigid_object_groups:
             return self._rigid_object_groups[uid]
-        if uid in self._soft_objects:
-            return self._soft_objects[uid]
-        if uid in self._cloth_objects:
-            return self._cloth_objects[uid]
+        if uid in self._deformable_objects:
+            return self._deformable_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
@@ -1582,7 +1607,7 @@ class SimulationManager:
                     init_local_pose=descriptor.pose.copy(),
                     body_type=body_type,
                     body_scale=tuple(float(value) for value in descriptor.body_scale),
-                    use_usd_properties=True,
+                    asset_physics_mode="preserve",
                 )
                 facade = RigidObject(
                     cfg=cfg,
@@ -1614,7 +1639,8 @@ class SimulationManager:
                 cfg.uid = descriptor.name
                 cfg.fpath = file_path
                 cfg.init_local_pose = descriptor.pose.copy()
-                cfg.use_usd_properties = True
+                cfg.asset_physics_mode = "preserve"
+                cfg.use_usd_properties = None
                 cfg.fix_base = bool(descriptor.fixed_base)
                 cfg.disable_self_collision = not descriptor.enable_self_collision
                 cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
@@ -1697,93 +1723,102 @@ class SimulationManager:
             self.prepare()
         return rigid_obj
 
-    def add_soft_object(self, cfg: SoftObjectCfg) -> SoftObject:
-        """Add a soft object to the scene.
+    def add_deformable_object(self, cfg: DeformableObjectCfg) -> DeformableObject:
+        """Declare a volume or surface deformable in the scene.
+
+        DexSim is the only deformable implementation currently registered.
+        Backend capability flags and the dispatch boundary are intentionally
+        explicit so a future Newton adapter can be added without changing this
+        public method or its callers.
 
         Args:
-            cfg (SoftObjectCfg): Configuration for the soft object.
+            cfg: Volume- or surface-deformable configuration.
 
         Returns:
-            SoftObject: The added soft object instance handle.
+            The declared deformable facade.
+
+        Raises:
+            NotImplementedError: If the active backend or device cannot host
+                the requested deformable type.
+            ValueError: If the discriminator or UID is invalid.
         """
-        if not self.physics.supports_soft_bodies:
+        deformable_type = cfg.deformable_type
+        if deformable_type == "volume":
+            supported = self.physics.supports_volume_deformables
+        elif deformable_type == "surface":
+            supported = self.physics.supports_surface_deformables
+        else:
+            raise ValueError(
+                f"Unsupported deformable_type {deformable_type!r}; expected "
+                "'volume' or 'surface'."
+            )
+        if not supported:
             raise NotImplementedError(
-                f"The {self.physics.name} backend does not support soft bodies."
+                f"The {self.physics.name} backend does not yet provide a "
+                f"{deformable_type}-deformable object adapter."
             )
         if self.device.type != "cuda":
-            raise NotImplementedError("SoftObject currently requires a CUDA device.")
+            raise NotImplementedError(
+                "DexSim deformable objects currently require a CUDA device."
+            )
         if self.spawn_result is not None:
             raise NotImplementedError(
-                "DexSim Spawn does not yet support adding a soft body after finalize."
+                "DexSim Spawn does not yet support adding deformables after "
+                "finalization."
             )
+
         uid = cfg.uid
         if uid is None:
-            raise ValueError("Soft object uid must be specified.")
-        if uid in self._soft_objects:
-            raise ValueError(f"Soft object {uid!r} already exists.")
+            raise ValueError("Deformable object uid must be specified.")
+        if uid in self._deformable_objects:
+            raise ValueError(f"Deformable object {uid!r} already exists.")
 
-        descriptor, materials = soft_desc_from_cfg(cfg, per_env=True)
+        backend_implementations = _DEFORMABLE_BACKEND_IMPLEMENTATIONS.get(
+            self.physics.name
+        )
+        if not backend_implementations:
+            raise NotImplementedError(
+                f"No deformable implementation is registered for the "
+                f"{self.physics.name} backend."
+            )
+
+        config_cls, object_cls, descriptor_factory, spawn_kind = (
+            backend_implementations[deformable_type]
+        )
+        if not isinstance(cfg, config_cls):
+            raise TypeError(
+                f"A {deformable_type} deformable requires "
+                f"{config_cls.__name__}, got {type(cfg).__name__}."
+            )
+        descriptor, materials = descriptor_factory(cfg, per_env=True)
         self._spawn_scene.builder.materials.update(materials)
-        soft_object = SoftObject(
+        deformable = object_cls(
             cfg,
             entities=None,
             device=self.device,
             declared_num_instances=self.sim_config.num_envs,
         )
-
         self._spawn_scene.declare(
-            "soft_object",
+            spawn_kind,
             uid,
             descriptor,
-            facade=soft_object,
+            facade=deformable,
         )
-        self._soft_objects[uid] = soft_object
+        self._deformable_objects[uid] = deformable
         self.notify_visualization_topology_changed()
-        return soft_object
+        return deformable
+
+    def add_soft_object(self, cfg: SoftObjectCfg) -> SoftObject:
+        """Compatibility wrapper for adding a volume deformable."""
+        deformable = self.add_deformable_object(cfg)
+        assert isinstance(deformable, VolumeDeformableObject)
+        return deformable
 
     def add_cloth_object(self, cfg: ClothObjectCfg) -> ClothObject:
-        """Add a cloth object to the scene.
-
-        Args:
-            cfg (ClothObjectCfg): Configuration for the cloth object.
-
-        Returns:
-            ClothObject: The added cloth object instance handle.
-        """
-        if not self.physics.supports_cloth:
-            raise NotImplementedError(
-                f"The {self.physics.name} backend does not support cloth bodies."
-            )
-        if self.device.type != "cuda":
-            raise NotImplementedError("ClothObject currently requires a CUDA device.")
-        if self.spawn_result is not None:
-            raise NotImplementedError(
-                "DexSim Spawn does not yet support adding cloth after finalize."
-            )
-        uid = cfg.uid
-        if uid is None:
-            raise ValueError("Cloth object uid must be specified.")
-        if uid in self._cloth_objects:
-            raise ValueError(f"Cloth object {uid!r} already exists.")
-
-        descriptor, materials = cloth_desc_from_cfg(cfg, per_env=True)
-        self._spawn_scene.builder.materials.update(materials)
-        cloth_object = ClothObject(
-            cfg,
-            entities=None,
-            device=self.device,
-            declared_num_instances=self.sim_config.num_envs,
-        )
-
-        self._spawn_scene.declare(
-            "cloth_object",
-            uid,
-            descriptor,
-            facade=cloth_object,
-        )
-        self._cloth_objects[uid] = cloth_object
-        self.notify_visualization_topology_changed()
-        return cloth_object
+        """Compatibility wrapper for adding a surface deformable."""
+        deformable = self.add_deformable_object(cfg)
+        assert isinstance(deformable, SurfaceDeformableObject)
+        return deformable
 
     def get_rigid_object(self, uid: str) -> RigidObject | None:
         """Get a rigid object by its unique ID.
@@ -1799,33 +1834,28 @@ class SimulationManager:
             return None
         return self._rigid_objects[uid]
 
+    def get_deformable_object(self, uid: str) -> DeformableObject | None:
+        """Get a deformable object by its unique ID."""
+        if uid not in self._deformable_objects:
+            logger.log_warning(f"Deformable object {uid} not found.")
+            return None
+        return self._deformable_objects[uid]
+
     def get_soft_object(self, uid: str) -> SoftObject | None:
-        """Get a soft object by its unique ID.
-
-        Args:
-            uid (str): The unique ID of the soft object.
-
-        Returns:
-            SoftObject | None: The soft object instance if found, otherwise None.
-        """
-        if uid not in self._soft_objects:
+        """Get a volume deformable through the legacy soft-object API."""
+        deformable = self._deformable_objects.get(uid)
+        if not isinstance(deformable, VolumeDeformableObject):
             logger.log_warning(f"Soft object {uid} not found.")
             return None
-        return self._soft_objects[uid]
+        return deformable
 
     def get_cloth_object(self, uid: str) -> ClothObject | None:
-        """Get a cloth object by its unique ID.
-
-        Args:
-            uid (str): The unique ID of the cloth object.
-
-        Returns:
-            ClothObject | None: The cloth object instance if found, otherwise None.
-        """
-        if uid not in self._cloth_objects:
+        """Get a surface deformable through the legacy cloth-object API."""
+        deformable = self._deformable_objects.get(uid)
+        if not isinstance(deformable, SurfaceDeformableObject):
             logger.log_warning(f"Cloth object {uid} not found.")
             return None
-        return self._cloth_objects[uid]
+        return deformable
 
     def get_rigid_object_uid_list(self) -> List[str]:
         """Get current rigid body uid list
@@ -2013,21 +2043,25 @@ class SimulationManager:
         self._constraints[cfg.name] = constraint
         return constraint
 
-    def get_soft_object_uid_list(self) -> List[str]:
-        """Get current soft body uid list
+    def get_deformable_object_uid_list(self) -> List[str]:
+        """Return all deformable object UIDs in declaration order."""
+        return list(self._deformable_objects.keys())
 
-        Returns:
-            List[str]: list of soft body uid.
-        """
-        return list(self._soft_objects.keys())
+    def get_soft_object_uid_list(self) -> List[str]:
+        """Return volume-deformable UIDs through the legacy soft API."""
+        return [
+            uid
+            for uid, asset in self._deformable_objects.items()
+            if asset.deformable_type == "volume"
+        ]
 
     def get_cloth_object_uid_list(self) -> List[str]:
-        """Get current cloth body uid list
-
-        Returns:
-            List[str]: list of cloth body uid.
-        """
-        return list(self._cloth_objects.keys())
+        """Return surface-deformable UIDs through the legacy cloth API."""
+        return [
+            uid
+            for uid, asset in self._deformable_objects.items()
+            if asset.deformable_type == "surface"
+        ]
 
     def remove_rigid_constraint(
         self,
@@ -2819,6 +2853,7 @@ class SimulationManager:
 
         self._rigid_objects.pop(uid, None)
         self._rigid_object_groups.pop(uid, None)
+        self._deformable_objects.pop(uid, None)
         self._articulations.pop(uid, None)
         self._robots.pop(uid, None)
         self.notify_visualization_topology_changed()
@@ -3568,12 +3603,9 @@ class SimulationManager:
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
-        for uid, soft_obj in self._soft_objects.items():
+        for uid, deformable_obj in self._deformable_objects.items():
             if uid not in excluded_uids:
-                soft_obj.reset(env_ids)
-        for uid, cloth_obj in self._cloth_objects.items():
-            if uid not in excluded_uids:
-                cloth_obj.reset(env_ids)
+                deformable_obj.reset(env_ids)
         for uid, light in self._lights.items():
             if uid not in excluded_uids:
                 light.reset(env_ids)
@@ -3689,8 +3721,7 @@ class SimulationManager:
             for registry_name in (
                 "_rigid_objects",
                 "_rigid_object_groups",
-                "_soft_objects",
-                "_cloth_objects",
+                "_deformable_objects",
                 "_articulations",
                 "_robots",
             ):
@@ -3740,8 +3771,7 @@ class SimulationManager:
         _sever_wrapper_refs("_rigid_objects")
         _sever_wrapper_refs("_constraints")
         _sever_wrapper_refs("_rigid_object_groups")
-        _sever_wrapper_refs("_soft_objects")
-        _sever_wrapper_refs("_cloth_objects")
+        _sever_wrapper_refs("_deformable_objects")
         _sever_wrapper_refs("_articulations")
         _sever_wrapper_refs("_robots")
         _sever_wrapper_refs("_sensors")

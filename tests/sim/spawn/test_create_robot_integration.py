@@ -30,6 +30,12 @@ from scripts.tutorials.sim.create_robot import create_robot
 
 pytestmark = pytest.mark.requires_sim
 
+ARM_BASE_MASS = 3.167  # SR5 base_link inertial mass from the source URDF.
+ARM_BASE_INERTIA = (5.677594, 30.912516, 31.167990)
+ARM_STIFFNESS = 1.0e4
+ARM_DAMPING = 1.5e3
+ARM_MAX_EFFORT = 1.0e4
+
 
 class _ConfigCapture:
     def add_robot(self, cfg):
@@ -50,8 +56,10 @@ def _resolve_tutorial_properties(world, cfg):
         base.rigid_body.inertia.copy(),
         joint.dexsim.stiffness,
         joint.dexsim.damping,
+        joint.dexsim.max_force,
         joint.newton.target_ke,
         joint.newton.target_kd,
+        joint.effort_limit,
     )
 
 
@@ -65,17 +73,26 @@ def test_create_robot_preserves_source_inertia_and_arm_drive() -> None:
     config.backend = dexsim.types.Backend.VULKAN
     world = dexsim.World(config)
 
-    mass, inertia, stiffness, damping, newton_ke, newton_kd = (
-        _resolve_tutorial_properties(world, cfg)
-    )
+    (
+        mass,
+        inertia,
+        stiffness,
+        damping,
+        max_effort,
+        newton_ke,
+        newton_kd,
+        common_max_effort,
+    ) = _resolve_tutorial_properties(world, cfg)
 
-    assert mass == pytest.approx(1.0)
+    assert mass == pytest.approx(ARM_BASE_MASS)
     np.testing.assert_allclose(
         inertia,
-        [5.677594, 30.912516, 31.167990],
+        ARM_BASE_INERTIA,
         rtol=1.0e-5,
     )
-    assert stiffness == pytest.approx(1.0e4)
-    assert damping == pytest.approx(1.0e3)
-    assert newton_ke == pytest.approx(1.0e4)
-    assert newton_kd == pytest.approx(1.0e3)
+    assert stiffness == pytest.approx(ARM_STIFFNESS)
+    assert damping == pytest.approx(ARM_DAMPING)
+    assert max_effort == pytest.approx(ARM_MAX_EFFORT)
+    assert newton_ke == pytest.approx(ARM_STIFFNESS)
+    assert newton_kd == pytest.approx(ARM_DAMPING)
+    assert common_max_effort == pytest.approx(ARM_MAX_EFFORT)

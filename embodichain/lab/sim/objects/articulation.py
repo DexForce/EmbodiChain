@@ -46,6 +46,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RigidBodyAttributesCfg,
     RigidBodyAttributesOverrideCfg,
+    RigidBodyPhysicsCfg,
 )
 from dexsim.types import PhysicalAttr
 from embodichain.utils.string import (
@@ -159,6 +160,28 @@ class ArticulationData:
             dtype=torch.float32,
             device=self.device,
         )
+
+        # Current link mass-property buffers use the public articulation link
+        # ordering. Initialization snapshots are captured after backend
+        # materialization and remain unchanged by runtime writes.
+        self._mass = torch.zeros(
+            (self.num_instances, self.num_links),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._inertia = torch.zeros(
+            (self.num_instances, self.num_links, 3),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._com_pose = torch.zeros(
+            (self.num_instances, self.num_links, 7),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._default_mass: torch.Tensor | None = None
+        self._default_inertia: torch.Tensor | None = None
+        self._default_com_pose: torch.Tensor | None = None
 
         max_dof = self.dof
         if (
@@ -319,6 +342,142 @@ class ArticulationData:
             self._body_link_lin_vel,
             self._body_link_ang_vel,
         )
+
+    def _entity_link_name(self, entity: object, link_name: str) -> str:
+        """Resolve one public link name to an entity-local backend name."""
+        resolver = getattr(self.articulation_view, "entity_link_name", None)
+        if resolver is not None:
+            return resolver(entity, link_name)
+        return link_name
+
+    def read_physical_properties(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Refresh current mass, inertia diagonal, and local COM pose buffers.
+
+        COM poses use the articulation convention ``xyz + wxyz`` and all
+        tensors use the public link ordering.
+        """
+        masses: list[list[float]] = []
+        inertias: list[list[np.ndarray]] = []
+        com_poses: list[list[np.ndarray]] = []
+        for entity in self.entities:
+            mass_row: list[float] = []
+            inertia_row: list[np.ndarray] = []
+            com_row: list[np.ndarray] = []
+            for link_name in self.link_names:
+                local_name = self._entity_link_name(entity, link_name)
+                attr = entity.get_physical_attr(local_name)
+                mass_row.append(float(attr.mass))
+                inertia_row.append(np.asarray(attr.inertia, dtype=np.float32))
+                com_row.append(
+                    np.concatenate(
+                        (
+                            np.asarray(attr.com_position, dtype=np.float32),
+                            np.asarray(attr.com_quaternion, dtype=np.float32),
+                        )
+                    )
+                )
+            masses.append(mass_row)
+            inertias.append(inertia_row)
+            com_poses.append(com_row)
+
+        self._mass.copy_(
+            torch.as_tensor(
+                np.asarray(masses, dtype=np.float32),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        )
+        self._inertia.copy_(
+            torch.as_tensor(
+                np.asarray(inertias, dtype=np.float32),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        )
+        self._com_pose.copy_(
+            torch.as_tensor(
+                np.asarray(com_poses, dtype=np.float32),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        )
+        return self._mass, self._inertia, self._com_pose
+
+    @property
+    def mass(self) -> torch.Tensor:
+        """Current link masses with shape ``(N, num_links)``."""
+        return self.read_physical_properties()[0]
+
+    @property
+    def inertia(self) -> torch.Tensor:
+        """Current link inertia diagonals with shape ``(N, num_links, 3)``."""
+        return self.read_physical_properties()[1]
+
+    @property
+    def com_pose(self) -> torch.Tensor:
+        """Current local link COM poses with shape ``(N, num_links, 7)``."""
+        return self.read_physical_properties()[2]
+
+    @property
+    def default_physical_properties_initialized(self) -> bool:
+        """Whether initialization-time link mass properties are available."""
+        return (
+            self._default_mass is not None
+            and self._default_inertia is not None
+            and self._default_com_pose is not None
+        )
+
+    @property
+    def default_mass(self) -> torch.Tensor:
+        """Initialization-time link masses with shape ``(N, num_links)``."""
+        if self._default_mass is None:
+            raise RuntimeError("Default articulation link masses are unavailable.")
+        return self._default_mass
+
+    @property
+    def default_inertia(self) -> torch.Tensor:
+        """Initialization-time link inertia diagonals."""
+        if self._default_inertia is None:
+            raise RuntimeError("Default articulation link inertias are unavailable.")
+        return self._default_inertia
+
+    @property
+    def default_com_pose(self) -> torch.Tensor:
+        """Initialization-time local link COM poses in ``xyz + wxyz`` order."""
+        if self._default_com_pose is None:
+            raise RuntimeError("Default articulation link COM poses are unavailable.")
+        return self._default_com_pose
+
+    def capture_default_physical_properties(
+        self,
+        *,
+        mass: torch.Tensor,
+        inertia: torch.Tensor,
+        com_pose: torch.Tensor,
+    ) -> None:
+        """Capture backend-resolved link mass properties exactly once."""
+        expected_shapes = {
+            "mass": (self.num_instances, self.num_links),
+            "inertia": (self.num_instances, self.num_links, 3),
+            "com_pose": (self.num_instances, self.num_links, 7),
+        }
+        values = {"mass": mass, "inertia": inertia, "com_pose": com_pose}
+        for name, value in values.items():
+            if tuple(value.shape) != expected_shapes[name]:
+                raise ValueError(
+                    f"Expected {name} shape {expected_shapes[name]}, "
+                    f"got {tuple(value.shape)}."
+                )
+        if self.default_physical_properties_initialized:
+            raise RuntimeError(
+                "Default articulation link mass properties are already captured."
+            )
+
+        self._default_mass = mass.to(self.device, dtype=torch.float32).clone()
+        self._default_inertia = inertia.to(self.device, dtype=torch.float32).clone()
+        self._default_com_pose = com_pose.to(self.device, dtype=torch.float32).clone()
 
     @property
     def joint_stiffness(self) -> torch.Tensor:
@@ -507,73 +666,39 @@ class Articulation(BatchEntity):
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
-        # Get default masses.
-        self.default_link_masses = self.get_mass()
+        self._capture_default_physical_properties()
 
-        if self.cfg.use_usd_properties or spawn_result is not None:
-            self.default_joint_stiffness = self._data.joint_stiffness.clone()
-            self.default_joint_damping = self._data.joint_damping.clone()
-            self.default_joint_friction = self._data.joint_friction.clone()
-            self.default_joint_armature = self._data.joint_armature.clone()
-            self.default_joint_max_effort = self._data.qf_limits.clone()
-            self.default_joint_max_velocity = self._data.qvel_limits.clone()
+        preserve_asset_physics = self.cfg.resolve_asset_physics_mode() == "preserve"
+        self.default_joint_stiffness = self._data.joint_stiffness.clone()
+        self.default_joint_damping = self._data.joint_damping.clone()
+        self.default_joint_friction = self._data.joint_friction.clone()
+        self.default_joint_armature = self._data.joint_armature.clone()
+        self.default_joint_max_effort = self._data.qf_limits.clone()
+        self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
-            if spawn_result is None:
-                usd_drive_pros = self.cfg.drive_pros
-                usd_drive_pros.stiffness = (
-                    self.default_joint_stiffness[0].cpu().numpy().tolist()
-                )
-                usd_drive_pros.damping = (
-                    self.default_joint_damping[0].cpu().numpy().tolist()
-                )
-                usd_drive_pros.friction = (
-                    self.default_joint_friction[0].cpu().numpy().tolist()
-                )
-                usd_drive_pros.armature = (
-                    self.default_joint_armature[0].cpu().numpy().tolist()
-                )
-                usd_drive_pros.max_effort = (
-                    self.default_joint_max_effort[0].cpu().numpy().tolist()
-                )
-                usd_drive_pros.max_velocity = (
-                    self.default_joint_max_velocity[0].cpu().numpy().tolist()
-                )
-        else:
-            default_cfg = JointDrivePropertiesCfg()
-            values = {
-                "default_joint_damping": default_cfg.damping,
-                "default_joint_stiffness": default_cfg.stiffness,
-                "default_joint_max_effort": default_cfg.max_effort,
-                "default_joint_max_velocity": default_cfg.max_velocity,
-                "default_joint_friction": default_cfg.friction,
-                "default_joint_armature": default_cfg.armature,
-            }
-            for name, value in values.items():
-                setattr(
-                    self,
-                    name,
-                    torch.full(
-                        (len(self._entities), self._data.dof),
-                        float(value),
-                        dtype=torch.float32,
-                        device=self.device,
-                    ),
-                )
-            if spawn_result is None:
-                self._set_default_joint_drive()
+        # Spawn descriptors already contain build-time overlays. The retained
+        # legacy path applies only explicitly requested drive fields here.
+        if (
+            spawn_result is None
+            and not preserve_asset_physics
+            and self.cfg.drive_pros is not None
+        ):
+            self._set_default_joint_drive()
 
         # Regex limits for Spawn-owned URDF and authored USD articulations are
         # already applied by EmbodiChain to the source-resolved descriptor.
-        # Array limits, and USD assets that explicitly retain source
-        # properties, still require this post-bind runtime path because they
-        # are not declaration-time name rules.
-        is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
+        # Array limits still require the runtime path because they are not
+        # declaration-time name rules. Preserve mode keeps all source limits.
         qpos_limits_are_source_resolved = (
             spawn_result is not None
             and isinstance(self.cfg.qpos_limits, dict)
-            and not (is_usd_source and self.cfg.use_usd_properties)
+            and not preserve_asset_physics
         )
-        if self.cfg.qpos_limits is not None and not qpos_limits_are_source_resolved:
+        if (
+            self.cfg.qpos_limits is not None
+            and not preserve_asset_physics
+            and not qpos_limits_are_source_resolved
+        ):
             if isinstance(self.cfg.qpos_limits, dict):
                 indices, _, values = resolve_matching_names_values(
                     self.cfg.qpos_limits, self.joint_names
@@ -596,6 +721,7 @@ class Articulation(BatchEntity):
                     )
                 self.set_qpos_limits(qpos_limits)
 
+        is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
         self.pk_chain = None
         if self.cfg.build_pk_chain and not is_usd_source:
             self.pk_chain = create_pk_chain(
@@ -850,6 +976,77 @@ class Articulation(BatchEntity):
             RigidBodyData: The rigid body data manager.
         """
         return self._data
+
+    @property
+    def default_link_masses(self) -> torch.Tensor:
+        """Initialization-time link masses retained for compatibility."""
+        return self.body_data.default_mass
+
+    def _capture_default_physical_properties(self) -> None:
+        """Capture materialized link mass properties as reset defaults."""
+        if self._data.default_physical_properties_initialized:
+            return
+        mass, inertia, com_pose = self._data.read_physical_properties()
+        self._data.capture_default_physical_properties(
+            mass=mass,
+            inertia=inertia,
+            com_pose=com_pose,
+        )
+
+    def _resolve_link_names(
+        self, link_names: str | Sequence[str] | None
+    ) -> tuple[list[str], torch.Tensor]:
+        """Validate link names and return their public data-column indices."""
+        names = (
+            list(self.link_names)
+            if link_names is None
+            else [link_names] if isinstance(link_names, str) else list(link_names)
+        )
+        unknown = [name for name in names if name not in self.link_names]
+        if unknown:
+            raise ValueError(
+                f"Unknown articulation links {unknown}; available links: "
+                f"{self.link_names}."
+            )
+        indices = torch.as_tensor(
+            [self.link_names.index(name) for name in names],
+            dtype=torch.long,
+            device=self.device,
+        )
+        return names, indices
+
+    def _restore_default_physical_properties(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Restore initialization-time link mass properties for selected rows."""
+        if not self._data.default_physical_properties_initialized or len(env_ids) == 0:
+            return
+
+        env_index = self._resolve_env_ids(env_ids)
+        env_list = env_index.detach().cpu().tolist()
+        default_mass = self._data.default_mass[env_index]
+        default_inertia = self._data.default_inertia[env_index]
+        default_com_pose = self._data.default_com_pose[env_index]
+        current_mass, current_inertia, current_com_pose = (
+            value[env_index] for value in self._data.read_physical_properties()
+        )
+
+        mass_changed = not torch.allclose(current_mass, default_mass)
+        inertia_changed = not torch.allclose(current_inertia, default_inertia)
+        if mass_changed:
+            self.set_mass(default_mass, link_names=self.link_names, env_ids=env_list)
+        if mass_changed or inertia_changed:
+            self.set_inertia(
+                default_inertia,
+                link_names=self.link_names,
+                env_ids=env_list,
+            )
+        if not torch.allclose(current_com_pose, default_com_pose):
+            self.set_com_pose(
+                default_com_pose,
+                link_names=self.link_names,
+                env_ids=env_list,
+            )
 
     def _entity_link_name(self, env_idx: int, link_name: str) -> str:
         """Resolve a canonical link name to the backend entity's local name."""
@@ -1463,31 +1660,28 @@ class Articulation(BatchEntity):
     def set_mass(
         self,
         mass: torch.Tensor,
-        link_names: Sequence[str],
-        env_ids: Sequence[int] | None = None,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
         """Set the mass of specific links in the articulation.
 
         Args:
-            mass (torch.Tensor): The mass values to set with shape (N, len(link_names)).
-            link_names (Sequence[str]): The names of the links to set the mass for.
-            env_ids (Sequence[int] | None, optional): Environment indices to apply the mass change. If None, applies to all environments. Defaults to None.
+            mass: Mass values with shape ``(num_envs, num_links)``.
+            link_names: Link names to update. If None, all links are updated.
+            env_ids: Environment indices. If None, all rows are updated.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-
-        if len(local_env_ids) != len(mass):
-            logger.log_error(
-                f"Length of env_ids {len(local_env_ids)} does not match mass length {len(mass)}."
+        env_index = self._resolve_env_ids(env_ids)
+        env_list = env_index.detach().cpu().tolist()
+        names, _ = self._resolve_link_names(link_names)
+        mass = torch.as_tensor(mass, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env_list), len(names))
+        if tuple(mass.shape) != expected_shape:
+            raise ValueError(
+                f"Expected mass shape {expected_shape}, got {tuple(mass.shape)}."
             )
 
-        for link_name in link_names:
-            if link_name not in self.link_names:
-                logger.log_error(
-                    f"Link name {link_name} not found in {self.__class__.__name__}. Available links: {self.link_names}"
-                )
-
-        for i, env_idx in enumerate(local_env_ids):
-            for j, name in enumerate(link_names):
+        for i, env_idx in enumerate(env_list):
+            for j, name in enumerate(names):
                 if self.is_spawn_bound:
                     self._entities[env_idx].set_link_mass(name, mass[i, j].item())
                 elif self._data.is_newton_backend:
@@ -1498,54 +1692,154 @@ class Articulation(BatchEntity):
 
     def get_mass(
         self,
-        link_names: Sequence[str] | None = None,
-        env_ids: Sequence[int] | None = None,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Get the mass of specific links in the articulation.
 
         Args:
-            link_names (Sequence[str] | None, optional): The names of the links to get the mass for. If None, gets mass for all links. Defaults to None.
-            env_ids (Sequence[int] | None, optional): Environment indices to get the mass from. If None, gets from all environments. Defaults to None.
+            link_names: Link names to query. If None, all links are returned.
+            env_ids: Environment indices. If None, all rows are returned.
 
         Returns:
-            torch.Tensor: The mass of the specified links with shape (N, len(link_names)).
+            Selected link masses with shape ``(num_envs, num_links)``.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
+        env_index = self._resolve_env_ids(env_ids)
+        _, link_index = self._resolve_link_names(link_names)
+        return self.body_data.mass[
+            env_index[:, None],
+            link_index[None, :],
+        ]
 
-        if link_names is None:
-            link_names = self.link_names
-        else:
-            for link_name in link_names:
-                if link_name not in self.link_names:
-                    logger.log_error(
-                        f"Link name {link_name} not found in {self.__class__.__name__}. Available links: {self.link_names}"
+    def set_inertia(
+        self,
+        inertia: torch.Tensor,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set principal moments of inertia for selected links."""
+        env_index = self._resolve_env_ids(env_ids)
+        env_list = env_index.detach().cpu().tolist()
+        names, _ = self._resolve_link_names(link_names)
+        inertia = torch.as_tensor(inertia, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env_list), len(names), 3)
+        if tuple(inertia.shape) != expected_shape:
+            raise ValueError(
+                f"Expected inertia shape {expected_shape}, "
+                f"got {tuple(inertia.shape)}."
+            )
+
+        values = inertia.detach().cpu().numpy()
+        for i, env_idx in enumerate(env_list):
+            entity = self._entities[env_idx]
+            for j, name in enumerate(names):
+                local_name = self._entity_link_name(env_idx, name)
+                value = np.asarray(values[i, j], dtype=np.float32)
+                if self.is_spawn_bound and self._data.is_newton_backend:
+                    attr = entity.get_physical_attr(local_name)
+                    entity.set_physical_attr(
+                        attr,
+                        local_name,
+                        is_replace_inertial=False,
                     )
-
-        mass_tensor = torch.zeros(
-            (len(local_env_ids), len(link_names)),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        for i, env_idx in enumerate(local_env_ids):
-            for j, name in enumerate(link_names):
-                if self.is_spawn_bound:
-                    status, values = self._entities[env_idx].get_link_mass(name)
-                    if status < 0 or name not in values:
+                    link_desc = entity.get_link_desc(local_name)
+                    if link_desc.rigid_body is None:
                         raise RuntimeError(
-                            f"Spawn articulation {self.uid!r} did not expose "
-                            f"mass for link {name!r} in row {env_idx}."
+                            f"Articulation link {name!r} has no rigid-body descriptor."
                         )
-                    mass_tensor[i, j] = values[name]
-                elif self._data.is_newton_backend:
-                    local_name = self._entity_link_name(env_idx, name)
-                    mass_tensor[i, j] = self._entities[env_idx].get_link_mass(
-                        local_name
+                    link_desc.rigid_body.inertia = value.copy()
+                elif not self._data.is_newton_backend:
+                    entity.get_physical_body(local_name).set_mass_space_inertia_tensor(
+                        value
                     )
                 else:
-                    mass_tensor[i, j] = (
-                        self._entities[env_idx].get_physical_body(name).get_mass()
+                    attr = entity.get_physical_attr(local_name)
+                    attr.inertia = value
+                    entity.set_physical_attr(
+                        attr,
+                        local_name,
+                        is_replace_inertial=False,
                     )
-        return mass_tensor
+
+    def get_inertia(
+        self,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get principal moments of inertia for selected links."""
+        env_index = self._resolve_env_ids(env_ids)
+        _, link_index = self._resolve_link_names(link_names)
+        return self.body_data.inertia[
+            env_index[:, None],
+            link_index[None, :],
+        ]
+
+    def set_com_pose(
+        self,
+        com_pose: torch.Tensor,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set local COM poses in articulation ``xyz + wxyz`` convention."""
+        env_index = self._resolve_env_ids(env_ids)
+        env_list = env_index.detach().cpu().tolist()
+        names, _ = self._resolve_link_names(link_names)
+        com_pose = torch.as_tensor(com_pose, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env_list), len(names), 7)
+        if tuple(com_pose.shape) != expected_shape:
+            raise ValueError(
+                f"Expected COM pose shape {expected_shape}, "
+                f"got {tuple(com_pose.shape)}."
+            )
+
+        values = com_pose.detach().cpu().numpy()
+        for i, env_idx in enumerate(env_list):
+            entity = self._entities[env_idx]
+            for j, name in enumerate(names):
+                local_name = self._entity_link_name(env_idx, name)
+                position = np.asarray(values[i, j, :3], dtype=np.float32)
+                quaternion = np.asarray(values[i, j, 3:7], dtype=np.float32)
+                if self.is_spawn_bound and self._data.is_newton_backend:
+                    attr = entity.get_physical_attr(local_name)
+                    entity.set_physical_attr(
+                        attr,
+                        local_name,
+                        is_replace_inertial=False,
+                    )
+                    link_desc = entity.get_link_desc(local_name)
+                    if link_desc.rigid_body is None:
+                        raise RuntimeError(
+                            f"Articulation link {name!r} has no rigid-body descriptor."
+                        )
+                    link_desc.rigid_body.com_position = position.copy()
+                    link_desc.rigid_body.com_quaternion = quaternion.copy()
+                elif not self._data.is_newton_backend:
+                    entity.get_physical_body(local_name).set_cmass_local_pose(
+                        position,
+                        quaternion,
+                    )
+                else:
+                    attr = entity.get_physical_attr(local_name)
+                    attr.com_position = position
+                    attr.com_quaternion = quaternion
+                    entity.set_physical_attr(
+                        attr,
+                        local_name,
+                        is_replace_inertial=False,
+                    )
+
+    def get_com_pose(
+        self,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get local COM poses in articulation ``xyz + wxyz`` convention."""
+        env_index = self._resolve_env_ids(env_ids)
+        _, link_index = self._resolve_link_names(link_names)
+        return self.body_data.com_pose[
+            env_index[:, None],
+            link_index[None, :],
+        ]
 
     def get_link_physical_attr(
         self,
@@ -1590,7 +1884,7 @@ class Articulation(BatchEntity):
         link_names: str | Sequence[str] | None = None,
         env_ids: Sequence[int] | None = None,
         *,
-        base_attrs: RigidBodyAttributesCfg | None = None,
+        base_attrs: RigidBodyAttributesCfg | RigidBodyPhysicsCfg | None = None,
         replace_inertial: bool = False,
     ) -> None:
         """Set physical attributes for selected articulation links.
@@ -1603,11 +1897,20 @@ class Articulation(BatchEntity):
             replace_inertial: Recompute inertia when mass changes.
 
         .. attention::
-            On the Newton backend, link properties are retained on the Spawn
-            descriptor because the finalized model is immutable. Call
-            :meth:`SimulationManager.prepare` after this method to rebuild once
-            and apply all accumulated per-link changes.
+            The deprecated flat config inputs are Default-backend-only. Newton
+            link properties must be declared through grouped physics configs.
         """
+        is_newton = self._data is not None and self._data.is_newton_backend
+        if is_newton and isinstance(
+            attrs,
+            (RigidBodyAttributesCfg, RigidBodyAttributesOverrideCfg),
+        ):
+            raise TypeError(
+                f"{type(attrs).__name__} is a deprecated "
+                "Default-backend-only configuration. Use grouped link_attrs "
+                "during Newton asset declaration."
+            )
+
         if link_names is None:
             matched_link_names = self.link_names
         elif isinstance(link_names, str):
@@ -1622,6 +1925,8 @@ class Articulation(BatchEntity):
         if isinstance(attrs, RigidBodyAttributesOverrideCfg):
             if base_attrs is None:
                 base_attrs = self.cfg.attrs
+            if isinstance(base_attrs, RigidBodyPhysicsCfg):
+                base_attrs = RigidBodyAttributesCfg.from_grouped(base_attrs)
             physical_attr = attrs.merge_with(base_attrs)
             if attrs.mass is not None:
                 replace_inertial = True
@@ -1630,7 +1935,6 @@ class Articulation(BatchEntity):
         else:
             physical_attr = attrs
 
-        is_newton = self._data is not None and self._data.is_newton_backend
         local_env_ids = self._all_indices if env_ids is None else env_ids
         for env_idx in local_env_ids:
             for name in matched_link_names:
@@ -1653,7 +1957,7 @@ class Articulation(BatchEntity):
         max_velocity: torch.Tensor | None = None,
         friction: torch.Tensor | None = None,
         armature: torch.Tensor | None = None,
-        drive_type: str = "none",
+        drive_type: str | None = None,
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
     ) -> None:
@@ -1666,7 +1970,7 @@ class Articulation(BatchEntity):
             max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
             friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
             armature (torch.Tensor): The joint armature with shape (len(env_ids), len(joint_ids)).
-            drive_type (str, optional): The type of drive to apply. Defaults to "none".
+            drive_type: Optional drive type. ``None`` preserves the current mode.
             joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
             env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
         """
@@ -1687,12 +1991,11 @@ class Articulation(BatchEntity):
                         "DexSim's acceleration drive. Use drive_type='force' "
                         "or provide a Newton-native drive descriptor."
                     )
-                if drive_type not in {"force", "none"}:
+                if drive_type is not None and drive_type not in {"force", "none"}:
                     raise ValueError(f"Unsupported joint drive type {drive_type!r}.")
-                drive_args = {
-                    "target_mode": 3 if drive_type == "force" else 0,
-                    "joint_ids": local_joint_ids,
-                }
+                drive_args = {"joint_ids": local_joint_ids}
+                if drive_type is not None:
+                    drive_args["target_mode"] = 3 if drive_type == "force" else 0
                 if stiffness is not None:
                     drive_args["target_ke"] = _drive_arg(stiffness, i)
                 if damping is not None:
@@ -1708,10 +2011,9 @@ class Articulation(BatchEntity):
                 self._entities[env_idx].set_newton_drive(**drive_args)
                 continue
 
-            drive_args = {
-                "drive_type": get_dexsim_drive_type(drive_type),
-                "joint_ids": local_joint_ids,
-            }
+            drive_args = {"joint_ids": local_joint_ids}
+            if drive_type is not None:
+                drive_args["drive_type"] = get_dexsim_drive_type(drive_type)
             if stiffness is not None:
                 drive_args["stiffness"] = _drive_arg(stiffness, i)
             if damping is not None:
@@ -1957,6 +2259,7 @@ class Articulation(BatchEntity):
         self.cfg: ArticulationCfg
 
         self.restore_visual_material(env_ids=local_env_ids)
+        self._restore_default_physical_properties(local_env_ids)
 
         if self.cfg.init_local_pose is not None:
             pose = (
@@ -2014,6 +2317,8 @@ class Articulation(BatchEntity):
 
         if drive_pros is None:
             drive_pros = self.cfg.drive_pros
+        if drive_pros is None:
+            return
 
         drive_props = [
             ("damping", self.default_joint_damping),
@@ -2046,9 +2351,9 @@ class Articulation(BatchEntity):
                     logger.log_error(f"Failed to set {prop_name}: {e}")
 
         if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type", "none")
+            drive_type = drive_pros.get("drive_type")
         else:
-            drive_type = getattr(drive_pros, "drive_type", "none")
+            drive_type = getattr(drive_pros, "drive_type", None)
 
         # Apply drive parameters to all articulations in the batch
         self.set_joint_drive(

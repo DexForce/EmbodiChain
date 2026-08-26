@@ -48,9 +48,11 @@ from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
 )
 from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 from embodichain.lab.sim.cfg import (
+    DexsimCollisionPropertiesCfg,
     RobotCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
@@ -281,7 +283,7 @@ class DexforceW1Cfg(RobotCfg):
             "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e3},
             "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10, HEAD_JOINTS: 1e5},
         }
-        drive_pros = JointDrivePropertiesCfg(**joint_params)
+        drive_pros = JointDrivePropertiesCfg(drive_type="force", **joint_params)
 
         if with_default_eef:
             eef_joint_names = DEFAULT_EEF_HAND_JOINT_NAMES
@@ -299,10 +301,12 @@ class DexforceW1Cfg(RobotCfg):
             "min_position_iters": 32,
             "min_velocity_iters": 8,
             "drive_pros": drive_pros,
-            "attrs": RigidBodyAttributesCfg(
-                static_friction=0.95,
-                dynamic_friction=0.9,
-                contact_offset=0.001,
+            "attrs": RigidBodyPhysicsCfg(
+                collision_props=DexsimCollisionPropertiesCfg(contact_offset=0.001),
+                material_props=RigidBodyMaterialCfg(
+                    static_friction=0.95,
+                    dynamic_friction=0.9,
+                ),
             ),
         }
 

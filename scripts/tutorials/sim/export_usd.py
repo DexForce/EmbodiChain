@@ -208,6 +208,7 @@ def create_caffe(sim: SimulationManager) -> Robot:
     container_cfg = ArticulationCfg(
         uid="caffe",
         fpath=get_data_path("MultiW1Data/cafe/cafe.urdf"),
+        asset_physics_mode="overlay",
         init_pos=[1.05, -0.5, 0.79],
         init_rot=[0, 0, -30],
         attrs=RigidBodyAttributesCfg(

@@ -63,6 +63,24 @@ class RigidBodyGroupData:
             (num_instances, num_objects, 3), dtype=torch.float32, device=device
         )
         self._ang_vel = torch.empty_like(self._lin_vel)
+        self._mass = torch.empty(
+            (num_instances, num_objects, 1),
+            dtype=torch.float32,
+            device=device,
+        )
+        self._inertia = torch.empty(
+            (num_instances, num_objects, 3),
+            dtype=torch.float32,
+            device=device,
+        )
+        self._com_pose = torch.empty(
+            (num_instances, num_objects, 7),
+            dtype=torch.float32,
+            device=device,
+        )
+        self._default_mass: torch.Tensor | None = None
+        self._default_inertia: torch.Tensor | None = None
+        self._default_com_pose: torch.Tensor | None = None
 
     @property
     def pose(self) -> torch.Tensor:
@@ -86,6 +104,85 @@ class RigidBodyGroupData:
     def vel(self) -> torch.Tensor:
         """Linear and angular velocities with shape ``[env, object, 6]``."""
         return torch.cat((self.lin_vel, self.ang_vel), dim=-1)
+
+    @property
+    def mass(self) -> torch.Tensor:
+        """Current masses with shape ``[env, object]``."""
+        self.body_view.fetch_mass(self._mass.reshape(-1, 1))
+        return self._mass.squeeze(-1)
+
+    @property
+    def inertia(self) -> torch.Tensor:
+        """Current inertia diagonals with shape ``[env, object, 3]``."""
+        self.body_view.fetch_inertia_diagonal(self._inertia.reshape(-1, 3))
+        return self._inertia
+
+    @property
+    def com_pose(self) -> torch.Tensor:
+        """Current local COM poses in Group ``xyz + wxyz`` convention."""
+        flat = self._com_pose.reshape(-1, 7)
+        self.body_view.fetch_com_local_pose(flat)
+        flat[:, 3:7] = convert_quat(flat[:, 3:7], to="wxyz")
+        return self._com_pose
+
+    @property
+    def default_physical_properties_initialized(self) -> bool:
+        """Whether initialization-time mass properties are available."""
+        return (
+            self._default_mass is not None
+            and self._default_inertia is not None
+            and self._default_com_pose is not None
+        )
+
+    @property
+    def default_mass(self) -> torch.Tensor:
+        """Initialization-time masses with shape ``[env, object]``."""
+        if self._default_mass is None:
+            raise RuntimeError("Default rigid-object Group masses are unavailable.")
+        return self._default_mass
+
+    @property
+    def default_inertia(self) -> torch.Tensor:
+        """Initialization-time inertia diagonals."""
+        if self._default_inertia is None:
+            raise RuntimeError("Default rigid-object Group inertias are unavailable.")
+        return self._default_inertia
+
+    @property
+    def default_com_pose(self) -> torch.Tensor:
+        """Initialization-time local COM poses in ``xyz + wxyz`` order."""
+        if self._default_com_pose is None:
+            raise RuntimeError("Default rigid-object Group COM poses are unavailable.")
+        return self._default_com_pose
+
+    def capture_default_physical_properties(
+        self,
+        *,
+        mass: torch.Tensor,
+        inertia: torch.Tensor,
+        com_pose: torch.Tensor,
+    ) -> None:
+        """Capture backend-resolved Group mass properties exactly once."""
+        expected_shapes = {
+            "mass": (self.num_instances, self.num_objects),
+            "inertia": (self.num_instances, self.num_objects, 3),
+            "com_pose": (self.num_instances, self.num_objects, 7),
+        }
+        values = {"mass": mass, "inertia": inertia, "com_pose": com_pose}
+        for name, value in values.items():
+            if tuple(value.shape) != expected_shapes[name]:
+                raise ValueError(
+                    f"Expected {name} shape {expected_shapes[name]}, "
+                    f"got {tuple(value.shape)}."
+                )
+        if self.default_physical_properties_initialized:
+            raise RuntimeError(
+                "Default rigid-object Group mass properties are already captured."
+            )
+
+        self._default_mass = mass.to(self.device, dtype=torch.float32).clone()
+        self._default_inertia = inertia.to(self.device, dtype=torch.float32).clone()
+        self._default_com_pose = com_pose.to(self.device, dtype=torch.float32).clone()
 
 
 class RigidObjectGroup(BatchEntity):
@@ -147,6 +244,7 @@ class RigidObjectGroup(BatchEntity):
         )
 
         super().__init__(cfg, rows, device, auto_reset=False)
+        self._capture_default_physical_properties()
         self.reset()
 
     @property
@@ -174,6 +272,45 @@ class RigidObjectGroup(BatchEntity):
                 f"RigidObjectGroup {self.uid!r} is not bound; call SimulationManager.prepare()."
             )
         return self._data
+
+    def _capture_default_physical_properties(self) -> None:
+        """Capture materialized Group mass properties as reset defaults."""
+        data = self.body_data
+        if data.default_physical_properties_initialized:
+            return
+        data.capture_default_physical_properties(
+            mass=data.mass,
+            inertia=data.inertia,
+            com_pose=data.com_pose,
+        )
+
+    def _restore_default_physical_properties(
+        self, env_ids: Sequence[int] | torch.Tensor | None
+    ) -> None:
+        """Restore initialization-time Group mass properties for selected rows."""
+        data = self.body_data
+        if self.is_non_dynamic or not data.default_physical_properties_initialized:
+            return
+        env, objects, _ = self._selected_indices(env_ids)
+        if not env:
+            return
+        env_index = torch.as_tensor(env, dtype=torch.long, device=self.device)
+        obj_index = torch.as_tensor(objects, dtype=torch.long, device=self.device)
+        self.set_mass(
+            data.default_mass[env_index[:, None], obj_index[None, :]],
+            env_ids=env,
+            obj_ids=objects,
+        )
+        self.set_inertia(
+            data.default_inertia[env_index[:, None], obj_index[None, :]],
+            env_ids=env,
+            obj_ids=objects,
+        )
+        self.set_com_pose(
+            data.default_com_pose[env_index[:, None], obj_index[None, :]],
+            env_ids=env,
+            obj_ids=objects,
+        )
 
     @property
     def body_state(self) -> torch.Tensor:
@@ -273,6 +410,94 @@ class RigidObjectGroup(BatchEntity):
             device=self.device,
         )
         return env, objects, rows
+
+    def get_mass(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        obj_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return selected masses with shape ``[env, object]``."""
+        env, objects, _ = self._selected_indices(env_ids, obj_ids)
+        env_index = torch.as_tensor(env, dtype=torch.long, device=self.device)
+        obj_index = torch.as_tensor(objects, dtype=torch.long, device=self.device)
+        return self.body_data.mass[env_index[:, None], obj_index[None, :]]
+
+    def set_mass(
+        self,
+        mass: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        obj_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set selected masses from a tensor shaped ``[env, object]``."""
+        env, objects, rows = self._selected_indices(env_ids, obj_ids)
+        mass = torch.as_tensor(mass, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env), len(objects))
+        if tuple(mass.shape) != expected_shape:
+            raise ValueError(
+                f"Expected mass shape {expected_shape}, got {tuple(mass.shape)}."
+            )
+        self.body_data.body_view.apply_mass(mass.reshape(-1, 1), rows)
+
+    def get_inertia(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        obj_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return selected inertia diagonals with shape ``[env, object, 3]``."""
+        env, objects, _ = self._selected_indices(env_ids, obj_ids)
+        env_index = torch.as_tensor(env, dtype=torch.long, device=self.device)
+        obj_index = torch.as_tensor(objects, dtype=torch.long, device=self.device)
+        return self.body_data.inertia[env_index[:, None], obj_index[None, :]]
+
+    def set_inertia(
+        self,
+        inertia: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        obj_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set selected inertia diagonals."""
+        env, objects, rows = self._selected_indices(env_ids, obj_ids)
+        inertia = torch.as_tensor(inertia, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env), len(objects), 3)
+        if tuple(inertia.shape) != expected_shape:
+            raise ValueError(
+                f"Expected inertia shape {expected_shape}, "
+                f"got {tuple(inertia.shape)}."
+            )
+        self.body_data.body_view.apply_inertia_diagonal(inertia.reshape(-1, 3), rows)
+
+    def get_com_pose(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        obj_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return selected local COM poses in Group ``xyz + wxyz`` order."""
+        env, objects, _ = self._selected_indices(env_ids, obj_ids)
+        env_index = torch.as_tensor(env, dtype=torch.long, device=self.device)
+        obj_index = torch.as_tensor(objects, dtype=torch.long, device=self.device)
+        return self.body_data.com_pose[env_index[:, None], obj_index[None, :]]
+
+    def set_com_pose(
+        self,
+        com_pose: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        obj_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set selected local COM poses in Group ``xyz + wxyz`` order."""
+        env, objects, rows = self._selected_indices(env_ids, obj_ids)
+        com_pose = torch.as_tensor(com_pose, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env), len(objects), 7)
+        if tuple(com_pose.shape) != expected_shape:
+            raise ValueError(
+                f"Expected COM pose shape {expected_shape}, "
+                f"got {tuple(com_pose.shape)}."
+            )
+        flat = com_pose.reshape(-1, 7)
+        target = torch.cat(
+            (flat[:, :3], convert_quat(flat[:, 3:7], to="xyzw")),
+            dim=-1,
+        )
+        self.body_data.body_view.apply_com_local_pose(target, rows)
 
     def set_collision_filter(
         self,
@@ -405,6 +630,7 @@ class RigidObjectGroup(BatchEntity):
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         env, _, _ = self._selected_indices(env_ids)
+        self._restore_default_physical_properties(env)
         member_poses = []
         for cfg in self.cfg.rigid_objects.values():
             if cfg.init_local_pose is not None:

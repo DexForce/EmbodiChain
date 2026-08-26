@@ -14,27 +14,28 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Translate EmbodiChain asset configs into DexSim Spawn descriptors."""
+"""Tests for the configclass decorator."""
 
 from __future__ import annotations
 
-from .descriptors import (
-    articulation_desc_from_cfg,
-    cloth_desc_from_cfg,
-    rigid_desc_from_cfg,
-    soft_desc_from_cfg,
-    surface_deformable_desc_from_cfg,
-    volume_deformable_desc_from_cfg,
-)
-from .usd import articulation_desc_from_usd, rigid_desc_from_usd
+from dataclasses import fields
+from typing import ClassVar
 
-__all__ = [
-    "articulation_desc_from_cfg",
-    "articulation_desc_from_usd",
-    "cloth_desc_from_cfg",
-    "rigid_desc_from_cfg",
-    "rigid_desc_from_usd",
-    "soft_desc_from_cfg",
-    "surface_deformable_desc_from_cfg",
-    "volume_deformable_desc_from_cfg",
-]
+from embodichain.utils import configclass
+
+
+@configclass
+class _DeferredClassVarCfg:
+    values: list[int] = []
+    label: ClassVar[str] = "shared"
+
+
+def test_deferred_classvar_is_not_converted_to_a_dataclass_field() -> None:
+    first = _DeferredClassVarCfg()
+    second = _DeferredClassVarCfg()
+    first.values.append(1)
+
+    assert [item.name for item in fields(_DeferredClassVarCfg)] == ["values"]
+    assert first.to_dict() == {"values": [1]}
+    assert second.values == []
+    assert _DeferredClassVarCfg.label == "shared"
