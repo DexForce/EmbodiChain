@@ -74,6 +74,7 @@ class ExecutionEventKind(str, Enum):
     COLLISION_WORLD_CHANGED = "collision_world_changed"
     ACTION_PLANNING_FAILED = "action_planning_failed"
     ACTION_TIMEOUT = "action_timeout"
+    TRAJECTORY_SEGMENT_ENTERED = "trajectory_segment_entered"
     TRAJECTORY_COMPLETED = "trajectory_completed"
     EFFECT_VERIFICATION_REQUIRED = "effect_verification_required"
     EFFECT_VERIFICATION_FAILED = "effect_verification_failed"
@@ -103,6 +104,9 @@ class ExecutionEvent:
     invocation_index: int
     env_mask: torch.Tensor
     message: str = ""
+    segment_name: str | None = None
+    failure_code: str | None = None
+    retryable: bool | None = None
 
     def __post_init__(self) -> None:
         if self.timestamp < 0.0:
@@ -115,6 +119,18 @@ class ExecutionEvent:
             raise TypeError("env_mask must be a torch.Tensor.")
         if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
             raise ValueError("ExecutionEvent.env_mask must be a 1D bool tensor.")
+        for name in ("segment_name", "failure_code"):
+            value = getattr(self, name)
+            if value is not None and (
+                type(value) is not str or not value or value != value.strip()
+            ):
+                raise ValueError(f"ExecutionEvent.{name} must be non-empty or None.")
+        if self.retryable is not None and type(self.retryable) is not bool:
+            raise TypeError("ExecutionEvent.retryable must be a bool or None.")
+        if (self.failure_code is None) != (self.retryable is None):
+            raise ValueError(
+                "ExecutionEvent.failure_code and retryable must be set together."
+            )
         object.__setattr__(self, "env_mask", self.env_mask.clone())
 
 
@@ -920,8 +936,10 @@ class ExecutionSession:
     The session never steps a simulator itself. Each :meth:`tick` consumes the
     latest observation and scene snapshot and emits at most one synchronized
     endpoint-command frame. A declared physical-effect boundary resolves only
-    after the caller supplies a correlated :class:`EffectVerificationResult`.
-    Non-empty expected symbolic effects are committed for verified rows only.
+    after the caller supplies a correlated :class:`EffectVerificationResult`,
+    and non-empty expected symbolic effects are committed for accepted rows
+    only. Higher-level runtimes decide how to produce that result from their
+    configured monitor selection.
 
     Environment eligibility and recovery budgets are tracked per row. The
     waypoint cursor is batch-synchronized: a recoverable row replans the active
@@ -1573,6 +1591,13 @@ class ExecutionSession:
 
         commands = plan.commands
         if self._waypoint_index < commands.frame_count:
+            segment_event = self._segment_entry_event(
+                plan,
+                self._waypoint_index,
+                execution_mask,
+            )
+            if segment_event is not None:
+                events.append(segment_event)
             command = self._command_at(plan, self._waypoint_index, execution_mask)
             self._waypoint_index += 1
             return self._tick_result(command=command, events=events)
@@ -1641,6 +1666,13 @@ class ExecutionSession:
                 if not self._pending.any():
                     return self._finish_action_tick(self._pending, None, events)
                 if plan.commands.frame_count > 0 and execution_mask.any():
+                    segment_event = self._segment_entry_event(
+                        plan,
+                        0,
+                        execution_mask,
+                    )
+                    if segment_event is not None:
+                        events.append(segment_event)
                     command = self._command_at(plan, 0, execution_mask)
                     self._waypoint_index = 1
                     return self._tick_result(command=command, events=events)
@@ -1824,6 +1856,24 @@ class ExecutionSession:
         self._queued_events.append(
             self._event(event_kind, planned_mask, "Planned from the latest context.")
         )
+        planning_failed = self._pending & ~plan.plan_success
+        failure = plan.diagnostics.failure
+        if planning_failed.any() and failure is not None and not failure.retryable:
+            self._queued_events.append(
+                self._event(
+                    ExecutionEventKind.ACTION_PLANNING_FAILED,
+                    planning_failed,
+                    "Planning failed with a non-retryable classification: "
+                    f"{failure.code!r}.",
+                    failure_code=failure.code,
+                    retryable=False,
+                )
+            )
+            self._eligible &= ~planning_failed
+            self._pending &= ~planning_failed
+            terminal_event = self._update_terminal_status()
+            if terminal_event is not None:
+                self._queued_events.append(terminal_event)
 
     def _validate_phase_effect_gates(self, plan: ActionPlan) -> None:
         """Bind invocation-owned gates to non-initial named plan segments."""
@@ -2394,6 +2444,23 @@ class ExecutionSession:
             self._terminal_acceptance_counts.zero_()
             self._terminal_pending_reported = False
         return frame
+
+    def _segment_entry_event(
+        self,
+        plan: ActionPlan,
+        waypoint_index: int,
+        env_mask: torch.Tensor,
+    ) -> ExecutionEvent | None:
+        """Report entry into a named trajectory segment exactly once per pass."""
+        segment = plan.segment_at(waypoint_index)
+        if waypoint_index != segment.start:
+            return None
+        return self._event(
+            ExecutionEventKind.TRAJECTORY_SEGMENT_ENTERED,
+            env_mask,
+            f"Entered trajectory segment {segment.name!r}.",
+            segment_name=segment.name,
+        )
 
     def _evaluate_tracking_frame(
         self,
@@ -3053,6 +3120,10 @@ class ExecutionSession:
         kind: ExecutionEventKind,
         env_mask: torch.Tensor,
         message: str,
+        *,
+        segment_name: str | None = None,
+        failure_code: str | None = None,
+        retryable: bool | None = None,
     ) -> ExecutionEvent:
         """Create an event correlated with the current invocation."""
         skill_id = (
@@ -3070,6 +3141,21 @@ class ExecutionSession:
             if self._invocation_index < len(self._requests)
             else 0
         )
+        if segment_name is None and self._plan is not None and self._plan.segments:
+            waypoint_index = min(
+                self._waypoint_index,
+                self._plan.commands.frame_count - 1,
+            )
+            segment_name = self._plan.segment_at(waypoint_index).name
+        if (
+            failure_code is None
+            and kind is ExecutionEventKind.ACTION_PLANNING_FAILED
+            and self._plan is not None
+            and self._plan.diagnostics.failure is not None
+        ):
+            failure = self._plan.diagnostics.failure
+            failure_code = failure.code
+            retryable = failure.retryable
         return ExecutionEvent(
             kind=kind,
             timestamp=self._context.robot.timestamp,
@@ -3079,6 +3165,9 @@ class ExecutionSession:
             invocation_index=min(self._invocation_index, len(self._requests) - 1),
             env_mask=env_mask,
             message=message,
+            segment_name=segment_name,
+            failure_code=failure_code,
+            retryable=retryable,
         )
 
     def _drain_events(self) -> list[ExecutionEvent]:

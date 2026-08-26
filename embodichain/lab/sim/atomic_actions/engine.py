@@ -226,7 +226,7 @@ class AtomicActionEngine:
 
     def bind_control_parts(
         self,
-        skill: str | AtomicAction,
+        skill_id: str,
         endpoints: Mapping[str, Mapping[str, str]],
         *,
         task_state_keys: Mapping[str, str] | None = None,
@@ -234,8 +234,7 @@ class AtomicActionEngine:
         """Build an advanced direct-core binding from control-part names.
 
         Args:
-            skill: Installed skill ID or an explicit action passed later to
-                :meth:`plan_action`.
+            skill_id: Installed skill ID.
             endpoints: Nested ``slot_id -> endpoint_id -> control_part`` mapping.
             task_state_keys: Optional explicit stable task-state key for each
                 resource slot. See :meth:`ActionPlanningServices.bind_control_parts`
@@ -244,21 +243,11 @@ class AtomicActionEngine:
         Returns:
             Engine-owned generic endpoint binding.
         """
-        if isinstance(skill, str):
-            action = self._actions.get(skill)
-            if action is None:
-                raise KeyError(f"No atomic action registered for skill {skill!r}.")
-        elif isinstance(skill, AtomicAction):
-            action = skill
-            if (
-                action.is_bound
-                and action.planning_services is not self._planning_services
-            ):
-                raise ValueError(
-                    f"Atomic action {action.skill_id!r} belongs to another engine."
-                )
-        else:
-            raise TypeError("skill must be an installed skill ID or AtomicAction.")
+        if type(skill_id) is not str:
+            raise TypeError("skill_id must be a string.")
+        action = self._actions.get(skill_id)
+        if action is None:
+            raise KeyError(f"No atomic action registered for skill {skill_id!r}.")
         contract = type(action).__dict__.get("binding_contract")
         if contract is None:
             raise ValueError(
@@ -389,35 +378,6 @@ class AtomicActionEngine:
 
         for action_type in BUILTIN_ACTION_TYPES:
             self.register(action_type())
-
-    def plan_action(
-        self,
-        action: AtomicAction,
-        invocation: ActionInvocation,
-        context: PlanningContext,
-    ) -> ActionPlan:
-        """Plan with an unregistered action using this engine's resources.
-
-        This is an advanced extension and testing escape hatch. Built-in
-        parameter variants should use invocation ``skill_options`` with the
-        engine's registered implementation.
-
-        Args:
-            action: Configured action implementation to invoke.
-            invocation: Grounded request matching the action skill identifier.
-            context: Latest measured planning state.
-
-        Returns:
-            Validated side-effect-free action plan.
-        """
-        if not isinstance(action, AtomicAction):
-            raise TypeError("action must be an AtomicAction instance.")
-        self._validate_context(context)
-        action._bind(self._planning_services)
-        request = action.resolve_request(invocation)
-        plan = action.plan(request, context)
-        self._validate_plan(plan, context, request)
-        return plan
 
     def resolve(
         self,
@@ -629,7 +589,7 @@ class AtomicActionEngine:
         *,
         eligible_mask: torch.Tensor | None = None,
     ) -> ExecutionSession:
-        """Start closed-loop execution for a grounded invocation sequence.
+        """Start incremental execution for a grounded invocation sequence.
 
         Args:
             invocations: Grounded action requests in execution order.

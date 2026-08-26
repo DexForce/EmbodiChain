@@ -17,12 +17,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import torch
-
-if TYPE_CHECKING:
-    from embodichain.lab.sim.common import BatchEntity
 
 
 @dataclass
@@ -542,24 +539,10 @@ class InteractionPoints(Affordance):
 class AssembleAffordance(Affordance):
     """Affordance describing how an assemble object fits onto a base object.
 
-    The affordance stores the relative assembly relation. Canonical planning
-    supplies the base object's snapshot pose through ``AssembleGoal.base_pose``;
-    :attr:`base_object_entity` is retained only as a deprecated direct-core
-    fallback when that goal field is omitted. The assemble object's target pose
-    is ``base_pose @ assemble_to_base_pose``.
+    The affordance stores the relative assembly relation. Planning supplies the
+    base object's snapshot pose through ``AssembleGoal.base_pose``. The assemble
+    object's target pose is ``base_pose @ assemble_to_base_pose``.
     """
-
-    base_object_label: str = ""
-    """Label of the base object the assemble object is placed onto."""
-
-    base_object_entity: BatchEntity | None = None
-    """Legacy live base entity used only when ``AssembleGoal.base_pose`` is absent."""
-
-    assemble_object_label: str = ""
-    """Label of the assemble object that is picked up and placed."""
-
-    assemble_object_entity: BatchEntity | None = None
-    """Optional simulation entity for the assemble object (reference/logging)."""
 
     assemble_to_base_pose: torch.Tensor = field(
         default_factory=lambda: torch.eye(4, dtype=torch.float32)

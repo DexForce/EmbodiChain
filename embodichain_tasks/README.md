@@ -8,10 +8,11 @@ inside the core `embodichain` import package. It is bundled into the main
 registered through the `embodichain.tasks` entry point. It has no independent
 distribution metadata or version.
 
-Tasks are organized by domain and task identity, not by solution method. Every
-task package keeps its environment registration in `task.py`; simulator scene
-and MDP settings remain in JSON/YAML. Optional expert bindings and policy
-configs live below the same task:
+Tasks are organized by domain and task identity, not by solution method.
+Import-registered task packages keep their environment registration in
+`task.py`; simulator scene and MDP settings remain in JSON/YAML. Supported
+Expert Program tasks may instead be entirely configuration-defined. Optional
+programs and policy configs live below the same task:
 
 ```text
 embodichain_tasks/<domain>/<task>/task.py
@@ -20,8 +21,10 @@ configs/tasks/<domain>/<task>/expert/program.yaml
 configs/tasks/<domain>/<task>/agents/<algorithm>.yaml
 ```
 
-Simple tasks contain only `task.py` and an environment config. Expert or RL
-files are added only when that task provides the corresponding solution.
+Simple imported tasks contain only `task.py` and an environment config. A
+configuration-defined Expert Program task uses `expert_program_runtime` in
+`env.json`; loading that config registers the common `EmbodiedEnv`, so no task
+package or Python binding is needed.
 
 ## Migrating from the solution-first layout
 
@@ -32,7 +35,7 @@ paths must use the task-first locations:
 | --- | --- |
 | `embodichain_tasks.rl.basic.<task>` | `embodichain_tasks.classic_control.<task>.task` |
 | `embodichain_tasks.rl.push_cube` | `embodichain_tasks.manipulation.push_cube.task` |
-| `embodichain_tasks.expert_program.<task>` | `embodichain_tasks.manipulation.<task>.task` and `<task>.expert.binding` |
+| `embodichain_tasks.expert_program.<task>` | No replacement module for supported config-defined examples; load `configs/tasks/manipulation/<task>/env.json` |
 | `configs/gym/`, `configs/expert_program/`, `configs/agents/rl/` | `configs/tasks/<domain>/<task>/` |
 
 ## Installation
@@ -84,11 +87,12 @@ python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs
 
 ## How registration works
 
-Importing `embodichain_tasks` recursively imports every sub-package, which
-triggers each task's `@register_env` decorator and registers it in the
-gymnasium registry. The unified CLI calls `discover_task_packages()` (from
-`embodichain.lab.gym.utils.registration`) at startup, which imports this
-package via its entry point. See the
+Importing `embodichain_tasks` recursively imports every task package, which
+triggers its `@register_env` decorator and registers it in the gymnasium
+registry. Configuration-defined Expert Program IDs are registered later by
+`config_to_cfg()` when their `env.json` is loaded. The unified CLI calls
+`discover_task_packages()` (from `embodichain.lab.gym.utils.registration`) at
+startup, which imports this package via its entry point. See the
 [task-package discovery utilities](../embodichain/lab/gym/utils/registration.py)
 and the [official task package initializer](embodichain_tasks/__init__.py) for
 the implementation.

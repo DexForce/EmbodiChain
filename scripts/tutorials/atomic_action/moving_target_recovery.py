@@ -275,7 +275,6 @@ def main() -> None:
         affordance=Affordance(),
         geometry={},
         label="cube",
-        entity=target,
         entity_id=TARGET_ENTITY_ID,
     )
     engine = AtomicActionEngine(

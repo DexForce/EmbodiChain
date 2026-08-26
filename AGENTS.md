@@ -34,8 +34,8 @@ the agent should:
 
 Available topics: `simulation-system`, `env-framework`,
 `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`,
-`sim-visualization`, `motion-planning`, `atomic-actions`, `rl-learning`,
-`configclass-pattern`, `randomization`.
+`sim-visualization`, `motion-planning`, `atomic-actions`, `expert-programs`,
+`rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
 
@@ -103,7 +103,7 @@ EmbodiChain/
 
 Official tasks use a task-first layout:
 
-- Python entry point: `embodichain_tasks/embodichain_tasks/<domain>/<task>/task.py`
+- Import-registered Python entry point: `embodichain_tasks/embodichain_tasks/<domain>/<task>/task.py`
 - Scene and MDP config: `embodichain_tasks/configs/tasks/<domain>/<task>/env.{json,yaml}`
 - Optional Expert Program: `<task config>/expert/program.yaml`
 - Optional expert runtime binding: `<task package>/expert/binding.py`
@@ -113,6 +113,11 @@ Keep `@register_env` in `task.py`. Do not create Python `scenario` or `mdp`
 modules when the existing JSON/YAML config and manager functors express the
 task. Organize tasks by domain and task identity, not by solution method such
 as `expert_program` or `rl`.
+
+A supported configuration-defined Expert Program may omit `task.py` and
+`expert/binding.py`: declare `expert_program_runtime` in its task-local
+`env.json`, and let `config_to_cfg()` register the common `EmbodiedEnv` under
+the configured ID.
 
 ---
 

@@ -589,12 +589,12 @@ def test_registry_rejects_ambiguous_aliases_across_types() -> None:
                 SceneEntityRegistration(
                     ref=SceneObjectRef("cube"),
                     state_provider=_StateProvider(),
-                    aliases=("legacy",),
+                    aliases=("external",),
                 ),
                 SceneEntityRegistration(
                     ref=SceneArticulationRef("drawer"),
                     state_provider=_StateProvider(),
-                    aliases=("legacy",),
+                    aliases=("external",),
                 ),
             )
         )
@@ -925,7 +925,7 @@ def test_collision_integration_requires_exact_full_world_ids() -> None:
             ),
             SceneEntityRegistration(
                 ref=SceneObjectRef("table"),
-                aliases=("legacy_table",),
+                aliases=("external_table",),
                 state_provider=_StateProvider(),
                 geometry_provider=_GeometryProvider(),
                 collision_role=SceneCollisionRole.STATIC,
@@ -949,7 +949,7 @@ def test_collision_integration_requires_exact_full_world_ids() -> None:
         registry.validate_collision_integration(
             _MotionGenerator(
                 entity_ids=("cube",),
-                world_entity_ids=("cube", "legacy_table"),
+                world_entity_ids=("cube", "external_table"),
             ),  # type: ignore[arg-type]
             batch_size=2,
         )
@@ -998,7 +998,7 @@ def test_collision_integration_rejects_external_provider_id_drift() -> None:
         registry.validate_collision_integration(
             _MotionGenerator(entity_ids=("cube",)),  # type: ignore[arg-type]
             batch_size=2,
-            scene_provider=_ExternalSceneProvider(("legacy_cube",)),
+            scene_provider=_ExternalSceneProvider(("external_cube",)),
         )
 
 

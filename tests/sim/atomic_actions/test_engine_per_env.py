@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import replace
 import math
 from typing import ClassVar
@@ -58,6 +57,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
     PlannerDiagnostics,
+    PlanningFailure,
     PlanningContext,
     PhaseEffectGateRequest,
     PhaseEffectGateRequirement,
@@ -83,7 +83,6 @@ from embodichain.lab.sim.atomic_actions import (
     TrackingSetpoint,
     TrajectorySegment,
 )
-from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 from embodichain.lab.sim.planners import PlanOptions
 
@@ -97,7 +96,7 @@ def _effect_result(
     retry_mask: torch.Tensor | None = None,
     expectation_results: tuple[EffectExpectationResult, ...] = (),
 ) -> EffectVerificationResult:
-    """Build an explicit terminal decision with legacy retry semantics."""
+    """Build an explicit terminal decision that retries failed rows by default."""
     return EffectVerificationResult(
         verification_id=verification_id,
         success_mask=success_mask,
@@ -200,7 +199,10 @@ class EffectAction(DynamicAction):
         pose = resolve_pose_goal(goal.xpos, context, name="xpos")
         target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
         semantics = ObjectSemantics(
-            affordance=Affordance(), geometry={}, label="object"
+            affordance=Affordance(),
+            geometry={},
+            entity_id="object",
+            label="object",
         )
         held = HeldObjectState(
             semantics=semantics,
@@ -312,7 +314,35 @@ class FailedEffectAction(EffectAction):
         context: PlanningContext,
     ) -> ActionPlan:
         plan = super()._plan(request, context)
-        return replace(plan, plan_success=torch.zeros_like(plan.plan_success))
+        return replace(
+            plan,
+            plan_success=torch.zeros_like(plan.plan_success),
+            diagnostics=PlannerDiagnostics(
+                backend="test",
+                failure=PlanningFailure("planning_failed", retryable=True),
+            ),
+        )
+
+
+class NonRetryablePlanningFailureAction(DynamicAction):
+    """Reject one invalid goal without consuming action-retry budget."""
+
+    skill_id: ClassVar[str] = "non_retryable_failure"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        self.plan_count += 1
+        return self.failed_plan(
+            request,
+            context,
+            message="The grounded target violates the action contract.",
+            failure_code="invalid_goal",
+            retryable=False,
+        )
 
 
 class DiagnosticAction(DynamicAction):
@@ -388,7 +418,14 @@ class MixedEffectAction(EffectAction):
         plan = super()._plan(request, context)
         plan_success = torch.ones_like(plan.plan_success)
         plan_success[-1] = False
-        return replace(plan, plan_success=plan_success)
+        return replace(
+            plan,
+            plan_success=plan_success,
+            diagnostics=PlannerDiagnostics(
+                backend="test",
+                failure=PlanningFailure("planning_failed", retryable=True),
+            ),
+        )
 
 
 class NonuniformTimingAction(DynamicAction):
@@ -533,29 +570,6 @@ class DestinationSequenceAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]
                 (TrackingFrame((changed,)),),
             ),
         )
-
-
-class UncopyableEntity(BatchEntity):
-    """Minimal live entity whose simulator identity must not be copied."""
-
-    def __init__(self) -> None:
-        self._pose = torch.eye(4).unsqueeze(0)
-
-    def __deepcopy__(self, memo: dict[int, object]) -> UncopyableEntity:
-        raise AssertionError("Live simulator entities must not be deep-copied.")
-
-    def set_local_pose(
-        self,
-        pose: torch.Tensor,
-        env_ids: Sequence[int] | None = None,
-    ) -> None:
-        self._pose = pose.clone()
-
-    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
-        return self._pose.clone()
-
-    def reset(self, env_ids: Sequence[int] | None = None) -> None:
-        return None
 
 
 def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
@@ -1354,6 +1368,61 @@ def test_all_rows_planning_failure_skips_inactive_command_frames() -> None:
     )
 
 
+def test_non_retryable_planning_failure_fails_without_spending_retry_budget() -> None:
+    engine, _ = _engine()
+    action = NonRetryablePlanningFailureAction()
+    engine.register(action)
+    invocation = _invocation(
+        engine,
+        skill_id=action.skill_id,
+        max_action_retries=5,
+    )
+
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    failed = session.tick(_context(0.0, 0.0, 0.2, 0))
+
+    assert failed.status is ExecutionStatus.FAILED
+    assert action.plan_count == 1
+    assert len(session.plan_attempts) == 1
+    assert not any(
+        event.kind is ExecutionEventKind.ACTION_RETRY for event in failed.events
+    )
+    planning_event = next(
+        event
+        for event in failed.events
+        if event.kind is ExecutionEventKind.ACTION_PLANNING_FAILED
+    )
+    assert planning_event.failure_code == "invalid_goal"
+    assert planning_event.retryable is False
+    failure = session.plan_attempts[0].plan.diagnostics.failure
+    assert failure is not None
+    assert failure.code == "invalid_goal"
+    assert not failure.retryable
+
+
+def test_execution_events_report_named_trajectory_segment_entries() -> None:
+    engine, _ = _engine()
+    action = PhaseGateAction()
+    engine.register(action)
+    invocation = _invocation(engine, skill_id=action.skill_id)
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+
+    ticks = (
+        session.tick(_context(0.0, 0.0, 0.2, 0)),
+        session.tick(_context(0.1, 0.0, 0.2, 0)),
+        session.tick(_context(0.2, 0.1, 0.2, 0)),
+    )
+    entries = [
+        event
+        for tick in ticks
+        for event in tick.events
+        if event.kind is ExecutionEventKind.TRAJECTORY_SEGMENT_ENTERED
+    ]
+
+    assert [event.segment_name for event in entries] == ["prepare", "commit"]
+    assert [event.env_mask.tolist() for event in entries] == [[True], [True]]
+
+
 def test_plan_attempt_records_snapshot_nested_metadata_at_installation() -> None:
     engine, _ = _engine()
     action = DiagnosticAction()
@@ -1555,15 +1624,14 @@ def test_session_commands_schedule_arrivals_and_final_settling() -> None:
     assert torch.allclose(command_durations[:, :-1].sum(dim=1), torch.tensor([0.4]))
 
 
-def test_request_snapshot_preserves_live_entity_identity() -> None:
-    entity = UncopyableEntity()
+def test_request_snapshot_preserves_stable_entity_identity() -> None:
     grasp_xpos = torch.eye(4).unsqueeze(0)
     geometry_extent = torch.tensor([0.1, 0.2, 0.3])
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={"extent": geometry_extent},
         label="object",
-        entity=entity,
+        entity_id="object",
     )
     goal = GraspGoal(semantics=semantics, grasp_xpos=grasp_xpos)
 
@@ -1581,7 +1649,7 @@ def test_request_snapshot_preserves_live_entity_identity() -> None:
 
     assert request.goal is not goal
     assert request.goal.semantics is not semantics
-    assert request.goal.semantics.entity is entity
+    assert request.goal.semantics.entity_id == "object"
     assert torch.equal(request.goal.grasp_xpos, torch.eye(4).unsqueeze(0))
     assert torch.equal(
         request.goal.semantics.geometry["extent"],
@@ -2747,14 +2815,13 @@ def test_effect_result_masks_are_owned_disjoint_and_request_scoped() -> None:
         )
 
 
-def test_state_delta_snapshot_owns_effect_data_and_preserves_live_entity() -> None:
-    entity = UncopyableEntity()
+def test_state_delta_snapshot_owns_effect_data_and_stable_identity() -> None:
     semantics = ObjectSemantics(
         affordance=Affordance(custom_config={"threshold": [1.0]}),
         geometry={"size": torch.ones(3)},
         properties={"mass": torch.tensor(1.0)},
         label="snapshot-object",
-        entity=entity,
+        entity_id="snapshot-object",
     )
     held = HeldObjectState(
         semantics=semantics,
@@ -2768,7 +2835,7 @@ def test_state_delta_snapshot_owns_effect_data_and_preserves_live_entity() -> No
     assert copied is not None
     assert copied is not held
     assert copied.semantics is not semantics
-    assert copied.semantics.entity is entity
+    assert copied.semantics.entity_id == "snapshot-object"
     assert copied.semantics.affordance is not semantics.affordance
     assert copied.object_to_eef.data_ptr() != held.object_to_eef.data_ptr()
     assert copied.grasp_xpos.data_ptr() != held.grasp_xpos.data_ptr()

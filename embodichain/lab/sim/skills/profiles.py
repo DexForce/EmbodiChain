@@ -946,10 +946,9 @@ class WorkflowRecoveryPolicy:
 
 @dataclass(frozen=True, slots=True, init=False)
 class SkillPolicyPreset:
-    """Versioned policies and typed semantic-call option templates."""
+    """Policies and typed semantic-call option templates."""
 
     preset_id: str
-    schema_version: int
     required_planner: str | None
     """Optional planner backend required by this preset."""
     _motion_policy: MotionPolicy
@@ -965,7 +964,6 @@ class SkillPolicyPreset:
         preset_id: str,
         *,
         action_option_templates: Mapping[str, ActionOptions],
-        schema_version: int = 3,
         motion_policy: MotionPolicy | None = None,
         tracking_policy: TrackingPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
@@ -976,13 +974,6 @@ class SkillPolicyPreset:
     ) -> None:
         """Own one policy bundle without exposing mutable nested configuration."""
         _validate_identifier(preset_id, field_name="SkillPolicyPreset.preset_id")
-        if not isinstance(schema_version, int) or isinstance(schema_version, bool):
-            raise TypeError("SkillPolicyPreset.schema_version must be an integer.")
-        if schema_version != 3:
-            raise ValueError(
-                "Unsupported SkillPolicyPreset.schema_version "
-                f"{schema_version}; supported versions are [3]."
-            )
         if required_planner is not None:
             _validate_identifier(
                 required_planner,
@@ -1055,7 +1046,6 @@ class SkillPolicyPreset:
                 options
             )
         object.__setattr__(self, "preset_id", preset_id)
-        object.__setattr__(self, "schema_version", schema_version)
         object.__setattr__(self, "required_planner", required_planner)
         object.__setattr__(self, "_motion_policy", deepcopy(selected_motion))
         object.__setattr__(self, "_tracking_policy", deepcopy(selected_tracking))
@@ -1104,7 +1094,13 @@ class SkillPolicyPreset:
 
     @property
     def effect_monitors(self) -> Mapping[str, EffectMonitorRef]:
-        """Return effect-monitor selections keyed by exact semantic call ID."""
+        """Return effect-monitor selections keyed by exact semantic call ID.
+
+        Monitor presence enables physical verification for that semantic call.
+        Omitting ``effect_monitors`` at construction installs the built-in
+        curated monitors; passing an explicit empty mapping selects open-loop
+        planned-effect projection.
+        """
         return MappingProxyType(
             {
                 semantic_id: monitor_ref.snapshot()
@@ -1145,7 +1141,6 @@ class SkillPolicyPreset:
         """Return an independently owned preset value."""
         return SkillPolicyPreset(
             preset_id=self.preset_id,
-            schema_version=self.schema_version,
             motion_policy=self.motion_policy,
             tracking_policy=self.tracking_policy,
             recovery_policy=self.recovery_policy,

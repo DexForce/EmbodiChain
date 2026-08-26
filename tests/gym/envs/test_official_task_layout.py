@@ -25,15 +25,10 @@ from embodichain.lab.gym.utils.registration import (
 from embodichain.learning.rl.env import get_registered_learning_env_names
 from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
-EXPECTED_GYM_TASK_MODULES = {
+EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
     "BlocksRankingRGB-v1": "embodichain_tasks.tableware.blocks_ranking_rgb.task",
     "BlocksRankingSize-v1": "embodichain_tasks.tableware.blocks_ranking_size.task",
     "CartPoleRL": "embodichain_tasks.classic_control.cart_pole.task",
-    "ExpertProgramOpenDrawer-v1": "embodichain_tasks.manipulation.open_drawer.task",
-    "ExpertProgramRepeatedPickPlace-v1": (
-        "embodichain_tasks.manipulation.repeated_pick_place.task"
-    ),
-    "HandOver-v1": "embodichain_tasks.manipulation.hand_over.task",
     "MatchObjectContainer-v1": "embodichain_tasks.tableware.match_object_container.task",
     "PlaceObjectDrawer-v1": "embodichain_tasks.tableware.place_object_drawer.task",
     "PourWater-v3": "embodichain_tasks.tableware.pour_water.task",
@@ -49,15 +44,15 @@ EXPECTED_GYM_TASK_MODULES = {
 }
 
 
-def test_gym_ids_resolve_to_task_modules() -> None:
-    """Existing Gym IDs resolve to registration classes owned by task.py."""
+def test_import_registered_gym_ids_resolve_to_task_modules() -> None:
+    """Import-registered Gym IDs resolve to classes owned by task.py."""
     discover_task_packages()
 
     actual_modules = {
         env_id: REGISTERED_ENVS[env_id].cls.__module__
-        for env_id in EXPECTED_GYM_TASK_MODULES
+        for env_id in EXPECTED_IMPORT_REGISTERED_TASK_MODULES
     }
-    assert actual_modules == EXPECTED_GYM_TASK_MODULES
+    assert actual_modules == EXPECTED_IMPORT_REGISTERED_TASK_MODULES
 
 
 def test_point_mass_registration_uses_classic_control_task_module() -> None:

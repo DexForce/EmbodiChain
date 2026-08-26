@@ -14,18 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Repeated pick/place Expert Program bindings."""
+"""Private validation shared by semantic-skill value contracts."""
 
 from __future__ import annotations
 
-from .binding import (
-    REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION,
-    create_repeated_pick_place_robot_profile_binding,
-    create_repeated_pick_place_scene_binding,
-)
 
-__all__ = [
-    "REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION",
-    "create_repeated_pick_place_robot_profile_binding",
-    "create_repeated_pick_place_scene_binding",
-]
+def validate_identifier(value: object, *, field_name: str) -> str:
+    """Return one exact, non-empty identifier without outer whitespace."""
+    if type(value) is not str or not value or value != value.strip():
+        raise ValueError(
+            f"{field_name} must be a non-empty string without outer whitespace."
+        )
+    return value

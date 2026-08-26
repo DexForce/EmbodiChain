@@ -1,6 +1,5 @@
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -19,6 +18,9 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import gymnasium.spaces
@@ -29,6 +31,7 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.expert_program import IntegrationFingerprintMismatch
+from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -41,11 +44,14 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.utils.utility import load_config, save_config
-from embodichain_tasks.manipulation.repeated_pick_place.expert.binding import (
-    REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION as CUBE_EXPERT_PROGRAM_REGISTRATION,
-    ROBOT_PROFILE_ID as CUBE_ROBOT_PROFILE_ID,
-    SCENE_REGISTRY_ID as CUBE_SCENE_REGISTRY_ID,
+
+_REPOSITORY_ROOT = Path(__file__).parents[3]
+_CUBE_GYM_CONFIG_PATH = (
+    _REPOSITORY_ROOT
+    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json"
 )
+CUBE_ROBOT_PROFILE_ID = "expert_program_ur5_pick_place"
+CUBE_SCENE_REGISTRY_ID = "expert_program_repeated_pick_place"
 
 
 class TestInitRolloutBufferFromConfig:
@@ -519,8 +525,15 @@ class TestConfigToCfgFromFile:
     @staticmethod
     def _minimal_gym_config() -> dict[str, object]:
         """Return a minimal config that reaches the generic parser."""
+        production_config = json.loads(
+            _CUBE_GYM_CONFIG_PATH.read_text(encoding="utf-8")
+        )
         return {
             "id": "ExpertProgramRepeatedPickPlace-v1",
+            "max_episode_steps": 1200,
+            "expert_program_runtime": deepcopy(
+                production_config["expert_program_runtime"]
+            ),
             "env": {},
             "robot": {
                 "class_type": "URRobot",
@@ -533,12 +546,11 @@ class TestConfigToCfgFromFile:
     def _expert_program_payload() -> dict[str, object]:
         """Return one minimal strict Expert Program payload."""
         return {
-            "schema_version": 2,
             "program_id": "configured_pick",
             "integration": {
                 "robot_profile": CUBE_ROBOT_PROFILE_ID,
                 "scene_registry": CUBE_SCENE_REGISTRY_ID,
-                "runtime_preset": "safe",
+                "runtime_preset": "trajectory",
             },
             "targets": {},
             "program": {
@@ -671,29 +683,32 @@ class TestConfigToCfgFromFile:
         assert cfg.expert_program.program_id == "configured_pick"
         assert calls == [str(override_path)]
 
-    def test_registration_drift_fails_before_program_loader(
+    def test_registration_drift_fails_during_repeated_config_load(
         self,
         tmp_path,
         monkeypatch,
     ) -> None:
-        """The config boundary checks registration integrity before file loading."""
+        """A repeated config load rejects drift in its registered integration."""
         from embodichain.lab.gym.envs.expert_program import loader
 
         program_path = tmp_path / "program.yaml"
         save_config(program_path, self._expert_program_payload())
         config = self._minimal_gym_config()
         config["expert_program_path"] = str(program_path)
-        binding = CUBE_EXPERT_PROGRAM_REGISTRATION.scene_binding.rigid_objects[0]
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        registration = get_env_spec(str(config["id"])).expert_program_registration
+        assert registration is not None
+        binding = registration.scene_binding.rigid_objects[0]
         original_semantic_type = binding.semantic_type
         object.__setattr__(binding, "semantic_type", "changed_cube")
         loader_calls: list[str] = []
+        original_load = loader.load_expert_program
 
-        def unexpected_load(path, **kwargs):
-            del kwargs
+        def tracked_load(path, **kwargs):
             loader_calls.append(str(path))
-            raise AssertionError("Drift must fail before program loading.")
+            return original_load(path, **kwargs)
 
-        monkeypatch.setattr(loader, "load_expert_program", unexpected_load)
+        monkeypatch.setattr(loader, "load_expert_program", tracked_load)
 
         try:
             with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
@@ -701,7 +716,7 @@ class TestConfigToCfgFromFile:
         finally:
             object.__setattr__(binding, "semantic_type", original_semantic_type)
 
-        assert loader_calls == []
+        assert loader_calls == [str(program_path)]
 
     def test_config_to_cfg_uses_cwd_without_source_path(
         self,

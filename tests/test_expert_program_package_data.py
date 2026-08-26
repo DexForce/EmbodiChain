@@ -42,6 +42,7 @@ _PROGRAMS = {
         "repeated_cube_pick_place"
     ),
     Path("tasks/manipulation/open_drawer/expert/program.yaml"): "slide_open_drawer",
+    Path("tasks/manipulation/hand_over/expert/program.yaml"): "dual_ur5_hand_over",
 }
 
 
@@ -78,7 +79,7 @@ def _literal_setup_keyword(keyword_name: str) -> object:
 
 @pytest.fixture
 def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
-    """Stage only the two official programs through the real build_py command."""
+    """Stage only the three official programs through the real build_py command."""
     package_data = _literal_setup_keyword("package_data")
     include_package_data = _literal_setup_keyword("include_package_data")
     assert type(package_data) is dict
@@ -125,10 +126,10 @@ def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
     )
 
 
-def test_setup_stages_both_official_expert_program_formats(
+def test_setup_stages_all_official_expert_programs(
     staged_config_package: _StagedConfigPackage,
 ) -> None:
-    """The actual setup patterns put nested JSON and YAML in wheel staging."""
+    """The actual setup patterns put nested Expert Programs in wheel staging."""
     assert staged_config_package.include_package_data is False
     assert get_package_dir()[_CONFIG_PACKAGE] == "embodichain_tasks/configs"
     assert staged_config_package.package_data[_CONFIG_PACKAGE] == [
@@ -147,7 +148,7 @@ def test_staged_programs_decode_through_installed_config_paths(
     staged_config_package: _StagedConfigPackage,
     tmp_path: Path,
 ) -> None:
-    """A clean process resolves and decodes both files from wheel staging."""
+    """A clean process resolves and decodes all files from wheel staging."""
     runtime_dir = tmp_path / "runtime"
     runtime_dir.mkdir()
     expected_ids = {

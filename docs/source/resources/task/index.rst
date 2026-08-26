@@ -2,8 +2,9 @@ Supported Tasks
 ===============
 
 The official task environments are bundled in the ``embodichain`` wheel under
-the ``embodichain_tasks`` import package. Installing EmbodiChain registers the
-environment IDs below automatically; no second package installation is needed.
+the ``embodichain_tasks`` import package. Import-backed tasks register during
+package discovery; configuration-defined Expert Program tasks register when
+their gym config is loaded. No second package installation is needed.
 
 Run a task by passing one of its gym configuration files to the unified CLI:
 
@@ -79,5 +80,7 @@ Environment catalog
      - ``Rearrangement-v3`` / ``RearrangementAgent-v3``
      - Registered task variants; no standalone gym config is currently shipped.
 
-The value of ``id`` inside a gym config must match a registered environment ID.
-When adding a task, update this catalog together with its runnable config.
+The value of ``id`` inside a conventional gym config must match a registered
+environment ID. A supported ``expert_program_runtime`` config registers its own
+free ID while loading. When adding a task, update this catalog together with
+its runnable config.

@@ -652,6 +652,7 @@ embodichain.lab.sim.atomic_actions.plans
    CompiledTrajectory
    EffectVerificationRequirement
    PlannerDiagnostics
+   PlanningFailure
    TimedTrajectory
    TrajectorySegment
    normalize_success_mask
@@ -1918,88 +1919,6 @@ embodichain_tasks.configs
 
    get_config_path
 
-embodichain_tasks.manipulation.hand_over
-----------------------------------------
-
-Dual-arm hand-over task registration. Scene and MDP state are supplied by the
-task-local environment config; Expert Program runtime wiring stays under
-``expert``.
-
-.. currentmodule:: embodichain_tasks.manipulation.hand_over
-
-.. autosummary::
-
-   HandOverEnv
-
-embodichain_tasks.manipulation.hand_over.expert
------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.hand_over.expert
-
-.. autosummary::
-
-   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
-   HAND_OVER_POSE_PROVIDER
-   create_hand_over_robot_profile_binding
-   create_hand_over_scene_binding
-
-embodichain_tasks.manipulation.hand_over.expert.binding
--------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.hand_over.expert.binding
-
-.. autosummary::
-
-   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
-   HAND_OVER_POSE_PROVIDER
-   create_hand_over_robot_profile_binding
-   create_hand_over_scene_binding
-
-embodichain_tasks.manipulation.hand_over.task
----------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.hand_over.task
-
-.. autosummary::
-
-   HandOverEnv
-
-embodichain_tasks.manipulation.open_drawer
-------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.open_drawer
-
-.. autosummary::
-
-   ExpertProgramOpenDrawerEnv
-
-embodichain_tasks.manipulation.open_drawer.expert
--------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.open_drawer.expert
-
-.. autosummary::
-
-   create_open_drawer_expert_program_adapter
-
-embodichain_tasks.manipulation.open_drawer.expert.binding
----------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.open_drawer.expert.binding
-
-.. autosummary::
-
-   create_open_drawer_expert_program_adapter
-
-embodichain_tasks.manipulation.open_drawer.task
------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.open_drawer.task
-
-.. autosummary::
-
-   ExpertProgramOpenDrawerEnv
-
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
 
@@ -2017,46 +1936,6 @@ embodichain_tasks.manipulation.push_cube.task
 .. autosummary::
 
    PushCubeEnv
-
-embodichain_tasks.manipulation.repeated_pick_place
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place
-
-.. autosummary::
-
-   ExpertProgramRepeatedPickPlaceEnv
-
-embodichain_tasks.manipulation.repeated_pick_place.expert
----------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place.expert
-
-.. autosummary::
-
-   REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
-   create_repeated_pick_place_robot_profile_binding
-   create_repeated_pick_place_scene_binding
-
-embodichain_tasks.manipulation.repeated_pick_place.expert.binding
------------------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place.expert.binding
-
-.. autosummary::
-
-   REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
-   create_repeated_pick_place_robot_profile_binding
-   create_repeated_pick_place_scene_binding
-
-embodichain_tasks.manipulation.repeated_pick_place.task
--------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place.task
-
-.. autosummary::
-
-   ExpertProgramRepeatedPickPlaceEnv
 
 embodichain_tasks.special.simple_task
 -------------------------------------

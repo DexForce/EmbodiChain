@@ -31,6 +31,7 @@ or installed in a higher-level planning runtime.
    GraspPoseGenerator
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
+   get_parallel_jaw_gripper_model
 
 .. autoclass:: GraspPoseGenerator
    :members:
@@ -43,6 +44,8 @@ or installed in a higher-level planning runtime.
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
+.. autofunction:: get_parallel_jaw_gripper_model
+
 .. currentmodule:: embodichain.toolkits.graspkit.pose_generator
 
 .. autosummary::
@@ -51,6 +54,7 @@ or installed in a higher-level planning runtime.
    GraspPoseGenerator
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
+   get_parallel_jaw_gripper_model
 
 The :mod:`embodichain.toolkits.graspkit.pg_grasp` module provides a reusable
 antipodal implementation of these contracts. The pipeline consists of three
