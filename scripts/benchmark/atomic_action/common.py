@@ -657,7 +657,7 @@ def create_antipodal_object_semantics(
             mesh_vertices=mesh_vertices,
             mesh_triangles=mesh_triangles,
         ),
-        entity=obj,
+        entity_id=obj.uid,
     )
 
 

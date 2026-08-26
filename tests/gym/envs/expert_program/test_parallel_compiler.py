@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for provider-free schema-v2 parallel program compilation."""
+"""Tests for provider-free parallel program compilation."""
 
 from __future__ import annotations
 
@@ -102,7 +102,6 @@ def _parallel() -> ParallelCfg:
 
 def _config(program: ParallelCfg | SegmentCfg | SequenceCfg) -> ExpertProgramCfg:
     return ExpertProgramCfg(
-        schema_version=2,
         program_id="parallel_pick",
         integration=_integration(),
         program=program,

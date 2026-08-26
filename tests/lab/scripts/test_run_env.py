@@ -47,7 +47,6 @@ VISER_POLL_INTERVAL = 0.05
 def _expert_program_payload() -> dict[str, object]:
     """Return one minimal strict Expert Program payload."""
     return {
-        "schema_version": 2,
         "program_id": "cli_pick",
         "integration": {
             "robot_profile": "default_robot",
@@ -192,12 +191,12 @@ def test_load_expert_program_safely_decodes_supported_files(
     [
         (
             "program.json",
-            '{"schema_version": 2, "schema_version": 2}',
+            '{"program_id": "one", "program_id": "two"}',
             "Duplicate JSON key",
         ),
         (
             "program.yaml",
-            "schema_version: 2\nschema_version: 2\n",
+            "program_id: one\nprogram_id: two\n",
             "found duplicate key",
         ),
     ],
@@ -219,7 +218,7 @@ def test_load_expert_program_rejects_duplicate_mapping_keys(
 def test_load_expert_program_rejects_unsupported_file_extension(tmp_path) -> None:
     """Only explicit JSON and YAML file formats are accepted."""
     path = tmp_path / "program.toml"
-    path.write_text("schema_version = 1", encoding="utf-8")
+    path.write_text('program_id = "cli_pick"', encoding="utf-8")
 
     with pytest.raises(ValueError, match=".json, .yaml, or .yml"):
         _load_expert_program(path)

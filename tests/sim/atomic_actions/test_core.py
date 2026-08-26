@@ -46,6 +46,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
     PlannerDiagnostics,
+    PlanningFailure,
     PlanningContext,
     RecoveryPolicy,
     ResolvedActionRequest,
@@ -73,22 +74,19 @@ from embodichain.lab.sim.atomic_actions.goals import (
     collect_scene_dependencies,
     resolve_pose_goal,
 )
-from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.planners import ToppraPlanOptions
 
 
 def _semantics(
     label: str = "object",
     *,
-    entity: BatchEntity | None = None,
     entity_id: str | None = None,
 ) -> ObjectSemantics:
     return ObjectSemantics(
         affordance=Affordance(),
         geometry={},
         label=label,
-        entity=entity,
-        entity_id=entity_id,
+        entity_id=label if entity_id is None else entity_id,
     )
 
 
@@ -485,6 +483,14 @@ def test_object_semantics_rejects_invalid_entity_id(entity_id: object) -> None:
         )
 
 
+def test_object_semantics_requires_entity_id() -> None:
+    with pytest.raises(TypeError, match="entity_id"):
+        ObjectSemantics(  # type: ignore[call-arg]
+            affordance=Affordance(),
+            geometry={},
+        )
+
+
 def test_object_semantics_identity_fields_are_frozen() -> None:
     semantics = _semantics(entity_id="cube")
 
@@ -569,15 +575,14 @@ def test_task_state_normalizes_held_relations_and_masks_updates() -> None:
 
 
 def test_task_state_reports_per_environment_exclusive_holds() -> None:
-    entity = Mock(spec=BatchEntity)
-    shared = _semantics("shared", entity=entity)
+    shared = _semantics("shared", entity_id="shared-object")
     same_entity = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
         label="same-entity-alias",
-        entity=entity,
+        entity_id="shared-object",
     )
-    independent = _semantics("shared")
+    independent = _semantics("shared", entity_id="independent-object")
     state = TaskState(
         batch_size=2,
         device="cpu",
@@ -676,59 +681,6 @@ def test_state_delta_rejects_partial_merge_of_different_entity_ids() -> None:
         delta.apply(state, torch.tensor([True, False]))
 
 
-def test_state_delta_does_not_match_explicit_id_to_legacy_uid() -> None:
-    shared_entity = Mock(uid="cube")
-    previous_semantics = ObjectSemantics(
-        affordance=Affordance(),
-        geometry={},
-        entity=shared_entity,
-        entity_id="cube",
-    )
-    candidate_semantics = ObjectSemantics(
-        affordance=Affordance(),
-        geometry={},
-        entity=shared_entity,
-    )
-    state = TaskState(
-        batch_size=2,
-        device="cpu",
-        held_objects={"arm": _held(semantics=previous_semantics)},
-    )
-    delta = StateDelta(
-        held_object_updates={"arm": _held(semantics=candidate_semantics)}
-    )
-
-    with pytest.raises(ValueError, match="different held-object semantics"):
-        delta.apply(state, torch.tensor([True, False]))
-
-
-def test_state_delta_merges_legacy_semantics_with_same_uid() -> None:
-    previous_semantics = ObjectSemantics(
-        affordance=Affordance(),
-        geometry={},
-        entity=Mock(uid="cube"),
-    )
-    candidate_semantics = ObjectSemantics(
-        affordance=Affordance(),
-        geometry={},
-        entity=Mock(uid="cube"),
-    )
-    state = TaskState(
-        batch_size=2,
-        device="cpu",
-        held_objects={"arm": _held(semantics=previous_semantics)},
-    )
-
-    updated = StateDelta(
-        held_object_updates={
-            "arm": _held(semantics=candidate_semantics),
-        }
-    ).apply(state, torch.tensor([True, False]))
-
-    held = updated.get_held_object("arm")
-    assert held is not None and held.semantics is previous_semantics
-
-
 def test_robot_observation_owns_input_tensors() -> None:
     qpos = torch.zeros(2, 4)
     observation = RobotObservation(
@@ -780,15 +732,12 @@ def test_scene_entity_pose_enforces_confidence() -> None:
         )
 
 
-def test_object_pose_uses_explicit_scene_id_without_live_fallback() -> None:
+def test_object_pose_uses_scene_snapshot() -> None:
     scene_pose = torch.eye(4).repeat(2, 1, 1)
     scene_pose[:, 0, 3] = torch.tensor([0.2, 0.4])
-    entity = Mock()
-    entity.get_local_pose.return_value = torch.full((2, 4, 4), 9.0)
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
-        entity=entity,
         entity_id="cup",
     )
     context = _context(
@@ -802,38 +751,17 @@ def test_object_pose_uses_explicit_scene_id_without_live_fallback() -> None:
     resolved = _resolve_object_pose(semantics, context)
 
     assert torch.equal(resolved, scene_pose)
-    entity.get_local_pose.assert_not_called()
 
 
-def test_object_pose_missing_explicit_scene_id_does_not_fall_back() -> None:
-    entity = Mock()
-    entity.get_local_pose.return_value = torch.eye(4).repeat(2, 1, 1)
+def test_object_pose_rejects_missing_scene_entity() -> None:
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
-        entity=entity,
         entity_id="missing",
     )
 
     with pytest.raises(KeyError, match="unknown scene entity"):
         _resolve_object_pose(semantics, _context())
-    entity.get_local_pose.assert_not_called()
-
-
-def test_object_pose_legacy_entity_warns_and_broadcasts() -> None:
-    entity = Mock()
-    entity.get_local_pose.return_value = torch.eye(4)
-    semantics = ObjectSemantics(
-        affordance=Affordance(),
-        geometry={},
-        entity=entity,
-    )
-
-    with pytest.warns(DeprecationWarning, match="entity_id"):
-        resolved = _resolve_object_pose(semantics, _context())
-
-    assert resolved.shape == (2, 4, 4)
-    entity.get_local_pose.assert_called_once_with(to_matrix=True)
 
 
 def test_dependency_collection_does_not_descend_object_semantics() -> None:
@@ -1082,6 +1010,10 @@ def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
         commands,
         plan_success=plan_success,
         joint_trajectory=trajectory,
+        diagnostics=PlannerDiagnostics(
+            backend="test",
+            failure=PlanningFailure("planning_failed", retryable=True),
+        ),
     )
     payload = commands.frames[0].commands[0].payload
     assert isinstance(payload, JointPositionPayload)
@@ -1325,9 +1257,23 @@ def test_joint_position_plan_allows_empty_commands_when_all_rows_fail() -> None:
         joint_trajectory=trajectory,
         tracking_policy=TrackingPolicy.joint_position(),
         tracking=_joint_tracking_sequence(commands),
+        diagnostics=PlannerDiagnostics(
+            backend="test",
+            failure=PlanningFailure("planning_failed", retryable=True),
+        ),
     )
 
     assert plan.commands.frame_count == 0
+
+
+def test_action_plan_requires_explicit_failure_diagnostics() -> None:
+    commands = TimedCommandSequence(
+        frames=(),
+        env_ids=torch.tensor([4], dtype=torch.long),
+    )
+
+    with pytest.raises(ValueError, match="failure is required"):
+        _action_plan(commands, plan_success=torch.tensor([False]))
 
 
 def test_action_plan_requires_stable_destination_set() -> None:

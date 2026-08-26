@@ -53,6 +53,7 @@ from embodichain.lab.sim.skills.effects import (
     EffectMonitor,
     EffectMonitorDecision,
     EffectMonitorFactory,
+    EffectMonitorParam,
     EffectMonitorRef,
     EffectMonitorRegistry,
     HeldObjectRelation,
@@ -1073,6 +1074,10 @@ class _BoundMonitor(EffectMonitor):
     @property
     def spec(self) -> SemanticEffectSpec:
         return self._spec if self._alias else self._spec.snapshot()
+
+    @property
+    def resolved_params(self) -> Mapping[str, EffectMonitorParam]:
+        return MappingProxyType({})
 
     def observe(
         self,

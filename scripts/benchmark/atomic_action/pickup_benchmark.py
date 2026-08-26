@@ -127,9 +127,11 @@ def _run_case(
         ActionInvocation,
         AtomicActionEngine,
         ControlPartCommandProfile,
+        EntityState,
         GraspGoal,
         PickUpOptions,
         MotionPolicy,
+        SceneSnapshot,
     )
     from scripts.tutorials.atomic_action.pickup import (
         get_hand_open_close_qpos,
@@ -193,7 +195,16 @@ def _run_case(
                         ),
                     ),
                 ),
-                atomic_engine.initial_context(control_dt=sim.sim_config.physics_dt),
+                atomic_engine.initial_context(
+                    scene=SceneSnapshot(
+                        timestamp=0.0,
+                        version=0,
+                        entities={
+                            obj.uid: EntityState(obj.get_local_pose(to_matrix=True))
+                        },
+                    ),
+                    control_dt=sim.sim_config.physics_dt,
+                ),
             )
         )
         is_success = bool(result.plan_success.all().item())

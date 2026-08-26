@@ -36,6 +36,9 @@ from embodichain.lab.sim.atomic_actions.runner import (
     ExecutionRunnerCfg,
     ObservationProvider,
 )
+from embodichain.lab.sim.skills._assembly import (
+    assemble_semantic_runtime_components,
+)
 from embodichain.lab.sim.skills.calls import (
     SemanticCallCatalog,
     SemanticCallSpec,
@@ -53,10 +56,7 @@ from embodichain.lab.sim.skills.evidence import (
     EffectEvidenceProvider,
     EffectEvidenceProviderRegistry,
 )
-from embodichain.lab.sim.skills.integration import (
-    SceneManifest,
-    SemanticIntegrationManifest,
-)
+from embodichain.lab.sim.skills.integration import SemanticIntegrationManifest
 from embodichain.lab.sim.skills.parallel_runtime import (
     ParallelCommandSafetyValidator,
     analyze_parallel_branches,
@@ -110,6 +110,17 @@ class PlanningObservationPort(
     Protocol,
 ):
     """Combined observation and full-qpos port required by the Gym runtime."""
+
+
+@runtime_checkable
+class ExpertProgramAdapterFactory(Protocol):
+    """Bind one initialized environment to its Expert Program adapter."""
+
+    def create_adapter(
+        self,
+        environment: object,
+    ) -> ExpertProgramEnvironmentAdapter:
+        """Create the adapter after the environment has built its live scene."""
 
 
 @runtime_checkable
@@ -228,6 +239,14 @@ class _RegistrationOwningExpertProgramFactory(Protocol):
         self,
     ) -> tuple[SegmentPostPolicyPort | None, SegmentValidatorPort | None]:
         """Return factory-owned post-policy and validator ports."""
+
+    def create_registered_semantic_lowerers(
+        self,
+        *,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> tuple[RegisteredSemanticLowerer, ...]:
+        """Create fresh lowerers owned by the exact task registration."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -598,15 +617,36 @@ class ExpertProgramEnvironmentAdapter:
                 )
             self._registration.validate_engine(engine)
 
-        manifest = self._create_manifest(
+        registered_lowerers = self._registered_lowerers
+        if self._registration is not None:
+            registration_owner = self._factory
+            if not isinstance(
+                registration_owner,
+                _RegistrationOwningExpertProgramFactory,
+            ):
+                raise IntegrationFingerprintMismatch(
+                    "The standard environment factory lost registration-owned "
+                    "lowerer construction."
+                )
+            registered_lowerers = (
+                registration_owner.create_registered_semantic_lowerers(
+                    scene_registry=registry,
+                    engine=engine,
+                )
+            )
+            self._validate_registration_ownership()
+
+        semantic = assemble_semantic_runtime_components(
             registry,
             profile,
-            runtime_preset=integration.runtime_preset,
-        )
-        bound = manifest.bind(
-            registry,
             engine,
+            call_catalog=self._call_catalog,
+            runtime_preset=integration.runtime_preset,
             endpoint_adapters=self._endpoint_adapters,
+            registered_lowerers=registered_lowerers,
+            relation_grounders=self._relation_grounders,
+            handover_pose_providers=self._handover_pose_providers,
+            effect_monitor_registry=self._effect_monitor_registry,
         )
         if self._registration is not None:
             self._validate_registration_ownership()
@@ -614,14 +654,6 @@ class ExpertProgramEnvironmentAdapter:
             # engine-owned bound profile. Revalidate that second live result so a
             # provider cannot pass factory construction and drift before compile.
             self._registration.validate_engine(engine)
-        compiler = SemanticSkillCompiler(
-            bound,
-            registered_lowerers=self._registered_lowerers,
-            relation_grounders=self._relation_grounders,
-            handover_pose_providers=self._handover_pose_providers,
-            effect_monitor_registry=self._effect_monitor_registry,
-        )
-
         selection = ExpertProgramIntegrationCfg(
             robot_profile=integration.robot_profile,
             scene_registry=integration.scene_registry,
@@ -631,9 +663,9 @@ class ExpertProgramEnvironmentAdapter:
             integration=selection,
             scene_registry=registry,
             robot_profile=profile,
-            manifest=manifest,
+            manifest=semantic.manifest,
             engine=engine,
-            compiler=compiler,
+            compiler=semantic.compiler,
         )
 
     def _assemble_execution_runtime(
@@ -657,24 +689,36 @@ class ExpertProgramEnvironmentAdapter:
                 "create_planning_observation_provider() must return a port "
                 "implementing both ObservationProvider and CurrentQposProvider."
             )
-        providers = self._factory.create_effect_evidence_providers(
-            scene_registry=semantic.scene_registry,
-            engine=semantic.engine,
-            observation_provider=observation_provider,
-        )
-        self._validate_registration_ownership()
-        if isinstance(providers, (str, bytes)):
-            raise TypeError(
-                "create_effect_evidence_providers() must return an iterable of "
-                "EffectEvidenceProvider values."
-            )
         try:
-            provider_values = tuple(providers)
-        except TypeError as exc:
-            raise TypeError(
-                "create_effect_evidence_providers() must return an iterable of "
-                "EffectEvidenceProvider values."
+            selected_preset = semantic.robot_profile.presets[
+                semantic.integration.runtime_preset
+            ]
+        except KeyError as exc:
+            raise ValueError(
+                "The selected runtime preset is absent from the assembled robot "
+                "profile."
             ) from exc
+        if selected_preset.effect_monitors:
+            providers = self._factory.create_effect_evidence_providers(
+                scene_registry=semantic.scene_registry,
+                engine=semantic.engine,
+                observation_provider=observation_provider,
+            )
+            self._validate_registration_ownership()
+            if isinstance(providers, (str, bytes)):
+                raise TypeError(
+                    "create_effect_evidence_providers() must return an iterable of "
+                    "EffectEvidenceProvider values."
+                )
+            try:
+                provider_values = tuple(providers)
+            except TypeError as exc:
+                raise TypeError(
+                    "create_effect_evidence_providers() must return an iterable of "
+                    "EffectEvidenceProvider values."
+                ) from exc
+        else:
+            provider_values = ()
         evidence_collector = EffectEvidenceCollector(
             EffectEvidenceProviderRegistry(provider_values)
         )
@@ -703,15 +747,6 @@ class ExpertProgramEnvironmentAdapter:
                 )
             command_encoder.freeze()
         command_sink = BufferedGymCommandSink(command_encoder, clock)
-        try:
-            selected_preset = semantic.robot_profile.presets[
-                semantic.integration.runtime_preset
-            ]
-        except KeyError as exc:
-            raise ValueError(
-                "The selected runtime preset is absent from the assembled robot "
-                "profile."
-            ) from exc
         selected_runner_cfg = selected_preset.runner_cfg
         if self._registration is None and self._runner_cfg is not None:
             selected_runner_cfg = deepcopy(self._runner_cfg)
@@ -972,21 +1007,6 @@ class ExpertProgramEnvironmentAdapter:
         if self._registration is not None:
             self._registration.validate_scene_registry(registry)
         return registry
-
-    def _create_manifest(
-        self,
-        registry: SceneRegistry,
-        profile: RobotSkillProfile,
-        *,
-        runtime_preset: str,
-    ) -> SemanticIntegrationManifest:
-        """Create one static manifest from exact selected declarations."""
-        return SemanticIntegrationManifest(
-            scene=SceneManifest.from_registry(registry),
-            robot_profile=profile,
-            call_catalog=self._call_catalog,
-            runtime_preset=runtime_preset,
-        )
 
 
 __all__: list[str] = []

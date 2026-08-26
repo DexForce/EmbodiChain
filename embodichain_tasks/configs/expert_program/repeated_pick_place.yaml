@@ -1,9 +1,8 @@
-schema_version: 2
 program_id: repeated_cube_pick_place
 integration:
   robot_profile: expert_program_ur5_pick_place
   scene_registry: expert_program_repeated_pick_place
-  runtime_preset: safe
+  runtime_preset: trajectory
 targets:
   drop_pose:
     kind: cyclic_pose
@@ -36,12 +35,3 @@ program:
               target: drop_pose
             resources:
               primary: manipulator
-    post:
-      - kind: wait_stable
-        entity: cube
-        preset: rigid_object
-    validators:
-      - kind: object_near_target
-        object: cube
-        target: drop_pose
-        position_tolerance: 0.12

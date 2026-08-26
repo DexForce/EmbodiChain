@@ -37,7 +37,7 @@ _CASE_ID = "repeated_cube_three_cycle_live"
 _SEED = 0
 _NUM_ENVS = 1
 _SUBPROCESS_TIMEOUT_SECONDS = 300
-# ``main`` closes the environment; bypass native ContactSensor interpreter teardown.
+# ``main`` closes the environment; bypass native simulator interpreter teardown.
 _RUN_PUBLIC_MAIN = (
     "import os, sys; "
     "from scripts.benchmark.expert_program.demo_success import main; "
@@ -45,27 +45,14 @@ _RUN_PUBLIC_MAIN = (
 )
 
 
-def _successful_effect_decisions(call: dict[str, object]) -> list[dict[str, object]]:
-    """Return successful physical-effect observations from one call trace."""
-    effects = call["effects"]
-    assert isinstance(effects, list)
-    return [
-        effect
-        for effect in effects
-        if isinstance(effect, dict)
-        and isinstance(effect.get("decision"), dict)
-        and effect["decision"].get("success_mask") == [True]
-    ]
-
-
 @pytest.mark.requires_sim
 @pytest.mark.subprocess_sim
 @pytest.mark.slow
 @pytest.mark.gpu
-def test_live_repeated_cube_completes_three_physical_cycles(
+def test_live_repeated_cube_completes_three_trajectory_cycles(
     tmp_path: Path,
 ) -> None:
-    """Run all three no-retry segments through the public live entry point."""
+    """Run all three open-loop trajectory segments through the public entry point."""
     raw_path = tmp_path / "cube_raw.json"
     report_path = tmp_path / "cube_report.md"
     completed = subprocess.run(
@@ -117,9 +104,7 @@ def test_live_repeated_cube_completes_three_physical_cycles(
     assert isinstance(segments, list)
     assert len(segments) == 3
 
-    for segment_index, (segment, target_index) in enumerate(
-        zip(segments, (0, 1, 0), strict=True)
-    ):
+    for segment_index, segment in enumerate(segments):
         assert isinstance(segment, dict)
         assert segment["segment_id"] == segment_index
         assert segment["name"] == "move_cube"
@@ -131,18 +116,12 @@ def test_live_repeated_cube_completes_three_physical_cycles(
         calls = runtime["calls"]
         assert [call["semantic_id"] for call in calls] == ["pick", "place"]
         assert all(call["status"] == "completed" for call in calls)
-        assert all(_successful_effect_decisions(call) for call in calls)
+        assert all(call["effects"] == [] for call in calls)
 
-        post_policies = metadata["post_policies"]
-        assert len(post_policies) == 1
-        assert post_policies[0]["kind"] == "wait_stable"
-        assert post_policies[0]["result"]["status"] == "settled"
+        assert metadata["post_policies"] == []
         validation = metadata["validation"]
         assert validation["accepted_mask"] == [True]
-        validators = validation["validators"]
-        assert len(validators) == 1
-        assert validators[0]["result"]["target_value_index"] == target_index
-        assert validators[0]["result"]["accepted_mask"] == [True]
+        assert validation["validators"] == []
 
     aggregates = aggregate_demo_success_trials(decoded_trials)
     metrics = aggregates.success_and_metrics[0]

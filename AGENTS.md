@@ -34,8 +34,8 @@ the agent should:
 
 Available topics: `simulation-system`, `env-framework`,
 `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`,
-`sim-visualization`, `motion-planning`, `atomic-actions`, `rl-learning`,
-`configclass-pattern`, `randomization`.
+`sim-visualization`, `motion-planning`, `atomic-actions`, `expert-programs`,
+`rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
 

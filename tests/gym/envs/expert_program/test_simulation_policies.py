@@ -139,7 +139,6 @@ class _Simulation:
 def _compiled_segment(*, settle_preset: str = "fast"):
     """Compile one segment containing both supported policy types."""
     payload = {
-        "schema_version": 2,
         "program_id": "policy_test",
         "integration": {
             "robot_profile": "test_robot",
@@ -202,7 +201,6 @@ def _compiled_segment(*, settle_preset: str = "fast"):
 def _compiled_articulation_segment():
     """Compile one standard joint-position validator."""
     payload = {
-        "schema_version": 2,
         "program_id": "joint_policy_test",
         "integration": {
             "robot_profile": "test_robot",
@@ -218,7 +216,6 @@ def _compiled_articulation_segment():
                 "call": {
                     "kind": "registered",
                     "call_id": "example.slide",
-                    "schema_version": 1,
                     "arguments": {},
                 },
             },

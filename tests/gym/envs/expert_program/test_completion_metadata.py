@@ -257,6 +257,8 @@ class _TraceGroundedCall:
     eligible_mask: torch.Tensor
     effect_spec: None = None
     effect_monitor: None = None
+    effect_guards: tuple[()] = ()
+    effect_gates: tuple[()] = ()
 
 
 class _TraceCompiler(SemanticSkillCompiler):
@@ -312,16 +314,17 @@ class _TraceCompiler(SemanticSkillCompiler):
             revision=revision,
         )
         analyzed = SimpleNamespace(
+            call=workflow.calls[call_index],
+            effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="completion_trace_robot"),
                 preset=SimpleNamespace(
                     preset_id="completion_trace_preset",
-                    schema_version=1,
                     motion_policy=invocation.motion_policy,
                     recovery_policy=invocation.recovery_policy,
                     runner_cfg=ExecutionRunnerCfg(),
                 ),
-            )
+            ),
         )
         return _TraceGroundedCall(
             analyzed=analyzed,
@@ -364,7 +367,6 @@ class _ProgramAnalysis:
 class _CompiledProgram:
     """Single-segment compiled-program port for the completion audit."""
 
-    schema_version = 2
     program_id = "completion-audit-program"
 
     def __init__(self, segment: _CompiledSegment) -> None:
@@ -432,7 +434,6 @@ def test_completion_trace_preserves_every_plan_generation_as_json_metadata() -> 
     assert accepted.tolist() == [True, True]
     assert action.plan_count == 2
 
-    assert metadata["expert_program_schema_version"] == 2
     assert metadata["expert_program_id"] == "completion-audit-program"
     assert metadata["program_segment_id"] == "completion-segment"
     assert metadata["program_segment_index"] == 0

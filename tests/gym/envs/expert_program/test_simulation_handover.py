@@ -27,8 +27,6 @@ from embodichain.lab.gym.envs.expert_program import ConfiguredHandOverPoseProvid
 def _provider() -> ConfiguredHandOverPoseProvider:
     """Return one deterministic dual-arm transfer declaration."""
     return ConfiguredHandOverPoseProvider(
-        middle_position=(0.0, 0.0, 0.7),
-        middle_quaternion_wxyz=(1.0, 1.0, 0.0, 0.0),
         final_position=(0.0, -0.2, 0.7),
         final_quaternion_wxyz=(1.0, 1.0, 0.0, 0.0),
     )
@@ -48,13 +46,9 @@ def test_configured_handover_provider_normalizes_and_owns_targets() -> None:
             [0.0, 1.0, 0.0],
         ]
     )
-    assert first.middle.pose is not second.middle.pose
     assert first.final.pose is not second.final.pose
     assert torch.allclose(
-        first.middle.pose.to_matrix()[:3, :3], expected_rotation, atol=1e-6
-    )
-    assert torch.allclose(
-        first.middle.pose.to_matrix()[:3, 3], torch.tensor([0.0, 0.0, 0.7])
+        first.final.pose.to_matrix()[:3, :3], expected_rotation, atol=1e-6
     )
     assert torch.allclose(
         first.final.pose.to_matrix()[:3, 3], torch.tensor([0.0, -0.2, 0.7])
@@ -64,8 +58,8 @@ def test_configured_handover_provider_normalizes_and_owns_targets() -> None:
 @pytest.mark.parametrize(
     ("overrides", "error_type"),
     [
-        ({"middle_position": (0.0, 0.0)}, TypeError),
-        ({"middle_quaternion_wxyz": (0.0, 0.0, 0.0, 0.0)}, ValueError),
+        ({"final_position": (0.0, 0.0)}, TypeError),
+        ({"final_quaternion_wxyz": (0.0, 0.0, 0.0, 0.0)}, ValueError),
     ],
 )
 def test_configured_handover_provider_rejects_invalid_declarations(
@@ -74,8 +68,6 @@ def test_configured_handover_provider_rejects_invalid_declarations(
 ) -> None:
     """Malformed provider declarations fail before simulation construction."""
     values: dict[str, object] = {
-        "middle_position": (0.0, 0.0, 0.7),
-        "middle_quaternion_wxyz": (1.0, 0.0, 0.0, 0.0),
         "final_position": (0.0, -0.2, 0.7),
         "final_quaternion_wxyz": (1.0, 0.0, 0.0, 0.0),
     }

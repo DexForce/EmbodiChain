@@ -38,7 +38,7 @@ class _RigidObject:
     """Minimal live rigid-object geometry and pose surface."""
 
     def __init__(self) -> None:
-        self.uid = "legacy_cube"
+        self.uid = "external_cube"
         self.pose = torch.eye(4).repeat(2, 1, 1)
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:

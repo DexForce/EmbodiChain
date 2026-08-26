@@ -45,6 +45,7 @@ embodichain.lab.sim.skills
       SemanticIntegrationManifest
       SemanticDiagnostic
       SemanticValidationError
+      SemanticCallAvailability
       SemanticEffectVerifier
       AtomicSkills
       SkillRuntime
@@ -200,6 +201,9 @@ Semantic integration
    :members:
 
 .. autoclass:: SemanticValidationError
+   :members:
+
+.. autoclass:: SemanticCallAvailability
    :members:
 
 Semantic runtime

@@ -36,14 +36,13 @@ from embodichain.lab.gym.envs.expert_program import (
 )
 
 
-def _program_data(*, schema_version: int = 2) -> dict[str, object]:
+def _program_data() -> dict[str, object]:
     """Return one minimal complete Expert Program JSON value."""
     program: dict[str, object] = {
         "kind": "invoke",
         "call": {"kind": "pick", "object": "cube"},
     }
     return {
-        "schema_version": schema_version,
         "program_id": "loader_pick",
         "integration": {
             "robot_profile": "test_robot",
@@ -119,13 +118,11 @@ def test_loads_expert_program_json_decodes_one_plain_document() -> None:
 
 
 @pytest.mark.parametrize("suffix", [".json", ".yaml"])
-@pytest.mark.parametrize("schema_version", [2])
 def test_load_expert_program_forwards_validation_context_for_each_format(
     tmp_path: Path,
     suffix: str,
-    schema_version: int,
 ) -> None:
-    data = _program_data(schema_version=schema_version)
+    data = _program_data()
     serialized = json.dumps(data) if suffix == ".json" else yaml.safe_dump(data)
     path = tmp_path / f"program{suffix}"
     path.write_text(serialized, encoding="utf-8")

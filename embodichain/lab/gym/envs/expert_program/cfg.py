@@ -25,12 +25,6 @@ from typing import TypeAlias
 
 from embodichain.utils import configclass
 
-EXPERT_PROGRAM_SCHEMA_VERSION = 2
-"""Only supported Expert Program schema version."""
-
-REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION = 1
-"""Schema version for opaque catalog-registered semantic-call payloads."""
-
 MAX_REPEAT_COUNT = 1_000
 """Maximum repeat count accepted by one Expert Program repeat node."""
 
@@ -350,28 +344,19 @@ class HandOverCfg:
     """Declarative request to transfer one held object between resources."""
 
     object: str = MISSING
-    receiver: str | None = None
     final_target: TargetRefCfg | None = None
     resources: dict[str, str] = field(default_factory=dict)
     kind: str = "hand_over"
 
     def __post_init__(self) -> None:
-        """Validate object, destination resource, and optional target."""
+        """Validate object, resource selections, and optional target."""
         _validate_identifier(self.object, field_name="object")
-        if self.receiver is not None:
-            _validate_identifier(self.receiver, field_name="receiver")
         if (
             self.final_target is not None
             and type(self.final_target) is not TargetRefCfg
         ):
             raise TypeError("final_target must be exactly TargetRefCfg or None.")
-        resources = _validate_resources(self.resources, field_name="resources")
-        if self.receiver is not None:
-            selected = resources.get("destination")
-            if selected is not None and selected != self.receiver:
-                raise ValueError("receiver conflicts with resources['destination'].")
-            resources["destination"] = self.receiver
-        self.resources = resources
+        self.resources = _validate_resources(self.resources, field_name="resources")
         _validate_kind(self.kind, expected="hand_over", field_name="kind")
 
 
@@ -380,26 +365,17 @@ class RegisteredSemanticCallCfg:
     """Safe declarative payload for one catalog-registered semantic call."""
 
     call_id: str = MISSING
-    schema_version: int = REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION
     arguments: dict[str, DeclarativeCfgValue] = field(default_factory=dict)
     resources: dict[str, str] = field(default_factory=dict)
     kind: str = "registered"
 
     def __post_init__(self) -> None:
-        """Validate versioned ID and recursively executable-free arguments."""
+        """Validate the call ID and recursively executable-free arguments."""
         _validate_identifier(self.call_id, field_name="call_id")
         if _REGISTERED_CALL_ID_PATTERN.fullmatch(self.call_id) is None:
             raise ValueError(
                 "call_id must contain two or more lowercase identifier segments "
                 "separated by single dots."
-            )
-        if (
-            type(self.schema_version) is not int
-            or self.schema_version != REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION
-        ):
-            raise ValueError(
-                "Registered call schema_version must be exactly "
-                f"{REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION}."
             )
         if type(self.arguments) is not dict:
             raise TypeError("arguments must be an exact dict.")
@@ -747,9 +723,8 @@ def _validate_program(
 
 @configclass
 class ExpertProgramCfg:
-    """Strict, versioned, executable-free Expert Program configuration."""
+    """Strict, executable-free Expert Program configuration."""
 
-    schema_version: int = MISSING
     program_id: str = MISSING
     integration: ExpertProgramIntegrationCfg = MISSING
     program: ProgramNodeCfg = MISSING
@@ -757,13 +732,6 @@ class ExpertProgramCfg:
 
     def __post_init__(self) -> None:
         """Validate the complete static configuration and target graph."""
-        if (
-            type(self.schema_version) is not int
-            or self.schema_version != EXPERT_PROGRAM_SCHEMA_VERSION
-        ):
-            raise ValueError(
-                "schema_version must be exactly " f"{EXPERT_PROGRAM_SCHEMA_VERSION}."
-            )
         _validate_identifier(self.program_id, field_name="program_id")
         if type(self.integration) is not ExpertProgramIntegrationCfg:
             raise TypeError("integration must be ExpertProgramIntegrationCfg.")

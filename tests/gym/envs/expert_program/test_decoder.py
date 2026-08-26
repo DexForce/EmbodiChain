@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for strict Expert Program Version 2 decoding."""
+"""Tests for strict Expert Program decoding."""
 
 from __future__ import annotations
 
@@ -48,9 +48,8 @@ from embodichain.lab.gym.envs.expert_program.cfg import (
 
 
 def _program_data() -> dict[str, object]:
-    """Return the repeated-cube Version 2 example as plain JSON values."""
+    """Return the repeated-cube example as plain JSON values."""
     return {
-        "schema_version": 2,
         "program_id": "repeated_cube_pick_place",
         "integration": {
             "robot_profile": "auto",
@@ -185,7 +184,7 @@ def test_decoder_supports_every_builtin_semantic_call() -> None:
                 {
                     "kind": "hand_over",
                     "object": "cube",
-                    "receiver": "right_actor",
+                    "resources": {"destination": "right_actor"},
                     "final_target": {
                         "kind": "target_ref",
                         "target": "drop_pose",
@@ -196,7 +195,6 @@ def test_decoder_supports_every_builtin_semantic_call() -> None:
                 {
                     "kind": "registered",
                     "call_id": "example.inspect",
-                    "schema_version": 1,
                     "arguments": {
                         "labels": ["front", "back"],
                         "options": {"confidence": 0.9},
@@ -335,17 +333,14 @@ def test_every_union_rejects_unknown_discriminator_at_exact_path(
     assert render_config_path(error.value.path) == expected_path
 
 
-@pytest.mark.parametrize("schema_version", [False, 0, 1, 3, "2"])
-def test_decoder_rejects_unsupported_top_level_schema_version(
-    schema_version: object,
-) -> None:
+def test_decoder_rejects_removed_top_level_schema_version() -> None:
     data = _program_data()
-    data["schema_version"] = schema_version
+    data["schema_version"] = 2
 
     with pytest.raises(ExpertProgramDecodeError) as error:
         decode_expert_program(data)
 
-    assert error.value.code == "unsupported_schema_version"
+    assert error.value.code == "unknown_field"
     assert error.value.path == ("schema_version",)
 
 
@@ -374,20 +369,20 @@ def test_decoder_rejects_unbounded_or_invalid_repeat_count(count: object) -> Non
     assert render_config_path(error.value.path) == "$.program.count"
 
 
-def test_registered_call_schema_version_error_reports_version_field() -> None:
+def test_decoder_rejects_removed_registered_call_schema_version() -> None:
     data = _program_data()
     data["program"] = _invoke(
         {
             "kind": "registered",
             "call_id": "example.inspect",
-            "schema_version": 2,
+            "schema_version": 1,
         }
     )
 
     with pytest.raises(ExpertProgramDecodeError) as error:
         decode_expert_program(data)
 
-    assert error.value.code == "invalid_schema_version"
+    assert error.value.code == "unknown_field"
     assert render_config_path(error.value.path) == "$.program.call.schema_version"
 
 
@@ -419,7 +414,6 @@ def test_decoder_rejects_executable_traversal_or_live_registered_payload(
         {
             "kind": "registered",
             "call_id": "example.inspect",
-            "schema_version": 1,
             "arguments": arguments,
         }
     )
@@ -439,7 +433,6 @@ def test_decoder_rejects_cyclic_input_before_ast_recursion() -> None:
         {
             "kind": "registered",
             "call_id": "example.inspect",
-            "schema_version": 1,
             "arguments": cyclic,
         }
     )

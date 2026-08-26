@@ -778,7 +778,7 @@ class SceneEntityRegistration:
     """Explicit dynamic pose/confidence source."""
 
     aliases: tuple[str, ...] = ()
-    """External or legacy names normalized once at the registry boundary."""
+    """External names normalized once at the registry boundary."""
 
     parent: SceneEntityRef | None = None
     """Canonical parent reference for a link or affordance."""

@@ -263,7 +263,6 @@ class _FakeProgramAnalysis:
 
 
 class _FakeProgram:
-    schema_version = 2
     program_id = "demo-program"
 
     def __init__(self, *segments: _FakeSegment) -> None:
@@ -915,20 +914,6 @@ def test_environment_step_clock_advances_only_explicitly() -> None:
     clock.advance_after_env_step()
     assert clock.step_index == 1
     assert clock.now() == pytest.approx(STEP_DT)
-
-
-def test_atomic_demo_bridge_rejects_non_v2_compiled_program() -> None:
-    clock = EnvironmentStepClock(STEP_DT)
-    sink = BufferedGymCommandSink(
-        RuntimeCommandFrameEncoder(_QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))),
-        clock,
-    )
-    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=STEP_DT))
-    program = _FakeProgram(_FakeSegment())
-    program.schema_version = 1
-
-    with pytest.raises(ValueError, match="schema_version must be exactly 2"):
-        AtomicDemoBridge(program, runtime, sink, clock)
 
 
 def test_observation_provider_reorders_qpos_by_stable_env_id() -> None:

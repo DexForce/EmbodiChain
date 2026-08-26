@@ -103,7 +103,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
             affordance=Affordance(),
             geometry={},
             label=STACK_BLOCK_UID,
-            entity=self._stack_block,
+            entity_id=STACK_BLOCK_UID,
         )
 
     def create_demo_segments(self, **kwargs: Any) -> tuple[DemoSegment]:
@@ -134,11 +134,13 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         """Plan PickUp then Place while threading the held-object state."""
         from embodichain.lab.sim.atomic_actions import (
             ActionInvocation,
+            EntityState,
             GraspGoal,
             MotionPolicy,
             PickUpOptions,
             PlaceGoal,
             PlaceOptions,
+            SceneSnapshot,
         )
 
         source_pose = self._stack_block.get_local_pose(to_matrix=True).to(
@@ -186,7 +188,14 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                     ),
                 ),
             ),
-            self._action_engine.initial_context(control_dt=self.step_dt),
+            self._action_engine.initial_context(
+                scene=SceneSnapshot(
+                    timestamp=0.0,
+                    version=0,
+                    entities={STACK_BLOCK_UID: EntityState(source_pose)},
+                ),
+                control_dt=self.step_dt,
+            ),
         )
         pick_success = pick_compiled.plan_success
         pick_trajectory = pick_compiled.trajectory.positions

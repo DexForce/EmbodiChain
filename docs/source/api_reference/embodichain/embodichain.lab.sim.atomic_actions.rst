@@ -37,6 +37,7 @@ embodichain.lab.sim.atomic_actions
       TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
+      PlanningFailure
       ActionPlan
       CompiledTrajectory
 
@@ -234,6 +235,9 @@ Planning and state
    :members:
 
 .. autoclass:: TimedTrajectory
+   :members:
+
+.. autoclass:: PlanningFailure
    :members:
 
 .. autoclass:: RuntimeCommandPayload

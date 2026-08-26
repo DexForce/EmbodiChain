@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Strict JSON/YAML-value decoder for Expert Program schema version 2."""
+"""Strict JSON/YAML-value decoder for declarative Expert Programs."""
 
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from typing import Literal, Protocol, TypeAlias, runtime_checkable
 from .cfg import (
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
-    EXPERT_PROGRAM_SCHEMA_VERSION,
     MAX_PROGRAM_DEPTH,
     MAX_REPEAT_COUNT,
     CyclicPoseTargetCfg,
@@ -434,7 +433,7 @@ def _decode_pose(value: object, *, path: ConfigPath) -> PoseCfg:
 
 
 def _decode_target(value: object, *, path: ConfigPath) -> TargetCfg:
-    """Decode one target provider shared by the supported schema versions."""
+    """Decode one supported target provider."""
     mapping = _expect_mapping(value, path=path)
     kind = _expect_discriminator(
         mapping,
@@ -567,15 +566,10 @@ def _decode_call(
     if kind == "hand_over":
         _validate_fields(
             mapping,
-            allowed=frozenset(
-                {"kind", "object", "receiver", "final_target", "resources"}
-            ),
+            allowed=frozenset({"kind", "object", "final_target", "resources"}),
             required=frozenset({"kind", "object"}),
             path=path,
         )
-        receiver = mapping.get("receiver")
-        if receiver is not None:
-            receiver = _expect_identifier(receiver, path=(*path, "receiver"))
         final_target = (
             None
             if mapping.get("final_target") is None
@@ -590,35 +584,24 @@ def _decode_call(
             path=path,
             kind=kind,
             object=_expect_identifier(mapping["object"], path=(*path, "object")),
-            receiver=receiver,
             final_target=final_target,
             resources=resources,
         )  # type: ignore[return-value]
     _validate_fields(
         mapping,
-        allowed=frozenset(
-            {"kind", "call_id", "schema_version", "arguments", "resources"}
-        ),
-        required=frozenset({"kind", "call_id", "schema_version"}),
+        allowed=frozenset({"kind", "call_id", "arguments", "resources"}),
+        required=frozenset({"kind", "call_id"}),
         path=path,
     )
     arguments = _expect_mapping(
         mapping.get("arguments", {}),
         path=(*path, "arguments"),
     )
-    schema_version = mapping["schema_version"]
-    if type(schema_version) is not int or schema_version != 1:
-        raise _error(
-            "invalid_schema_version",
-            (*path, "schema_version"),
-            "Registered call schema_version must be exactly 1.",
-        )
     return _construct(
         RegisteredSemanticCallCfg,
         path=path,
         kind=kind,
         call_id=_expect_identifier(mapping["call_id"], path=(*path, "call_id")),
-        schema_version=schema_version,
         arguments=arguments,
         resources=resources,
     )  # type: ignore[return-value]
@@ -1072,10 +1055,10 @@ def decode_expert_program(
     *,
     validation_context: ExpertProgramValidationContext | None = None,
 ) -> ExpertProgramCfg:
-    """Decode untrusted JSON/YAML-shaped values into strict versioned config.
+    """Decode untrusted JSON/YAML-shaped values into strict program config.
 
-    Only schema version 2 is supported. It contains sequential nodes plus
-    deterministic parallel blocks with explicit barriers.
+    The schema contains sequential nodes plus deterministic parallel blocks
+    with explicit barriers.
 
     Args:
         data: Exact JSON-compatible mapping produced by a trusted parser.
@@ -1098,25 +1081,10 @@ def decode_expert_program(
     mapping = _expect_mapping(owned, path=())
     _validate_fields(
         mapping,
-        allowed=frozenset(
-            {"schema_version", "program_id", "integration", "targets", "program"}
-        ),
-        required=frozenset(
-            {"schema_version", "program_id", "integration", "targets", "program"}
-        ),
+        allowed=frozenset({"program_id", "integration", "targets", "program"}),
+        required=frozenset({"program_id", "integration", "targets", "program"}),
         path=(),
     )
-    schema_version = mapping["schema_version"]
-    if (
-        type(schema_version) is not int
-        or schema_version != EXPERT_PROGRAM_SCHEMA_VERSION
-    ):
-        raise _error(
-            "unsupported_schema_version",
-            ("schema_version",),
-            "Expert Program schema_version must be exactly "
-            f"{EXPERT_PROGRAM_SCHEMA_VERSION}.",
-        )
 
     integration_mapping = _expect_mapping(
         mapping["integration"],
@@ -1163,7 +1131,6 @@ def decode_expert_program(
     config = _construct(
         ExpertProgramCfg,
         path=(),
-        schema_version=schema_version,
         program_id=_expect_identifier(mapping["program_id"], path=("program_id",)),
         integration=integration,
         targets=targets,

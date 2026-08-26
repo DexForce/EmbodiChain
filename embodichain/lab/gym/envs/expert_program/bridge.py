@@ -62,8 +62,6 @@ from embodichain.lab.sim.skills.parallel_runtime import (
 from embodichain.lab.sim.skills.runtime import SkillResult, SkillRuntime, SkillStatus
 from embodichain.lab.sim.types import EnvAction
 
-from .cfg import EXPERT_PROGRAM_SCHEMA_VERSION
-
 _SAFE_HOLD_ACTION_KINDS = frozenset(
     {"runtime_safe_hold", "runtime_wait_hold", "runtime_abort_safe_hold"}
 )
@@ -153,7 +151,6 @@ class RuntimeTransportActionEncoder(Protocol):
 class CompiledProgramPort(Protocol):
     """Minimal provider-free compiled-program surface consumed by the bridge."""
 
-    schema_version: int
     program_id: str
 
     def iter_segments(self) -> Iterator[Any]:
@@ -896,7 +893,7 @@ class AtomicDemoBridge:
         parallel_safety_validator: Optional authoritative physical-safety gate
             required before any parallel branch can start.
 
-    Schema-v2 parallel blocks retain their branch lanes and explicit barrier.
+    Parallel blocks retain their branch lanes and explicit barrier.
     They are lowered through :class:`ParallelSkillRuntime`; they are never
     flattened into a sequential semantic-call list.
     """
@@ -916,14 +913,6 @@ class AtomicDemoBridge:
         if not isinstance(program, CompiledProgramPort):
             raise TypeError("program must implement CompiledProgramPort.")
         _validate_identifier(program.program_id, field_name="program.program_id")
-        if (
-            type(program.schema_version) is not int
-            or program.schema_version != EXPERT_PROGRAM_SCHEMA_VERSION
-        ):
-            raise ValueError(
-                "program.schema_version must be exactly "
-                f"{EXPERT_PROGRAM_SCHEMA_VERSION}."
-            )
         if not isinstance(runtime, SequentialSkillRuntimePort):
             raise TypeError("runtime must implement SequentialSkillRuntimePort.")
         if not isinstance(command_sink, BufferedGymCommandSink):
@@ -1041,7 +1030,6 @@ class AtomicDemoBridge:
     def _segment_metadata(self, segment: Any) -> dict[str, Any]:
         """Build mutable JSON-safe metadata completed at lifecycle boundaries."""
         return {
-            "expert_program_schema_version": self._program.schema_version,
             "expert_program_id": self._program.program_id,
             "program_segment_id": segment.segment_id,
             "program_segment_index": segment.segment_index,

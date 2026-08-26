@@ -344,6 +344,16 @@ def test_semantic_call_catalog_rejects_duplicate_ids() -> None:
         SemanticCallCatalog([descriptor, descriptor])
 
 
+def test_semantic_call_descriptor_derives_atomic_contract_from_target() -> None:
+    """A semantic descriptor should have one atomic target source of truth."""
+    descriptor = _call_descriptor("vendor.inspect", RegisteredSemanticCall)
+    target = descriptor.target_descriptor
+
+    assert target is not None
+    assert descriptor.skill_id == target.skill_id
+    assert descriptor.binding_contract is target.binding_contract
+
+
 def test_catalog_rejects_executable_call_subclasses() -> None:
     class UnsafeRegisteredCall(RegisteredSemanticCall):
         pass
