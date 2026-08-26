@@ -209,7 +209,7 @@ def test_hand_over_registration_owns_scene_and_pose_provider() -> None:
         == "simulation.configured_handover_pose"
     )
     assert HAND_OVER_POSE_PROVIDER.middle_position == pytest.approx((0.0, 0.0, 0.7))
-    assert HAND_OVER_POSE_PROVIDER.final_position == pytest.approx((0.0, -0.2, 0.7))
+    assert HAND_OVER_POSE_PROVIDER.final_position == pytest.approx((0.0, -0.2, 0.6))
 
 
 def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
