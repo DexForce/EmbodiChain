@@ -362,6 +362,201 @@ class SlideAffordance(AntipodalAffordance):
 
 
 @dataclass
+class OpenDoorAffordance(AntipodalAffordance):
+    """Target-local handle geometry and a resolved hinge axis.
+
+    Use :meth:`from_articulation` to start from a graspable handle link. The
+    factory consumes the articulation's public parent-joint chain, skips only
+    fixed joints, and automatically accepts one unambiguous active revolute
+    ancestor. Ambiguous mechanisms require an explicit hinge joint name. The
+    resulting affordance owns no simulator entity or live pose.
+    """
+
+    mesh_vertices: torch.Tensor = field(kw_only=True)
+    """Handle-local vertices for the graspable contact surface."""
+
+    mesh_triangles: torch.Tensor = field(kw_only=True)
+    """Triangle indices for the graspable contact surface."""
+
+    rotation_axis: torch.Tensor = field(kw_only=True)
+    """Resolved hinge axis expressed in the handle-link frame."""
+
+    axis_origin: tuple[float, float, float] = field(kw_only=True)
+    """Resolved point on the hinge axis in the handle-link frame."""
+
+    joint_name: str = field(kw_only=True)
+    """Stable name of the resolved parent revolute joint."""
+
+    joint_limits: tuple[float, float] | None = None
+    """Optional lower and upper hinge limits in radians."""
+
+    opening_direction: int = 1
+    """Joint-coordinate direction from the closed limit toward the open limit."""
+
+    def __post_init__(self) -> None:
+        AntipodalAffordance.__post_init__(self)
+        if (
+            not isinstance(self.rotation_axis, torch.Tensor)
+            or self.rotation_axis.shape != (3,)
+            or not torch.isfinite(self.rotation_axis).all()
+        ):
+            raise ValueError(
+                "OpenDoorAffordance.rotation_axis must be a finite (3,) tensor."
+            )
+        if torch.linalg.vector_norm(self.rotation_axis) <= 1.0e-6:
+            raise ValueError("OpenDoorAffordance.rotation_axis must be non-zero.")
+        self.rotation_axis = self.rotation_axis.clone()
+        self.axis_origin = _validate_local_point(
+            self.axis_origin, "OpenDoorAffordance.axis_origin"
+        )
+        _validate_joint_metadata(self.joint_name, self.joint_limits)
+        if type(self.opening_direction) is not int or self.opening_direction not in (
+            -1,
+            1,
+        ):
+            raise ValueError("opening_direction must be either -1 or 1.")
+
+    @classmethod
+    def from_articulation(
+        cls,
+        articulation: Articulation,
+        link_name: str,
+        *,
+        hinge_joint_name: str | None = None,
+        opening_direction: int = 1,
+    ) -> OpenDoorAffordance:
+        """Build handle semantics from a parent revolute joint.
+
+        Automatic resolution skips only fixed joints. It succeeds when the
+        handle chain contains exactly one active ancestor and that joint is
+        revolute. A chain with multiple active ancestors can represent a latch,
+        handle joint, or another mechanism and therefore requires an explicit
+        ``hinge_joint_name``. Hinge geometry is converted from the joint frame
+        into the requested handle-link frame using current public link poses.
+
+        Args:
+            articulation: Articulation containing the graspable handle link.
+            link_name: Graspable handle link from which to start the traversal.
+            hinge_joint_name: Optional explicit revolute ancestor. Required
+                when more than one active ancestor makes automatic resolution
+                ambiguous.
+            opening_direction: Joint-coordinate direction from the closed legal
+                endpoint toward the open endpoint. Defaults to increasing qpos.
+
+        Returns:
+            Pure target-local handle and hinge semantics.
+
+        Raises:
+            TypeError: If a supplied name is not a string.
+            ValueError: If the link or explicit joint is unknown, automatic
+                resolution is ambiguous, the selected joint is not revolute,
+                or the resolved joint geometry is invalid.
+        """
+        if type(link_name) is not str:
+            raise TypeError("link_name must be a string.")
+        if not link_name or link_name != link_name.strip():
+            raise ValueError("link_name must be non-empty.")
+        if hinge_joint_name is not None and type(hinge_joint_name) is not str:
+            raise TypeError("hinge_joint_name must be a string or None.")
+        if hinge_joint_name is not None and (
+            not hinge_joint_name or hinge_joint_name != hinge_joint_name.strip()
+        ):
+            raise ValueError("hinge_joint_name must be non-empty when provided.")
+
+        parent_chain = articulation.get_parent_joint_chain(link_name)
+        if not parent_chain:
+            raise ValueError(
+                f"Link {link_name!r} has no parent joint and cannot resolve a hinge."
+            )
+
+        if hinge_joint_name is not None:
+            hinge = next(
+                (joint for joint in parent_chain if joint.name == hinge_joint_name),
+                None,
+            )
+            if hinge is None:
+                available = [joint.name for joint in parent_chain]
+                raise ValueError(
+                    f"Joint {hinge_joint_name!r} is not an ancestor of link "
+                    f"{link_name!r}. Available ancestors: {available}."
+                )
+        else:
+            active_ancestors = tuple(
+                joint for joint in parent_chain if joint.joint_type != "fixed"
+            )
+            if not active_ancestors:
+                raise ValueError(
+                    f"No active parent joint found for link {link_name!r}."
+                )
+            if len(active_ancestors) != 1:
+                active_names = [joint.name for joint in active_ancestors]
+                raise ValueError(
+                    f"Ambiguous active ancestors {active_names} for link "
+                    f"{link_name!r}; provide hinge_joint_name explicitly."
+                )
+            hinge = active_ancestors[0]
+        if hinge.joint_type != "revolute":
+            raise ValueError(
+                f"Selected hinge joint {hinge.name!r} must be revolute, got "
+                f"{hinge.joint_type!r}."
+            )
+        if hinge.joint_limits is None:
+            raise ValueError(
+                f"Selected hinge joint {hinge.name!r} must expose position limits."
+            )
+
+        handle_pose = articulation.get_link_pose(
+            link_name, env_ids=[0], to_matrix=True
+        )[0].to(dtype=torch.float32)
+        parent_pose = articulation.get_link_pose(
+            hinge.parent_link_name, env_ids=[0], to_matrix=True
+        )[0].to(device=handle_pose.device, dtype=torch.float32)
+        joint_origin = hinge.origin_pose.to(
+            device=handle_pose.device,
+            dtype=torch.float32,
+        )
+        joint_axis = hinge.axis.to(
+            device=handle_pose.device,
+            dtype=torch.float32,
+        )
+        if joint_origin.shape != (4, 4):
+            raise ValueError(
+                "Resolved revolute joint origin_pose must have shape (4, 4)."
+            )
+        if joint_axis.shape != (3,) or not torch.isfinite(joint_axis).all():
+            raise ValueError(
+                "Resolved revolute joint axis must be a finite (3,) vector."
+            )
+        if torch.linalg.vector_norm(joint_axis) <= 1.0e-6:
+            raise ValueError("Resolved revolute joint axis must be non-zero.")
+
+        joint_pose_world = torch.matmul(parent_pose, joint_origin)
+        handle_rotation_world = handle_pose[:3, :3]
+        rotation_axis_world = torch.matmul(
+            joint_pose_world[:3, :3],
+            joint_axis / torch.linalg.vector_norm(joint_axis),
+        )
+        rotation_axis_local = torch.matmul(
+            handle_rotation_world.transpose(0, 1), rotation_axis_world
+        )
+        axis_origin_local = torch.matmul(
+            handle_rotation_world.transpose(0, 1),
+            joint_pose_world[:3, 3] - handle_pose[:3, 3],
+        )
+        vertices, triangles = articulation.get_link_vert_face(link_name)
+        lower_limit, upper_limit = hinge.joint_limits
+        return cls(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
+            rotation_axis=rotation_axis_local,
+            axis_origin=tuple(float(value) for value in axis_origin_local),
+            joint_name=hinge.name,
+            joint_limits=(lower_limit, upper_limit),
+            opening_direction=opening_direction,
+        )
+
+
+@dataclass
 class PressAffordance(Affordance):
     """Explicit target-local contact point and pressing direction."""
 
@@ -602,6 +797,7 @@ __all__ = [
     "Affordance",
     "AntipodalAffordance",
     "AxisAlignAffordance",
+    "OpenDoorAffordance",
     "SlideAffordance",
     "PressAffordance",
     "TwistAffordance",

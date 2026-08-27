@@ -90,6 +90,12 @@ Use the narrow topic when a request names one of these subsystems. Use
 `simulation-system` for the overall `lab/sim` architecture, manager
 lifecycle, scene ownership, or cross-module flow.
 
+`Articulation.get_parent_joint_chain(link_name)` is the public topology query
+for integrations that need link ancestry. It returns immediate-parent-first
+`ArticulationJointKinematics` values containing copied names, joint type,
+origin, axis, and optional limits. Consumers must not reach into
+`BatchEntity._entities` or retain backend-native joint-info objects.
+
 ## Configuration Flow
 
 `SimulationManagerCfg` owns window size, headless mode, rendering, GPU/CPU
@@ -133,6 +139,8 @@ corresponding robot/sensor module. Scene composition belongs in
 - `destroy()` queues deferred cleanup. Tests and non-exiting standalone
   callers that use `exit_process=False` must call
   `SimulationManager.flush_cleanup_queue()`.
+- Resolve articulation ancestry through `get_parent_joint_chain()`; keep
+  DexSim topology access encapsulated by `Articulation`.
 
 ## Common Failure Modes
 

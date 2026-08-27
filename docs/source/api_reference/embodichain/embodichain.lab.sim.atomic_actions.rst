@@ -108,6 +108,9 @@ embodichain.lab.sim.atomic_actions
       SlideGoal
       SlideOptions
       SlideAffordance
+      OpenDoorGoal
+      OpenDoorOptions
+      OpenDoorAffordance
       TwistGoal
       TwistOptions
       TwistAffordance
@@ -122,6 +125,7 @@ embodichain.lab.sim.atomic_actions
       Place
       Press
       Slide
+      OpenDoor
       Twist
       CoordinatedPickment
       CoordinatedPlacement
