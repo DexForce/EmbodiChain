@@ -72,6 +72,7 @@ embodichain.lab.sim.atomic_actions
       CommandDispatch
       CommandOperation
       ExecutionClock
+      create_simulation_atomic_action_engine
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
@@ -302,6 +303,8 @@ Engine and execution
 
 .. autoclass:: MonotonicExecutionClock
    :members:
+
+.. autofunction:: create_simulation_atomic_action_engine
 
 .. autoclass:: SimulationExecutionAdapter
    :members:

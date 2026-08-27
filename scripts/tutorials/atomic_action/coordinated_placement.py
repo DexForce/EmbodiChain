@@ -38,8 +38,8 @@ from scipy.spatial.transform import Rotation as SciRotation
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     CoordinatedPlacementOptions,
     CoordinatedPlacementGoal,
     GraspGoal,
@@ -581,8 +581,9 @@ def run_coordinated_placement_demo(
         hold_steps=6,
         retreat_steps=18,
     )
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(bread, pan),
         control_profiles={
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,

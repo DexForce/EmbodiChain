@@ -766,6 +766,7 @@ embodichain.lab.sim.atomic_actions.sim_adapter
 
 .. autosummary::
 
+   create_simulation_atomic_action_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    SceneSnapshotSupplier

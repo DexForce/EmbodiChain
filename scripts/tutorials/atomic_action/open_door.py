@@ -32,14 +32,12 @@ from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
-    EntityState,
     MotionPolicy,
     ObjectSemantics,
     ObservedArticulationJointState,
     OpenDoorAffordance,
     OpenDoorGoal,
     OpenDoorOptions,
-    SceneEntityPose,
     SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import (
@@ -188,7 +186,7 @@ def main() -> None:
                 "open_door",
                 OpenDoorGoal(
                     semantics,
-                    SceneEntityPose(HANDLE_SCENE_ENTITY_ID),
+                    handle_pose,
                     open_fraction=open_fraction,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
@@ -205,7 +203,6 @@ def main() -> None:
             scene=SceneSnapshot(
                 timestamp=0.0,
                 version=0,
-                entities={HANDLE_SCENE_ENTITY_ID: EntityState(handle_pose)},
                 articulation_joints={
                     (
                         MICROWAVE_SCENE_ENTITY_ID,

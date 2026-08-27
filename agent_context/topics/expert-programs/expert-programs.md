@@ -238,19 +238,14 @@ evidence fails closed. Resource disjointness alone is never sufficient.
   `simulation.pour` calls after built-in Pick. The configured lowerers preserve
   verified held-object state and keep task motion values in the selected robot
   policy preset.
-- `Rearrangement-v3` uses registered `simulation.push_object` calls over
-  predeclared utensil-to-slot routes. Each utensil is pushed, settled, and
-  corrected from the latest measured pose; the action short-circuits inside its
-  configured completion tolerance, while segment validators remain the final
-  physical acceptance boundary.
 
 Do not infer physical qualification from the two trajectory-only examples or
 from unit/fake-port tests. Physical acceptance belongs in dedicated validation
 integrations with measured evidence, controlled multi-seed/randomization runs,
 and task validators. `EmbodiedEnv` is the common execution environment for all
-five references. Their Gym configs own the complete supported composition
+four references. Their Gym configs own the complete supported composition
 roots, including the allowlisted services needed by Open Drawer, Hand Over,
-Pour Water, and Rearrangement; none has a task environment module or subclass.
+and Pour Water; none has a task environment module or subclass.
 
 ## Recommended change sites
 
@@ -265,7 +260,7 @@ Pour Water, and Rearrangement; none has a task environment module or subclass.
 | Lazy Gym action/segment lifecycle | `bridge.py` and `embodichain/lab/gym/envs/demo.py` |
 | Environment adapter binding, episode program selection, success/reset | `embodichain/lab/gym/envs/embodied_env.py` and `embodichain/lab/gym/utils/registration.py` |
 | Config-created simple runtime and dynamic ID binding | `embodichain/lab/gym/envs/expert_program/configured_runtime.py` and `embodichain/lab/gym/utils/gym_utils.py` |
-| Reference scene/profile/runtime values | `embodichain_tasks/configs/tasks/manipulation/{repeated_pick_place,open_drawer,hand_over}/env.json` and `embodichain_tasks/configs/tasks/manipulation/tableware/{pour_water,rearrangement}/env.json` |
+| Reference scene/profile/runtime values | `embodichain_tasks/configs/tasks/manipulation/{repeated_pick_place,open_drawer,hand_over}/env.json` and `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json` |
 | Configured live-service implementations | `embodichain/lab/gym/envs/expert_program/_configured_runtime_services.py` |
 
 Prefer changing the narrow owner. Do not add task-local motion generators,

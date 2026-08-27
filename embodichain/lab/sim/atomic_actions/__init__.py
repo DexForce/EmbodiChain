@@ -224,6 +224,7 @@ from .runner import (
 )
 from .scene import SceneProvider
 from .sim_adapter import (
+    create_simulation_atomic_action_engine,
     RigidObjectSceneProvider,
     RigidObjectSceneProviderCfg,
     SceneSnapshotSupplier,
@@ -270,6 +271,7 @@ __all__ = [
     "CommandSink",
     "ControlCommand",
     "ControlPartCommandProfile",
+    "create_simulation_atomic_action_engine",
     "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",
     "CoordinatedPickment",

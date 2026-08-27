@@ -82,6 +82,23 @@ instance of every type in `BUILTIN_ACTION_TYPES`; use `load_builtins=False` only
 for isolated tests or a fully custom action set. A bound action cannot be
 reused by another engine.
 
+An engine may additionally borrow a default `SceneProvider`. In that case,
+`engine.initial_context()` captures a `SceneSnapshot` from the provider using
+the robot observation timestamp and generated environment IDs. An explicitly
+supplied `scene=` snapshot takes precedence, and engines without either source
+retain the empty-scene behavior. The provider is only an initial-context
+convenience for direct-core planning; execution observations and scene revision
+advancement remain owned by the runtime's `ObservationProvider`.
+
+Direct simulation callers that only need selected rigid-object poses should use
+`create_simulation_atomic_action_engine(..., scene_entities=(...))`. The factory
+derives canonical direct-core IDs from the supplied objects' `uid` values and
+installs the default provider; it never scans `SimulationManager`. Actions then
+select the entries they consume through their goal and semantic entity IDs.
+Articulation/link observations, aliases, collision roles, dynamic execution,
+and external perception remain explicit `SceneProvider` or `SceneRegistry`
+integration paths.
+
 ## Engine entry points
 
 Choose the public engine entry point by lifecycle, not by skill type:
