@@ -352,6 +352,7 @@ def _recipe(
                     role=role,
                     already_held=incoming_held_arm is not None,
                     payloads=payloads,
+                    orientation_goal=str(params.get("orientation_goal", "none")),
                 ),
                 "arrange_line",
                 goal,
@@ -359,6 +360,11 @@ def _recipe(
             )
         goal = {
             "reference_object": target,
+            "support_object": (
+                target
+                if relation in {"on", "inside"}
+                else str(params.get("support_role", "table"))
+            ),
             "reference_state": "live",
             "relation": relation,
             "relation_frame": str(params.get("relation_frame", "world")),
@@ -387,6 +393,7 @@ def _recipe(
                 role=role,
                 already_held=incoming_held_arm is not None,
                 payloads=payloads,
+                orientation_goal=str(params.get("orientation_goal", "none")),
             ),
             "place_relative",
             goal,
@@ -502,6 +509,7 @@ def _recipe(
                 role=role,
                 already_held=incoming_held_arm is not None,
                 leave_held=terminal_behavior == "hold",
+                orientation_goal=str(params.get("orientation_goal", "upright")),
             ),
             "orient_object",
             goal,
@@ -618,6 +626,20 @@ def _recipe(
     if task_type == "E4":
         transfer = str(params.get("transfer_arm", "left_arm"))
         receive = str(params.get("receive_arm", "right_arm"))
+        terminal_behavior = str(params.get("terminal_behavior", "hold"))
+        if terminal_behavior not in TERMINAL_BEHAVIORS - {"none"}:
+            raise ValueError("E4 terminal_behavior must be 'hold' or 'place'.")
+        target = params.get("target_role")
+        relation = str(params.get("relation", "none"))
+        if terminal_behavior == "place":
+            if not isinstance(target, str) or not target or relation == "none":
+                raise ValueError(
+                    "E4 terminal_behavior='place' requires target_role and relation."
+                )
+        elif target is not None or relation != "none":
+            raise ValueError(
+                "E4 terminal_behavior='hold' cannot carry target_role or relation."
+            )
         if incoming_held_arm == "coordinated":
             raise ValueError(
                 "E4 cannot consume a coordinated hold; an explicit single-arm "
@@ -628,30 +650,36 @@ def _recipe(
                 f"E4 transfer_arm {transfer!r} conflicts with the predecessor "
                 f"holder {incoming_held_arm!r}."
             )
-        pickup_actor = {"mode": "required", "arm": transfer}
-        pickup = None
+        transfer_actor = {"mode": "required", "arm": transfer}
+        receive_actor = {"mode": "required", "arm": receive}
+        nodes: list[dict[str, Any]] = []
+        previous = list(dependencies)
+        next_index = 1
         if incoming_held_arm is None:
             pickup = _node(
                 group_id,
-                1,
+                next_index,
                 "PickUp",
                 task_type,
                 object_uid,
-                pickup_actor,
+                transfer_actor,
                 "arm",
                 {"kind": "object", "object": object_uid},
-                dependencies,
+                previous,
                 role,
                 {"type": "object_held", "object": object_uid, "arm": transfer},
                 motion_policy(("handover_role", "transfer")),
             )
+            nodes.append(pickup)
+            previous = [pickup["id"]]
+            next_index += 1
         staging = _node(
             group_id,
-            1 if pickup is None else 2,
+            next_index,
             "MoveHeldObject",
             task_type,
             object_uid,
-            pickup_actor,
+            transfer_actor,
             "arm",
             {
                 "kind": "handover_staging",
@@ -659,14 +687,17 @@ def _recipe(
                 "transfer_arm": transfer,
                 "receive_arm": receive,
             },
-            dependencies if pickup is None else [pickup["id"]],
+            previous,
             role,
             {"type": "object_held", "object": object_uid, "arm": transfer},
             motion_policy(),
         )
+        nodes.append(staging)
+        previous = [staging["id"]]
+        next_index += 1
         handover = _node(
             group_id,
-            2 if pickup is None else 3,
+            next_index,
             "HandOver",
             task_type,
             object_uid,
@@ -678,67 +709,199 @@ def _recipe(
                 "transfer_arm": transfer,
                 "receive_arm": receive,
             },
-            [staging["id"]],
+            previous,
             role,
             {"type": "handover_complete", "object": object_uid, "arm": receive},
             motion_policy(),
         )
+        nodes.append(handover)
+        previous = [handover["id"]]
+        next_index += 1
         # Grounding configures HandOver as exchange-to-exchange, so its receiver
         # stays at the grasp while the transfer arm performs the built-in lift.
         # This ordered retreat/home suffix then verifies and completes clearance
         # before any receiver-side continuation may carry the object away.
         retreat = _node(
             group_id,
-            3 if pickup is None else 4,
+            next_index,
             "MoveEndEffector",
             task_type,
             object_uid,
-            pickup_actor,
+            transfer_actor,
             "arm",
             {
                 "kind": "policy_pose",
                 "source": "handover",
                 "operation": "retreat",
             },
-            [handover["id"]],
+            previous,
             "cleanup",
             {},
             motion_policy(),
         )
+        nodes.append(retreat)
+        previous = [retreat["id"]]
+        next_index += 1
         home = _node(
             group_id,
-            4 if pickup is None else 5,
+            next_index,
             "MoveJoints",
             task_type,
             object_uid,
-            pickup_actor,
+            transfer_actor,
             "arm",
             {
                 "kind": "joint_state",
                 "source": "initial",
                 "operation": "handover_home",
             },
-            [retreat["id"]],
+            previous,
             "cleanup",
             {},
             motion_policy(),
         )
-        return (
-            [
-                item
-                for item in (pickup, staging, handover, retreat, home)
-                if item is not None
-            ],
-            "handover",
-            {
+        nodes.append(home)
+        previous = [home["id"]]
+        next_index += 1
+
+        orientation_modifiers: tuple[tuple[str, str], ...] = (
+            (("orientation", "upright"),)
+            if params.get("orientation_goal") == "upright"
+            else ()
+        )
+        receiver_policy = motion_policy(*orientation_modifiers)
+        if terminal_behavior == "hold":
+            receiver_exit = _node(
+                group_id,
+                next_index,
+                "MoveHeldObject",
+                task_type,
+                object_uid,
+                receive_actor,
+                "arm",
+                {
+                    "kind": "semantic_goal",
+                    "semantic_step": group_id,
+                    "phase": "handover_exit",
+                    "receive_arm": receive,
+                    "terminal_hold": True,
+                },
+                previous,
+                role,
+                {"type": "handover_complete", "object": object_uid, "arm": receive},
+                receiver_policy,
+            )
+            nodes.append(receiver_exit)
+            goal = {
                 "relation": "handover",
                 "orientation_goal": str(params.get("orientation_goal", "none")),
                 "orientation_axis": "none",
                 **_orientation_extensions(params),
                 "transfer_arm": transfer,
                 "receive_arm": receive,
+                "terminal_behavior": "hold",
+            }
+            return (
+                nodes,
+                "handover",
+                goal,
+                {"type": "handover_complete", "object": object_uid, "arm": receive},
+            )
+
+        assert isinstance(target, str)
+        for phase in ("staging", "final"):
+            receiver_move = _node(
+                group_id,
+                next_index,
+                "MoveHeldObject",
+                task_type,
+                object_uid,
+                receive_actor,
+                "arm",
+                {
+                    "kind": "semantic_goal",
+                    "semantic_step": group_id,
+                    "phase": phase,
+                },
+                previous,
+                role,
+                {},
+                receiver_policy,
+            )
+            nodes.append(receiver_move)
+            previous = [receiver_move["id"]]
+            next_index += 1
+        release = _node(
+            group_id,
+            next_index,
+            "Place",
+            task_type,
+            object_uid,
+            receive_actor,
+            "arm",
+            {"kind": "current_held_pose"},
+            previous,
+            role,
+            {},
+            receiver_policy,
+        )
+        nodes.append(release)
+        previous = [release["id"]]
+        next_index += 1
+        receiver_retreat = _node(
+            group_id,
+            next_index,
+            "MoveEndEffector",
+            task_type,
+            object_uid,
+            receive_actor,
+            "arm",
+            {"kind": "policy_pose", "source": "release", "operation": "retreat"},
+            previous,
+            "cleanup",
+            {},
+            receiver_policy,
+        )
+        nodes.append(receiver_retreat)
+        previous = [receiver_retreat["id"]]
+        next_index += 1
+        receiver_home = _node(
+            group_id,
+            next_index,
+            "MoveJoints",
+            task_type,
+            object_uid,
+            receive_actor,
+            "arm",
+            {"kind": "joint_state", "source": "initial"},
+            previous,
+            "cleanup",
+            {},
+            motion_policy(),
+        )
+        nodes.append(receiver_home)
+        success = {
+            "type": task_success_type(task_type, params),
+            "relation": relation,
+            "reference_object": target,
+        }
+        return (
+            nodes,
+            "handover",
+            {
+                "reference_object": target,
+                "support_object": (target if relation in {"on", "inside"} else "table"),
+                "reference_state": "live",
+                "relation": relation,
+                "relation_frame": str(params.get("relation_frame", "robot")),
+                "orientation_goal": str(params.get("orientation_goal", "none")),
+                "orientation_axis": "none",
+                **_orientation_extensions(params),
+                "transfer_arm": transfer,
+                "receive_arm": receive,
+                "terminal_behavior": "place",
             },
-            {"type": "handover_complete", "object": object_uid, "arm": receive},
+            success,
         )
     if task_type == "E5":
         terminal_behavior = str(params.get("terminal_behavior", "hold"))
@@ -916,9 +1079,10 @@ def _single_arm_manipulation(
     already_held: bool = False,
     leave_held: bool = False,
     payloads: Sequence[Mapping[str, Any]] = (),
+    orientation_goal: str = "none",
 ) -> list[dict[str, Any]]:
     orientation_modifiers: tuple[tuple[str, str], ...] = (
-        (("orientation", "upright"),) if task_type == "E2" else ()
+        (("orientation", "upright"),) if orientation_goal == "upright" else ()
     )
     payload_binding = deepcopy(list(payloads))
     specs = (

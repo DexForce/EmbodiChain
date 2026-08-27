@@ -337,14 +337,12 @@ def validate_target_compatibility(
     relation: str,
 ) -> None:
     """Reject only structural or explicitly declared target contradictions."""
-    if task_type == "E1" and relation == "on" and target is not None:
+    if relation == "on" and target is not None:
         # Support is a relation between two concrete bodies at a candidate
         # pose. A positive affordance list is not a closed-world inventory, so
         # omission of ``support_surface`` cannot prove incompatibility here.
         return
-    requires_container = task_type == "E3" or (
-        task_type == "E1" and relation == "inside"
-    )
+    requires_container = task_type == "E3" or relation == "inside"
     if requires_container and target is None:
         raise ValueError(
             f"{task_type} {relation} relation requires a target container."
@@ -366,7 +364,7 @@ def validate_target_compatibility(
 
 
 def _target_affordances(task_type: str, relation: str) -> tuple[str, ...]:
-    if task_type == "E3" or (task_type == "E1" and relation == "inside"):
+    if task_type == "E3" or relation == "inside":
         return ("container",)
     return ()
 

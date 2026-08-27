@@ -172,9 +172,9 @@ def test_handover_ownership_flows_through_home_terminal_barrier() -> None:
         if node["task_instance_id"] == "task_03" and node["atomic_action"] == "HandOver"
     )
 
-    assert terminal["atomic_action"] == "MoveJoints"
+    assert terminal["atomic_action"] == "MoveHeldObject"
     assert terminal["contract"]["completion"] == "terminal_barrier"
-    assert terminal["contract"]["failure_policy"] == "best_effort"
+    assert terminal["contract"]["failure_policy"] == "task_required"
     retreat = next(
         node
         for node in graph["nodes"]

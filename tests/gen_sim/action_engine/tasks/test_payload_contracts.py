@@ -31,6 +31,7 @@ import embodichain.gen_sim.action_engine.planning.linker as linker_module
 import embodichain.gen_sim.action_engine.runtime.executor as executor_module
 from embodichain.gen_sim.action_engine.domain import task_contract
 from embodichain.gen_sim.action_engine.protocol import TASK_SPEC_SCHEMA
+from embodichain.gen_sim.action_engine.runtime import load_execution_program
 from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
 
 from ..task_fixtures import make_task_spec
@@ -157,6 +158,28 @@ def test_loaded_e5_propagates_payloads_through_goal_binding_and_claims() -> None
     ]
 
 
+def test_standalone_e5_binds_task_owned_payload_without_a_producer() -> None:
+    task, _requirements = make_task_spec("E5")
+    task["task_instances"][0]["params"]["payload_roles"] = ["payload"]
+
+    graph = instantiate_seed_graph(
+        task,
+        {"object_01": "tray_uid", "payload": "can_uid"},
+    )
+    node = graph["nodes"][0]
+
+    assert graph["metadata"]["direct_payload_links"] == []
+    assert graph["task_groups"][0]["goal"]["payloads"] == [
+        {"object": "can_uid", "slot": "center"}
+    ]
+    assert node["target_binding"]["payloads"] == [
+        {"object": "can_uid", "slot": "center"}
+    ]
+    assert "object:can_uid" in {
+        claim["resource"] for claim in node["contract"]["claims"]
+    }
+
+
 def test_loaded_carrier_graph_and_payload_order_are_deterministic() -> None:
     task, bindings = _loaded_carrier_task()
 
@@ -234,6 +257,25 @@ def test_payload_infrastructure_does_not_branch_on_task_numbers() -> None:
         assert literals.isdisjoint(task_numbers), function.__qualname__
 
 
+def test_e2_incoming_hold_reads_only_generic_ownership_state() -> None:
+    holder = recipes_module._incoming_held_arm(
+        "E2",
+        "object_uid",
+        ["anonymous_producer"],
+        {"anonymous_producer": ("object_uid", "right_arm")},
+    )
+    tree = ast.parse(dedent(inspect.getsource(recipes_module._incoming_held_arm)))
+    task_numbers = {f"E{index}" for index in range(1, 10)}
+    literals = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+    assert holder == "right_arm"
+    assert literals.isdisjoint(task_numbers)
+
+
 @pytest.mark.parametrize("task_type", [f"E{index}" for index in range(1, 10)])
 def test_standalone_tasks_gain_no_payload_dependency(task_type: str) -> None:
     task, _requirements = make_task_spec(task_type)
@@ -248,6 +290,9 @@ def test_standalone_tasks_gain_no_payload_dependency(task_type: str) -> None:
     bindings = {role: f"runtime_{role}" for role in role_names}
 
     graph = instantiate_seed_graph(task, bindings)
+    program = load_execution_program(graph)
 
     assert graph["task_groups"][0]["depends_on"] == []
     assert graph["metadata"]["direct_payload_links"] == []
+    assert len(program.semantic_steps) == 1
+    assert program.semantic_steps[0].id == "task_01"

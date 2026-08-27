@@ -188,14 +188,28 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
         ),
         "E4": _contract(
             "E4",
-            "Transfer one held object from one arm to the other.",
-            frozenset({"transfer_arm", "receive_arm", "orientation_goal"}),
+            "Transfer one object between arms, then either leave the receiver "
+            "holding it safely or place it at a symbolic relation.",
+            frozenset(
+                {
+                    "target",
+                    "relation",
+                    "transfer_arm",
+                    "receive_arm",
+                    "orientation_goal",
+                    "terminal_behavior",
+                }
+            ),
             "rigid_object",
             frozenset({"graspable", "handover"}),
             "handover_complete",
             resource_mode="handover",
             moves_primary_object=True,
             accepts_incoming_hold=True,
+            terminal_success_types=(
+                ("hold", "handover_complete"),
+                ("place", "semantic_goal"),
+            ),
         ),
         "E5": _contract(
             "E5",

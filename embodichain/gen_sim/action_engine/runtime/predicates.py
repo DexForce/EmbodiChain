@@ -742,7 +742,7 @@ def evaluate_predicate(
         return _constant(env, False)
     if kind == "poured":
         if spec.get("verification") == "action_completion":
-            # Reaching semantic-step verification means every required E3 edge
+            # Reaching semantic-step verification means every required pour edge
             # already completed without a fatal planning or execution failure.
             return _constant(env, True)
 

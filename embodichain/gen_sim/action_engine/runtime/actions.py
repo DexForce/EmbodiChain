@@ -626,7 +626,7 @@ class AtomicActionAdapter:
         grounded: GroundedAction,
         capability: AtomicCapability,
     ) -> tuple[GroundedAction, ...]:
-        """Build deterministic geometry-ranked E5 partition candidates.
+        """Build deterministic geometry-ranked coordinated-grasp candidates.
 
         ``left_to_right_arm_direction`` remains the live base-to-base direction:
         it labels the two participant regions and is not the transport direction.

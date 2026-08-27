@@ -628,6 +628,9 @@ def _resolve_default_contract(
         )
     if capability.name == "MoveHeldObject":
         required_arm = _required_arm(arm, capability.name)
+        terminal_hold = binding.get("terminal_hold", False)
+        if not isinstance(terminal_hold, bool):
+            raise TypeError("MoveHeldObject terminal_hold must be a boolean.")
         return ResolvedActionContract(
             requires=(
                 StateAtom("object_held", object_uid=object_uid, arm=required_arm),
@@ -637,6 +640,7 @@ def _resolve_default_contract(
                 ResourceClaim(f"object:{object_uid}", lifetime="until_release"),
             )
             + payload_claims,
+            completion="terminal_barrier" if terminal_hold else "ordinary",
         )
     if capability.name == "Place":
         required_arm = _required_arm(arm, capability.name)

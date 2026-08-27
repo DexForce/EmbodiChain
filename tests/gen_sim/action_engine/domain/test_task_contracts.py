@@ -67,6 +67,18 @@ def test_e5_success_depends_only_on_terminal_behavior() -> None:
         task_success_type("E5", {"terminal_behavior": "none"})
 
 
+def test_e4_success_depends_on_its_own_terminal_behavior() -> None:
+    contract = task_contract("E4")
+
+    assert {"target", "relation", "terminal_behavior"} <= set(
+        contract.applicable_intent_fields
+    )
+    assert task_success_type("E4", {"terminal_behavior": "hold"}) == (
+        "handover_complete"
+    )
+    assert task_success_type("E4", {"terminal_behavior": "place"}) == "semantic_goal"
+
+
 def test_symbolic_transport_values_are_language_neutral_protocol_enums() -> None:
     assert {"on", "inside", "behind", "left_of"} <= RELATIONS
     assert {"none", "up", "left", "world_y"} <= TRANSPORT_DIRECTIONS

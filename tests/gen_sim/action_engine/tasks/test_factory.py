@@ -19,7 +19,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
+import embodichain.gen_sim.action_engine.domain.task_contracts as task_contracts_module
+import embodichain.gen_sim.action_engine.domain.v2 as domain_v2_module
+from embodichain.gen_sim.action_engine.runtime import load_execution_program
 from embodichain.gen_sim.action_engine.tasks import (
     ground_instruction_draft,
     instantiate_seed_graph,
@@ -68,7 +72,7 @@ def _intent_step(
         "layout": "none",
         "axis": "none",
         "direction": "none",
-        "terminal_behavior": "none",
+        "terminal_behavior": "hold" if task_type == "E4" else "none",
         "depends_on": [],
     }
     step.update(updates)
@@ -273,6 +277,7 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
         "HandOver",
         "MoveEndEffector",
         "MoveJoints",
+        "MoveHeldObject",
     ]
     assert handover_nodes[0]["motion_policy"] == {
         "modifiers": [{"type": "handover_role", "mode": "transfer"}]
@@ -428,6 +433,7 @@ def test_handover_to_place_uses_receiver_hold_without_repickup() -> None:
         "HandOver",
         "MoveEndEffector",
         "MoveJoints",
+        "MoveHeldObject",
     ]
     assert handover["actor"] == {"mode": "required", "arm": "left_arm"}
     assert graph["nodes"][0]["motion_policy"] == {
@@ -467,6 +473,151 @@ def test_handover_to_place_uses_receiver_hold_without_repickup() -> None:
         "arm": "right_arm",
     }
     assert placement_nodes[0]["depends_on"] == [handover["node_ids"][-1]]
+
+
+def test_e4_hold_owns_receiver_safe_exit() -> None:
+    task = {
+        "schema_version": "action_engine_task_spec_v2",
+        "task_id": "handover_hold",
+        "level": "L1",
+        "instruction": "Hand the can to the right arm and keep holding it.",
+        "reasoning_type": "none",
+        "task_instances": [
+            {
+                "id": "handover",
+                "task_type": "E4",
+                "params": {
+                    "object_role": "can",
+                    "transfer_arm": "left_arm",
+                    "receive_arm": "right_arm",
+                    "terminal_behavior": "hold",
+                },
+                "depends_on": [],
+                "role": "primary",
+            }
+        ],
+        "success": {},
+        "oracle": {},
+        "metadata": {},
+    }
+
+    graph = instantiate_seed_graph(task, {"can": "can_uid"})
+    group = graph["task_groups"][0]
+    receiver_exit = graph["nodes"][-1]
+
+    assert [node["atomic_action"] for node in graph["nodes"]] == [
+        "PickUp",
+        "MoveHeldObject",
+        "HandOver",
+        "MoveEndEffector",
+        "MoveJoints",
+        "MoveHeldObject",
+    ]
+    assert receiver_exit["actor"] == {"mode": "required", "arm": "right_arm"}
+    assert receiver_exit["target_binding"]["phase"] == "handover_exit"
+    assert receiver_exit["target_binding"]["terminal_hold"] is True
+    assert group["success"]["type"] == "handover_complete"
+    assert group["contract"]["completion"] == "terminal_barrier"
+
+
+def test_e4_place_owns_receiver_placement_without_e1(monkeypatch) -> None:
+    task = {
+        "schema_version": "action_engine_task_spec_v2",
+        "task_id": "handover_place",
+        "level": "L1",
+        "instruction": "Hand the can to the right arm and place it on the notebook.",
+        "reasoning_type": "none",
+        "task_instances": [
+            {
+                "id": "handover_place",
+                "task_type": "E4",
+                "params": {
+                    "object_role": "can",
+                    "target_role": "notebook",
+                    "relation": "on",
+                    "transfer_arm": "left_arm",
+                    "receive_arm": "right_arm",
+                    "terminal_behavior": "place",
+                },
+                "depends_on": [],
+                "role": "primary",
+            }
+        ],
+        "success": {},
+        "oracle": {},
+        "metadata": {},
+    }
+
+    graph = instantiate_seed_graph(
+        task,
+        {"can": "can_uid", "notebook": "notebook_uid"},
+    )
+    group = graph["task_groups"][0]
+
+    assert {node["task_type"] for node in graph["nodes"]} == {"E4"}
+    assert len(graph["task_groups"]) == 1
+    assert [node["atomic_action"] for node in graph["nodes"]] == [
+        "PickUp",
+        "MoveHeldObject",
+        "HandOver",
+        "MoveEndEffector",
+        "MoveJoints",
+        "MoveHeldObject",
+        "MoveHeldObject",
+        "Place",
+        "MoveEndEffector",
+        "MoveJoints",
+    ]
+    assert all(
+        node["actor"] == {"mode": "required", "arm": "right_arm"}
+        for node in graph["nodes"][5:]
+    )
+    assert group["goal"]["terminal_behavior"] == "place"
+    assert group["goal"]["reference_object"] == "notebook_uid"
+    assert group["success"] == {
+        "type": "semantic_goal",
+        "relation": "on",
+        "reference_object": "notebook_uid",
+    }
+
+    renamed = deepcopy(graph)
+    renamed["task_groups"][0]["operator"] = "equivalent_transfer_and_place"
+    program = load_execution_program(renamed)
+    assert program.semantic_steps[0].operator == "equivalent_transfer_and_place"
+    assert [
+        action["atomic_action_class"]
+        for edge in program.edges
+        for action in edge.actions
+    ] == [node["atomic_action"] for node in graph["nodes"]]
+
+    alias_contract = replace(
+        task_contracts_module.task_contract("E4"),
+        task_type="transfer_and_place",
+    )
+    monkeypatch.setattr(
+        domain_v2_module,
+        "TASK_TYPES",
+        frozenset({*domain_v2_module.TASK_TYPES, "transfer_and_place"}),
+    )
+    monkeypatch.setattr(
+        task_contracts_module,
+        "TASK_CONTRACTS",
+        {
+            **dict(task_contracts_module.TASK_CONTRACTS),
+            "transfer_and_place": alias_contract,
+        },
+    )
+    renamed_type = deepcopy(graph)
+    for node in renamed_type["nodes"]:
+        node["task_type"] = "transfer_and_place"
+    renamed_type["task_groups"][0]["task_type"] = "transfer_and_place"
+
+    alias_program = load_execution_program(renamed_type)
+    assert [
+        action["atomic_action_class"]
+        for edge in alias_program.edges
+        for action in edge.actions
+    ] == [node["atomic_action"] for node in graph["nodes"]]
 
 
 def test_structured_draft_grounds_handover_then_receiver_placement() -> None:
@@ -534,6 +685,7 @@ def test_structured_draft_grounds_handover_then_receiver_placement() -> None:
         "HandOver",
         "MoveEndEffector",
         "MoveJoints",
+        "MoveHeldObject",
         "MoveHeldObject",
         "MoveHeldObject",
         "Place",
@@ -617,7 +769,14 @@ def test_seed_graph_adds_missing_same_object_e2_handover_dependency() -> None:
         node["atomic_action"]
         for node in graph["nodes"]
         if node["task_instance_id"] == "task_03"
-    ] == ["PickUp", "MoveHeldObject", "HandOver", "MoveEndEffector", "MoveJoints"]
+    ] == [
+        "PickUp",
+        "MoveHeldObject",
+        "HandOver",
+        "MoveEndEffector",
+        "MoveJoints",
+        "MoveHeldObject",
+    ]
     pickup = next(
         node
         for node in graph["nodes"]

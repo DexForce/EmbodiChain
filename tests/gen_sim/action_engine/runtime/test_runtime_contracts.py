@@ -1893,8 +1893,9 @@ def test_handover_continuation_uses_stable_upright_policies() -> None:
     assert grounded_staging.allow_yaw_search
     assert grounded_final.allow_yaw_search
     assert grounded_final_with_reference.target_object_pose is not None
+    assert grounded_final.target_object_pose is not None
     assert grounded_final_with_reference.target_object_pose[0, 2, 3] == pytest.approx(
-        0.90
+        float(grounded_final.target_object_pose[0, 2, 3])
     )
     assert (
         grounded_release.cfg["sample_interval"] == release_defaults["sample_interval"]
@@ -4357,10 +4358,10 @@ def test_live_pickup_planning_exception_is_a_retryable_edge_failure(
     assert result.planner_traces[0]["exception"] == "RuntimeError: no IK"
 
 
-def test_pickup_candidate_screens_handover_successor_target(
+def test_pickup_candidate_does_not_scan_a_successor_task_operator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A later handover staging pose participates in pickup grasp screening."""
+    """A task screens only its own target bindings, never a successor recipe."""
     entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
     env = _FakeEnv({"can": entity})
     executor = ProgramExecutor(
@@ -4404,7 +4405,6 @@ def test_pickup_candidate_screens_handover_successor_target(
     executor.edges[handover_edge.id] = handover_edge
 
     existing_target = _pose(0.0, 0.2, 0.85)
-    handover_target = _pose(0.0, 0.0, 1.15)
     grounded = GroundedAction(
         action_class="PickUp",
         arm="left_arm",
@@ -4413,27 +4413,21 @@ def test_pickup_candidate_screens_handover_successor_target(
         cfg={"downstream_object_target_poses": (existing_target,)},
     )
 
-    def ground(
+    def own_task_ground(
         _action: Any,
         candidate: SemanticStep,
-        *,
-        arm: str,
-        state: ExecutionState,
-        reference_eef_pose: torch.Tensor | None = None,
-        orientation_reference_pose: torch.Tensor | None = None,
+        **_kwargs: Any,
     ) -> GroundedAction:
-        del arm, state, reference_eef_pose, orientation_reference_pose
-        target = handover_target if candidate.id == handover_step.id else None
+        assert candidate.id == pickup_step.id
         return GroundedAction(
             action_class="MoveHeldObject",
             arm="left_arm",
             control="arm",
             target=SimpleNamespace(),
             cfg={},
-            target_object_pose=target,
         )
 
-    monkeypatch.setattr(executor.grounder, "ground", ground)
+    monkeypatch.setattr(executor.grounder, "ground", own_task_ground)
     result = executor._with_downstream_targets(
         pickup_step,
         pickup_step.edge_ids[0],
@@ -4443,9 +4437,8 @@ def test_pickup_candidate_screens_handover_successor_target(
     )
 
     targets = result.cfg["downstream_object_target_poses"]
-    assert len(targets) == 2
+    assert len(targets) == 1
     assert torch.equal(targets[0], existing_target)
-    assert torch.equal(targets[1], handover_target)
 
 
 def test_object_held_predicate_checks_live_gripper_and_tcp_geometry() -> None:

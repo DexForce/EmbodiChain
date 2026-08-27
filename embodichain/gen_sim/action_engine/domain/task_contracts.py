@@ -72,12 +72,26 @@ _CORE_ACTIONS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "E1": ("PickUp", "MoveHeldObject", "Place"),
         "E2": ("AxisAlign",),
         "E3": ("PickUp", "MoveHeldObject", "Pour", "Place"),
-        "E4": ("PickUp", "MoveHeldObject", "HandOver"),
+        "E4": ("PickUp", "MoveHeldObject", "HandOver", "Place"),
         "E5": ("CoordinatedPickment",),
         "E6": ("PullArticulatedPart",),
         "E7": ("PushArticulatedPart",),
         "E8": ("TurnKnob",),
         "E9": ("Press",),
+    }
+)
+
+_SIGNATURE_ACTIONS: Mapping[str, frozenset[str]] = MappingProxyType(
+    {
+        "E1": frozenset(),
+        "E2": frozenset(),
+        "E3": frozenset({"Pour"}),
+        "E4": frozenset({"HandOver"}),
+        "E5": frozenset(),
+        "E6": frozenset({"PullArticulatedPart"}),
+        "E7": frozenset({"PushArticulatedPart"}),
+        "E8": frozenset({"TurnKnob"}),
+        "E9": frozenset({"Press"}),
     }
 )
 
@@ -101,6 +115,7 @@ class TaskContract:
     direct_payload_relations: frozenset[str]
     accepts_incoming_hold: bool
     terminal_success_types: tuple[tuple[str, str], ...]
+    signature_actions: frozenset[str] = frozenset()
 
 
 def _action_contract(value: SemanticTaskContract) -> TaskContract:
@@ -108,6 +123,7 @@ def _action_contract(value: SemanticTaskContract) -> TaskContract:
         task_type=value.task_type,
         semantics=value.semantics,
         core_actions=_CORE_ACTIONS[value.task_type],
+        signature_actions=_SIGNATURE_ACTIONS[value.task_type],
         applicable_intent_fields=value.applicable_intent_fields,
         source_structure=value.source_structure,
         required_affordances=value.required_affordances,

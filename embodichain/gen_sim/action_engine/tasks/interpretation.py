@@ -268,11 +268,17 @@ def _emit_step(
         elif task_type == "E3":
             params.update({"relation": "above", "relation_frame": "robot"})
         elif task_type == "E4":
+            terminal_behavior = str(step["terminal_behavior"])
+            if terminal_behavior == "none":
+                terminal_behavior = "place" if target is not None else "hold"
             params.update(
                 {
                     "transfer_arm": step["transfer_arm"],
                     "receive_arm": step["receive_arm"],
                     "orientation_goal": step["orientation_goal"],
+                    "terminal_behavior": terminal_behavior,
+                    "relation": step["relation"],
+                    "relation_frame": "robot",
                 }
             )
         elif task_type == "E5":

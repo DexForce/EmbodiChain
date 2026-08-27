@@ -171,7 +171,7 @@ runtime:
         sample_interval: 180
         pre_grasp_distance: 0.15
         lift_height: 0.16
-        lower_distance: 0.03
+        lower_distance: 0.16
         hand_interp_steps: 12
       PickUp:
         pre_grasp_distance: 0.15
