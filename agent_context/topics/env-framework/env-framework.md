@@ -9,6 +9,7 @@
 
 | File | Role |
 |---|---|
+| `embodichain/__main__.py` | Unified CLI dispatch, including `list-env` environment discovery |
 | `embodichain/lab/gym/envs/base_env.py` | `BaseEnv(gym.Env)` + `EnvCfg` — low-level env loop |
 | `embodichain/lab/gym/envs/types.py` | `ControllerAction` — owned controller-ready action boundary |
 | `embodichain/lab/gym/envs/embodied_env.py` | `EmbodiedEnv(BaseEnv)` + `EmbodiedEnvCfg` — modular task base class |
@@ -129,9 +130,12 @@ class MyTaskEnv(EmbodiedEnv):
    `REGISTERED_ENVS` dict, keyed by `uid`.
 3. It also calls `gym.register()` so the env is available via
    `gym.make(uid)`.
-4. `kwargs` passed to `@register_env` must be **JSON-serialisable** (no
+4. Simulator tasks with a supported RL training config declare
+   `supports_rl=True`; this is stored on `EnvSpec` and is not forwarded to the
+   environment constructor.
+5. `kwargs` passed to `@register_env` must be **JSON-serialisable** (no
    classes/types). A `RuntimeError` is raised otherwise.
-5. Use `override=True` to re-register an existing uid (useful in scripts/tests).
+6. Use `override=True` to re-register an existing uid (useful in scripts/tests).
 
 ### Gym ID convention
 
@@ -170,6 +174,17 @@ env = make("MyTask-v1", cfg=my_cfg)
 ```
 
 Or via gymnasium: `gym.make("MyTask-v1")`.
+
+### Listing registered environments
+
+`embodichain list-env` calls `discover_task_packages()` and prints one stable,
+case-insensitively sorted environment list. Labels distinguish runtime type
+(`Simulator` or `Lightweight`) from the `RL` capability, so simulator-backed
+`CartPoleRL` and `PushCubeRL` appear as `[Simulator, RL]`. Lightweight learning
+environments always carry `[Lightweight, RL]`. The command lists
+import-registered environments only; configuration-owned Expert Program IDs
+remain process-local and appear only after their task-local `env.json` has been
+loaded through `config_to_cfg()`.
 
 ---
 
@@ -274,17 +289,21 @@ from the event config before the event manager is created.
 
 Use the `/add-task-env` skill. It scaffolds:
 
-1. A task package under
-   `embodichain_tasks/embodichain_tasks/<domain>/<task>/`.
-2. A `task.py` entry point with the `@register_env("<GymId>")` decorator.
-3. A task-local `configs/tasks/<domain>/<task>/env.{json,yaml}` containing the
-   scene and MDP configuration.
-4. Optional sibling Expert Program, scripted expert, or RL artifacts.
-5. Task-package exports and a focused test stub.
+1. A task-named module at
+   `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`.
+2. The `@register_env("<GymId>")` decorator in that module.
+3. A task-local `configs/tasks/<category-path>/<task>/env.{json,yaml}`
+   containing the scene and MDP configuration.
+4. Optional task-local Expert Program or RL configuration artifacts.
+5. A module `__all__` declaration and focused test stub.
+
+The category path starts with a top-level task family and may include a
+subdomain. Tableware tasks use `manipulation/tableware`; general manipulation
+tasks can stay directly under `manipulation`.
 
 Do not organize task ownership around a solution method such as `rl` or
-`expert_program`. Keep registration in `task.py`; use `expert/binding.py` only
-for runtime wiring that cannot be expressed in task config.
+`expert_program`. Keep registration in the task-named module and do not create
+a same-named Python package for a task that has only one Python entry point.
 
 ### Minimal manual skeleton
 

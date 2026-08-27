@@ -97,6 +97,13 @@ The animations below are the focused simulator demos under
 <img src="../../../_static/atomic_actions/pour.gif" alt="Pour demo" width="480" style="max-width: 100%;" />
 :::
 
+:::{grid-item-card} `PushObject`
+:link: builtin-push-object
+:link-type: ref
+
+`push_object` · contact and translate a free rigid object on its support plane
+:::
+
 :::{grid-item-card} `Place`
 :link: builtin-place
 :link-type: ref
@@ -183,6 +190,7 @@ The animations below are the focused simulator demos under
 | `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | unheld object with `AxisAlignAffordance` | open-loop pick, align, lower, and release |
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | object held exclusively by the `primary.motion` target | preserve attachment |
 | `pour` | `PourGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | exclusively held object with `AxisAlignAffordance` | preserve attachment; open-loop rotate and return |
+| `push_object` | `PushObjectGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | free rigid object plus target support pose | open-loop planar push; application validates the measured landing pose |
 | `place` | `PlaceGoal`, `AssembleGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | any active attachment must be exclusive to `primary.motion`; `AssembleGoal` requires one | detach object |
 | `press` | `PressGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
 | `slide` | `SlideGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `SlideAffordance` + link pose | open-loop motion; application verifies joint travel/grasp |
@@ -243,6 +251,7 @@ entity as a recovery dependency.
 | `MoveEndEffector.xpos` | yes | yes |
 | `MoveJoints.target` | no | no |
 | `MoveHeldObject.object_target_pose` | yes | yes |
+| `PushObject.target_pose` | yes | yes; the object and target are monitored through `approach` only |
 | `Place.xpos` | yes | yes |
 | `CoordinatedPickGoal.object_target_pose` / `object_initial_pose` | yes | yes |
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
@@ -393,7 +402,7 @@ bound motion target.
 | Skill ID | `pick_up` |
 | Goal | `GraspGoal(semantics=..., grasp_xpos=None)` |
 | Binding contract | `primary.motion` plus disjoint `primary.grasp` |
-| Precondition | `ObjectSemantics.entity_id` resolves in the planning snapshot; the deprecated live `entity` fallback remains temporarily; an `AntipodalAffordance` is required when no explicit grasp pose is supplied |
+| Precondition | `ObjectSemantics.entity_id` resolves in the planning snapshot; the deprecated live `entity` fallback remains temporarily; an `AntipodalAffordance` is required when neither an explicit grasp pose nor `fixed_object_to_eef` is supplied |
 | Effect | write `HeldObjectState` for the bound motion target |
 | Verification | the attachment effect must be verified during closed-loop execution |
 
@@ -404,9 +413,12 @@ dependency, so material target motion invalidates and replans an executing
 dispatched, dependency monitoring stops: contact-, close-, and lift-induced
 object motion must not be misclassified as an external target update. Tracking
 and collision-world checks remain active independently. When `grasp_xpos` is
-omitted, the action samples valid affordance grasps, evaluates
-reachability, and stores the selected `object_to_eef` transform in the expected
-held-object state. Later object-centric skills reuse that transform.
+omitted and `fixed_object_to_eef` is configured, the action composes that
+object-relative calibration directly with the observed object pose. This path
+bypasses affordance sampling, `rotate_upright`, and `grasp_frame_to_eef`. Without
+the fixed calibration, the action samples valid affordance grasps and evaluates
+reachability. Both paths store the selected `object_to_eef` transform in the
+expected held-object state so later object-centric skills can reuse it.
 
 Set `ObjectSemantics.entity_id` to the same stable ID used by the scene
 snapshot. `PickUp` resolves that object pose once per planning attempt, uses the
@@ -419,8 +431,11 @@ Important `PickUpOptions` fields:
 
 | Field | Purpose |
 |---|---|
-| `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and approach direction |
+| `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and world-frame approach direction |
 | `lift_height`, `hand_interp_steps` | Lift distance and close-segment discretization |
+| `grasp_settle_steps` | Closed-hand hold frames before lifting |
+| `grasp_frame_to_eef` | Fixed SE(3) calibration from canonical grasp frames to the robot TCP |
+| `fixed_object_to_eef` | Optional task/robot-calibrated SE(3) grasp that bypasses affordance sampling when the goal has no explicit grasp |
 | `pick_object_part` | Affordance region: currently `center`, `top`, or `bottom` |
 | `approach_alignment_max_angle` | Optional TCP approach-alignment filter |
 | `downstream_object_target_poses` | Optional future reachability constraints used in grasp selection |
@@ -483,10 +498,16 @@ rather than an unstable cross-product direction.
 
 Moves an already attached object to an object-frame target while keeping the
 hand closed. The caller specifies the desired **object pose**, not an EEF pose;
-the action derives `target_object_pose @ object_to_eef` from verified task state.
-When upright transport needs the current object orientation, it derives it from
-the observed EEF pose and verified `object_to_eef` relation rather than reading
-a live scene entity.
+the action derives `target_object_pose @ object_to_eef` from verified task state
+and sends that exact EEF target to the motion planner. It does not replace the
+requested orientation with an implicit transport orientation. A caller that
+needs upright or tilted transport must encode that orientation in the object
+target itself.
+
+After a successful semantic call, `SkillRuntime` reconciles an active held
+relation from the terminal object observation and forward kinematics when both
+are available. Consequently, later object-space calls use the measured
+attachment instead of indefinitely projecting the originally selected grasp.
 
 | Contract | Value |
 |---|---|
@@ -498,8 +519,7 @@ a live scene entity.
 | Effect | none; the existing attachment is preserved |
 | Dynamic target | explicit pose or `SceneEntityPose` |
 
-The bound `primary.grasp` endpoint must provide `grasp`; optional
-upright-transport settings belong to `MoveHeldObjectOptions`. The participant's
+The bound `primary.grasp` endpoint must provide `grasp`. The participant's
 motion and grasp endpoints are selected through `ActionBinding`; generic timing
 is explicit on the planner result or planning context, while trajectory
 sampling remains in `MotionPolicy`. In a vectorized batch, rows
@@ -540,6 +560,42 @@ planner can chain the outbound and return legs.
 **Example:** `scripts/tutorials/atomic_action/pour.py` compiles a horizontal
 `PickUp` followed by `Pour`.
 
+(builtin-push-object)=
+
+## `PushObject`
+
+Pushes a free rigid object toward an object-space target on the target pose's
+support plane. `PushObjectGoal` owns the object's semantic identity and an
+explicit pose or late-bound `SceneEntityPose`. The action closes the configured
+end effector, approaches a calibrated contact point from above, makes contact,
+translates along the measured planar object-to-target direction, and retracts.
+
+The primitive intentionally declares no symbolic placement effect. Contact and
+sliding are open-loop physics interactions, so a task must use a measured
+segment validator such as `object_near_target` before accepting a demonstration.
+Object and target scene dependencies are monitored only through `approach`;
+motion caused by the contact and push phases is therefore not misclassified as
+an external dynamic-goal update.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `push_object` |
+| Goal | `PushObjectGoal(semantics=..., target_pose=...)` |
+| Binding | manipulator + end effector role `primary` |
+| Precondition | a free rigid object and a target pose whose local Z axis is the support normal |
+| Motion | close, approach, contact, planar push, retract |
+| Effect | none; verify the measured object pose at the task boundary |
+
+`PushObjectOptions` owns contact distance, overshoot, approach/retract heights,
+the object-local contact point, and an optional support-frame planar offset.
+The support-frame override keeps corrective pushes on the same side even when
+a thin object flips or yaws after first contact. `completion_tolerance` makes a
+later corrective invocation return a hold trajectory when the latest measured
+pose is already close enough. `PushObjectToolCalibration` can override the
+contact transform and clearance for a bound control part, which keeps
+asymmetric left/right tool geometry in the robot profile rather than in task
+control code.
+
 (builtin-place)=
 
 ## `Place`
@@ -571,8 +627,10 @@ The bound `primary.grasp` endpoint must provide `open` and `grasp`. Important
 |---|---|
 | `lift_height` | Approach and retract height |
 | `hand_interp_steps` | Open-segment discretization |
+| `release_settle_steps` | Open-hand hold frames before retracting |
 | `max_approach_retract_z` | Optional world-Z ceiling for approach/retract poses |
 | `cartesian_waypoint_count` | Fixed-orientation translation keyframes per segment |
+| `preserve_current_object_orientation` | Keep the observed object orientation while using the target translation |
 
 **Example:** `scripts/tutorials/atomic_action/place.py`
 

@@ -29,6 +29,7 @@ from typing import Protocol, runtime_checkable
 import torch
 
 from embodichain.toolkits.graspkit import GraspPoseGenerator
+from embodichain.utils.math import pose_inv
 
 from ..atomic_actions.bindings import EndpointBinding
 from ..atomic_actions.core import SkillDescriptor
@@ -48,6 +49,7 @@ from ..atomic_actions.execution import (
 )
 from ..atomic_actions.plans import ActionPlan, PlanningFailure, TrajectorySegment
 from ..atomic_actions.policies import MotionPolicy, RecoveryPolicy
+from ..atomic_actions.requirements import FORWARD_KINEMATICS_CAPABILITY
 from ..atomic_actions.runner import (
     CommandSink,
     ExecutionClock,
@@ -3303,6 +3305,11 @@ class SkillRuntime:
         else:
             completed = torch.zeros_like(self._call_entered_mask)
             failed = self._call_entered_mask & ~self._cancelled
+        self._reconcile_observed_held_relations(
+            grounded,
+            runner.session.latest_context,
+            completed,
+        )
         plan_attempts = tuple(
             SkillPlanAttemptTrace.from_execution_attempt(
                 attempt,
@@ -3339,6 +3346,108 @@ class SkillRuntime:
             status=runner_step.status,
             message=runner_step.message,
         )
+
+    def _reconcile_observed_held_relations(
+        self,
+        grounded: GroundedSemanticCall,
+        context: PlanningContext,
+        completed_mask: torch.Tensor,
+    ) -> None:
+        """Replace projected attachment transforms with terminal measurements.
+
+        Grasp execution can move an object relative to its planned contact frame.
+        A downstream object-space action must therefore use the relation measured
+        after the preceding call, rather than continuing to project the original
+        grasp candidate.  Only completed rows and individually held relations are
+        updated; missing or zero-confidence scene observations retain their last
+        verified projection.
+        """
+        if not completed_mask.any():
+            return
+
+        endpoints_by_state_key: dict[str, list[EndpointBinding]] = {}
+        for endpoint in grounded.invocation.binding.endpoints:
+            if FORWARD_KINEMATICS_CAPABILITY not in endpoint.capabilities:
+                continue
+            task_state_key = endpoint.task_state_key
+            if task_state_key is None:
+                continue
+            endpoints_by_state_key.setdefault(task_state_key, []).append(endpoint)
+
+        for task_state_key, endpoints in endpoints_by_state_key.items():
+            held = self._task_state.get_held_object(task_state_key)
+            if not isinstance(held, HeldObjectState):
+                continue
+            entity_id = held.semantics.entity_id
+            if entity_id is None:
+                continue
+            entity = context.scene.entities.get(entity_id)
+            if entity is None or entity.confidence <= 0.0:
+                continue
+
+            unique_endpoints = {
+                endpoint.destination_key: endpoint for endpoint in endpoints
+            }
+            if len(unique_endpoints) != 1:
+                raise ValueError(
+                    "A held-object task-state key must resolve to exactly one "
+                    "forward-kinematics endpoint."
+                )
+            endpoint = next(iter(unique_endpoints.values()))
+            active = completed_mask & held.env_mask
+            if not active.any():
+                continue
+
+            joint_ids = torch.tensor(
+                endpoint.joint_ids,
+                dtype=torch.long,
+                device=context.robot.qpos.device,
+            )
+            endpoint_qpos = context.robot.qpos.index_select(1, joint_ids)
+            endpoint_pose = self._engine.robot.compute_fk(
+                qpos=endpoint_qpos,
+                name=endpoint.target.target_id,
+                env_ids=context.env_ids.detach().cpu().tolist(),
+                to_matrix=True,
+            )
+            if not isinstance(endpoint_pose, torch.Tensor) or endpoint_pose.shape != (
+                context.batch_size,
+                4,
+                4,
+            ):
+                raise ValueError(
+                    "Forward kinematics must return one 4x4 endpoint pose per "
+                    "environment when reconciling a held object."
+                )
+            endpoint_pose = endpoint_pose.to(
+                device=context.robot.qpos.device,
+                dtype=context.robot.qpos.dtype,
+            )
+            object_pose = entity.pose.to(
+                device=endpoint_pose.device,
+                dtype=endpoint_pose.dtype,
+            )
+            if object_pose.shape == (4, 4):
+                object_pose = object_pose.unsqueeze(0).expand(
+                    context.batch_size,
+                    -1,
+                    -1,
+                )
+            if object_pose.shape != endpoint_pose.shape:
+                raise ValueError(
+                    "A held object's observed pose must be one 4x4 transform per "
+                    "environment."
+                )
+
+            observed = HeldObjectState(
+                semantics=held.semantics,
+                object_to_eef=torch.bmm(pose_inv(object_pose), endpoint_pose),
+                grasp_xpos=endpoint_pose,
+                env_mask=held.env_mask,
+            )
+            self._task_state = StateDelta(
+                held_object_updates={task_state_key: observed}
+            ).apply(self._task_state, active)
 
     def _workflow_recovery_trigger(self) -> _WorkflowRecoveryTrigger | None:
         """Resolve preset policy and the failed call's physical source endpoint."""

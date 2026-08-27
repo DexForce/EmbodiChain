@@ -175,7 +175,7 @@ pip install -e .
 ```
 
 Commands can continue to use repository-style paths such as
-`embodichain_tasks/configs/tasks/tableware/pour_water/env.json`. EmbodiChain resolves
+`embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json`. EmbodiChain resolves
 these paths from the checkout when present and otherwise from the installed
 wheel.
 

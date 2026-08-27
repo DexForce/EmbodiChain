@@ -127,6 +127,9 @@ class PlaceOptions(ActionOptions):
     hand_interp_steps: int = 5
     """Number of waypoints for the gripper-open interpolation segment."""
 
+    release_settle_steps: int = 0
+    """Fully open hold frames before retracting the end-effector."""
+
     lift_height: float = 0.1
     """Height (m) to retract the end-effector after opening the gripper."""
 
@@ -136,13 +139,20 @@ class PlaceOptions(ActionOptions):
     cartesian_waypoint_count: int = 1
     """Number of fixed-orientation Cartesian keyframes per translation segment."""
 
+    preserve_current_object_orientation: bool = False
+    """Keep the held object's observed world orientation at the place target."""
+
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
+        if type(self.release_settle_steps) is not int or self.release_settle_steps < 0:
+            raise ValueError("release_settle_steps must be a non-negative integer.")
         if self.lift_height < 0.0:
             raise ValueError("lift_height must be non-negative.")
         if self.cartesian_waypoint_count < 1:
             raise ValueError("cartesian_waypoint_count must be at least 1.")
+        if type(self.preserve_current_object_orientation) is not bool:
+            raise TypeError("preserve_current_object_orientation must be a bool.")
 
 
 class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
@@ -313,20 +323,29 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         # planners (which preserve their own sample count) are accommodated.
         n_down_actual = down_arm.shape[1]
         n_back_actual = back_arm.shape[1]
+        n_settle = options.release_settle_steps
+        open_start = n_down_actual
+        settle_start = open_start + n_open
+        back_start = settle_start + n_settle
         full = torch.empty(
-            (self.num_envs, n_down_actual + n_open + n_back_actual, self.robot_dof),
+            (self.num_envs, back_start + n_back_actual, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
         full[:, :n_down_actual, arm_joint_ids] = down_arm
         full[:, :n_down_actual, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
-        full[:, n_down_actual : n_down_actual + n_open, arm_joint_ids] = (
-            reach_arm_qpos.unsqueeze(1)
-        )
-        full[:, n_down_actual : n_down_actual + n_open, hand_joint_ids] = hand_open_path
-        full[:, n_down_actual + n_open :, arm_joint_ids] = back_arm
-        full[:, n_down_actual + n_open :, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+        full[:, open_start:settle_start, arm_joint_ids] = reach_arm_qpos.unsqueeze(1)
+        full[:, open_start:settle_start, hand_joint_ids] = hand_open_path
+        if n_settle:
+            full[:, settle_start:back_start, arm_joint_ids] = reach_arm_qpos.unsqueeze(
+                1
+            )
+            full[:, settle_start:back_start, hand_joint_ids] = hand_open_qpos.unsqueeze(
+                1
+            )
+        full[:, back_start:, arm_joint_ids] = back_arm
+        full[:, back_start:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
         coordinated_updates = {
             key: None for key in state.coordinated_held_objects if task_state_key in key
@@ -346,7 +365,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             ),
             segment_lengths={
                 "approach": n_down_actual,
-                "release": n_open,
+                "release": n_open + n_settle,
                 "retract": n_back_actual,
             },
         )

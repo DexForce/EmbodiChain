@@ -647,8 +647,8 @@ def test_custom_endpoint_adapter_resolves_commands_and_physical_claim() -> None:
     engine = _engine(control_profiles={}, load_builtins=False)
     engine.register(_VelocityNavigateAction())
 
-    bound = engine.bind_skill_profile(
-        profile,
+    bound = profile.bind(
+        engine,
         endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
     )
     resolved = bound.resolve("navigate_velocity")
@@ -708,8 +708,8 @@ def test_custom_endpoint_joint_claim_survives_action_binding_lowering() -> None:
     )
     engine = _engine(control_profiles={}, load_builtins=False)
     engine.register(_VelocityNavigateAction())
-    bound = engine.bind_skill_profile(
-        profile,
+    bound = profile.bind(
+        engine,
         endpoint_adapters={_BaseVelocityEndpoint: JointClaimAdapter()},
     )
 
@@ -759,36 +759,6 @@ def test_custom_endpoint_joint_claim_must_fit_robot_dof() -> None:
                 _BaseVelocityEndpoint: OutOfRangeJointClaimAdapter(),
             },
         )
-
-
-def test_engine_constructor_forwards_custom_endpoint_adapters() -> None:
-    source = _engine(control_profiles={}, load_builtins=False)
-    profile = RobotSkillProfile(
-        "mobile",
-        resources={
-            "mobile_base": RobotResource(
-                "mobile_base",
-                endpoints={
-                    "motion": _BaseVelocityEndpoint(
-                        "base_velocity",
-                        capabilities=frozenset({"motion.base.velocity"}),
-                    )
-                },
-            )
-        },
-    )
-
-    engine = AtomicActionEngine(
-        source.motion_generator,
-        load_builtins=False,
-        skill_profile=profile,
-        endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
-    )
-
-    assert engine.skill_profile is not None
-    assert engine.skill_profile.resources["mobile_base"].claim.claim_tokens == (
-        frozenset({"controller:base_velocity"})
-    )
 
 
 def test_custom_endpoint_claim_tokens_protect_distinct_leaf_aliases() -> None:
@@ -1647,28 +1617,18 @@ def test_profile_rejects_default_for_uninstalled_skill() -> None:
         )
 
 
-def test_engine_can_install_profile_as_authoritative_command_source() -> None:
+def test_profile_configures_engine_before_semantic_binding() -> None:
     source_engine = _engine(control_profiles=_command_profiles())
     profile = _profile(defaults={"pick_up": ResourceBinding({"primary": "left_actor"})})
 
-    engine = AtomicActionEngine(source_engine.motion_generator, skill_profile=profile)
+    engine = AtomicActionEngine(
+        source_engine.motion_generator,
+        control_profiles=profile.action_control_profiles(),
+    )
+    bound = profile.bind(engine)
 
-    assert engine.skill_profile is not None
-    assert engine.skill_profile.resolve("pick_up").resource_ids == {
-        "primary": "left_actor"
-    }
+    assert bound.resolve("pick_up").resource_ids == {"primary": "left_actor"}
     assert set(engine.control_profiles) == {"left_hand", "right_hand"}
-
-
-def test_engine_rejects_endpoint_adapters_without_skill_profile() -> None:
-    source = _engine(control_profiles={}, load_builtins=False)
-
-    with pytest.raises(ValueError, match="requires skill_profile"):
-        AtomicActionEngine(
-            source.motion_generator,
-            load_builtins=False,
-            endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
-        )
 
 
 def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
@@ -1693,7 +1653,8 @@ def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
 
     engine.register(Replacement(), replace=True)
 
-    assert engine.skill_profile is None
+    with pytest.raises(RuntimeError, match="changed after"):
+        bound.assert_current()
     with pytest.raises(RuntimeError, match="changed after"):
         _ = bound.skills
 

@@ -37,6 +37,7 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
+    AxisAlignAffordance,
     ControlPartCommandProfile,
     EntityState,
 )
@@ -175,6 +176,11 @@ def _pose_tensor(values: tuple[float, ...]) -> torch.Tensor:
     return torch.tensor(values, dtype=torch.float32).reshape(4, 4)
 
 
+def _pose_metadata(values: tuple[float, ...]) -> tuple[float, ...]:
+    """Canonicalize static pose metadata to the live registry precision."""
+    return tuple(_pose_tensor(values).reshape(-1).tolist())
+
+
 def _validate_scene_classification(
     dynamics: SceneDynamics,
     collision_role: SceneCollisionRole,
@@ -266,7 +272,13 @@ class SimulationArticulationLinkBinding:
 
 @dataclass(frozen=True, slots=True)
 class AntipodalGraspAffordanceBinding:
-    """Build one antipodal grasp affordance from a selected rigid-object mesh."""
+    """Build one antipodal grasp affordance from a selected rigid-object mesh.
+
+    ``internal_axis`` upgrades the payload to :class:`AxisAlignAffordance` while
+    preserving the same antipodal grasp capability.  The axis is expressed in
+    the rigid object's local frame and can be reused by held-object skills such
+    as ``Pour``.
+    """
 
     entity_id: str
     object_id: str
@@ -275,6 +287,7 @@ class AntipodalGraspAffordanceBinding:
     aliases: tuple[str, ...] = ()
     relative_pose: tuple[float, ...] = _IDENTITY_POSE
     mesh_env_id: int = 0
+    internal_axis: tuple[float, float, float] | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("entity_id", "object_id", "native_name", "revision"):
@@ -295,6 +308,16 @@ class AntipodalGraspAffordanceBinding:
             or self.mesh_env_id < 0
         ):
             raise ValueError("mesh_env_id must be a non-negative integer.")
+        if self.internal_axis is not None:
+            axis = tuple(
+                _finite(value, field_name=f"internal_axis[{index}]")
+                for index, value in enumerate(self.internal_axis)
+            )
+            if len(axis) != 3:
+                raise ValueError("internal_axis must contain exactly three numbers.")
+            if math.sqrt(sum(value * value for value in axis)) <= 1.0e-6:
+                raise ValueError("internal_axis must be non-zero.")
+            object.__setattr__(self, "internal_axis", axis)
 
 
 def _validate_placement_binding(value: object) -> None:
@@ -483,7 +506,7 @@ def _mesh_tensor(
 def _antipodal_affordance(
     binding: AntipodalGraspAffordanceBinding,
     entity: Any,
-) -> AntipodalAffordance:
+) -> AntipodalAffordance | AxisAlignAffordance:
     """Build and validate one owned antipodal affordance payload."""
     vertices = _mesh_tensor(
         entity,
@@ -499,9 +522,15 @@ def _antipodal_affordance(
     )
     if bool((triangles < 0).any()) or int(triangles.max().item()) >= vertices.shape[0]:
         raise ValueError("Antipodal mesh triangles reference invalid vertex indices.")
-    return AntipodalAffordance(
-        mesh_vertices=vertices,
-        mesh_triangles=triangles,
+    kwargs = {
+        "mesh_vertices": vertices,
+        "mesh_triangles": triangles,
+    }
+    if binding.internal_axis is None:
+        return AntipodalAffordance(**kwargs)
+    return AxisAlignAffordance(
+        **kwargs,
+        internal_axis=torch.tensor(binding.internal_axis, dtype=torch.float32),
     )
 
 
@@ -671,6 +700,11 @@ class SimulationSceneBinding:
                     f"Grasp affordance {binding.entity_id!r} references unbound "
                     f"object {binding.object_id!r}."
                 )
+            payload_type = (
+                AntipodalAffordance
+                if binding.internal_axis is None
+                else AxisAlignAffordance
+            )
             entries.append(
                 SceneEntityManifest(
                     ref=SceneAffordanceRef(binding.entity_id),
@@ -678,9 +712,9 @@ class SimulationSceneBinding:
                     parent=SceneObjectRef(binding.object_id),
                     native_name=binding.native_name,
                     affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
-                    affordance_payload_type=AntipodalAffordance,
+                    affordance_payload_type=payload_type,
                     affordance_revision=binding.revision,
-                    relative_pose=binding.relative_pose,
+                    relative_pose=_pose_metadata(binding.relative_pose),
                 )
             )
 
@@ -712,7 +746,7 @@ class SimulationSceneBinding:
                         affordance_capabilities=frozenset({capability}),
                         affordance_payload_type=payload_type,
                         affordance_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
-                        relative_pose=binding.object_target_pose,
+                        relative_pose=_pose_metadata(binding.object_target_pose),
                     )
                 )
 

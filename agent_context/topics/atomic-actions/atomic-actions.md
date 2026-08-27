@@ -128,7 +128,7 @@ generic DAG, not a fixed arm/tool schema:
   generic command-profile key, joint IDs, adapter-defined claim tokens, and
   exclusivity. `ControlPartEndpointAdapter` is installed by default for
   `ControlPartEndpoint` and produces a `JointPositionTarget`. Integrations pass
-  additional `endpoint_adapters` to profile or engine binding for mobile bases,
+  additional `endpoint_adapters` to `RobotSkillProfile.bind()` for mobile bases,
   whole-body controllers, or other endpoint kinds. Registration is by exact
   endpoint type, and the built-in adapter cannot be overridden; distinct
   controller semantics use a distinct endpoint subtype.
@@ -175,15 +175,14 @@ ownership, and disjointness, then emits the same generic `ActionBinding` with
 and this path deliberately does not perform profile resource discovery or
 capability matching.
 
-`engine.make_invocation(skill_id, goal, ...)` is the convenience construction
-boundary when callers do not need to retain a binding separately. Pass
-`control_parts` for the direct path, or rely on a bound `RobotSkillProfile` and
-optionally pass `resources` as `slot -> resource_id` selections. The two binding
-sources are mutually exclusive. Without a profile, `control_parts` is required;
-with a profile, omitting `resources` uses unique or configured-default profile
-resolution. The method returns an ordinary `ActionInvocation` and does not plan
-or execute it. It resolves bindings only; profile policy presets and runner
-configuration remain semantic-runtime concerns.
+`engine.make_invocation(skill_id, goal, ..., control_parts=...)` is the
+direct-core convenience construction boundary. It resolves only the explicit
+`slot -> endpoint -> control_part` mapping and returns an ordinary
+`ActionInvocation`; it never imports, binds, or stores a `RobotSkillProfile`.
+Profile-based callers use `RobotSkillProfile.bind(engine, ...)`, resolve a
+binding through the returned `BoundRobotSkillProfile`, and construct an
+`ActionInvocation` directly. `SemanticSkillCompiler` owns that path for semantic
+workflows.
 
 Discovery boundaries are distinct:
 
@@ -192,11 +191,10 @@ Discovery boundaries are distinct:
 - `engine.skills` contains descriptors only for installed, `agent_visible`
   actions whose concrete class explicitly declares a binding contract. A
   subclass does not inherit semantic exposure implicitly.
-- `engine.skill_profile.skills` filters `engine.skills` again to contracts with
-  at least one valid assignment on the bound robot. Registering or replacing an
-  action invalidates the engine's bound profile; an independently retained
-  `BoundRobotSkillProfile` also rejects use after the engine skill catalog
-  changes and must be rebound.
+- `bound_profile.skills` filters `engine.skills` again to contracts with at least
+  one valid assignment on the bound robot. Registering or replacing an action
+  advances `engine.skill_catalog_revision`; every retained
+  `BoundRobotSkillProfile` then rejects use and must be rebound.
 
 Binding and policy authority is split deliberately:
 
@@ -215,19 +213,20 @@ Binding and policy authority is split deliberately:
 - the engine owns installed actions, one planner backend, its binding identity,
   and direct control-part command-profile snapshots.
 
-Constructing `AtomicActionEngine(..., skill_profile=profile)` makes the
-profile's generic `command_profiles` the single authoritative constructor
-source; passing `control_profiles` at the same time is rejected.
+The atomic core never imports or owns a `RobotSkillProfile`. A profile-aware
+composition root first constructs `AtomicActionEngine` with
+`control_profiles=profile.action_control_profiles()`, installs any custom
+actions, and then calls `profile.bind(engine, endpoint_adapters=...)`. The
+returned `BoundRobotSkillProfile` belongs to the semantic integration layer.
 `command_profiles` values currently use `ControlPartCommandProfile` as their
 immutable command container, but their mapping keys are generic profile IDs
 rather than necessarily being control-part names.
 `ControlPartEndpointAdapter` plus `RobotSkillProfile.action_control_profiles()`
-provides the direct control-part lookup used by built-in joint planners when an
-engine is constructed from a profile; it is not a binding route. Binding a
-profile to an already constructed engine instead requires equivalent direct
-control-part commands to have been installed already. Profile resolution still
-places all resolved semantic commands, including commands for custom endpoint
-types, on their `EndpointBinding`. A profile `JointPositionCommand` is
+provides the direct control-part lookup used by built-in joint planners; it is
+not a binding route. Binding requires equivalent direct control-part commands
+to have been installed on the engine already. Profile resolution still places
+all resolved semantic commands, including commands for custom endpoint types,
+on their `EndpointBinding`. A profile `JointPositionCommand` is
 one-dimensional and sized to the adapter-resolved endpoint joint IDs;
 invocation `ActionControlOverrides` remain the authority for one revision's
 per-environment endpoint-command replacements.
@@ -321,13 +320,19 @@ A `Place` with no explicit `primary` resource inherits the workflow's known
 holder resource, and a `HandOver` with no explicit `source` does the same. The
 inferred selection is snapshotted onto the canonical linked call before
 binding; an explicit conflicting selection still fails with
-`held_resource_mismatch`. Inference never crosses a registered-call boundary.
+`held_resource_mismatch`. Holder-resource inference never crosses a
+registered-call boundary.
 `HandOver` selects participants only through the `source` and `destination`
 resource slots; there is no separate receiver alias.
-A pick therefore owns zero or one downstream object target rather than an
-arbitrary target tuple. Relation targets retain affordance payload type and
-revision metadata and stay late-bound through an explicitly installed
-`RelationTargetGrounder`; handover poses stay behind a named
+A registered lowerer is opaque to pickup look-ahead by default. It may override
+`pick_lookahead_targets()` to certify that it retains the same picked object on
+the same bound `primary` resource and expose an exact ordered tuple of
+intermediate object poses. Returning `None` remains the conservative barrier;
+an empty tuple retains the chain without adding a target. A pick therefore owns
+an ordered downstream target sequence through its first release. Relation
+targets retain affordance payload type and revision metadata and stay
+late-bound through an explicitly installed `RelationTargetGrounder`; handover
+poses stay behind a named
 `HandOverPoseProvider` selected by the robot profile.
 
 `SemanticSkillCompiler.ground()` lowers exactly one analyzed call from the
@@ -472,7 +477,8 @@ Scene dependencies must match the poses each primitive actually consumes:
 | `PickUp` | Always its semantic `entity_id`, because the object pose is grounded once and reused; plus any goal-owned `SceneEntityPose`, such as `grasp_xpos`. The semantic object ID is monitored only through `approach`; other dependencies keep their plan-declared window. |
 | `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
 | `Place` | A `SceneEntityPose` in ordinary `xpos`; `AssembleGoal` always declares its required `base_pose`. |
-| `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
+| `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; the exact object target is composed with the verified `object_to_eef` attachment, without implicit reorientation. After successful semantic calls, the runtime refreshes held relations from terminal object observations and EEF forward kinematics when available. |
+| `PushObject` | Its semantic object ID plus a `SceneEntityPose` in `target_pose`. Both dependencies are monitored through `approach`; contact and push intentionally move the object. |
 | `Press` | `PressGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `Slide` | `SlideGoal.target_pose` when it is a `SceneEntityPose`; the local grasp mesh does not own the link. |
 | `Twist` | `TwistGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
@@ -817,12 +823,11 @@ an implementation is installed; it does not prove that the current embodiment
 has compatible control parts, profiles, bindings, or task state. Capability
 discovery is separate: `engine.skills`
 contains only agent-visible installed actions whose concrete classes explicitly
-declare a `binding_contract`; when a robot profile is bound,
-`engine.skill_profile.skills` further filters that catalog to valid resource
-assignments. Registration is engine-local; there is no independent process-wide
-action catalog. Construct extensions explicitly and install them with
-`engine.register()` so discovery and execution cannot observe disconnected
-registries.
+declare a `binding_contract`; `BoundRobotSkillProfile.skills` further filters
+that catalog to valid resource assignments. Registration is engine-local; there
+is no independent process-wide action catalog. Construct extensions explicitly
+and install them with `engine.register()` so discovery and execution cannot
+observe disconnected registries.
 
 `ExecutionRunnerCfg` is intentionally separate from action options. It
 configures controller acknowledgement deadlines, scheduler cadence, and final
@@ -886,7 +891,10 @@ on their resolved endpoint.
 | `move_end_effector` | `EndEffectorPoseGoal` | `primary.motion` |
 | `move_joints` | `JointPositionGoal` (`target` is explicit qpos or a profile command name) | `primary.motion` |
 | `pick_up` | `GraspGoal` | `primary.motion`, `primary.grasp` |
+| `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` |
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` |
+| `pour` | `PourGoal` | `primary.motion`, `primary.grasp` |
+| `push_object` | `PushObjectGoal` | `primary.motion`, `primary.grasp` |
 | `place` | `PlaceGoal`, `AssembleGoal` | `primary.motion`, `primary.grasp` |
 | `press` | `PressGoal` | `primary.motion`, `primary.grasp` |
 | `slide` | `SlideGoal` | `primary.motion`, `primary.grasp` |
@@ -900,6 +908,13 @@ target-local geometry and interaction semantics. Their goals own an explicit
 `target_pose`, which may be a deterministic tensor snapshot or a late-bound
 `SceneEntityPose`. Never put an `Articulation`, `RigidObject`, or live link pose
 reader in these affordances.
+
+`PushObject` is a free-object planar interaction with an empty `StateDelta`.
+Its options separate object/support contact geometry from per-control-part tool
+calibration, and a completion tolerance lets a corrective invocation hold when
+the latest measured object pose is already close. A task still owns settling
+and measured landing-pose validation; action completion alone does not claim
+placement.
 
 `Press` and `Slide` use dense axis-aligned Cartesian targets for their contact
 motion. The linear motion-generator path solves every output sample with IK;

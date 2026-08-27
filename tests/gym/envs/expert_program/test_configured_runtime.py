@@ -23,21 +23,43 @@ from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from gymnasium.envs.registration import registry as gym_registry
 import pytest
+import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.envs.expert_program import SequenceCfg, load_expert_program
+from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
+    _MoveHeldObjectLowerer,
+    _PourLowerer,
+    _PushObjectLowerer,
+)
 from embodichain.lab.gym.envs.expert_program.configured_runtime import (
     _decode_configured_expert_program_runtime,
     _decode_grasp_generator,
     _register_configured_expert_program_runtime,
 )
+from embodichain.lab.sim.atomic_actions import (
+    Affordance,
+    HeldObjectPoseGoal,
+    MoveHeldObjectOptions,
+    PickUpOptions,
+    PlaceOptions,
+    PourGoal,
+    PourOptions,
+    PushObjectGoal,
+    PushObjectOptions,
+    ObjectSemantics,
+)
+from embodichain.lab.sim.skills import RegisteredSemanticCall, SceneObjectRef
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
 _CONFIG_DIRECTORY = _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation"
+_TABLEWARE_CONFIG_DIRECTORY = _CONFIG_DIRECTORY / "tableware"
 _TASKS = {
     "repeated_pick_place": (
         "expert_program_repeated_pick_place",
@@ -63,6 +85,26 @@ _TASKS = {
     ),
 }
 _TEST_ENV_ID = "ConfiguredExpertProgramRuntimeTest-v1"
+_TABLEWARE_TASKS = {
+    "pour_water": (
+        "expert_program_pour_water",
+        "expert_program_cobotmagic_pour",
+        frozenset(
+            {
+                "pick",
+                "place",
+                "hand_over",
+                "simulation.move_held_object",
+                "simulation.pour",
+            }
+        ),
+    ),
+    "rearrangement": (
+        "expert_program_tableware_rearrangement",
+        "expert_program_cobotmagic_rearrangement",
+        frozenset({"pick", "place", "hand_over", "simulation.push_object"}),
+    ),
+}
 
 
 def _config_path(task_name: str) -> Path:
@@ -80,6 +122,18 @@ def _gym_config(task_name: str) -> dict[str, object]:
 def _runtime_payload(task_name: str) -> dict[str, object]:
     """Return an independently owned production runtime declaration."""
     payload = _gym_config(task_name)["expert_program_runtime"]
+    assert type(payload) is dict
+    return payload
+
+
+def _tableware_config_path(task_name: str) -> Path:
+    """Return one config-defined tableware task's Gym config path."""
+    return _TABLEWARE_CONFIG_DIRECTORY / task_name / "env.json"
+
+
+def _tableware_gym_config(task_name: str) -> dict[str, object]:
+    """Return an independently owned tableware Gym configuration."""
+    payload = json.loads(_tableware_config_path(task_name).read_text(encoding="utf-8"))
     assert type(payload) is dict
     return payload
 
@@ -115,6 +169,304 @@ def test_all_examples_decode_through_one_composable_runtime_schema(
     assert registration.robot_profile_binding.profile_id == expected_profile
     assert frozenset(registration.call_catalog.descriptors) == expected_calls
     assert runtime.adapter_factory.registration is registration
+
+
+@pytest.mark.parametrize(
+    ("task_name", "expected_scene", "expected_profile", "expected_calls"),
+    tuple(
+        (task_name, scene_id, profile_id, calls)
+        for task_name, (scene_id, profile_id, calls) in _TABLEWARE_TASKS.items()
+    ),
+)
+def test_tableware_programs_decode_and_preflight_without_task_environment_code(
+    task_name: str,
+    expected_scene: str,
+    expected_profile: str,
+    expected_calls: frozenset[str],
+) -> None:
+    """Migrated tableware tasks use the common configured runtime end to end."""
+    config = _tableware_gym_config(task_name)
+    runtime = _decode_configured_expert_program_runtime(
+        config["expert_program_runtime"]
+    )
+    registration = runtime.registration
+    program = load_expert_program(
+        config["expert_program_path"],
+        base_dir=_tableware_config_path(task_name).parent,
+        validation_context=registration.catalog,
+    )
+    registration.catalog.preflight(program)
+
+    assert registration.scene_binding.registry_id == expected_scene
+    assert registration.robot_profile_binding.profile_id == expected_profile
+    assert frozenset(registration.call_catalog.descriptors) == expected_calls
+
+
+def test_pour_water_runtime_declares_live_transport_and_axis_aware_pour() -> None:
+    """Pouring policy owns its calibrated grasp, cup offset, axis, and tilt."""
+    config = _tableware_gym_config("pour_water")
+    runtime = _decode_configured_expert_program_runtime(
+        config["expert_program_runtime"]
+    )
+    registration = runtime.registration
+    grasp = registration.scene_binding.antipodal_grasps[0]
+    preset = registration.robot_profile_binding.presets[0]
+    options = preset.action_option_templates
+    factories = registration.registered_semantic_lowerer_factories
+
+    assert grasp.internal_axis == pytest.approx((1.0, 0.0, 0.0))
+    assert type(options["pick"]) is PickUpOptions
+    assert options["pick"].hand_interp_steps == 11
+    assert options["pick"].grasp_settle_steps == 25
+    assert options["pick"].rotate_upright is None
+    assert options["pick"].fixed_object_to_eef is not None
+    assert options["pick"].fixed_object_to_eef == pytest.approx(
+        torch.tensor(
+            (
+                (-0.0530918874, 0.4963395894, 0.8665033579, 0.0358702540),
+                (-0.0525476672, -0.8679134846, 0.4939277470, 0.0204655528),
+                (0.9972059727, -0.0193091929, 0.0721606836, 0.0321167707),
+                (0.0, 0.0, 0.0, 1.0),
+            )
+        ),
+    )
+    assert type(options["simulation.move_held_object"]) is MoveHeldObjectOptions
+    assert type(options["simulation.pour"]) is PourOptions
+    assert options["simulation.pour"].rotate_angle == pytest.approx(-torch.pi / 3)
+    assert type(options["place"]) is PlaceOptions
+    assert options["place"].hand_interp_steps == 11
+    assert options["place"].release_settle_steps == 15
+    assert options["place"].preserve_current_object_orientation is True
+    assert {factory.call_id for factory in factories} == {
+        "simulation.move_held_object",
+        "simulation.pour",
+    }
+    assert (
+        "grasp_pose_generators"
+        not in config["expert_program_runtime"]["runtime_services"]
+    )
+
+
+def test_pour_water_registered_lowerers_build_only_typed_goals() -> None:
+    """Task arguments select configured values while presets own motion policy."""
+    relative_pose = (
+        1.0,
+        0.0,
+        0.0,
+        0.05,
+        0.0,
+        1.0,
+        0.0,
+        -0.1,
+        0.0,
+        0.0,
+        1.0,
+        0.125,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+    transport = _MoveHeldObjectLowerer(
+        "cup_pour_pose",
+        "cup",
+        relative_pose,
+    ).lower(
+        RegisteredSemanticCall(
+            call_id="simulation.move_held_object",
+            arguments={"target": "cup_pour_pose"},
+        ),
+        context=None,  # type: ignore[arg-type]
+        bound=None,  # type: ignore[arg-type]
+        option_template=MoveHeldObjectOptions(),
+    )
+    pour = _PourLowerer("bottle").lower(
+        RegisteredSemanticCall(
+            call_id="simulation.pour",
+            arguments={"object": "bottle"},
+        ),
+        context=None,  # type: ignore[arg-type]
+        bound=None,  # type: ignore[arg-type]
+        option_template=PourOptions(),
+    )
+
+    assert type(transport.goal) is HeldObjectPoseGoal
+    assert transport.goal.object_target_pose.entity_id == "cup"
+    assert torch.equal(
+        transport.goal.object_target_pose.relative_pose,
+        torch.tensor(relative_pose, dtype=torch.float32).reshape(4, 4),
+    )
+    assert type(pour.goal) is PourGoal
+
+    transport_targets = _MoveHeldObjectLowerer(
+        "cup_pour_pose",
+        "cup",
+        relative_pose,
+    ).pick_lookahead_targets(
+        RegisteredSemanticCall(
+            call_id="simulation.move_held_object",
+            arguments={"target": "cup_pour_pose"},
+        ),
+        picked_object=SceneObjectRef("bottle"),
+        bound=None,  # type: ignore[arg-type]
+        previous_target=None,
+    )
+    assert transport_targets is not None
+    pour_targets = _PourLowerer("bottle").pick_lookahead_targets(
+        RegisteredSemanticCall(
+            call_id="simulation.pour",
+            arguments={"object": "bottle"},
+        ),
+        picked_object=SceneObjectRef("bottle"),
+        bound=SimpleNamespace(
+            preset=SimpleNamespace(
+                action_option_template=lambda semantic_id: PourOptions(
+                    rotate_angle=-torch.pi / 3
+                )
+            )
+        ),  # type: ignore[arg-type]
+        previous_target=transport_targets[0],
+    )
+
+    assert len(transport_targets) == 1
+    assert transport_targets[0].pose.entity_id == "cup"
+    assert pour_targets is not None
+    assert len(pour_targets) == 2
+    tilted = pour_targets[0].pose.relative_pose
+    assert tilted is not None
+    assert tilted[:3, :3] == pytest.approx(
+        torch.tensor(
+            (
+                (1.0, 0.0, 0.0),
+                (0.0, 0.5, 0.8660254),
+                (0.0, -0.8660254, 0.5),
+            )
+        )
+    )
+
+
+def test_move_held_object_lowerer_rejects_non_se3_relative_pose() -> None:
+    """Configured live-relative transport fails closed on malformed transforms."""
+    payload = deepcopy(_tableware_gym_config("pour_water")["expert_program_runtime"])
+    services = payload["runtime_services"]
+    lowerer = services["registered_semantic_lowerers"][0]
+    lowerer["relative_pose"][-1] = 2.0
+
+    with pytest.raises(ValueError, match="bottom row"):
+        _decode_configured_expert_program_runtime(payload)
+
+
+def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
+    """Configured fixed grasps must contain exactly one SE(3) transform."""
+    payload = deepcopy(_tableware_gym_config("pour_water")["expert_program_runtime"])
+    pick_options = payload["robot_profile"]["presets"][0]["action_options"]["pick"]
+    pick_options["fixed_object_to_eef"] = [1.0] * 15
+
+    with pytest.raises(ValueError, match="exactly 16 values"):
+        _decode_configured_expert_program_runtime(payload)
+
+
+def test_rearrangement_runs_two_arms_sequentially_until_parallel_is_safe() -> None:
+    """Planar pushing replaces unreliable thin-utensil pickup trajectories."""
+    config = _tableware_gym_config("rearrangement")
+    runtime = _decode_configured_expert_program_runtime(
+        config["expert_program_runtime"]
+    )
+    registration = runtime.registration
+    push_options = registration.robot_profile_binding.presets[
+        0
+    ].action_option_templates["simulation.push_object"]
+    program = load_expert_program(
+        config["expert_program_path"],
+        base_dir=_tableware_config_path("rearrangement").parent,
+        validation_context=registration.catalog,
+    )
+
+    assert type(program.program) is SequenceCfg
+    assert [segment.name for segment in program.program.items] == [
+        "push_fork_toward_plate_slot",
+        "refine_fork_at_plate_slot",
+        "push_spoon_toward_plate_slot",
+        "refine_spoon_at_plate_slot",
+    ]
+    assert type(push_options) is PushObjectOptions
+    assert push_options.hand_interp_steps == 7
+    assert push_options.approach_height == pytest.approx(0.1)
+    assert push_options.retract_height == pytest.approx(0.1)
+    assert push_options.contact_distance == pytest.approx(0.03)
+    assert push_options.push_overshoot == pytest.approx(0.02)
+    assert push_options.completion_tolerance == pytest.approx(0.075)
+    assert torch.equal(
+        push_options.object_contact_offset,
+        torch.tensor([-0.05, 0.0, 0.0]),
+    )
+    assert torch.equal(
+        push_options.support_frame_planar_contact_offset,
+        torch.tensor([-0.05, 0.0, 0.0]),
+    )
+    assert len(push_options.tool_calibrations) == 1
+    assert push_options.tool_calibrations[0].control_part == "right_arm"
+    assert push_options.tool_calibrations[0].contact_distance == pytest.approx(0.05)
+    assert registration.robot_profile_binding.presets[
+        0
+    ].recovery_policy.goal_rotation_threshold == pytest.approx(torch.pi)
+    assert registration.scene_binding.antipodal_grasps == ()
+    assert len(registration.registered_semantic_lowerer_factories) == 1
+    assert registration.registered_semantic_lowerer_factories[0].routes == (
+        ("fork", "plate_fork_slot"),
+        ("spoon", "plate_spoon_slot"),
+    )
+    assert (
+        "grasp_pose_generators"
+        not in config["expert_program_runtime"]["runtime_services"]
+    )
+
+
+def test_rearrangement_push_lowerer_builds_a_late_bound_typed_goal() -> None:
+    """Registered arguments choose only one predeclared object-target route."""
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity_id="fork",
+        label="fork",
+    )
+    lowering = _PushObjectLowerer(
+        (("fork", "plate_fork_slot"),),
+        (semantics,),
+    ).lower(
+        RegisteredSemanticCall(
+            call_id="simulation.push_object",
+            arguments={"object": "fork", "target": "plate_fork_slot"},
+        ),
+        context=None,  # type: ignore[arg-type]
+        bound=None,  # type: ignore[arg-type]
+        option_template=PushObjectOptions(),
+    )
+
+    assert type(lowering.goal) is PushObjectGoal
+    assert lowering.goal.semantics is semantics
+    assert lowering.goal.target_pose.entity_id == "plate_fork_slot"
+
+
+def test_rearrangement_keeps_fixed_plate_out_of_interactive_objects() -> None:
+    """The kinematic placement reference belongs to the background scene."""
+    config = _tableware_gym_config("rearrangement")
+    background = {item["uid"]: item for item in config["background"]}
+    interactive_ids = {item["uid"] for item in config["rigid_object"]}
+
+    assert background["plate"]["body_type"] == "kinematic"
+    assert "plate" not in interactive_ids
+    assert interactive_ids == {"fork", "spoon"}
+
+
+def test_rearrangement_settles_thin_tableware_before_first_push() -> None:
+    """Thin resting utensils receive a full contact-settling window on reset."""
+    config = _tableware_gym_config("rearrangement")
+    settle = config["env"]["events"]["settle_tableware_on_reset"]
+
+    assert settle["mode"] == "reset"
+    assert settle["params"]["min_steps"] == 50
+    assert settle["params"]["timeout_behavior"] == "raise"
 
 
 @pytest.mark.parametrize("task_name", tuple(_TASKS))

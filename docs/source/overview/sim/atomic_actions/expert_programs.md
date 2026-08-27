@@ -21,7 +21,7 @@ second planner, scheduler, effect system, or simulation loop:
 
 ```text
 JSON / YAML
-    -> strict schema-v2 decoder
+    -> strict declarative decoder
     -> ExpertProgramCfg
     -> ExpertProgramCompiler + provider-free SceneManifest
     -> CompiledProgram
@@ -54,23 +54,30 @@ scheduling, effect verification, recovery, or safe-stop behavior.
 
 ## Author a program
 
-Schema version 2 is the only accepted schema. It supports bounded `sequence`,
-`repeat`, `segment`, and `invoke` nodes plus deterministic `parallel` blocks.
+The current schema supports bounded `sequence`, `repeat`, `segment`, and
+`invoke` nodes plus deterministic `parallel` blocks.
 Each parallel block owns its explicit `barrier`; a barrier is not a standalone
 program node. Unknown fields, unsupported discriminators,
 unbounded structures, executable values, and dotted environment traversal are
 rejected before physical execution or command emission.
 
+The serialized format no longer carries a top-level `schema_version`; supplying
+that removed field is rejected as an unknown field. Compatibility revisions
+for registered semantic calls are owned by their typed catalog descriptors,
+not selected by task YAML.
+
 `RegisteredSemanticCall` is an opaque extension boundary in these schema
 versions. An extension with a physical effect must also register its typed
 compiler/effect contract; a serialized call ID alone cannot manufacture effect
-verification semantics.
+verification semantics. Runtime lowerers remain opaque to pickup look-ahead by
+default; an installed lowerer may explicitly expose typed retained-object
+targets through `pick_lookahead_targets()` without putting policy or executable
+values into the serialized payload.
 
 The top-level shape is:
 
 ```text
 ExpertProgramCfg
-  schema_version: 2
   program_id
   integration
     robot_profile
@@ -88,8 +95,8 @@ The standard segment validators check either a rigid object's measured position
 against a target or a named articulation joint against inclusive position
 bounds.
 
-The registered-call payload has its own schema revision, independent of the
-top-level program version. Config construction enforces the same structural
+Each registered-call payload is checked against the schema revision owned by
+its catalog descriptor. Config construction enforces the same structural
 invariants as decoding, while provider-aware validation separately resolves
 catalog, scene, profile, preset, post-policy, and validator IDs. The loader and
 decoder reject duplicate keys, unknown fields and discriminators, non-finite
@@ -99,7 +106,6 @@ nesting, excessive nodes, excessive repeats, and excessive expanded calls.
 The repeated-cube task is configured entirely as semantic calls:
 
 ```yaml
-schema_version: 2
 program_id: repeated_cube_pick_place
 integration:
   robot_profile: expert_program_ur5_pick_place
@@ -248,6 +254,9 @@ performs provider-aware semantic analysis before any command can be emitted. Seq
 stretches retain downstream object-target look-ahead across segment boundaries;
 an explicit parallel block is a conservative look-ahead barrier. Runtime still
 re-observes and grounds each call just in time after prior verified effects.
+Registered calls preserve a sequential retained-object chain only when their
+lowerer explicitly certifies it through `pick_lookahead_targets()`; the default
+`None` stops propagation.
 
 The standard simulation integration never treats an accepted controller command
 as physical evidence. Grasp, release, and hand-over verification consume live
@@ -323,15 +332,17 @@ evidence, and clock ports.
 
 ## Reference integrations
 
-The packaged tasks demonstrate three different integration paths:
+The packaged tasks demonstrate five different integration paths:
 
 | Environment | Declarative path | Acceptance boundary |
 | --- | --- | --- |
 | `ExpertProgramRepeatedPickPlace-v1` | Bounded repeat of built-in `Pick` and `Place` calls with cyclic targets | Trajectory completion only; effect checks, settling, validation, and recovery are disabled |
 | `ExpertProgramOpenDrawer-v1` | Registered simulation call lowered to the built-in `Slide` primitive | Trajectory completion only; effect checks, settling, validation, and recovery are disabled |
 | `HandOver-v1` | Built-in coordinated `HandOver` over disjoint source and destination resources | Rigid-object settling plus measured object-near-target validation |
+| `PourWater-v3` | Registered transport and pour calls lowered to `MoveHeldObject` and `Pour` after a built-in `Pick` | Measured cup/bottle settling plus final object-near-target validation |
+| `Rearrangement-v3` | Registered `simulation.push_object` calls lowered to `PushObject`; each utensil is pushed, settled, and conditionally corrected from the latest pose | Per-utensil settling and measured object-near-target validation |
 
-All three IDs are created while their Gym JSON is loaded. The shared configured
+All five IDs are created while their Gym JSON is loaded. The shared configured
 runtime decoder builds a provider-free scene, robot profile, and allowlisted
 live services, then registers the existing `EmbodiedEnv` under the JSON-selected
 ID. The task package contains no task-specific environment subclasses.

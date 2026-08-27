@@ -245,7 +245,8 @@ controller.
 The canonical path resolves the skill through a bound profile:
 
 ```python
-resolved = engine.skill_profile.resolve(
+bound_profile = robot_profile.bind(engine)
+resolved = bound_profile.resolve(
     "pick_up",
     selections={"primary": "left_participant"},
 )
@@ -293,13 +294,13 @@ by the motion endpoint's control-part target.
 ### Control-part semantic commands
 
 On the canonical semantic path, declare embodiment commands on the
-{doc}`RobotSkillProfile <robot_skill_profiles>` and pass the profile through the
-engine's `skill_profile` argument. For a direct-core integration, register the
-same command profiles explicitly when constructing the engine. Profile command
-IDs are generic and selected by endpoint adapters; the built-in control-part
-adapter defaults them to concrete `robot.control_parts` names. Direct-core
-engine keys are always concrete control-part names. The command names remain
-semantic:
+{doc}`RobotSkillProfile <robot_skill_profiles>`, lower its control-part command
+profiles into the engine constructor, and then bind the profile in the semantic
+layer. For a direct-core integration, register the same command profiles
+explicitly when constructing the engine. Profile command IDs are generic and
+selected by endpoint adapters; the built-in control-part adapter defaults them
+to concrete `robot.control_parts` names. Direct-core engine keys are always
+concrete control-part names. The command names remain semantic:
 
 ```python
 engine = AtomicActionEngine(
@@ -385,10 +386,9 @@ world from one {doc}`SceneRegistry <../scene_registry>`. Direct use of
 Registration means that an implementation is installed, not that every robot
 can execute it. `engine.actions` contains direct-core implementations;
 `engine.skills` contains installed, agent-visible implementations with an
-explicit generic binding contract; and `engine.skill_profile.skills` applies
-embodiment capability filtering. Required task-state preconditions remain
-runtime conditions and are validated while an invocation is resolved and
-planned.
+explicit generic binding contract; and `bound_profile.skills` applies embodiment
+capability filtering. Required task-state preconditions remain runtime conditions
+and are validated while an invocation is resolved and planned.
 
 Use invocation `skill_options` whenever behavior varies per call. Two variants
 with the same stable skill ID therefore share one built-in implementation:

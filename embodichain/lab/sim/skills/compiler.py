@@ -29,6 +29,8 @@ from uuid import uuid4
 
 import torch
 
+from embodichain.utils.math import pose_inv
+
 from embodichain.lab.sim.atomic_actions import (
     ActionControlOverrides,
     ActionInvocation,
@@ -47,6 +49,7 @@ from embodichain.lab.sim.atomic_actions import (
     SceneEntityPose,
     SkillDescriptor,
 )
+from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 from .calls import (
     HandOver,
     Pick,
@@ -218,11 +221,14 @@ class SemanticObjectTarget:
     """One object-space look-ahead target.
 
     Exactly one source is set. Relation targets remain late-bound and require
-    an explicitly installed typed/versioned grounder.
+    an explicitly installed typed/versioned grounder. Orientation preservation
+    records the downstream placement policy so pickup feasibility checks use
+    the same object target that placement will eventually lower.
     """
 
     pose: SemanticPose | SceneEntityPose | None = None
     relation: SemanticRelationTarget | None = None
+    preserve_current_object_orientation: bool = False
 
     def __post_init__(self) -> None:
         selected = sum(value is not None for value in (self.pose, self.relation))
@@ -243,6 +249,8 @@ class SemanticObjectTarget:
             type(self.relation) is not SemanticRelationTarget
         ):
             raise TypeError("relation must be exactly SemanticRelationTarget or None.")
+        if type(self.preserve_current_object_orientation) is not bool:
+            raise TypeError("preserve_current_object_orientation must be a bool.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -425,6 +433,36 @@ class RegisteredSemanticLowerer(ABC):
 
     call_id: ClassVar[str]
     target_descriptor: ClassVar[SkillDescriptor]
+
+    def pick_lookahead_targets(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        picked_object: SceneObjectRef,
+        bound: BoundSemanticCall,
+        previous_target: SemanticObjectTarget | None,
+    ) -> tuple[SemanticObjectTarget, ...] | None:
+        """Declare retained-object poses used to screen an earlier pickup.
+
+        ``None`` keeps the registered call opaque and stops pickup look-ahead.
+        An exact tuple certifies that the call retains ``picked_object`` on its
+        bound ``primary`` resource; each item is an object pose that the
+        selected grasp must make reachable. ``previous_target`` is the latest
+        pose declared earlier in the retained chain. An empty tuple therefore
+        means retained attachment without an additional pose target.
+
+        Args:
+            call: Registered semantic call being analyzed.
+            picked_object: Object selected by the earlier pickup.
+            bound: Linked call with its resolved preset and resources.
+            previous_target: Latest object target in the retained chain, if any.
+
+        Returns:
+            Exact retained-object targets, an empty tuple for target-free
+            retention, or ``None`` to stop look-ahead propagation.
+        """
+        del call, picked_object, bound, previous_target
+        return None
 
     @abstractmethod
     def lower(
@@ -1264,17 +1302,9 @@ class SemanticSkillCompiler:
         )
 
     def _assert_current(self, *, path: tuple[PathPart, ...]) -> None:
-        """Reject a compiler after engine profile/catalog ownership changes."""
-        engine = self._integration.engine
-        if engine.skill_profile is not self._integration.robot_profile:
-            raise _diagnostic(
-                "semantic_profile_stale",
-                path,
-                "The engine's canonical robot profile changed after compiler "
-                "construction.",
-            )
+        """Reject a compiler after the engine skill catalog changes."""
         try:
-            _ = self._integration.robot_profile.skills
+            self._integration.robot_profile.assert_current()
         except RuntimeError as exc:
             raise _diagnostic(
                 "semantic_catalog_stale",
@@ -1407,7 +1437,31 @@ class SemanticSkillCompiler:
         for bound in bound_calls[pick_index + 1 :]:
             call = bound.linked.call
             if type(call) is RegisteredSemanticCall:
-                break
+                lowerer = self._registered_lowerers[call.call_id]
+                if (
+                    bound.binding.resource_ids.get("primary")
+                    != bound_calls[pick_index].binding.resource_ids["primary"]
+                ):
+                    break
+                registered_targets = lowerer.pick_lookahead_targets(
+                    call,
+                    picked_object=pick.object,
+                    bound=bound,
+                    previous_target=targets[-1] if targets else None,
+                )
+                if registered_targets is None:
+                    break
+                if type(registered_targets) is not tuple or not all(
+                    type(target) is SemanticObjectTarget
+                    for target in registered_targets
+                ):
+                    raise TypeError(
+                        "RegisteredSemanticLowerer.pick_lookahead_targets() must "
+                        "return an exact tuple of SemanticObjectTarget values or "
+                        "None."
+                    )
+                targets.extend(registered_targets)
+                continue
             call_object = getattr(call, "object", None)
             if type(call_object) is not SceneObjectRef or (
                 call_object.entity_id != object_id
@@ -1418,10 +1472,23 @@ class SemanticSkillCompiler:
             if type(call) is HandOver:
                 break
             if type(call) is Place:
+                place_options = bound.preset.action_option_template(call.semantic_id)
+                if type(place_options) is not PlaceOptions:
+                    raise AssertionError(
+                        "Linked place call has a non-PlaceOptions template."
+                    )
                 if call.at is not None:
-                    targets.append(SemanticObjectTarget(pose=call.at))
+                    target = SemanticObjectTarget(pose=call.at)
                 else:
-                    targets.append(self._relation_target(bound))
+                    target = self._relation_target(bound)
+                targets.append(
+                    replace(
+                        target,
+                        preserve_current_object_orientation=(
+                            place_options.preserve_current_object_orientation
+                        ),
+                    )
+                )
                 break
         return tuple(targets)
 
@@ -1441,14 +1508,21 @@ class SemanticSkillCompiler:
             affordance=grasp_ref,
         )
         option_template = self._action_option_template(analyzed, PickUpOptions)
+        downstream_targets: list[PoseGoalValue] = []
+        for target in analyzed.downstream_object_targets:
+            grounded_target = self._ground_object_target(target, context)
+            if target.preserve_current_object_orientation:
+                grounded_target = self._target_with_observed_object_orientation(
+                    grounded_target,
+                    object_id=call.object.entity_id,
+                    context=context,
+                )
+            downstream_targets.append(grounded_target)
         return SemanticLowering(
             goal=GraspGoal(semantics=semantics),
             skill_options=replace(
                 option_template,
-                downstream_object_target_poses=tuple(
-                    self._ground_object_target(target, context)
-                    for target in analyzed.downstream_object_targets
-                ),
+                downstream_object_target_poses=tuple(downstream_targets),
             ),
         )
 
@@ -1471,24 +1545,32 @@ class SemanticSkillCompiler:
             path=(*path, analyzed.index, "call", "object"),
         )
         del task_state_key
+        option_template = self._action_option_template(analyzed, PlaceOptions)
         if call.at is not None:
             object_target = self._broadcast_pose(
                 call.at.to_matrix(),
                 context,
                 name="Place.at",
             )
-            xpos: PoseGoalValue = torch.bmm(object_target, held.object_to_eef)
         else:
             object_target = self._ground_object_target(
                 self._relation_target(analyzed.bound),
                 context,
             )
-            xpos = self._compose_object_to_eef(
-                object_target, held.object_to_eef, context
+        if option_template.preserve_current_object_orientation:
+            object_target = self._target_with_observed_object_orientation(
+                object_target,
+                object_id=call.object.entity_id,
+                context=context,
             )
+        xpos: PoseGoalValue = self._compose_object_to_eef(
+            object_target,
+            held.object_to_eef,
+            context,
+        )
         return SemanticLowering(
             goal=PlaceGoal(xpos=xpos),
-            skill_options=self._action_option_template(analyzed, PlaceOptions),
+            skill_options=option_template,
         )
 
     def _lower_handover(
@@ -2328,6 +2410,60 @@ class SemanticSkillCompiler:
         return SceneEntityPose(
             object_target.entity_id,
             relative_pose=composed,
+            minimum_confidence=object_target.minimum_confidence,
+        )
+
+    def _target_with_observed_object_orientation(
+        self,
+        object_target: PoseGoalValue,
+        *,
+        object_id: str,
+        context: PlanningContext,
+    ) -> PoseGoalValue:
+        """Keep a place target's position while retaining live object rotation."""
+        try:
+            observed_entity = context.scene.entities[object_id]
+        except KeyError as exc:
+            raise KeyError(
+                f"Place orientation preservation references unknown object "
+                f"{object_id!r}."
+            ) from exc
+        if observed_entity.confidence <= 0.0:
+            raise ValueError(
+                f"Place orientation preservation requires positive confidence for "
+                f"object {object_id!r}."
+            )
+        observed_object_pose = resolve_pose_goal(
+            SceneEntityPose(object_id),
+            context,
+            name="Place observed object",
+        )
+        target_pose = resolve_pose_goal(
+            object_target,
+            context,
+            name="Place object target",
+        )
+        target_pose = self._broadcast_pose(
+            target_pose,
+            context,
+            name="Place object target",
+        ).clone()
+        target_pose[:, :3, :3] = observed_object_pose[:, :3, :3]
+        if isinstance(object_target, torch.Tensor):
+            return target_pose
+
+        parent_pose = resolve_pose_goal(
+            SceneEntityPose(
+                object_target.entity_id,
+                minimum_confidence=object_target.minimum_confidence,
+            ),
+            context,
+            name="Place target parent",
+        )
+        relative_pose = torch.bmm(pose_inv(parent_pose), target_pose)
+        return SceneEntityPose(
+            object_target.entity_id,
+            relative_pose=relative_pose,
             minimum_confidence=object_target.minimum_confidence,
         )
 

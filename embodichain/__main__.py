@@ -72,6 +72,11 @@ COMMANDS = (
         help="Run an environment for data generation or preview.",
     ),
     Command(
+        name="list-env",
+        target="embodichain.__main__:_run_list_env",
+        help="List import-registered environments and their capabilities.",
+    ),
+    Command(
         name="preview_lerobot_data",
         target="embodichain.lab.scripts.preview_lerobot_data:cli",
         help="Print and validate a recorded LeRobot dataset episode.",
@@ -146,6 +151,50 @@ def _load_handler(target: str) -> Callable[[Sequence[str] | None], None]:
     module_name, attribute = target.split(":", maxsplit=1)
     module = importlib.import_module(module_name)
     return getattr(module, attribute)
+
+
+def _run_list_env(argv: Sequence[str] | None = None) -> None:
+    """List import-registered EmbodiChain environments.
+
+    Args:
+        argv: Arguments excluding the command name.
+    """
+    parser = argparse.ArgumentParser(
+        prog="embodichain list-env",
+        description="List import-registered EmbodiChain environments.",
+        epilog=(
+            "Configuration-defined Expert Program IDs are registered only "
+            "after their environment config is loaded."
+        ),
+    )
+    parser.parse_args(argv)
+
+    from embodichain.lab.gym.utils.registration import (
+        REGISTERED_ENVS,
+        discover_task_packages,
+    )
+    from embodichain.learning.rl.env import get_registered_learning_env_names
+
+    discover_task_packages()
+    labels_by_env: dict[str, set[str]] = {}
+    for env_id, spec in REGISTERED_ENVS.items():
+        labels = labels_by_env.setdefault(env_id, set())
+        labels.add("Simulator")
+        if spec.supports_rl:
+            labels.add("RL")
+    for env_id in get_registered_learning_env_names():
+        labels_by_env.setdefault(env_id, set()).update(("Lightweight", "RL"))
+
+    if not labels_by_env:
+        print("No registered environments found.")
+        return
+
+    label_order = ("Simulator", "Lightweight", "RL")
+    print(f"Environments ({len(labels_by_env)}):")
+    for env_id in sorted(labels_by_env, key=str.casefold):
+        labels = labels_by_env[env_id]
+        ordered_labels = [label for label in label_order if label in labels]
+        print(f"  {env_id} [{', '.join(ordered_labels)}]")
 
 
 def main(argv: Sequence[str] | None = None) -> None:

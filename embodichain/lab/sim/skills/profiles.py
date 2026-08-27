@@ -1696,7 +1696,7 @@ class BoundRobotSkillProfile:
 
     @property
     def engine(self) -> AtomicActionEngine:
-        """Return the exact action engine that owns this bound profile."""
+        """Return the exact action engine used to validate this profile."""
         return self._engine
 
     @property
@@ -1714,6 +1714,14 @@ class BoundRobotSkillProfile:
         """Return installed semantic skills fully supported by this profile."""
         self._assert_catalog_current()
         return self._skills
+
+    def assert_current(self) -> None:
+        """Reject this binding after the engine's skill catalog changes.
+
+        Raises:
+            RuntimeError: If actions were registered or replaced after binding.
+        """
+        self._assert_catalog_current()
 
     def preset(
         self,

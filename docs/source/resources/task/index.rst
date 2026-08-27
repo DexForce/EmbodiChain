@@ -11,7 +11,7 @@ Run a task by passing one of its gym configuration files to the unified CLI:
 .. code-block:: bash
 
    embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json
+       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json
 
 Use ``--preview`` to inspect a configured environment without starting a data
 generation run. See :doc:`/guides/run_env` for all launch options and
@@ -44,13 +44,13 @@ Environment catalog
      - ``embodichain_tasks/configs/tasks/special/stay_still_save/env_ur10.json``
    * - Tableware
      - ``BlocksRankingRGB-v1``
-     - ``embodichain_tasks/configs/tasks/tableware/blocks_ranking_rgb/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/env.json``
    * - Tableware
      - ``BlocksRankingSize-v1``
-     - ``embodichain_tasks/configs/tasks/tableware/blocks_ranking_size/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_size/env.json``
    * - Tableware
      - ``MatchObjectContainer-v1``
-     - ``embodichain_tasks/configs/tasks/tableware/match_object_container/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/match_object_container/env.json``
    * - Manipulation
      - ``ExpertProgramOpenDrawer-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/env.json``
@@ -59,26 +59,22 @@ Environment catalog
      - ``embodichain_tasks/configs/tasks/manipulation/hand_over/env.json``
    * - Tableware
      - ``PlaceObjectDrawer-v1``
-     - ``embodichain_tasks/configs/tasks/tableware/place_object_drawer/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/place_object_drawer/env.json``
    * - Tableware
      - ``PourWater-v3``
-     - ``embodichain_tasks/configs/tasks/tableware/pour_water/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json``
    * - Tableware
      - ``ScoopIce-v1``
-     - ``embodichain_tasks/configs/tasks/tableware/scoop_ice/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/scoop_ice/env.json``
    * - Tableware
      - ``StackBlocksTwo-v1``
-     - ``embodichain_tasks/configs/tasks/tableware/stack_blocks_two/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json``
    * - Tableware
      - ``StackCups-v1``
-     - ``embodichain_tasks/configs/tasks/tableware/stack_cups/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/stack_cups/env.json``
    * - Tableware
-     - ``PourWaterAgent-v3``
-     - Uses the Pour Water scene together with
-       ``embodichain_tasks/configs/tasks/tableware/pour_water/agent/``.
-   * - Tableware
-     - ``Rearrangement-v3`` / ``RearrangementAgent-v3``
-     - Registered task variants; no standalone gym config is currently shipped.
+     - ``Rearrangement-v3``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/rearrangement/env.json``
 
 The value of ``id`` inside a conventional gym config must match a registered
 environment ID. A supported ``expert_program_runtime`` config registers its own

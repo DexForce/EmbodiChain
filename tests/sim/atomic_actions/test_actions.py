@@ -80,6 +80,10 @@ from embodichain.lab.sim.atomic_actions import (
     PressAffordance,
     PressGoal,
     PressOptions,
+    PushObject,
+    PushObjectGoal,
+    PushObjectOptions,
+    PushObjectToolCalibration,
     SlideAffordance,
     Slide,
     SlideGoal,
@@ -692,6 +696,29 @@ def _plan_segment_contract_case(case_id: str) -> ActionPlan:
             _context(),
         )
 
+    if case_id == "push_object":
+        action = _bind_action(generator, PushObject())
+        object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+        target_pose = object_pose.clone()
+        target_pose[:, 1, 3] = 0.1
+        scene = SceneSnapshot(
+            timestamp=0.0,
+            version=0,
+            entities={
+                "object": EntityState(object_pose),
+                "target": EntityState(target_pose),
+            },
+        )
+        goal = PushObjectGoal(
+            _semantics(entity_id="object"),
+            SceneEntityPose("target"),
+        )
+        return _plan_action(
+            action,
+            _invocation(action, goal, sample_count=sample_count),
+            _context(scene=scene),
+        )
+
     raise AssertionError(f"Unknown trajectory-segment contract case {case_id!r}.")
 
 
@@ -704,6 +731,7 @@ def test_builtin_descriptors_expose_strict_goal_types() -> None:
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
     assert Pour.GoalType is PourGoal
     assert Press.GoalType is PressGoal
+    assert PushObject.GoalType is PushObjectGoal
     assert Slide.GoalType is SlideGoal
     assert Twist.GoalType is TwistGoal
     assert CoordinatedPickment.GoalType is CoordinatedPickGoal
@@ -720,6 +748,7 @@ def test_builtin_descriptors_expose_strict_goal_types() -> None:
         ("place", ("approach", "release", "retract")),
         ("assemble", ("approach", "release", "retract")),
         ("press", ("close", "approach", "contact", "press", "retract")),
+        ("push_object", ("close", "approach", "contact", "push", "retract")),
     ),
 )
 def test_builtin_trajectory_segment_names_and_ranges_are_stable(
@@ -755,6 +784,7 @@ def test_interaction_primitives_use_motion_centric_skill_ids() -> None:
         PlaceOptions(),
         PourOptions(),
         PressOptions(),
+        PushObjectOptions(),
         SlideOptions(),
         TwistOptions(),
         CoordinatedPickmentOptions(),
@@ -909,6 +939,82 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
     assert placed_task.get_held_object("arm") is None
 
 
+def test_place_holds_fully_open_before_retracting_when_configured() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, Place())
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"arm": _held()},
+    )
+    sample_count = 20
+    settle_steps = 3
+    invocation = ActionInvocation(
+        skill_id=action.skill_id,
+        goal=PlaceGoal(torch.eye(4)),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(sample_count=sample_count),
+        skill_options=PlaceOptions(release_settle_steps=settle_steps),
+    )
+
+    plan = _plan_action(action, invocation, _context(task))
+
+    release = plan.segment("release")
+    assert plan.commands.frame_count == sample_count + settle_steps
+    assert release.stop - release.start == 5 + settle_steps
+    hand_positions = _joint_command_positions(plan, "hand")
+    torch.testing.assert_close(
+        hand_positions[:, release.stop - settle_steps : release.stop],
+        hand_positions[:, release.stop - 1 : release.stop].expand(
+            -1,
+            settle_steps,
+            -1,
+        ),
+    )
+
+
+def test_pick_holds_fully_closed_before_lifting_when_configured() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    sample_count = 20
+    settle_steps = 3
+    invocation = ActionInvocation(
+        skill_id=action.skill_id,
+        goal=GraspGoal(
+            semantics=_semantics(entity_id="target"),
+            grasp_xpos=torch.eye(4),
+        ),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(sample_count=sample_count),
+        skill_options=PickUpOptions(grasp_settle_steps=settle_steps),
+    )
+
+    plan = _plan_action(
+        action,
+        invocation,
+        _context(
+            scene=_target_scene(
+                torch.eye(4).repeat(NUM_ENVS, 1, 1),
+                timestamp=0.0,
+                version=0,
+            )
+        ),
+    )
+
+    close = plan.segment("close")
+    assert plan.commands.frame_count == sample_count + settle_steps
+    assert close.stop - close.start == 5 + settle_steps
+    hand_positions = _joint_command_positions(plan, "hand")
+    torch.testing.assert_close(
+        hand_positions[:, close.stop - settle_steps : close.stop],
+        hand_positions[:, close.stop - 1 : close.stop].expand(
+            -1,
+            settle_steps,
+            -1,
+        ),
+    )
+
+
 def test_place_releases_only_exclusively_held_rows() -> None:
     generator = _motion_generator()
 
@@ -955,8 +1061,9 @@ def test_place_releases_only_exclusively_held_rows() -> None:
     assert alternate is not None and alternate.env_mask.tolist() == [True, False]
 
 
-def test_move_held_object_requires_projected_attachment() -> None:
+def test_move_held_object_uses_exact_projected_attachment_target() -> None:
     generator = _motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
     action = _bind_action(generator, MoveHeldObject())
     invocation = _invocation(
         action,
@@ -977,15 +1084,6 @@ def test_move_held_object_requires_projected_attachment() -> None:
         device="cpu",
         held_objects={"arm": held},
     )
-    eef_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    eef_pose[:, :3, :3] = torch.tensor(
-        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
-    )
-    eef_pose[:, 0, 3] = torch.tensor([0.5, 0.8])
-    generator.robot.compute_fk.return_value = eef_pose
-    generator.robot.compute_fk.side_effect = None
-    automatic_rotation = Mock()
-    action._apply_automatic_transport_rotation = automatic_rotation
     invocation = ActionInvocation(
         skill_id="move_held_object",
         goal=HeldObjectPoseGoal(torch.eye(4)),
@@ -998,13 +1096,9 @@ def test_move_held_object_requires_projected_attachment() -> None:
 
     assert plan.plan_success.all()
     assert plan.expected_effects.is_empty
-    assert generator.robot.compute_fk.call_args.kwargs["name"] == "arm"
-    move_eef_pose, current_eef_pose = automatic_rotation.call_args.args
-    assert torch.allclose(
-        move_eef_pose,
-        torch.bmm(torch.eye(4).repeat(NUM_ENVS, 1, 1), held.object_to_eef),
-    )
-    assert torch.equal(current_eef_pose, eef_pose)
+    target_states = generator.generate.call_args.args[0]
+    assert len(target_states) == 1
+    assert torch.allclose(target_states[0].xpos, held.object_to_eef)
 
 
 def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
@@ -1073,6 +1167,47 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     assert torch.all(trajectory.positions[:, :, ARM_DOF:] == 1.0)
     assert plan.expected_effects.is_empty
     assert context.task is task
+
+
+def test_pour_reads_held_state_from_the_bound_logical_resource() -> None:
+    """Profile resource IDs need not match native motion control-part names."""
+    generator = _motion_generator()
+    generator.robot.compute_fk.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    generator.robot.compute_fk.side_effect = None
+    action = _bind_action(generator, Pour())
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        label="pourable-object",
+        entity_id="pourable-object",
+    )
+    logical_resource = "right_manipulator"
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={logical_resource: _held(semantics)},
+    )
+    direct_binding = _binding(action)
+    binding = ActionBinding(
+        owner_id=direct_binding.owner_id,
+        endpoints=tuple(
+            replace(endpoint, task_state_key=logical_resource)
+            for endpoint in direct_binding.endpoints
+        ),
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="pour",
+            goal=PourGoal(),
+            binding=binding,
+            motion_policy=MotionPolicy(sample_count=10),
+        ),
+        _context(task),
+    )
+
+    assert plan.plan_success.all()
 
 
 def test_engine_compiles_pickup_followed_by_pour() -> None:
@@ -1428,6 +1563,68 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     }
 
 
+def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
+    """A calibrated object-relative grasp is used directly and owned safely."""
+    generator = _motion_generator()
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="fixed-grasp-object",
+        entity_id="target",
+    )
+    action = _bind_action(generator, PickUp())
+    grasp_generator = _GRASP_GENERATORS[id(action)]
+    grasp_generator.get_valid_grasp_poses = Mock()
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, 0, 3] = torch.tensor([0.03, 0.07])
+    fixed_object_to_eef = torch.tensor(
+        (
+            (0.0, 1.0, 0.0, 0.04),
+            (-1.0, 0.0, 0.0, 0.02),
+            (0.0, 0.0, 1.0, 0.03),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    )
+    options = PickUpOptions(
+        fixed_object_to_eef=fixed_object_to_eef,
+        rotate_upright=math.pi / 2.0,
+        grasp_frame_to_eef=torch.tensor(
+            (
+                (0.0, -1.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0, 0.05),
+                (0.0, 0.0, 0.0, 1.0),
+            )
+        ),
+    )
+    owned_transform = options.fixed_object_to_eef.clone()
+    fixed_object_to_eef.zero_()
+    context = _context(scene=_target_scene(object_pose, timestamp=0.0, version=0))
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id=action.skill_id,
+            goal=GraspGoal(semantics=semantics),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=20),
+            skill_options=options,
+        ),
+        context,
+    )
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+
+    grasp_generator.get_valid_grasp_poses.assert_not_called()
+    held = projected.get_held_object("arm")
+    assert held is not None
+    expected_grasp = torch.matmul(object_pose, owned_transform)
+    torch.testing.assert_close(held.grasp_xpos, expected_grasp)
+    torch.testing.assert_close(
+        held.object_to_eef,
+        owned_transform.expand(NUM_ENVS, -1, -1),
+    )
+
+
 def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
     generator = _motion_generator()
     generator.generate = Mock(wraps=generator.generate)
@@ -1694,6 +1891,137 @@ def test_pick_holds_only_environment_without_a_feasible_grasp() -> None:
     held = projected.get_held_object("arm")
     assert held is not None
     assert held.env_mask.tolist() == [True, False]
+
+
+def test_pick_normalizes_integer_batch_ik_success_masks() -> None:
+    """DexSim integer IK flags become boolean masks before tensor selection."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    poses = torch.eye(4).repeat(NUM_ENVS, 3, 2, 1, 1)
+    joint_seed = torch.zeros(NUM_ENVS, ARM_DOF)
+    manipulator = JointPositionTarget("arm", tuple(range(ARM_DOF)))
+
+    def compute_batch_ik(
+        *,
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert name == "arm"
+        return (
+            torch.ones(pose.shape[:2], dtype=torch.int32),
+            joint_seed.clone(),
+        )
+
+    generator.robot.compute_batch_ik.side_effect = compute_batch_ik
+
+    success, qpos = action._compute_batch_candidate_ik(
+        poses,
+        joint_seed,
+        manipulator,
+    )
+
+    assert success.dtype is torch.bool
+    assert success.shape == (NUM_ENVS, 3, 2)
+    assert success.all()
+    assert qpos.shape == (NUM_ENVS, 3, 2, ARM_DOF)
+
+
+def test_pick_maps_canonical_grasp_frames_to_the_robot_eef() -> None:
+    """Endpoint calibration is applied after canonical grasp generation."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    grasp_xpos = torch.eye(4).repeat(NUM_ENVS, 1, 1, 1)
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    start_qpos = torch.zeros(NUM_ENVS, ARM_DOF)
+    manipulator = JointPositionTarget("arm", tuple(range(ARM_DOF)))
+    grasp_frame_to_eef = torch.tensor(
+        (
+            (0.0, 1.0, 0.0, 0.0),
+            (-1.0, 0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    )
+
+    def feasible_ik(
+        poses: torch.Tensor,
+        joint_seed: torch.Tensor,
+        manipulator: JointPositionTarget,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del joint_seed, manipulator
+        return (
+            torch.ones(poses.shape[:3], dtype=torch.bool),
+            torch.zeros(*poses.shape[:3], ARM_DOF),
+        )
+
+    action._compute_batch_candidate_ik = Mock(side_effect=feasible_ik)
+
+    selected, success = action._select_feasible_grasp_variants(
+        grasp_xpos,
+        start_qpos,
+        object_pose,
+        manipulator,
+        PickUpOptions(grasp_frame_to_eef=grasp_frame_to_eef),
+        torch.tensor((0.0, 0.0, -1.0)),
+    )
+
+    assert success.all()
+    assert torch.allclose(
+        selected,
+        grasp_frame_to_eef.expand(NUM_ENVS, 1, -1, -1),
+    )
+
+
+def test_pick_candidate_pregrasp_uses_configured_world_approach_direction() -> None:
+    """Candidate screening and trajectory generation share one approach frame."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    grasp_xpos = torch.eye(4).repeat(NUM_ENVS, 1, 1, 1)
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    start_qpos = torch.zeros(NUM_ENVS, ARM_DOF)
+    manipulator = JointPositionTarget("arm", tuple(range(ARM_DOF)))
+    grasp_frame_to_eef = torch.tensor(
+        (
+            (0.0, 1.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0, 0.0),
+            (0.0, 0.0, -1.0, 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    )
+
+    def feasible_ik(
+        poses: torch.Tensor,
+        joint_seed: torch.Tensor,
+        manipulator: JointPositionTarget,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del joint_seed, manipulator
+        return (
+            torch.ones(poses.shape[:3], dtype=torch.bool),
+            torch.zeros(*poses.shape[:3], ARM_DOF),
+        )
+
+    action._compute_batch_candidate_ik = Mock(side_effect=feasible_ik)
+    options = PickUpOptions(
+        pre_grasp_distance=0.15,
+        grasp_frame_to_eef=grasp_frame_to_eef,
+    )
+    approach_direction = torch.tensor((0.0, 0.0, -1.0))
+
+    action._select_feasible_grasp_variants(
+        grasp_xpos,
+        start_qpos,
+        object_pose,
+        manipulator,
+        options,
+        approach_direction,
+    )
+
+    pre_grasp_poses = action._compute_batch_candidate_ik.call_args_list[0].args[0]
+    torch.testing.assert_close(
+        pre_grasp_poses[..., :3, 3],
+        torch.tensor((0.0, 0.0, 0.15)).expand(NUM_ENVS, 1, 2, -1),
+    )
 
 
 def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
@@ -2404,6 +2732,209 @@ def test_slide_fk_path_remains_on_translation_axis() -> None:
     axis = torch.tensor([0.0, -1.0, 0.0])
     orthogonal = positions - (positions * axis).sum(dim=-1, keepdim=True) * axis
     assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+
+
+def test_push_object_plans_contact_and_target_directed_planar_motion() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PushObject())
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, 0, 3] = torch.tensor([0.4, 0.5])
+    object_pose[1, :3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+    target_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    target_pose[:, 0, 3] = object_pose[:, 0, 3]
+    target_pose[:, 1, 3] += torch.tensor([0.12, -0.12])
+    scene = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={
+            "utensil": EntityState(object_pose),
+            "slot": EntityState(target_pose),
+        },
+    )
+    options = PushObjectOptions(
+        hand_interp_steps=3,
+        approach_height=0.1,
+        retract_height=0.08,
+        contact_distance=0.03,
+        push_overshoot=0.02,
+        object_contact_offset=torch.tensor([-0.05, 0.0, 0.0]),
+        support_frame_planar_contact_offset=torch.tensor([-0.05, 0.0, 0.0]),
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="push_object",
+            goal=PushObjectGoal(
+                _semantics(entity_id="utensil"),
+                SceneEntityPose("slot"),
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=options,
+        ),
+        _context(scene=scene),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.expected_effects.is_empty
+    assert plan.scene_dependencies == ("slot", "utensil")
+    assert plan.scene_dependency_end_segment == "approach"
+    assert [segment.name for segment in plan.segments] == [
+        "close",
+        "approach",
+        "contact",
+        "push",
+        "retract",
+    ]
+    trajectory = _joint_trajectory(plan)
+    assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert torch.all(
+        trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+    )
+
+    planned_targets = [
+        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
+    ]
+    motion_lengths = PushObject._motion_segment_lengths(
+        24,
+        options.hand_interp_steps,
+    )
+    contact_stop = 1 + motion_lengths[1] - 1
+    push_stop = contact_stop + motion_lengths[2] - 1
+    expected_direction = torch.tensor([[0.0, 1.0, 0.0], [0.0, -1.0, 0.0]])
+    expected_contact = torch.tensor([[0.35, -0.03, 0.0], [0.45, 0.03, 0.0]])
+    expected_pushed = expected_contact + expected_direction * 0.14
+    assert torch.allclose(
+        planned_targets[0][:, :3, 3],
+        expected_contact + torch.tensor([0.0, 0.0, 0.1]),
+    )
+    assert torch.allclose(
+        planned_targets[contact_stop - 1][:, :3, 3],
+        expected_contact,
+    )
+    assert torch.allclose(
+        planned_targets[push_stop - 1][:, :3, 3],
+        expected_pushed,
+    )
+    assert torch.allclose(
+        planned_targets[-1][:, :3, 3],
+        expected_pushed + torch.tensor([0.0, 0.0, 0.08]),
+    )
+
+
+def test_push_object_holds_rows_without_a_planar_displacement() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PushObject())
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    target_pose = object_pose.clone()
+    target_pose[1, 1, 3] = 0.1
+    scene = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={
+            "utensil": EntityState(object_pose),
+            "slot": EntityState(target_pose),
+        },
+    )
+    context = _context(scene=scene)
+
+    plan = _plan_action(
+        action,
+        _invocation(
+            action,
+            PushObjectGoal(
+                _semantics(entity_id="utensil"),
+                SceneEntityPose("slot"),
+            ),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [False, True]
+    trajectory = _joint_trajectory(plan)
+    assert torch.allclose(
+        trajectory.positions[0],
+        context.robot.qpos[0].unsqueeze(0).expand(trajectory.waypoint_count, -1),
+    )
+
+
+def test_push_object_short_circuits_within_completion_tolerance() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PushObject())
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    target_pose = object_pose.clone()
+    target_pose[:, 1, 3] = 0.02
+    scene = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={
+            "utensil": EntityState(object_pose),
+            "slot": EntityState(target_pose),
+        },
+    )
+    context = _context(scene=scene)
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="push_object",
+            goal=PushObjectGoal(
+                _semantics(entity_id="utensil"),
+                SceneEntityPose("slot"),
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=PushObjectOptions(completion_tolerance=0.03),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    generator.robot.compute_ik.assert_not_called()
+    trajectory = _joint_trajectory(plan)
+    assert torch.allclose(
+        trajectory.positions,
+        context.robot.qpos.unsqueeze(1).expand_as(trajectory.positions),
+    )
+
+
+def test_push_object_options_own_calibration_tensors() -> None:
+    contact_offset = torch.tensor([-0.05, 0.0, 0.0])
+    support_offset = torch.tensor([-0.04, 0.0, 0.0])
+    calibration = torch.eye(4)
+    tool_calibration = PushObjectToolCalibration(
+        control_part="alternate_arm",
+        contact_frame_to_eef=calibration,
+        contact_distance=0.08,
+    )
+    options = PushObjectOptions(
+        object_contact_offset=contact_offset,
+        support_frame_planar_contact_offset=support_offset,
+        contact_frame_to_eef=calibration,
+        tool_calibrations=(tool_calibration,),
+    )
+
+    contact_offset[0] = 9.0
+    support_offset[0] = 9.0
+    calibration[0, 3] = 9.0
+    tool_calibration.contact_frame_to_eef[1, 3] = 9.0
+
+    assert torch.equal(
+        options.object_contact_offset,
+        torch.tensor([-0.05, 0.0, 0.0]),
+    )
+    assert torch.equal(
+        options.support_frame_planar_contact_offset,
+        torch.tensor([-0.04, 0.0, 0.0]),
+    )
+    assert torch.equal(options.contact_frame_to_eef, torch.eye(4))
+    assert torch.equal(
+        options.tool_calibrations[0].contact_frame_to_eef,
+        torch.eye(4),
+    )
+    assert options._contact_distance_for("alternate_arm") == pytest.approx(0.08)
+    assert options._contact_distance_for("arm") == pytest.approx(0.03)
 
 
 def test_press_plans_close_approach_press_and_retract() -> None:

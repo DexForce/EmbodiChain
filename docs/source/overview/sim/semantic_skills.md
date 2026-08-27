@@ -101,9 +101,11 @@ manifest = SemanticIntegrationManifest(
 perception. It snapshots canonical identity, aliases, topology, affordance
 capabilities and revisions, and collision-world mode. `manifest.bind(...)`
 requires the live {class}`SceneRegistry` to match that snapshot and binds the
-profile to the exact action engine. Replacing an installed agent-visible action,
-changing the bound profile, or changing scene metadata invalidates the old
-integration rather than silently reusing stale contracts.
+profile to the exact action engine. The returned bound profile snapshots the
+engine's skill-catalog revision. Replacing an installed agent-visible action or
+changing scene metadata invalidates the old integration rather than silently
+reusing stale contracts; creating another bound view does not mutate the engine
+or invalidate an existing integration.
 
 Policy preset selection is deterministic:
 
@@ -153,8 +155,10 @@ session = engine.start(
 The runtime performs this JIT grounding automatically before every call. Known
 calls should be submitted together when possible: a `Pick -> Place` or
 `Pick -> HandOver` segment lets analysis pass the first downstream object target
-into grasp selection. Splitting those calls into separate dynamic segments is
-valid, but removes that look-ahead information from the earlier Pick.
+into grasp selection. A registered lowerer can retain that chain by returning
+typed object poses from `pick_lookahead_targets()`; its default `None` is a
+conservative barrier. Splitting calls into separate dynamic segments is valid,
+but removes that look-ahead information from the earlier Pick.
 
 ## Construct a runtime
 
@@ -292,7 +296,8 @@ string.
 
 Three explicit extension points keep executable objects outside semantic calls:
 
-- {class}`RegisteredSemanticLowerer` lowers a catalog-registered call;
+- {class}`RegisteredSemanticLowerer` lowers a catalog-registered call and may
+  explicitly expose retained-object pickup look-ahead targets;
 - {class}`RelationTargetGrounder` converts a capability-, payload-type-, and
   revision-matched relation into an object pose;
 - {class}`HandOverPoseProvider` supplies embodiment-appropriate middle and

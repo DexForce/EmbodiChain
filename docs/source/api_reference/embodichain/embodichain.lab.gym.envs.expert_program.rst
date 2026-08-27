@@ -24,7 +24,6 @@ embodichain.lab.gym.envs.expert_program
       CuroboParallelCommandSafetyValidator
       CuroboParallelSafetyValidatorFactory
       DemoBridgeError
-      EXPERT_PROGRAM_SCHEMA_VERSION
       EnvironmentStepClock
       EnvironmentStepTimingError
       EndpointAdapterDeclaration
@@ -94,11 +93,9 @@ embodichain.lab.gym.envs.expert_program
 Schema and loading
 ------------------
 
-Expert Program schema version 2 is the only accepted top-level schema. It
-contains bounded sequential nodes and deterministic parallel blocks whose
-barrier is owned by the enclosing parallel node.
-
-.. autodata:: EXPERT_PROGRAM_SCHEMA_VERSION
+The current Expert Program schema contains bounded sequential nodes and
+deterministic parallel blocks whose barrier is owned by the enclosing parallel
+node. Serialized programs do not carry a top-level schema-version field.
 
 .. autoclass:: ExpertProgramCfg
    :members:
@@ -184,7 +181,7 @@ MLLM frontend
 -------------
 
 The MLLM frontend intentionally accepts only the constrained sequential subset
-of schema version 2. Trusted host code remains responsible for authoring
+of the current schema. Trusted host code remains responsible for authoring
 parallel structure and selecting the integration.
 
 .. autofunction:: embodichain.agents.mllm.decode_mllm_expert_program

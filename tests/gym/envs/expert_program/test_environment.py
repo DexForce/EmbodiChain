@@ -225,7 +225,10 @@ def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "fake_planner"
-    return AtomicActionEngine(generator, skill_profile=profile)
+    return AtomicActionEngine(
+        generator,
+        control_profiles=profile.action_control_profiles(),
+    )
 
 
 class _FakeEnvironmentFactory:

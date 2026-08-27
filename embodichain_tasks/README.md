@@ -8,23 +8,28 @@ inside the core `embodichain` import package. It is bundled into the main
 registered through the `embodichain.tasks` entry point. It has no independent
 distribution metadata or version.
 
-Tasks are organized by domain and task identity, not by solution method.
-Import-registered task packages keep their environment registration in
-`task.py`; simulator scene and MDP settings remain in JSON/YAML. Supported
-Expert Program tasks may instead be entirely configuration-defined. Optional
-programs and policy configs live below the same task:
+Tasks are organized by task family, optional subdomain, and task identity, not
+by solution method. Import-registered tasks keep their environment
+registration in a task-named Python module; simulator scene and MDP settings
+remain in JSON/YAML. Supported Expert Program tasks may instead be entirely
+configuration-defined. Optional programs and policy configs live below the
+same task:
 
 ```text
-embodichain_tasks/<domain>/<task>/task.py
-configs/tasks/<domain>/<task>/env.{json,yaml}
-configs/tasks/<domain>/<task>/expert/program.yaml
-configs/tasks/<domain>/<task>/agents/<algorithm>.yaml
+embodichain_tasks/<category-path>/<task>.py
+configs/tasks/<category-path>/<task>/env.{json,yaml}
+configs/tasks/<category-path>/<task>/expert/program.yaml
+configs/tasks/<category-path>/<task>/agents/<algorithm>.yaml
 ```
 
-Simple imported tasks contain only `task.py` and an environment config. A
-configuration-defined Expert Program task uses `expert_program_runtime` in
-`env.json`; loading that config registers the common `EmbodiedEnv`, so no task
-package or Python binding is needed.
+The category path begins with a top-level task family and may include a
+subdomain: tableware tasks use `manipulation/tableware`, while general
+manipulation tasks can stay directly under `manipulation`. The Python entry
+stays flat beneath its owning category; the task-local configuration directory
+remains because it can own environment, Expert Program, and policy artifacts.
+A configuration-defined Expert Program task uses
+`expert_program_runtime` in `env.json`; loading that config registers the
+common `EmbodiedEnv`, so no Python task module is needed.
 
 ## Migrating from the solution-first layout
 
@@ -33,10 +38,12 @@ paths must use the task-first locations:
 
 | Previous owner | Task-first owner |
 | --- | --- |
-| `embodichain_tasks.rl.basic.<task>` | `embodichain_tasks.classic_control.<task>.task` |
-| `embodichain_tasks.rl.push_cube` | `embodichain_tasks.manipulation.push_cube.task` |
+| `embodichain_tasks.rl.basic.<task>` | `embodichain_tasks.classic_control.<task>` |
+| `embodichain_tasks.rl.push_cube` | `embodichain_tasks.manipulation.push_cube` |
+| `embodichain_tasks.tableware.<task>` | `embodichain_tasks.manipulation.tableware.<task>` |
 | `embodichain_tasks.expert_program.<task>` | No replacement module for supported config-defined examples; load `configs/tasks/manipulation/<task>/env.json` |
-| `configs/gym/`, `configs/expert_program/`, `configs/agents/rl/` | `configs/tasks/<domain>/<task>/` |
+| `configs/tasks/tableware/<task>/` | `configs/tasks/manipulation/tableware/<task>/` |
+| `configs/gym/`, `configs/expert_program/`, `configs/agents/rl/` | `configs/tasks/<category-path>/<task>/` |
 
 ## Installation
 
@@ -75,19 +82,19 @@ selected by the `"id"` field of the gym config.
 
 ```bash
 # Data generation mode
-embodichain run-env --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json
+embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
 
 # Preview mode
-embodichain run-env --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json --preview
+embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json --preview
 
 # Equivalent invocations
-python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json
-python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/tasks/tableware/pour_water/env.json
+python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
+python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
 ```
 
 ## How registration works
 
-Importing `embodichain_tasks` recursively imports every task package, which
+Importing `embodichain_tasks` recursively imports every task module, which
 triggers its `@register_env` decorator and registers it in the gymnasium
 registry. Configuration-defined Expert Program IDs are registered later by
 `config_to_cfg()` when their `env.json` is loaded. The unified CLI calls
@@ -112,7 +119,7 @@ To add a task environment:
    [project.entry-points."embodichain.tasks"]
    "your_package" = "your_package"
    ```
-2. **Implement the environment** in `<domain>/<task>/task.py` as an
+2. **Implement the environment** in `<category-path>/<task>.py` as an
    `EmbodiedEnv` subclass and register it there with
    `@register_env("YourTask-v1")`. Importing your package must reach every task module so the
    decorator runs -- the template uses explicit imports in `__init__.py`;

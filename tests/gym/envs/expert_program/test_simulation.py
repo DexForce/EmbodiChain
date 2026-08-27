@@ -38,6 +38,7 @@ from embodichain.lab.gym.envs.expert_program.simulation import (
 )
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
+    AxisAlignAffordance,
     CARTESIAN_POSE_CAPABILITY,
     GRASP_CAPABILITY,
     PickUpOptions,
@@ -56,6 +57,7 @@ from embodichain.lab.sim.skills import (
     SkillPolicyPreset,
     SupportSurfaceAffordance,
 )
+from embodichain.lab.sim.skills.integration import SceneManifest
 from embodichain.lab.sim.skills.profiles import ResourceEndpoint
 
 _BATCH_SIZE = 2
@@ -341,6 +343,59 @@ def test_scene_binding_builds_existing_registry_contracts() -> None:
         snapshot.entities[container_ref.entity_id].pose[:, 0, 3],
         torch.tensor((0.4, 0.5)),
     )
+
+
+def test_scene_manifest_uses_live_float32_pose_precision() -> None:
+    """Static preflight and live registry agree for decimal placement poses."""
+    binding = _scene_binding()
+    support = replace(
+        binding.support_surfaces[0],
+        object_target_pose=(
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.16,
+            0.0,
+            0.0,
+            1.0,
+            0.03,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+    )
+    configured = replace(binding, support_surfaces=(support,))
+
+    declared = configured.declare()
+    live = SceneManifest.from_registry(configured.build(_Simulation()))
+
+    assert declared.entries == live.entries
+
+
+def test_axis_aligned_grasp_binding_preserves_mesh_and_local_axis() -> None:
+    """Configured pouring geometry remains a valid antipodal grasp payload."""
+    binding = _scene_binding()
+    axis_grasp = replace(
+        binding.antipodal_grasps[0],
+        internal_axis=(1.0, 0.0, 0.0),
+    )
+    configured = replace(binding, antipodal_grasps=(axis_grasp,))
+
+    manifest_grasp = configured.declare().lookup(
+        "cube_grasp",
+        expected_type=SceneAffordanceRef,
+    )
+    live_grasp = configured.build(_Simulation()).lookup("cube_grasp").affordance
+
+    assert manifest_grasp.affordance_payload_type is AxisAlignAffordance
+    assert type(live_grasp) is AxisAlignAffordance
+    assert torch.equal(live_grasp.internal_axis, torch.tensor((1.0, 0.0, 0.0)))
+    assert live_grasp.mesh_vertices is not None
 
 
 def test_scene_binding_fails_closed_on_missing_native_entity() -> None:

@@ -18,26 +18,29 @@ Scaffold a new task environment following EmbodiChain's conventions and patterns
 
 Ask the user:
 
-- **Domain**: physical task family such as `tableware`, `manipulation`,
-  `classic_control`, or `special`
+- **Top-level task family**: `manipulation`, `classic_control`, or `special`
+- **Optional subdomain**: a narrower category such as `tableware` under
+  `manipulation`
 - **Task name** (snake_case, e.g. `pick_place`)
 - **Gym ID** (e.g. `PickPlace-v1`)
 - **Optional solutions**: scripted expert, Expert Program, or RL policy configs
 - **Config format**: JSON or YAML
 
-Do not use a solution method such as `rl` or `expert_program` as the domain.
+Combine the task family and optional subdomain into `<category_path>`. Do not
+use a solution method such as `rl` or `expert_program` as a category.
 
-### 2. Create the Task Package
+### 2. Create the Task Module
 
 Place the environment and its registration at:
 
 ```text
-embodichain_tasks/embodichain_tasks/<domain>/<task_name>/task.py
+embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
 ```
 
-Add a sibling `__init__.py` that re-exports the task class. Lightweight
-pure-PyTorch tasks use the same domain/task layout and register through
-`@register_learning_env` when they are not `EmbodiedEnv` subclasses.
+Do not add a same-named task directory or `__init__.py` for a single Python
+entry point. Lightweight pure-PyTorch tasks use the same flat
+category/task-module layout and register through `@register_learning_env` when
+they are not `EmbodiedEnv` subclasses.
 
 Template:
 
@@ -87,14 +90,15 @@ class <CamelCaseName>Env(EmbodiedEnv):
     # Keep only task behavior that cannot be expressed by env config here.
 ```
 
-Keep `@register_env` in `task.py`; do not create a separate registration module.
+Keep `@register_env` in the task-named module; do not create a separate
+registration module.
 
 ### 3. Add the Environment Config
 
 Create the scene and MDP configuration at:
 
 ```text
-embodichain_tasks/configs/tasks/<domain>/<task_name>/env.json
+embodichain_tasks/configs/tasks/<category_path>/<task_name>/env.json
 ```
 
 Use `env.yaml` when YAML was selected. Robot, scene, sensors, observations,
@@ -105,24 +109,24 @@ the required behavior.
 Optional solution artifacts stay below the same task:
 
 ```text
-<task package>/expert/binding.py            # runtime binding only, when needed
-<task package>/expert/scripted.py           # handwritten online expert
 <task config>/expert/program.yaml           # declarative Expert Program
 <task config>/agents/<algorithm>.yaml       # RL training configuration
 ```
 
+Prefer the declarative Expert Program runtime for expert behavior. Do not
+scaffold a task-local Action Bank, `BaseAgentEnv`, or expert Python package.
 Recorded trajectories are data assets, not Python integration modules.
 
 ### 4. Update Exports
 
-Task packages under `embodichain_tasks` are auto-imported via
-`import_packages()`. Re-export the environment from the task package:
+Task modules under `embodichain_tasks` are auto-imported via
+`import_packages()`. Define exports directly in the task module:
 
 ```python
-from .task import <CamelCaseName>Env
-
 __all__ = ["<CamelCaseName>Env"]
 ```
+
+The domain `__init__.py` does not need to re-export each task.
 
 ### 5. Create Test Stub
 
@@ -132,7 +136,7 @@ lightweight learning environments).
 ### 6. Format
 
 ```bash
-black embodichain_tasks/embodichain_tasks/<domain>/<task_name>/
+black embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
 black tests/gym/envs/tasks/test_<name>.py
 ```
 
@@ -140,10 +144,12 @@ black tests/gym/envs/tasks/test_<name>.py
 
 - [ ] File has Apache 2.0 header
 - [ ] Uses `from __future__ import annotations`
-- [ ] Registration lives in `task.py` with a unique ID
+- [ ] Registration lives in `<task_name>.py` with a unique ID
 - [ ] `__all__` defined in the task module
+- [ ] No same-named per-task package was created for a single module
+- [ ] Python and config paths use the same category hierarchy
 - [ ] Scene and MDP are declared in task-local JSON/YAML
 - [ ] Expert/RL artifacts exist only when the task provides that solution
-- [ ] Task package `__init__.py` re-exports the environment
+- [ ] No task-local Action Bank or `BaseAgentEnv` was introduced
 - [ ] Test stub created
 - [ ] `black` run on changed Python files

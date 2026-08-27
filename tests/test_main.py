@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,7 @@ EXPECTED_COMMANDS = {
     "benchmark",
     "data",
     "decompose-urdf",
+    "list-env",
     "preview-asset",
     "preview_lerobot_data",
     "run-env",
@@ -74,6 +76,59 @@ def test_dispatch_forwards_subcommand_arguments(
     cli.main(["preview-asset", "--asset_path", "robot.urdf", "--headless"])
 
     assert received == ["--asset_path", "robot.urdf", "--headless"]
+
+
+def test_list_env_discovers_and_prints_sorted_capability_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List-env separates runtime type from explicit RL capability."""
+    from embodichain.lab.gym.utils import registration
+    from embodichain.learning.rl import env as learning_env
+
+    discovery_calls: list[None] = []
+    monkeypatch.setattr(
+        registration,
+        "discover_task_packages",
+        lambda: discovery_calls.append(None),
+    )
+    monkeypatch.setattr(
+        registration,
+        "REGISTERED_ENVS",
+        {
+            "Zulu-v1": SimpleNamespace(supports_rl=False),
+            "alpha-v1": SimpleNamespace(supports_rl=False),
+            "PushCubeRL": SimpleNamespace(supports_rl=True),
+        },
+    )
+    monkeypatch.setattr(
+        learning_env,
+        "get_registered_learning_env_names",
+        lambda: ["zeta_rl", "BetaRL"],
+    )
+
+    cli.main(["list-env"])
+
+    assert discovery_calls == [None]
+    assert capsys.readouterr().out == (
+        "Environments (5):\n"
+        "  alpha-v1 [Simulator]\n"
+        "  BetaRL [Lightweight, RL]\n"
+        "  PushCubeRL [Simulator, RL]\n"
+        "  zeta_rl [Lightweight, RL]\n"
+        "  Zulu-v1 [Simulator]\n"
+    )
+
+
+def test_list_env_help_explains_config_defined_registration(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List-env help explains why config-owned IDs may be absent."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["list-env", "--help"])
+
+    assert exc_info.value.code == 0
+    assert "Configuration-defined Expert Program IDs" in capsys.readouterr().out
 
 
 def test_subcommand_help_uses_complete_command_parser(

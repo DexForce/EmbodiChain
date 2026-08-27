@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""General manipulation task environments."""
+"""Manipulation task environments and subdomains."""
 
 from __future__ import annotations
 

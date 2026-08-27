@@ -25,9 +25,10 @@ import sys
 import embodichain.lab.sim.atomic_actions as atomic_actions
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-PRIMITIVES_DIRECTORY = (
-    REPOSITORY_ROOT / "embodichain" / "lab" / "sim" / "atomic_actions" / "primitives"
+ATOMIC_ACTIONS_DIRECTORY = (
+    REPOSITORY_ROOT / "embodichain" / "lab" / "sim" / "atomic_actions"
 )
+PRIMITIVES_DIRECTORY = ATOMIC_ACTIONS_DIRECTORY / "primitives"
 TUTORIAL_DIRECTORY = REPOSITORY_ROOT / "scripts" / "tutorials" / "atomic_action"
 
 PUBLIC_PRIMITIVE_SCRIPTS = tuple(
@@ -97,3 +98,20 @@ def test_atomic_action_star_import_resolves_all_public_exports() -> None:
     exec("from embodichain.lab.sim.atomic_actions import *", namespace)
 
     assert set(atomic_actions.__all__).issubset(namespace)
+
+
+def test_atomic_action_modules_do_not_depend_on_semantic_skills() -> None:
+    """The atomic-action core must not import the higher semantic-skill layer."""
+    forbidden_dependencies = (
+        "embodichain.lab.sim.skills",
+        "from ..skills",
+        "from .skills",
+        "RobotSkillProfile",
+    )
+    offenders = [
+        str(path.relative_to(REPOSITORY_ROOT))
+        for path in sorted(ATOMIC_ACTIONS_DIRECTORY.rglob("*.py"))
+        if any(value in path.read_text() for value in forbidden_dependencies)
+    ]
+
+    assert offenders == []

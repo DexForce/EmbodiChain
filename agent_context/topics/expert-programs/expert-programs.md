@@ -69,9 +69,9 @@ required `robot_profile`, and optional `runtime_services`. There is no
 task-level `kind` dispatcher. The scene and profile decode typed simulation
 bindings, resources, action options, policies, and monitor selections;
 allowlisted service leaves create antipodal grasp generators, configured
-hand-over poses, articulation-link Slide lowerers, or joint-position constraint
-evidence. Dotted imports, arbitrary callable names, and task module lookup are
-not accepted.
+hand-over poses, articulation-link `Slide`, held-object transport, `Pour`, or
+planar `PushObject` lowerers, or joint-position constraint evidence. Dotted
+imports, arbitrary callable names, and task module lookup are not accepted.
 
 Configured antipodal generators accept either a built-in parallel-jaw model ID
 or an inline geometry mapping. The immutable model catalog is owned by
@@ -95,7 +95,10 @@ combine target-motion monitoring with a replan policy.
 references, expands bounded repeats and cyclic targets, assigns stable segment
 and call indices, preserves parallel branches, and returns one already
 materialized `CompiledProgram`. Consecutive sequential segments share static
-downstream-goal look-ahead; a parallel barrier splits that analysis.
+downstream-goal look-ahead; a parallel barrier splits that analysis. Registered
+calls remain look-ahead barriers unless their installed
+`RegisteredSemanticLowerer.pick_lookahead_targets()` explicitly certifies
+same-resource attachment retention and exposes typed object targets.
 
 ## Simulation registration contract
 
@@ -126,6 +129,9 @@ Every registered call descriptor requires exact one-to-one coverage by a
 the call ID and factory revision; the call catalog fixes the payload schema and
 target descriptor. Each runtime assembly must receive a fresh lowerer whose
 live declaration matches the call ID and target descriptor.
+The lowerer's optional `pick_lookahead_targets()` hook may expose a retained
+object-target chain to an earlier Pick; its default `None` keeps the extension
+opaque and stops propagation.
 Stateful factories must expose recursively immutable configuration; do not put
 live simulator objects or mutable task state in their declaration.
 
@@ -228,14 +234,23 @@ evidence fails closed. Resource disjointness alone is never sufficient.
 - `HandOver-v1` exercises the coordinated built-in call over disjoint source
   and destination resources with configured hand-over poses, measured gripper
   evidence, settling, and final-target validation.
+- `PourWater-v3` uses registered `simulation.move_held_object` and
+  `simulation.pour` calls after built-in Pick. The configured lowerers preserve
+  verified held-object state and keep task motion values in the selected robot
+  policy preset.
+- `Rearrangement-v3` uses registered `simulation.push_object` calls over
+  predeclared utensil-to-slot routes. Each utensil is pushed, settled, and
+  corrected from the latest measured pose; the action short-circuits inside its
+  configured completion tolerance, while segment validators remain the final
+  physical acceptance boundary.
 
 Do not infer physical qualification from the two trajectory-only examples or
 from unit/fake-port tests. Physical acceptance belongs in dedicated validation
 integrations with measured evidence, controlled multi-seed/randomization runs,
 and task validators. `EmbodiedEnv` is the common execution environment for all
-three references. Their Gym configs own the complete supported composition
-roots, including the allowlisted services needed by Open Drawer and Hand Over;
-none has a task environment module or subclass.
+five references. Their Gym configs own the complete supported composition
+roots, including the allowlisted services needed by Open Drawer, Hand Over,
+Pour Water, and Rearrangement; none has a task environment module or subclass.
 
 ## Recommended change sites
 
@@ -250,7 +265,7 @@ none has a task environment module or subclass.
 | Lazy Gym action/segment lifecycle | `bridge.py` and `embodichain/lab/gym/envs/demo.py` |
 | Environment adapter binding, episode program selection, success/reset | `embodichain/lab/gym/envs/embodied_env.py` and `embodichain/lab/gym/utils/registration.py` |
 | Config-created simple runtime and dynamic ID binding | `embodichain/lab/gym/envs/expert_program/configured_runtime.py` and `embodichain/lab/gym/utils/gym_utils.py` |
-| Reference scene/profile/runtime values | `embodichain_tasks/configs/tasks/manipulation/{repeated_pick_place,open_drawer,hand_over}/env.json` |
+| Reference scene/profile/runtime values | `embodichain_tasks/configs/tasks/manipulation/{repeated_pick_place,open_drawer,hand_over}/env.json` and `embodichain_tasks/configs/tasks/manipulation/tableware/{pour_water,rearrangement}/env.json` |
 | Configured live-service implementations | `embodichain/lab/gym/envs/expert_program/_configured_runtime_services.py` |
 
 Prefer changing the narrow owner. Do not add task-local motion generators,
