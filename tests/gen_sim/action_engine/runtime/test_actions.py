@@ -52,6 +52,7 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionGoal,
     ObjectSemantics,
     PlannerDiagnostics,
+    PlanningFailure,
     RecoveryPolicy,
     RuntimeCommandFrame,
     SceneSnapshot,
@@ -175,6 +176,11 @@ def _commands_for(trajectory: TimedTrajectory) -> TimedCommandSequence:
     return TimedCommandSequence(frames=frames, env_ids=trajectory.env_ids)
 
 
+def _planner_diagnostics(success: torch.Tensor) -> PlannerDiagnostics:
+    failure = None if bool(success.all()) else PlanningFailure("planning_failed")
+    return PlannerDiagnostics(backend="fake", failure=failure)
+
+
 class _FakeEngine:
     """Minimal endpoint-binding and planning surface for adapter unit tests."""
 
@@ -226,7 +232,12 @@ def test_free_yaw_search_uses_an_internal_reachability_sample_set(
     adapter = AtomicActionAdapter(env)
     target = torch.eye(4).repeat(2, 1, 1)
     target[:, :3, 3] = torch.tensor([0.1, -0.2, 0.9])
-    semantics = ObjectSemantics(label="can", geometry={}, affordance=Affordance())
+    semantics = ObjectSemantics(
+        label="can",
+        entity_id="can",
+        geometry={},
+        affordance=Affordance(),
+    )
     held = HeldObjectState(
         semantics=semantics,
         object_to_eef=torch.eye(4).repeat(2, 1, 1),
@@ -361,7 +372,7 @@ def test_adapter_lowers_axis_align_from_live_pose_with_a_stable_seed() -> None:
 
     assert len(adapted_items) == 1
     assert isinstance(adapted.target, AxisAlignGoal)
-    assert adapted.target.semantics.entity_id is None
+    assert adapted.target.semantics.entity_id == "can"
     assert adapted.target.grasp_xpos is not None
     assert adapted.motion_policy["body_grasp"]["long_axis_index"] == 1
     assert adapted.motion_policy["body_grasp"]["candidate_counts"] == [1, 1]
@@ -387,6 +398,7 @@ def test_axis_align_body_grasp_does_not_fall_back_to_scene_snapshot_pose() -> No
         AxisAlignGoal(
             semantics=ObjectSemantics(
                 label="can",
+                entity_id="can",
                 geometry={},
                 affordance=AxisAlignAffordance(
                     mesh_vertices=vertices,
@@ -485,7 +497,7 @@ def test_semantics_prewarms_vhacd_cache_before_affordance(
     second = adapter.semantics("cube")
 
     assert first is second
-    assert first.entity_id is None
+    assert first.entity_id == "cube"
     assert events == ["cache", "affordance"]
     assert observed["max_decomposition_hulls"] == 8
     assert observed["mesh_vertices"].dtype == torch.float32
@@ -509,6 +521,7 @@ def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None
     coordinated_goal = CoordinatedPickGoal(
         semantics=ObjectSemantics(
             label="tray",
+            entity_id="tray",
             geometry={},
             affordance=AntipodalAffordance(),
         ),
@@ -637,6 +650,7 @@ def test_coordinated_pickment_uses_engine_scoped_grasp_generator() -> None:
     goal = CoordinatedPickGoal(
         semantics=ObjectSemantics(
             label="tray",
+            entity_id="tray",
             geometry={},
             affordance=affordance,
         ),
@@ -677,6 +691,7 @@ def _coordinated_grounded(
     goal = CoordinatedPickGoal(
         semantics=ObjectSemantics(
             label="test_object",
+            entity_id="test_object",
             geometry={},
             affordance=AntipodalAffordance(
                 object_label="test_object",
@@ -886,7 +901,7 @@ def test_retreat_uses_row_local_motion_planner_reachability_search(
             tracking_policy=TrackingPolicy.timed(),
             planned_scene_version=0,
             planned_collision_world_revision=(0, 0),
-            diagnostics=PlannerDiagnostics(backend="fake"),
+            diagnostics=_planner_diagnostics(success),
             expected_effects=StateDelta(),
         )
 
@@ -961,7 +976,7 @@ def test_lift_clear_reachability_search_uses_only_vertical_candidates(
             tracking_policy=TrackingPolicy.timed(),
             planned_scene_version=0,
             planned_collision_world_revision=(0, 0),
-            diagnostics=PlannerDiagnostics(backend="fake"),
+            diagnostics=_planner_diagnostics(success),
             expected_effects=StateDelta(),
         )
 
@@ -1032,7 +1047,7 @@ def test_retreat_after_lift_search_reduces_only_horizontal_distance(
             tracking_policy=TrackingPolicy.timed(),
             planned_scene_version=0,
             planned_collision_world_revision=(0, 0),
-            diagnostics=PlannerDiagnostics(backend="fake"),
+            diagnostics=_planner_diagnostics(success),
             expected_effects=StateDelta(),
         )
 
@@ -1111,7 +1126,7 @@ def test_tool_down_reorientation_uses_waypoints_and_yaw_candidates(
             tracking_policy=TrackingPolicy.timed(),
             planned_scene_version=0,
             planned_collision_world_revision=(0, 0),
-            diagnostics=PlannerDiagnostics(backend="fake"),
+            diagnostics=_planner_diagnostics(success),
             expected_effects=StateDelta(),
         )
 
@@ -1225,7 +1240,7 @@ def test_dynamic_scene_parks_contact_target_and_held_rows() -> None:
     )
     held_semantics = ObjectSemantics(
         label="held",
-        entity=entities["held"],
+        entity_id="held",
         geometry={},
         affordance=Affordance(),
     )
@@ -1426,7 +1441,7 @@ def test_retreat_parks_intentional_contact_objects() -> None:
 def test_action_outcome_commits_state_delta_only_for_verified_rows() -> None:
     semantics = ObjectSemantics(
         label="cube",
-        entity=object(),
+        entity_id="cube",
         geometry={},
         affordance=Affordance(),
     )
@@ -1475,7 +1490,7 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
     adapter = AtomicActionAdapter(env)
     semantics = ObjectSemantics(
         label="cube",
-        entity=object(),
+        entity_id="cube",
         geometry={},
         affordance=Affordance(),
     )
@@ -1515,6 +1530,9 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
                 backend="curobo",
                 messages=messages,
                 metadata={"marker": terminal},
+                failure=(
+                    None if bool(success.all()) else PlanningFailure("planning_failed")
+                ),
             ),
             expected_effects=StateDelta(
                 held_object_updates={"physical_left_arm": held}
@@ -1610,7 +1628,10 @@ def test_collision_required_cleanup_does_not_use_unsafe_fallback(
         tracking_policy=TrackingPolicy.timed(),
         planned_scene_version=1,
         planned_collision_world_revision=(1, 1),
-        diagnostics=PlannerDiagnostics(backend="fake"),
+        diagnostics=PlannerDiagnostics(
+            backend="fake",
+            failure=PlanningFailure("planning_failed"),
+        ),
         expected_effects=StateDelta(),
     )
     strategies: list[str] = []
