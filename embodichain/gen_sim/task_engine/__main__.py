@@ -14,8 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Command-line entry points for Action Engine generation and execution."""
+"""Module entry point for Task Engine workflows."""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .cli import main
+
+__all__ = ["main"]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

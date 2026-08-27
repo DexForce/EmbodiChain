@@ -38,6 +38,7 @@ EXPECTED_COMMANDS = {
     "run-env",
     "scene-engine",
     "simready",
+    "task-engine",
     "train-rl",
     "preview-scene",
     "workspace-cache",
@@ -67,6 +68,13 @@ def test_list_task_command_uses_dedicated_cli_adapter() -> None:
     command = next(command for command in cli.COMMANDS if command.name == "list-task")
 
     assert command.target == "embodichain.cli.list_task:main"
+
+
+def test_task_engine_command_uses_gen_sim_cli() -> None:
+    """The generated-task workflow remains separate from Task Program run-env."""
+    command = next(command for command in cli.COMMANDS if command.name == "task-engine")
+
+    assert command.target == "embodichain.gen_sim.task_engine.cli:main"
 
 
 def test_root_help_does_not_import_command_modules(

@@ -14,8 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Command-line entry points for Action Engine generation and execution."""
+"""Tests for Task Engine scene adaptation boundaries."""
 
 from __future__ import annotations
-
-__all__: list[str] = []
