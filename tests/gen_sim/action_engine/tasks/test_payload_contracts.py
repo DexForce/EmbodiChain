@@ -201,8 +201,13 @@ def test_loaded_e5_place_keeps_payload_contract_through_synchronized_release() -
         "CoordinatedPickment",
         "MoveJoints",
         "MoveJoints",
+        "MoveEndEffector",
+        "MoveEndEffector",
+        "MoveJoints",
+        "MoveJoints",
     ]
-    assert len({node.get("sync_group") for node in nodes[1:]}) == 1
+    assert len({node.get("sync_group") for node in nodes[1:3]}) == 1
+    assert all(node.get("sync_group") is None for node in nodes[3:])
 
 
 def test_consumer_without_direct_payload_capability_is_rejected() -> None:

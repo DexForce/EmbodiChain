@@ -435,6 +435,7 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
             "control_part",
             "preserve",
             "joint_state",
+            verifier_hook=_verify_required_home,
             contract_resolver_hook=_resolve_joints_contract,
         ),
         AtomicCapability(
@@ -795,7 +796,9 @@ def _resolve_end_effector_contract(
             StateAtom(
                 (
                     "arm_clear"
-                    if binding.get("operation") == "retreat_after_lift"
+                    if binding.get("requires_arm_clear", False)
+                    or binding.get("operation")
+                    in {"reorient_tool_down", "retreat_after_lift"}
                     else "arm_free"
                 ),
                 arm=arm,
@@ -1012,18 +1015,81 @@ def _verify_arm_clearance(
     )
     clear = distance >= float(minimum_clearance)
     role_axis = policy.get("transfer_role_axis")
-    if role_axis is None:
-        return attempted & clear
-    role_axis = torch.as_tensor(
-        role_axis,
-        dtype=offset.dtype,
-        device=offset.device,
-    )
-    if role_axis.ndim == 1:
-        role_axis = role_axis.unsqueeze(0).repeat(int(executor.env.num_envs), 1)
-    lateral = torch.sum(offset * role_axis, dim=1)
-    clear &= lateral >= float(policy.get("minimum_transfer_lateral_clearance", 0.06))
+    if role_axis is not None:
+        role_axis = torch.as_tensor(
+            role_axis,
+            dtype=offset.dtype,
+            device=offset.device,
+        )
+        if role_axis.ndim == 1:
+            role_axis = role_axis.unsqueeze(0).repeat(int(executor.env.num_envs), 1)
+        lateral = torch.sum(offset * role_axis, dim=1)
+        clear &= lateral >= float(
+            policy.get("minimum_transfer_lateral_clearance", 0.06)
+        )
+    if bool(policy.get("verify_lift_clear", False)):
+        target = getattr(outcome.grounded.target, "xpos", None)
+        if not isinstance(target, torch.Tensor):
+            return torch.zeros_like(attempted)
+        if target.ndim == 4:
+            target = target[:, -1]
+        if target.shape != eef.shape:
+            return torch.zeros_like(attempted)
+        target = target.to(dtype=eef.dtype, device=eef.device)
+        tolerance = float(
+            policy.get(
+                "postcondition_tolerance",
+                executor.runtime_policy.predicate_fallbacks["position_tolerance"],
+            )
+        )
+        clear &= (
+            torch.linalg.vector_norm(
+                eef[:, :3, 3] - target[:, :3, 3],
+                dim=1,
+            )
+            <= tolerance
+        )
     return attempted & clear
+
+
+def _verify_required_home(
+    *,
+    executor: Any,
+    step: Any,
+    arm: str,
+    outcome: Any,
+    attempted: torch.Tensor,
+) -> torch.Tensor:
+    """Verify required cleanup against the live arm joint state."""
+    del step
+    policy = outcome.grounded.motion_policy
+    if not bool(policy.get("verify_required_home", False)):
+        return attempted
+    env = executor.env
+    get_part = getattr(env, "get_agent_arm_control_part", None)
+    if not callable(get_part):
+        return torch.zeros_like(attempted)
+    control_part = get_part(arm == "left_arm")
+    if not isinstance(control_part, str) or not control_part:
+        return torch.zeros_like(attempted)
+    target = getattr(outcome.grounded.target, "target", None)
+    if not isinstance(target, torch.Tensor):
+        return torch.zeros_like(attempted)
+    joint_ids = env.robot.get_joint_ids(name=control_part)
+    current = env.robot.get_qpos()[:, joint_ids]
+    target = target.to(dtype=current.dtype, device=current.device)
+    if target.ndim == 1:
+        target = target.unsqueeze(0).repeat(int(env.num_envs), 1)
+    if target.shape != current.shape:
+        return torch.zeros_like(attempted)
+    tolerance = float(
+        policy.get(
+            "postcondition_tolerance",
+            executor.runtime_policy.predicate_fallbacks["arm_initial_qpos_tolerance"],
+        )
+    )
+    reached = torch.all(torch.abs(current - target) <= tolerance, dim=1)
+    return attempted & reached
 
 
 def _actor_arms(actor: Mapping[str, Any]) -> tuple[str, ...]:

@@ -18,10 +18,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
+import logging
 import math
+from threading import RLock
 from typing import Any
 
 import torch
@@ -69,7 +72,9 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     GraspAnnotationCfg,
     ParallelJawGraspCollisionCfg,
 )
-from embodichain.utils.logger import log_info
+from embodichain.utils import logger as project_logger
+from embodichain.utils.logger import log_info, log_warning
+from embodichain.utils.math import matrix_from_quat, quat_from_matrix, quat_slerp
 
 from .body_grasp import AxisAlignBodyGraspAdapter
 from .grasp_collision_cache import ensure_vhacd_grasp_collision_cache
@@ -104,6 +109,29 @@ _COLLISION_PARKING_Z_OFFSET = -100.0
 _BODY_GRASP_CANDIDATE_LIMIT = 500
 _BODY_GRASP_SEED = 17_392
 _FREE_YAW_SAMPLE_COUNT = 8
+_RETREAT_LOG_LOCK = RLock()
+
+
+@contextmanager
+def _capture_retreat_warnings(enabled: bool) -> Iterator[list[str]]:
+    """Capture candidate-level planner warnings during bounded retreat search."""
+    messages: list[str] = []
+    if not enabled:
+        yield messages
+        return
+    collector = logging.Handler(level=logging.WARNING)
+    collector.emit = lambda record: messages.append(record.getMessage())
+    logger = project_logger.logger
+    with _RETREAT_LOG_LOCK:
+        handlers = list(logger.handlers)
+        propagate = logger.propagate
+        try:
+            logger.handlers[:] = [collector]
+            logger.propagate = False
+            yield messages
+        finally:
+            logger.handlers[:] = handlers
+            logger.propagate = propagate
 
 
 def _collision_cache_for_world(
@@ -358,13 +386,14 @@ class AtomicActionAdapter:
             capability,
         )
         grounded_candidates = tuple(
-            candidate
+            reorientation
             for coordinated in coordinated_candidates
             for candidate in self._adapt_axis_align_body_grasps(
                 coordinated,
                 context,
                 capability,
             )
+            for reorientation in self._adapt_tool_down_candidates(candidate)
         )
         selected: (
             tuple[
@@ -375,6 +404,9 @@ class AtomicActionAdapter:
             ]
             | None
         ) = None
+        selected_warnings: tuple[str, ...] = ()
+        candidate_search_warnings: list[str] = []
+        candidate_search_attempts = 0
         best_failure_count = self.num_envs + 1
         for candidate in grounded_candidates:
             candidate_engine = self._engine_for(candidate, capability)
@@ -383,7 +415,15 @@ class AtomicActionAdapter:
                 capability,
                 engine=candidate_engine,
             )
-            candidate_plan = candidate_engine.plan(candidate_invocation, context)
+            capture_warnings = bool(
+                candidate.motion_policy.get("retreat_reachability_search", False)
+                or candidate.motion_policy.get("reorient_tool_down", False)
+            )
+            with _capture_retreat_warnings(capture_warnings) as warnings:
+                candidate_plan = candidate_engine.plan(candidate_invocation, context)
+            if capture_warnings:
+                candidate_search_warnings.extend(warnings)
+                candidate_search_attempts += 1
             failure_count = int((~candidate_plan.plan_success).sum().item())
             if selected is None or failure_count < best_failure_count:
                 selected = (
@@ -392,12 +432,26 @@ class AtomicActionAdapter:
                     candidate_plan,
                     candidate_engine,
                 )
+                selected_warnings = tuple(warnings)
                 best_failure_count = failure_count
             if failure_count == 0:
                 break
         if selected is None:
             raise RuntimeError("Atomic action adaptation produced no plan candidate.")
         grounded, invocation, plan, selected_engine = selected
+        if bool(grounded.motion_policy.get("reorient_tool_down", False)):
+            summary = (
+                "Tool-down reorientation search: "
+                f"resolved={int(plan.plan_success.sum())}/{plan.plan_success.numel()}, "
+                f"attempts={candidate_search_attempts}, "
+                f"selected_yaw_degrees="
+                f"{grounded.motion_policy.get('reorient_selected_yaw_degrees')}, "
+                f"suppressed_warnings={len(candidate_search_warnings)}."
+            )
+            if bool(plan.plan_success.all()):
+                log_info(summary)
+            else:
+                log_warning(summary)
         selected_positions = self._positions_with_agent_holds(
             plan,
             grounded,
@@ -419,6 +473,7 @@ class AtomicActionAdapter:
                 invocation=invocation,
                 initial_positions=selected_positions,
                 initial_success=primary_success,
+                initial_warnings=selected_warnings,
             )
             invocation = replace(invocation, goal=grounded.target)
         combined_success = primary_success.clone()
@@ -621,6 +676,117 @@ class AtomicActionAdapter:
             )
         return tuple(candidates)
 
+    def _adapt_tool_down_candidates(
+        self,
+        grounded: GroundedAction,
+    ) -> tuple[GroundedAction, ...]:
+        """Build fixed-position, downward-TCP yaw candidates after E2 lift-clear."""
+        if not bool(grounded.motion_policy.get("reorient_tool_down", False)):
+            return (grounded,)
+        reference = grounded.motion_policy.get("reorient_reference_pose")
+        if not isinstance(reference, torch.Tensor):
+            raise ValueError("Tool-down reorientation requires a reference TCP pose.")
+        reference = reference.to(device=self.device, dtype=torch.float32)
+        if reference.shape == (4, 4):
+            reference = reference.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        if reference.shape != (self.num_envs, 4, 4):
+            raise ValueError(
+                "Tool-down reorientation reference must have shape "
+                f"({self.num_envs}, 4, 4)."
+            )
+        waypoint_count = int(grounded.cfg.get("reorient_waypoint_count", 5))
+        if not 2 <= waypoint_count <= 16:
+            raise ValueError("reorient_waypoint_count must be in [2, 16].")
+        raw_yaws = grounded.cfg.get(
+            "reorient_yaw_degrees", (0.0, 45.0, -45.0, 90.0, -90.0, 180.0)
+        )
+        if not isinstance(raw_yaws, Sequence) or isinstance(raw_yaws, (str, bytes)):
+            raise TypeError("reorient_yaw_degrees must be a sequence.")
+        yaw_degrees = [float(value) for value in raw_yaws]
+        if not yaw_degrees or any(not math.isfinite(value) for value in yaw_degrees):
+            raise ValueError("reorient_yaw_degrees must contain finite values.")
+
+        base_rotation = self._downward_tcp_rotation(reference[:, :3, :3])
+        candidates = []
+        for yaw_degrees_value in yaw_degrees:
+            yaw = math.radians(yaw_degrees_value)
+            yaw_rotation = reference.new_tensor(
+                [
+                    [math.cos(yaw), -math.sin(yaw), 0.0],
+                    [math.sin(yaw), math.cos(yaw), 0.0],
+                    [0.0, 0.0, 1.0],
+                ]
+            )
+            target_rotation = torch.matmul(yaw_rotation, base_rotation)
+            waypoints = self._rotation_waypoints(
+                reference,
+                target_rotation,
+                waypoint_count=waypoint_count,
+            )
+            policy = {
+                **grounded.motion_policy,
+                "reorient_selected_yaw_degrees": yaw_degrees_value,
+            }
+            candidates.append(
+                replace(
+                    grounded,
+                    target=EndEffectorPoseGoal(xpos=waypoints),
+                    cfg={**grounded.cfg, **policy},
+                    motion_policy=policy,
+                )
+            )
+        return tuple(candidates)
+
+    def _downward_tcp_rotation(self, rotation: torch.Tensor) -> torch.Tensor:
+        """Project the current TCP heading while aligning local +Z with world -Z."""
+        x_axis = rotation[:, :3, 0].clone()
+        x_axis[:, 2] = 0.0
+        norm = torch.linalg.vector_norm(x_axis, dim=1, keepdim=True)
+        fallback = rotation[:, :3, 1].clone()
+        fallback[:, 2] = 0.0
+        fallback_norm = torch.linalg.vector_norm(fallback, dim=1, keepdim=True)
+        world_x = rotation.new_tensor([1.0, 0.0, 0.0]).expand_as(x_axis)
+        fallback = torch.where(
+            fallback_norm > 1.0e-6,
+            fallback / fallback_norm.clamp_min(1.0e-6),
+            world_x,
+        )
+        x_axis = torch.where(
+            norm > 1.0e-6,
+            x_axis / norm.clamp_min(1.0e-6),
+            fallback,
+        )
+        z_axis = rotation.new_tensor([0.0, 0.0, -1.0]).expand_as(x_axis)
+        y_axis = torch.linalg.cross(z_axis, x_axis, dim=1)
+        return torch.stack((x_axis, y_axis, z_axis), dim=2)
+
+    def _rotation_waypoints(
+        self,
+        reference: torch.Tensor,
+        target_rotation: torch.Tensor,
+        *,
+        waypoint_count: int,
+    ) -> torch.Tensor:
+        """Interpolate fixed-position TCP rotations, excluding the observed start."""
+        start_quat = quat_from_matrix(reference[:, :3, :3])
+        end_quat = quat_from_matrix(target_rotation)
+        end_quat = torch.where(
+            torch.sum(start_quat * end_quat, dim=1, keepdim=True) < 0.0,
+            -end_quat,
+            end_quat,
+        )
+        poses = reference[:, None].repeat(1, waypoint_count, 1, 1)
+        for index in range(waypoint_count):
+            fraction = float(index + 1) / float(waypoint_count)
+            interpolated = torch.stack(
+                [
+                    quat_slerp(start_quat[env_id], end_quat[env_id], tau=fraction)
+                    for env_id in range(self.num_envs)
+                ]
+            )
+            poses[:, index, :3, :3] = matrix_from_quat(interpolated)
+        return poses
+
     def _adapt_coordinated_pickment_grasps(
         self,
         grounded: GroundedAction,
@@ -788,8 +954,9 @@ class AtomicActionAdapter:
         invocation: ActionInvocation,
         initial_positions: torch.Tensor,
         initial_success: torch.Tensor,
+        initial_warnings: Sequence[str] = (),
     ) -> tuple[GroundedAction, torch.Tensor, torch.Tensor, dict[str, Any]]:
-        """Select the highest row-local retreat accepted by the live planner."""
+        """Select a row-local retreat candidate accepted by the live planner."""
         candidates = self._retreat_search_targets(grounded)
         target = getattr(grounded.target, "xpos", None)
         if not isinstance(target, torch.Tensor) or len(candidates) <= 1:
@@ -811,10 +978,27 @@ class AtomicActionAdapter:
         selected_target = candidates[0][1].clone()
         selected_positions = initial_positions
         success = initial_success.clone()
+        suppressed_warnings = list(initial_warnings)
+        reference = grounded.motion_policy["retreat_reference_pose"].to(
+            device=selected_target.device,
+            dtype=selected_target.dtype,
+        )
+        if reference.shape == (4, 4):
+            reference = reference.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        selected_candidates = [
+            candidates[0][0] if bool(success[env_id]) else "unresolved"
+            for env_id in range(self.num_envs)
+        ]
         attempts: list[dict[str, Any]] = [
             {
                 "candidate": candidates[0][0],
                 "target_z": candidates[0][1][:, 2, 3].detach().clone(),
+                "target_distance": torch.linalg.vector_norm(
+                    candidates[0][1][:, :2, 3] - reference[:, :2, 3],
+                    dim=1,
+                )
+                .detach()
+                .clone(),
                 "success": initial_success.detach().clone(),
             }
         ]
@@ -835,7 +1019,9 @@ class AtomicActionAdapter:
                 invocation,
                 goal=candidate_grounded.target,
             )
-            candidate_plan = self._engine().plan(candidate_invocation, context)
+            with _capture_retreat_warnings(True) as warnings:
+                candidate_plan = self._engine().plan(candidate_invocation, context)
+            suppressed_warnings.extend(warnings)
             candidate_positions = self._positions_with_agent_holds(
                 candidate_plan,
                 candidate_grounded,
@@ -854,19 +1040,45 @@ class AtomicActionAdapter:
                 candidate_target,
                 selected_target,
             )
+            for env_id in (
+                torch.nonzero(selected_rows, as_tuple=False).flatten().tolist()
+            ):
+                selected_candidates[env_id] = label
             success |= candidate_success
             attempts.append(
                 {
                     "candidate": label,
                     "target_z": candidate_target[:, 2, 3].detach().clone(),
+                    "target_distance": torch.linalg.vector_norm(
+                        candidate_target[:, :2, 3] - reference[:, :2, 3],
+                        dim=1,
+                    )
+                    .detach()
+                    .clone(),
                     "success": candidate_success.detach().clone(),
                 }
             )
 
+        selected_distance = torch.linalg.vector_norm(
+            selected_target[:, :2, 3] - reference[:, :2, 3], dim=1
+        )
         metadata = {
             "retreat_selected_target_z": selected_target[:, 2, 3].detach().clone(),
+            "retreat_selected_target_distance": selected_distance.detach().clone(),
             "retreat_reachability_found": success.detach().clone(),
         }
+        summary = (
+            "Retreat reachability search: "
+            f"mode={grounded.motion_policy.get('retreat_search_mode', 'vertical_then_baseward')}, "
+            f"resolved={int(success.sum())}/{success.numel()}, "
+            f"attempts={len(attempts)}, "
+            f"selected={selected_candidates}, "
+            f"suppressed_warnings={len(suppressed_warnings)}."
+        )
+        if bool(success.all()):
+            log_info(summary)
+        else:
+            log_warning(summary)
         selected_grounded = replace(
             grounded,
             target=EndEffectorPoseGoal(xpos=selected_target),
@@ -881,6 +1093,9 @@ class AtomicActionAdapter:
                 "strategy": "bounded_motion_planner",
                 "attempts": attempts,
                 "selected_target_z": selected_target[:, 2, 3].detach().clone(),
+                "selected_target_distance": selected_distance.detach().clone(),
+                "selected_candidates": selected_candidates,
+                "suppressed_warnings": len(suppressed_warnings),
             },
         )
 
@@ -908,6 +1123,52 @@ class AtomicActionAdapter:
         sample_count = int(grounded.cfg.get("retreat_search_samples", 6))
         if not 2 <= sample_count <= 16:
             raise ValueError("retreat_search_samples must be in [2, 16].")
+        search_mode = str(
+            grounded.motion_policy.get("retreat_search_mode", "vertical_then_baseward")
+        )
+        allowed_modes = {"horizontal_only", "vertical_only", "vertical_then_baseward"}
+        if search_mode not in allowed_modes:
+            raise ValueError(
+                "retreat_search_mode must be 'horizontal_only', 'vertical_only', "
+                "or 'vertical_then_baseward'."
+            )
+        if search_mode == "horizontal_only":
+            direction = target[:, :2, 3] - reference[:, :2, 3]
+            requested_distance = torch.linalg.vector_norm(
+                direction, dim=1, keepdim=True
+            )
+            if bool((requested_distance <= 1.0e-6).any()):
+                return [("requested", target.clone())]
+            direction = direction / requested_distance
+            minimum_distance = float(grounded.cfg.get("minimum_retreat_distance", 0.05))
+            if not math.isfinite(minimum_distance) or minimum_distance < 0.0:
+                raise ValueError(
+                    "minimum_retreat_distance must be finite and non-negative."
+                )
+            minimum = torch.minimum(
+                requested_distance[:, 0],
+                torch.full_like(requested_distance[:, 0], minimum_distance),
+            )
+            fractions = torch.linspace(
+                1.0,
+                0.0,
+                sample_count,
+                dtype=target.dtype,
+                device=target.device,
+            )
+            distances = (
+                minimum[:, None]
+                + (requested_distance[:, 0] - minimum)[:, None] * fractions[None]
+            )
+            candidates = [("requested", target.clone())]
+            for index in range(1, sample_count):
+                candidate = target.clone()
+                candidate[:, :2, 3] = (
+                    reference[:, :2, 3] + direction * distances[:, index, None]
+                )
+                candidates.append((f"distance_{index}", candidate))
+            return candidates
+
         minimum_height = float(grounded.cfg.get("minimum_retreat_height", 0.05))
         if not math.isfinite(minimum_height) or minimum_height < 0.0:
             raise ValueError("minimum_retreat_height must be finite and non-negative.")
@@ -934,6 +1195,9 @@ class AtomicActionAdapter:
             candidate = target.clone()
             candidate[:, 2, 3] = reference[:, 2, 3] + heights[:, index]
             candidates.append((f"height_{index}", candidate))
+
+        if search_mode == "vertical_only":
+            return candidates
 
         from .frames import arm_base_poses
 

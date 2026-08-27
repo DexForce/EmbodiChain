@@ -101,6 +101,7 @@ from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
     HeldObjectPoseGoal,
     HeldObjectState,
+    JointPositionGoal,
     ObjectSemantics,
     PickUpOptions,
     PourGoal,
@@ -634,6 +635,20 @@ def test_e5_synchronized_release_uses_physics_verified_opening_time() -> None:
         if action.get("target_binding", {}).get("coordinated_release_role")
         == "participant"
     )
+    left_lift = next(
+        action
+        for edge in program.edges
+        for action in edge.actions
+        if action.get("actor", {}).get("arm") == "left_arm"
+        and action.get("target_binding", {}).get("operation") == "lift_clear"
+    )
+    left_home = next(
+        action
+        for edge in program.edges
+        for action in edge.actions
+        if action.get("actor", {}).get("arm") == "left_arm"
+        and action.get("target_binding", {}).get("operation") == "e5_home"
+    )
     grounder = ActionGrounder(program, env, lambda _uid: None)
 
     grounded = grounder.ground(
@@ -642,8 +657,121 @@ def test_e5_synchronized_release_uses_physics_verified_opening_time() -> None:
         arm="left_arm",
         state=_coordinated_held_state(env, entity),
     )
+    lift_grounded = grounder.ground(
+        left_lift,
+        step,
+        arm="left_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+    )
+    home_grounded = grounder.ground(
+        left_home,
+        step,
+        arm="left_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+    )
 
     assert grounded.cfg["sample_interval"] == 60
+    assert lift_grounded.motion_policy["retreat_search_mode"] == "vertical_only"
+    assert lift_grounded.motion_policy["verify_lift_clear"] is True
+    assert home_grounded.motion_policy["verify_required_home"] is True
+
+
+def test_e5_lift_clear_verifier_requires_the_live_tcp_to_reach_its_target() -> None:
+    entity = _FakeEntity("tray", _pose(0.0, 0.0, 0.75), _box_vertices(0.20))
+    env = _FakeEnv({"tray": entity})
+    target_pose = _pose(0.0, -0.20, 1.05)
+    live_pose = target_pose.clone()
+    env.get_current_xpos_agent = lambda: (live_pose, _pose(0.0, 0.20, 1.05))
+    grounded = GroundedAction(
+        action_class="MoveEndEffector",
+        arm="left_arm",
+        control="arm",
+        target=EndEffectorPoseGoal(xpos=target_pose),
+        cfg={},
+        motion_policy={
+            "clearance_object_uid": "tray",
+            "minimum_clearance": 0.15,
+            "postcondition_tolerance": 0.05,
+            "verify_lift_clear": True,
+        },
+        object_uid="tray",
+    )
+    outcome = ActionOutcome(
+        trajectory=torch.zeros(1, 1, env.robot.dof),
+        success=torch.ones(1, dtype=torch.bool),
+        next_state=ExecutionState(last_qpos=env.robot.get_qpos()),
+        grounded=grounded,
+    )
+    verifier = build_atomic_capability_registry().get("MoveEndEffector").verifier_hook
+    assert verifier is not None
+    executor = SimpleNamespace(
+        env=env,
+        runtime_policy=default_runtime_policy("dual_ur10"),
+    )
+
+    reached = verifier(
+        executor=executor,
+        step=SimpleNamespace(object_uid="tray"),
+        arm="left_arm",
+        outcome=outcome,
+        attempted=torch.ones(1, dtype=torch.bool),
+    )
+    live_pose[:, 2, 3] -= 0.10
+    missed = verifier(
+        executor=executor,
+        step=SimpleNamespace(object_uid="tray"),
+        arm="left_arm",
+        outcome=outcome,
+        attempted=torch.ones(1, dtype=torch.bool),
+    )
+
+    assert reached.tolist() == [True]
+    assert missed.tolist() == [False]
+
+
+def test_required_home_verifier_checks_live_arm_qpos() -> None:
+    env = _FakeEnv()
+    target = torch.tensor([[0.20, -0.20]])
+    grounded = GroundedAction(
+        action_class="MoveJoints",
+        arm="left_arm",
+        control="arm",
+        target=JointPositionGoal(target=target),
+        cfg={},
+        motion_policy={"verify_required_home": True},
+    )
+    outcome = ActionOutcome(
+        trajectory=torch.zeros(1, 1, env.robot.dof),
+        success=torch.ones(1, dtype=torch.bool),
+        next_state=ExecutionState(last_qpos=env.robot.get_qpos()),
+        grounded=grounded,
+    )
+    verifier = build_atomic_capability_registry().get("MoveJoints").verifier_hook
+    assert verifier is not None
+    executor = SimpleNamespace(
+        env=env,
+        runtime_policy=default_runtime_policy("dual_ur10"),
+    )
+    env.robot._qpos[:, env.left_arm_joints] = target
+
+    reached = verifier(
+        executor=executor,
+        step=SimpleNamespace(object_uid="tray"),
+        arm="left_arm",
+        outcome=outcome,
+        attempted=torch.ones(1, dtype=torch.bool),
+    )
+    env.robot._qpos[:, env.left_arm_joints] += 0.10
+    missed = verifier(
+        executor=executor,
+        step=SimpleNamespace(object_uid="tray"),
+        arm="left_arm",
+        outcome=outcome,
+        attempted=torch.ones(1, dtype=torch.bool),
+    )
+
+    assert reached.tolist() == [True]
+    assert missed.tolist() == [False]
 
 
 def test_runtime_policy_discards_legacy_support_z_fallbacks() -> None:
@@ -3715,18 +3843,27 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         if candidate.id in orient_step.edge_ids
         and candidate.actions[0]["atomic_action_class"] == "AxisAlign"
     )
-    orient_lift_edge = next(
+    orient_lift_edges = [
         candidate
         for candidate in program.edges
         if candidate.id in orient_step.edge_ids
         and candidate.actions[0]["target_binding"].get("operation") == "lift_clear"
-    )
+    ]
+    assert len(orient_lift_edges) == 2
+    orient_lift_edge, orient_post_reorient_lift_edge = orient_lift_edges
     orient_retreat_edge = next(
         candidate
         for candidate in program.edges
         if candidate.id in orient_step.edge_ids
         and candidate.actions[0]["target_binding"].get("operation")
         == "retreat_after_lift"
+    )
+    orient_reorient_edge = next(
+        candidate
+        for candidate in program.edges
+        if candidate.id in orient_step.edge_ids
+        and candidate.actions[0]["target_binding"].get("operation")
+        == "reorient_tool_down"
     )
     handover_edge = next(
         candidate
@@ -3760,12 +3897,26 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         state=ExecutionState(last_qpos=env.robot.get_qpos()),
         reference_eef_pose=release_pose,
     )
+    orient_reorient = grounder.ground(
+        orient_reorient_edge.actions[0],
+        orient_step,
+        arm="right_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+        reference_eef_pose=orient_lift.target.xpos,
+    )
+    orient_post_reorient_lift = grounder.ground(
+        orient_post_reorient_lift_edge.actions[0],
+        orient_step,
+        arm="right_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+        reference_eef_pose=orient_reorient.target.xpos,
+    )
     orient_retreat = grounder.ground(
         orient_retreat_edge.actions[0],
         orient_step,
         arm="right_arm",
         state=ExecutionState(last_qpos=env.robot.get_qpos()),
-        reference_eef_pose=orient_lift.target.xpos,
+        reference_eef_pose=orient_post_reorient_lift.target.xpos,
     )
     handover_pickup = grounder.ground(
         handover_edge.actions[0],
@@ -3784,25 +3935,49 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         release_pose[:, :2, 3],
     )
     assert bool((orient_lift.target.xpos[:, 2, 3] > release_pose[:, 2, 3]).all())
-    assert "retreat_reachability_search" not in orient_lift.motion_policy
+    assert orient_lift.motion_policy["retreat_reachability_search"] is True
+    assert orient_lift.motion_policy["retreat_search_mode"] == "vertical_only"
+    assert isinstance(orient_reorient.target, EndEffectorPoseGoal)
+    assert orient_reorient.motion_policy["reorient_tool_down"] is True
+    assert orient_reorient.motion_policy["reorient_waypoint_count"] == 5
+    assert orient_reorient.motion_policy["minimum_clearance"] == pytest.approx(0.15)
+    assert isinstance(orient_post_reorient_lift.target, EndEffectorPoseGoal)
+    assert (
+        orient_post_reorient_lift.motion_policy["retreat_search_mode"]
+        == "vertical_only"
+    )
+    assert bool(
+        (
+            orient_post_reorient_lift.target.xpos[:, 2, 3]
+            > orient_reorient.target.xpos[:, 2, 3]
+        ).all()
+    )
     assert isinstance(orient_retreat.target, EndEffectorPoseGoal)
+    assert orient_retreat.motion_policy["retreat_reachability_search"] is True
+    assert orient_retreat.motion_policy["retreat_search_mode"] == "horizontal_only"
+    assert orient_retreat.motion_policy["retreat_search_samples"] == 4
     retreat_distance = torch.linalg.vector_norm(
-        orient_retreat.target.xpos[:, :2, 3] - orient_lift.target.xpos[:, :2, 3],
+        orient_retreat.target.xpos[:, :2, 3]
+        - orient_post_reorient_lift.target.xpos[:, :2, 3],
         dim=1,
     )
     torch.testing.assert_close(
         retreat_distance, torch.full_like(retreat_distance, 0.20)
     )
     assert bool(
-        (orient_retreat.target.xpos[:, 0, 3] > orient_lift.target.xpos[:, 0, 3]).all()
+        (
+            orient_retreat.target.xpos[:, 0, 3]
+            > orient_post_reorient_lift.target.xpos[:, 0, 3]
+        ).all()
     )
     assert torch.equal(
         orient_retreat.target.xpos[:, 2, 3],
-        orient_lift.target.xpos[:, 2, 3],
+        orient_post_reorient_lift.target.xpos[:, 2, 3],
     )
     assert bool(
         (
-            orient_retreat.target.xpos[:, :2, 3] != orient_lift.target.xpos[:, :2, 3]
+            orient_retreat.target.xpos[:, :2, 3]
+            != orient_post_reorient_lift.target.xpos[:, :2, 3]
         ).any()
     )
     assert orient_alignment.target.grasp_xpos is None
@@ -5217,6 +5392,99 @@ def test_continue_failure_policy_executes_downstream_without_clearing_history(
     assert result.semantic_success["first"].tolist() == [True, False]
     assert result.semantic_success["second"].tolist() == [True, True]
     assert result.success.tolist() == [True, False]
+
+
+def test_continue_failure_policy_blocks_failed_safety_cleanup_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = {
+        "schema_version": TASK_SPEC_SCHEMA,
+        "task_id": "safe_orient_cleanup",
+        "level": "L1",
+        "instruction": "Stand the can upright.",
+        "reasoning_type": "none",
+        "task_instances": [
+            {
+                "id": "orient",
+                "task_type": "E2",
+                "params": {
+                    "object_role": "can",
+                    "required_arm": "right_arm",
+                    "orientation_goal": "upright",
+                    "support_role": "table",
+                },
+                "depends_on": [],
+                "role": "primary",
+            }
+        ],
+        "success": {"type": "object_upright", "task_instance_id": "orient"},
+        "oracle": {},
+        "metadata": {},
+    }
+    entities = {
+        "can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03)),
+        "table": _FakeEntity("table", _pose(0.0, 0.0, 0.5), _box_vertices(0.5)),
+    }
+    env = _FakeEnv(entities)
+    program = load_execution_program(instantiate_seed_graph(task, {"can": "can"}))
+    executor = ProgramExecutor(
+        program,
+        env,
+        settle_steps=0,
+        record_runtime=False,
+        failure_policy="continue",
+    )
+    executor.runtime_graph = None
+    monkeypatch.setattr(
+        executor,
+        "_ensure_assignment",
+        lambda step, failed: executor._assignments.setdefault(
+            step.id,
+            [None if bool(failed[0]) else str(step.actor["arm"])],
+        ),
+    )
+    lift_edge = next(
+        edge
+        for edge in program.edges
+        if edge.actions[0]["target_binding"].get("operation") == "lift_clear"
+    )
+    active_by_edge: dict[str, list[bool]] = {}
+
+    def execute(
+        edge: ExecutionEdge,
+        _step: SemanticStep,
+        *,
+        failed: torch.Tensor,
+    ) -> _EdgeResult:
+        active = ~failed
+        active_by_edge[edge.id] = active.tolist()
+        result_failed = failed.clone()
+        if edge.id == lift_edge.id:
+            result_failed |= active
+        return _EdgeResult(
+            actions=[],
+            failed=result_failed,
+            grounded=[],
+            executed=active,
+        )
+
+    monkeypatch.setattr(executor, "_execute_edge", execute)
+    monkeypatch.setattr(
+        executor,
+        "_verify_step",
+        lambda _step, failed: (
+            failed,
+            ~failed,
+            torch.zeros(env.num_envs, 3),
+        ),
+    )
+
+    result = executor.run()
+
+    assert active_by_edge[lift_edge.id] == [True]
+    for edge_id in program.semantic_steps[0].edge_ids[2:]:
+        assert active_by_edge[edge_id] == [False]
+    assert not bool(result.success[0])
 
 
 def test_continue_failure_policy_records_failed_then_executed_checkpoints(

@@ -143,6 +143,8 @@ def test_historical_task2_1_uses_axis_align_and_explicit_handover_arms() -> None
         "AxisAlign",
         "MoveEndEffector",
         "MoveEndEffector",
+        "MoveEndEffector",
+        "MoveEndEffector",
         "MoveJoints",
     ]
     assert actions["task_01"] == expected_orient_actions
@@ -240,6 +242,8 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
         "AxisAlign",
         "MoveEndEffector",
         "MoveEndEffector",
+        "MoveEndEffector",
+        "MoveEndEffector",
         "MoveJoints",
     ]
     assert orient["goal"]["upright_local_axis"] == "z"
@@ -247,6 +251,8 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     assert orient_nodes[0]["motion_policy"] == {"modifiers": []}
     assert [node["role"] for node in orient_nodes] == [
         "primary",
+        "cleanup",
+        "cleanup",
         "cleanup",
         "cleanup",
         "cleanup",
@@ -260,9 +266,20 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     assert orient_nodes[2]["target_binding"] == {
         "kind": "policy_pose",
         "source": "release",
-        "operation": "retreat_after_lift",
+        "operation": "reorient_tool_down",
     }
     assert orient_nodes[3]["target_binding"] == {
+        "kind": "policy_pose",
+        "source": "release",
+        "operation": "lift_clear",
+        "requires_arm_clear": True,
+    }
+    assert orient_nodes[4]["target_binding"] == {
+        "kind": "policy_pose",
+        "source": "release",
+        "operation": "retreat_after_lift",
+    }
+    assert orient_nodes[5]["target_binding"] == {
         "kind": "joint_state",
         "source": "initial",
         "operation": "e2_home",
@@ -271,6 +288,8 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     assert orient_nodes[1]["depends_on"] == [orient_nodes[0]["id"]]
     assert orient_nodes[2]["depends_on"] == [orient_nodes[1]["id"]]
     assert orient_nodes[3]["depends_on"] == [orient_nodes[2]["id"]]
+    assert orient_nodes[4]["depends_on"] == [orient_nodes[3]["id"]]
+    assert orient_nodes[5]["depends_on"] == [orient_nodes[4]["id"]]
     assert [node["atomic_action"] for node in handover_nodes] == [
         "PickUp",
         "MoveHeldObject",
@@ -289,11 +308,19 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     assert orient_nodes[0]["contract"]["failure_policy"] == "task_required"
     assert orient_nodes[1]["contract"]["failure_policy"] == "safety_required"
     assert orient_nodes[2]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[3]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[4]["contract"]["failure_policy"] == "safety_required"
     assert orient_nodes[-1]["contract"]["failure_policy"] == "safety_required"
     assert orient_nodes[1]["contract"]["requires"] == [
         {"predicate": "arm_free", "arm": "left_arm"}
     ]
     assert orient_nodes[2]["contract"]["requires"] == [
+        {"predicate": "arm_clear", "arm": "left_arm"}
+    ]
+    assert orient_nodes[3]["contract"]["requires"] == [
+        {"predicate": "arm_clear", "arm": "left_arm"}
+    ]
+    assert orient_nodes[4]["contract"]["requires"] == [
         {"predicate": "arm_clear", "arm": "left_arm"}
     ]
     assert any(
