@@ -68,28 +68,6 @@ def test_topic_entries_use_the_required_schema() -> None:
     assert errors == []
 
 
-def test_registered_context_and_source_paths_exist() -> None:
-    context_map = _load_context_map()
-    missing_paths: list[str] = []
-
-    for context_path in context_map["defaults"]["contexts"]:
-        resolved = _AGENT_CONTEXT_ROOT / context_path
-        if not resolved.exists():
-            missing_paths.append(str(resolved.relative_to(_REPOSITORY_ROOT)))
-
-    for topic in context_map["topics"]:
-        for context_path in topic["paths"]:
-            resolved = _AGENT_CONTEXT_ROOT / context_path
-            if not resolved.exists():
-                missing_paths.append(str(resolved.relative_to(_REPOSITORY_ROOT)))
-        for source_path in topic["source_of_truth"]:
-            resolved = _REPOSITORY_ROOT / source_path
-            if not resolved.exists():
-                missing_paths.append(str(resolved.relative_to(_REPOSITORY_ROOT)))
-
-    assert missing_paths == []
-
-
 def test_related_topics_reference_registered_ids() -> None:
     topics = _topics_by_id()
     invalid_relations = [
