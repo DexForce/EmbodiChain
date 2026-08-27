@@ -43,7 +43,13 @@ class NmgOnnxAdapter(PlannerAdapter):
     """Run a standalone NMG ONNX policy through :class:`NeuralPlanner`."""
 
     capabilities = frozenset(
-        {"eef_waypoint", "batched", "empty_world", "atomic_action"}
+        {
+            "eef_waypoint",
+            "joint_waypoint",
+            "batched",
+            "empty_world",
+            "atomic_action",
+        }
     )
     model_revision = "nmg-onnx-v1"
 
@@ -84,9 +90,11 @@ class NmgOnnxAdapter(PlannerAdapter):
             num_arm_joints=int(values.get("num_arm_joints", 7)),
             num_waypoints=int(values.get("num_waypoints", 8)),
             use_relative_obs=bool(values.get("use_relative_obs", True)),
+            canonicalize_quat_obs=bool(values.get("canonicalize_quat_obs", True)),
             intermediate_orientation=bool(values.get("intermediate_orientation", True)),
             pos_eps=float(values.get("pos_eps", 0.01)),
             rot_eps=float(values.get("rot_eps", 0.1)),
+            joint_eps=float(values.get("joint_eps", 0.02)),
             onnx_providers=list(providers) if providers is not None else None,
             policy_frame_from_world=values.get("policy_frame_from_world"),
             runtime_tcp_from_policy_tcp=values.get("runtime_tcp_from_policy_tcp"),

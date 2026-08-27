@@ -119,6 +119,11 @@ def _quat_mul_xyzw(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     )
 
 
+def _canonicalize_quat_xyzw(q: torch.Tensor) -> torch.Tensor:
+    """Map equivalent quaternion signs to the training-time ``w >= 0`` half."""
+    return torch.where(q[..., 3:4] < 0.0, -q, q)
+
+
 @configclass
 class NeuralPlannerCfg(BasePlannerCfg):
     planner_type: str = "neural"
@@ -144,6 +149,9 @@ class NeuralPlannerCfg(BasePlannerCfg):
     use_relative_obs: bool = True
     """Whether the exported policy uses the unified relative-observation blocks."""
 
+    canonicalize_quat_obs: bool = True
+    """Whether quaternion observations use the training-time ``w >= 0`` convention."""
+
     intermediate_orientation: bool = True
     """Whether every Cartesian waypoint requires its orientation constraint."""
 
@@ -152,6 +160,9 @@ class NeuralPlannerCfg(BasePlannerCfg):
 
     rot_eps: float = 0.1
     """Waypoint rotation threshold in radians."""
+
+    joint_eps: float = 0.02
+    """Waypoint joint-position threshold in radians."""
 
     onnx_providers: list[str] | None = None
     """Optional ONNX Runtime execution-provider priority list."""
@@ -182,8 +193,8 @@ class NeuralPlanner(BasePlanner):
     r"""Neural motion planner based on an APG waypoint transformer policy.
 
     The planner loads a standalone ONNX waypoint policy and rolls it out in
-    closed loop to drive the arm toward a sequence of
-    end-effector waypoints. Velocities and accelerations in the returned
+    closed loop to drive the arm toward a sequence of end-effector and/or
+    joint-position waypoints. Velocities and accelerations in the returned
     :class:`PlanResult` are estimated via finite differences over the generated
     position trajectory.
 
@@ -196,7 +207,11 @@ class NeuralPlanner(BasePlanner):
         ImportError: If ONNX Runtime is not installed.
     """
 
-    supported_move_types = frozenset({MoveType.EEF_MOVE})
+    supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    preserve_plan_samples = True
+    """Keep native closed-loop states instead of distance-resampling them."""
+    preserve_failed_plan_positions = True
+    """Keep closed-loop rollout samples even when not all waypoints converge."""
 
     def __init__(self, cfg: NeuralPlannerCfg):
         super().__init__(cfg)
@@ -236,6 +251,7 @@ class NeuralPlanner(BasePlanner):
 
         self._num_waypoints = int(self.cfg.num_waypoints)
         self._use_relative_obs = bool(self.cfg.use_relative_obs)
+        self._canonicalize_quat_obs = bool(self.cfg.canonicalize_quat_obs)
         self._action_dim = int(self.cfg.num_arm_joints)
         if self._action_dim != 7:
             raise ValueError(
@@ -244,6 +260,7 @@ class NeuralPlanner(BasePlanner):
         self._max_steps = int(self.cfg.max_steps)
         self._pos_eps = float(self.cfg.pos_eps)
         self._rot_eps = float(self.cfg.rot_eps)
+        self._joint_eps = float(self.cfg.joint_eps)
         self._intermediate_orientation = bool(self.cfg.intermediate_orientation)
         self._policy = _OnnxPolicy(model_path, self.cfg.onnx_providers)
         self._obs_dim = self._policy.obs_dim
@@ -290,9 +307,9 @@ class NeuralPlanner(BasePlanner):
         until all waypoints are reached or ``max_steps`` is exhausted.
 
         Args:
-            target_states: List of :class:`PlanState` waypoints. Each entry must
-                use :attr:`MoveType.EEF_MOVE` and carry an ``xpos`` tensor of
-                shape ``(B, 4, 4)``.
+            target_states: List of :class:`PlanState` waypoints. Each entry uses
+                :attr:`MoveType.EEF_MOVE` with ``xpos`` shape ``(B, 4, 4)`` or
+                :attr:`MoveType.JOINT_MOVE` with ``qpos`` shape ``(B, 7)``.
             options: :class:`NeuralPlanOptions` with ``control_part``,
                 ``start_qpos``, and ``max_steps`` overrides.
 
@@ -305,8 +322,8 @@ class NeuralPlanner(BasePlanner):
             via finite differences and are therefore approximate.
 
         Raises:
-            ValueError: If ``control_part`` is not provided, if a target state
-                is not ``EEF_MOVE``, or if ``start_qpos`` has too few joints.
+            ValueError: If ``control_part`` is not provided, a target state is
+                unsupported, or ``start_qpos`` has too few joints.
         """
         if not target_states:
             return PlanResult(
@@ -321,9 +338,16 @@ class NeuralPlanner(BasePlanner):
                 ValueError,
             )
 
-        waypoints_pos, waypoints_quat, valid_mask, episode_k = self._parse_waypoints(
-            target_states
-        )
+        (
+            waypoints_pos,
+            waypoints_quat,
+            waypoints_joint,
+            valid_mask,
+            pos_mask,
+            rot_mask,
+            joint_mask,
+            episode_k,
+        ) = self._parse_waypoints(target_states)
         qpos = self._initial_qpos(control_part, options.start_qpos)
         b = qpos.shape[0]
         limits = self.robot.get_qpos_limits(name=control_part)[0].to(self.device)
@@ -345,7 +369,11 @@ class NeuralPlanner(BasePlanner):
                     ee_pose,
                     waypoints_pos,
                     waypoints_quat,
+                    waypoints_joint,
                     valid_mask,
+                    pos_mask,
+                    rot_mask,
+                    joint_mask,
                     active_idx,
                     last_action,
                 )
@@ -370,7 +398,15 @@ class NeuralPlanner(BasePlanner):
 
                 ee_pose = self._fk_pose_xyzw(qpos, control_part)
                 reached = self._is_active_reached(
-                    ee_pose, waypoints_pos, waypoints_quat, active_idx, episode_k
+                    qpos[:, : self._action_dim],
+                    ee_pose,
+                    waypoints_pos,
+                    waypoints_quat,
+                    waypoints_joint,
+                    pos_mask,
+                    rot_mask,
+                    joint_mask,
+                    active_idx,
                 )
                 active_idx = torch.where(reached, active_idx + 1, active_idx)
                 converged = converged | (active_idx >= episode_k)
@@ -406,9 +442,16 @@ class NeuralPlanner(BasePlanner):
             ),
         )
 
-    def _parse_waypoints(
-        self, target_states: list[PlanState]
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    def _parse_waypoints(self, target_states: list[PlanState]) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        int,
+    ]:
         if len(target_states) > self._num_waypoints:
             logger.log_error(
                 f"Received {len(target_states)} waypoints, but the ONNX policy supports "
@@ -418,23 +461,68 @@ class NeuralPlanner(BasePlanner):
         b = _infer_batch_size(target_states) or 1
         waypoint_pos = torch.zeros(b, self._num_waypoints, 3, device=self.device)
         waypoint_quat = torch.zeros(b, self._num_waypoints, 4, device=self.device)
+        waypoint_quat[..., 3] = 1.0
+        waypoint_joint = torch.zeros(
+            b, self._num_waypoints, self._action_dim, device=self.device
+        )
         valid_mask = torch.zeros(b, self._num_waypoints, device=self.device)
+        pos_mask = torch.zeros_like(valid_mask)
+        rot_mask = torch.zeros_like(valid_mask)
+        joint_mask = torch.zeros_like(valid_mask)
         for idx, target in enumerate(target_states):
-            if target.move_type != MoveType.EEF_MOVE or target.xpos is None:
+            if target.move_type == MoveType.EEF_MOVE and target.xpos is not None:
+                xpos = torch.as_tensor(
+                    target.xpos, dtype=torch.float32, device=self.device
+                )
+                if xpos.dim() == 2:
+                    xpos = xpos.unsqueeze(0)
+                policy_xpos = self._to_policy_frame(xpos)
+                waypoint_pos[:, idx] = policy_xpos[:, :3, 3]
+                quat_xyzw = convert_quat(
+                    quat_from_matrix(policy_xpos[:, :3, :3]), to="xyzw"
+                )
+                waypoint_quat[:, idx] = (
+                    _canonicalize_quat_xyzw(quat_xyzw)
+                    if getattr(self, "_canonicalize_quat_obs", False)
+                    else quat_xyzw
+                )
+                pos_mask[:, idx] = 1.0
+                rot_mask[:, idx] = 1.0
+            elif target.move_type == MoveType.JOINT_MOVE and target.qpos is not None:
+                qpos = torch.as_tensor(
+                    target.qpos, dtype=torch.float32, device=self.device
+                )
+                if qpos.dim() == 1:
+                    qpos = qpos.unsqueeze(0)
+                if qpos.shape != (b, self._action_dim):
+                    logger.log_error(
+                        "NeuralPlanner JOINT_MOVE qpos must have shape "
+                        f"({b}, {self._action_dim}), got {tuple(qpos.shape)}.",
+                        ValueError,
+                    )
+                waypoint_joint[:, idx] = qpos
+                joint_mask[:, idx] = 1.0
+            else:
                 logger.log_error(
-                    "NeuralPlanner expects EEF_MOVE PlanState entries with xpos.",
+                    "NeuralPlanner expects EEF_MOVE entries with xpos or "
+                    "JOINT_MOVE entries with qpos.",
                     ValueError,
                 )
-            xpos = torch.as_tensor(target.xpos, dtype=torch.float32, device=self.device)
-            if xpos.dim() == 2:
-                xpos = xpos.unsqueeze(0)
-            policy_xpos = self._to_policy_frame(xpos)
-            waypoint_pos[:, idx] = policy_xpos[:, :3, 3]
-            waypoint_quat[:, idx] = convert_quat(
-                quat_from_matrix(policy_xpos[:, :3, :3]), to="xyzw"
-            )
             valid_mask[:, idx] = 1.0
-        return waypoint_pos, waypoint_quat, valid_mask, len(target_states)
+        if not self._intermediate_orientation:
+            final_mask = torch.zeros_like(rot_mask)
+            final_mask[:, len(target_states) - 1] = 1.0
+            rot_mask *= final_mask
+        return (
+            waypoint_pos,
+            waypoint_quat,
+            waypoint_joint,
+            valid_mask,
+            pos_mask,
+            rot_mask,
+            joint_mask,
+            len(target_states),
+        )
 
     def _initial_qpos(
         self, control_part: str, start_qpos: torch.Tensor | None
@@ -460,6 +548,8 @@ class NeuralPlanner(BasePlanner):
         fk = self._to_policy_frame(self._fk_matrix(qpos, control_part))
         pos = fk[:, :3, 3]
         quat_xyzw = convert_quat(quat_from_matrix(fk[:, :3, :3]), to="xyzw")
+        if getattr(self, "_canonicalize_quat_obs", False):
+            quat_xyzw = _canonicalize_quat_xyzw(quat_xyzw)
         return torch.cat([pos, quat_xyzw], dim=-1)
 
     def _build_obs(
@@ -468,7 +558,11 @@ class NeuralPlanner(BasePlanner):
         ee_pose: torch.Tensor,
         waypoint_pos: torch.Tensor,
         waypoint_quat: torch.Tensor,
+        waypoint_joint: torch.Tensor,
         valid_mask: torch.Tensor,
+        pos_mask: torch.Tensor,
+        rot_mask: torch.Tensor,
+        joint_mask: torch.Tensor,
         active_idx: torch.Tensor,
         last_action: torch.Tensor,
     ) -> torch.Tensor:
@@ -476,23 +570,8 @@ class NeuralPlanner(BasePlanner):
         active_idx_clamped = torch.clamp(active_idx, max=self._num_waypoints - 1)
         active_onehot = torch.zeros(b, self._num_waypoints, device=self.device)
         active_onehot.scatter_(1, active_idx_clamped.unsqueeze(1), 1.0)
-        pos_mask = valid_mask.clone()
-        rot_mask = valid_mask.clone()
-        if not self._intermediate_orientation:
-            waypoint_ids = torch.arange(self._num_waypoints, device=self.device)
-            episode_k = valid_mask.sum(dim=-1).long()
-            rot_mask = (waypoint_ids.unsqueeze(0) == (episode_k - 1).unsqueeze(1)).to(
-                valid_mask.dtype
-            )
-        joint_mask = torch.zeros_like(valid_mask)
-        waypoint_joint = torch.zeros(
-            b,
-            self._num_waypoints,
-            self._action_dim,
-            dtype=joint_pos.dtype,
-            device=self.device,
-        )
         pos_block = waypoint_pos * pos_mask.unsqueeze(-1)
+        joint_block = waypoint_joint * joint_mask.unsqueeze(-1)
         identity = torch.tensor(
             [0.0, 0.0, 0.0, 1.0],
             dtype=waypoint_quat.dtype,
@@ -508,7 +587,7 @@ class NeuralPlanner(BasePlanner):
             ee_pose,
             pos_block.reshape(b, self._num_waypoints * 3),
             quat_block.reshape(b, self._num_waypoints * 4),
-            waypoint_joint.reshape(b, self._num_waypoints * self._action_dim),
+            joint_block.reshape(b, self._num_waypoints * self._action_dim),
             active_onehot,
             valid_mask,
             pos_mask,
@@ -520,22 +599,33 @@ class NeuralPlanner(BasePlanner):
             idx = torch.arange(b, device=self.device)
             active_pos = pos_block[idx, active_idx_clamped]
             active_quat = quat_block[idx, active_idx_clamped]
+            active_joint = joint_block[idx, active_idx_clamped]
             inv_eef = _quat_inverse_xyzw(ee_pose[:, 3:7])
             active_rel_quat = _quat_mul_xyzw(active_quat, inv_eef)
-            obs_parts.append(
-                torch.cat([active_pos - ee_pose[:, :3], active_rel_quat], dim=-1)
+            if getattr(self, "_canonicalize_quat_obs", False):
+                active_rel_quat = _canonicalize_quat_xyzw(active_rel_quat)
+            active_cart_rel = torch.cat(
+                [active_pos - ee_pose[:, :3], active_rel_quat], dim=-1
             )
+            active_rel = torch.where(
+                (joint_mask[idx, active_idx_clamped] > 0.5).unsqueeze(-1),
+                active_joint - joint_pos,
+                active_cart_rel,
+            )
+            obs_parts.append(active_rel)
             rel_pos = (pos_block - ee_pose[:, None, :3]) * pos_mask.unsqueeze(-1)
             rel_quat = _quat_mul_xyzw(
                 quat_block,
                 inv_eef[:, None, :].expand_as(quat_block),
             )
+            if getattr(self, "_canonicalize_quat_obs", False):
+                rel_quat = _canonicalize_quat_xyzw(rel_quat)
             rel_quat = torch.where(
                 rot_mask.unsqueeze(-1) > 0.5,
                 rel_quat,
                 identity.view(1, 1, 4),
             )
-            joint_err = torch.zeros_like(waypoint_joint)
+            joint_err = (joint_block - joint_pos[:, None]) * joint_mask.unsqueeze(-1)
             obs_parts.extend(
                 [
                     rel_pos.reshape(b, self._num_waypoints * 3),
@@ -554,6 +644,11 @@ class NeuralPlanner(BasePlanner):
             torch.ones_like(waypoint_type),
             waypoint_type,
         )
+        waypoint_type = torch.where(
+            joint_mask > 0.5,
+            torch.full_like(waypoint_type, 2.0),
+            waypoint_type,
+        )
         obs_parts.append(waypoint_type)
         obs = torch.cat(obs_parts, dim=-1)
         if obs.shape[-1] != self._obs_dim:
@@ -564,30 +659,46 @@ class NeuralPlanner(BasePlanner):
 
     def _is_active_reached(
         self,
+        joint_pos: torch.Tensor,
         ee_pose: torch.Tensor,
         waypoint_pos: torch.Tensor,
         waypoint_quat: torch.Tensor,
+        waypoint_joint: torch.Tensor,
+        pos_mask: torch.Tensor,
+        rot_mask: torch.Tensor,
+        joint_mask: torch.Tensor,
         active_idx: torch.Tensor,
-        episode_k: int,
     ) -> torch.Tensor:
         b = ee_pose.shape[0]
         idx = torch.arange(b, device=self.device)
         active_idx_clamped = torch.clamp(active_idx, max=self._num_waypoints - 1)
         active_pos = waypoint_pos[idx, active_idx_clamped]
         active_quat_xyzw = waypoint_quat[idx, active_idx_clamped]
+        active_joint = waypoint_joint[idx, active_idx_clamped]
+        active_pos_mask = pos_mask[idx, active_idx_clamped] > 0.5
+        active_rot_mask = rot_mask[idx, active_idx_clamped] > 0.5
+        active_joint_mask = joint_mask[idx, active_idx_clamped] > 0.5
         pos_dist = (ee_pose[:, :3] - active_pos).norm(dim=-1)
         ee_quat_wxyz = convert_quat(ee_pose[:, 3:7], to="wxyz")
         active_quat_wxyz = convert_quat(active_quat_xyzw, to="wxyz")
         rot_dist = quat_error_magnitude(ee_quat_wxyz, active_quat_wxyz)
-        orientation_required = self._intermediate_orientation | (
-            active_idx >= episode_k - 1
-        )
         rot_ok = torch.where(
-            orientation_required,
+            active_rot_mask,
             rot_dist < self._rot_eps,
             torch.ones_like(rot_dist, dtype=torch.bool),
         )
-        reached = (pos_dist < self._pos_eps) & rot_ok
+        pos_ok = torch.where(
+            active_pos_mask,
+            pos_dist < self._pos_eps,
+            torch.ones_like(pos_dist, dtype=torch.bool),
+        )
+        joint_dist = torch.amax(torch.abs(joint_pos - active_joint), dim=-1)
+        joint_ok = torch.where(
+            active_joint_mask,
+            joint_dist < self._joint_eps,
+            torch.ones_like(joint_dist, dtype=torch.bool),
+        )
+        reached = pos_ok & rot_ok & joint_ok
         return reached
 
     @staticmethod

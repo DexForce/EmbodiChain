@@ -47,7 +47,13 @@ class CuroboAdapter(PlannerAdapter):
     """Run cuRobo with a frozen, empty-world operational configuration."""
 
     capabilities = frozenset(
-        {"eef_waypoint", "batched", "empty_world", "atomic_action"}
+        {
+            "eef_waypoint",
+            "joint_waypoint",
+            "batched",
+            "empty_world",
+            "atomic_action",
+        }
     )
     model_revision = "curobo-v2"
     separate_prepare = True
