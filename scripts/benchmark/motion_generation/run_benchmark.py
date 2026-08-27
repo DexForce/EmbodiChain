@@ -50,7 +50,8 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
         "--suite",
         default="smoke",
         help=(
-            "Suite short name (smoke/coverage/atomic_franka_pgi_curobo) "
+            "Suite short name (smoke/coverage/atomic_franka_pgi_curobo/"
+            "atomic_franka_pgi_curobo_randomized) "
             "or an explicit YAML path."
         ),
     )
@@ -202,6 +203,9 @@ def _apply_overrides(
         suite.free_space.start_state_bins = start_state_bins
     if seeds is not None:
         suite.free_space.seeds = seeds
+        for track in suite.tracks:
+            if track.scenario != "free_space" and "seeds" in track.config:
+                track.config["seeds"] = list(seeds)
     if num_trials is not None:
         suite.protocol.measured_trials = num_trials
     if warmup_trials is not None:

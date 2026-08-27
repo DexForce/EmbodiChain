@@ -16,6 +16,8 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_curobo --device cuda --record-video
 python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_curobo_randomized --device cuda
+python -m scripts.benchmark.motion_generation.run_benchmark \
   --extra-baselines ik_interpolate toppra
 ```
 
@@ -31,6 +33,8 @@ in that run's `videos/` directory.
 - `atomic-task` track with frozen robot/object/task manifests and common physics replay
 - Single-arm Atomic Task slice: Franka + PGI with `MoveEndEffector`,
   `MoveJoints`, `PickUp`, `MoveHeldObject`, `Place`, and `Press`
+- Deterministic 16-seed generalization sweep for all six single-arm skills,
+  with bounded robot-start, target, held-object, and object-pose randomization
 - Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics
 - Direct, batched NMG ONNX adapter (`candidate`, enabled when a model path is supplied)
 - Lifecycle timing: construct / prepare / cold / warm

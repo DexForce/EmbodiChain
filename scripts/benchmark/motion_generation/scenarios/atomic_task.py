@@ -82,6 +82,7 @@ _TOP_DOWN_ROTATION = (
 )
 _TASK_DIFFICULTIES = {"simple", "medium", "hard"}
 _GRIPPER_SKILLS = {"pick_up", "move_held_object", "place", "press"}
+_CASE_QPOS_RESOLUTION_RAD = 1.0e-4
 
 
 @dataclass(frozen=True)
@@ -231,6 +232,80 @@ def _difficulty(config: Mapping[str, object]) -> str:
     return difficulty
 
 
+def _seeded_jitter(
+    amplitude: Sequence[float],
+    *,
+    seed: int,
+    stream: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Sample deterministic independent uniform jitter in ``[-amplitude, +amplitude]``."""
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed((int(seed) * 1_000_003 + int(stream) * 97_409) % (2**63 - 1))
+    unit = torch.rand(len(amplitude), generator=generator, dtype=torch.float32)
+    values = (2.0 * unit - 1.0) * torch.tensor(amplitude, dtype=torch.float32)
+    return values.to(dtype=dtype, device=device)
+
+
+def _case_generation_seed(seed: int, *, skill_index: int, case_index: int) -> int:
+    """Derive one stable RNG seed for all stochastic IK work in a case."""
+    return (
+        int(seed) * 1_000_003 + int(skill_index) * 97_409 + int(case_index) * 13_007
+    ) % (2**63 - 1)
+
+
+def _canonical_case_qpos(qpos: torch.Tensor) -> torch.Tensor:
+    """Remove insignificant device-level IK noise from frozen case states."""
+    return torch.round(qpos / _CASE_QPOS_RESOLUTION_RAD) * _CASE_QPOS_RESOLUTION_RAD
+
+
+def _randomized_vector(
+    base: Sequence[float],
+    config: Mapping[str, object],
+    *,
+    jitter_name: str,
+    seed: int,
+    stream: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Return one configured vector plus optional deterministic uniform jitter."""
+    base_values = [float(value) for value in base]
+    amplitude = _float_vector(
+        config.get(jitter_name),
+        name=jitter_name,
+        length=len(base_values),
+        default=(0.0,) * len(base_values),
+    )
+    if any(value < 0.0 for value in amplitude):
+        raise ValueError(f"{jitter_name} values must be non-negative.")
+    return torch.tensor(base_values, dtype=dtype, device=device) + _seeded_jitter(
+        amplitude,
+        seed=seed,
+        stream=stream,
+        dtype=dtype,
+        device=device,
+    )
+
+
+def _randomization_parameters(
+    config: Mapping[str, object], *, seed: int
+) -> dict[str, object]:
+    """Serialize the deterministic randomization contract into a case manifest."""
+    ranges = {
+        str(key): value
+        for key, value in config.items()
+        if str(key).endswith("_jitter_m") or str(key).endswith("_jitter_rad")
+    }
+    return {
+        "enabled": bool(ranges),
+        "seed": int(seed),
+        "distribution": "independent_uniform",
+        "ranges": ranges,
+    }
+
+
 def _motion_valid_mask(
     motion_outcomes: tuple[CaseOutcome, ...], *, device: torch.device
 ) -> torch.Tensor:
@@ -282,26 +357,40 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
         batch_size: int,
     ) -> BenchmarkCase:
         scenario.restore_base_robot()
+        scenario.randomize_robot_start(config, seed=seed, stream=11)
         raw_offsets = config.get("target_offsets_m")
         if not isinstance(raw_offsets, Sequence) or isinstance(
             raw_offsets, (str, bytes)
         ):
             raise TypeError("target_offsets_m must be a non-empty list of xyz vectors.")
-        offsets = [
+        base_offsets = [
             _float_vector(value, name="target_offsets_m", length=3)
             for value in raw_offsets
         ]
-        if not offsets:
+        if not base_offsets:
             raise ValueError("target_offsets_m must not be empty.")
 
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
+        offsets_tensor = torch.stack(
+            [
+                _randomized_vector(
+                    offset,
+                    config,
+                    jitter_name="target_offset_jitter_m",
+                    seed=seed,
+                    stream=101 + index,
+                    dtype=start_pose.dtype,
+                    device=start_pose.device,
+                )
+                for index, offset in enumerate(base_offsets)
+            ]
+        )
+        offsets = offsets_tensor.detach().cpu().tolist()
         targets = start_pose[:, None].repeat(1, len(offsets), 1, 1)
-        targets[:, :, :3, 3] += torch.tensor(
-            offsets, dtype=targets.dtype, device=targets.device
-        )[None]
+        targets[:, :, :3, 3] += offsets_tensor[None]
         references = scenario.solve_reference_qpos(start_qpos, targets)
         name = _case_name(config)
         return BenchmarkCase(
@@ -321,10 +410,11 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=scenario.robot.get_qpos().clone(),
+            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
                 "target_offsets_m": offsets,
+                "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -400,7 +490,9 @@ class _PickUpCases(AtomicSkillCaseProvider):
         handle = scenario.activate_object(object_id)
         scenario.restore_base_robot()
 
-        object_pose = handle.entity.get_local_pose(to_matrix=True).clone()
+        object_pose = scenario.randomize_object_pose(
+            handle, config, seed=seed, stream=201
+        )
         arm_start = scenario.robot.get_qpos(name=scenario.control_part)
         pre_pick_pose = scenario.robot.compute_fk(
             arm_start, name=scenario.control_part, to_matrix=True
@@ -416,6 +508,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
             raise RuntimeError(
                 f"Independent IK rejected PickUp case {_case_name(config)!r}."
             )
+        pre_pick_qpos = _canonical_case_qpos(pre_pick_qpos)
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
 
         approach = torch.tensor(
@@ -464,13 +557,17 @@ class _PickUpCases(AtomicSkillCaseProvider):
             grasp_pose[:, :3, :3] = rotation
         else:
             raise ValueError("grasp_source must be 'fixed' or 'antipodal'.")
-        grasp_offset = torch.tensor(
+        grasp_offset = _randomized_vector(
             _float_vector(
                 config.get("grasp_offset_m"),
                 name="grasp_offset_m",
                 length=3,
                 default=(0.0, 0.0, 0.0),
             ),
+            config,
+            jitter_name="grasp_offset_jitter_m",
+            seed=seed,
+            stream=202,
             dtype=grasp_pose.dtype,
             device=grasp_pose.device,
         )
@@ -501,7 +598,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
             object_id=object_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=scenario.robot.get_qpos().clone(),
+            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 "sample_count": int(config.get("sample_count", 120)),
                 "grasp_source": grasp_source,
@@ -515,6 +612,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
                 "grasp_pose": grasp_pose.detach().cpu().tolist(),
                 "object_initial_pose": object_pose.detach().cpu().tolist(),
                 "object_config": dict(handle.config),
+                "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -617,21 +715,34 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
         batch_size: int,
     ) -> BenchmarkCase:
         scenario.restore_base_robot()
+        scenario.randomize_robot_start(config, seed=seed, stream=21)
         raw_offsets = config.get("target_offsets_rad")
         if not isinstance(raw_offsets, Sequence) or isinstance(
             raw_offsets, (str, bytes)
         ):
             raise TypeError("target_offsets_rad must be a non-empty list.")
-        offsets = [
+        base_offsets = [
             _float_vector(value, name="target_offsets_rad", length=7)
             for value in raw_offsets
         ]
-        if not offsets:
+        if not base_offsets:
             raise ValueError("target_offsets_rad must not be empty.")
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
-        offset_tensor = torch.tensor(
-            offsets, dtype=start_qpos.dtype, device=start_qpos.device
+        offset_tensor = torch.stack(
+            [
+                _randomized_vector(
+                    offset,
+                    config,
+                    jitter_name="target_offset_jitter_rad",
+                    seed=seed,
+                    stream=211 + index,
+                    dtype=start_qpos.dtype,
+                    device=start_qpos.device,
+                )
+                for index, offset in enumerate(base_offsets)
+            ]
         )
+        offsets = offset_tensor.detach().cpu().tolist()
         targets = start_qpos[:, None] + torch.cumsum(offset_tensor, dim=0)[None]
         limits = scenario.robot.get_qpos_limits(name=scenario.control_part)[0]
         margin = float(config.get("joint_limit_margin_rad", 0.05))
@@ -673,12 +784,13 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=scenario.robot.get_qpos().clone(),
+            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
                 "target_offsets_rad": offsets,
                 "target_qpos": targets.detach().cpu().tolist(),
                 "joint_threshold_rad": float(config.get("joint_threshold_rad", 0.02)),
+                "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -740,20 +852,35 @@ class _HeldObjectCases(AtomicSkillCaseProvider):
         self,
         scenario: "AtomicTaskScenario",
         config: Mapping[str, object],
-    ) -> tuple[AtomicObjectHandle, torch.Tensor, torch.Tensor, torch.Tensor]:
+        *,
+        seed: int,
+    ) -> tuple[
+        AtomicObjectHandle,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         object_id = config.get("object")
         if not isinstance(object_id, str) or not object_id:
             raise ValueError(f"{self.skill_id} cases require an object id.")
         handle = scenario.activate_object(object_id)
         scenario.restore_base_robot()
-        object_pose = handle.initial_pose.clone()
-        held_offset = torch.tensor(
+        table_object_pose = scenario.randomize_object_pose(
+            handle, config, seed=seed, stream=301
+        )
+        object_pose = table_object_pose.clone()
+        held_offset = _randomized_vector(
             _float_vector(
                 config.get("held_object_offset_m"),
                 name="held_object_offset_m",
                 length=3,
                 default=(0.0, 0.0, 0.18),
             ),
+            config,
+            jitter_name="held_object_offset_jitter_m",
+            seed=seed,
+            stream=302,
             dtype=object_pose.dtype,
             device=object_pose.device,
         )
@@ -764,13 +891,17 @@ class _HeldObjectCases(AtomicSkillCaseProvider):
             dtype=grasp_pose.dtype,
             device=grasp_pose.device,
         )
-        grasp_pose[:, :3, 3] += torch.tensor(
+        grasp_pose[:, :3, 3] += _randomized_vector(
             _float_vector(
                 config.get("grasp_offset_m"),
                 name="grasp_offset_m",
                 length=3,
                 default=(0.0, 0.0, 0.0),
             ),
+            config,
+            jitter_name="grasp_offset_jitter_m",
+            seed=seed,
+            stream=303,
             dtype=grasp_pose.dtype,
             device=grasp_pose.device,
         )
@@ -784,6 +915,7 @@ class _HeldObjectCases(AtomicSkillCaseProvider):
             raise RuntimeError(
                 f"Independent IK rejected held-object start {_case_name(config)!r}."
             )
+        arm_start = _canonical_case_qpos(arm_start)
         scenario.set_robot_start(arm_start, open_gripper=False, grasp_gripper=True)
         handle.entity.set_local_pose(object_pose)
         handle.entity.clear_dynamics()
@@ -791,8 +923,13 @@ class _HeldObjectCases(AtomicSkillCaseProvider):
             scenario.simulation.update(step=2)
             handle.entity.set_local_pose(object_pose)
             handle.entity.clear_dynamics()
+            scenario.set_robot_start(
+                arm_start,
+                open_gripper=False,
+                grasp_gripper=True,
+            )
         object_to_eef = torch.bmm(torch.linalg.inv(object_pose), grasp_pose)
-        return handle, object_pose, grasp_pose, object_to_eef
+        return handle, object_pose, grasp_pose, object_to_eef, table_object_pose
 
     def initial_task_state(
         self, scenario: "AtomicTaskScenario", case: BenchmarkCase
@@ -833,17 +970,25 @@ class _MoveHeldObjectCases(_HeldObjectCases):
         seed: int,
         batch_size: int,
     ) -> BenchmarkCase:
-        handle, object_pose, grasp_pose, object_to_eef = self._prepare_start(
-            scenario, config
-        )
+        (
+            handle,
+            object_pose,
+            grasp_pose,
+            object_to_eef,
+            _table_object_pose,
+        ) = self._prepare_start(scenario, config, seed=seed)
         target_object = object_pose.clone()
-        target_object[:, :3, 3] += torch.tensor(
+        target_object[:, :3, 3] += _randomized_vector(
             _float_vector(
                 config.get("target_object_offset_m"),
                 name="target_object_offset_m",
                 length=3,
                 default=(0.08, 0.08, 0.04),
             ),
+            config,
+            jitter_name="target_object_offset_jitter_m",
+            seed=seed,
+            stream=311,
             dtype=object_pose.dtype,
             device=object_pose.device,
         )
@@ -869,7 +1014,7 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             object_id=handle.object_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=scenario.robot.get_qpos().clone(),
+            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
                 "sample_count": int(config.get("sample_count", 80)),
@@ -877,6 +1022,7 @@ class _MoveHeldObjectCases(_HeldObjectCases):
                 "object_position_threshold_m": float(
                     config.get("object_position_threshold_m", 0.04)
                 ),
+                "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -944,17 +1090,25 @@ class _PlaceCases(_HeldObjectCases):
         seed: int,
         batch_size: int,
     ) -> BenchmarkCase:
-        handle, object_pose, grasp_pose, object_to_eef = self._prepare_start(
-            scenario, config
-        )
-        target_object = handle.initial_pose.clone()
-        target_object[:, :3, 3] += torch.tensor(
+        (
+            handle,
+            object_pose,
+            grasp_pose,
+            object_to_eef,
+            table_object_pose,
+        ) = self._prepare_start(scenario, config, seed=seed)
+        target_object = table_object_pose.clone()
+        target_object[:, :3, 3] += _randomized_vector(
             _float_vector(
                 config.get("target_object_offset_m"),
                 name="target_object_offset_m",
                 length=3,
                 default=(0.10, 0.10, 0.0),
             ),
+            config,
+            jitter_name="target_object_offset_jitter_m",
+            seed=seed,
+            stream=321,
             dtype=object_pose.dtype,
             device=object_pose.device,
         )
@@ -985,7 +1139,7 @@ class _PlaceCases(_HeldObjectCases):
             object_id=handle.object_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=scenario.robot.get_qpos().clone(),
+            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
                 "sample_count": int(config.get("sample_count", 120)),
@@ -996,6 +1150,7 @@ class _PlaceCases(_HeldObjectCases):
                 "object_position_threshold_m": float(
                     config.get("object_position_threshold_m", 0.05)
                 ),
+                "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -1070,18 +1225,23 @@ class _PressCases(AtomicSkillCaseProvider):
         batch_size: int,
     ) -> BenchmarkCase:
         scenario.restore_base_robot()
+        scenario.randomize_robot_start(config, seed=seed, stream=31)
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
         press_pose = start_pose.clone()
-        press_pose[:, :3, 3] += torch.tensor(
+        press_pose[:, :3, 3] += _randomized_vector(
             _float_vector(
                 config.get("target_offset_m"),
                 name="target_offset_m",
                 length=3,
                 default=(0.0, 0.0, -0.08),
             ),
+            config,
+            jitter_name="target_offset_jitter_m",
+            seed=seed,
+            stream=331,
             dtype=start_pose.dtype,
             device=start_pose.device,
         )
@@ -1105,11 +1265,12 @@ class _PressCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=scenario.robot.get_qpos().clone(),
+            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
                 "press_pose": press_pose.detach().cpu().tolist(),
                 "hand_interp_steps": int(config.get("hand_interp_steps", 8)),
+                "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -1284,7 +1445,7 @@ class AtomicTaskScenario(ScenarioProvider):
             raise ValueError("atomic-task seeds must not be empty.")
 
         cases: list[BenchmarkCase] = []
-        for skill_value in skill_values:
+        for skill_index, skill_value in enumerate(skill_values):
             if not isinstance(skill_value, Mapping):
                 raise TypeError("Every atomic-task skill entry must be a mapping.")
             skill_id = skill_value.get("id")
@@ -1298,20 +1459,33 @@ class AtomicTaskScenario(ScenarioProvider):
                 for key, value in skill_value.items()
                 if key not in {"id", "cases"}
             }
-            for raw_case in raw_cases:
+            for case_index, raw_case in enumerate(raw_cases):
                 if not isinstance(raw_case, Mapping):
                     raise TypeError("Every atomic skill case must be a mapping.")
                 config = {**defaults, **dict(raw_case)}
                 for seed in seeds:
                     provider = create_atomic_skill_provider(skill_id)
-                    case = provider.generate_case(
-                        self,
-                        suite,
-                        track,
-                        config,
-                        seed=seed,
-                        batch_size=batch_size,
+                    rng_devices = (
+                        [robot.device]
+                        if torch.device(robot.device).type == "cuda"
+                        else []
                     )
+                    with torch.random.fork_rng(devices=rng_devices):
+                        torch.manual_seed(
+                            _case_generation_seed(
+                                seed,
+                                skill_index=skill_index,
+                                case_index=case_index,
+                            )
+                        )
+                        case = provider.generate_case(
+                            self,
+                            suite,
+                            track,
+                            config,
+                            seed=seed,
+                            batch_size=batch_size,
+                        )
                     if case.case_id in self._case_providers:
                         raise ValueError(
                             f"Duplicate Atomic Task case {case.case_id!r}."
@@ -1771,6 +1945,7 @@ class AtomicTaskScenario(ScenarioProvider):
                 raise RuntimeError(
                     f"Independent IK rejected atomic target waypoint {index}."
                 )
+            seed = _canonical_case_qpos(seed)
             references.append(seed.clone())
         return torch.stack(references, dim=1)
 
@@ -1865,6 +2040,7 @@ class AtomicTaskScenario(ScenarioProvider):
                     if not bool(torch.as_tensor(success).all().item()):
                         feasible = False
                         break
+                    seed = _canonical_case_qpos(seed)
                 if feasible:
                     return grasp
         raise RuntimeError(
@@ -1879,6 +2055,102 @@ class AtomicTaskScenario(ScenarioProvider):
         for target in (False, True):
             self.robot.set_qpos(self._base_full_qpos, target=target)
         self.robot.clear_dynamics()
+
+    def randomize_robot_start(
+        self,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        stream: int,
+    ) -> torch.Tensor:
+        """Apply a deterministic, bounded perturbation to the arm start state."""
+        if self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        start = self.robot.get_qpos(name=self.control_part).clone()
+        amplitude = _float_vector(
+            config.get("start_qpos_jitter_rad"),
+            name="start_qpos_jitter_rad",
+            length=start.shape[-1],
+            default=(0.0,) * start.shape[-1],
+        )
+        if any(value < 0.0 for value in amplitude):
+            raise ValueError("start_qpos_jitter_rad values must be non-negative.")
+        randomized = start + _seeded_jitter(
+            amplitude,
+            seed=seed,
+            stream=stream,
+            dtype=start.dtype,
+            device=start.device,
+        )
+        limits = self.robot.get_qpos_limits(name=self.control_part)[0]
+        margin = float(config.get("start_joint_limit_margin_rad", 0.05))
+        if not math.isfinite(margin) or margin < 0.0:
+            raise ValueError("start_joint_limit_margin_rad must be non-negative.")
+        lower = limits[:, 0] + margin
+        upper = limits[:, 1] - margin
+        if bool(((randomized < lower) | (randomized > upper)).any().item()):
+            raise RuntimeError(
+                "Randomized arm start violates the configured joint-limit margin."
+            )
+        self.set_robot_start(
+            randomized,
+            open_gripper=False,
+            grasp_gripper=False,
+        )
+        return randomized
+
+    def randomize_object_pose(
+        self,
+        handle: AtomicObjectHandle,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        stream: int,
+    ) -> torch.Tensor:
+        """Install one deterministic position/yaw perturbation for an object."""
+        pose = handle.initial_pose.clone()
+        position_amplitude = _float_vector(
+            config.get("object_position_jitter_m"),
+            name="object_position_jitter_m",
+            length=3,
+            default=(0.0, 0.0, 0.0),
+        )
+        if any(value < 0.0 for value in position_amplitude):
+            raise ValueError("object_position_jitter_m values must be non-negative.")
+        pose[:, :3, 3] += _seeded_jitter(
+            position_amplitude,
+            seed=seed,
+            stream=stream,
+            dtype=pose.dtype,
+            device=pose.device,
+        )
+
+        yaw_amplitude = float(config.get("object_yaw_jitter_rad", 0.0))
+        if not math.isfinite(yaw_amplitude) or yaw_amplitude < 0.0:
+            raise ValueError("object_yaw_jitter_rad must be finite and non-negative.")
+        yaw = _seeded_jitter(
+            (yaw_amplitude,),
+            seed=seed,
+            stream=stream + 1,
+            dtype=pose.dtype,
+            device=pose.device,
+        )[0]
+        cosine = torch.cos(yaw)
+        sine = torch.sin(yaw)
+        yaw_rotation = torch.eye(3, dtype=pose.dtype, device=pose.device)
+        yaw_rotation[0, 0] = cosine
+        yaw_rotation[0, 1] = -sine
+        yaw_rotation[1, 0] = sine
+        yaw_rotation[1, 1] = cosine
+        pose[:, :3, :3] = yaw_rotation.unsqueeze(0) @ pose[:, :3, :3]
+
+        handle.entity.set_local_pose(pose)
+        handle.entity.clear_dynamics()
+        if self.simulation is not None:
+            self.simulation.update(step=2)
+            handle.entity.set_local_pose(pose)
+            handle.entity.clear_dynamics()
+        return pose
 
     def set_robot_start(
         self,

@@ -46,6 +46,10 @@ from scripts.benchmark.motion_generation.scenarios.atomic_objects import (
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     AtomicTaskScenario,
+    _canonical_case_qpos,
+    _case_generation_seed,
+    _randomization_parameters,
+    _seeded_jitter,
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
@@ -137,6 +141,83 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
         "control_part": "hand",
         "open_qpos": [0.0],
         "grasp_qpos": [0.024],
+    }
+
+
+def test_randomized_atomic_suite_covers_six_skills_with_fixed_seed_sweep():
+    suite = load_suite("atomic_franka_pgi_curobo_randomized")
+    track = suite.enabled_tracks()[0]
+
+    assert suite.suite_version == "atomic_franka_pgi_curobo_randomized_v1"
+    assert track.id == "atomic-task-randomized"
+    assert track.config["seeds"] == list(range(101, 117))
+    assert [item["id"] for item in track.config["skills"]] == [
+        "move_end_effector",
+        "move_joints",
+        "pick_up",
+        "move_held_object",
+        "place",
+        "press",
+    ]
+    assert all(
+        any(str(key).endswith(("_jitter_m", "_jitter_rad")) for key in item)
+        for item in track.config["skills"]
+    )
+
+
+def test_seeded_jitter_is_reproducible_bounded_and_stream_separated():
+    kwargs = {
+        "amplitude": (0.1, 0.2, 0.0),
+        "seed": 107,
+        "dtype": torch.float64,
+        "device": torch.device("cpu"),
+    }
+    first = _seeded_jitter(stream=5, **kwargs)
+    repeated = _seeded_jitter(stream=5, **kwargs)
+    different_seed = _seeded_jitter(stream=5, **{**kwargs, "seed": 108})
+    different_stream = _seeded_jitter(stream=6, **kwargs)
+
+    assert torch.equal(first, repeated)
+    assert not torch.equal(first, different_seed)
+    assert not torch.equal(first, different_stream)
+    assert torch.all(torch.abs(first) <= torch.tensor((0.1, 0.2, 0.0)))
+    assert first.dtype == torch.float64
+
+
+def test_case_generation_seed_is_stable_and_stratified():
+    value = _case_generation_seed(107, skill_index=2, case_index=3)
+
+    assert value == _case_generation_seed(107, skill_index=2, case_index=3)
+    assert value != _case_generation_seed(108, skill_index=2, case_index=3)
+    assert value != _case_generation_seed(107, skill_index=3, case_index=3)
+    assert value != _case_generation_seed(107, skill_index=2, case_index=4)
+
+
+def test_case_qpos_canonicalization_removes_sub_resolution_noise():
+    first = torch.tensor([[0.123421, -0.456779]], dtype=torch.float32)
+    second = torch.tensor([[0.123419, -0.456781]], dtype=torch.float32)
+
+    assert torch.equal(_canonical_case_qpos(first), _canonical_case_qpos(second))
+
+
+def test_randomization_manifest_records_contract_and_seed():
+    parameters = _randomization_parameters(
+        {
+            "target_offset_jitter_m": [0.03, 0.02, 0.01],
+            "object_yaw_jitter_rad": 0.4,
+            "sample_count": 80,
+        },
+        seed=113,
+    )
+
+    assert parameters == {
+        "enabled": True,
+        "seed": 113,
+        "distribution": "independent_uniform",
+        "ranges": {
+            "target_offset_jitter_m": [0.03, 0.02, 0.01],
+            "object_yaw_jitter_rad": 0.4,
+        },
     }
 
 

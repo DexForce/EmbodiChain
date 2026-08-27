@@ -299,6 +299,15 @@ def test_nmg_precision_and_external_accuracy_are_independently_configurable():
     assert nmg.config["rot_eps"] == pytest.approx(0.20)
 
 
+def test_seed_override_applies_to_atomic_tracks():
+    suite = load_suite("atomic_franka_pgi_curobo_randomized")
+
+    _apply_overrides(suite, seeds=[104])
+
+    assert suite.free_space.seeds == [104]
+    assert suite.enabled_tracks()[0].config["seeds"] == [104]
+
+
 @pytest.mark.parametrize("override", [{"nmg_pos_eps": 0.0}, {"nmg_rot_eps": -0.1}])
 def test_nmg_precision_rejects_non_positive_values(override):
     suite = load_suite("smoke")
