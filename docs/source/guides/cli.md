@@ -309,7 +309,7 @@ simulator:
 
 ```bash
 embodichain preview_lerobot_data \
-    outputs/lerobot/multi_segments \
+    outputs/lerobot/expert_program \
     --latest \
     --episode 0 \
     --expect-segments 3
@@ -342,21 +342,21 @@ Launch reinforcement learning training from a JSON or YAML config file.
 
 ```bash
 # Train with a config file (JSON or YAML)
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 
 # JSON configs remain supported
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
+embodichain train-rl --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
 
 # Multi-GPU distributed training
 torchrun --nproc_per_node=2 -m embodichain train-rl \
-    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json \
+    --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json \
     --distributed
 ```
 
 The module entry point remains available for compatibility:
 
 ```bash
-python -m embodichain.learning.rl.train --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 ```
 
 ### Arguments

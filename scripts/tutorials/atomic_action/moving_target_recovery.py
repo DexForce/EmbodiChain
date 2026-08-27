@@ -35,10 +35,11 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
     EntityState,
+    EffectVerificationRequest,
+    EffectVerificationResult,
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
-    ExecutionTick,
     GraspGoal,
     MotionPolicy,
     ObjectSemantics,
@@ -51,6 +52,7 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     SimulationExecutionAdapter,
     TaskState,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -307,7 +309,6 @@ def main() -> None:
         affordance=Affordance(),
         geometry={},
         label="cube",
-        entity=target,
         entity_id=TARGET_ENTITY_ID,
     )
     engine = AtomicActionEngine(
@@ -336,9 +337,12 @@ def main() -> None:
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             max_action_retries=1,
-            tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
             goal_translation_threshold=GOAL_TRANSLATION_THRESHOLD,
             action_timeout=30.0,
+        ),
+        tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+            terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
         ),
         skill_options=PickUpOptions(
             pre_grasp_distance=0.15,
@@ -444,8 +448,8 @@ def main() -> None:
 
     def verify_pickup_effect(
         _context: PlanningContext,
-        _: ExecutionTick,
-    ) -> torch.Tensor:
+        request: EffectVerificationRequest,
+    ) -> EffectVerificationResult:
         """Verify that the cube rose with, and remains near, the end effector."""
         if sim.is_newton_backend:
             attach_target_to_end_effector()
@@ -466,7 +470,14 @@ def main() -> None:
             f"cube-to-EEF={held_distance.detach().cpu().tolist()} m, "
             f"success={success.detach().cpu().tolist()}."
         )
-        return success
+        verified_success = request.env_mask & success
+        return EffectVerificationResult(
+            verification_id=request.verification_id,
+            success_mask=verified_success,
+            failure_mask=request.env_mask & ~success,
+            invalidation_mask=request.env_mask & ~success,
+            retry_mask=request.env_mask & ~success,
+        )
 
     recording_started = start_auto_play_recording(
         sim,

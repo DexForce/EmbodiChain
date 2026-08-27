@@ -197,6 +197,35 @@ cloth, soft bodies, camera frustums, low-frequency RGB preview, overlays, and a
 limitations, remote access, and troubleshooting, see
 {doc}`viser_visualization`.
 
+## Native point-cloud visualization
+
+Use {meth}`SimulationManager.visualize_point_cloud` to add static point-based
+debug or analysis data to the native DexSim viewer. It accepts NumPy arrays or
+Torch tensors with point positions shaped `(N, 3)`, plus optional per-point RGB
+or RGBA colors. Colors can be normalized floats or `uint8` values in `[0, 255]`;
+the manager converts them to renderer-ready RGB values. Omitting `colors`
+renders the point cloud in green.
+
+```python
+import numpy as np
+
+points = np.array([[0.0, 0.0, 0.2], [0.1, 0.0, 0.2]], dtype=np.float32)
+colors = np.array([[255, 0, 0], [0, 255, 0]], dtype=np.uint8)
+
+point_cloud = sim.visualize_point_cloud(
+    points,
+    colors=colors,
+    point_size=6.0,
+    name="debug_points",
+)
+```
+
+The returned native point-cloud handle can be queried or modified with the
+DexSim point-cloud API. This method targets the native window; use the
+browser-overlay APIs documented in {doc}`viser_visualization` for Viser.
+See {doc}`/tutorial/point_cloud_visualization` for a runnable color-and-position
+verification example.
+
 ## Assets Management
 
 The manager provides methods to add, retrieve and remove various simulation assets including:
@@ -284,6 +313,7 @@ In this mode, the physics simulation stepping is automatically handling by the p
 - **`SimulationManager.capture_visualization(force=False)`**: Capture the current scene state.
 - **`SimulationManager.capture_visualization_safely(force=False)`**: Capture without allowing a visualization failure to interrupt simulation progress.
 - **`SimulationManager.stop_visualization()`**: Stop Viser and release its server port.
+- **`SimulationManager.visualize_point_cloud(points, colors=None, point_size=2.0, name="point_cloud")`**: Add a static colored point cloud to the native DexSim viewer.
 - **`SimulationManager.visualization_health`**: Return endpoint, client count, revision, and worker status.
 - **`SimulationManager.visualization_stats`**: Return capture, queue, payload, and upload telemetry.
 

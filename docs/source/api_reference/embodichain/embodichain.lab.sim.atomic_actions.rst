@@ -2,6 +2,8 @@ embodichain.lab.sim.atomic_actions
 ==================================
 
 .. automodule:: embodichain.lab.sim.atomic_actions
+   :members:
+   :no-index:
 
    .. rubric:: Planning contracts
 
@@ -16,6 +18,7 @@ embodichain.lab.sim.atomic_actions
       ControlPartCommandProfile
       ActionControlOverrides
       ActionInvocation
+      PhaseEffectGateRequirement
       ResolvedActionRequest
       ActionOptions
       MotionPolicy
@@ -34,7 +37,7 @@ embodichain.lab.sim.atomic_actions
       TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
-      ExecutionFeedbackMode
+      PlanningFailure
       ActionPlan
       CompiledTrajectory
 
@@ -72,6 +75,13 @@ embodichain.lab.sim.atomic_actions
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
+      EffectVerificationRequirement
+      EffectVerificationResult
+      PhaseEffectGateRequest
+      PhaseEffectGateResult
+      HeldObjectGuardRequest
+      HeldObjectGuardResult
+      ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind
       ExecutionStatus
@@ -83,7 +93,16 @@ embodichain.lab.sim.atomic_actions
       EndEffectorPoseGoal
       JointPositionGoal
       GraspGoal
+      HandOverGoal
+      AxisAlignGoal
+      AxisAlignOptions
+      AxisAlignAffordance
       HeldObjectPoseGoal
+      PourGoal
+      PourOptions
+      PushObjectGoal
+      PushObjectOptions
+      PushObjectToolCalibration
       PlaceGoal
       AssembleGoal
       PressGoal
@@ -92,6 +111,9 @@ embodichain.lab.sim.atomic_actions
       SlideGoal
       SlideOptions
       SlideAffordance
+      OpenDoorGoal
+      OpenDoorOptions
+      OpenDoorAffordance
       TwistGoal
       TwistOptions
       TwistAffordance
@@ -100,10 +122,14 @@ embodichain.lab.sim.atomic_actions
       MoveEndEffector
       MoveJoints
       PickUp
+      AxisAlign
       MoveHeldObject
+      Pour
+      PushObject
       Place
       Press
       Slide
+      OpenDoor
       Twist
       CoordinatedPickment
       CoordinatedPlacement
@@ -114,6 +140,7 @@ embodichain.lab.sim.atomic_actions
    :hidden:
 
    embodichain.lab.sim.atomic_actions.primitives
+   embodichain.lab.sim.atomic_actions.tracking
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
 
@@ -218,6 +245,9 @@ Planning and state
 .. autoclass:: TimedTrajectory
    :members:
 
+.. autoclass:: PlanningFailure
+   :members:
+
 .. autoclass:: RuntimeCommandPayload
    :members:
 
@@ -231,9 +261,6 @@ Planning and state
    :members:
 
 .. autoclass:: TimedCommandSequence
-   :members:
-
-.. autoclass:: ExecutionFeedbackMode
    :members:
 
 .. autoclass:: ActionPlan
@@ -307,6 +334,18 @@ Engine and execution
    :members:
 
 .. autoclass:: ExecutionStatus
+   :members:
+
+.. autoclass:: EffectVerificationRequest
+   :members:
+
+.. autoclass:: EffectVerificationRequirement
+   :members:
+
+.. autoclass:: EffectVerificationResult
+   :members:
+
+.. autoclass:: ExecutionPlanAttempt
    :members:
 
 Semantic objects and helpers

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import select
 import sys
@@ -289,6 +290,16 @@ def generate_function(
             f"Episode {time_id} attempt {attempt}/{max_attempts} failed: "
             f"{result.terminal_reason}. Discarding {result.length} frames."
         )
+        if debug_mode:
+            log_warning(
+                "Failed demo trace: "
+                + json.dumps(
+                    result.to_metadata(),
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
 
     return False
 
@@ -740,6 +751,18 @@ def _create_parser() -> argparse.ArgumentParser:
 
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
     parser.set_defaults(viser_image_fps=None)
+
+    parser.add_argument(
+        "--expert-program",
+        type=str,
+        default=None,
+        help="Path to a declarative Expert Program (.json, .yaml, or .yml).",
+    )
+    parser.add_argument(
+        "--debug-mode",
+        action="store_true",
+        help="Log the structured trace for each failed demo attempt.",
+    )
 
     parser.add_argument(
         "--replay",

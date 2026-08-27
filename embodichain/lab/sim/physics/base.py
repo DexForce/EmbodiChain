@@ -44,8 +44,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import dexsim
 
-    from embodichain.lab.sim.cfg import SimulationManagerCfg
-    from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 
 __all__ = ["PhysicsBackend"]
 

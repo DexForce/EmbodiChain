@@ -24,7 +24,7 @@ import weakref
 from .base import PhysicsBackend
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.cfg import SimulationManagerCfg
+    from embodichain.lab.sim.sim_manager import SimulationManagerCfg
 
 __all__ = ["NewtonPhysicsBackend"]
 

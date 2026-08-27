@@ -18,7 +18,47 @@ manipulation utilities that can be used independently of the simulation loop.
 GraspKit — Parallel-Gripper Grasp Sampling
 -------------------------------------------
 
-The ``embodichain.toolkits.graspkit.pg_grasp`` module provides a complete pipeline for generating antipodal grasp poses for parallel-jaw grippers. The pipeline consists of three stages:
+The :mod:`embodichain.toolkits.graspkit` package owns the standalone
+grasp-pose service contracts. The toolkit does not import
+:mod:`embodichain.lab`, so the same generator instance can be called directly
+or installed in a higher-level planning runtime.
+
+.. currentmodule:: embodichain.toolkits.graspkit
+
+.. autosummary::
+   :nosignatures:
+
+   GraspPoseGenerator
+   ParallelJawGraspPoseGenerator
+   ParallelJawGripperModelCfg
+   get_parallel_jaw_gripper_model
+
+.. autoclass:: GraspPoseGenerator
+   :members:
+
+.. autoclass:: ParallelJawGraspPoseGenerator
+   :members:
+
+.. autoclass:: ParallelJawGripperModelCfg
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autofunction:: get_parallel_jaw_gripper_model
+
+.. currentmodule:: embodichain.toolkits.graspkit.pose_generator
+
+.. autosummary::
+   :nosignatures:
+
+   GraspPoseGenerator
+   ParallelJawGraspPoseGenerator
+   ParallelJawGripperModelCfg
+   get_parallel_jaw_gripper_model
+
+The :mod:`embodichain.toolkits.graspkit.pg_grasp` module provides a reusable
+antipodal implementation of these contracts. The pipeline consists of three
+stages:
 
 1. **Antipodal sampling** — Surface points are uniformly sampled on the mesh and rays are cast to find antipodal point pairs on opposite sides.
 2. **Pose construction** — For each antipodal pair, a 6-DoF grasp frame is built aligned with the approach direction.
@@ -28,13 +68,21 @@ The ``embodichain.toolkits.graspkit.pg_grasp`` module provides a complete pipeli
 
 .. currentmodule:: embodichain.toolkits.graspkit.pg_grasp
 
-The main entry point is :class:`GraspGenerator`. It is configured via :class:`GraspGeneratorCfg` and :class:`GripperCollisionCfg`.
+The application-facing entry point is :class:`AntipodalGraspPoseGenerator`.
+Its configuration separates the physical gripper model, grasp algorithm,
+collision policy, and annotation/cache policy. Mesh-specific sampling and
+collision state remain private implementation details.
 
 .. autosummary::
    :nosignatures:
 
-   GraspGenerator
-   GraspGeneratorCfg
+   GraspPoseGenerator
+   ParallelJawGraspPoseGenerator
+   ParallelJawGripperModelCfg
+   AntipodalGraspPoseGenerator
+   AntipodalGraspPoseGeneratorCfg
+   ParallelJawGraspCollisionCfg
+   GraspAnnotationCfg
    AntipodalSampler
    AntipodalSamplerCfg
    GripperCollisionChecker
@@ -43,19 +91,36 @@ The main entry point is :class:`GraspGenerator`. It is configured via :class:`Gr
    ConvexCollisionCheckerCfg
 
 
-GraspGenerator
-~~~~~~~~~~~~~~~
+AntipodalGraspPoseGenerator
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: GraspGenerator
-   :members: generate, annotate, get_grasp_poses, visualize_grasp_pose
-   :show-inheritance:
-
-GraspGeneratorCfg
-~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: GraspGeneratorCfg
+.. autoclass:: AntipodalGraspPoseGenerator
    :members:
    :show-inheritance:
+
+AntipodalGraspPoseGeneratorCfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AntipodalGraspPoseGeneratorCfg
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+ParallelJawGraspCollisionCfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParallelJawGraspCollisionCfg
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+GraspAnnotationCfg
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: GraspAnnotationCfg
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
 
 AntipodalSampler
 ~~~~~~~~~~~~~~~~~
@@ -98,6 +163,19 @@ ConvexCollisionCheckerCfg
 .. autoclass:: ConvexCollisionCheckerCfg
    :members:
    :show-inheritance:
+
+Implementation Module
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.pose_generator
+
+.. autosummary::
+   :nosignatures:
+
+   AntipodalGraspPoseGenerator
+   AntipodalGraspPoseGeneratorCfg
+   ParallelJawGraspCollisionCfg
+   GraspAnnotationCfg
 
 
 URDF Convex Decomposition

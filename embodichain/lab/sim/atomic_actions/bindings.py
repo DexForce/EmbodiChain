@@ -28,6 +28,10 @@ from typing import Mapping, TypeVar
 import torch
 
 from .control import ControlCommand
+from .tracking import (
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
+)
 
 
 def _validate_identifier(value: str, *, field_name: str) -> str:
@@ -77,6 +81,49 @@ def _snapshot_commands(
             )
         commands[name] = snapshot
     return MappingProxyType(commands)
+
+
+def _snapshot_tracking_channels(
+    values: Mapping[str, EndpointTrackingChannelBinding],
+    *,
+    target: RuntimeEndpointTarget,
+) -> Mapping[str, EndpointTrackingChannelBinding]:
+    """Validate and own endpoint-local tracking-channel bindings."""
+    if not isinstance(values, Mapping):
+        raise TypeError("EndpointBinding.tracking_channels must be a mapping.")
+    channels: dict[str, EndpointTrackingChannelBinding] = {}
+    for channel_id, binding in values.items():
+        _validate_identifier(
+            channel_id,
+            field_name="EndpointBinding tracking channel IDs",
+        )
+        if not isinstance(binding, EndpointTrackingChannelBinding):
+            raise TypeError(
+                "EndpointBinding.tracking_channels values must be "
+                "EndpointTrackingChannelBinding instances."
+            )
+        if binding.channel_id != channel_id:
+            raise ValueError(
+                f"Tracking channel key {channel_id!r} disagrees with its binding "
+                f"channel {binding.channel_id!r}."
+            )
+        snapshot = binding.snapshot()
+        if snapshot is binding:
+            raise TypeError(
+                "EndpointTrackingChannelBinding.snapshot() must return an "
+                "independently owned value."
+            )
+        address = snapshot.source.address
+        if (
+            isinstance(address, EndpointTrackingFeedbackAddress)
+            and address.target.address_fingerprint != target.address_fingerprint
+        ):
+            raise ValueError(
+                f"Tracking channel {channel_id!r} addresses a different runtime "
+                "endpoint target."
+            )
+        channels[channel_id] = snapshot
+    return MappingProxyType(channels)
 
 
 def _validate_target_fingerprint(
@@ -189,6 +236,12 @@ class EndpointBinding:
     resource_id: str
     adapter_id: str
     target: RuntimeEndpointTarget
+    task_state_key: str | None = None
+    """Symbolic task-state key; defaults to ``target.target_id``."""
+
+    tracking_channels: Mapping[str, EndpointTrackingChannelBinding] = field(
+        default_factory=dict
+    )
     capabilities: frozenset[str] = frozenset()
     commands: Mapping[str, ControlCommand] = field(default_factory=dict)
     claim_tokens: frozenset[str] = frozenset()
@@ -235,6 +288,19 @@ class EndpointBinding:
                 "fingerprint."
             )
         object.__setattr__(self, "target", target)
+        task_state_key = (
+            target.target_id if self.task_state_key is None else self.task_state_key
+        )
+        _validate_identifier(
+            task_state_key,
+            field_name="EndpointBinding.task_state_key",
+        )
+        object.__setattr__(self, "task_state_key", task_state_key)
+        object.__setattr__(
+            self,
+            "tracking_channels",
+            _snapshot_tracking_channels(self.tracking_channels, target=target),
+        )
         object.__setattr__(
             self,
             "capabilities",
@@ -306,6 +372,18 @@ class EndpointBinding:
             ) from exc
         return command.snapshot()
 
+    def tracking_channel(self, channel_id: str) -> EndpointTrackingChannelBinding:
+        """Return one independently owned typed tracking-channel binding."""
+        try:
+            binding = self.tracking_channels[channel_id]
+        except KeyError as exc:
+            raise KeyError(
+                f"Endpoint {self.slot_id}.{self.endpoint_id} has no tracking "
+                f"channel {channel_id!r}; available channels are "
+                f"{sorted(self.tracking_channels)}."
+            ) from exc
+        return binding.snapshot()
+
     def joint_positions(
         self,
         name: str,
@@ -344,6 +422,8 @@ class EndpointBinding:
             resource_id=self.resource_id,
             adapter_id=self.adapter_id,
             target=self.target,
+            task_state_key=self.task_state_key,
+            tracking_channels=self.tracking_channels,
             capabilities=self.capabilities,
             commands=merged,
             claim_tokens=self.claim_tokens,
@@ -358,6 +438,8 @@ class EndpointBinding:
             resource_id=self.resource_id,
             adapter_id=self.adapter_id,
             target=self.target,
+            task_state_key=self.task_state_key,
+            tracking_channels=self.tracking_channels,
             capabilities=self.capabilities,
             commands=self.commands,
             claim_tokens=self.claim_tokens,

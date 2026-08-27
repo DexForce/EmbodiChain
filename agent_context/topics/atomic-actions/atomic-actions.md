@@ -9,7 +9,7 @@ plan = engine.plan(invocation: ActionInvocation, context: PlanningContext)
 ```
 
 There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
-`AtomicActionEngine.run()` compatibility surface.
+`AtomicActionEngine.run()` surface.
 
 `ActionInvocation` separates:
 
@@ -28,9 +28,12 @@ explicit `control_dt` used only by action-owned interpolation. An `ActionPlan`
 contains per-environment planning success, an authoritative
 `TimedCommandSequence` in `commands`, an optional full-robot `TimedTrajectory`
 in `joint_trajectory`, action-level recovery and scene-invalidation metadata,
-planner diagnostics, named `TrajectorySegment` frame ranges, and an uncommitted
-`StateDelta`. Segments are inspection/tracing metadata inside one command
-sequence; they are not independently replannable execution boundaries.
+planner diagnostics with a typed retryable/non-retryable `PlanningFailure`,
+named `TrajectorySegment` frame ranges, and an uncommitted `StateDelta`.
+Segments are inspection/tracing metadata inside one command sequence; they are
+not independently replannable execution boundaries. Execution emits one
+`TRAJECTORY_SEGMENT_ENTERED` event at each named boundary and preserves the
+segment name on subsequent events for observability.
 
 `AtomicAction.build_plan()` is the planner-backed joint convenience path: it
 normalizes the success mask, freezes unsuccessful trajectory rows at the
@@ -45,9 +48,26 @@ recompute private sample splits in callers.
 
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
 instance, which contains its robot, one `MotionGenerator`/planner backend, and
-its direct control-part command-profile snapshot. It also issues an opaque
-binding-owner ID, so an `ActionBinding` cannot cross engine instances. It does
-not own a timing fallback. Planner results with positions require explicit `dt`;
+its direct control-part command-profile snapshot. It may also contain
+standalone `GraspPoseGenerator` services keyed by grasp endpoint runtime target
+ID. These services are siblings of `MotionGenerator`, not motion-generator
+features: direct callers may use them without atomic actions, while `PickUp`,
+`HandOver`, `Slide`, and `CoordinatedPickment` resolve them through their bound
+grasp endpoints. `AntipodalAffordance` owns target-local mesh geometry only.
+`embodichain.toolkits.graspkit` owns the backend-neutral
+`GraspPoseGenerator`, `ParallelJawGraspPoseGenerator`, and gripper-model
+contracts. The toolkit has no dependency on `embodichain.lab`; simulation,
+atomic actions, Expert Program, and handwritten environments are consumers of
+the same service API. Its `pg_grasp` package exposes
+`AntipodalGraspPoseGenerator` as the sole antipodal generator entry point;
+mesh-specific sampling, annotation, collision, and on-disk cache state live
+behind a private backend rather than a second public generator/configuration
+pair.
+The engine-scoped registry retains generator instances by reference, so a
+composition root may reuse an already prepared service in a handwritten
+environment. The engine also issues an opaque binding-owner ID, so an
+`ActionBinding` cannot cross engine instances. It does not own a timing
+fallback. Planner results with positions require explicit `dt`;
 `duration` is derived from it. Actions must pass a complete `TimedTrajectory` to
 `build_plan()`. Environment-backed integrations put `BaseEnv.step_dt` on
 `PlanningContext.control_dt` when action-owned interpolation needs a cadence.
@@ -70,12 +90,15 @@ Choose the public engine entry point by lifecycle, not by skill type:
 |---|---|---|
 | `engine.plan(invocation, context)` | Inspect or plan one registered action | Returns one `ActionPlan`; does not project a context for another action |
 | `engine.compile(invocations, context)` | Plan an ordered sequence against a fixed scene | Returns a concatenated `CompiledTrajectory`; propagates hypothetical qpos and expected effects through `projected_context` |
-| `engine.start(invocations, context)` | Execute incrementally from observations | Returns an `ExecutionSession`; `tick(latest_context)` emits commands and performs bounded recovery |
+| `engine.start(invocations, context, *, eligible_mask=None)` | Execute incrementally from observations | Returns an `ExecutionSession`; the optional initial cohort is sticky, and `tick(latest_context)` emits commands, exposes effect boundaries, and performs bounded recovery |
 
 None steps simulation directly. `compile()` never observes physical execution;
 split compilation at observation boundaries when later goals depend on measured
 results. Use `start()` when observation, effect verification, and replanning
-must remain active during execution.
+must remain active during execution. Non-empty expected effects always expose a
+correlated effect boundary. `SkillRuntime` resolves that boundary from the
+selected semantic monitor; when no monitor is configured, it projects the
+planned state without claiming physical task-success evidence.
 
 `AtomicAction.plan(request, context)` is the framework-owned template method
 called by the engine, not a fourth application entry point. It binds collision
@@ -84,9 +107,8 @@ to the skill-specific `_plan()` hook. New actions implement `_plan()` and must
 not override `plan()`. Custom actions must be installed with
 `engine.register()` before using the same public entry points.
 
-The `_plan()` extension boundary is an intentional hard break with no legacy
-adapter. A subclass that defines `plan()` raises `TypeError` at class definition;
-migrate an older custom action by renaming that implementation to `_plan()`.
+The `_plan()` extension boundary is strict. A subclass that defines `plan()`
+raises `TypeError` at class definition; custom actions implement `_plan()`.
 
 ## Robot skill profiles and resource binding
 
@@ -106,7 +128,7 @@ generic DAG, not a fixed arm/tool schema:
   generic command-profile key, joint IDs, adapter-defined claim tokens, and
   exclusivity. `ControlPartEndpointAdapter` is installed by default for
   `ControlPartEndpoint` and produces a `JointPositionTarget`. Integrations pass
-  additional `endpoint_adapters` to profile or engine binding for mobile bases,
+  additional `endpoint_adapters` to `RobotSkillProfile.bind()` for mobile bases,
   whole-body controllers, or other endpoint kinds. Registration is by exact
   endpoint type, and the built-in adapter cannot be overridden; distinct
   controller semantics use a distinct endpoint subtype.
@@ -145,24 +167,22 @@ the engine-owned `ActionBinding`, each resource's resolved endpoint data, and
 one combined `ResourceClaim`.
 
 Advanced callers without a profile use
-`engine.bind_control_parts(skill, endpoints)` with an exact nested
+`engine.bind_control_parts(skill_id, endpoints)` with an exact nested
 `slot -> endpoint -> control_part` mapping. The engine accepts an installed
-skill ID or an explicit action instance later passed to `plan_action()`, checks
-contract coverage, control-part existence, required commands, ownership, and
-disjointness, then emits the same generic `ActionBinding` with
+skill ID, checks contract coverage, control-part existence, required commands,
+ownership, and disjointness, then emits the same generic `ActionBinding` with
 `JointPositionTarget` endpoints. Callers do not construct bindings manually,
 and this path deliberately does not perform profile resource discovery or
 capability matching.
 
-`engine.make_invocation(skill_id, goal, ...)` is the convenience construction
-boundary when callers do not need to retain a binding separately. Pass
-`control_parts` for the direct path, or rely on a bound `RobotSkillProfile` and
-optionally pass `resources` as `slot -> resource_id` selections. The two binding
-sources are mutually exclusive. Without a profile, `control_parts` is required;
-with a profile, omitting `resources` uses unique or configured-default profile
-resolution. The method returns an ordinary `ActionInvocation` and does not plan
-or execute it. It resolves bindings only; profile policy presets and runner
-configuration remain semantic-runtime concerns.
+`engine.make_invocation(skill_id, goal, ..., control_parts=...)` is the
+direct-core convenience construction boundary. It resolves only the explicit
+`slot -> endpoint -> control_part` mapping and returns an ordinary
+`ActionInvocation`; it never imports, binds, or stores a `RobotSkillProfile`.
+Profile-based callers use `RobotSkillProfile.bind(engine, ...)`, resolve a
+binding through the returned `BoundRobotSkillProfile`, and construct an
+`ActionInvocation` directly. `SemanticSkillCompiler` owns that path for semantic
+workflows.
 
 Discovery boundaries are distinct:
 
@@ -171,11 +191,10 @@ Discovery boundaries are distinct:
 - `engine.skills` contains descriptors only for installed, `agent_visible`
   actions whose concrete class explicitly declares a binding contract. A
   subclass does not inherit semantic exposure implicitly.
-- `engine.skill_profile.skills` filters `engine.skills` again to contracts with
-  at least one valid assignment on the bound robot. Registering or replacing an
-  action invalidates the engine's bound profile; an independently retained
-  `BoundRobotSkillProfile` also rejects use after the engine skill catalog
-  changes and must be rebound.
+- `bound_profile.skills` filters `engine.skills` again to contracts with at least
+  one valid assignment on the bound robot. Registering or replacing an action
+  advances `engine.skill_catalog_revision`; every retained
+  `BoundRobotSkillProfile` then rejects use and must be rebound.
 
 Binding and policy authority is split deliberately:
 
@@ -194,19 +213,20 @@ Binding and policy authority is split deliberately:
 - the engine owns installed actions, one planner backend, its binding identity,
   and direct control-part command-profile snapshots.
 
-Constructing `AtomicActionEngine(..., skill_profile=profile)` makes the
-profile's generic `command_profiles` the single authoritative constructor
-source; passing `control_profiles` at the same time is rejected.
+The atomic core never imports or owns a `RobotSkillProfile`. A profile-aware
+composition root first constructs `AtomicActionEngine` with
+`control_profiles=profile.action_control_profiles()`, installs any custom
+actions, and then calls `profile.bind(engine, endpoint_adapters=...)`. The
+returned `BoundRobotSkillProfile` belongs to the semantic integration layer.
 `command_profiles` values currently use `ControlPartCommandProfile` as their
 immutable command container, but their mapping keys are generic profile IDs
 rather than necessarily being control-part names.
 `ControlPartEndpointAdapter` plus `RobotSkillProfile.action_control_profiles()`
-provides the direct control-part lookup used by built-in joint planners when an
-engine is constructed from a profile; it is not a binding route. Binding a
-profile to an already constructed engine instead requires equivalent direct
-control-part commands to have been installed already. Profile resolution still
-places all resolved semantic commands, including commands for custom endpoint
-types, on their `EndpointBinding`. A profile `JointPositionCommand` is
+provides the direct control-part lookup used by built-in joint planners; it is
+not a binding route. Binding requires equivalent direct control-part commands
+to have been installed on the engine already. Profile resolution still places
+all resolved semantic commands, including commands for custom endpoint types,
+on their `EndpointBinding`. A profile `JointPositionCommand` is
 one-dimensional and sized to the adapter-resolved endpoint joint IDs;
 invocation `ActionControlOverrides` remain the authority for one revision's
 per-environment endpoint-command replacements.
@@ -221,30 +241,25 @@ match the engine's configured planner.
 `ResourceClaim` contains transitive leaf-resource IDs, sorted concrete joint
 IDs, and adapter-defined `claim_tokens`. Claims conflict when any category
 overlaps, so a `whole_body` composite conflicts with a contained arm even when
-their endpoint or control-part names differ. This is deterministic conflict
-metadata only: there is no resource lease manager, parallel scheduler,
-or concurrency guarantee yet. Dynamic execution can dispatch multiple
-endpoint commands in one synchronized frame, but that does not imply resource
-scheduling or safe parallelism. A custom mobile/base or whole-body endpoint is
-executable only when its adapter supplies a target, the action emits a matching
-runtime payload, and the target's transport is registered with the
-`EndpointCommandRouter`. Successful binding or a non-conflicting claim alone is
-not proof that a planner/controller path or safe concurrent execution exists.
+their endpoint or control-part names differ. `ParallelSkillRuntime` uses these
+claims for deterministic preflight and rejects overlapping branches, but there
+is no general resource lease manager outside that coordinator. Non-conflicting
+claims are not proof of collision safety: the parallel coordinator requires a
+`ParallelCommandSafetyValidator` before merged command frames can leave it. A
+custom mobile/base or whole-body endpoint is executable only when its adapter
+supplies a target, the action emits a matching runtime payload, and the target's
+transport is registered with the `EndpointCommandRouter`.
 
 ## Object identity and pose grounding
 
 `ObjectSemantics.entity_id` is the typed core's canonical snapshot-key lowering
-target. The registry-backed path obtains it from a resolved `SceneEntityRef`.
-It remains optional for advanced direct-core compatibility but, when supplied,
-must be a non-empty string. Pose grounding with an explicit ID is strict:
-resolve it only from the current `PlanningContext.scene`; a missing snapshot
-entry is an error and never falls back to the live `entity`. Only when no ID is
-supplied may the core read `ObjectSemantics.entity`; that path emits
-`DeprecationWarning`, reads live state, and cannot declare a scene-motion
-dependency.
+target and is required. The registry-backed path obtains it from a resolved
+`SceneEntityRef`; direct-core callers supply the same non-empty string. Pose
+grounding resolves only from the current `PlanningContext.scene`, and a missing
+snapshot entry is an error.
 
 `ObjectSemantics` is shallow-frozen. Top-level fields such as `entity_id`,
-`entity`, and `label` cannot be rebound after construction; create a new
+`affordance`, and `label` cannot be rebound after construction; create a new
 semantics value to change identity. Nested affordance and metadata objects may
 remain mutable, but they never establish identity.
 
@@ -252,6 +267,22 @@ remain mutable, but they never establish identity.
 `EntityState`/pose copy on every public mapping lookup. Mutating an input tensor
 or a previously returned pose cannot change the published snapshot. Publish a
 new scene version for every material dynamic-state change.
+
+`OpenDoorGoal.open_fraction` owns the desired absolute hinge state: `0` maps to
+the `OpenDoorAffordance` closed legal endpoint and `1` to its open endpoint.
+`OpenDoorAffordance.opening_direction` owns the closed-to-open joint-coordinate
+direction and defaults to increasing qpos; reverse-coordinate hinges configure
+`-1` at affordance construction. `OpenDoorAffordance.from_articulation()`
+consumes only `Articulation.get_parent_joint_chain()`: automatic hinge
+selection skips fixed joints and requires exactly one active revolute ancestor;
+prismatic ancestors, latch joints, and other multi-active chains require an
+explicit `hinge_joint_name`. The planner automatically matches the
+affordance-resolved parent revolute joint name to one unique
+`SceneSnapshot.articulation_joints` observation, computes a row-local opening
+delta from measured qpos, holds rows already at target, and fails rows with
+invalid observations, illegal targets, or targets behind the current opening
+state. Interpolation density, approach/retract distances, and joint comparison
+tolerance remain `OpenDoorOptions` policy values.
 
 ## Scene registry integration
 
@@ -278,6 +309,130 @@ for different reference types.
 installed as aliases, and unlisted simulation entities are never scanned.
 Collision participation defaults to `NONE`, and every static/dynamic collision
 registration requires a geometry provider.
+
+`SceneEntityMetadata` is the single provider-free scene declaration model.
+`SceneEntityManifest` specializes that value without redeclaring its fields,
+and both `SceneManifest` and `SceneRegistry` use the same canonical ID, alias,
+parent, native-member, and affordance index. A `SceneManifest` additionally
+snapshots `collision_world_mode`; `SemanticIntegrationManifest.bind()` rejects
+live metadata or collision-mode drift before installing a robot profile.
+
+## Semantic workflow compilation
+
+Semantic calls (`Pick`, `Place`, `HandOver`, and catalog-registered values) are
+robot-independent declarations. `SemanticCallDescriptor` has one canonical
+atomic `target_descriptor`; its `skill_id` and `binding_contract` are derived
+views, not separately stored values. Curated call targets cannot be remapped.
+Registered calls require an explicit agent-visible target plus an installed
+`RegisteredSemanticLowerer` with a matching call ID and target descriptor.
+Their payloads carry task intent, while the selected `SkillPolicyPreset` is the
+sole action-option source; a lowerer may read its owned option template for goal
+grounding but must not mirror those options into the payload as a second policy
+configuration.
+
+`SemanticSkillCompiler.analyze()` performs provider-free linking, resource and
+affordance validation, held-object flow analysis, and first-release look-ahead.
+A `Place` with no explicit `primary` resource inherits the workflow's known
+holder resource, and a `HandOver` with no explicit `source` does the same. The
+inferred selection is snapshotted onto the canonical linked call before
+binding; an explicit conflicting selection still fails with
+`held_resource_mismatch`. Holder-resource inference never crosses a
+registered-call boundary.
+`HandOver` selects participants only through the `source` and `destination`
+resource slots; there is no separate receiver alias.
+A registered lowerer is opaque to pickup look-ahead by default. It may override
+`pick_lookahead_targets()` to certify that it retains the same picked object on
+the same bound `primary` resource and expose an exact ordered tuple of
+intermediate object poses. Returning `None` remains the conservative barrier;
+an empty tuple retains the chain without adding a target. A pick therefore owns
+an ordered downstream target sequence through its first release. Relation
+targets retain affordance payload type and revision metadata and stay
+late-bound through an explicitly installed `RelationTargetGrounder`; handover
+poses stay behind a named
+`HandOverPoseProvider` selected by the robot profile.
+
+`SemanticSkillCompiler.ground()` lowers exactly one analyzed call from the
+latest `PlanningContext` and returns a `GroundedSemanticCall`. Its
+`eligible_mask` is an owned snapshot and must be handed to execution together
+with the invocation:
+
+```python
+grounded = compiler.ground(workflow, call_index, context, eligible_mask=cohort)
+session = engine.start(
+    (grounded.invocation,),
+    context,
+    eligible_mask=grounded.eligible_mask,
+)
+```
+
+The compiler identity prevents a workflow from crossing lowerer/grounder
+registries. Engine/profile staleness is checked through the bound integration;
+the workflow does not duplicate engine-owner or catalog-revision fields.
+
+## Semantic skill runtime
+
+`embodichain.lab.sim.skills.SkillRuntime` is the canonical execution service.
+`start()` analyzes the complete semantic-call window once, then JIT-grounds and
+starts exactly one invocation, `ExecutionSession`, and `ExecutionRunner` per
+executed call. Before every call it obtains a fresh `PlanningContext`; only
+verified `TaskState` and the shrinking eligible cohort cross call barriers.
+`execution_prefix_length` lets a selected future suffix participate in static
+look-ahead without grounding or executing that suffix. A runtime owns at most
+one active workflow, while `fork()` creates an independent lane sharing the
+compiler, observation/evidence providers, clock, and optional runner override.
+
+The selected `SkillPolicyPreset` owns the default `ExecutionRunnerCfg` for each
+call. A runtime-level `runner_cfg` is an explicit all-call override; omitting it
+does not synthesize a second default. Motion and recovery policy continue to be
+lowered by `SemanticSkillCompiler` into the invocation.
+
+Physical verification flows through `EffectEvidenceCollectorPort`, the
+grounded `SemanticEffectSpec`, and its selected `EffectMonitor`. `SkillResult`
+contains tensor-owning row masks, verified task state, call/plan/effect traces,
+and JSON-safe metadata. `SkillFailure` exposes a stable `code` and `phase`;
+post-analysis preparation failures preserve an original `SemanticDiagnostic`
+when available, while low-level execution events remain in the call trace.
+Terminal failure first applies the core-owned symbolic reconciliation selected
+from per-expectation physical outcomes. `WorkflowRecoveryPolicy` then provides
+a bounded, row-local recovery budget. Rows whose reconciled state still proves
+the failed call's source relation retry that call from a fresh observation;
+rows whose source relation was invalidated execute a real semantic Pick on the
+resolved source resource and then retry the original call. Already successful
+rows wait at the shared call barrier, and every recovery call uses normal
+analysis, grounding, planning, command dispatch, effect verification, and
+trace metadata.
+
+`SkillPolicyPreset.effect_monitors` is the semantic verification switch at
+exact call-ID granularity. Omitting the constructor argument installs the
+built-in Pick/Place/HandOver monitors; an explicit empty mapping selects
+trajectory-only execution, and a partial mapping verifies only its selected
+calls. The compiler leaves `effect_spec` and `effect_monitor` unset for an
+unselected call, and `SkillRuntime` automatically projects the plan's expected
+state when that monitor is absent. A configured monitor whose
+factory or evidence provider is unavailable fails closed instead of silently
+becoming open-loop.
+
+`SkillRuntime.from_simulation()` is the standard explicit simulation factory.
+It combines an optional application verifier and step observer with the typed
+terminal monitors, phase-effect gates, and held-object guards selected by the
+compiler. `AtomicSkills` is a small application facade over that same runtime;
+it does not own a second compiler or execution loop. Its simulation constructor
+delegates to `SkillRuntime.from_simulation()`, `available_skills` exposes the
+bound profile's immutable atomic skill descriptors, and `availability()`
+returns a structured semantic diagnostic instead of reducing capability checks
+to a boolean.
+
+The core runtime and Expert Program adapter share one provider-free semantic
+assembly path for the scene manifest, robot-profile binding, catalog, and
+compiler. The standard Gym registration, compilation, bridge, and task
+integration contracts are routed separately through
+`agent_context/topics/expert-programs/expert-programs.md`.
+
+`ParallelSkillRuntime` coordinates two or more forked semantic lanes on one
+clock. It rejects overlapping `ResourceClaim` values and symbolic writes,
+requires a `ParallelCommandSafetyValidator`, merges at most one synchronized
+command action per coordinator step, and currently supports fail-fast recovery
+only. Parallel success adopts verified branch state at the shared barrier.
 
 `registry.make_planning_scene_provider(motion_generator, batch_size=...)`
 returns a fresh `RegistrySceneProvider` with independent baselines and revision
@@ -312,14 +467,8 @@ advanced direct-core paths.
 Stable object identity follows these exact rules:
 
 1. The same `ObjectSemantics` instance is identical to itself.
-2. If either side has an explicit `entity_id`, both sides must have an explicit
-   ID and the strings must match. Never compare an explicit ID directly with a
-   legacy UID, even when the spellings are equal.
-3. Only when both explicit IDs are absent, compare non-empty legacy
-   `entity.uid` values. If either side has a valid UID, both must have one and
-   the strings must match.
-4. Only when neither side has an explicit ID or valid UID may identity fall back
-   to the same live entity handle. `label` is descriptive and never establishes
+2. Otherwise, the required canonical `entity_id` strings must match.
+3. `label`, affordance payloads, and live simulator handles never establish
    identity.
 
 The direct-core identity rules do not perform alias resolution; normalization
@@ -341,20 +490,31 @@ Scene dependencies must match the poses each primitive actually consumes:
 |---|---|
 | `MoveEndEffector` | A `SceneEntityPose` in `xpos`. |
 | `MoveJoints` | None; its target is qpos or a named control-profile command. |
-| `PickUp` | Always its semantic `entity_id`, when present, because the object pose is grounded once and reused; plus any goal-owned `SceneEntityPose`, such as `grasp_xpos`. |
-| `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` only when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
-| `Place` | A `SceneEntityPose` in ordinary `xpos`; for `AssembleGoal`, `base_pose` when supplied. Omitting `base_pose` uses the deprecated live `AssembleAffordance.base_object_entity` fallback with no dependency. |
-| `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
+| `PickUp` | Always its semantic `entity_id`, because the object pose is grounded once and reused; plus any goal-owned `SceneEntityPose`, such as `grasp_xpos`. The semantic object ID is monitored only through `approach`; other dependencies keep their plan-declared window. |
+| `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
+| `Place` | A `SceneEntityPose` in ordinary `xpos`; `AssembleGoal` always declares its required `base_pose`. |
+| `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; the exact object target is composed with the verified `object_to_eef` attachment, without implicit reorientation. After successful semantic calls, the runtime refreshes held relations from terminal object observations and EEF forward kinematics when available. |
+| `PushObject` | Its semantic object ID plus a `SceneEntityPose` in `target_pose`. Both dependencies are monitored through `approach`; contact and push intentionally move the object. |
 | `Press` | `PressGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `Slide` | `SlideGoal.target_pose` when it is a `SceneEntityPose`; the local grasp mesh does not own the link. |
+| `OpenDoor` | `OpenDoorGoal.target_pose` when it is a `SceneEntityPose`; monitoring stops after the `reach` segment so grasp- and hinge-induced handle motion does not trigger recovery. |
 | `Twist` | `TwistGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
-| `HandOver` | No semantic-object scene dependency. It verifies stable attachment identity and derives current pose from held state; its middle/final option poses are tensors, and the reused `GraspGoal.grasp_xpos` field is ignored. |
+| `HandOver` | Its semantic object ID plus a `SceneEntityPose` in `HandOverGoal.target_pose`. The unified action observes the object before pickup, derives its middle transfer pose from the two arm roots, and owns pickup through final release. |
 
 `collect_scene_dependencies()` deliberately stops at `ObjectSemantics`.
 Therefore, a custom action that consumes a snapshot pose through semantic data
 must override `_scene_dependencies()`, union `super()` dependencies, and add the
 consumed semantic ID. Do not declare an ID merely because semantics are present.
+`ActionPlan.scene_dependency_end_segment` can bound dynamic-goal monitoring to
+the reversible part of a staged action for every dependency.
+`ActionPlan.scene_dependency_monitor_until` can assign each dependency an
+exclusive command-frame cutoff. An omitted dependency remains monitored for the
+whole action unless the global segment boundary applies. `PickUp` stops
+monitoring its semantic object ID after approach: object motion before contact
+still replans, while contact-, grasp-, and lift-induced motion is not
+misclassified as an external update. Collision-world and joint-tracking checks
+remain independent of these dependency windows.
 
 ## Static compilation
 
@@ -388,14 +548,18 @@ snapshot every time the action plans. Its entity ID is recorded in
 `ActionPlan.scene_dependencies`.
 
 ```python
-session = engine.start(invocations, initial_context)
+session = engine.start(
+    invocations,
+    initial_context,
+    eligible_mask=initial_eligible_mask,
+)
 runner = ExecutionRunner(
     session,
     observation_provider,
     command_sink,
     clock=execution_clock,
 )
-result = runner.step(effect_success=None)
+result = runner.step(effect_result=None)
 ```
 
 `ExecutionSession` owns deterministic planning progress and recovery state. It
@@ -405,31 +569,114 @@ authoritative `TimedCommandSequence`. A frame contains one or more
 per-environment `hold_duration`. Every command pairs a
 `RuntimeEndpointTarget` with a `RuntimeCommandPayload`; their `transport_id`
 values must match, destinations must be unique within the frame, and joint
-targets may not overlap. `ExecutionFeedbackMode.JOINT_POSITION` requires an
-owned `joint_trajectory` and joint-position targets/payloads; generic command
-plans default to timed completion and retain external semantic-effect
-verification. Framework authorization replaces every emitted target with its
-binding-owned snapshot and rejects unbound destinations, target substitution,
-and endpoint claim conflicts. A plan's non-empty frames and its recovery
-replans retain a stable destination set. Empty failed plans retain previously
-active targets so the caller can still hold them. The session monitors:
+targets may not overlap. `TrackingPolicy` separates optional in-flight checks
+from terminal acceptance. `AtomicAction` projects command payloads into a
+command-aligned `TimedTrackingSequence` through each endpoint's typed tracking
+channel, while `TrackingRuntime` resolves exact-version feedback providers,
+command projectors, and metric evaluators. `TrackingPolicy.joint_position()`
+installs feedback-based in-flight and terminal joint metrics;
+`TrackingPolicy.timed()` uses explicit terminal settling without feedback.
+Invalid required feedback fails only the affected rows closed, while feedback
+that exceeds the configured consecutive-violation budget can trigger a replan.
+Framework authorization replaces every emitted target with its binding-owned
+snapshot and rejects unbound destinations, target substitution, and endpoint
+claim conflicts. A plan's non-empty frames and its recovery replans retain a
+stable destination set. Empty failed plans retain previously active targets so
+the caller can still hold them. The session monitors:
 
-- joint tracking error against the previous command in joint-position mode;
+- typed in-flight tracking metrics and terminal acceptance;
 - translation/rotation drift of referenced scene entities;
 - per-environment collision-world revision changes for collision-sensitive
   actions;
 - action-attempt timeout;
 - planner and semantic-effect failure.
 
-It replans from the latest observation within per-environment budgets. The
-budgets and eligibility masks are row-local, while the action waypoint cursor
-is batch-synchronized: one allowed replan regenerates the active cohort and
-restarts its action trajectory without charging unaffected rows. Unknown
-or exhausted failures are reported as structured `ExecutionEvent` objects. A
-non-empty `StateDelta` is not committed until the caller supplies an external
-`effect_success` mask. While verification is outstanding,
-`ExecutionTick.pending_effect` retains a typed `EffectVerificationRequest` on
-every tick; `EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
+The optional initial `eligible_mask` is copied onto the engine device and must
+be a boolean tensor with one value per environment. Initially ineligible rows
+never re-enter the cohort. They are excluded from every command, replan, effect
+verification, and later invocation barrier. An all-false cohort creates a
+failed session without invoking any action planner.
+
+It replans from the latest observation within per-environment budgets. Pass an
+owned boolean `eligible_mask` to `engine.start()` when a previous semantic call
+has already deactivated rows. Eligibility can only shrink; use
+`runner.deactivate_rows(mask, reason=...)` while a runner owns scheduling so its
+cached effect request stays correlated. The budgets, verified task state, and
+eligibility masks are row-local, while the action waypoint cursor and call
+barrier are batch-synchronized. One allowed replan regenerates the still-pending
+cohort without charging unaffected rows. Exhausted rows hold and never become
+eligible again.
+
+A non-empty `StateDelta` is not committed until the caller supplies a
+correlated `EffectVerificationResult`. Its disjoint `success_mask` and
+`failure_mask` must be subsets of the current request mask; requested rows in
+neither mask remain unresolved. Partial successes commit immediately while
+unresolved rows keep the barrier pending. `EffectVerificationRequest` carries a
+monotonic `verification_id`, stable `requested_at`/`deadline` values in the
+robot-observation timestamp domain, a session-local `attempt_generation`, and
+an owned effect snapshot. Mask shrinkage creates a new ID without extending the
+deadline or changing the generation; installing a replacement plan increments
+the generation. Results for an old ID are rejected. `RecoveryPolicy.action_timeout`
+covers the trajectory and terminal effect wait together, and only timestamps
+strictly greater than the deadline time out. While verification is outstanding,
+`ExecutionTick.pending_effect` retains the request on every tick;
+`EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
+
+For synchronous verification, pass `effect_verifier(context, request)` to
+`runner.step()` or `run_until_blocked()`. The runner calls it after the fresh
+due-cycle observation and supplies its result to `session.tick()` in that same
+cycle. It does not call the verifier when the observation timestamp is already
+past the request deadline. A verifier must return an exact
+`EffectVerificationResult`; all-false masks mean unresolved. External
+asynchronous integrations instead pass `effect_result` explicitly on a due
+`step()` call.
+
+```python
+import torch
+
+request = tick.pending_effect
+effect_result = EffectVerificationResult(
+    verification_id=request.verification_id,
+    success_mask=observed_success,
+    failure_mask=observed_failure,
+    invalidation_mask=observed_failure,
+    retry_mask=torch.zeros_like(observed_failure),
+)
+result = runner.step(effect_result=effect_result)
+```
+
+Both failure-policy masks must be subsets of `failure_mask`.
+`invalidation_mask` applies only the request-owned, removal-only
+`failure_invalidation` delta; a verifier cannot inject replacement state.
+`retry_mask` selects rows whose physical preconditions still permit replay of
+the same invocation. Other failures cross a typed recovery boundary, while
+unresolved terminal evidence is reconciled fail-closed at the action deadline.
+
+Curated semantic calls also install physical checks inside an action. A
+`HeldObjectGuardRequest` observes negative invariants before commands in named
+segments and applies removal-only reconciliation when attachment loss is
+proven. A `PhaseEffectGateRequest` blocks entry to a named segment until its
+positive physical transition is verified, replaying the preceding command for
+the synchronized active cohort while evidence is unresolved. Gate success
+unlocks motion but does not commit `TaskState`; the terminal monitor remains
+authoritative.
+
+Pick gates attachment before `lift`; Place gates release before `retract`.
+The unified HandOver action gates source pickup before `pickup_transport`,
+destination pickup before `handover_release`, and source release before
+`place`. Its source-held guard covers pickup transport through receiver close,
+and its destination-held guard covers source release and placement. All checks
+are observational: they never create simulator constraints, freeze bodies, or
+override poses.
+
+Cause events (`ACTION_PLANNING_FAILED`, `EFFECT_VERIFICATION_FAILED`, and
+`EFFECT_VERIFICATION_TIMEOUT`) are distinct from the `ACTION_RETRY` recovery
+event. An `ACTION_PLANNING_FAILED` event carries the plan's stable failure code
+and retryability. Non-retryable failures deactivate their affected rows without
+spending an action retry budget. `AtomicAction.build_command_plan()` supplies a
+retryable `planning_failed` classification when a failed result omitted one;
+direct `ActionPlan` construction requires explicit failure diagnostics.
+`SESSION_COMPLETED` and `SESSION_FAILED` are distinct terminal events.
 
 Recovery replans reuse the current immutable `ResolvedActionRequest`, including
 its owned goal snapshot. Mutable goal values are copied, while simulator-backed
@@ -539,6 +786,26 @@ Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
 `dynamic_obstacle_recovery.py`. Each injects one disturbance, reports the
 structured invalidation/replan events, and requires terminal completion.
 
+Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
+Both examples separate `create_*_application()` (scene/profile/runtime and
+default verifier wiring), `create_*_task()` (robot-independent semantic calls),
+and the application-facing `app.run(task, ...)` entry. Both examples use the
+canonical `SkillRuntime.from_simulation()` factory; there is no tutorial-specific
+execution loop. `place.py`
+executes `Pick -> Place`, verifying the observed lift, planned object-to-EEF
+relation, release pose, and open hand. `hand_over.py` demonstrates disjoint
+dual-arm resources plus an explicit `RegisteredSemanticLowerer`, then verifies
+the unified pickup, transfer, placement, and final release. Both report
+structured recovery events and use `--diagnose_plan` only for a separate
+offline compile that projects hypothetical effects without executing them.
+Release and ownership-transfer presets disable whole-action effect retries
+because those physical changes are not safely repeatable without state
+reconciliation.
+
+Human-facing architecture and lifecycle documentation lives in
+`docs/source/overview/sim/semantic_skills.md`; the runnable walkthrough is
+indexed at `docs/source/tutorial/semantic_skills.rst`.
+
 The latest validated session context is retained for safe hold if the first
 live observation fails. Environment IDs must remain stable and ordered for the
 entire session; robot and scene timestamps and scene versions must be monotonic.
@@ -573,12 +840,11 @@ an implementation is installed; it does not prove that the current embodiment
 has compatible control parts, profiles, bindings, or task state. Capability
 discovery is separate: `engine.skills`
 contains only agent-visible installed actions whose concrete classes explicitly
-declare a `binding_contract`; when a robot profile is bound,
-`engine.skill_profile.skills` further filters that catalog to valid resource
-assignments. Registration is engine-local; there is no independent process-wide
-action catalog. Construct extensions explicitly and install them with
-`engine.register()` so discovery and execution cannot observe disconnected
-registries.
+declare a `binding_contract`; `BoundRobotSkillProfile.skills` further filters
+that catalog to valid resource assignments. Registration is engine-local; there
+is no independent process-wide action catalog. Construct extensions explicitly
+and install them with `engine.register()` so discovery and execution cannot
+observe disconnected registries.
 
 `ExecutionRunnerCfg` is intentionally separate from action options. It
 configures controller acknowledgement deadlines, scheduler cadence, and final
@@ -642,7 +908,10 @@ on their resolved endpoint.
 | `move_end_effector` | `EndEffectorPoseGoal` | `primary.motion` |
 | `move_joints` | `JointPositionGoal` (`target` is explicit qpos or a profile command name) | `primary.motion` |
 | `pick_up` | `GraspGoal` | `primary.motion`, `primary.grasp` |
+| `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` |
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` |
+| `pour` | `PourGoal` | `primary.motion`, `primary.grasp` |
+| `push_object` | `PushObjectGoal` | `primary.motion`, `primary.grasp` |
 | `place` | `PlaceGoal`, `AssembleGoal` | `primary.motion`, `primary.grasp` |
 | `press` | `PressGoal` | `primary.motion`, `primary.grasp` |
 | `slide` | `SlideGoal` | `primary.motion`, `primary.grasp` |
@@ -656,6 +925,13 @@ target-local geometry and interaction semantics. Their goals own an explicit
 `target_pose`, which may be a deterministic tensor snapshot or a late-bound
 `SceneEntityPose`. Never put an `Articulation`, `RigidObject`, or live link pose
 reader in these affordances.
+
+`PushObject` is a free-object planar interaction with an empty `StateDelta`.
+Its options separate object/support contact geometry from per-control-part tool
+calibration, and a completion tolerance lets a corrective invocation hold when
+the latest measured object pose is already close. A task still owns settling
+and measured landing-pose validation; action completion alone does not claim
+placement.
 
 `Press` and `Slide` use dense axis-aligned Cartesian targets for their contact
 motion. The linear motion-generator path solves every output sample with IK;
@@ -677,11 +953,9 @@ semantic object's pose once per planning attempt and declares the semantic
 `object_to_eef` relation all consume that same pose.
 
 `AssembleGoal.base_pose=SceneEntityPose(...)` is the canonical assembly anchor
-and becomes a recovery dependency. An omitted `base_pose` permits the deprecated
-live `AssembleAffordance.base_object_entity` fallback for direct-core callers
-only; it is not dependency-tracked. The current `assemble.py` tutorial exercises
-that legacy fallback, while `moving_target_recovery.py` is the canonical
-snapshot-grounded object example.
+and is required, so the base is always snapshot-grounded and registered as a
+recovery dependency. The `assemble.py` tutorial publishes the matching scene
+snapshot; `moving_target_recovery.py` demonstrates dynamic snapshot recovery.
 
 ## Extension rules
 

@@ -35,6 +35,7 @@ from scripts.benchmark.atomic_action.common import (
     build_single_action_leaderboard,
     build_video_output_path,
     create_antipodal_object_semantics,
+    create_benchmark_grasp_pose_generator,
     create_benchmark_object,
     describe_object_preset,
     ensure_repo_root,
@@ -126,13 +127,13 @@ def _run_case(
         ActionInvocation,
         AtomicActionEngine,
         ControlPartCommandProfile,
+        EntityState,
         GraspGoal,
         PickUpOptions,
         MotionPolicy,
+        SceneSnapshot,
     )
     from scripts.tutorials.atomic_action.pickup import (
-        build_grasp_generator_cfg,
-        build_gripper_collision_cfg,
         get_hand_open_close_qpos,
         initialize_pre_pick_robot_pose,
         compute_pick_close_end_step,
@@ -166,13 +167,13 @@ def _run_case(
                     grasp=hand_close,
                 )
             },
+            grasp_pose_generators={
+                "hand": create_benchmark_grasp_pose_generator(case_args)
+            },
         )
         semantics = create_antipodal_object_semantics(
             obj=obj,
             preset=object_preset,
-            args=case_args,
-            build_gripper_collision_cfg=build_gripper_collision_cfg,
-            build_grasp_generator_cfg=build_grasp_generator_cfg,
         )
         binding = atomic_engine.bind_control_parts(
             "pick_up",
@@ -194,7 +195,16 @@ def _run_case(
                         ),
                     ),
                 ),
-                atomic_engine.initial_context(control_dt=sim.sim_config.physics_dt),
+                atomic_engine.initial_context(
+                    scene=SceneSnapshot(
+                        timestamp=0.0,
+                        version=0,
+                        entities={
+                            obj.uid: EntityState(obj.get_local_pose(to_matrix=True))
+                        },
+                    ),
+                    control_dt=sim.sim_config.physics_dt,
+                ),
             )
         )
         is_success = bool(result.plan_success.all().item())

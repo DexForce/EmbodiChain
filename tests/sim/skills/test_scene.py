@@ -24,9 +24,17 @@ from typing import Literal
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import Affordance, EntityState, SceneSnapshot
+from embodichain.lab.sim.atomic_actions import (
+    Affordance,
+    AntipodalAffordance,
+    EntityState,
+    ObservedArticulationJointState,
+    SceneSnapshot,
+)
 from embodichain.lab.sim.planners.base_planner import CollisionWorldInfo
 from embodichain.lab.sim.skills import (
+    AmbiguousSceneAffordanceError,
+    GRASP_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneCollisionRole,
@@ -35,6 +43,7 @@ from embodichain.lab.sim.skills import (
     SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
+    UnsupportedSceneAffordanceError,
 )
 
 
@@ -83,6 +92,24 @@ class _MutableStateProvider:
         return EntityState(self.pose)
 
 
+class _MutableJointProvider:
+    """Expose one mutable canonical articulation joint observation."""
+
+    def __init__(self, position: torch.Tensor) -> None:
+        self.position = position
+        self.calls = 0
+
+    def observe_joints(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> dict[str, ObservedArticulationJointState]:
+        del timestamp, env_ids
+        self.calls += 1
+        return {"slide": ObservedArticulationJointState(self.position)}
+
+
 class _MotionGenerator:
     """Minimal dynamic-collision integration surface."""
 
@@ -121,12 +148,26 @@ class _ExternalSceneProvider:
 class _SimulationEntity:
     """Simulation entity pose source used by the opt-in adapter tests."""
 
-    def __init__(self, pose: torch.Tensor) -> None:
+    def __init__(
+        self,
+        pose: torch.Tensor,
+        *,
+        qpos: torch.Tensor | None = None,
+        joint_names: tuple[str, ...] = (),
+    ) -> None:
         self.pose = pose
+        self.qpos = qpos
+        self.joint_names = joint_names
 
     def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
         assert to_matrix is True
         return self.pose
+
+    def get_qpos(self, *, target: bool) -> torch.Tensor:
+        assert target is False
+        if self.qpos is None:
+            raise RuntimeError("This simulation fixture has no articulation qpos.")
+        return self.qpos
 
 
 class _Simulation:
@@ -138,7 +179,11 @@ class _Simulation:
             "ignored": _SimulationEntity(torch.eye(4) * 2.0),
         }
         self.articulations = {
-            "sim_drawer": _SimulationEntity(torch.eye(4)),
+            "sim_drawer": _SimulationEntity(
+                torch.eye(4),
+                qpos=torch.tensor([[0.25]]),
+                joint_names=("slide",),
+            ),
         }
 
     def get_rigid_object(self, uid: str) -> _SimulationEntity | None:
@@ -146,6 +191,25 @@ class _Simulation:
 
     def get_articulation(self, uid: str) -> _SimulationEntity | None:
         return self.articulations.get(uid)
+
+
+class _CopyTrackedAffordance(AntipodalAffordance):
+    """Count payload copies so metadata projection can prove it performs none."""
+
+    copies = 0
+
+    def __deepcopy__(self, memo: dict[int, object]) -> _CopyTrackedAffordance:
+        del memo
+        type(self).copies += 1
+        return _CopyTrackedAffordance()
+
+
+class _SelfCopyAffordance(AntipodalAffordance):
+    """Malicious payload that violates deepcopy ownership."""
+
+    def __deepcopy__(self, memo: dict[int, object]) -> _SelfCopyAffordance:
+        del memo
+        return self
 
 
 @pytest.mark.parametrize("entity_id", ["", " cube", "cube "])
@@ -195,6 +259,47 @@ def test_root_registration_requires_explicit_state_provider() -> None:
         SceneEntityRegistration(ref=SceneObjectRef("cube"))
 
 
+def test_joint_state_provider_is_owned_by_articulation_registration() -> None:
+    joint_provider = _MutableJointProvider(torch.tensor([[0.1], [0.2]]))
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneArticulationRef("drawer"),
+                state_provider=_StateProvider(),
+                joint_state_provider=joint_provider,
+            ),
+        )
+    )
+    provider = registry.make_scene_provider()
+    env_ids = torch.tensor([0, 1], dtype=torch.long)
+
+    first = provider.snapshot(timestamp=0.0, env_ids=env_ids)
+    returned = first.articulation_joints[("drawer", "slide")]
+    returned.position.zero_()
+    assert torch.equal(
+        first.articulation_joints[("drawer", "slide")].position,
+        torch.tensor([[0.1], [0.2]]),
+    )
+
+    joint_provider.position[:, 0] = torch.tensor([0.3, 0.4])
+    second = provider.snapshot(timestamp=1.0, env_ids=env_ids)
+    assert second.version == first.version + 1
+    assert torch.equal(
+        second.articulation_joints[("drawer", "slide")].position,
+        torch.tensor([[0.3], [0.4]]),
+    )
+    assert joint_provider.calls == 2
+
+
+def test_joint_state_provider_rejects_non_articulation_registration() -> None:
+    with pytest.raises(ValueError, match="SceneArticulationRef"):
+        SceneEntityRegistration(
+            ref=SceneObjectRef("cube"),
+            state_provider=_StateProvider(),
+            joint_state_provider=_MutableJointProvider(torch.tensor([0.0])),
+        )
+
+
 def test_link_registration_requires_parent_and_native_name() -> None:
     with pytest.raises(ValueError, match="parent and native_name"):
         SceneEntityRegistration(
@@ -228,6 +333,172 @@ def test_affordance_registration_rejects_two_pose_sources() -> None:
             affordance=Affordance(),
             relative_pose=torch.eye(4),
         )
+
+
+def test_grasp_capability_requires_typed_versioned_payload() -> None:
+    object_ref = SceneObjectRef("cube")
+    common = {
+        "ref": SceneAffordanceRef("cube_grasp"),
+        "parent": object_ref,
+        "native_name": "grasp",
+        "relative_pose": torch.eye(4),
+        "affordance_capabilities": frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+    }
+
+    with pytest.raises(TypeError, match="AntipodalAffordance"):
+        SceneEntityRegistration(
+            **common,
+            affordance=Affordance(),
+            affordance_revision="v1",
+        )
+    with pytest.raises(ValueError, match="affordance_revision"):
+        SceneEntityRegistration(
+            **common,
+            affordance=AntipodalAffordance(),
+        )
+
+
+def test_registry_selects_only_explicit_scoped_affordance_default() -> None:
+    object_ref = SceneObjectRef("cube")
+    first = SceneAffordanceRef("first_grasp")
+    second = SceneAffordanceRef("second_grasp")
+
+    def registrations(*, with_default: bool) -> tuple[SceneEntityRegistration, ...]:
+        return (
+            SceneEntityRegistration(
+                ref=object_ref,
+                state_provider=_StateProvider(),
+                default_affordances=(
+                    {GRASP_AFFORDANCE_CAPABILITY: second} if with_default else {}
+                ),
+            ),
+            *tuple(
+                SceneEntityRegistration(
+                    ref=ref,
+                    parent=object_ref,
+                    native_name=ref.entity_id,
+                    affordance=AntipodalAffordance(),
+                    affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                    affordance_revision="v1",
+                    relative_pose=torch.eye(4),
+                )
+                for ref in (first, second)
+            ),
+        )
+
+    ambiguous = SceneRegistry(registrations(with_default=False))
+    with pytest.raises(AmbiguousSceneAffordanceError, match="multiple"):
+        ambiguous.resolve_affordance(
+            object_ref,
+            capability=GRASP_AFFORDANCE_CAPABILITY,
+        )
+    with pytest.raises(UnsupportedSceneAffordanceError, match="no affordance"):
+        ambiguous.resolve_affordance(
+            object_ref,
+            capability="affordance.unknown",
+        )
+
+    registry = SceneRegistry(registrations(with_default=True))
+    assert (
+        registry.resolve_affordance(
+            object_ref,
+            capability=GRASP_AFFORDANCE_CAPABILITY,
+        )
+        == second
+    )
+    assert (
+        registry.resolve_affordance(
+            object_ref,
+            capability=GRASP_AFFORDANCE_CAPABILITY,
+            explicit=first,
+        )
+        == first
+    )
+
+
+def test_registry_metadata_projection_does_not_copy_affordance_payload() -> None:
+    object_ref = SceneObjectRef("cube")
+    _CopyTrackedAffordance.copies = 0
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(ref=object_ref, state_provider=_StateProvider()),
+            SceneEntityRegistration(
+                ref=SceneAffordanceRef("cube_grasp"),
+                parent=object_ref,
+                native_name="grasp",
+                affordance=_CopyTrackedAffordance(),
+                affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                affordance_revision="v1",
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+    _CopyTrackedAffordance.copies = 0
+
+    metadata = registry.entity_metadata
+
+    assert metadata[1].affordance_payload_type is _CopyTrackedAffordance
+    assert _CopyTrackedAffordance.copies == 0
+
+
+def test_registry_rejects_affordance_that_cannot_produce_owned_copy() -> None:
+    cube = SceneObjectRef("cube")
+
+    with pytest.raises(TypeError, match="distinct value"):
+        SceneRegistry(
+            (
+                SceneEntityRegistration(ref=cube, state_provider=_StateProvider()),
+                SceneEntityRegistration(
+                    ref=SceneAffordanceRef("cube_grasp"),
+                    parent=cube,
+                    native_name="grasp",
+                    affordance=_SelfCopyAffordance(),
+                    relative_pose=torch.eye(4),
+                ),
+            )
+        )
+
+
+def test_registry_builds_owned_object_semantics_from_direct_child() -> None:
+    cube = SceneObjectRef("cube")
+    table = SceneObjectRef("table")
+    cube_grasp = SceneAffordanceRef("cube_grasp")
+    table_grasp = SceneAffordanceRef("table_grasp")
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=cube,
+                state_provider=_StateProvider(),
+                semantic_type="cube",
+            ),
+            SceneEntityRegistration(ref=table, state_provider=_StateProvider()),
+            SceneEntityRegistration(
+                ref=cube_grasp,
+                parent=cube,
+                native_name="grasp",
+                affordance=AntipodalAffordance(),
+                relative_pose=torch.eye(4),
+            ),
+            SceneEntityRegistration(
+                ref=table_grasp,
+                parent=table,
+                native_name="grasp",
+                affordance=AntipodalAffordance(),
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+
+    first = registry.object_semantics(cube, affordance=cube_grasp)
+    second = registry.object_semantics("cube", affordance="cube_grasp")
+
+    assert first.entity_id == "cube"
+    assert first.label == "cube"
+    assert first.affordance is not second.affordance
+    first.affordance.custom_config["mutated"] = True
+    assert "mutated" not in second.affordance.custom_config
+    with pytest.raises(ValueError, match="not a direct child"):
+        registry.object_semantics(cube, affordance=table_grasp)
 
 
 def test_collision_registration_requires_geometry_provider() -> None:
@@ -318,12 +589,12 @@ def test_registry_rejects_ambiguous_aliases_across_types() -> None:
                 SceneEntityRegistration(
                     ref=SceneObjectRef("cube"),
                     state_provider=_StateProvider(),
-                    aliases=("legacy",),
+                    aliases=("external",),
                 ),
                 SceneEntityRegistration(
                     ref=SceneArticulationRef("drawer"),
                     state_provider=_StateProvider(),
-                    aliases=("legacy",),
+                    aliases=("external",),
                 ),
             )
         )
@@ -654,7 +925,7 @@ def test_collision_integration_requires_exact_full_world_ids() -> None:
             ),
             SceneEntityRegistration(
                 ref=SceneObjectRef("table"),
-                aliases=("legacy_table",),
+                aliases=("external_table",),
                 state_provider=_StateProvider(),
                 geometry_provider=_GeometryProvider(),
                 collision_role=SceneCollisionRole.STATIC,
@@ -678,7 +949,7 @@ def test_collision_integration_requires_exact_full_world_ids() -> None:
         registry.validate_collision_integration(
             _MotionGenerator(
                 entity_ids=("cube",),
-                world_entity_ids=("cube", "legacy_table"),
+                world_entity_ids=("cube", "external_table"),
             ),  # type: ignore[arg-type]
             batch_size=2,
         )
@@ -727,7 +998,7 @@ def test_collision_integration_rejects_external_provider_id_drift() -> None:
         registry.validate_collision_integration(
             _MotionGenerator(entity_ids=("cube",)),  # type: ignore[arg-type]
             batch_size=2,
-            scene_provider=_ExternalSceneProvider(("legacy_cube",)),
+            scene_provider=_ExternalSceneProvider(("external_cube",)),
         )
 
 
@@ -832,6 +1103,35 @@ def test_from_simulation_is_explicit_and_uses_uid_only_as_alias() -> None:
     assert registry.collision_geometry_by_id() == {}
     assert set(snapshot.entities) == {"cube"}
     assert "ignored" not in snapshot.entities
+
+
+def test_from_simulation_does_not_register_canonical_uid_as_alias() -> None:
+    simulation = _Simulation()
+    simulation.rigid_objects["cube"] = simulation.rigid_objects["sim_cube"]
+
+    registry = SceneRegistry.from_simulation(
+        simulation,  # type: ignore[arg-type]
+        rigid_objects={"cube": "cube"},
+    )
+
+    assert registry.resolve("cube") == SceneObjectRef("cube")
+    assert registry.aliases == {}
+
+
+def test_from_simulation_publishes_named_articulation_qpos() -> None:
+    registry = SceneRegistry.from_simulation(
+        _Simulation(),  # type: ignore[arg-type]
+        articulations={"drawer": "sim_drawer"},
+    )
+
+    snapshot = registry.make_scene_provider().snapshot(
+        timestamp=0.0,
+        env_ids=torch.tensor([0], dtype=torch.long),
+    )
+
+    state = snapshot.articulation_joints[("drawer", "slide")]
+    assert torch.equal(state.position, torch.tensor([[0.25]]))
+    assert state.valid_mask is not None and state.valid_mask.tolist() == [True]
 
 
 def test_from_simulation_derives_live_geometry_only_for_explicit_collision_role() -> (

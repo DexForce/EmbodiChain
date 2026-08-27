@@ -62,7 +62,7 @@ Example
 
 .. code-block:: bash
 
-    embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+    embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 
 For more details, please refer to the source code and API documentation of each submodule.
 

@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, TYPE_CHECKING
@@ -57,8 +56,21 @@ class SceneEntityPose:
                 "relative_pose",
                 allow_waypoints=False,
             )
+            object.__setattr__(self, "relative_pose", self.relative_pose.clone())
         if not 0.0 <= self.minimum_confidence <= 1.0:
             raise ValueError("minimum_confidence must be in [0, 1].")
+
+    def snapshot(self) -> SceneEntityPose:
+        """Return an independently owned late-bound pose value.
+
+        Returns:
+            Exact scene reference with an owned relative-pose tensor.
+        """
+        return SceneEntityPose(
+            self.entity_id,
+            relative_pose=self.relative_pose,
+            minimum_confidence=self.minimum_confidence,
+        )
 
 
 PoseGoalValue = torch.Tensor | SceneEntityPose
@@ -158,36 +170,16 @@ def _resolve_object_pose(
     *,
     name: str = "object",
 ) -> torch.Tensor:
-    """Resolve an object's pose from a snapshot or the deprecated live handle."""
+    """Resolve an object's pose from the current scene snapshot."""
     from .core import ObjectSemantics
 
     if not isinstance(semantics, ObjectSemantics):
         raise TypeError("semantics must be an ObjectSemantics instance.")
-    if semantics.entity_id is not None:
-        return resolve_pose_goal(
-            SceneEntityPose(semantics.entity_id),
-            context,
-            name=name,
-        )
-    if semantics.entity is None:
-        raise ValueError(
-            f"{name} requires ObjectSemantics.entity_id or a legacy entity handle."
-        )
-    warnings.warn(
-        "Live pose grounding through ObjectSemantics.entity is deprecated; "
-        "set entity_id and provide the entity through PlanningContext.scene.",
-        DeprecationWarning,
-        stacklevel=2,
+    return resolve_pose_goal(
+        SceneEntityPose(semantics.entity_id),
+        context,
+        name=name,
     )
-    pose = semantics.entity.get_local_pose(to_matrix=True)
-    if not isinstance(pose, torch.Tensor):
-        raise TypeError(f"{name} legacy entity pose must be a torch.Tensor.")
-    pose = pose.to(device=context.robot.qpos.device, dtype=torch.float32)
-    if pose.shape == (4, 4):
-        pose = pose.unsqueeze(0).expand(context.batch_size, -1, -1)
-    elif pose.shape != (context.batch_size, 4, 4):
-        raise ValueError(f"{name} legacy entity pose must match planning batch size.")
-    return pose.clone()
 
 
 def collect_scene_dependencies(value: Any) -> tuple[str, ...]:

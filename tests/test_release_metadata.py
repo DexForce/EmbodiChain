@@ -73,6 +73,8 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
     assert {"embodichain", "embodichain_tasks", "embodichain_tasks.configs"} <= set(
         packages
     )
+    assert "embodichain_tasks.manipulation.tableware" in packages
+    assert "embodichain_tasks.tableware" not in packages
     assert all(
         package in {"embodichain", "embodichain_tasks"}
         or package.startswith(("embodichain.", "embodichain_tasks."))

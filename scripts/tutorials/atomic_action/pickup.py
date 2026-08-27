@@ -31,9 +31,11 @@ import torch
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
+    EntityState,
     GraspGoal,
     PickUpOptions,
     MotionPolicy,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -44,6 +46,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
@@ -144,12 +147,16 @@ def main() -> None:
                 grasp=hand_close,
             )
         },
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
+            )
+        },
     )
     semantics = create_antipodal_semantics(
         obj,
         label="cube",
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
     )
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "pickup_object_axis", obj.get_local_pose(to_matrix=True))
@@ -175,7 +182,14 @@ def main() -> None:
                 ),
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
+            ),
+            control_dt=sim.sim_config.physics_dt,
+        ),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan PickUp demo trajectory.")

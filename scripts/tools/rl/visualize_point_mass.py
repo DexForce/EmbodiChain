@@ -36,7 +36,7 @@ from tensordict import TensorDict
 from embodichain.learning.rl.models import Policy, build_mlp_from_cfg, build_policy
 from embodichain.utils.logger import log_info
 from embodichain.utils.utility import load_config
-from embodichain_tasks.rl.basic.point_mass import PointMassEnv
+from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
 
 @dataclass(frozen=True)

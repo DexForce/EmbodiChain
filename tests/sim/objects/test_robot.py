@@ -17,9 +17,11 @@
 from __future__ import annotations
 
 import os
-import torch
-import pytest
+from types import SimpleNamespace
+
 import numpy as np
+import pytest
+import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
@@ -48,6 +50,20 @@ CONTROL_PARTS = {
         "RIGHT_J7",
     ],
 }
+
+
+def test_get_qf_selects_control_part_joint_efforts():
+    full_qf = torch.tensor(
+        [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=torch.float32
+    )
+    robot = object.__new__(Robot)
+    robot._data = SimpleNamespace(qf=full_qf)
+    robot.cfg = SimpleNamespace(control_parts={"arm": ["joint_3", "joint_1"]})
+    robot._joint_ids = {"arm": [3, 1]}
+
+    actual_qf = robot.get_qf(name="arm")
+
+    assert torch.equal(actual_qf, full_qf[:, [3, 1]])
 
 
 # Base test class for CPU and CUDA

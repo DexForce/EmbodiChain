@@ -27,8 +27,6 @@ from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.common import BatchEntity
-
 from .affordance import Affordance
 from .bindings import EndpointBinding, JointPositionTarget
 from .effects import StateDelta
@@ -42,8 +40,9 @@ from .invocation import (
 )
 from .plans import (
     ActionPlan,
-    ExecutionFeedbackMode,
+    EffectVerificationRequirement,
     PlannerDiagnostics,
+    PlanningFailure,
     TimedTrajectory,
     TrajectorySegment,
     normalize_success_mask,
@@ -55,6 +54,12 @@ from .runtime_commands import (
     JointPositionPayload,
     RuntimeCommandFrame,
     TimedCommandSequence,
+)
+from .tracking import (
+    FeedbackTerminalAcceptance,
+    TimedTrackingSequence,
+    TrackingFrame,
+    TrackingSetpoint,
 )
 
 if TYPE_CHECKING:
@@ -96,17 +101,14 @@ class ObjectSemantics:
     geometry: dict[str, Any]
     """Non-affordance geometric metadata."""
 
+    entity_id: str
+    """Stable scene identifier used by snapshot grounding and object identity."""
+
     properties: dict[str, Any] = field(default_factory=dict)
     """Physical properties such as mass and friction."""
 
     label: str = "none"
     """Semantic object category."""
-
-    entity: BatchEntity | None = None
-    """Optional simulation entity used by deterministic grounding."""
-
-    entity_id: str | None = None
-    """Stable scene identifier used by snapshot grounding and explicit identity."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.affordance, Affordance):
@@ -117,17 +119,9 @@ class ObjectSemantics:
             raise TypeError("properties must be a dict.")
         if not isinstance(self.label, str) or not self.label:
             raise ValueError("label must be a non-empty string.")
-        if self.entity_id is not None and (
-            not isinstance(self.entity_id, str) or not self.entity_id.strip()
-        ):
-            raise ValueError("entity_id must be a non-empty string when set.")
+        if not isinstance(self.entity_id, str) or not self.entity_id.strip():
+            raise ValueError("entity_id must be a non-empty string.")
         self.affordance.object_label = self.label
-
-
-def _legacy_object_uid(semantics: ObjectSemantics) -> str | None:
-    """Return a valid legacy simulation UID without alias normalization."""
-    uid = getattr(semantics.entity, "uid", None)
-    return uid if isinstance(uid, str) and uid.strip() else None
 
 
 def _same_object_identity(
@@ -135,19 +129,7 @@ def _same_object_identity(
     right: ObjectSemantics,
 ) -> bool:
     """Return whether two semantic snapshots identify the same object."""
-    if left is right:
-        return True
-    if left.entity_id is not None or right.entity_id is not None:
-        return (
-            left.entity_id is not None
-            and right.entity_id is not None
-            and left.entity_id == right.entity_id
-        )
-    left_uid = _legacy_object_uid(left)
-    right_uid = _legacy_object_uid(right)
-    if left_uid is not None or right_uid is not None:
-        return left_uid is not None and right_uid is not None and left_uid == right_uid
-    return left.entity is not None and left.entity is right.entity
+    return left is right or left.entity_id == right.entity_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,7 +355,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 invocation.control_overrides,
             ),
             motion_policy=invocation.motion_policy,
+            tracking_policy=invocation.tracking_policy,
             recovery_policy=invocation.recovery_policy,
+            phase_effect_gates=invocation.phase_effect_gates,
             skill_options=options,
             invocation_id=invocation.invocation_id,
             revision=invocation.revision,
@@ -506,9 +490,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         success: bool | torch.Tensor,
         trajectory: TimedTrajectory,
         expected_effects: StateDelta | None = None,
+        effect_candidates: StateDelta | None = None,
+        effect_verification: EffectVerificationRequirement | None = None,
         replannable: bool = True,
         diagnostics: PlannerDiagnostics | None = None,
         segment_lengths: Mapping[str, int] | None = None,
+        scene_dependency_monitor_until: Mapping[str, int] | None = None,
+        scene_dependency_end_segment: str | None = None,
     ) -> ActionPlan:
         """Build a validated action plan for a primitive implementation.
 
@@ -518,10 +506,24 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             success: Per-environment planning success or scalar planner result.
             trajectory: Full-robot trajectory with explicit timing.
             expected_effects: Symbolic effects to verify after execution.
+            effect_candidates: Planned attachment baselines used by phase gates
+                and in-flight held-object guards without committing task state.
+            effect_verification: Optional explicit physical-effect boundary.
+                Use this when verification is required without a symbolic task-
+                state delta.
             replannable: Whether the execution runtime may replan this action.
             diagnostics: Optional retained planner diagnostics.
             segment_lengths: Optional ordered mapping from semantic segment
                 names to waypoint counts. Zero-length entries are omitted.
+            scene_dependency_monitor_until: Optional per-entity exclusive
+                waypoint-index upper bound for scene-motion invalidation. An
+                entity is monitored while the current waypoint index is smaller
+                than its bound. ``0`` disables monitoring immediately; omitted
+                dependencies remain monitored for the full action. Once the bound
+                is reached, all pose changes for that entity are ignored.
+            scene_dependency_end_segment: Optional last segment during which
+                scene motion may invalidate and replan the action for every
+                dependency.
 
         Returns:
             Side-effect-free action plan.
@@ -556,10 +558,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             success=success_mask,
             commands=commands,
             expected_effects=expected_effects,
+            effect_candidates=effect_candidates,
+            effect_verification=effect_verification,
             replannable=replannable,
             diagnostics=diagnostics,
             segment_lengths=segment_lengths,
-            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+            scene_dependency_monitor_until=scene_dependency_monitor_until,
+            scene_dependency_end_segment=scene_dependency_end_segment,
             joint_trajectory=timed,
         )
 
@@ -571,17 +576,48 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         success: bool | torch.Tensor,
         commands: TimedCommandSequence,
         expected_effects: StateDelta | None = None,
+        effect_candidates: StateDelta | None = None,
+        effect_verification: EffectVerificationRequirement | None = None,
         replannable: bool = True,
         diagnostics: PlannerDiagnostics | None = None,
         segment_lengths: Mapping[str, int] | None = None,
-        feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED,
+        scene_dependency_monitor_until: Mapping[str, int] | None = None,
+        scene_dependency_end_segment: str | None = None,
         joint_trajectory: TimedTrajectory | None = None,
     ) -> ActionPlan:
         """Build a plan from transport-neutral runtime command frames.
 
-        Non-joint command sequences use timed completion unless a future
-        endpoint-specific feedback evaluator is installed. Semantic effects
-        remain externally verified through the execution session.
+        Tracking targets are projected from the command payloads through the
+        typed channels declared by each bound endpoint. Semantic effects remain
+        externally verified through the execution session.
+
+        Args:
+            request: Resolved invocation snapshot being planned.
+            context: Planning input used for the plan.
+            success: Per-environment planning success or scalar planner result.
+            commands: Transport-neutral command sequence for the action.
+            expected_effects: Symbolic effects to verify after execution.
+            effect_candidates: Planned attachment baselines used by phase gates
+                and in-flight held-object guards without committing task state.
+            effect_verification: Optional explicit physical-effect boundary.
+            replannable: Whether the execution runtime may replan this action.
+            diagnostics: Optional retained planner diagnostics.
+            segment_lengths: Optional ordered mapping from semantic segment names
+                to command-frame counts. Zero-length entries are omitted.
+            scene_dependency_monitor_until: Optional per-entity exclusive
+                command-frame-index upper bound for scene-motion invalidation. An
+                entity is monitored while the current frame index is smaller than
+                its bound. ``0`` disables monitoring immediately; omitted
+                dependencies remain monitored for the full action. Once the bound
+                is reached, all pose changes for that entity are ignored.
+            scene_dependency_end_segment: Optional last segment during which
+                scene motion may invalidate and replan the action for every
+                dependency.
+            joint_trajectory: Optional joint trajectory retained for offline
+                compilation and inspection.
+
+        Returns:
+            Side-effect-free action plan.
         """
         if not isinstance(commands, TimedCommandSequence):
             raise TypeError("commands must be a TimedCommandSequence.")
@@ -602,6 +638,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             commands,
             active_mask=success_mask,
         )
+        tracking = self._tracking_sequence(request, commands)
         segments = self._build_segments(
             segment_lengths,
             frame_count=commands.frame_count,
@@ -610,25 +647,102 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             diagnostics = PlannerDiagnostics(
                 backend=self.planning_services.planner_name
             )
+        if (~success_mask).any() and diagnostics.failure is None:
+            diagnostics = PlannerDiagnostics(
+                backend=diagnostics.backend,
+                messages=diagnostics.messages,
+                metadata=diagnostics.metadata,
+                failure=PlanningFailure("planning_failed", retryable=True),
+            )
         return ActionPlan(
             skill_id=self.skill_id,
             plan_success=success_mask,
             commands=commands,
             recovery_policy=request.recovery_policy,
+            tracking_policy=request.tracking_policy,
             planned_scene_version=context.scene.version,
             planned_collision_world_revision=(
                 context.scene.collision_world_revisions(context.batch_size)
             ),
             diagnostics=diagnostics,
-            feedback_mode=feedback_mode,
+            tracking=tracking,
             joint_trajectory=joint_trajectory,
             segments=segments,
             scene_dependencies=self._scene_dependencies(request),
+            scene_dependency_monitor_until=(
+                {}
+                if scene_dependency_monitor_until is None
+                else scene_dependency_monitor_until
+            ),
+            scene_dependency_end_segment=scene_dependency_end_segment,
             collision_world_sensitive=self._uses_collision_world(request, context),
             replannable=replannable,
             expected_effects=expected_effects or StateDelta(),
+            effect_candidates=effect_candidates or StateDelta(),
+            effect_verification=effect_verification,
             invocation_id=request.invocation_id,
             invocation_revision=request.revision,
+        )
+
+    def _tracking_sequence(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        commands: TimedCommandSequence,
+    ) -> TimedTrackingSequence | None:
+        """Project command payloads through binding-owned tracking channels."""
+        policy = request.tracking_policy
+        metrics = list(() if policy.in_flight is None else policy.in_flight.metrics)
+        if isinstance(policy.terminal, FeedbackTerminalAcceptance):
+            metrics.extend(policy.terminal.metrics)
+        if not metrics:
+            return None
+
+        runtime = self.planning_services.tracking_runtime
+        for metric in metrics:
+            runtime.evaluators.resolve(metric)
+        metrics_by_channel = {metric.channel_id: metric for metric in metrics}
+
+        endpoints_by_destination: dict[
+            tuple[str, str],
+            tuple[EndpointBinding, ...],
+        ] = {}
+        for endpoint in request.binding.endpoints:
+            endpoints_by_destination.setdefault(endpoint.destination_key, ())
+            endpoints_by_destination[endpoint.destination_key] += (endpoint,)
+
+        tracking_frames: list[TrackingFrame] = []
+        for frame_index, frame in enumerate(commands.frames):
+            setpoints: list[TrackingSetpoint] = []
+            for command in frame.commands:
+                endpoints = endpoints_by_destination[command.destination_key]
+                for endpoint in endpoints:
+                    for channel_id in metrics_by_channel:
+                        channel = endpoint.tracking_channels.get(channel_id)
+                        if channel is None:
+                            continue
+                        runtime.providers.resolve(channel.source)
+                        runtime.projectors.resolve(channel.projector)
+                        setpoints.append(
+                            TrackingSetpoint(
+                                endpoint_key=endpoint.key,
+                                binding=channel,
+                                desired=runtime.project(command, channel),
+                            )
+                        )
+            covered_channels = {setpoint.binding.channel_id for setpoint in setpoints}
+            missing_channels = sorted(
+                set(metrics_by_channel).difference(covered_channels)
+            )
+            if missing_channels:
+                raise ValueError(
+                    f"Command frame {frame_index} cannot project configured "
+                    f"tracking channels {missing_channels}; bound endpoints must "
+                    "declare a typed feedback source and projector."
+                )
+            tracking_frames.append(TrackingFrame(tuple(setpoints)))
+        return TimedTrackingSequence(
+            env_ids=commands.env_ids,
+            frames=tuple(tracking_frames),
         )
 
     @staticmethod
@@ -782,8 +896,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             )
             # ``dt[:, i]`` is the arrival interval for waypoint ``i``. After
             # dispatching it, wait for the next arrival interval; the terminal
-            # frame deliberately reuses its own interval as a settling window,
-            # preserving the closed-loop runner's pre-PR2C timing contract.
+            # frame reuses its own interval as the action's settling window.
             frames.append(
                 RuntimeCommandFrame(
                     commands=tuple(endpoint_commands),
@@ -831,6 +944,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         context: PlanningContext,
         *,
         message: str | None = None,
+        failure_code: str = "planning_failed",
+        retryable: bool = True,
     ) -> ActionPlan:
         """Build a failed empty plan without changing task state.
 
@@ -838,6 +953,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             request: Resolved invocation that failed to plan.
             context: Planning input used for the attempt.
             message: Optional diagnostic message.
+            failure_code: Stable machine-readable planning failure code.
+            retryable: Whether execution may spend action-retry budget on the
+                failed rows.
 
         Returns:
             Failed action plan with an empty trajectory.
@@ -846,6 +964,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         diagnostics = PlannerDiagnostics(
             backend=self.planning_services.planner_name,
             messages=(() if message is None else (message,)),
+            failure=PlanningFailure(failure_code, retryable=retryable),
         )
         if request.binding.endpoints and all(
             isinstance(endpoint.target, JointPositionTarget)

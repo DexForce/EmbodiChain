@@ -47,6 +47,7 @@ from embodichain.lab.sim.atomic_actions import (
     SimulationExecutionAdapter,
     TaskState,
     TimedCommandSequence,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
@@ -479,8 +480,11 @@ def main() -> None:
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
-            tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
             action_timeout=30.0,
+        ),
+        tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+            terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
         ),
         invocation_id="dynamic-obstacle-demo",
     )
@@ -584,7 +588,7 @@ def main() -> None:
             if event.kind in {
                 ExecutionEventKind.COLLISION_WORLD_CHANGED,
                 ExecutionEventKind.REPLANNED,
-                ExecutionEventKind.TRACKING_ERROR,
+                ExecutionEventKind.TRACKING_DIVERGED,
                 ExecutionEventKind.RECOVERY_EXHAUSTED,
             }:
                 rows = event.env_mask.nonzero(as_tuple=False).flatten().tolist()

@@ -565,22 +565,19 @@ def create_benchmark_object(
 create_mesh_benchmark_object = create_benchmark_object
 
 
-def _make_benchmark_antipodal_affordance_class():
-    """Create an AntipodalAffordance subclass after project imports are available."""
-    from embodichain.lab.sim.atomic_actions import AntipodalAffordance
+def _make_benchmark_grasp_pose_generator_class():
+    """Create the benchmark generator subclass after project imports are available."""
+    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 
-    class BenchmarkAntipodalAffordance(AntipodalAffordance):
-        """Benchmark affordance that biases side grasps to horizontal closing."""
+    class BenchmarkGraspPoseGenerator(AntipodalGraspPoseGenerator):
+        """Antipodal service that biases side grasps to horizontal closing."""
 
         def get_valid_grasp_poses(
             self,
-            obj_poses,
-            approach_direction,
+            **kwargs,
         ):
-            results = super().get_valid_grasp_poses(
-                obj_poses=obj_poses,
-                approach_direction=approach_direction,
-            )
+            results = super().get_valid_grasp_poses(**kwargs)
+            approach_direction = kwargs["approach_direction"]
             if not _is_horizontal_approach_direction(approach_direction):
                 return results
 
@@ -602,36 +599,65 @@ def _make_benchmark_antipodal_affordance_class():
                 adjusted_results.append((grasp_poses, adjusted_costs))
             return adjusted_results
 
-    return BenchmarkAntipodalAffordance
+    return BenchmarkGraspPoseGenerator
+
+
+def create_benchmark_grasp_pose_generator(
+    args: argparse.Namespace,
+):
+    """Create the endpoint-owned parallel-jaw service used by benchmarks."""
+    from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGeneratorCfg,
+        GraspAnnotationCfg,
+        ParallelJawGraspCollisionCfg,
+    )
+
+    generator_type = _make_benchmark_grasp_pose_generator_class()
+    return generator_type(
+        ParallelJawGripperModelCfg(
+            model_id="dh_pgi_140_80",
+            min_opening_width=0.003,
+            max_opening_width=0.1,
+            finger_length=0.1,
+            finger_width=0.04,
+            finger_thickness=0.01,
+            palm_depth=0.096,
+        ),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=args.n_sample),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            opening_margin=0.03,
+            point_sample_density=0.012,
+            filter_ground_collision=False,
+        ),
+        annotation_cfg=GraspAnnotationCfg(
+            selection_mode="whole_mesh",
+            viser_port=11801,
+            force_refresh=args.force_reannotate,
+        ),
+    )
 
 
 def create_antipodal_object_semantics(
     obj,
     preset: MeshObjectPreset,
-    args: argparse.Namespace,
-    build_gripper_collision_cfg: Callable[[], object],
-    build_grasp_generator_cfg: Callable[[argparse.Namespace], object],
 ):
-    """Create object semantics with an antipodal grasp affordance."""
-    from embodichain.lab.sim.atomic_actions import ObjectSemantics
+    """Create pure object semantics with target-local antipodal geometry."""
+    from embodichain.lab.sim.atomic_actions import AntipodalAffordance, ObjectSemantics
 
     mesh_vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
     mesh_triangles = obj.get_triangles(env_ids=[0])[0]
-    affordance_cls = _make_benchmark_antipodal_affordance_class()
     return ObjectSemantics(
         label=preset.label,
         geometry={
             "mesh_vertices": mesh_vertices,
             "mesh_triangles": mesh_triangles,
         },
-        affordance=affordance_cls(
+        affordance=AntipodalAffordance(
             mesh_vertices=mesh_vertices,
             mesh_triangles=mesh_triangles,
-            gripper_collision_cfg=build_gripper_collision_cfg(),
-            generator_cfg=build_grasp_generator_cfg(args),
-            force_reannotate=args.force_reannotate,
         ),
-        entity=obj,
+        entity_id=obj.uid,
     )
 
 

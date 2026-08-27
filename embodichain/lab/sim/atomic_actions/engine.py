@@ -31,16 +31,12 @@ from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
+from .tracking import TrackingRuntime
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
-    from embodichain.lab.sim.skills import (
-        BoundRobotSkillProfile,
-        ResourceEndpoint,
-        ResourceEndpointAdapter,
-        RobotSkillProfile,
-    )
+    from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession
 
@@ -52,53 +48,35 @@ class AtomicActionEngine:
         self,
         motion_generator: MotionGenerator,
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         load_builtins: bool = True,
-        skill_profile: RobotSkillProfile | None = None,
-        endpoint_adapters: (
-            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
-        ) = None,
+        tracking_runtime: TrackingRuntime | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
         Args:
             motion_generator: Engine-owned motion-generation backend.
             control_profiles: Semantic commands keyed by robot control-part name.
+            grasp_pose_generators: Standalone grasp-pose services keyed by the
+                runtime target ID of each grasp endpoint, normally its robot
+                control-part name.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
-            skill_profile: Optional authoritative robot skill profile. Its
-                command profiles are installed automatically and validated
-                after built-in actions are loaded. ``control_profiles`` and
-                ``skill_profile`` are mutually exclusive.
-            endpoint_adapters: Optional exact-type endpoint adapters used when
-                binding ``skill_profile``. Invalid without a profile.
+            tracking_runtime: Optional exact-version feedback, projector, and
+                metric registries. Built-in joint tracking is installed when
+                omitted.
         """
-        if endpoint_adapters is not None and skill_profile is None:
-            raise ValueError("endpoint_adapters requires skill_profile.")
-        if skill_profile is not None:
-            from embodichain.lab.sim.skills import RobotSkillProfile
-
-            if not isinstance(skill_profile, RobotSkillProfile):
-                raise TypeError("skill_profile must be a RobotSkillProfile or None.")
-            if control_profiles is not None:
-                raise ValueError(
-                    "control_profiles and skill_profile are mutually exclusive; "
-                    "the profile is the authoritative semantic-command source."
-                )
-            control_profiles = skill_profile.action_control_profiles()
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
+            tracking_runtime=tracking_runtime,
+            grasp_pose_generators=grasp_pose_generators,
         )
         self._actions: dict[str, AtomicAction] = {}
-        self._skill_profile: BoundRobotSkillProfile | None = None
+        self._skill_catalog_revision = 0
         if load_builtins:
             self._load_builtin_actions()
-        if skill_profile is not None:
-            self._skill_profile = skill_profile.bind(
-                self,
-                endpoint_adapters=endpoint_adapters,
-            )
 
     @property
     def motion_generator(self) -> MotionGenerator:
@@ -121,6 +99,11 @@ class AtomicActionEngine:
         return self._planning_services
 
     @property
+    def tracking_runtime(self) -> TrackingRuntime:
+        """Typed endpoint-feedback runtime used by plans and sessions."""
+        return self._planning_services.tracking_runtime
+
+    @property
     def binding_owner_id(self) -> str:
         """Return the opaque owner identity required by action bindings."""
         return self._planning_services.binding_owner_id
@@ -129,6 +112,11 @@ class AtomicActionEngine:
     def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
         """Semantic command profiles registered for robot control parts."""
         return self._planning_services.control_profiles
+
+    @property
+    def grasp_pose_generators(self) -> Mapping[str, GraspPoseGenerator]:
+        """Standalone grasp-pose services installed for endpoint targets."""
+        return self._planning_services.grasp_pose_generators
 
     @property
     def actions(self) -> dict[str, AtomicAction]:
@@ -155,78 +143,49 @@ class AtomicActionEngine:
         )
 
     @property
-    def skill_profile(self) -> BoundRobotSkillProfile | None:
-        """Return the currently bound semantic robot profile, when configured."""
-        return self._skill_profile
+    def skill_catalog_revision(self) -> int:
+        """Return the monotonic installed semantic-skill catalog revision.
 
-    def bind_skill_profile(
-        self,
-        profile: RobotSkillProfile,
-        *,
-        endpoint_adapters: (
-            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
-        ) = None,
-    ) -> BoundRobotSkillProfile:
-        """Validate and bind a profile after custom action installation.
-
-        The engine's immutable control-part profiles must already contain the
-        profile commands lowered into the current action core. Generic
-        non-core endpoint commands remain on resolved endpoints. Prefer the
-        constructor's ``skill_profile`` argument when no custom actions need
-        to be installed first.
-
-        Args:
-            profile: Authoritative robot resource and policy profile.
-            endpoint_adapters: Optional exact-type endpoint adapters used for
-                custom controller declarations.
-
-        Returns:
-            Validated profile bound to this engine and its installed actions.
+        Installing or replacing an agent-visible implementation advances the
+        revision even when its public descriptor is equal. External binding and
+        compilation layers can therefore reject stale implementation snapshots.
         """
-        from embodichain.lab.sim.skills import RobotSkillProfile
-
-        if not isinstance(profile, RobotSkillProfile):
-            raise TypeError("profile must be a RobotSkillProfile.")
-        bound = profile.bind(self, endpoint_adapters=endpoint_adapters)
-        self._skill_profile = bound
-        return bound
+        return self._skill_catalog_revision
 
     def bind_control_parts(
         self,
-        skill: str | AtomicAction,
+        skill_id: str,
         endpoints: Mapping[str, Mapping[str, str]],
+        *,
+        task_state_keys: Mapping[str, str] | None = None,
     ) -> ActionBinding:
         """Build an advanced direct-core binding from control-part names.
 
         Args:
-            skill: Installed skill ID or an explicit action passed later to
-                :meth:`plan_action`.
+            skill_id: Installed skill ID.
             endpoints: Nested ``slot_id -> endpoint_id -> control_part`` mapping.
+            task_state_keys: Optional explicit stable task-state key for each
+                resource slot. See :meth:`ActionPlanningServices.bind_control_parts`
+                for inference rules when omitted.
 
         Returns:
             Engine-owned generic endpoint binding.
         """
-        if isinstance(skill, str):
-            action = self._actions.get(skill)
-            if action is None:
-                raise KeyError(f"No atomic action registered for skill {skill!r}.")
-        elif isinstance(skill, AtomicAction):
-            action = skill
-            if (
-                action.is_bound
-                and action.planning_services is not self._planning_services
-            ):
-                raise ValueError(
-                    f"Atomic action {action.skill_id!r} belongs to another engine."
-                )
-        else:
-            raise TypeError("skill must be an installed skill ID or AtomicAction.")
+        if type(skill_id) is not str:
+            raise TypeError("skill_id must be a string.")
+        action = self._actions.get(skill_id)
+        if action is None:
+            raise KeyError(f"No atomic action registered for skill {skill_id!r}.")
         contract = type(action).__dict__.get("binding_contract")
         if contract is None:
             raise ValueError(
                 f"Skill {action.skill_id!r} has no explicit SkillBindingContract."
             )
-        return self._planning_services.bind_control_parts(contract, endpoints)
+        return self._planning_services.bind_control_parts(
+            contract,
+            endpoints,
+            task_state_keys=task_state_keys,
+        )
 
     def make_invocation(
         self,
@@ -234,7 +193,6 @@ class AtomicActionEngine:
         goal: GoalT,
         *,
         control_parts: Mapping[str, Mapping[str, str]] | None = None,
-        resources: Mapping[str, str] | None = None,
         motion_policy: MotionPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
         skill_options: OptionsT | None = None,
@@ -244,19 +202,14 @@ class AtomicActionEngine:
     ) -> ActionInvocation[GoalT, OptionsT]:
         """Construct a grounded invocation while naming the skill only once.
 
-        ``control_parts`` uses the advanced direct-core binding path. When it is
-        omitted, the engine must own a bound robot skill profile; ``resources``
-        then optionally selects logical resource IDs by skill-local slot. An
-        omitted resource selection uses the profile's unique or default binding.
-        This method resolves bindings only; profile policy presets and runner
-        configuration remain responsibilities of the semantic runtime layer.
+        ``control_parts`` uses the advanced direct-core binding path. Profile-
+        based integrations resolve an :class:`ActionBinding` in the semantic
+        layer and construct :class:`ActionInvocation` directly.
 
         Args:
             skill_id: Stable identifier of an installed atomic skill.
             goal: Action-specific typed goal.
-            control_parts: Optional direct ``slot -> endpoint -> control_part``
-                mapping.
-            resources: Optional profile ``slot -> resource_id`` selections.
+            control_parts: Direct ``slot -> endpoint -> control_part`` mapping.
             motion_policy: Optional invocation motion policy.
             recovery_policy: Optional invocation recovery policy.
             skill_options: Optional action-specific invocation options.
@@ -269,24 +222,13 @@ class AtomicActionEngine:
             ``compile``, and ``start``.
 
         Raises:
-            ValueError: If binding sources conflict or no binding source is
-                available.
-            KeyError: If the skill or an explicitly selected resource is unknown.
+            ValueError: If ``control_parts`` is omitted.
+            KeyError: If the skill or control part is unknown.
             TypeError: If an invocation field or binding input has an invalid type.
         """
-        if control_parts is not None and resources is not None:
-            raise ValueError("control_parts and resources are mutually exclusive.")
-        if control_parts is not None:
-            binding = self.bind_control_parts(skill_id, control_parts)
-        else:
-            profile = self.skill_profile
-            if profile is None:
-                if resources is not None:
-                    raise ValueError("resources requires a bound RobotSkillProfile.")
-                raise ValueError(
-                    "control_parts is required when no RobotSkillProfile is bound."
-                )
-            binding = profile.resolve(skill_id, resources).action_binding
+        if control_parts is None:
+            raise ValueError("control_parts is required for direct-core invocation.")
+        binding = self.bind_control_parts(skill_id, control_parts)
 
         return ActionInvocation(
             skill_id=skill_id,
@@ -330,7 +272,13 @@ class AtomicActionEngine:
             )
         action._bind(self._planning_services)
         self._actions[descriptor.skill_id] = action
-        self._skill_profile = None
+        existing_descriptor = None if existing is None else existing.descriptor()
+        if (descriptor.agent_visible and descriptor.binding_contract is not None) or (
+            existing_descriptor is not None
+            and existing_descriptor.agent_visible
+            and existing_descriptor.binding_contract is not None
+        ):
+            self._skill_catalog_revision += 1
 
     def _load_builtin_actions(self) -> None:
         """Create and bind fresh built-in action instances for this engine."""
@@ -340,35 +288,6 @@ class AtomicActionEngine:
 
         for action_type in BUILTIN_ACTION_TYPES:
             self.register(action_type())
-
-    def plan_action(
-        self,
-        action: AtomicAction,
-        invocation: ActionInvocation,
-        context: PlanningContext,
-    ) -> ActionPlan:
-        """Plan with an unregistered action using this engine's resources.
-
-        This is an advanced extension and testing escape hatch. Built-in
-        parameter variants should use invocation ``skill_options`` with the
-        engine's registered implementation.
-
-        Args:
-            action: Configured action implementation to invoke.
-            invocation: Grounded request matching the action skill identifier.
-            context: Latest measured planning state.
-
-        Returns:
-            Validated side-effect-free action plan.
-        """
-        if not isinstance(action, AtomicAction):
-            raise TypeError("action must be an AtomicAction instance.")
-        self._validate_context(context)
-        action._bind(self._planning_services)
-        request = action.resolve_request(invocation)
-        plan = action.plan(request, context)
-        self._validate_plan(plan, context, request)
-        return plan
 
     def resolve(
         self,
@@ -577,13 +496,18 @@ class AtomicActionEngine:
         self,
         invocations: Iterable[ActionInvocation],
         context: PlanningContext | None = None,
+        *,
+        eligible_mask: torch.Tensor | None = None,
     ) -> ExecutionSession:
-        """Start closed-loop execution for a grounded invocation sequence.
+        """Start incremental execution for a grounded invocation sequence.
 
         Args:
             invocations: Grounded action requests in execution order.
             context: Initial measured state and scene snapshot. The engine
                 captures one when omitted.
+            eligible_mask: Optional per-environment cohort allowed to execute.
+                Ineligible rows remain excluded for the whole session. All rows
+                are eligible when omitted.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -591,7 +515,12 @@ class AtomicActionEngine:
         from .execution import ExecutionSession
 
         initial = self.initial_context() if context is None else context
-        return ExecutionSession(self, tuple(invocations), initial)
+        return ExecutionSession(
+            self,
+            tuple(invocations),
+            initial,
+            eligible_mask=eligible_mask,
+        )
 
     def _validate_context(self, context: PlanningContext) -> None:
         """Validate an externally supplied planning context."""
@@ -628,6 +557,11 @@ class AtomicActionEngine:
         if plan.invocation_revision != request.revision:
             raise ValueError(
                 "ActionPlan.invocation_revision must preserve the request revision."
+            )
+        if plan.tracking_policy != request.tracking_policy:
+            raise ValueError(
+                "ActionPlan.tracking_policy must preserve the resolved request "
+                "tracking policy."
             )
         commands = plan.commands
         if commands.batch_size != context.batch_size:

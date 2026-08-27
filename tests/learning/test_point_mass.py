@@ -34,7 +34,7 @@ from embodichain.learning.rl.models import ActorCritic
 from embodichain.learning.rl.train import train_from_config
 from embodichain.learning.rl.utils import OptimizerCfg
 from embodichain.learning.rl.utils.trainer import Trainer
-from embodichain_tasks.rl.basic.point_mass import PointMassEnv
+from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
 
 def test_point_mass_is_registered_differentiable_environment() -> None:

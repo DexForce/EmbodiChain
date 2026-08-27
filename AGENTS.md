@@ -34,8 +34,8 @@ the agent should:
 
 Available topics: `simulation-system`, `env-framework`,
 `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`,
-`sim-visualization`, `motion-planning`, `atomic-actions`, `rl-learning`,
-`configclass-pattern`, `randomization`.
+`sim-visualization`, `motion-planning`, `atomic-actions`, `expert-programs`,
+`rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
 
@@ -68,7 +68,6 @@ EmbodiChain/
 │   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
 │   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
 │   │   │   │   │   └── randomization/  # Physics, geometry, spatial, visual randomizers
-│   │   │   │   ├── tasks/        # Deprecated import shim for official tasks
 │   │   │   │   ├── action_bank/  # Configurable action primitives
 │   │   │   │   └── wrapper/      # Env wrappers (e.g. no_fail)
 │   │   │   └── utils/            # Gym registration, misc helpers
@@ -101,6 +100,28 @@ EmbodiChain/
 ├── setup.py                      # Package setup
 └── VERSION                       # Package version file
 ```
+
+Official tasks use a task-first layout:
+
+- Import-registered Python entry point: `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`
+- Scene and MDP config: `embodichain_tasks/configs/tasks/<category-path>/<task>/env.{json,yaml}`
+- Optional Expert Program: `<task config>/expert/program.yaml`
+- Optional RL configuration: `<task config>/agents/<algorithm>.{json,yaml}`
+
+The category path starts with a top-level task family and may include a
+subdomain. For example, tableware tasks belong under
+`manipulation/tableware`, while a general manipulation task can live directly
+under `manipulation`.
+
+Keep `@register_env` in the task-named module. Do not create a same-named
+per-task Python package for a single entry point, or Python `scenario` / `mdp`
+modules when the existing JSON/YAML config and manager functors express the
+task. Organize tasks by task family, optional subdomain, and task identity,
+not by solution method such as `expert_program` or `rl`.
+
+A supported configuration-defined Expert Program may omit `<task>.py`:
+declare `expert_program_runtime` in its task-local `env.json`, and let
+`config_to_cfg()` register the common `EmbodiedEnv` under the configured ID.
 
 ---
 
@@ -208,6 +229,12 @@ __all__ = ["MyClass", "my_function"]
 ### Documentation
 
 - Docs are built with **Sphinx** using **Markdown** source files (`docs/source/`).
+- Check public API coverage without modifying files:
+  ```bash
+  python docs/scripts/check_api_docs.py
+  ```
+- Use the `/update-api-docs` skill to generate or update documentation for
+  missing public exports; the checker itself never writes documentation.
 - Build locally:
   ```bash
   pip install -r docs/requirements.txt
@@ -287,6 +314,7 @@ Tool-specific adapter files should stay thin and point back to the canonical ski
 | Add Task Env | `/add-task-env` | Scaffold a new `EmbodiedEnv` task |
 | Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
 | Add Test | `/add-test` | Scaffold tests following project conventions |
+| Update API Docs | `/update-api-docs` | Document public exports reported by the read-only API checker |
 | Pre-Commit Check | `/pre-commit-check` | Run all local CI checks before committing |
 | Create PR | `/pr` | Create a PR following the project template |
 | Benchmark | `/benchmark` | Write benchmark scripts for EmbodiChain modules |

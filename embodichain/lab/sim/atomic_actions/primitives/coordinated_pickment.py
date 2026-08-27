@@ -23,6 +23,7 @@ from typing import ClassVar
 
 import torch
 
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
@@ -63,6 +64,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
+    require_shared_task_state_key,
     repeat_qpos,
     resolve_batched_pose,
 )
@@ -76,8 +78,8 @@ class CoordinatedPickGoal(ObjectActionGoal):
     """Object-centric target for picking and moving one object with two hands.
 
     The left/right grasp poses are not supplied by the caller; they are sampled
-    from :meth:`AntipodalAffordance.get_dual_arm_valid_grasp_poses` at planning
-    time using the dual-arm direction and approach direction declared on
+    by the parallel-jaw grasp-pose service at planning time using the dual-arm
+    direction and approach direction declared on
     :class:`CoordinatedPickmentOptions`.
     """
 
@@ -88,7 +90,7 @@ class CoordinatedPickGoal(ObjectActionGoal):
     """Optional initial object pose.
 
     When omitted, the pose is grounded through the semantic object's stable
-    scene identity, with its live entity retained only as a legacy fallback.
+    scene identity.
     """
 
     def __post_init__(self) -> None:
@@ -110,10 +112,10 @@ class CoordinatedPickGoal(ObjectActionGoal):
 class CoordinatedPickmentOptions(ActionOptions):
     """Per-invocation coordinated pickup behavior.
 
-    Left/right grasps are sampled from the target affordance using
-    :meth:`AntipodalAffordance.get_dual_arm_valid_grasp_poses`. The dual-arm
-    direction splits the object into left/right grasp regions and the approach
-    direction filters the sampled antipodal pairs.
+    Left/right grasps are sampled from target-local affordance geometry by the
+    engine's parallel-jaw grasp-pose service. The dual-arm direction splits the
+    object into left/right grasp regions and the approach direction filters the
+    sampled antipodal pairs.
     """
 
     object_motion_keyframes: int = 6
@@ -174,6 +176,8 @@ class CoordinatedPickmentOptions(ActionOptions):
 class _CoordinatedPickResources:
     """Invocation-bound control parts and compatible hand commands."""
 
+    left_task_state_key: str
+    right_task_state_key: str
     left_arm: JointPositionTarget
     right_arm: JointPositionTarget
     left_hand: JointPositionTarget
@@ -407,6 +411,21 @@ class CoordinatedPickment(
         right_arm = right_motion.require_target(JointPositionTarget)
         left_hand = left_grasp.require_target(JointPositionTarget)
         right_hand = right_grasp.require_target(JointPositionTarget)
+        left_task_state_key = require_shared_task_state_key(
+            left_motion,
+            left_grasp,
+            participant="CoordinatedPickment left participant",
+        )
+        right_task_state_key = require_shared_task_state_key(
+            right_motion,
+            right_grasp,
+            participant="CoordinatedPickment right participant",
+        )
+        if left_task_state_key == right_task_state_key:
+            raise ValueError(
+                "CoordinatedPickment left and right participants must use "
+                "different task_state_key values."
+            )
         if left_arm.control_part == right_arm.control_part:
             raise ValueError(
                 "CoordinatedPickment left and right roles must use different "
@@ -418,6 +437,8 @@ class CoordinatedPickment(
                 "end-effector control parts."
             )
         return _CoordinatedPickResources(
+            left_task_state_key=left_task_state_key,
+            right_task_state_key=right_task_state_key,
             left_arm=left_arm,
             right_arm=right_arm,
             left_hand=left_hand,
@@ -476,6 +497,7 @@ class CoordinatedPickment(
         target: CoordinatedPickGoal,
         context: PlanningContext,
         options: CoordinatedPickmentOptions,
+        resources: _CoordinatedPickResources,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -497,7 +519,11 @@ class CoordinatedPickment(
         )
         left_grasp_xpos, right_grasp_xpos, grasp_success = (
             self._resolve_dual_arm_grasp_poses(
-                target.semantics, object_initial_pose, options
+                target.semantics,
+                object_initial_pose,
+                options,
+                resources.left_hand.target_id,
+                resources.right_hand.target_id,
             )
         )
         left_object_to_eef = torch.bmm(pose_inv(object_initial_pose), left_grasp_xpos)
@@ -532,6 +558,8 @@ class CoordinatedPickment(
         semantics: ObjectSemantics,
         object_poses: torch.Tensor,
         options: CoordinatedPickmentOptions,
+        left_grasp_target_id: str,
+        right_grasp_target_id: str,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Sample left/right grasp poses from the target antipodal affordance.
 
@@ -539,7 +567,9 @@ class CoordinatedPickment(
             semantics: Object semantics carrying an :class:`AntipodalAffordance`.
             object_poses: Object poses with shape ``(num_envs, 4, 4)``.
             options: Coordinated pickment options carrying the dual-arm and
-                approach directions used by the affordance sampler.
+                approach directions used by the grasp-pose generator.
+            left_grasp_target_id: Left grasp endpoint target ID.
+            right_grasp_target_id: Right grasp endpoint target ID.
 
         Returns:
             ``(left_grasp_xpos, right_grasp_xpos, success_mask)``. The grasp poses
@@ -566,7 +596,24 @@ class CoordinatedPickment(
         left_to_right_arm_direction = left_to_right_arm_direction / (
             torch.linalg.vector_norm(left_to_right_arm_direction).clamp_min(1.0e-6)
         )
-        dual_results = semantics.affordance.get_dual_arm_valid_grasp_poses(
+        left_generator = self.planning_services.grasp_pose_generator(
+            left_grasp_target_id
+        )
+        right_generator = self.planning_services.grasp_pose_generator(
+            right_grasp_target_id
+        )
+        if left_generator is not right_generator:
+            raise ValueError(
+                "CoordinatedPickment currently requires the left and right "
+                "grasp endpoints to share one grasp-pose generator instance."
+            )
+        if not isinstance(left_generator, ParallelJawGraspPoseGenerator):
+            raise TypeError(
+                "CoordinatedPickment requires a " "ParallelJawGraspPoseGenerator."
+            )
+        dual_results = left_generator.get_dual_arm_valid_grasp_poses(
+            mesh_vertices=semantics.affordance.mesh_vertices,
+            mesh_triangles=semantics.affordance.mesh_triangles,
             obj_poses=object_poses,
             left_to_right_arm_direction=left_to_right_arm_direction,
             approach_direction=approach_direction,
@@ -599,8 +646,8 @@ class CoordinatedPickment(
         """Return the lowest-cost grasp pose from one arm's sampler result.
 
         Args:
-            arm_result: One ``"left"``/``"right"`` entry of the dict returned by
-                :meth:`AntipodalAffordance.get_dual_arm_valid_grasp_poses`.
+            arm_result: One ``"left"``/``"right"`` result from the installed
+                parallel-jaw grasp-pose generator.
 
         Returns:
             The selected ``(4, 4)`` grasp pose, or ``None`` when the sampler
@@ -843,7 +890,7 @@ class CoordinatedPickment(
             right_target_xpos,
             held_states,
             grasp_success,
-        ) = self._resolve_target(target, context, options)
+        ) = self._resolve_target(target, context, options, resources)
         left_held_state, right_held_state = held_states
         if not grasp_success.any():
             logger.log_warning("CoordinatedPickment failed to resolve dual-arm grasps.")
@@ -1020,8 +1067,8 @@ class CoordinatedPickment(
             ),
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.left_arm.control_part: left_held_object,
-                    resources.right_arm.control_part: right_held_object,
+                    resources.left_task_state_key: left_held_object,
+                    resources.right_task_state_key: right_held_object,
                 },
             ),
             segment_lengths={

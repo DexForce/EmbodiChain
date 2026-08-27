@@ -41,7 +41,9 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     CoordinatedPickGoal,
     CoordinatedPickmentOptions,
+    EntityState,
     MotionPolicy,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
@@ -63,6 +65,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
+    create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_rigid_body_physics,
@@ -159,6 +162,7 @@ PICKMENT_PRE_GRASP_DISTANCE = 0.11
 PICKMENT_LIFT_HEIGHT = 0.10
 PICKMENT_HAND_INTERP_STEPS = 10
 PICKMENT_HOLD_STEPS = 4
+ROBOTIQ_2F_140_CLOSE_QPOS = 0.7
 TRAJECTORY_SIM_STEPS = 4
 
 
@@ -189,7 +193,7 @@ def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
 ) -> Robot:
-    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
@@ -379,22 +383,22 @@ def run_coordinated_pickment_demo(
     object_semantics = create_antipodal_semantics(
         obj,
         label=preset.label,
-        n_sample=args.n_sample,
-        # n_sample = 1000,
-        force_reannotate=args.force_reannotate,
     )
     left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
     motion_gen = create_toppra_motion_generator(robot)
 
+    hand_close_qpos = (
+        ROBOTIQ_2F_140_CLOSE_QPOS if args.robot == "ur10" else preset.hand_close_qpos
+    )
     left_open, left_close = get_hand_open_close_qpos(
         robot,
         hand_control_part="left_hand",
-        close_qpos=preset.hand_close_qpos,
+        close_qpos=hand_close_qpos,
     )
     right_open, right_close = get_hand_open_close_qpos(
         robot,
         hand_control_part="right_hand",
-        close_qpos=preset.hand_close_qpos,
+        close_qpos=hand_close_qpos,
     )
     pickment_options = CoordinatedPickmentOptions(
         pre_grasp_distance=PICKMENT_PRE_GRASP_DISTANCE,
@@ -404,6 +408,10 @@ def run_coordinated_pickment_demo(
         object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
         left_to_right_arm_direction=left_to_right_arm_direction,
         middle_empty_ratio=0.7,
+    )
+    grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=args.n_sample,
+        force_refresh=args.force_reannotate,
     )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -416,6 +424,10 @@ def run_coordinated_pickment_demo(
                 open=right_open,
                 grasp=right_close,
             ),
+        },
+        grasp_pose_generators={
+            "left_hand": grasp_pose_generator,
+            "right_hand": grasp_pose_generator,
         },
     )
     target_pose = build_object_target_pose(
@@ -455,7 +467,14 @@ def run_coordinated_pickment_demo(
                 skill_options=pickment_options,
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={obj.uid: EntityState(object_pose_batch)},
+            ),
+            control_dt=sim.sim_config.physics_dt,
+        ),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions

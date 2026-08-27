@@ -44,20 +44,20 @@ embodichain run-env --gym_config path/to/gym_config.yaml
 
 JSON, YAML, and YML files are supported. The config's `id` selects the
 registered environment, while the rest of the file describes its simulation,
-robot, sensors, managers, episode limits, and optional dataset recorders. If a
-task uses the action bank, pass its action graph separately:
+robot, sensors, managers, episode limits, and optional dataset recorders.
+Configuration-defined Expert Program tasks declare their task-local program in
+the same gym config:
 
 ```bash
 embodichain run-env \
-    --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json \
-    --action_config embodichain_tasks/configs/gym/pour_water/action_config.json
+    --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json
 ```
 
 At startup, `run-env`:
 
 1. discovers installed task packages through the `embodichain.tasks` entry
    point and executes their initialization hooks;
-2. loads the gym and optional action configs;
+2. loads the gym config and its optional task-local Expert Program;
 3. applies CLI overrides such as `--num_envs`, `--device`, `--renderer`, and
    `--max_episodes`;
 4. creates the environment selected by the gym config's `id`; and
@@ -243,7 +243,7 @@ episode count.
 #### Run the built-in three-cycle example
 
 The shipped
-`embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json` config uses
+`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json` config uses
 a specified UR5 with a parallel gripper to pick up and freely place the same
 cube three times. Each cycle is a separate lazy segment. The next pickup is
 planned only after the previous placement has fallen and become stable, so the
@@ -254,14 +254,14 @@ No action-bank config is needed:
 
 ```bash
 embodichain run-env \
-    --gym_config embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json \
+    --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json \
     --headless \
     --device cuda \
     --max_episodes 1
 ```
 
 The configured `LeRobotRecorder` writes below
-`outputs/lerobot/multi_segments/` using an auto-numbered directory. The episode
+`outputs/lerobot/expert_program/` using an auto-numbered directory. The episode
 contains one overall task plus three per-frame subtask/segment annotations.
 See {ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for
 the EmbodiChain terminal validator and LeRobot's official Rerun viewer.

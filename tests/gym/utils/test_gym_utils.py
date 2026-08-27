@@ -18,6 +18,9 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import gymnasium.spaces
@@ -27,6 +30,8 @@ import torch
 
 from tensordict import TensorDict
 
+from embodichain.lab.gym.envs.expert_program import IntegrationFingerprintMismatch
+from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -39,6 +44,14 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.utils.utility import load_config, save_config
+
+_REPOSITORY_ROOT = Path(__file__).parents[3]
+_CUBE_GYM_CONFIG_PATH = (
+    _REPOSITORY_ROOT
+    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json"
+)
+CUBE_ROBOT_PROFILE_ID = "expert_program_ur5_pick_place"
+CUBE_SCENE_REGISTRY_ID = "expert_program_repeated_pick_place"
 
 
 def test_env_launcher_args_include_physics():
@@ -534,6 +547,43 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    @staticmethod
+    def _minimal_gym_config() -> dict[str, object]:
+        """Return a minimal config that reaches the generic parser."""
+        production_config = json.loads(
+            _CUBE_GYM_CONFIG_PATH.read_text(encoding="utf-8")
+        )
+        return {
+            "id": "ExpertProgramRepeatedPickPlace-v1",
+            "max_episode_steps": 1200,
+            "expert_program_runtime": deepcopy(
+                production_config["expert_program_runtime"]
+            ),
+            "env": {},
+            "robot": {
+                "class_type": "URRobot",
+                "robot_type": "ur5",
+                "uid": "TestUR5",
+            },
+        }
+
+    @staticmethod
+    def _expert_program_payload() -> dict[str, object]:
+        """Return one minimal strict Expert Program payload."""
+        return {
+            "program_id": "configured_pick",
+            "integration": {
+                "robot_profile": CUBE_ROBOT_PROFILE_ID,
+                "scene_registry": CUBE_SCENE_REGISTRY_ID,
+                "runtime_preset": "trajectory",
+            },
+            "targets": {},
+            "program": {
+                "kind": "invoke",
+                "call": {"kind": "pick", "object": "cube"},
+            },
+        }
+
     def test_robot_class_type_preserves_ur_variant(self):
         config = {
             "id": "EmbodiedEnv-v1",
@@ -556,6 +606,185 @@ class TestConfigToCfgFromFile:
             "robot_type": "ur5",
             "uid": "TestUR5",
         }
+
+    def test_expert_program_path_is_resolved_from_gym_config_source(
+        self,
+        tmp_path,
+    ) -> None:
+        """A serialized program path is relative to its Gym config file."""
+        gym_dir = tmp_path / "gym" / "task"
+        program_dir = tmp_path / "expert_program"
+        gym_dir.mkdir(parents=True)
+        program_dir.mkdir()
+        gym_path = gym_dir / "gym_config.json"
+        program_path = program_dir / "program.yaml"
+        save_config(program_path, self._expert_program_payload())
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "../../expert_program/program.yaml"
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=gym_path,
+        )
+
+        assert cfg.expert_program.program_id == "configured_pick"
+        assert cfg.expert_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+
+    def test_build_env_cfg_loads_source_relative_expert_program(
+        self,
+        tmp_path,
+    ) -> None:
+        """The normal file launcher attaches the decoded program before init."""
+        gym_dir = tmp_path / "gym"
+        program_dir = tmp_path / "programs"
+        gym_dir.mkdir()
+        program_dir.mkdir()
+        gym_path = gym_dir / "gym_config.json"
+        program_path = program_dir / "program.json"
+        save_config(program_path, self._expert_program_payload())
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "../programs/program.json"
+        save_config(gym_path, config)
+        args = argparse.Namespace(
+            gym_config=str(gym_path),
+            num_envs=1,
+            device="cpu",
+            headless=True,
+            renderer=None,
+            gpu_id=0,
+            arena_space=2.0,
+            max_episodes=None,
+            filter_visual_rand=False,
+            filter_dataset_saving=False,
+            preview=False,
+            action_config=None,
+        )
+
+        cfg, _, _ = build_env_cfg_from_args(args)
+
+        assert cfg.expert_program.program_id == "configured_pick"
+
+    def test_cli_program_override_is_selected_and_loaded_once(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        """The CLI override replaces the Gym path at the single loader boundary."""
+        from embodichain.lab.gym.envs.expert_program import loader
+
+        gym_path = tmp_path / "gym_config.json"
+        override_path = tmp_path / "override.yaml"
+        save_config(override_path, self._expert_program_payload())
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "must_not_be_loaded.yaml"
+        save_config(gym_path, config)
+        args = argparse.Namespace(
+            gym_config=str(gym_path),
+            expert_program=str(override_path),
+            num_envs=1,
+            device="cpu",
+            headless=True,
+            renderer=None,
+            gpu_id=0,
+            arena_space=2.0,
+            max_episodes=None,
+            filter_visual_rand=False,
+            filter_dataset_saving=False,
+            preview=False,
+            action_config=None,
+        )
+        calls: list[str] = []
+        original = loader.load_expert_program
+
+        def load_once(path, **kwargs):
+            calls.append(str(path))
+            return original(path, **kwargs)
+
+        monkeypatch.setattr(loader, "load_expert_program", load_once)
+
+        cfg, _, _ = build_env_cfg_from_args(args)
+
+        assert cfg.expert_program.program_id == "configured_pick"
+        assert calls == [str(override_path)]
+
+    def test_registration_drift_fails_during_repeated_config_load(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        """A repeated config load rejects drift in its registered integration."""
+        from embodichain.lab.gym.envs.expert_program import loader
+
+        program_path = tmp_path / "program.yaml"
+        save_config(program_path, self._expert_program_payload())
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = str(program_path)
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        registration = get_env_spec(str(config["id"])).expert_program_registration
+        assert registration is not None
+        binding = registration.scene_binding.rigid_objects[0]
+        original_semantic_type = binding.semantic_type
+        object.__setattr__(binding, "semantic_type", "changed_cube")
+        loader_calls: list[str] = []
+        original_load = loader.load_expert_program
+
+        def tracked_load(path, **kwargs):
+            loader_calls.append(str(path))
+            return original_load(path, **kwargs)
+
+        monkeypatch.setattr(loader, "load_expert_program", tracked_load)
+
+        try:
+            with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+                config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        finally:
+            object.__setattr__(binding, "semantic_type", original_semantic_type)
+
+        assert loader_calls == [str(program_path)]
+
+    def test_config_to_cfg_uses_cwd_without_source_path(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        """Dictionary-only callers retain explicit current-directory semantics."""
+        program_path = tmp_path / "program.yaml"
+        save_config(program_path, self._expert_program_payload())
+        monkeypatch.chdir(tmp_path)
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "program.yaml"
+
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+        assert cfg.expert_program.program_id == "configured_pick"
+
+    @pytest.mark.parametrize("value", [None, True, 1, {}, "", " program.yaml"])
+    def test_expert_program_path_rejects_ambiguous_values(
+        self,
+        value,
+    ) -> None:
+        """The path field never accepts coercion, null, or outer whitespace."""
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = value
+
+        with pytest.raises((TypeError, ValueError), match="expert_program_path"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    def test_expert_program_path_missing_file_fails_before_environment_init(
+        self,
+        tmp_path,
+    ) -> None:
+        """A configured program must exist when the Gym config is decoded."""
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "missing.yaml"
+
+        with pytest.raises(FileNotFoundError, match="missing.yaml"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "gym_config.json",
+            )
 
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {

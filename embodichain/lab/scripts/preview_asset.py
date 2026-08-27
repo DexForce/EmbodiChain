@@ -130,9 +130,10 @@ def load_assets(
 
     loaded_assets = []
     for idx, asset_path in enumerate(asset_paths):
+        asset_suffix = os.path.splitext(asset_path)[1].lower()
         asset_type = args.asset_type
         # URDF is always loaded as articulation.
-        if os.path.splitext(asset_path)[1].lower() == ".urdf":
+        if asset_suffix == ".urdf":
             log_info(
                 f"URDF file detected for {asset_path}. "
                 "Setting asset type to 'articulation' automatically.",
@@ -166,6 +167,8 @@ def load_assets(
                 init_rot=init_rot,
                 fix_base=args.fix_base,
                 asset_physics_mode=asset_physics_mode,
+                # The auxiliary pytorch-kinematics chain only accepts URDF XML.
+                build_pk_chain=asset_suffix not in {".usd", ".usda", ".usdc"},
             )
             loaded_assets.append(sim.add_articulation(cfg))
         else:
