@@ -35,6 +35,8 @@ from embodichain.lab.sim.atomic_actions.state import (
     HeldObjectState,
 )
 
+from ._validation import validate_identifier as _validate_identifier
+
 EffectMonitorParam: TypeAlias = (
     None
     | bool
@@ -103,15 +105,6 @@ def _metadata_value(value: object) -> object:
             },
         }
     return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
-
-
-def _validate_identifier(value: str, *, field_name: str) -> str:
-    """Return one exact non-empty identifier."""
-    if type(value) is not str or not value or value != value.strip():
-        raise ValueError(
-            f"{field_name} must be a non-empty string without outer whitespace."
-        )
-    return value
 
 
 def _snapshot_declarative_value(
@@ -553,7 +546,7 @@ class CoordinatedHeldObjectCleanupExpectation:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ArticulationJointStateExpectation:
-    """Future-compatible symbolic articulation-joint postcondition."""
+    """Symbolic articulation-joint postcondition."""
 
     expectation_id: str
     articulation_id: str
@@ -1663,14 +1656,9 @@ class EffectMonitor(ABC):
         """Return an independently owned effect contract."""
 
     @property
+    @abstractmethod
     def resolved_params(self) -> Mapping[str, EffectMonitorParam]:
-        """Return resolved monitor thresholds for trace metadata.
-
-        Custom monitors may override this property.  The empty default keeps
-        third-party implementations source-compatible while built-ins expose
-        every effective threshold, including defaults omitted by configuration.
-        """
-        return MappingProxyType({})
+        """Return all resolved monitor thresholds for trace metadata."""
 
     @abstractmethod
     def observe(

@@ -227,12 +227,13 @@ def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
     vertices = torch.tensor([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]])
     triangles = torch.tensor([[0, 1, 1]])
     obj = MagicMock()
+    obj.uid = "cube"
     obj.get_vertices.return_value = vertices.unsqueeze(0)
     obj.get_triangles.return_value = triangles.unsqueeze(0)
 
     semantics = create_antipodal_semantics(obj, label="cube")
 
-    assert semantics.entity is obj
+    assert semantics.entity_id == "cube"
     assert semantics.label == "cube"
     assert semantics.geometry == {}
     assert torch.equal(semantics.affordance.mesh_vertices, vertices)

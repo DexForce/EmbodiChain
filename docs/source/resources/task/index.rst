@@ -53,6 +53,9 @@ Environment catalog
    * - Expert Program
      - ``ExpertProgramOpenDrawer-v1``
      - ``embodichain_tasks/configs/gym/expert_program/open_drawer.json``
+   * - Expert Program
+     - ``HandOver-v1``
+     - ``embodichain_tasks/configs/gym/expert_program/hand_over.json``
    * - Tableware
      - ``PlaceObjectDrawer-v1``
      - ``embodichain_tasks/configs/gym/place_object_drawer/cobot_magic_3cam.json``

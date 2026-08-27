@@ -126,7 +126,7 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                 label=uid,
                 geometry={},
                 affordance=Affordance(),
-                entity=self._blocks[uid],
+                entity_id=uid,
             )
         self._action_engine: AtomicActionEngine = AtomicActionEngine(
             motion_generator,
@@ -212,11 +212,13 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         """Plan an atomic PickUp followed by Place for one block."""
         from embodichain.lab.sim.atomic_actions import (
             ActionInvocation,
+            EntityState,
             GraspGoal,
             MotionPolicy,
             PickUpOptions,
             PlaceGoal,
             PlaceOptions,
+            SceneSnapshot,
         )
 
         block = self._blocks[uid]
@@ -263,7 +265,14 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                     ),
                 ),
             ),
-            self._action_engine.initial_context(control_dt=self.step_dt),
+            self._action_engine.initial_context(
+                scene=SceneSnapshot(
+                    timestamp=0.0,
+                    version=0,
+                    entities={uid: EntityState(source_pose)},
+                ),
+                control_dt=self.step_dt,
+            ),
         )
         pick_success = pick_compiled.plan_success
         pick_trajectory = pick_compiled.trajectory.positions

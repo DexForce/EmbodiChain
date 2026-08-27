@@ -517,10 +517,6 @@ class TestAssembleAffordance:
 
     def test_default_fields(self):
         aff = AssembleAffordance()
-        assert aff.base_object_label == ""
-        assert aff.assemble_object_label == ""
-        assert aff.base_object_entity is None
-        assert aff.assemble_object_entity is None
         assert torch.equal(aff.assemble_to_base_pose, torch.eye(4))
 
     def test_get_assemble_object_pose_single_base_pose(self):

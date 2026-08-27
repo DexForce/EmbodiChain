@@ -87,6 +87,7 @@ from .plans import (
     CompiledTrajectory,
     EffectVerificationRequirement,
     PlannerDiagnostics,
+    PlanningFailure,
     TimedTrajectory,
     TrajectorySegment,
 )
@@ -351,6 +352,7 @@ __all__ = [
     "PourGoal",
     "PourOptions",
     "PlannerDiagnostics",
+    "PlanningFailure",
     "PlanningContext",
     "PoseGoalValue",
     "PoseTrackingMetric",
@@ -420,8 +422,5 @@ __all__ = [
     "WholeBodyPoseTrackingEvaluator",
     "WholeBodyPoseTrackingMetric",
     "WholeBodyPoseTrackingState",
-    "get_registered_actions",
-    "register_action",
-    "unregister_action",
     "TwistAffordance",
 ]

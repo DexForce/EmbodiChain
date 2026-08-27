@@ -103,7 +103,7 @@ def _scene_registry() -> tuple[SceneRegistry, _NeverObserveProvider]:
             ),
             SceneEntityRegistration(
                 ref=SceneAffordanceRef("cube_grasp"),
-                aliases=("legacy_grasp",),
+                aliases=("external_grasp",),
                 parent=cube,
                 native_name="grasp",
                 affordance=Affordance(),
@@ -146,7 +146,6 @@ def _program(
 ) -> ExpertProgramCfg:
     """Build one valid Expert Program around a supplied node."""
     return ExpertProgramCfg(
-        schema_version=2,
         program_id=program_id,
         integration=_integration(),
         program=node,
@@ -179,7 +178,6 @@ def _assert_semantic_call_equal(
             _assert_pose_equal(actual.at, expected.at)
     elif type(actual) is HandOver and type(expected) is HandOver:
         assert actual.object == expected.object
-        assert actual.receiver == expected.receiver
         assert (actual.final_target is None) == (expected.final_target is None)
         if actual.final_target is not None and expected.final_target is not None:
             _assert_pose_equal(actual.final_target, expected.final_target)
@@ -202,7 +200,7 @@ def test_compiler_matches_direct_python_semantic_calls_and_sequence_order() -> N
                 InvokeCfg(
                     call=PickCfg(
                         object="sim_cube",
-                        grasp="legacy_grasp",
+                        grasp="external_grasp",
                         resources={"primary": "left_actor"},
                     )
                 ),
@@ -210,8 +208,8 @@ def test_compiler_matches_direct_python_semantic_calls_and_sequence_order() -> N
                 InvokeCfg(
                     call=HandOverCfg(
                         object="sim_cube",
-                        receiver="right_actor",
                         final_target=TargetRefCfg(target="handover_pose"),
+                        resources={"destination": "right_actor"},
                     )
                 ),
                 InvokeCfg(
@@ -243,8 +241,8 @@ def test_compiler_matches_direct_python_semantic_calls_and_sequence_order() -> N
         ),
         HandOver(
             object=SceneObjectRef("cube"),
-            receiver="right_actor",
             final_target=SemanticPose(target.position, target.quaternion_wxyz),
+            resources={"destination": "right_actor"},
         ),
         RegisteredSemanticCall(
             call_id="example.inspect",

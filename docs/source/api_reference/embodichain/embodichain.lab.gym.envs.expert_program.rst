@@ -28,6 +28,7 @@ embodichain.lab.gym.envs.expert_program
       EnvironmentStepClock
       EnvironmentStepTimingError
       EndpointAdapterDeclaration
+      ExpertProgramAdapterFactory
       ExpertProgramCfg
       ExpertProgramCompileError
       ExpertProgramCompiler
@@ -53,6 +54,8 @@ embodichain.lab.gym.envs.expert_program
       PlanningObservationPort
       PoseCfg
       RegisteredSemanticCallCfg
+      RegisteredSemanticLowererDeclaration
+      RegisteredSemanticLowererFactory
       RepeatCfg
       RuntimeCommandFrameEncoder
       RuntimeTransportDeclaration
@@ -64,6 +67,7 @@ embodichain.lab.gym.envs.expert_program
       SequenceCfg
       SimulationArticulationBinding
       SimulationArticulationLinkBinding
+      SimulationExpertProgramAdapterFactory
       SimulationExpertProgramFactory
       SimulationExpertProgramRegistration
       SimulationRigidObjectBinding
@@ -206,6 +210,9 @@ bridge.
 .. autoclass:: ExpertProgramEnvironmentAdapter
    :members:
 
+.. autoclass:: ExpertProgramAdapterFactory
+   :members:
+
 .. autoclass:: ExpertProgramEnvironmentFactory
 
 .. autoclass:: ExpertProgramRuntimeAssembly
@@ -218,8 +225,9 @@ Registration catalogs and standard extensions
 
 The standard simulation path snapshots one task-owned registration before a
 live environment is created. Its fingerprint covers the scene/profile
-manifests and the exact endpoint, transport, and parallel-safety declarations
-used again during runtime assembly.
+manifests and the exact endpoint, transport, evidence, parallel-safety, and
+registered-semantic-lowerer factory declarations used again during runtime
+assembly.
 
 .. autoclass:: ExpertProgramIntegrationCatalog
    :members:
@@ -233,6 +241,11 @@ used again during runtime assembly.
    :members:
 
 .. autoclass:: ControlPartEvidenceProviderFactory
+
+.. autoclass:: RegisteredSemanticLowererDeclaration
+   :members:
+
+.. autoclass:: RegisteredSemanticLowererFactory
 
 .. autoclass:: EndpointAdapterDeclaration
    :members:
@@ -322,6 +335,9 @@ use the core ``RobotResource`` type directly.
 .. autoclass:: SimulationExpertProgramFactory
    :members:
 
+.. autoclass:: SimulationExpertProgramAdapterFactory
+   :members:
+
 .. autoclass:: ConfiguredHandOverPoseProvider
    :members:
 
@@ -375,6 +391,8 @@ Extension declaration implementation module
    EndpointAdapterDeclaration
    ParallelCommandSafetyValidatorFactory
    ParallelSafetyDeclaration
+   RegisteredSemanticLowererDeclaration
+   RegisteredSemanticLowererFactory
    RuntimeTransportDeclaration
    StandardExtensionDeclarations
    VersionedKey
@@ -382,6 +400,7 @@ Extension declaration implementation module
    declare_control_part_evidence_factory
    declare_endpoint_adapter
    declare_parallel_safety_factory
+   declare_registered_semantic_lowerer_factory
    declare_runtime_transport
    validate_immutable_extension_declaration
 
@@ -398,6 +417,11 @@ Extension declaration implementation module
 .. autoclass:: ParallelSafetyDeclaration
    :members:
 
+.. autoclass:: RegisteredSemanticLowererDeclaration
+   :members:
+
+.. autoclass:: RegisteredSemanticLowererFactory
+
 .. autoclass:: RuntimeTransportDeclaration
    :members:
 
@@ -413,6 +437,8 @@ Extension declaration implementation module
 .. autofunction:: declare_endpoint_adapter
 
 .. autofunction:: declare_parallel_safety_factory
+
+.. autofunction:: declare_registered_semantic_lowerer_factory
 
 .. autofunction:: declare_runtime_transport
 

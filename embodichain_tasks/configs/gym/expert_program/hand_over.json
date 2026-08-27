@@ -1,6 +1,185 @@
 {
     "id": "HandOver-v1",
     "expert_program_path": "../../expert_program/hand_over.yaml",
+    "expert_program_runtime": {
+        "scene": {
+            "registry_id": "dual_ur5_handover_v1",
+            "rigid_objects": [
+                {
+                    "entity_id": "can",
+                    "simulation_uid": "handover_object",
+                    "dynamics": "dynamic",
+                    "semantic_type": "soda_can"
+                },
+                {
+                    "entity_id": "support_surface",
+                    "dynamics": "static",
+                    "semantic_type": "support_surface"
+                }
+            ],
+            "antipodal_grasps": [
+                {
+                    "entity_id": "can_antipodal_grasp",
+                    "object_id": "can"
+                }
+            ]
+        },
+        "robot_profile": {
+            "profile_id": "dual_ur5_handover_v1",
+            "resources": [
+                {
+                    "resource_id": "left",
+                    "endpoints": [
+                        {
+                            "endpoint_id": "motion",
+                            "control_part": "left_arm",
+                            "capabilities": [
+                                "kinematics.batch_inverse",
+                                "motion.cartesian_pose",
+                                "kinematics.forward"
+                            ]
+                        },
+                        {
+                            "endpoint_id": "grasp",
+                            "control_part": "left_hand",
+                            "capabilities": ["interaction.grasp"],
+                            "command_preset": "left_parallel_gripper"
+                        }
+                    ]
+                },
+                {
+                    "resource_id": "right",
+                    "endpoints": [
+                        {
+                            "endpoint_id": "motion",
+                            "control_part": "right_arm",
+                            "capabilities": [
+                                "kinematics.batch_inverse",
+                                "motion.cartesian_pose",
+                                "kinematics.forward"
+                            ]
+                        },
+                        {
+                            "endpoint_id": "grasp",
+                            "control_part": "right_hand",
+                            "capabilities": ["interaction.grasp"],
+                            "command_preset": "right_parallel_gripper"
+                        }
+                    ]
+                }
+            ],
+            "command_presets": [
+                {
+                    "preset_id": "left_parallel_gripper",
+                    "control_part": "left_hand",
+                    "commands": {
+                        "open": [0.0],
+                        "grasp": [0.04]
+                    }
+                },
+                {
+                    "preset_id": "right_parallel_gripper",
+                    "control_part": "right_hand",
+                    "commands": {
+                        "open": [0.0],
+                        "grasp": [0.04]
+                    }
+                }
+            ],
+            "defaults": {
+                "hand_over": {
+                    "source": "left",
+                    "destination": "right"
+                }
+            },
+            "presets": [
+                {
+                    "preset_id": "safe",
+                    "action_options": {
+                        "hand_over": {
+                            "kind": "hand_over",
+                            "pre_grasp_distance": 0.08,
+                            "lift_height": 0.08,
+                            "hand_interp_steps": 10
+                        }
+                    },
+                    "motion": {
+                        "strategy": "motion_gen",
+                        "sample_count": 140,
+                        "dynamic_collision_mode": "auto"
+                    },
+                    "tracking": {
+                        "kind": "joint_position",
+                        "in_flight_max_abs_error": 1.0,
+                        "terminal_max_abs_error": 1.0
+                    },
+                    "recovery": {
+                        "max_replans": 3,
+                        "max_action_retries": 0,
+                        "goal_rotation_threshold": 0.5
+                    },
+                    "workflow_recovery": {"max_recovery_attempts": 2},
+                    "runner": {
+                        "minimum_cycle_time": 0.04,
+                        "hold_on_completion": false,
+                        "hold_during_effect_verification": false
+                    },
+                    "effect_monitors": {
+                        "hand_over": {
+                            "monitor_id": "builtin.composite_effect",
+                            "revision": "1",
+                            "params": {"consecutive_samples": 10}
+                        }
+                    }
+                }
+            ],
+            "default_preset": "safe",
+            "grounding_providers": {
+                "hand_over": "simulation.configured_handover_pose"
+            }
+        },
+        "runtime_services": {
+            "grasp_pose_generators": {
+                "left_hand": {
+                    "kind": "antipodal_parallel_jaw",
+                    "sample_count": 10000,
+                    "approach_direction_samples": 1,
+                    "opening_margin": 0.03,
+                    "point_sample_density": 0.012,
+                    "filter_ground_collision": false,
+                    "model": "dh_pgi_140_80"
+                },
+                "right_hand": {
+                    "kind": "antipodal_parallel_jaw",
+                    "sample_count": 10000,
+                    "approach_direction_samples": 1,
+                    "opening_margin": 0.03,
+                    "point_sample_density": 0.012,
+                    "filter_ground_collision": false,
+                    "model": "dh_pgi_140_80"
+                }
+            },
+            "handover_pose_providers": [
+                {
+                    "kind": "configured_pose",
+                    "final_position": [0.0, -0.2, 0.6],
+                    "final_quaternion_wxyz": [
+                        0.7071067812,
+                        0.7071067812,
+                        0.0,
+                        0.0
+                    ]
+                }
+            ],
+            "control_part_evidence": {
+                "kind": "joint_position_constraint",
+                "control_parts": ["left_hand", "right_hand"],
+                "object_ids": ["can"],
+                "open_qpos": [0.0],
+                "minimum_displacement": 0.004
+            }
+        }
+    },
     "max_episodes": 1,
     "max_episode_steps": 1200,
     "num_envs": 1,
@@ -102,6 +281,17 @@
                 "right_gripper_finger2_joint_1": 0.0
             },
             "drive_type": "force"
+        },
+        "link_attrs": {
+            "gripper_fingers": {
+                "link_names_expr": [
+                    "(left|right)_gripper_finger[12]_link_1"
+                ],
+                "attrs": {
+                    "dynamic_friction": 2.0,
+                    "static_friction": 2.0
+                }
+            }
         },
         "solver_cfg": {
             "left_arm": {

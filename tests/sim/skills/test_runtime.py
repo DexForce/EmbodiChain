@@ -90,6 +90,7 @@ from embodichain.lab.sim.skills.effects import (
     EffectExpectationDecision,
     EffectMonitor,
     EffectMonitorDecision,
+    EffectMonitorParam,
     HeldObjectRelation,
     HeldObjectStateExpectation,
     JOINT_STATE_EFFECT_CHANNEL,
@@ -216,6 +217,8 @@ class _DecisionMonitor(EffectMonitor):
     """Return one deterministic row-local physical-effect decision."""
 
     def __init__(self, spec: SemanticEffectSpec, decision: EffectMonitorDecision):
+        if not decision.expectation_decisions:
+            raise ValueError("Test monitors require explicit expectation decisions.")
         self._spec = spec
         self._decision = decision
         self.calls = 0
@@ -224,6 +227,10 @@ class _DecisionMonitor(EffectMonitor):
     @property
     def spec(self) -> SemanticEffectSpec:
         return self._spec.snapshot()
+
+    @property
+    def resolved_params(self) -> dict[str, EffectMonitorParam]:
+        return {}
 
     def observe(
         self,
@@ -428,15 +435,22 @@ class _Workflow:
 class _Grounded:
     analyzed: object
     invocation: ActionInvocation
-    effect_spec: SemanticEffectSpec
-    effect_monitor: EffectMonitor
+    effect_spec: SemanticEffectSpec | None
+    effect_monitor: EffectMonitor | None
     eligible_mask: torch.Tensor
+    effect_guards: tuple[GroundedHeldObjectGuard, ...] = ()
+    effect_gates: tuple[GroundedPhaseEffectGate, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class _Integration:
     engine: AtomicActionEngine
     scene_registry: SceneRegistry
+
+    @property
+    def robot_profile(self) -> object:
+        """Expose the production capability surface used by the facade."""
+        return SimpleNamespace(skills=self.engine.skills)
 
 
 class _Compiler(SemanticSkillCompiler):
@@ -448,11 +462,29 @@ class _Compiler(SemanticSkillCompiler):
         decisions: tuple[EffectMonitorDecision, ...],
         plan_success: tuple[torch.Tensor, ...],
         runner_cfg: ExecutionRunnerCfg,
+        *,
+        install_effect_monitor: bool,
     ) -> None:
         self._test_integration = _Integration(engine, SceneRegistry())
-        self._decisions = decisions
+        self._decisions = tuple(
+            EffectMonitorDecision(
+                decision.success_mask,
+                decision.failure_mask,
+                decision.expectation_decisions
+                or (
+                    EffectExpectationDecision(
+                        expectation_id="joint_target",
+                        satisfied_mask=decision.success_mask,
+                        contradicted_mask=decision.failure_mask,
+                        inverse_satisfied_mask=torch.zeros_like(decision.failure_mask),
+                    ),
+                ),
+            )
+            for decision in decisions
+        )
         self._plan_success = plan_success
         self._runner_cfg = runner_cfg
+        self._install_effect_monitor = install_effect_monitor
         self.analyze_count = 0
         self.ground_count = 0
         self.ground_timestamps: list[float] = []
@@ -543,11 +575,14 @@ class _Compiler(SemanticSkillCompiler):
                 ),
             ),
         )
-        monitor = _DecisionMonitor(spec, self._decisions[call_index])
         self.invocations.append(invocation)
-        self.monitors.append(monitor)
+        monitor: _DecisionMonitor | None = None
+        if self._install_effect_monitor:
+            monitor = _DecisionMonitor(spec, self._decisions[call_index])
+            self.monitors.append(monitor)
         analyzed = SimpleNamespace(
             call=call,
+            effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
                 binding=SimpleNamespace(action_binding=invocation.binding),
@@ -556,7 +591,6 @@ class _Compiler(SemanticSkillCompiler):
                 ),
                 preset=SimpleNamespace(
                     preset_id="runtime_test_preset",
-                    schema_version=1,
                     motion_policy=invocation.motion_policy,
                     recovery_policy=invocation.recovery_policy,
                     runner_cfg=self._runner_cfg,
@@ -566,7 +600,7 @@ class _Compiler(SemanticSkillCompiler):
         return _Grounded(
             analyzed,
             invocation,
-            spec,
+            spec if monitor is not None else None,
             monitor,
             eligible_mask.clone(),
         )
@@ -733,6 +767,7 @@ class _WorkflowRecoveryCompiler(SemanticSkillCompiler):
         )
         analyzed = SimpleNamespace(
             call=call,
+            effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
                 binding=SimpleNamespace(action_binding=binding),
@@ -741,7 +776,6 @@ class _WorkflowRecoveryCompiler(SemanticSkillCompiler):
                 ),
                 preset=SimpleNamespace(
                     preset_id="runtime_test_recovery_preset",
-                    schema_version=3,
                     motion_policy=motion_policy,
                     tracking_policy=tracking_policy,
                     recovery_policy=recovery_policy,
@@ -819,6 +853,7 @@ def _system(
     plan_success: tuple[torch.Tensor, ...] | None = None,
     preset_runner_cfg: ExecutionRunnerCfg | None = None,
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
+    install_effect_monitor: bool = True,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -842,6 +877,7 @@ def _system(
         decisions,
         selected_plan_success,
         selected_runner_cfg,
+        install_effect_monitor=install_effect_monitor,
     )
     observation = _ObservationProvider()
     sink = _CommandSink()
@@ -957,6 +993,23 @@ def test_runtime_analyzes_once_and_uses_one_fresh_session_per_call(
     assert len(system.collector.calls) == 2
     assert system.compiler.ground_timestamps[1] > system.compiler.ground_timestamps[0]
     assert system.observation.calls == 4
+
+
+def test_runtime_projects_planned_effect_when_grounded_call_has_no_monitor() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+
+    result = system.runtime.run(_call("trajectory_only"))
+
+    assert result.status is SkillStatus.COMPLETED
+    assert result.effects == ()
+    assert system.collector.calls == []
+    joint = result.task_state.get_articulation_joint_state("fixture", "joint")
+    assert joint is not None
+    assert torch.equal(joint.env_mask, _mask(True, True))
+    assert torch.allclose(joint.position, torch.ones(BATCH_SIZE, 1))
 
 
 def test_runtime_uses_selected_preset_runner_cfg_without_override(
@@ -1175,8 +1228,7 @@ def test_runtime_retries_directly_when_verified_source_relation_remains() -> Non
     result = system.runtime.run(
         HandOver(
             object=SceneObjectRef("cube"),
-            receiver="right_actor",
-            resources={"source": "left_actor"},
+            resources={"source": "left_actor", "destination": "right_actor"},
         )
     )
 
@@ -1234,8 +1286,7 @@ def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> No
     result = system.runtime.run(
         HandOver(
             object=SceneObjectRef("cube"),
-            receiver="right_actor",
-            resources={"source": "left_actor"},
+            resources={"source": "left_actor", "destination": "right_actor"},
         )
     )
 
@@ -1567,7 +1618,18 @@ def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation()
     )
     monitor = _DecisionMonitor(
         spec,
-        EffectMonitorDecision(_mask(False, True), _mask(True, False)),
+        EffectMonitorDecision(
+            _mask(False, True),
+            _mask(True, False),
+            (
+                EffectExpectationDecision(
+                    "source",
+                    _mask(False, True),
+                    _mask(True, False),
+                    _mask(False, False),
+                ),
+            ),
+        ),
     )
     guard = GroundedHeldObjectGuard(
         guard_id="source_attached",
@@ -1665,11 +1727,33 @@ def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace()
     )
     terminal_monitor = _DecisionMonitor(
         spec,
-        EffectMonitorDecision(_mask(True, True), _mask(False, False)),
+        EffectMonitorDecision(
+            _mask(True, True),
+            _mask(False, False),
+            (
+                EffectExpectationDecision(
+                    "destination",
+                    _mask(True, True),
+                    _mask(False, False),
+                    _mask(False, False),
+                ),
+            ),
+        ),
     )
     gate_monitor = _DecisionMonitor(
         spec,
-        EffectMonitorDecision(_mask(False, True), _mask(True, False)),
+        EffectMonitorDecision(
+            _mask(False, True),
+            _mask(True, False),
+            (
+                EffectExpectationDecision(
+                    "destination",
+                    _mask(False, True),
+                    _mask(True, False),
+                    _mask(False, False),
+                ),
+            ),
+        ),
     )
     gate = GroundedPhaseEffectGate(
         gate_id="destination_acquired",
@@ -1791,10 +1875,7 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     assert typed_attempt.snapshot().scene_dependency_monitor_until == {"fixture": 0}
     resolved = call["resolved_core_policy"]
     assert resolved["profile_id"] == "runtime_test_profile"
-    assert resolved["preset"] == {
-        "preset_id": "runtime_test_preset",
-        "schema_version": 1,
-    }
+    assert resolved["preset"] == {"preset_id": "runtime_test_preset"}
     assert resolved["motion_policy"]["strategy"] == "ik_interp"
     assert resolved["motion_policy"]["sample_count"] == 7
     assert resolved["tracking_policy"] == {
@@ -2018,6 +2099,77 @@ def test_facade_varargs_and_programmatic_iterable_share_runtime_path() -> None:
     assert [item.skill_id for item in iterable_system.compiler.invocations] == [
         item.skill_id for item in facade_system.compiler.invocations
     ]
+
+
+def test_facade_reports_bound_robot_skills_and_call_availability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    facade = AtomicSkills(system.runtime)
+
+    available = facade.availability(_call("available"))
+
+    assert available.available
+    assert available.semantic_id == "test.available"
+    assert available.diagnostic is None
+    assert facade.available_skills == system.engine.skills
+
+    diagnostic = SemanticDiagnostic(
+        "unknown_entity",
+        ("workflow", 0, "call", "object"),
+        "The referenced object is unavailable.",
+        ("cube",),
+    )
+    monkeypatch.setattr(
+        system.compiler,
+        "analyze",
+        Mock(side_effect=SemanticValidationError(diagnostic)),
+    )
+
+    unavailable = facade.availability(_call("unavailable"))
+
+    assert not unavailable.available
+    assert unavailable.diagnostic == diagnostic
+
+
+def test_facade_from_simulation_delegates_to_canonical_runtime_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    factory = Mock(return_value=system.runtime)
+    monkeypatch.setattr(SkillRuntime, "from_simulation", factory)
+    registry = SceneRegistry()
+    verifier = Mock()
+
+    facade = AtomicSkills.from_simulation(
+        simulation="simulation",
+        robot="robot",
+        motion_generator="motion_generator",
+        scene_registry=registry,
+        robot_profile="robot_profile",
+        effect_verifier=verifier,
+        control_dt=0.01,
+    )
+
+    assert facade.runtime is system.runtime
+    factory.assert_called_once_with(
+        simulation="simulation",
+        robot="robot",
+        motion_generator="motion_generator",
+        scene_registry=registry,
+        robot_profile="robot_profile",
+        grasp_pose_generators=None,
+        call_catalog=None,
+        effect_verifier=verifier,
+        registered_lowerers=(),
+        relation_grounders=(),
+        handover_pose_providers=(),
+        endpoint_adapters=None,
+        runner_cfg=None,
+        control_dt=0.01,
+        scene_translation_threshold=1.0e-4,
+        scene_rotation_threshold=1.0e-3,
+    )
 
 
 def test_from_env_requires_an_explicit_runtime_provider() -> None:

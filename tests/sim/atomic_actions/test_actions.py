@@ -100,7 +100,6 @@ from embodichain.lab.sim.atomic_actions import (
     TwistOptions,
 )
 from embodichain.lab.sim.atomic_actions.goals import collect_scene_dependencies
-from embodichain.lab.sim.common import BatchEntity
 from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
@@ -471,14 +470,11 @@ def _joint_command_payloads(
     return tuple(payloads)
 
 
-def _semantics(*, entity_id: str | None = None) -> ObjectSemantics:
-    entity = Mock(spec=BatchEntity)
-    entity.get_local_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+def _semantics(*, entity_id: str = "test_object") -> ObjectSemantics:
     return ObjectSemantics(
         affordance=Affordance(),
         geometry={},
         label="test_object",
-        entity=entity,
         entity_id=entity_id,
     )
 
@@ -640,7 +636,7 @@ def _stub_dual_arm_grasp_poses(action: AtomicAction) -> None:
 
 
 def _plan_segment_contract_case(case_id: str) -> ActionPlan:
-    """Plan one built-in used by the Version 1 trajectory-segment contract."""
+    """Plan one built-in used by the trajectory-segment contract."""
     generator = _motion_generator()
     sample_count = 20
 
@@ -689,7 +685,6 @@ def _plan_segment_contract_case(case_id: str) -> ActionPlan:
         action = _bind_action(generator, Place())
         goal = AssembleGoal(
             affordance=AssembleAffordance(
-                base_object_entity=Mock(),
                 assemble_to_base_pose=torch.eye(4),
             ),
             base_pose=SceneEntityPose("base"),
@@ -716,6 +711,7 @@ def _plan_segment_contract_case(case_id: str) -> ActionPlan:
                 ),
                 geometry={},
                 label="button",
+                entity_id="button",
             ),
             torch.eye(4),
         )
@@ -728,7 +724,7 @@ def _plan_segment_contract_case(case_id: str) -> ActionPlan:
     raise AssertionError(f"Unknown trajectory-segment contract case {case_id!r}.")
 
 
-def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
+def test_builtin_descriptors_expose_strict_goal_types() -> None:
     assert MoveEndEffector.GoalType is EndEffectorPoseGoal
     assert MoveJoints.GoalType is JointPositionGoal
     assert PickUp.GoalType is GraspGoal
@@ -1020,26 +1016,27 @@ def test_move_held_object_requires_projected_attachment() -> None:
     eef_pose[:, 0, 3] = torch.tensor([0.5, 0.8])
     generator.robot.compute_fk.return_value = eef_pose
     generator.robot.compute_fk.side_effect = None
-    action._apply_configured_upright_rotation = Mock()
-    configured_invocation = ActionInvocation(
+    automatic_rotation = Mock()
+    action._apply_automatic_transport_rotation = automatic_rotation
+    invocation = ActionInvocation(
         skill_id="move_held_object",
         goal=HeldObjectPoseGoal(torch.eye(4)),
         binding=_binding(action),
         motion_policy=MotionPolicy(sample_count=10),
-        skill_options=MoveHeldObjectOptions(pick_rotate_upright=0.25),
+        skill_options=MoveHeldObjectOptions(),
     )
 
-    plan = _plan_action(action, configured_invocation, _context(task))
+    plan = _plan_action(action, invocation, _context(task))
 
     assert plan.plan_success.all()
     assert plan.expected_effects.is_empty
     assert generator.robot.compute_fk.call_args.kwargs["name"] == "arm"
-    current_object_pose = action._apply_configured_upright_rotation.call_args.args[2]
+    move_eef_pose, current_eef_pose = automatic_rotation.call_args.args
     assert torch.allclose(
-        current_object_pose,
-        torch.bmm(eef_pose, pose_inv(held.object_to_eef)),
+        move_eef_pose,
+        torch.bmm(torch.eye(4).repeat(NUM_ENVS, 1, 1), held.object_to_eef),
     )
-    semantics.entity.get_local_pose.assert_not_called()
+    assert torch.equal(current_eef_pose, eef_pose)
 
 
 def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
@@ -1065,6 +1062,7 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
         affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
         geometry={},
         label="pourable-object",
+        entity_id="pourable-object",
     )
     task = TaskState(
         batch_size=NUM_ENVS,
@@ -1187,6 +1185,7 @@ def test_pour_requires_exclusively_held_axis_align_affordance() -> None:
         affordance=AxisAlignAffordance(),
         geometry={},
         label="shared-pourable-object",
+        entity_id="shared-pourable-object",
     )
     task = TaskState(
         batch_size=NUM_ENVS,
@@ -1416,13 +1415,10 @@ def test_move_joints_visits_waypoints_and_rejects_unknown_names() -> None:
 def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     generator = _motion_generator()
     affordance = AntipodalAffordance()
-    entity = Mock()
-    entity.get_local_pose.return_value = torch.full((NUM_ENVS, 4, 4), 9.0)
     semantics = ObjectSemantics(
         affordance=affordance,
         geometry={},
         label="explicit-grasp-object",
-        entity=entity,
         entity_id="target",
     )
     grasp = torch.eye(4).repeat(NUM_ENVS, 1, 1)
@@ -1448,7 +1444,6 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
 
     grasp_generator.get_valid_grasp_poses.assert_not_called()
-    request.goal.semantics.entity.get_local_pose.assert_not_called()
     held = projected.get_held_object("arm")
     assert held is not None
     assert torch.allclose(held.grasp_xpos, grasp)
@@ -1644,6 +1639,7 @@ def test_axis_align_validates_goal_and_binding_contract() -> None:
         affordance=AxisAlignAffordance(),
         geometry={},
         label="axis-object",
+        entity_id="axis-object",
     )
 
     with pytest.raises(TypeError, match="expects goal AxisAlignGoal"):
@@ -1691,13 +1687,10 @@ def test_axis_align_handles_opposite_axes_without_nan() -> None:
 
 def test_pick_holds_only_environment_without_a_feasible_grasp() -> None:
     generator = _motion_generator()
-    entity = Mock()
-    entity.get_local_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(),
         geometry={},
         label="partially-graspable-object",
-        entity=entity,
         entity_id="target",
     )
     action = _bind_action(generator, PickUp())
@@ -1741,13 +1734,10 @@ def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
     target_pose[:, 0, 3] = torch.tensor([0.1, 0.2])
     relative_pose = torch.eye(4)
     relative_pose[2, 3] = 0.05
-    entity = Mock()
-    entity.get_local_pose.return_value = target_pose
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
         label="late-bound-grasp-object",
-        entity=entity,
         entity_id="target",
     )
     action = _bind_action(generator, PickUp())
@@ -1788,13 +1778,10 @@ def test_pick_session_replans_when_late_bound_target_moves() -> None:
     initial_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     moved_pose = initial_pose.clone()
     moved_pose[:, 1, 3] = 0.3
-    entity = Mock()
-    entity.get_local_pose.return_value = initial_pose
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
         label="moving-grasp-object",
-        entity=entity,
         entity_id="target",
     )
     engine = AtomicActionEngine(
@@ -1823,7 +1810,6 @@ def test_pick_session_replans_when_late_bound_target_moves() -> None:
     )
     session = engine.start((invocation,), initial_context)
     session.tick(initial_context)
-    entity.get_local_pose.return_value = moved_pose
 
     recovered = session.tick(
         _context(
@@ -1966,6 +1952,7 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
         ),
         geometry={},
         label="button",
+        entity_id="button",
     )
     held = _held(semantics)
     task = TaskState(
@@ -2006,6 +1993,7 @@ def test_twist_plans_six_segments_from_articulation_link() -> None:
         affordance=affordance,
         geometry={},
         label="knob",
+        entity_id="knob",
     )
     generator = _motion_generator()
     action = _bind_action(generator, Twist())
@@ -2056,6 +2044,7 @@ def test_twist_plans_from_explicit_rigid_object_pose_snapshot() -> None:
         ),
         geometry={},
         label="rigid-knob",
+        entity_id="rigid-knob",
     )
 
     action = _bind_action(_motion_generator(), Twist())
@@ -2142,7 +2131,12 @@ def test_interaction_goal_collects_target_scene_dependency(
     goal_factory,
     affordance,
 ) -> None:
-    semantics = ObjectSemantics(affordance=affordance, geometry={}, label="target")
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        entity_id="target",
+        label="target",
+    )
     goal = goal_factory(semantics, SceneEntityPose("target-link"))
 
     assert collect_scene_dependencies(goal) == ("target-link",)
@@ -2176,6 +2170,7 @@ def test_twist_session_replans_when_scene_target_moves() -> None:
         ),
         geometry={},
         label="moving-knob",
+        entity_id="moving-knob",
     )
     invocation = ActionInvocation(
         skill_id="twist",
@@ -2256,6 +2251,7 @@ def test_slide_plans_expected_segments(
         affordance=affordance,
         geometry={},
         label="drawer_handle",
+        entity_id="drawer_handle",
     )
     generator = _motion_generator()
     action = _bind_action(generator, Slide())
@@ -2347,6 +2343,7 @@ def test_slide_holds_failed_environment() -> None:
         affordance=affordance,
         geometry={},
         label="drawer_handle",
+        entity_id="drawer_handle",
     )
     generator = _motion_generator()
 
@@ -2419,7 +2416,12 @@ def test_slide_fk_path_remains_on_translation_axis() -> None:
         mesh_triangles=torch.tensor([[0, 1, 2]]),
         translation_axis=torch.tensor([0.0, -1.0, 0.0]),
     )
-    semantics = ObjectSemantics(affordance=affordance, geometry={}, label="handle")
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        entity_id="handle",
+        label="handle",
+    )
     action = _bind_action(generator, Slide())
     _GRASP_GENERATORS[id(action)].get_best_grasp_poses = Mock(
         return_value=(
@@ -2871,6 +2873,7 @@ def test_press_plans_close_approach_press_and_retract() -> None:
         affordance=affordance,
         geometry={},
         label="button",
+        entity_id="button",
     )
     generator = _motion_generator()
     action = _bind_action(generator, Press())
@@ -2935,6 +2938,7 @@ def test_press_plans_from_rigid_object_pose_snapshot_with_option_position() -> N
         affordance=affordance,
         geometry={},
         label="rigid-button",
+        entity_id="rigid-button",
     )
     generator = _motion_generator()
     action = _bind_action(generator, Press())
@@ -2992,6 +2996,7 @@ def test_press_fk_path_passes_contact_and_remains_on_press_axis() -> None:
         ),
         geometry={},
         label="button",
+        entity_id="button",
     )
     action = _bind_action(generator, Press())
     plan = _plan_action(
@@ -3032,6 +3037,7 @@ def test_press_preserves_failed_environment_at_observed_qpos() -> None:
         ),
         geometry={},
         label="button",
+        entity_id="button",
     )
     generator = _motion_generator()
 
@@ -3077,6 +3083,7 @@ def test_press_rejects_non_press_affordance() -> None:
         ),
         geometry={},
         label="mesh-button",
+        entity_id="mesh-button",
     )
     action = _bind_action(_motion_generator(), Press())
 
@@ -3093,6 +3100,7 @@ def test_press_requires_primary_arm_and_end_effector_bindings() -> None:
         affordance=AntipodalAffordance(),
         geometry={},
         label="button",
+        entity_id="button",
     )
     action = _bind_action(_motion_generator(), Press())
     invocation = ActionInvocation(
@@ -3130,6 +3138,7 @@ def test_twist_rejects_non_twist_affordance() -> None:
         ),
         geometry={},
         label="mesh-knob",
+        entity_id="mesh-knob",
     )
     action = _bind_action(_motion_generator(), Twist())
 
@@ -3159,6 +3168,7 @@ def test_slide_rejects_non_slide_affordance() -> None:
         ),
         geometry={},
         label="mesh-handle",
+        entity_id="mesh-handle",
     )
     action = _bind_action(_motion_generator(), Slide())
 
@@ -3178,6 +3188,7 @@ def test_slide_requires_primary_end_effector() -> None:
         affordance=AntipodalAffordance(),
         geometry={},
         label="drawer_handle",
+        entity_id="drawer_handle",
     )
     action = _bind_action(_motion_generator(), Slide())
     invocation = ActionInvocation(
@@ -3719,13 +3730,10 @@ def test_coordinated_pick_returns_full_dof_plan_and_omits_empty_hold(
     )
     affordance = AntipodalAffordance()
     _stub_dual_arm_grasp_poses(action)
-    entity = Mock()
-    entity.get_local_pose.return_value = torch.full((NUM_ENVS, 4, 4), 9.0)
     semantics = ObjectSemantics(
         affordance=affordance,
         geometry={},
         label="coordinated-object",
-        entity=entity,
         entity_id="coordinated_object",
     )
     invocation = ActionInvocation(
@@ -3764,7 +3772,6 @@ def test_coordinated_pick_returns_full_dof_plan_and_omits_empty_hold(
         "right_hand",
     }
     assert plan.scene_dependencies == ()
-    request.goal.semantics.entity.get_local_pose.assert_not_called()
     assert tuple(segment.name for segment in plan.segments) == expected_segments
     assert plan.segments[0].start == 0
     assert all(
@@ -3788,13 +3795,10 @@ def test_coordinated_pick_implicit_initial_pose_uses_scene_snapshot() -> None:
     )
     affordance = AntipodalAffordance()
     _stub_dual_arm_grasp_poses(action)
-    entity = Mock()
-    entity.get_local_pose.return_value = torch.full((NUM_ENVS, 4, 4), 9.0)
     semantics = ObjectSemantics(
         affordance=affordance,
         geometry={},
         label="snapshot-coordinated-object",
-        entity=entity,
         entity_id="target",
     )
     object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
@@ -3822,7 +3826,6 @@ def test_coordinated_pick_implicit_initial_pose_uses_scene_snapshot() -> None:
     ].get_dual_arm_valid_grasp_poses.call_args.kwargs["obj_poses"]
     assert torch.equal(sampled_pose, object_pose)
     assert plan.scene_dependencies == ("target",)
-    request.goal.semantics.entity.get_local_pose.assert_not_called()
     left_held = projected.get_held_object("left_arm")
     right_held = projected.get_held_object("right_arm")
     assert left_held is not None and right_held is not None
@@ -3834,12 +3837,9 @@ def test_coordinated_pick_implicit_initial_pose_uses_scene_snapshot() -> None:
 def test_assemble_place_uses_explicit_base_snapshot() -> None:
     generator = _motion_generator()
     action = _bind_action(generator, Place())
-    base_entity = Mock()
-    base_entity.get_local_pose.return_value = torch.full((NUM_ENVS, 4, 4), 9.0)
     relative_pose = torch.eye(4)
     relative_pose[2, 3] = 0.05
     affordance = AssembleAffordance(
-        base_object_entity=base_entity,
         assemble_to_base_pose=relative_pose,
     )
     task = TaskState(
@@ -3871,31 +3871,11 @@ def test_assemble_place_uses_explicit_base_snapshot() -> None:
 
     assert plan.plan_success.all()
     assert plan.scene_dependencies == ("base",)
-    request.goal.affordance.base_object_entity.get_local_pose.assert_not_called()
 
 
-def test_assemble_place_legacy_base_entity_warns() -> None:
-    generator = _motion_generator()
-    action = _bind_action(generator, Place())
-    base_entity = Mock()
-    base_entity.get_local_pose.return_value = torch.eye(4)
-    affordance = AssembleAffordance(base_object_entity=base_entity)
-    task = TaskState(
-        batch_size=NUM_ENVS,
-        device="cpu",
-        held_objects={"arm": _held()},
-    )
-
-    request = action.resolve_request(
-        _invocation(action, AssembleGoal(affordance=affordance))
-    )
-    with pytest.warns(DeprecationWarning, match="base_pose"):
-        plan = action.plan(request, _context(task))
-
-    assert plan.scene_dependencies == ()
-    request.goal.affordance.base_object_entity.get_local_pose.assert_called_once_with(
-        to_matrix=True
-    )
+def test_assemble_goal_requires_snapshot_base_pose() -> None:
+    with pytest.raises(TypeError, match="base_pose"):
+        AssembleGoal(affordance=AssembleAffordance())  # type: ignore[call-arg]
 
 
 def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
@@ -3937,7 +3917,12 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
     invocation = ActionInvocation(
         skill_id="coordinated_pickment",
         goal=CoordinatedPickGoal(
-            semantics=ObjectSemantics(affordance=affordance, geometry={}, label="tray"),
+            semantics=ObjectSemantics(
+                affordance=affordance,
+                geometry={},
+                entity_id="tray",
+                label="tray",
+            ),
             object_target_pose=target_pose,
             object_initial_pose=torch.eye(4),
         ),
@@ -3997,7 +3982,12 @@ def test_coordinated_pick_fails_when_affordance_has_no_grasp() -> None:
             },
         ]
     )
-    semantics = ObjectSemantics(affordance=affordance, geometry={}, label="object")
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        entity_id="object",
+        label="object",
+    )
     invocation = ActionInvocation(
         skill_id="coordinated_pickment",
         goal=CoordinatedPickGoal(
@@ -4045,10 +4035,20 @@ def test_coordinated_placement_projects_effects_and_omits_empty_segments(
         ),
     )
     placing = _held(
-        ObjectSemantics(affordance=AntipodalAffordance(), geometry={}, label="placing")
+        ObjectSemantics(
+            affordance=AntipodalAffordance(),
+            geometry={},
+            entity_id="placing",
+            label="placing",
+        )
     )
     support = _held(
-        ObjectSemantics(affordance=AntipodalAffordance(), geometry={}, label="support")
+        ObjectSemantics(
+            affordance=AntipodalAffordance(),
+            geometry={},
+            entity_id="support",
+            label="support",
+        )
     )
     task = TaskState(
         batch_size=NUM_ENVS,
@@ -4161,10 +4161,20 @@ def test_coordinated_placement_holds_only_environment_with_ik_failure() -> None:
         ),
     )
     placing = _held(
-        ObjectSemantics(affordance=AntipodalAffordance(), geometry={}, label="placing")
+        ObjectSemantics(
+            affordance=AntipodalAffordance(),
+            geometry={},
+            entity_id="placing",
+            label="placing",
+        )
     )
     support = _held(
-        ObjectSemantics(affordance=AntipodalAffordance(), geometry={}, label="support")
+        ObjectSemantics(
+            affordance=AntipodalAffordance(),
+            geometry={},
+            entity_id="support",
+            label="support",
+        )
     )
     task = TaskState(
         batch_size=NUM_ENVS,
@@ -4213,7 +4223,10 @@ def test_coordinated_actions_reject_curobo_motion_generation() -> None:
         skill_id="coordinated_pickment",
         goal=CoordinatedPickGoal(
             semantics=ObjectSemantics(
-                affordance=AntipodalAffordance(), geometry={}, label="object"
+                affordance=AntipodalAffordance(),
+                geometry={},
+                entity_id="object",
+                label="object",
             ),
             object_target_pose=torch.eye(4),
             object_initial_pose=torch.eye(4),

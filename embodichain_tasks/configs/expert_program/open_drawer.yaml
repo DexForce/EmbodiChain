@@ -1,9 +1,8 @@
-schema_version: 2
 program_id: slide_open_drawer
 integration:
   robot_profile: expert_program_ur5_slide
   scene_registry: expert_program_open_drawer
-  runtime_preset: safe
+  runtime_preset: trajectory
 targets: {}
 program:
   kind: segment
@@ -12,18 +11,8 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: embodichain_tasks.open_drawer
-      schema_version: 1
+      call_id: simulation.articulation_link_slide
       arguments:
         handle: drawer_handle
       resources:
         primary: manipulator
-  post:
-    - kind: wait_stable
-      entity: drawer
-      preset: articulation
-  validators:
-    - kind: articulation_joint_position
-      articulation: drawer
-      joint: cabinet_to_drawer
-      minimum_position: 0.10

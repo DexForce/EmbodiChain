@@ -217,6 +217,7 @@ def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
     semantics = ObjectSemantics(
         affordance=PressAffordance(press_position=(0.0, 0.0, 0.0)),
         geometry={},
+        entity_id="button",
     )
     invocation = ActionInvocation(
         skill_id="press",
@@ -504,41 +505,21 @@ def test_engine_motion_generator_is_read_only() -> None:
         engine.motion_generator = Mock()  # type: ignore[misc]
 
 
-def test_engine_plan_action_supports_unregistered_configured_instance() -> None:
+def test_engine_requires_registered_skill_id_for_direct_binding() -> None:
     engine = _engine()
     action = StubAction()
-    binding = engine.bind_control_parts(
-        action,
-        {"primary": {"motion": "all"}},
-    )
-    invocation = ActionInvocation(
-        skill_id="stub",
-        goal=JointPositionGoal(torch.ones(2, 3)),
-        binding=binding,
-        motion_policy=MotionPolicy(sample_count=2),
-    )
-
-    plan = engine.plan_action(
-        action,
-        invocation,
-        engine.initial_context(),
-    )
-
-    assert plan.plan_success.tolist() == [True, True]
-    assert action.is_bound
-    assert engine.actions == {}
-
-
-def test_engine_cannot_build_binding_for_action_owned_by_another_engine() -> None:
-    action = StubAction()
-    first = _engine()
-    first.register(action)
-
-    with pytest.raises(ValueError, match="belongs to another engine"):
-        _engine().bind_control_parts(
-            action,
+    with pytest.raises(TypeError, match="skill_id must be a string"):
+        engine.bind_control_parts(
+            action,  # type: ignore[arg-type]
             {"primary": {"motion": "all"}},
         )
+
+    with pytest.raises(KeyError, match="No atomic action registered"):
+        engine.bind_control_parts("stub", {"primary": {"motion": "all"}})
+
+    engine.register(action)
+    binding = engine.bind_control_parts("stub", {"primary": {"motion": "all"}})
+    assert binding.endpoint("primary", "motion").target.control_part == "all"
 
 
 def test_action_cannot_be_rebound_to_another_engine() -> None:

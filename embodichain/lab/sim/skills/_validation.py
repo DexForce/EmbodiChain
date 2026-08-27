@@ -14,13 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Configuration-defined Expert Program task examples.
-
-The runnable environments in this package are assembled from the bundled Gym
-JSON files at configuration-load time.  No task-specific environment classes
-or import-time registrations are required.
-"""
+"""Private validation shared by semantic-skill value contracts."""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+
+def validate_identifier(value: object, *, field_name: str) -> str:
+    """Return one exact, non-empty identifier without outer whitespace."""
+    if type(value) is not str or not value or value != value.strip():
+        raise ValueError(
+            f"{field_name} must be a non-empty string without outer whitespace."
+        )
+    return value

@@ -41,7 +41,9 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     CoordinatedPickGoal,
     CoordinatedPickmentOptions,
+    EntityState,
     MotionPolicy,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
@@ -466,7 +468,14 @@ def run_coordinated_pickment_demo(
                 skill_options=pickment_options,
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={obj.uid: EntityState(object_pose_batch)},
+            ),
+            control_dt=sim.sim_config.physics_dt,
+        ),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions
