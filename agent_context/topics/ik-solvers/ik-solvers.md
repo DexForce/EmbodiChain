@@ -154,8 +154,8 @@ class RobotCfg(ArticulationCfg):
 - `search_mode`: `"seeded"` computes the seed's geometric shoulder-elbow-wrist
   arm angle and searches redundancy angles radially around it; if the configured
   radial step cannot produce `num_samples` distinct angles in one revolution,
-  uncovered intermediate angles from a uniform full-circle grid fill the remaining
-  slots. `"full"` samples the complete `[-pi, pi)` interval directly.
+  the incomplete radial prefix is replaced by a complete seed-centered uniform
+  full-circle grid. `"full"` samples the complete `[-pi, pi)` interval directly.
 - `redundancy_step`: angular increment used by seed-centered search.
 - Requesting all solutions always uses full-space redundancy sampling.
 - CPU and CUDA derive the reference plane in the base frame and use the same

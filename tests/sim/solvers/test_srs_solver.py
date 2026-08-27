@@ -39,8 +39,6 @@ from embodichain.lab.sim.solvers.srs_solver import SRSSolver, SRSSolverCfg
 
 
 class BaseSolverTest:
-    solver = {}
-
     def get_arm_config(self):
         return [
             (DexforceW1ArmSide.LEFT, "left_arm"),
@@ -79,6 +77,10 @@ class BaseSolverTest:
             cfg.ik_nearest_weight = np.array([2.0, 2.0, 2.0, 0.0, 1.0, 1.0, 1.0])
 
             self.solver[arm_name] = SRSSolver(cfg=cfg, num_envs=1, device=device)
+
+    def teardown_method(self):
+        """Release per-test solver instances and their backend allocations."""
+        self.solver.clear()
 
     @pytest.mark.parametrize(
         "arm_side, arm_name",
@@ -206,6 +208,7 @@ class BaseSolverTest:
     def test_seeded_redundancy_sampling_expands_around_geometric_arm_angle(self):
         """Test redundancy samples expand around the seed's geometric arm angle."""
         solver = self.solver[next(iter(self.solver))]
+        solver.cfg.num_samples = 5
         seed = torch.tensor(
             [[0.15, -0.35, 0.40, -0.70, 0.20, 0.30, -0.15]],
             dtype=torch.float32,
@@ -237,6 +240,42 @@ class BaseSolverTest:
             angles.shape[1], dtype=torch.bool, device=solver.device
         ).unsqueeze(0)
         assert torch.all(wrapped_delta.masked_fill(diagonal, torch.inf) > 1e-6)
+
+    def test_underfilled_seeded_sampling_uses_complete_uniform_grid(self):
+        """Test an exhausted radial sequence becomes a gap-free circular grid."""
+        solver = self.solver[next(iter(self.solver))]
+        solver.cfg.num_samples = 100
+        seed = torch.tensor(
+            [[0.15, -0.35, 0.40, -0.70, 0.20, 0.30, -0.15]],
+            dtype=torch.float32,
+            device=solver.device,
+        )
+
+        seed_arm_angle = solver.impl._get_seed_arm_angles(seed)
+        angles = solver.impl._sample_elbow_angles(seed)
+        offsets = (
+            torch.remainder(
+                angles - seed_arm_angle.unsqueeze(1) + torch.pi,
+                2.0 * torch.pi,
+            )
+            - torch.pi
+        )
+        sorted_offsets = offsets.sort(dim=1).values
+        circular_gaps = torch.cat(
+            (
+                sorted_offsets[:, 1:] - sorted_offsets[:, :-1],
+                sorted_offsets[:, :1] + 2.0 * torch.pi - sorted_offsets[:, -1:],
+            ),
+            dim=1,
+        )
+
+        assert angles.shape == (1, solver.cfg.num_samples)
+        assert torch.allclose(angles[:, 0], seed_arm_angle, atol=1e-6)
+        assert torch.allclose(
+            circular_gaps,
+            torch.full_like(circular_gaps, 2.0 * torch.pi / solver.cfg.num_samples),
+            atol=1e-6,
+        )
 
     def test_horizontal_shoulder_wrist_seed_recovers_its_fk_pose(self):
         """Test horizontal shoulder-wrist geometry retains its shoulder azimuth."""
@@ -332,16 +371,6 @@ class BaseSolverTest:
                 solver.impl.ik_nearest_weight_tensor.cpu(),
                 torch.from_numpy(weights).float(),
             )
-
-    @classmethod
-    def teardown_class(cls):
-        solver = getattr(cls, "solver", None)
-        if solver is not None:
-            try:
-                solver.clear()
-                print("solver destroyed successfully")
-            except Exception as e:
-                print(f"Error during solver destruction: {e}")
 
 
 # Base test class for CPU and CUDA

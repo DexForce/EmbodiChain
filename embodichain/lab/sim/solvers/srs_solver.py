@@ -177,33 +177,20 @@ class _BaseSRSSolverImpl:
             layer += 1
 
         # A fixed radial step has only finitely many distinct positions on one
-        # revolution. If it cannot provide num_samples entries, retain the
-        # seed-first radial prefix and fill the remaining slots from a uniform
-        # full-circle grid. This preserves the configured local search order
-        # while honoring num_samples and covering intermediate arm angles.
+        # revolution. If it cannot provide num_samples entries, replace the
+        # incomplete prefix with a complete seed-centered uniform grid. Mixing
+        # off-grid radial offsets into a fixed-size grid would necessarily omit
+        # some grid points and leave gaps in the redundancy search space.
         if len(offsets) < self.cfg.num_samples:
-            uniform_offsets = np.linspace(
-                -np.pi,
-                np.pi,
-                self.cfg.num_samples,
-                endpoint=False,
-                dtype=np.float64,
-            )
-            uniform_offsets = sorted(
-                uniform_offsets,
-                key=lambda value: abs((float(value) + np.pi) % (2.0 * np.pi) - np.pi),
-            )
-            for candidate in uniform_offsets:
-                wrapped_candidate = (float(candidate) + np.pi) % (2.0 * np.pi) - np.pi
-                if any(
-                    abs((wrapped_candidate - existing + np.pi) % (2.0 * np.pi) - np.pi)
-                    <= 1e-12
-                    for existing in offsets
-                ):
-                    continue
-                offsets.append(wrapped_candidate)
-                if len(offsets) == self.cfg.num_samples:
-                    break
+            offsets = [0.0]
+            uniform_step = 2.0 * np.pi / self.cfg.num_samples
+            layer = 1
+            while len(offsets) < self.cfg.num_samples:
+                offset = layer * uniform_step
+                offsets.append(offset)
+                if len(offsets) < self.cfg.num_samples and offset < np.pi - 1e-12:
+                    offsets.append(-offset)
+                layer += 1
 
         offset_tensor = torch.tensor(offsets, dtype=qpos_seed.dtype, device=self.device)
         seed_arm_angles = self._get_seed_arm_angles(qpos_seed)
