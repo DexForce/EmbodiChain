@@ -180,6 +180,7 @@ def run_handover_demo(
     """Plan and optionally execute a pick-up followed by a handover."""
     create_support_surface(sim)
     obj = create_handover_object(sim)
+    sim.prepare()
     settle_object(sim, obj, step=0)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()

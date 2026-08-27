@@ -65,6 +65,7 @@ def main() -> None:
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
+    sim.prepare()
     motion_gen = create_curobo_motion_generator(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)

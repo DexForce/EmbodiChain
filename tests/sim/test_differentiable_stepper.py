@@ -48,7 +48,7 @@ def test_newton_without_grad_rejects_differentiable_stepper():
             headless=True,
         )
     )
-    sim.finalize_newton_physics()
+    sim.prepare()
     with pytest.raises(Exception, match=r"grad"):
         sim.create_differentiable_stepper()
     SimulationManager.reset()
@@ -66,7 +66,7 @@ def test_newton_with_grad_creates_stepper():
             headless=True,
         )
     )
-    sim.finalize_newton_physics()
+    sim.prepare()
     stepper = sim.create_differentiable_stepper()
     from dexsim.engine.newton_physics.differentiable_stepper import (
         DifferentiableStepper,
@@ -90,7 +90,7 @@ def test_tape_context_records_step():
             headless=True,
         )
     )
-    sim.finalize_newton_physics()
+    sim.prepare()
     from embodichain.lab.sim.diff import tape_context
 
     with tape_context(sim) as tape:

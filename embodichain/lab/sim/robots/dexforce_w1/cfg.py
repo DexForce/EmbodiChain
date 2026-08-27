@@ -21,6 +21,15 @@ import typing
 import numpy as np
 import torch
 
+if __name__ == "__main__" and not __package__:
+    # Support running this example by file path from an uninstalled source tree.
+    import sys
+    from pathlib import Path
+
+    # Replace the script directory so its ``types.py`` cannot shadow the
+    # standard-library ``types`` module in compiler subprocesses.
+    sys.path[0] = str(Path(__file__).resolve().parents[5])
+
 from typing import TYPE_CHECKING, Dict
 
 from embodichain.lab.sim.robots.dexforce_w1.types import (
@@ -39,9 +48,11 @@ from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
 )
 from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 from embodichain.lab.sim.cfg import (
+    DexsimCollisionPropertiesCfg,
     RobotCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
@@ -272,7 +283,7 @@ class DexforceW1Cfg(RobotCfg):
             "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e3},
             "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10, HEAD_JOINTS: 1e5},
         }
-        drive_pros = JointDrivePropertiesCfg(**joint_params)
+        drive_pros = JointDrivePropertiesCfg(drive_type="force", **joint_params)
 
         if with_default_eef:
             eef_joint_names = DEFAULT_EEF_HAND_JOINT_NAMES
@@ -290,10 +301,12 @@ class DexforceW1Cfg(RobotCfg):
             "min_position_iters": 32,
             "min_velocity_iters": 8,
             "drive_pros": drive_pros,
-            "attrs": RigidBodyAttributesCfg(
-                static_friction=0.95,
-                dynamic_friction=0.9,
-                contact_offset=0.001,
+            "attrs": RigidBodyPhysicsCfg(
+                collision_props=DexsimCollisionPropertiesCfg(contact_offset=0.001),
+                material_props=RigidBodyMaterialCfg(
+                    static_friction=0.95,
+                    dynamic_friction=0.9,
+                ),
             ),
         }
 
@@ -334,12 +347,21 @@ if __name__ == "__main__":
 
     np.set_printoptions(precision=5, suppress=True)
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
-    config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
+    config = SimulationManagerCfg(
+        headless=True, device="cpu", num_envs=4, physics_cfg=NewtonPhysicsCfg()
+    )
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
 
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.update(step=1)
-    print("DexforceW1 robot added to the simulation.")
+    print("DexforceW1 robot added to the simulation.", flush=True)
+    sim.open_window()
+    from IPython import embed
+
+    embed()  # noqa: E702
+    sim.destroy()

@@ -130,6 +130,7 @@ def main():
         0.0000e00,
     ]
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
 
     # Set initial joint positions for both arms
     # Left arm: 8 joints (WAIST + 7 LEFT_J), Right arm: 8 joints (WAIST + 7 RIGHT_J)

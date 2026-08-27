@@ -31,6 +31,7 @@ from embodichain.lab.gym.envs.differentiable_env import (
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
 from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
 from embodichain.lab.sim.diff import NewtonStepFunc, differentiable_step
+from embodichain.lab.sim.diff.runtime import NewtonDifferentiableRuntime
 import embodichain.lab.sim.diff.bridge as diff_bridge
 from embodichain.lab.sim.sim_manager import SimulationManagerCfg
 
@@ -326,16 +327,16 @@ class _TrajectorySimulationManager:
 
 
 class _RealBridgeManager:
-    """Expose only the public Newton-trajectory surface to the bridge."""
+    """Expose only the Spawn-owned differentiable runtime to the bridge."""
 
-    def __init__(self, newton_manager: Any) -> None:
+    def __init__(self, runtime: Any) -> None:
         self.is_newton_backend = True
-        self.physics = SimpleNamespace(newton_manager=newton_manager)
+        self.differentiable_runtime = runtime
 
     def create_differentiable_stepper(self) -> None:
         """Fail if the bridge retains the removed SimulationManager route."""
         raise AssertionError(
-            "NewtonStepFunc must use NewtonManager.create_differentiable_trajectory(), "
+            "NewtonStepFunc must use the Spawn differentiable runtime, "
             "not SimulationManager.create_differentiable_stepper()."
         )
 
@@ -1267,24 +1268,20 @@ def test_differentiable_step_rejects_nonpositive_substeps(substeps: int) -> None
         )
 
 
-def test_cpu_newton_manager_trajectory_retains_local_control_gradient_and_fd(tmp_path):
-    """The real bridge keeps a local control trajectory across two steps."""
+def test_cpu_spawn_trajectory_retains_local_control_gradient_and_fd(tmp_path):
+    """The Spawn bridge keeps a local control trajectory across two steps."""
     newton = pytest.importorskip("newton")
     pytest.importorskip("dexsim.engine.newton_physics")
     from dexsim.engine.newton_physics import (
         NewtonCfg,
         NewtonCollisionPipelineCfg,
-        NewtonManager,
         SemiImplicitSolverCfg,
     )
-
-    assert hasattr(
-        NewtonManager, "create_differentiable_trajectory"
-    ), "NewtonManager must publish create_differentiable_trajectory() first."
+    from dexsim.engine.newton_physics.newton_backend import NewtonBackend
 
     previous_kernel_cache_dir = wp.config.kernel_cache_dir
     previous_verify_access = wp.config.verify_autograd_array_access
-    nm = None
+    backend = None
     wp.config.kernel_cache_dir = str(tmp_path / "warp_cache")
     wp.config.verify_autograd_array_access = True
     try:
@@ -1299,21 +1296,22 @@ def test_cpu_newton_manager_trajectory_retains_local_control_gradient_and_fd(tmp
             broad_phase="explicit",
             requires_grad=True,
         )
-        nm = NewtonManager(cfg)
+        backend = NewtonBackend(cfg)
         shape_cfg = newton.ModelBuilder.ShapeConfig(
             ke=1.0e4,
             kd=1.0e1,
             kf=0.0,
             mu=0.0,
         )
-        body_id = nm._builder.add_body(
+        body_id = backend.builder.add_body(
             xform=wp.transform(wp.vec3(0.0, 0.0, 0.5), wp.quat_identity()),
             mass=1.0,
             label="embodichain_manager_trajectory_gradient_ball",
         )
-        nm._builder.add_shape_sphere(body=body_id, radius=0.1, cfg=shape_cfg)
-        nm._builder.add_ground_plane(cfg=shape_cfg)
-        nm.start_simulation()
+        backend.builder.add_shape_sphere(body=body_id, radius=0.1, cfg=shape_cfg)
+        backend.builder.add_ground_plane(cfg=shape_cfg)
+        backend.finalize()
+        nm = NewtonDifferentiableRuntime(lambda: backend)
         assert nm._model.joint_count == 1
 
         manager = _RealBridgeManager(nm)
@@ -1415,10 +1413,15 @@ def test_cpu_newton_manager_trajectory_retains_local_control_gradient_and_fd(tmp
             atol=1.0e-4,
         )
     finally:
-        if nm is not None:
-            nm.clear()
+        if backend is not None:
+            backend.close()
         wp.config.verify_autograd_array_access = previous_verify_access
-        wp.config.kernel_cache_dir = previous_kernel_cache_dir
+        if previous_kernel_cache_dir is None:
+            from warp._src.build import init_kernel_cache
+
+            init_kernel_cache()
+        else:
+            wp.config.kernel_cache_dir = previous_kernel_cache_dir
 
 
 def test_dynamics_environment_does_not_expose_generic_step_helper():
@@ -1489,9 +1492,7 @@ def _import_franka_env():
     requires network access on first run. Tests skip cleanly when the
     asset cannot be fetched.
     """
-    from embodichain.lab.gym.envs.tasks.special.franka_reach_apg import (
-        FrankaReachApgEnv,
-    )
+    from embodichain_tasks.special.franka_reach_apg import FrankaReachApgEnv
 
     return FrankaReachApgEnv
 
@@ -1500,7 +1501,7 @@ def test_franka_kinematics_build_snapshots_live_primal_before_bridge(
     monkeypatch,
 ) -> None:
     """Franka must detach taped FK inputs before the parent opens a tape."""
-    from embodichain.lab.gym.envs.tasks.special import franka_reach_apg
+    from embodichain_tasks.special import franka_reach_apg
 
     env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
     live_joint_q = object()
@@ -1508,13 +1509,11 @@ def test_franka_kinematics_build_snapshots_live_primal_before_bridge(
     fresh_fk_state = object()
     events: list[str] = []
     env.sim = SimpleNamespace(
-        physics=SimpleNamespace(
-            newton_manager=SimpleNamespace(
-                _state_0=SimpleNamespace(joint_q=live_joint_q),
-                _model=SimpleNamespace(
-                    state=lambda: (events.append("state"), fresh_fk_state)[1]
-                ),
-            )
+        differentiable_runtime=SimpleNamespace(
+            current_state=SimpleNamespace(joint_q=live_joint_q),
+            model=SimpleNamespace(
+                state=lambda: (events.append("state"), fresh_fk_state)[1]
+            ),
         )
     )
 
@@ -1544,7 +1543,7 @@ def test_franka_kinematics_build_snapshots_live_primal_before_bridge(
 
 def test_franka_action_kernel_reads_snapshot_instead_of_live_state(monkeypatch) -> None:
     """The recorded action kernel must not capture mutable manager state."""
-    from embodichain.lab.gym.envs.tasks.special import franka_reach_apg
+    from embodichain_tasks.special import franka_reach_apg
 
     env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
     live_joint_q = object()
@@ -1591,18 +1590,16 @@ def test_franka_snapshot_keeps_gradient_after_live_state_mutation_and_matches_fd
     tmp_path,
 ) -> None:
     """Detached FK input survives live writes before backward under strict mode."""
-    from embodichain.lab.gym.envs.tasks.special import franka_reach_apg
+    from embodichain_tasks.special import franka_reach_apg
 
     env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
     device = "cpu"
     live_joint_q = wp.zeros(7, dtype=wp.float32, device=device)
     env.sim = SimpleNamespace(
         num_envs=1,
-        physics=SimpleNamespace(
-            newton_manager=SimpleNamespace(
-                _state_0=SimpleNamespace(joint_q=live_joint_q),
-                _model=SimpleNamespace(state=lambda: object()),
-            )
+        differentiable_runtime=SimpleNamespace(
+            current_state=SimpleNamespace(joint_q=live_joint_q),
+            model=SimpleNamespace(state=lambda: object()),
         ),
     )
     env._wp_device = device
@@ -1682,6 +1679,8 @@ def test_franka_snapshot_keeps_gradient_after_live_state_mutation_and_matches_fd
         wp.config.kernel_cache_dir = previous_kernel_cache_dir
 
 
+@pytest.mark.requires_sim
+@pytest.mark.gpu
 def test_franka_apg_smoke_backward():
     """Verify reward is autograd-tracked and action.grad flows back."""
     try:
@@ -1690,16 +1689,21 @@ def test_franka_apg_smoke_backward():
         pytest.skip(f"Franka URDF not available: {e}")
 
     env = FrankaReachApgEnv(num_envs=2)
-    env.reset(seed=0)
-    action = torch.zeros(2, 7, requires_grad=True, device=env.device)
-    obs, reward, terminated, truncated, info = env.step(action)
-    assert reward.requires_grad, "Reward must be autograd-tracked."
-    loss = reward.sum()
-    loss.backward()
-    assert action.grad is not None
-    assert torch.isfinite(action.grad).all()
+    try:
+        env.reset(seed=0)
+        action = torch.zeros(2, 7, requires_grad=True, device=env.device)
+        obs, reward, terminated, truncated, info = env.step(action)
+        assert reward.requires_grad, "Reward must be autograd-tracked."
+        loss = reward.sum()
+        loss.backward()
+        assert action.grad is not None
+        assert torch.isfinite(action.grad).all()
+    finally:
+        env.close()
 
 
+@pytest.mark.requires_sim
+@pytest.mark.gpu
 def test_franka_apg_one_iter_loss_reduces():
     """Verify a single SGD step reduces the APG loss."""
     try:
@@ -1708,17 +1712,20 @@ def test_franka_apg_one_iter_loss_reduces():
         pytest.skip(f"Franka URDF not available: {e}")
 
     env = FrankaReachApgEnv(num_envs=2)
-    env.reset(seed=0)
-    action = torch.zeros(2, 7, requires_grad=True, device=env.device)
-    opt = torch.optim.SGD([action], lr=0.01)
-
-    losses = []
-    for _ in range(3):
+    try:
         env.reset(seed=0)
-        opt.zero_grad()
-        _, reward, _, _, _ = env.step(action)
-        loss = (-reward).sum()
-        loss.backward()
-        opt.step()
-        losses.append(loss.detach().item())
-    assert losses[-1] < losses[0], f"APG did not reduce loss: {losses}"
+        action = torch.zeros(2, 7, requires_grad=True, device=env.device)
+        opt = torch.optim.SGD([action], lr=0.01)
+
+        losses = []
+        for _ in range(3):
+            env.reset(seed=0)
+            opt.zero_grad()
+            _, reward, _, _, _ = env.step(action)
+            loss = (-reward).sum()
+            loss.backward()
+            opt.step()
+            losses.append(loss.detach().item())
+        assert losses[-1] < losses[0], f"APG did not reduce loss: {losses}"
+    finally:
+        env.close()

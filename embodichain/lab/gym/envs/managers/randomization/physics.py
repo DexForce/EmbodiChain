@@ -35,6 +35,8 @@ def randomize_rigid_object_mass(
     entity_cfg: SceneEntityCfg,
     mass_range: tuple[float, float],
     relative: bool = False,
+    recompute_inertia: bool = True,
+    min_mass: float = 1e-6,
 ) -> None:
     """Randomize the mass of rigid objects in the environment.
 
@@ -44,24 +46,53 @@ def randomize_rigid_object_mass(
         entity_cfg (SceneEntityCfg): The configuration for the scene entity.
         mass_range (tuple[float, float]): The range (min, max) to sample the mass from.
         relative (bool): Whether to apply the mass change relative to the initial mass. Defaults to False.
+        recompute_inertia (bool): Whether to scale the initial inertia by the sampled
+            mass ratio. Defaults to True.
+        min_mass (float): Minimum allowed sampled mass. Defaults to 1e-6.
+
+    Raises:
+        ValueError: If ``min_mass`` is not positive or an initial mass is not positive.
     """
 
     if entity_cfg.uid not in env.sim.get_rigid_object_uid_list():
         return
 
     rigid_object: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
+    if rigid_object.is_non_dynamic:
+        logger.log_warning(
+            f"Cannot randomize mass for non-dynamic rigid object '{entity_cfg.uid}'."
+        )
+        return
+    if min_mass <= 0.0:
+        raise ValueError(f"min_mass must be positive, got {min_mass}.")
+
     num_instance = len(env_ids)
+    index = torch.as_tensor(env_ids, dtype=torch.long, device=rigid_object.device)
+    body_data = rigid_object.body_data
+    if body_data is None:
+        return
+    default_masses = body_data.default_mass[index]
+    if torch.any(default_masses <= 0.0):
+        raise ValueError("Initial rigid-body masses must be positive.")
 
     sampled_masses = sample_uniform(
-        lower=mass_range[0], upper=mass_range[1], size=(num_instance,)
+        lower=mass_range[0],
+        upper=mass_range[1],
+        size=(num_instance,),
+        device=rigid_object.device,
     )
 
     if relative:
-        init_mass = rigid_object.cfg.attrs.mass
-        init_mass = torch.full((sampled_masses.shape), init_mass, device=env.device)
-        sampled_masses = init_mass + sampled_masses
+        sampled_masses = default_masses + sampled_masses
+
+    sampled_masses = sampled_masses.clamp_min(min_mass)
 
     rigid_object.set_mass(sampled_masses, env_ids=env_ids)
+
+    if recompute_inertia:
+        mass_ratios = sampled_masses / default_masses
+        sampled_inertia = body_data.default_inertia[index] * mass_ratios.unsqueeze(-1)
+        rigid_object.set_inertia(sampled_inertia, env_ids=env_ids)
 
 
 def randomize_rigid_object_center_of_mass(
@@ -111,6 +142,8 @@ def randomize_articulation_mass(
     mass_range: tuple[float, float] | dict[str, tuple[float, float]],
     link_names: str | list[str] | None = None,
     relative: bool = False,
+    recompute_inertia: bool = True,
+    min_mass: float = 1e-6,
 ) -> None:
     """Randomize the mass of articulation links in the environment.
 
@@ -127,14 +160,23 @@ def randomize_articulation_mass(
         link_names (str | list[str] | None): A regex pattern or list of regex patterns to match
             link names. If None, all links are randomized. Ignored when ``mass_range`` is a dict.
             Defaults to None.
-        relative (bool): Whether to apply the mass change relative to the current mass.
+        relative (bool): Whether to apply the mass change relative to the initial mass.
             Defaults to False.
+        recompute_inertia (bool): Whether to scale initialization-time inertia by
+            the sampled mass ratio. Defaults to True.
+        min_mass (float): Minimum allowed sampled mass. Defaults to 1e-6.
+
+    Raises:
+        ValueError: If ``min_mass`` or an initialization-time link mass is not
+            positive.
     """
 
     if entity_cfg.uid not in env.sim.get_articulation_uid_list():
         return
 
     articulation: Articulation = env.sim.get_articulation(entity_cfg.uid)
+    if min_mass <= 0.0:
+        raise ValueError(f"min_mass must be positive, got {min_mass}.")
     num_instance = len(env_ids)
 
     if isinstance(mass_range, dict):
@@ -149,18 +191,18 @@ def randomize_articulation_mass(
         matched_link_names = list(mass_range.keys())
         link_lower = torch.tensor(
             [mass_range[name][0] for name in matched_link_names],
-            device=env.device,
+            device=articulation.device,
             dtype=torch.float32,
         )
         link_upper = torch.tensor(
             [mass_range[name][1] for name in matched_link_names],
-            device=env.device,
+            device=articulation.device,
             dtype=torch.float32,
         )
         # Broadcast: (num_instance, num_links)
         sampled_masses = torch.rand(
             (num_instance, len(matched_link_names)),
-            device=env.device,
+            device=articulation.device,
             dtype=torch.float32,
         )
         sampled_masses = link_lower + sampled_masses * (link_upper - link_lower)
@@ -179,17 +221,39 @@ def randomize_articulation_mass(
             lower=mass_range[0],
             upper=mass_range[1],
             size=(num_instance, len(matched_link_names)),
+            device=articulation.device,
+        )
+
+    env_index = torch.as_tensor(env_ids, dtype=torch.long, device=articulation.device)
+    link_indices = torch.as_tensor(
+        [articulation.link_names.index(name) for name in matched_link_names],
+        dtype=torch.long,
+        device=articulation.device,
+    )
+    default_masses = articulation.body_data.default_mass[
+        env_index[:, None], link_indices[None, :]
+    ]
+    if torch.any(default_masses <= 0.0):
+        raise ValueError(
+            "Initialization-time articulation link masses must be positive."
         )
 
     if relative:
-        link_indices = [
-            articulation.link_names.index(name) for name in matched_link_names
-        ]
-        current_masses = articulation.default_link_masses.clone()[env_ids][
-            :, link_indices
-        ]
-        sampled_masses = current_masses + sampled_masses
+        sampled_masses = default_masses + sampled_masses
+
+    sampled_masses = sampled_masses.clamp_min(min_mass)
 
     articulation.set_mass(
         sampled_masses, link_names=matched_link_names, env_ids=env_ids
     )
+
+    if recompute_inertia:
+        default_inertia = articulation.body_data.default_inertia[
+            env_index[:, None], link_indices[None, :]
+        ]
+        mass_ratios = sampled_masses / default_masses
+        articulation.set_inertia(
+            default_inertia * mass_ratios.unsqueeze(-1),
+            link_names=matched_link_names,
+            env_ids=env_ids,
+        )

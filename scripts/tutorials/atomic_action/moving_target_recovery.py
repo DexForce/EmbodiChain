@@ -169,7 +169,6 @@ class _MovingTargetScene:
             raise ValueError("destination must differ from the current planar pose.")
         force = force_magnitude * planar_offset / planar_distance.unsqueeze(-1)
 
-        self.target.set_body_type("dynamic")
         self.target.clear_dynamics()
         step_count = max(1, math.ceil(duration / clock.physics_dt))
         force_step_count = min(
@@ -189,7 +188,7 @@ class _MovingTargetScene:
 
 
 def _create_moving_target(sim: SimulationManager) -> RigidObject:
-    """Create the bright cube, held kinematic until the physical push."""
+    """Create the bright dynamic cube used for the physical push."""
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid=TARGET_ENTITY_ID,
@@ -208,7 +207,7 @@ def _create_moving_target(sim: SimulationManager) -> RigidObject:
                 static_friction=0.99,
                 enable_ccd=True,
             ),
-            body_type="kinematic",
+            body_type="dynamic",
             max_convex_hull_num=16,
             init_pos=INITIAL_TARGET_POSITION,
         )
@@ -243,6 +242,7 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     target = _create_moving_target(sim)
+    sim.prepare()
     sim.update(step=10)
     target_scene = _MovingTargetScene(target, MOVED_TARGET_POSITION)
     sim_runtime = SimulationExecutionAdapter(
@@ -255,7 +255,6 @@ def main() -> None:
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, target, hand_open)
     if args.no_target_motion:
-        target.set_body_type("dynamic")
         target.clear_dynamics()
 
     target_to_grasp = make_top_down_eef_pose(

@@ -41,7 +41,7 @@ function. The default uses `dexsim.engine.newton_physics.DifferentiableStepper.s
 the Franka APG example overrides it to call `newton.eval_fk` directly
 (see "FK bypass" below).
 
-See `embodichain/lab/gym/envs/tasks/special/franka_reach_apg.py` for
+See `embodichain_tasks.special.franka_reach_apg` for
 the canonical example.
 
 ## Why reward must be computed inside the tape
@@ -96,7 +96,7 @@ env config to split the tape and detach at chunk boundaries.
   `DifferentiableEmbodiedEnv` base class.
 - `embodichain/lab/sim/diff/bridge.py` — `NewtonStepFunc`,
   `tape_context`, `differentiable_step`.
-- `embodichain/lab/gym/envs/tasks/special/franka_reach_apg.py` —
+- `embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py` —
   example task.
 - `embodichain/lab/sim/sim_manager.py` —
   `SimulationManager.create_differentiable_stepper` /
@@ -107,4 +107,4 @@ env config to split the tape and detach at chunk boundaries.
 ## Related topics
 
 - env-framework
-- rl-training
+- rl-learning

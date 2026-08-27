@@ -59,6 +59,7 @@ def _make_asset(asset_type, materials):
 
     asset = asset_type.__new__(asset_type)
     asset._entities = [entity]
+    asset._spawn_result = None
     asset._all_indices = [0]
     asset.is_shared_visual_material = False
     asset.uid = asset_type.__name__
@@ -191,10 +192,14 @@ def test_asset_restores_only_changed_segments(asset_type):
 
 def test_asset_reset_restores_selected_environment_material(asset_type):
     asset = asset_type.__new__(asset_type)
+    asset._entities = [MagicMock(name="entity")]
+    asset._declared_num_instances = 1
+    asset._spawn_result = MagicMock(name="spawn_result")
     asset._all_indices = [0]
     asset.device = torch.device("cpu")
     asset.cfg = SimpleNamespace(
         attrs=MagicMock(),
+        init_local_pose=None,
         init_pos=(0.0, 0.0, 0.0),
         init_rot=(0.0, 0.0, 0.0),
         init_qpos=(0.0,),
@@ -203,9 +208,12 @@ def test_asset_reset_restores_selected_environment_material(asset_type):
     asset.set_local_pose = MagicMock()
 
     if asset_type is RigidObject:
+        asset._data = None
         asset.set_attrs = MagicMock()
         asset.clear_dynamics = MagicMock()
     elif asset_type is Articulation:
+        asset._data = MagicMock(is_newton_backend=True)
+        asset._restore_default_physical_properties = MagicMock()
         asset.set_qpos = MagicMock()
         asset.clear_dynamics = MagicMock()
         asset._world = MagicMock()

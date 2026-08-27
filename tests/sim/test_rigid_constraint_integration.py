@@ -97,8 +97,7 @@ class BaseRigidConstraintTest:
             ),
         )
 
-        if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
+        self.sim.prepare()
         self.sim.enable_physics(True)
 
     def teardown_method(self):

@@ -101,11 +101,15 @@ def create_microwave(sim) -> Articulation:
         cfg=ArticulationCfg(
             uid="microwave",
             fpath=get_data_path(MICROWAVE_ASSET),
+            asset_physics_mode="overlay",
             init_pos=MICROWAVE_POSITION,
             init_qpos=(0, 0, 0, 0),
             init_rot=MICROWAVE_ORIENTATION,
             drive_pros=JointDrivePropertiesCfg(
-                stiffness=1e-3, damping=1e2, max_effort=1e-2
+                drive_type="force",
+                stiffness=1e-3,
+                damping=1e2,
+                max_effort=1e-2,
             ),
             fix_base=True,
         )
@@ -185,6 +189,7 @@ def main() -> None:
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
     )
     target = create_rigid_button(sim) if args.rigid_object else create_microwave(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.040)
     motion_gen = create_toppra_motion_generator(robot)
     semantics, target_pose = create_button_semantics(target)

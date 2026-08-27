@@ -24,7 +24,6 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
     RobotCfg,
     URDFCfg,
 )
@@ -142,6 +141,7 @@ class FrankaPandaCfg(RobotCfg):
         }
 
         self.drive_pros = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={
                 "fr3_joint[1-7]": 1e4,
                 "fr3_finger_joint[1-2]": 1e3,
@@ -203,10 +203,8 @@ if __name__ == "__main__":
 
     cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     from IPython import embed
 

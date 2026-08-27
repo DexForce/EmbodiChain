@@ -76,6 +76,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     }
 
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+    sim.prepare()
     arm_name = "left_arm"
     # Set initial joint positions for left arm
     qpos_seed = torch.tensor(

@@ -159,8 +159,7 @@ def main() -> None:
                 build_pk_chain=False,
             )
         )
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     visualization_cfg = VisualizationCfg(
         backend="viser",

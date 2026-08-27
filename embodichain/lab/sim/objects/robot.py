@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from typing import Dict, List, Literal, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Literal, Sequence, Tuple
 from dataclasses import dataclass, field
 from tensordict import TensorDict
 
@@ -38,6 +38,9 @@ from embodichain.utils.string import (
     resolve_matching_names_values,
 )
 from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    from dexsim.spawn import SpawnResult, SpawnedArticulation
 
 
 @dataclass
@@ -71,11 +74,14 @@ class Robot(Articulation):
     def __init__(
         self,
         cfg: RobotCfg,
-        entities: List[_Articulation],
+        entities: List[_Articulation | SpawnedArticulation] | None = None,
         device: torch.device = torch.device("cpu"),
+        *,
+        spawn_result: SpawnResult | None = None,
+        declared_num_instances: int | None = None,
     ) -> None:
 
-        self._entities = entities
+        self._entities = [] if entities is None else entities
         self.cfg = cfg
 
         # Initialize joint ids for control parts.
@@ -91,12 +97,18 @@ class Robot(Articulation):
         # cache I/O unless a task actually requests workspace sampling.
         self._workspaces: Dict[str, RobotWorkspace] = {}
 
-        if self.cfg.control_parts:
+        if entities is not None and self.cfg.control_parts:
             self._init_control_parts(self.cfg.control_parts)
 
-        super().__init__(cfg, entities, device)
+        super().__init__(
+            cfg,
+            entities,
+            device,
+            spawn_result=spawn_result,
+            declared_num_instances=declared_num_instances,
+        )
 
-        if self.cfg.solver_cfg:
+        if entities is not None and self.cfg.solver_cfg:
             self.init_solver(self.cfg.solver_cfg)
 
     def __str__(self) -> str:
@@ -105,6 +117,19 @@ class Robot(Articulation):
             parent_str
             + f" | control_parts: {self.control_parts}, solvers: {self._solvers}"
         )
+
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedArticulation],
+    ) -> None:
+        """Store handles and expose robot metadata without creating Batch data.
+
+        Runtime Batch/Data initialization remains the responsibility of
+        ``bind_spawn()`` after Spawn finalization.
+        """
+        super().attach_spawn_handles(entities)
+        if self.cfg.control_parts:
+            self._init_control_parts(self.cfg.control_parts)
 
     @property
     def control_parts(self) -> Dict[str, List[str]] | None:
@@ -1438,6 +1463,17 @@ class Robot(Articulation):
             ]
         )
         link_names = self.get_control_part_link_names(name=control_part)
+
+        if self.is_spawn_bound:
+            for env_idx in self._all_indices:
+                entity = self._entities[env_idx]
+                for link_name in link_names:
+                    self._spawn_result.set_physical_visible(
+                        (entity, link_name), rgba, visible
+                    )
+            for link_name in link_names:
+                self._has_collision_visible_node_dict[link_name] = True
+            return
 
         # create collision visible node if not exist
         if visible:

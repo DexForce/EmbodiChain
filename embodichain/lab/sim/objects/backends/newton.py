@@ -15,18 +15,22 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 import numpy as np
 import torch
 
 from dexsim.models import MeshObject
-from dexsim.engine.newton_physics import NewtonPhysicsScene
 from embodichain.lab.sim.objects.backends.base import (
     ArticulationViewBase,
     RigidBodyViewBase,
 )
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix
+
+if TYPE_CHECKING:
+    from dexsim.engine.newton_physics.newton_physics_scene import NewtonPhysicsScene
+else:
+    NewtonPhysicsScene = Any
 
 __all__ = [
     "NewtonRigidBodyView",

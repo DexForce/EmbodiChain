@@ -20,8 +20,9 @@ import torch
 import dexsim
 import numpy as np
 
+from copy import deepcopy
 from dataclasses import dataclass, MISSING
-from typing import List, Sequence, Union
+from typing import TYPE_CHECKING, List, Sequence, Union
 from functools import cached_property
 
 from dexsim.models import MeshObject
@@ -35,6 +36,7 @@ from embodichain.lab.sim.objects.backends import (
     is_newton_scene,
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
+from embodichain.lab.sim.physics.newton import is_newton_gradient_mode
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim import (
     VisualMaterial,
@@ -56,6 +58,9 @@ from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
 
+if TYPE_CHECKING:
+    from dexsim.spawn import SpawnResult, SpawnedObject
+
 _UINT64_MAX = (1 << 64) - 1
 __all__ = ["RigidBodyData", "RigidObject", "RigidObjectCfg"]
 
@@ -69,7 +74,11 @@ class RigidBodyData:
     """
 
     def __init__(
-        self, entities: List[MeshObject], ps: PhysicsScene, device: torch.device
+        self,
+        entities: List[MeshObject],
+        ps: PhysicsScene | None,
+        device: torch.device,
+        body_view: RigidBodyViewBase | None = None,
     ) -> None:
         """Initialize the RigidBodyData.
 
@@ -84,7 +93,9 @@ class RigidBodyData:
         self.device = device
 
         # Create the appropriate backend view.
-        if is_newton_scene(ps):
+        if body_view is not None:
+            self.body_view = body_view
+        elif is_newton_scene(ps):
             self.body_view: RigidBodyViewBase = NewtonRigidBodyView(
                 entities=entities, scene=ps, device=device
             )
@@ -113,10 +124,13 @@ class RigidBodyData:
         self._ang_acc = torch.zeros(
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
+        # Initialization-time physical-property snapshots. These are captured
+        # after backend materialization and remain unchanged by runtime writes.
+        self._default_mass: torch.Tensor | None = None
+        self._default_inertia: torch.Tensor | None = None
+        self._default_com_pose: torch.Tensor | None = None
+
         # center of mass pose in format (x, y, z, qx, qy, qz, qw)
-        self.default_com_pose = torch.zeros(
-            (self.num_instances, 7), dtype=torch.float32, device=self.device
-        )
         self._com_pose = torch.zeros(
             (self.num_instances, 7), dtype=torch.float32, device=self.device
         )
@@ -132,8 +146,73 @@ class RigidBodyData:
         )
 
     @property
+    def default_physical_properties_initialized(self) -> bool:
+        """Whether the backend-resolved physical-property defaults are available."""
+        return (
+            self._default_mass is not None
+            and self._default_inertia is not None
+            and self._default_com_pose is not None
+        )
+
+    @property
+    def default_mass(self) -> torch.Tensor:
+        """Initialization-time mass with shape ``(N,)``."""
+        if self._default_mass is None:
+            raise RuntimeError("Default rigid-body mass has not been captured yet.")
+        return self._default_mass
+
+    @property
+    def default_inertia(self) -> torch.Tensor:
+        """Initialization-time inertia diagonal with shape ``(N, 3)``."""
+        if self._default_inertia is None:
+            raise RuntimeError("Default rigid-body inertia has not been captured yet.")
+        return self._default_inertia
+
+    @property
+    def default_com_pose(self) -> torch.Tensor:
+        """Initialization-time local center-of-mass pose with shape ``(N, 7)``."""
+        if self._default_com_pose is None:
+            raise RuntimeError("Default rigid-body COM pose has not been captured yet.")
+        return self._default_com_pose
+
+    def capture_default_physical_properties(
+        self,
+        *,
+        mass: torch.Tensor,
+        inertia: torch.Tensor,
+        com_pose: torch.Tensor,
+    ) -> None:
+        """Capture backend-resolved physical properties exactly once."""
+        expected_shapes = {
+            "mass": (self.num_instances,),
+            "inertia": (self.num_instances, 3),
+            "com_pose": (self.num_instances, 7),
+        }
+        values = {"mass": mass, "inertia": inertia, "com_pose": com_pose}
+        for name, value in values.items():
+            if tuple(value.shape) != expected_shapes[name]:
+                raise ValueError(
+                    f"Expected {name} shape {expected_shapes[name]}, got {tuple(value.shape)}."
+                )
+
+        if self.default_physical_properties_initialized:
+            raise RuntimeError(
+                "Default rigid-body physical properties are already captured."
+            )
+
+        self._default_mass = mass.to(self.device, dtype=torch.float32).clone()
+        self._default_inertia = inertia.to(self.device, dtype=torch.float32).clone()
+        self._default_com_pose = com_pose.to(self.device, dtype=torch.float32).clone()
+
+    @property
     def is_newton_backend(self) -> bool:
-        return isinstance(self.body_view, NewtonRigidBodyView)
+        return bool(
+            getattr(
+                self.body_view,
+                "is_newton_backend",
+                isinstance(self.body_view, NewtonRigidBodyView),
+            )
+        )
 
     @property
     def gpu_indices(self) -> torch.Tensor:
@@ -202,6 +281,24 @@ class RigidBodyData:
         return torch.cat((self.lin_acc, self.ang_acc), dim=-1)
 
     @property
+    def mass(self) -> torch.Tensor:
+        """Get current masses with shape ``(N,)``."""
+        if not self.body_view.is_ready:
+            logger.log_error("RigidBodyData mass requested but body view is not ready.")
+        self.body_view.fetch_mass(self._mass)
+        return self._mass.squeeze(-1)
+
+    @property
+    def inertia(self) -> torch.Tensor:
+        """Get current inertia diagonals with shape ``(N, 3)``."""
+        if not self.body_view.is_ready:
+            logger.log_error(
+                "RigidBodyData inertia requested but body view is not ready."
+            )
+        self.body_view.fetch_inertia_diagonal(self._inertia)
+        return self._inertia
+
+    @property
     def com_pose(self) -> torch.Tensor:
         """Get the center of mass pose of the rigid bodies.
 
@@ -227,27 +324,74 @@ class RigidObject(BatchEntity):
         cfg: RigidObjectCfg,
         entities: List[MeshObject] = None,
         device: torch.device = torch.device("cpu"),
+        *,
+        spawn_result: SpawnResult | None = None,
+        declared_num_instances: int | None = None,
     ) -> None:
+        if entities is None:
+            if declared_num_instances is None or declared_num_instances <= 0:
+                raise ValueError(
+                    "A declared RigidObject requires declared_num_instances > 0."
+                )
+            self.cfg = deepcopy(cfg)
+            self.uid = self.cfg.uid
+            self.device = device
+            self.body_type = cfg.body_type
+            self._entities = []
+            self._declared_num_instances = declared_num_instances
+            self._spawn_result = None
+            self._ps = None
+            self._world = None
+            self._data = None
+            self._all_indices = list(range(declared_num_instances))
+            self._visual_material = [None] * declared_num_instances
+            self.is_shared_visual_material = False
+            self._has_collision_visible_node = False
+            return
+
+        self._declared_num_instances = len(entities)
+        self._spawn_result = spawn_result
         self.body_type = cfg.body_type
 
-        self._world = dexsim.default_world()
-        from embodichain.lab.sim.sim_manager import get_physics_scene
+        if spawn_result is None:
+            self._world = dexsim.default_world()
+            from embodichain.lab.sim.sim_manager import get_physics_scene
 
-        self._ps = get_physics_scene()
+            self._ps = get_physics_scene()
+        else:
+            self._world = spawn_result.world
+            self._ps = None
 
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
         self._data: RigidBodyData | None = None
         if self.is_static is False:
-            self._data = RigidBodyData(entities=entities, ps=self._ps, device=device)
+            body_view = None
+            if spawn_result is not None:
+                from embodichain.lab.sim.objects.backends import SpawnRigidBodyView
+
+                batch = spawn_result.create_rigid_body_batch(entities)
+                body_view = SpawnRigidBodyView(spawn_result, batch, device)
+            self._data = RigidBodyData(
+                entities=entities,
+                ps=self._ps,
+                device=device,
+                body_view=body_view,
+            )
 
         # For rendering purposes, each instance can have its own material.
         self._visual_material: List[VisualMaterialInst] = [None] * len(entities)
         self.is_shared_visual_material = False
 
-        # Determine if we should use USD properties or cfg properties.
-        if not cfg.use_usd_properties:
+        source_path = getattr(cfg.shape, "fpath", None)
+        is_usd_source = str(source_path).lower().endswith((".usd", ".usda", ".usdc"))
+        preserve_asset_physics = (
+            is_usd_source and cfg.resolve_asset_physics_mode() == "preserve"
+        )
+
+        # Procedural/non-USD sources have no authored physics to preserve.
+        if spawn_result is None and not preserve_asset_physics:
             for entity in entities:
                 entity.set_body_scale(*cfg.body_scale)
                 if is_newton_scene(self._ps):
@@ -256,7 +400,7 @@ class RigidObject(BatchEntity):
                     # set_physical_attr() is still default-backend only.
                     continue
                 entity.set_physical_attr(cfg.attrs.attr())
-        else:
+        elif spawn_result is None:
             # Read current properties from USD-loaded entities and write back to cfg
             # Use first entity as reference
             first_entity: MeshObject = entities[0]
@@ -266,30 +410,101 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-        super().__init__(cfg, entities, device, auto_reset=False)
+        super().__init__(cfg, entities, device)
 
         self._initialize_existing_visual_material()
 
         # set default collision filter
-        self._set_default_collision_filter()
+        if spawn_result is None:
+            self._set_default_collision_filter()
 
         self._apply_initial_state()
 
-        # update default center of mass pose (only for non-static bodies with body data).
+        # Cache reset-relative physical properties after backend materialization.
         if self._data is not None:
-            self._data.default_com_pose = self._data.com_pose.clone()
+            self._capture_default_physical_properties()
 
         # TODO: Must be called after setting all attributes.
         # May be improved in the future.
-        if cfg.attrs.enable_collision is False:
+        if spawn_result is None and cfg.attrs.enable_collision is False:
             flag = torch.zeros(len(entities), dtype=torch.bool)
             self.enable_collision(flag)
 
         # reserve flag for collision visible node existence
         self._has_collision_visible_node = False
 
+    @property
+    def is_spawn_bound(self) -> bool:
+        """Whether this facade is bound to one finalized SpawnResult."""
+        return self._spawn_result is not None
+
+    @property
+    def is_declared(self) -> bool:
+        """Whether this facade is waiting for its SpawnResult binding."""
+        return self._world is None
+
+    @property
+    def num_instances(self) -> int:
+        if self._entities:
+            return len(self._entities)
+        return self._declared_num_instances
+
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedObject],
+    ) -> None:
+        """Store materialized handles without initializing runtime Batch data.
+
+        Default may call this before Spawn finalization so native metadata is
+        available early. ``bind_spawn()`` remains responsible for creating
+        result-dependent Batch/Data state after finalization.
+        """
+        handles = list(entities)
+        if len(handles) != self._declared_num_instances:
+            raise ValueError(
+                f"RigidObject {self.uid!r} expected "
+                f"{self._declared_num_instances} Spawn handles, got {len(handles)}."
+            )
+        self._entities = handles
+
+    def bind_spawn(
+        self,
+        result: SpawnResult,
+    ) -> None:
+        """Atomically bind a declared facade to stable Spawn handles."""
+        if self.is_spawn_bound:
+            raise RuntimeError(f"RigidObject {self.uid!r} is already Spawn-bound.")
+        if not self.is_declared:
+            raise RuntimeError(
+                f"RigidObject {self.uid!r} was not created as a Spawn declaration."
+            )
+
+        cfg = self.cfg
+        device = self.device
+        entities = list(self._entities)
+        if len(entities) != self._declared_num_instances:
+            raise ValueError(
+                f"RigidObject {self.uid!r} expected "
+                f"{self._declared_num_instances} Spawn handles, got {len(entities)}."
+            )
+
+        bound = type(self)(
+            cfg,
+            entities,
+            device,
+            spawn_result=result,
+        )
+        self.__dict__.clear()
+        self.__dict__.update(bound.__dict__)
+
     def __str__(self) -> str:
-        parent_str = super().__str__()
+        if self.is_declared:
+            parent_str = (
+                f"{self.__class__}: declared {self.num_instances} Spawn objects "
+                f"| uid: {self.uid} | device: {self.device}"
+            )
+        else:
+            parent_str = super().__str__()
         max_hull = self.cfg.max_convex_hull_num
         if max_hull is MISSING:
             if isinstance(self.cfg.shape, MeshCfg):
@@ -327,6 +542,45 @@ class RigidObject(BatchEntity):
 
         return self._data
 
+    @property
+    def default_mass(self) -> torch.Tensor:
+        """Initialization-time mass retained for backward compatibility."""
+        if self._data is None:
+            raise RuntimeError(
+                "Static rigid objects do not have a default mass buffer."
+            )
+        return self._data.default_mass
+
+    def _capture_default_physical_properties(self) -> None:
+        """Capture materialized mass properties as immutable reset defaults."""
+        if self._data is None or self._data.default_physical_properties_initialized:
+            return
+        if not self._data.body_view.is_ready:
+            logger.log_error(
+                "Cannot capture default rigid-body physical properties before "
+                "the backend view is ready."
+            )
+        self._data.capture_default_physical_properties(
+            mass=self.get_mass(),
+            inertia=self.get_inertia(),
+            com_pose=self._data.com_pose,
+        )
+
+    def _restore_default_physical_properties(self, env_ids: Sequence[int]) -> None:
+        """Restore initialization-time mass properties for selected rows."""
+        if (
+            self._data is None
+            or not self._data.default_physical_properties_initialized
+            or self.is_non_dynamic
+            or len(env_ids) == 0
+        ):
+            return
+
+        index = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        self.set_mass(self._data.default_mass[index], env_ids=env_ids)
+        self.set_inertia(self._data.default_inertia[index], env_ids=env_ids)
+        self.set_com_pose(self._data.default_com_pose[index], env_ids=env_ids)
+
     def _get_newton_attr(self, env_idx: int):
         """Return DexSim Newton metadata physical attributes for an entity."""
         entity = self._entities[env_idx]
@@ -349,11 +603,9 @@ class RigidObject(BatchEntity):
     def _get_newton_attr_or_none(self, env_idx: int):
         """Return the Newton meta PhysicalAttr, or None when not present.
 
-        Unlike :meth:`_get_newton_attr` this does not raise: objects spawned via
-        the desc-native path (``attrs.newton`` set) carry ``newton_shape``/
-        ``newton_body`` descriptors instead of a legacy ``attr``, so they have
-        no meta ``PhysicalAttr`` to mirror onto. Used by the not-ready setter
-        paths to tolerate both spawn paths.
+        Unlike :meth:`_get_newton_attr` this does not raise: objects created
+        from grouped Spawn descriptors may not carry a legacy ``attr`` mirror.
+        Used by not-ready setter paths to tolerate that representation.
         """
         entity = self._entities[env_idx]
         entity_handle = int(entity.get_native_handle())
@@ -482,6 +734,16 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match pose length {len(filter_data)}."
             )
 
+        if self.is_spawn_bound:
+            if self._data is None:
+                raise NotImplementedError(
+                    "Runtime collision-filter updates are unavailable for static "
+                    "Spawn rigid objects."
+                )
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_collision_filter(filter_data, body_ids)
+            return
+
         if is_newton_scene(self._ps):
             if self._data is not None and isinstance(
                 self._data.body_view, NewtonRigidBodyView
@@ -566,12 +828,14 @@ class RigidObject(BatchEntity):
             """Helper function to get local pose on CPU."""
             if to_matrix:
                 pose = torch.as_tensor(
-                    [entity.get_local_pose() for entity in entities],
+                    np.asarray([entity.get_local_pose() for entity in entities]),
                 )
             else:
-                xyzs = torch.as_tensor([entity.get_location() for entity in entities])
+                xyzs = torch.as_tensor(
+                    np.asarray([entity.get_location() for entity in entities])
+                )
                 quats = torch.as_tensor(
-                    [entity.get_rotation_quat() for entity in entities]
+                    np.asarray([entity.get_rotation_quat() for entity in entities])
                 )
                 pose = torch.cat((xyzs, quats), dim=-1)
 
@@ -666,7 +930,7 @@ class RigidObject(BatchEntity):
         elif self._data is not None and self._data.is_newton_backend:
             logger.log_warning(
                 "Cannot apply force or torque while Newton model is stale or "
-                "unfinalized; call SimulationManager.finalize_newton_physics() first."
+                "unprepared; call SimulationManager.prepare() first."
             )
         else:
             logger.log_error("Cannot apply force or torque before body view is ready.")
@@ -727,8 +991,8 @@ class RigidObject(BatchEntity):
                     entity.set_angular_velocity(ang_vel_np[i])
         elif self._data is not None and self._data.is_newton_backend:
             logger.log_warning(
-                "Cannot set velocity while Newton model is stale or unfinalized; "
-                "call SimulationManager.finalize_newton_physics() first."
+                "Cannot set velocity while Newton model is stale or unprepared; "
+                "call SimulationManager.prepare() first."
             )
         else:
             logger.log_error("Cannot set velocity before body view is ready.")
@@ -746,6 +1010,13 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        if self._data is not None and self._data.is_newton_backend:
+            raise TypeError(
+                "RigidBodyAttributesCfg is a deprecated Default-backend-only "
+                "configuration. Use grouped RigidBodyPhysicsCfg during Newton "
+                "asset declaration and the granular runtime setters afterward."
+            )
+
         if isinstance(attrs, List) and len(local_env_ids) != len(attrs):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match attrs length {len(attrs)}."
@@ -756,6 +1027,42 @@ class RigidObject(BatchEntity):
             physical_attrs = [attrs.attr() for _ in local_env_ids]
         else:
             physical_attrs = [a.attr() for a in attrs]
+
+        if self.is_spawn_bound:
+            if self._data is None:
+                raise NotImplementedError(
+                    "Runtime physical attributes are unavailable for static "
+                    "Spawn rigid objects."
+                )
+            body_ids = self._data.body_ids_for(local_env_ids)
+            view = self._data.body_view
+
+            def _stack(field: str) -> torch.Tensor:
+                return torch.as_tensor(
+                    [getattr(attr, field) for attr in physical_attrs],
+                    dtype=torch.float32,
+                    device=self.device,
+                ).unsqueeze(-1)
+
+            if any(
+                attr.static_friction != attr.dynamic_friction for attr in physical_attrs
+            ):
+                logger.log_warning(
+                    "DexSim Spawn exposes one backend-neutral friction value; "
+                    "set_attrs() uses dynamic_friction for both coefficients."
+                )
+            view.apply_mass(_stack("mass"), body_ids)
+            view.apply_friction(_stack("dynamic_friction"), body_ids)
+            view.apply_restitution(_stack("restitution"), body_ids)
+            view.apply_contact_offset(_stack("contact_offset"), body_ids)
+            view.apply_damping(
+                torch.cat(
+                    (_stack("linear_damping"), _stack("angular_damping")),
+                    dim=1,
+                ),
+                body_ids,
+            )
+            return
 
         if is_newton_scene(self._ps):
             self._set_newton_attrs(physical_attrs, local_env_ids)
@@ -785,8 +1092,8 @@ class RigidObject(BatchEntity):
 
         if self._data is None or not self._data.body_view.is_ready:
             logger.log_debug(
-                "Newton model is not finalized; physical attributes are mirrored "
-                "to metadata and applied at the next finalize_newton_physics()."
+                "Newton model is not prepared; physical attributes are mirrored "
+                "to metadata and applied at the next prepare()."
             )
             return
 
@@ -835,7 +1142,7 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(local_env_ids):
             if is_newton_scene(self._ps):
                 # Not finalized: mirror to meta (consumed at next finalize). The
-                # PhysX-bound set_mass is not patched for Newton entities.
+                # Default-backend set_mass is not patched for Newton entities.
                 attr = self._get_newton_attr_or_none(env_idx)
                 if attr is not None:
                     attr.mass = float(mass_np[i])
@@ -853,9 +1160,29 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        if self.is_spawn_bound and self.is_static:
+            # Static actors have no finite runtime mass (and Newton therefore
+            # gives them no body id), but the legacy API exposed their authored
+            # configuration. Preserve that readable metadata contract without
+            # manufacturing a dynamic-body batch solely for property queries.
+            configured_mass = self.cfg.attrs.mass
+            value = 0.0 if configured_mass is None else float(configured_mass)
+            return torch.full(
+                (len(local_env_ids),),
+                value,
+                dtype=torch.float32,
+                device=self.device,
+            )
+
         if self._data is not None and self._data.body_view.is_ready:
+            if env_ids is None:
+                return self._data.mass
             body_ids = self._data.body_ids_for(local_env_ids)
-            buf = self._data._mass[: len(local_env_ids)]
+            buf = torch.empty(
+                (len(local_env_ids), 1),
+                dtype=torch.float32,
+                device=self.device,
+            )
             self._data.body_view.fetch_mass(buf, body_ids)
             return buf.squeeze(-1)
 
@@ -897,7 +1224,7 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(local_env_ids):
             if is_newton_scene(self._ps):
                 # Not finalized: mirror to meta (Newton has a single mu; consumed
-                # at next finalize). The PhysX-bound friction setters are not
+                # at next finalize). The Default-backend friction setters are not
                 # patched for Newton entities.
                 attr = self._get_newton_attr_or_none(env_idx)
                 if attr is not None:
@@ -920,6 +1247,14 @@ class RigidObject(BatchEntity):
             torch.Tensor: The friction of the rigid object with shape (N,).
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if self.is_spawn_bound and self.is_static:
+            return torch.full(
+                (len(local_env_ids),),
+                float(self.cfg.attrs.dynamic_friction),
+                dtype=torch.float32,
+                device=self.device,
+            )
 
         if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
@@ -963,6 +1298,15 @@ class RigidObject(BatchEntity):
 
         damping = damping.to(dtype=torch.float32, device=self.device)
 
+        if self.is_spawn_bound:
+            if self._data is None:
+                raise NotImplementedError(
+                    "Runtime damping is unavailable for static Spawn rigid objects."
+                )
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_damping(damping, body_ids)
+            return
+
         if is_newton_scene(self._ps):
             for i, env_idx in enumerate(local_env_ids):
                 attr = self._get_newton_attr(env_idx)
@@ -989,6 +1333,25 @@ class RigidObject(BatchEntity):
             torch.Tensor: The damping of the rigid object with shape (N, 2), where the first column is linear damping and the second column is angular damping.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if self.is_spawn_bound:
+            if self._data is None:
+                return torch.tensor(
+                    [
+                        self.cfg.attrs.linear_damping,
+                        self.cfg.attrs.angular_damping,
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                ).repeat(len(local_env_ids), 1)
+            body_ids = self._data.body_ids_for(local_env_ids)
+            damping = torch.empty(
+                (len(local_env_ids), 2),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            self._data.body_view.fetch_damping(damping, body_ids)
+            return damping
 
         dampings = []
         for _, env_idx in enumerate(local_env_ids):
@@ -1035,7 +1398,7 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(local_env_ids):
             if is_newton_scene(self._ps):
                 # Not finalized: mirror to meta (consumed at next finalize). The
-                # PhysX-bound inertia setter is not patched for Newton entities.
+                # Default-backend inertia setter is not patched for Newton entities.
                 attr = self._get_newton_attr_or_none(env_idx)
                 if attr is not None:
                     attr.inertia = np.asarray(inertia_np[i], dtype=np.float32)
@@ -1055,9 +1418,24 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        if self.is_spawn_bound and self.is_static:
+            # Static actors have infinite mass, so no finite inertia tensor is
+            # represented by either Spawn backend.
+            return torch.zeros(
+                (len(local_env_ids), 3),
+                dtype=torch.float32,
+                device=self.device,
+            )
+
         if self._data is not None and self._data.body_view.is_ready:
+            if env_ids is None:
+                return self._data.inertia
             body_ids = self._data.body_ids_for(local_env_ids)
-            buf = self._data._inertia[: len(local_env_ids)]
+            buf = torch.empty(
+                (len(local_env_ids), 3),
+                dtype=torch.float32,
+                device=self.device,
+            )
             self._data.body_view.fetch_inertia_diagonal(buf, body_ids)
             return buf
 
@@ -1291,7 +1669,7 @@ class RigidObject(BatchEntity):
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return torch.as_tensor(
-            [self._entities[id].get_body_scale() for id in ids],
+            np.asarray([self._entities[id].get_body_scale() for id in ids]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -1362,6 +1740,12 @@ class RigidObject(BatchEntity):
             call is therefore a no-op on Newton.
         """
         from dexsim.types import ActorType
+
+        if self.is_spawn_bound:
+            raise NotImplementedError(
+                "Changing actor topology after Spawn binding requires a public "
+                "descriptor mutation transaction and is not implemented yet."
+            )
 
         if is_newton_scene(self._ps):
             logger.log_warning(
@@ -1497,8 +1881,8 @@ class RigidObject(BatchEntity):
                 self._entities[env_idx].clear_dynamics()
         elif self._data is not None and self._data.is_newton_backend:
             logger.log_warning(
-                "Cannot clear dynamics while Newton model is stale or unfinalized; "
-                "call SimulationManager.finalize_newton_physics() first."
+                "Cannot clear dynamics while Newton model is stale or unprepared; "
+                "call SimulationManager.prepare() first."
             )
         else:
             logger.log_error("Cannot clear dynamics before body view is ready.")
@@ -1517,6 +1901,13 @@ class RigidObject(BatchEntity):
         rgba = rgba if rgba is not None else (0.8, 0.2, 0.2, 0.7)
         if len(rgba) != 4:
             logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
+
+        if self.is_spawn_bound:
+            color = np.asarray(rgba, dtype=np.float32)
+            for entity in self._entities:
+                self._spawn_result.set_physical_visible(entity, color, visible)
+            self._has_collision_visible_node = True
+            return
 
         # create collision visible node if not exist
         if visible:
@@ -1550,6 +1941,16 @@ class RigidObject(BatchEntity):
     def _build_cfg_init_pose(self, env_ids: Sequence[int]) -> torch.Tensor:
         """Build initial root poses from cfg as ``(N, 4, 4)`` matrices."""
         num_instances = len(env_ids)
+        if self.cfg.init_local_pose is not None:
+            return (
+                torch.as_tensor(
+                    self.cfg.init_local_pose,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                .reshape(1, 4, 4)
+                .repeat(num_instances, 1, 1)
+            )
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
         )
@@ -1573,10 +1974,24 @@ class RigidObject(BatchEntity):
     def _apply_initial_state(self) -> None:
         """Apply cfg initial pose after construction.
 
-        PhysX/default backends run a full reset. Newton applies init pose in
+        The Default (DexSim) backend runs a full reset. Newton applies init pose in
         ``BUILDER`` via the scene batch API; velocities are cleared after
-        finalization through :meth:`SimulationManager.finalize_newton_physics`.
+        preparation through :meth:`SimulationManager.prepare`.
         """
+        if self.is_spawn_bound:
+            if self._spawn_result.backend == "dexsim":
+                # DexSim Direct GPU readiness performs native warm-up updates.
+                # Re-apply the authored state after the batch becomes usable
+                # so prepare() itself is not an observable simulation step.
+                self.reset()
+            else:
+                # Newton finalization materializes the descriptor pose without
+                # advancing simulation; only one-step dynamics buffers need
+                # clearing after batch binding.
+                if not is_newton_gradient_mode(self._spawn_result):
+                    self.clear_dynamics()
+            return
+
         if is_newton_scene(self._ps):
             if self._newton_lifecycle_state() == "BUILDER":
                 self.set_local_pose(
@@ -1594,9 +2009,12 @@ class RigidObject(BatchEntity):
 
         self.restore_visual_material(env_ids=local_env_ids)
 
-        # TODO: support attributes setter for newton.
-        if not is_newton_scene(self._ps):
+        # Preserve the legacy Default-backend attribute reset before restoring
+        # the backend-resolved mass-property snapshot below.
+        if not self.is_spawn_bound and not is_newton_scene(self._ps):
             self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
+
+        self._restore_default_physical_properties(local_env_ids)
 
         self.clear_dynamics(env_ids=local_env_ids)
 
@@ -1605,6 +2023,10 @@ class RigidObject(BatchEntity):
         )
 
     def destroy(self) -> None:
+        if self.is_declared or self.is_spawn_bound:
+            # SimulationManager owns topology removal and SpawnResult lifetime.
+            # Direct facade destruction must never bypass that owner.
+            return
         env = self._world.get_env()
         arenas = env.get_all_arenas()
         if len(arenas) == 0:

@@ -208,6 +208,7 @@ def test_grasp_pose_generator():
     try:
         robot = create_robot(sim, position=[0.0, 0.0, 0.0])
         mug = create_mug(sim)
+        sim.prepare()
 
         # get mug grasp pose
         grasp_cfg = GraspGeneratorCfg(

@@ -209,6 +209,7 @@ def main():
     cube1 = create_cube(sim, "cube1", position=[0.0, 0.0, 0.06])
     cube2 = create_cube(sim, "cube2", position=[0.0, 0.0, 0.09])
     robot = create_robot(sim, "UR10_PGI", position=[0.5, 0.0, 0.0])
+    sim.prepare()
 
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
@@ -229,10 +230,6 @@ def run_simulation(sim: SimulationManager):
     Args:
         sim: The SimulationManager instance to run
     """
-
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     step_count = 0
     # contact filter config

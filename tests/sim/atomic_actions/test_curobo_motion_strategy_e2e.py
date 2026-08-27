@@ -72,11 +72,12 @@ def _make_franka_curobo_engine():
             uid="demo_block",
             shape=CubeCfg(size=DEMO_BLOCK_DIMS),
             attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
+            body_type="static",
             init_pos=DEMO_BLOCK_POS,
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     mg = MotionGenerator(
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(

@@ -100,6 +100,7 @@ def create_drawer(
         cfg=ArticulationCfg(
             uid="drawer",
             fpath=get_data_path(DRAWER_ASSET),
+            asset_physics_mode="overlay",
             init_pos=DRAWER_POSITION,
             init_rot=DRAWER_ORIENTATION,
             init_qpos=(0.0,),
@@ -218,6 +219,7 @@ def main() -> None:
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0], tcp_z=0.15
     )
     drawer = create_drawer(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     motion_gen = create_toppra_motion_generator(robot)
     semantics = create_drawer_semantics(

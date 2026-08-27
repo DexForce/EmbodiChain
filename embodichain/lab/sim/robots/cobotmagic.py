@@ -22,10 +22,12 @@ import numpy as np
 from typing import TYPE_CHECKING, Dict, List, Union
 
 from embodichain.lab.sim.cfg import (
+    DexsimCollisionPropertiesCfg,
     RobotCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.solvers import SolverCfg, OPWSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -125,6 +127,7 @@ class CobotMagicCfg(RobotCfg):
         self.min_position_iters = 8
         self.min_velocity_iters = 2
         self.drive_pros = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={
                 "left_joint[1-6]": 7e4,
                 "right_joint[1-6]": 7e4,
@@ -144,10 +147,12 @@ class CobotMagicCfg(RobotCfg):
                 "right_joint[7-8]": 3e3,
             },
         )
-        self.attrs = RigidBodyAttributesCfg(
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            contact_offset=0.001,
+        self.attrs = RigidBodyPhysicsCfg(
+            collision_props=DexsimCollisionPropertiesCfg(contact_offset=0.001),
+            material_props=RigidBodyMaterialCfg(
+                static_friction=0.95,
+                dynamic_friction=0.9,
+            ),
         )
 
     @property
@@ -205,9 +210,10 @@ if __name__ == "__main__":
 
     cfg = CobotMagicCfg.from_dict(config)
     robot = sim.add_robot(cfg=cfg)
-    # sim.open_window()
+    sim.prepare()
+    sim.open_window()
+    from IPython import embed
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    embed()  # noqa: E702
 
     print("CobotMagic added to the simulation.")

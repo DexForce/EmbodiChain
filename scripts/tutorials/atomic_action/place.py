@@ -93,6 +93,7 @@ def create_pick_object(sim) -> RigidObject:
             init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2]],
         )
     )
+    sim.prepare()
     sim.update(step=10)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
@@ -124,6 +125,7 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
+    sim.prepare()
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)

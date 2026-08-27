@@ -154,6 +154,17 @@ def combined_function(f1: Callable, f2: Callable) -> Callable:
     return _combined
 
 
+def _is_class_var_annotation(annotation: Any) -> bool:
+    """Return whether an eager or postponed annotation denotes ``ClassVar``."""
+    if annotation is ClassVar or getattr(annotation, "__origin__", None) is ClassVar:
+        return True
+    if not isinstance(annotation, str):
+        return False
+    return annotation in {"ClassVar", "typing.ClassVar"} or annotation.startswith(
+        ("ClassVar[", "typing.ClassVar[")
+    )
+
+
 def custom_post_init(obj):
     """Deepcopy all elements to avoid shared memory issues for mutable objects in dataclasses initialization.
 
@@ -161,9 +172,12 @@ def custom_post_init(obj):
     proxy type i.e. a read only proxy for mapping objects. The error is thrown when using hierarchical data-classes
     for configuration.
     """
+    annotations = obj.__class__.__dict__.get("__annotations__", {})
     for key in dir(obj):
         # skip dunder members
         if key.startswith("__"):
+            continue
+        if _is_class_var_annotation(annotations.get(key)):
             continue
         # get data member
         value = getattr(obj, key)
@@ -538,8 +552,7 @@ def _process_mutable_types(cls):
         value = class_members.get(key, MISSING)
         # check if key belongs to ClassVar
         # in that case, we cannot use default_factory!
-        origin = getattr(ann[key], "__origin__", None)
-        if origin is ClassVar:
+        if _is_class_var_annotation(ann[key]):
             continue
         # check if f is MISSING
         # note: commented out for now since it causes issue with inheritance

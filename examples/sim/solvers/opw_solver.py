@@ -89,6 +89,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
 
     # Add robot to simulation
     robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+    sim.prepare()
 
     # Left arm control
     arm_name = "left_arm"

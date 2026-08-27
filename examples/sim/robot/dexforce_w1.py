@@ -70,6 +70,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     )
 
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.update(step=1)
     print("DexforceW1 with a user defined end-effector added to the simulation.")
 

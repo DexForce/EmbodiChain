@@ -122,6 +122,11 @@ def load_assets(
     init_pos = tuple(args.init_pos)
     init_rot = tuple(args.init_rot)
     spacing = float(args.asset_spacing)
+    asset_physics_mode = getattr(args, "asset_physics_mode", None)
+    if asset_physics_mode is None:
+        asset_physics_mode = (
+            "preserve" if getattr(args, "use_usd_properties", False) else "overlay"
+        )
 
     loaded_assets = []
     for idx, asset_path in enumerate(asset_paths):
@@ -160,7 +165,7 @@ def load_assets(
                 init_pos=asset_init_pos,
                 init_rot=init_rot,
                 fix_base=args.fix_base,
-                use_usd_properties=args.use_usd_properties,
+                asset_physics_mode=asset_physics_mode,
             )
             loaded_assets.append(sim.add_articulation(cfg))
         else:
@@ -175,7 +180,7 @@ def load_assets(
                 init_pos=asset_init_pos,
                 init_rot=init_rot,
                 body_type=args.body_type,
-                use_usd_properties=args.use_usd_properties,
+                asset_physics_mode=asset_physics_mode,
             )
             loaded_assets.append(sim.add_rigid_object(cfg))
 
@@ -341,6 +346,7 @@ def main(args: argparse.Namespace) -> None:
             sim.set_indirect_lighting(args.env_map)
 
         assets = load_assets(sim, args)
+        sim.prepare()
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
         joint_controller = _setup_viser_joint_control(sim, assets, args)
         _publish_loaded_assets(sim, args)
@@ -410,11 +416,28 @@ def _create_parser() -> argparse.ArgumentParser:
         default="kinematic",
         help="Body type for rigid objects (default: kinematic).",
     )
-    parser.add_argument(
+    asset_physics = parser.add_mutually_exclusive_group()
+    asset_physics.add_argument(
+        "--asset_physics_mode",
+        "--asset-physics-mode",
+        dest="asset_physics_mode",
+        choices=("preserve", "overlay"),
+        default="overlay",
+        help=(
+            "Preserve source-authored physics or overlay explicitly configured "
+            "values (default: overlay)."
+        ),
+    )
+    asset_physics.add_argument(
         "--use_usd_properties",
-        action="store_true",
-        default=False,
-        help="Use physical properties from the USD file instead of defaults.",
+        "--use-usd-properties",
+        dest="asset_physics_mode",
+        action="store_const",
+        const="preserve",
+        help=(
+            "Deprecated alias for --asset-physics-mode preserve; also applies "
+            "to URDF articulations."
+        ),
     )
     parser.add_argument(
         "--fix_base",

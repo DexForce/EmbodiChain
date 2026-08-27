@@ -29,9 +29,9 @@ Inheritance chain:
 
 ```
 ObjectBaseCfg          uid, init_pos, init_rot, init_local_pose
-  └─ ArticulationCfg   fpath, drive_pros, attrs, link_attrs, fix_base,
-  │                     disable_self_collision, init_qpos, body_scale,
-  │                     build_pk_chain, use_usd_properties
+  └─ ArticulationCfg   fpath, drive_pros, attrs, link_attrs, articulation_props,
+  │                     fix_base, disable_self_collision, init_qpos, body_scale,
+  │                     build_pk_chain, asset_physics_mode
       └─ RobotCfg      control_parts, urdf_cfg, solver_cfg, drive_pros (override default to "force")
           ├─ DexforceW1Cfg   version, hand_versions, with_default_eef
           └─ CobotMagicCfg   (dual-arm defaults)
@@ -44,8 +44,10 @@ Key fields on `RobotCfg`:
 | `control_parts` | `Dict[str, List[str]] \| None` | Part name → joint names (supports regex like `JOINT[1-6]`) |
 | `urdf_cfg` | `URDFCfg \| None` | Multi-component URDF assembly (e.g. left_arm + right_arm) |
 | `solver_cfg` | `SolverCfg \| Dict[str, SolverCfg] \| None` | IK solver config; dict keys must match `control_parts` keys |
-| `drive_pros` | `JointDrivePropertiesCfg` | Default drive type is `"force"` (overrides Articulation's `"none"`) |
-| `attrs` | `RigidBodyAttributesCfg` | Rigid-body physics attributes (mass, friction, damping, ...) |
+| `drive_pros` | `JointDrivePropertiesCfg` | Robot supplies the established full force-drive defaults; individual fields set to `None` in a custom config remain source-owned |
+| `asset_physics_mode` | `"preserve" \| "overlay" \| None` | Robot defaults to `overlay`; generic articulations default to `preserve`. The deprecated `use_usd_properties` alias is compatibility-only |
+| `attrs` | `RigidBodyPhysicsCfg \| RigidBodyAttributesCfg` | Grouped rigid-body physics; the deprecated flat config is a Default-backend-only compatibility input |
+| `articulation_props` | `ArticulationRootPropertiesCfg` | Fixed-base and self-collision intent; non-`None` values override legacy aliases |
 | variant fields | `enum \| str \| bool` | Optional subclass fields (e.g. `version`, `with_default_eef`) |
 | `_pk_urdf_path` | `property \| method → str` | URDF for the FK/IK serial chain (one source, so it can't drift from sim) |
 
@@ -127,8 +129,23 @@ control_parts = {
 | `max_effort` | `float \| Dict[str, float]` | `1e10` | Max torque/force |
 | `max_velocity` | `float \| Dict[str, float]` | `1e10` | rad/s or m/s |
 | `friction` | `float \| Dict[str, float]` | `0.0` | Joint friction |
+| `armature` | `float \| Dict[str, float]` | `0.0` | Added joint-space inertia |
 
 When using a dict, keys are joint names or regex patterns matching joint names. Control-part names can also be used as keys (resolved via `ArticulationCfg` logic).
+
+Use `NewtonJointDrivePropertiesCfg`, a subclass of
+`JointDrivePropertiesCfg`, when Newton's `target_mode` is required. The
+subclass inherits the common gains, effort/velocity limits, friction, and
+armature rather than repeating them under Newton-native aliases. Target modes
+are `"none"`, `"position"`, `"velocity"`, or `"position_velocity"`
+(DexSim-compatible integer values 0–3 are also accepted). Dict/YAML config sets
+`drive_pros.backend: newton`; serialization preserves that discriminator.
+
+These rules are resolved to exact joint names after URDF/USD source resolution
+and before Spawn finalization. Common effort/velocity/armature values are
+authored on `JointDesc`; only the Newton target mode is backend-specific. The
+dual-arm builder preserves the subclass and mirrors regex-keyed values to the
+generated `left_`/`right_` names.
 
 ## Adding a New Robot
 

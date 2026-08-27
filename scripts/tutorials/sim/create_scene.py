@@ -26,8 +26,10 @@ import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
+    MassPropertiesCfg,
     RenderCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     physics_cfg_for_backend,
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
@@ -91,12 +93,13 @@ def main() -> None:
             uid="cube",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
-            body_scale=[0.5, 0.5, 0.5],
-            attrs=RigidBodyAttributesCfg(
-                mass=0.1,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=0.1),
+                material_props=RigidBodyMaterialCfg(
+                    dynamic_friction=0.5,
+                    static_friction=0.5,
+                    restitution=0.1,
+                ),
             ),
             init_pos=[0, 0.0, 1.0],
         )
@@ -109,8 +112,8 @@ def main() -> None:
             uid="chair",
             shape=MeshCfg(fpath=path),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=10.0,
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=10.0),
             ),
             body_scale=[0.5, 0.5, 0.5],
             init_pos=[0.0, 0.0, 0.5],
@@ -118,6 +121,9 @@ def main() -> None:
             max_convex_hull_num=32,
         )
     )
+
+    # Materialize the complete initial scene before exposing it to the viewer.
+    sim.prepare()
 
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
@@ -156,10 +162,6 @@ def run_simulation(
         sim: The SimulationManager instance to run.
         max_steps: Optional maximum number of simulation steps to execute.
     """
-
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     step_count = 0
 

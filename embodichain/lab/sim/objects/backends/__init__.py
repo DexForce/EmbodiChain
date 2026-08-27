@@ -23,6 +23,7 @@ from .newton import (
     apply_collision_filter_for_envs,
     is_newton_scene,
 )
+from .spawn import SpawnArticulationView, SpawnRigidBodyView
 
 __all__ = [
     "ArticulationViewBase",
@@ -34,4 +35,6 @@ __all__ = [
     "apply_collision_filter_for_entities",
     "apply_collision_filter_for_envs",
     "is_newton_scene",
+    "SpawnArticulationView",
+    "SpawnRigidBodyView",
 ]

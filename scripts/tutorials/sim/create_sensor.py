@@ -112,8 +112,6 @@ def main() -> None:
     # Create robot configuration
     robot = create_robot(sim)
 
-    sensor = create_sensor(sim, args)
-
     # Add a cube to the scene
     cube_cfg = RigidObjectCfg(
         uid="cube",
@@ -123,9 +121,12 @@ def main() -> None:
     )
     sim.add_rigid_object(cfg=cube_cfg)
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    # Materialize all physical assets before reading robot metadata or
+    # constructing render-only sensors.
+    sim.prepare()
+    print(f"Robot created successfully with {robot.dof} joints")
+
+    sensor = create_sensor(sim, args)
 
     # Open visualization window if not headless
     if not args.headless:
@@ -226,6 +227,7 @@ def create_robot(sim):
         ),
         control_parts=CONTROL_PARTS,
         drive_pros=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"joint[1-6]": 1e4, "LEFT_.*": 1e3},
             damping={"joint[1-6]": 1e3, "LEFT_.*": 1e2},
         ),
@@ -233,8 +235,6 @@ def create_robot(sim):
 
     # Add robot to simulation
     robot: Robot = sim.add_robot(cfg=cfg)
-
-    print(f"Robot created successfully with {robot.dof} joints")
 
     return robot
 

@@ -72,11 +72,22 @@ def initialize_simulation(args) -> SimulationManager:
     Returns:
         SimulationManager: Configured simulation manager instance.
     """
+    physics_cfg = physics_cfg_for_backend(args.physics)
+    if args.physics == "newton":
+        # This contact-heavy URDF scene needs Newton's collision pipeline;
+        # MuJoCo's native contact path is not reliable for these convex meshes.
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "use_mujoco_contacts": False,
+            "nconmax": 16384,
+            "njmax": 65536,
+        }
+
     config = SimulationManagerCfg(
         headless=True,
         device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
-        physics_cfg=physics_cfg_for_backend(args.physics),
+        physics_cfg=physics_cfg,
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         arena_space=2.5,
@@ -428,6 +439,7 @@ def main():
     caffe = create_caffe(sim)
     cup = create_cup(sim)
 
+    sim.prepare()
     sim.update(step=1)
 
     # apply random perturbation

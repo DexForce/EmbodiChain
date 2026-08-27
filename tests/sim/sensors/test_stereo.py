@@ -61,6 +61,7 @@ class StereoCameraTest:
         }
         cfg = SensorCfg.from_dict(cfg_dict)
         self.camera: StereoCamera = self.sim.add_sensor(cfg)
+        self.sim.prepare()
 
     def test_get_data(self):
 

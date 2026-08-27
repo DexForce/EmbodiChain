@@ -87,6 +87,7 @@ def main():
             )
         },
         drive_pros=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"Joint[1-6]": 1e4},
             damping={"Joint[1-6]": 1e3},
         ),
@@ -99,6 +100,8 @@ def main():
         dtype=torch.float32,
         device="cpu",
     )
+
+    sim.prepare()
     joint_ids = robot.get_joint_ids("arm")
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids)
 

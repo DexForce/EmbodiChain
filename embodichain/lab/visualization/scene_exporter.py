@@ -367,18 +367,8 @@ class SceneExporter:
         self._append_deformable_objects(
             sources=sources,
             geometries=geometries,
-            uids=self._sim.get_soft_object_uid_list(),
-            getter=self._sim.get_soft_object,
-            kind="soft_object",
-            asset_prefix="soft",
-        )
-        self._append_deformable_objects(
-            sources=sources,
-            geometries=geometries,
-            uids=self._sim.get_cloth_object_uid_list(),
-            getter=self._sim.get_cloth_object,
-            kind="cloth_object",
-            asset_prefix="cloth",
+            uids=self._sim.get_deformable_object_uid_list(),
+            getter=self._sim.get_deformable_object,
         )
         self._append_cameras(camera_sources)
         self._append_gizmos(gizmo_sources)
@@ -548,31 +538,29 @@ class SceneExporter:
         geometries: dict[str, MeshGeometry],
         uids: list[str],
         getter: object,
-        kind: str,
-        asset_prefix: str,
     ) -> None:
         for uid in uids:
             asset = getter(uid)
             if asset is None:
                 continue
-            if kind == "soft_object":
-                current_vertices = _to_numpy(
-                    asset.get_current_collision_vertices(),
-                    np.float32,
-                )
+            if asset.deformable_type == "volume":
+                kind = "soft_object"
+                asset_prefix = "soft"
+            elif asset.deformable_type == "surface":
+                kind = "cloth_object"
+                asset_prefix = "cloth"
             else:
-                current_vertices = _to_numpy(
-                    asset.get_current_vertex_position(),
-                    np.float32,
+                raise ValueError(
+                    f"Unsupported deformable_type {asset.deformable_type!r} "
+                    f"for asset {uid!r}."
                 )
+            current_vertices = _to_numpy(
+                asset.get_surface_vertices(),
+                np.float32,
+            )
             uid_component = safe_path_component(uid)
             selected_env_ids = list(self._env_ids)
-            if kind == "soft_object":
-                faces_by_env = asset.get_collision_surface_triangles(
-                    env_ids=selected_env_ids,
-                )
-            else:
-                faces_by_env = asset.get_triangles(env_ids=selected_env_ids)
+            faces_by_env = asset.get_surface_triangles(env_ids=selected_env_ids)
             for selected_index, env_id in enumerate(self._env_ids):
                 vertices = current_vertices[env_id] - self._env_offsets[env_id]
                 faces = faces_by_env[selected_index]
@@ -849,10 +837,7 @@ class SceneExporter:
                 if not source.node.dynamic_geometry:
                     continue
                 if source.asset_key not in dynamic_vertex_cache:
-                    if source.asset_key[0] == "soft":
-                        vertices = source.asset.get_current_collision_vertices()
-                    else:
-                        vertices = source.asset.get_current_vertex_position()
+                    vertices = source.asset.get_surface_vertices()
                     dynamic_vertex_cache[source.asset_key] = _to_numpy(
                         vertices,
                         np.float32,

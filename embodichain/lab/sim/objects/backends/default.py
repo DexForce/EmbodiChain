@@ -45,7 +45,7 @@ __all__ = ["DefaultRigidBodyView", "DefaultArticulationView"]
 class DefaultRigidBodyView(RigidBodyViewBase):
     """Default DexSim backend rigid body data adapter.
 
-    Encapsulates both GPU (PhysX) and CPU entity-level data paths.
+    Encapsulates both GPU (DexSim) and CPU entity-level data paths.
     The default GPU API stores pose as ``(qx, qy, qz, qw, x, y, z)``; this
     adapter converts to / from the EmbodiChain convention
     ``(x, y, z, qx, qy, qz, qw)`` transparently.
@@ -323,7 +323,7 @@ class DefaultRigidBodyView(RigidBodyViewBase):
     def apply_contact_offset(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         raise NotImplementedError(
             "Per-body contact_offset apply is not exposed by the default backend; "
-            "set it via RigidBodyAttributesCfg (consumed at build) instead."
+            "set it at build time with DexsimCollisionPropertiesCfg instead."
         )
 
     # -- Internal helpers ----------------------------------------------------

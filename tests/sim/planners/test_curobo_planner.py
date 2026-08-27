@@ -881,11 +881,12 @@ def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, objec
             uid="block",
             shape=CubeCfg(size=_SIM_BLOCK_DIMS),
             attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
+            body_type="static",
             init_pos=_SIM_BLOCK_POS,
             init_rot=(0.0, 0.0, 0.0),
         )
     )
+    sim.prepare()
     return sim, robot, block
 
 

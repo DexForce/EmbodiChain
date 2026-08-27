@@ -66,6 +66,19 @@ class OnlineDataWorkerError(RuntimeError):
     """Fallback error for a worker exception that cannot be reconstructed."""
 
 
+def _add_exception_note(error: BaseException, note: str) -> None:
+    """Attach a PEP 678-style note on every supported Python version."""
+    add_note = getattr(error, "add_note", None)
+    if add_note is not None:
+        add_note(note)
+        return
+    notes = getattr(error, "__notes__", None)
+    if notes is None:
+        notes = []
+        error.__notes__ = notes
+    notes.append(note)
+
+
 def _forced_shutdown_error() -> OnlineDataWorkerError:
     """Build the error used when graceful worker durability is unknown."""
     return OnlineDataWorkerError(
@@ -699,8 +712,8 @@ class OnlineDataEngine:
                     forced_shutdown = self._shutdown_worker()
                 except BaseException as caught_cleanup_error:
                     cleanup_error = caught_cleanup_error
-                    error.add_note(
-                        f"Worker cleanup also failed: {caught_cleanup_error}"
+                    _add_exception_note(
+                        error, f"Worker cleanup also failed: {caught_cleanup_error}"
                     )
                 else:
                     self._cleanup_complete = True
@@ -712,9 +725,10 @@ class OnlineDataEngine:
                 # primary, but never lose that late durability error.
                 channel_error = self._receive_worker_error()
                 if channel_error is not None and channel_error is not error:
-                    error.add_note(
+                    _add_exception_note(
+                        error,
                         "Worker also failed during cleanup: "
-                        f"{type(channel_error).__name__}: {channel_error}"
+                        f"{type(channel_error).__name__}: {channel_error}",
                     )
 
                 if forced_shutdown:
@@ -722,7 +736,7 @@ class OnlineDataEngine:
                     if channel_error is None:
                         self._record_worker_error(durability_error)
                         channel_error = durability_error
-                    error.add_note(str(durability_error))
+                    _add_exception_note(error, str(durability_error))
 
                 if (
                     stop_requested
@@ -1226,12 +1240,12 @@ class OnlineDataEngine:
                         self._record_worker_error(durability_error)
                         worker_error = durability_error
                     else:
-                        worker_error.add_note(str(durability_error))
+                        _add_exception_note(worker_error, str(durability_error))
                 self._set_state(OnlineDataEngineState.FAILED)
                 self._lifecycle_condition.notify_all()
                 if worker_error is not None:
-                    worker_error.add_note(
-                        f"Worker cleanup also failed: {cleanup_error}"
+                    _add_exception_note(
+                        worker_error, f"Worker cleanup also failed: {cleanup_error}"
                     )
                     raise worker_error
                 self._worker_error = cleanup_error
@@ -1247,7 +1261,7 @@ class OnlineDataEngine:
                     self._record_worker_error(durability_error)
                     worker_error = durability_error
                 else:
-                    worker_error.add_note(str(durability_error))
+                    _add_exception_note(worker_error, str(durability_error))
 
             self._cleanup_complete = True
             if worker_error is not None:
@@ -1276,9 +1290,10 @@ class OnlineDataEngine:
         except BaseException as cleanup_error:
             if exc_value is None:
                 raise
-            exc_value.add_note(
+            _add_exception_note(
+                exc_value,
                 "OnlineDataEngine cleanup also failed: "
-                f"{type(cleanup_error).__name__}: {cleanup_error}"
+                f"{type(cleanup_error).__name__}: {cleanup_error}",
             )
         return None
 

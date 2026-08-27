@@ -190,7 +190,7 @@ def main():
 
     robot = create_robot(sim)
     soft_cow = create_soft_cow(sim)
-    sim.init_gpu_physics()
+    sim.prepare()
     if not args.headless:
         sim.open_window()
 

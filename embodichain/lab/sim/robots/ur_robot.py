@@ -23,7 +23,6 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -140,6 +139,7 @@ class URRobotCfg(RobotCfg):
         }
 
         self.drive_pros = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"arm": 1e4},
             damping={"arm": 1e3},
             max_effort={"arm": _UR_MAX_EFFORT[robot_type]},
@@ -200,10 +200,8 @@ if __name__ == "__main__":
         {"robot_type": "ur10e", "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0]}
     )
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     from IPython import embed
 

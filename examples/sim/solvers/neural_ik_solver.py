@@ -128,6 +128,7 @@ def main() -> None:
     )
 
     robot: Robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
 
     sim.open_window()
 

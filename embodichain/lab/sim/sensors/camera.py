@@ -21,7 +21,7 @@ import torch
 import dexsim.render as dr
 
 from functools import cached_property
-from typing import List, Literal, Sequence, Tuple
+from typing import Callable, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
@@ -134,27 +134,42 @@ class Camera(BaseSensor):
     SUPPORTED_DATA_TYPES = ["color", "depth", "mask", "normal", "position"]
 
     def __init__(
-        self, config: CameraCfg, device: torch.device = torch.device("cpu")
+        self,
+        config: CameraCfg,
+        device: torch.device = torch.device("cpu"),
+        *,
+        world: dexsim.World | None = None,
+        arenas: Sequence[dexsim.environment.Arena] | None = None,
+        parent_node_resolver: Callable[[str], Sequence[object]] | None = None,
+        defer_parent_attachment: bool = False,
     ) -> None:
-        super().__init__(config, device)
+        if world is None or arenas is None:
+            raise ValueError(
+                "Camera render resources must be supplied explicitly; construct "
+                "cameras through SimulationManager.add_sensor()."
+            )
+        self._world = world
+        self._arenas = list(arenas)
+        if len(self._arenas) == 0:
+            raise ValueError("Camera requires at least one materialized Arena.")
+        self._parent_node_resolver = parent_node_resolver
+        self._camera_names: list[tuple[dexsim.environment.Arena, str]] = []
+        self._is_destroyed = False
+        super().__init__(config, device, num_instances=len(self._arenas))
+        self.reset()
+        if config.extrinsics.parent is not None and not defer_parent_attachment:
+            self.attach_to_parent()
 
     def _build_sensor_from_config(
         self, config: CameraCfg, device: torch.device
     ) -> None:
-        self._world = dexsim.default_world()
-        env = self._world.get_env()
-        arenas = env.get_all_arenas()
-        if len(arenas) == 0:
-            arenas = [env]
-        num_instances = len(arenas)
-
         self._frame_buffer = self._world.create_camera_group(
-            [config.width, config.height], num_instances, True
+            [config.width, config.height], self.num_instances, True
         )
 
         view_attrib = config.get_view_attrib()
-        for i, arena in enumerate(arenas):
-            view_name = f"{self.uid}_view{i + 1}"
+        for i, arena in enumerate(self._arenas):
+            view_name = f"{config.uid}_view{i + 1}"
             view = arena.create_camera(
                 view_name,
                 config.width,
@@ -167,6 +182,7 @@ class Camera(BaseSensor):
             view.set_near(config.near)
             view.set_far(config.far)
             self._entities[i] = view
+            self._camera_names.append((arena, view_name))
 
         # Define a mapping of data types to their respective shapes and dtypes
         buffer_specs = {
@@ -202,8 +218,6 @@ class Camera(BaseSensor):
                 )
 
         self.cfg: CameraCfg = config
-        if self.cfg.extrinsics.parent is not None:
-            self._attach_to_entity()
 
     @cached_property
     def group_id(self) -> int:
@@ -270,20 +284,29 @@ class Camera(BaseSensor):
 
     def _attach_to_entity(self) -> None:
         """Attach the sensor to the parent entity in each environment."""
-        env = self._world.get_env()
-        for i, entity in enumerate(self._entities):
-
-            parent = None
-            if i == 0:
-                parent = env.find_node(f"{self.cfg.extrinsics.parent}")
-            else:
-                parent = env.find_node(f"{self.cfg.extrinsics.parent}.{i-1}")
-            if parent is None:
-                logger.log_error(
-                    f"Failed to find parent entity {self.cfg.extrinsics.parent} for sensor {self.cfg.uid}."
-                )
-
+        if self._parent_node_resolver is None:
+            raise RuntimeError(
+                f"Camera {self.cfg.uid!r} has parent "
+                f"{self.cfg.extrinsics.parent!r}, but no Spawn parent resolver "
+                "was supplied."
+            )
+        parents = list(self._parent_node_resolver(self.cfg.extrinsics.parent))
+        if len(parents) != self.num_instances:
+            raise RuntimeError(
+                f"Camera parent resolver returned {len(parents)} nodes for "
+                f"{self.num_instances} camera instances."
+            )
+        for entity, parent in zip(self._entities, parents):
             entity.attach_node(parent)
+
+    def attach_to_parent(self) -> None:
+        """Resolve and attach a deferred parent after Spawn materialization."""
+        if self.cfg.extrinsics.parent is None:
+            return
+        self._attach_to_entity()
+        # Extrinsics are expressed in the parent frame. Reapply them after
+        # reparenting because the camera was initially reset in Arena space.
+        self.reset()
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -346,14 +369,10 @@ class Camera(BaseSensor):
         Returns:
             A tensor representing the pose of the sensor in the arena frame.
         """
-        from embodichain.lab.sim.utility import get_dexsim_arenas
-
-        arenas = get_dexsim_arenas()
-
         poses = []
         for i, entity in enumerate(self._entities):
             pose = entity.get_world_pose()
-            pose[:2, 3] -= arenas[i].get_root_node().get_local_pose()[:2, 3]
+            pose[:2, 3] -= self._arenas[i].get_root_node().get_local_pose()[:2, 3]
             poses.append(torch.as_tensor(pose, dtype=torch.float32))
 
         poses = torch.stack(poses, dim=0).to(self.device)
@@ -362,6 +381,28 @@ class Camera(BaseSensor):
             quat = quat_from_matrix(poses[:, :3, :3])
             return torch.cat((xyz, quat), dim=-1)
         return poses
+
+    def destroy(self) -> None:
+        """Remove render cameras before releasing their World-owned group."""
+        if self._is_destroyed:
+            return
+        self._is_destroyed = True
+        for arena, camera_name in self._camera_names:
+            try:
+                arena.remove_camera(camera_name)
+            except Exception as error:
+                logger.log_warning(
+                    f"Failed to remove camera {camera_name!r}: {error!r}"
+                )
+        self._entities = []
+        self._camera_names = []
+        # DexSim currently has no public remove_camera_group API. The group is
+        # World-owned; dropping this borrowed facade after removing all views
+        # is the narrowest safe lifetime boundary available to EmbodiChain.
+        self._frame_buffer = None
+        self._parent_node_resolver = None
+        self._arenas = []
+        self._world = None
 
     def look_at(
         self,

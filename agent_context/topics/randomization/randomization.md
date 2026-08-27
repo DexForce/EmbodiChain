@@ -25,12 +25,20 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 
 | Function | Target | Key params |
 |---|---|---|
-| `randomize_rigid_object_mass` | `RigidObject` mass | `mass_range`, `relative` |
+| `randomize_rigid_object_mass` | Dynamic `RigidObject` mass/inertia | `mass_range`, `relative`, `recompute_inertia`, `min_mass` |
 | `randomize_rigid_object_center_of_mass` | `RigidObject` CoM offset | `com_pos_offset_range` |
-| `randomize_articulation_mass` | `Articulation` link masses | `mass_range` (uniform or per-link dict), `link_names` (regex), `relative` |
+| `randomize_articulation_mass` | `Articulation` link mass/inertia | `mass_range` (uniform or per-link dict), `link_names` (regex), `relative`, `recompute_inertia`, `min_mass` |
 
-- `relative=True` adds sampled value to the initial/default mass instead of replacing.
-- `randomize_articulation_mass` supports a `dict[str, tuple]` for per-link ranges; when used, `link_names` is ignored.
+- `relative=True` adds the sampled value to the backend-resolved initial mass
+  stored in the target object's `default_mass` snapshot; repeated calls
+  therefore do not accumulate for either rigid objects or articulations.
+- Rigid-object and articulation mass samples are clamped to positive
+  `min_mass`. By default, inertia is recomputed from the corresponding
+  initialization snapshot using the mass ratio; set `recompute_inertia=False`
+  only when inertia is managed separately.
+- Non-dynamic rigid objects are skipped with a warning.
+- `randomize_articulation_mass` supports a `dict[str, tuple]` for per-link
+  ranges; when used, `link_names` is ignored.
 - Link names are resolved via `resolve_matching_names` (regex matching).
 
 ### Visual (`visual.py`)
@@ -171,13 +179,16 @@ Used in `params` to reference simulation objects by `uid`. The manager resolves 
 
 ### Sampling
 
-All randomizers use `embodichain.utils.math.sample_uniform(lower, upper, size)` for uniform sampling.
+Randomizers use `embodichain.utils.math.sample_uniform(...)` for uniform
+sampling where applicable. Physics samples are allocated on the target object's
+device, not assumed to share `env.device`.
 
 ## Common Failure Modes
 
 | Symptom | Likely cause |
 |---|---|
 | Randomizer silently does nothing | `entity_cfg.uid` not found in `sim.get_rigid_object_uid_list()` — all randomizers early-return on UID mismatch |
+| Rigid-object mass is clamped | The sampled absolute mass or relative result was below positive `min_mass` |
 | `ValueError` on link name | `mass_range` dict key doesn't match any `articulation.link_names` |
 | Camera randomization error | Extrinsics config has neither `parent` nor `eye` set — unsupported mode |
 | Light randomization not per-env | By design: `randomize_light` applies same values across all envs |

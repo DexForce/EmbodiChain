@@ -101,6 +101,7 @@ def main() -> None:
             }
         )
         robot = sim.add_robot(cfg=cfg)
+        sim.prepare()
         print("DexforceW1 robot added to the simulation.")
 
         left_qpos = torch.tensor(

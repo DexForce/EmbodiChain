@@ -93,6 +93,8 @@ def main():
     )
     print("[INFO]: Add soft object complete!")
 
+    sim.prepare()
+
     # Open window when the scene has been set up
     if not args.headless:
         sim.open_window()
@@ -111,9 +113,6 @@ def run_simulation(sim: SimulationManager, soft_obj: SoftObject) -> None:
         sim: The SimulationManager instance to run
         soft_obj: soft object
     """
-
-    # Initialize GPU physics
-    sim.init_gpu_physics()
 
     step_count = 0
 
