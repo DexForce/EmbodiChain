@@ -36,9 +36,19 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     EndEffectorPoseGoal,
     GraspGoal,
+    HeldObjectPoseGoal,
+    HeldObjectState,
+    JointPositionGoal,
     MotionPolicy,
+    MoveHeldObjectOptions,
+    MoveJointsOptions,
     ObjectSemantics,
     PickUpOptions,
+    PlaceGoal,
+    PlaceOptions,
+    PressGoal,
+    PressOptions,
+    TaskState,
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 from embodichain.lab.sim.planners.utils import PlanResult
@@ -71,6 +81,7 @@ _TOP_DOWN_ROTATION = (
     (0.0401, 0.0000, -0.9992),
 )
 _TASK_DIFFICULTIES = {"simple", "medium", "hard"}
+_GRIPPER_SKILLS = {"pick_up", "move_held_object", "place", "press"}
 
 
 @dataclass(frozen=True)
@@ -83,6 +94,8 @@ class _ExecutionObservation:
     execution_time_ms: float
     task_completion_time_s: float
     object_lift_delta_m: torch.Tensor | None = None
+    final_arm_qpos: torch.Tensor | None = None
+    final_object_pose: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +112,7 @@ class AtomicSkillCaseProvider(ABC):
     """Generate and ground one Atomic Action without planner-specific logic."""
 
     skill_id: str
+    requires_gripper = False
 
     @abstractmethod
     def generate_case(
@@ -128,6 +142,13 @@ class AtomicSkillCaseProvider(ABC):
 
     def lift_segment_start(self, compiled: CompiledTrajectory) -> int | None:
         """Return the first lift waypoint that should release object dynamics."""
+        return None
+
+    def initial_task_state(
+        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+    ) -> TaskState | None:
+        """Return an optional symbolic precondition for isolated action testing."""
+        del scenario, case
         return None
 
     @abstractmethod
@@ -208,6 +229,41 @@ def _difficulty(config: Mapping[str, object]) -> str:
             f"task_difficulty must be one of {sorted(_TASK_DIFFICULTIES)}."
         )
     return difficulty
+
+
+def _motion_valid_mask(
+    motion_outcomes: tuple[CaseOutcome, ...], *, device: torch.device
+) -> torch.Tensor:
+    """Return the common motion-valid result as one device-local mask."""
+    return torch.tensor(
+        [item.motion_valid for item in motion_outcomes],
+        dtype=torch.bool,
+        device=device,
+    )
+
+
+def _case_pose(case: BenchmarkCase, name: str, *, device: torch.device) -> torch.Tensor:
+    """Restore one frozen pose tensor from JSON-compatible case parameters."""
+    return torch.tensor(case.case_parameters[name], dtype=torch.float32, device=device)
+
+
+def _held_object_state(
+    scenario: "AtomicTaskScenario", case: BenchmarkCase
+) -> HeldObjectState:
+    """Reconstruct the frozen held-object relation for an isolated case."""
+    handle = scenario.object_handle(case.object_id)
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        properties={"benchmark_object_id": handle.object_id},
+        label=handle.object_id,
+        entity=handle.entity,
+    )
+    return HeldObjectState(
+        semantics=semantics,
+        object_to_eef=_case_pose(case, "object_to_eef", device=scenario.robot.device),
+        grasp_xpos=_case_pose(case, "grasp_pose", device=scenario.robot.device),
+    )
 
 
 class _MoveEndEffectorCases(AtomicSkillCaseProvider):
@@ -326,6 +382,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
     """Explicit-grasp PickUp cases that isolate motion-planner performance."""
 
     skill_id = "pick_up"
+    requires_gripper = True
 
     def generate_case(
         self,
@@ -544,10 +601,565 @@ class _PickUpCases(AtomicSkillCaseProvider):
         return success, "object_not_grasped"
 
 
+class _MoveJointsCases(AtomicSkillCaseProvider):
+    """Deterministic relative joint-space waypoint cases."""
+
+    skill_id = "move_joints"
+
+    def generate_case(
+        self,
+        scenario: "AtomicTaskScenario",
+        suite: SuiteCfg,
+        track: TrackCfg,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        batch_size: int,
+    ) -> BenchmarkCase:
+        scenario.restore_base_robot()
+        raw_offsets = config.get("target_offsets_rad")
+        if not isinstance(raw_offsets, Sequence) or isinstance(
+            raw_offsets, (str, bytes)
+        ):
+            raise TypeError("target_offsets_rad must be a non-empty list.")
+        offsets = [
+            _float_vector(value, name="target_offsets_rad", length=7)
+            for value in raw_offsets
+        ]
+        if not offsets:
+            raise ValueError("target_offsets_rad must not be empty.")
+        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        offset_tensor = torch.tensor(
+            offsets, dtype=start_qpos.dtype, device=start_qpos.device
+        )
+        targets = start_qpos[:, None] + torch.cumsum(offset_tensor, dim=0)[None]
+        limits = scenario.robot.get_qpos_limits(name=scenario.control_part)[0]
+        margin = float(config.get("joint_limit_margin_rad", 0.05))
+        if bool(
+            (
+                (targets < limits[:, 0][None, None] + margin)
+                | (targets > limits[:, 1][None, None] - margin)
+            )
+            .any()
+            .item()
+        ):
+            raise RuntimeError(
+                f"Joint limits rejected MoveJoints case {_case_name(config)!r}."
+            )
+        target_poses = torch.stack(
+            [
+                scenario.robot.compute_fk(
+                    targets[:, index], name=scenario.control_part, to_matrix=True
+                )
+                for index in range(targets.shape[1])
+            ],
+            dim=1,
+        )
+        name = _case_name(config)
+        return BenchmarkCase(
+            suite_version=suite.suite_version,
+            track=track.id,
+            scenario_id=self.skill_id,
+            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            seed=seed,
+            batch_size=batch_size,
+            num_waypoints=len(offsets),
+            path_shape="relative_joint_waypoints",
+            start_state_bin="pre_action",
+            start_qpos=start_qpos,
+            target_waypoints=target_poses,
+            reference_qpos=targets,
+            robot_id=suite.robot.id,
+            skill_id=self.skill_id,
+            task_difficulty=_difficulty(config),
+            primary_success="task_success",
+            full_start_qpos=scenario.robot.get_qpos().clone(),
+            case_parameters={
+                "sample_count": int(config.get("sample_count", 80)),
+                "target_offsets_rad": offsets,
+                "target_qpos": targets.detach().cpu().tolist(),
+                "joint_threshold_rad": float(config.get("joint_threshold_rad", 0.02)),
+                "difficulty_factors": dict(config.get("difficulty_factors", {})),
+            },
+        )
+
+    def build_invocation(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        adapter: "PlannerAdapter",
+    ) -> ActionInvocation:
+        target = torch.tensor(
+            case.case_parameters["target_qpos"],
+            dtype=torch.float32,
+            device=scenario.robot.device,
+        )
+        return ActionInvocation(
+            skill_id=self.skill_id,
+            goal=JointPositionGoal(target),
+            binding=ActionBinding(manipulators={"primary": scenario.control_part}),
+            motion_policy=MotionPolicy(
+                planner=adapter.motion_policy_planner,
+                strategy="motion_gen",
+                sample_count=int(case.case_parameters["sample_count"]),
+            ),
+            skill_options=MoveJointsOptions(),
+        )
+
+    def task_result(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        compiled: CompiledTrajectory,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[torch.Tensor, str]:
+        del scenario, compiled
+        if observation.final_arm_qpos is None:
+            return torch.zeros_like(observation.execution_success), "joint_goal_miss"
+        target = torch.tensor(
+            case.case_parameters["target_qpos"],
+            dtype=observation.final_arm_qpos.dtype,
+            device=observation.final_arm_qpos.device,
+        )[:, -1]
+        error = torch.amax(torch.abs(observation.final_arm_qpos - target), dim=-1)
+        success = (
+            observation.execution_success
+            & _motion_valid_mask(motion_outcomes, device=error.device)
+            & (error <= float(case.case_parameters["joint_threshold_rad"]))
+        )
+        return success, "joint_goal_miss"
+
+
+class _HeldObjectCases(AtomicSkillCaseProvider):
+    """Shared isolated held-object precondition for transport and placement."""
+
+    requires_gripper = True
+
+    def _prepare_start(
+        self,
+        scenario: "AtomicTaskScenario",
+        config: Mapping[str, object],
+    ) -> tuple[AtomicObjectHandle, torch.Tensor, torch.Tensor, torch.Tensor]:
+        object_id = config.get("object")
+        if not isinstance(object_id, str) or not object_id:
+            raise ValueError(f"{self.skill_id} cases require an object id.")
+        handle = scenario.activate_object(object_id)
+        scenario.restore_base_robot()
+        object_pose = handle.initial_pose.clone()
+        held_offset = torch.tensor(
+            _float_vector(
+                config.get("held_object_offset_m"),
+                name="held_object_offset_m",
+                length=3,
+                default=(0.0, 0.0, 0.18),
+            ),
+            dtype=object_pose.dtype,
+            device=object_pose.device,
+        )
+        object_pose[:, :3, 3] += held_offset
+        grasp_pose = object_pose.clone()
+        grasp_pose[:, :3, :3] = torch.tensor(
+            config.get("grasp_rotation", _TOP_DOWN_ROTATION),
+            dtype=grasp_pose.dtype,
+            device=grasp_pose.device,
+        )
+        grasp_pose[:, :3, 3] += torch.tensor(
+            _float_vector(
+                config.get("grasp_offset_m"),
+                name="grasp_offset_m",
+                length=3,
+                default=(0.0, 0.0, 0.0),
+            ),
+            dtype=grasp_pose.dtype,
+            device=grasp_pose.device,
+        )
+        arm_seed = scenario.robot.get_qpos(name=scenario.control_part)
+        success, arm_start = scenario.robot.compute_ik(
+            pose=grasp_pose,
+            joint_seed=arm_seed,
+            name=scenario.control_part,
+        )
+        if not bool(torch.as_tensor(success).all().item()):
+            raise RuntimeError(
+                f"Independent IK rejected held-object start {_case_name(config)!r}."
+            )
+        scenario.set_robot_start(arm_start, open_gripper=False, grasp_gripper=True)
+        handle.entity.set_local_pose(object_pose)
+        handle.entity.clear_dynamics()
+        if scenario.simulation is not None:
+            scenario.simulation.update(step=2)
+            handle.entity.set_local_pose(object_pose)
+            handle.entity.clear_dynamics()
+        object_to_eef = torch.bmm(torch.linalg.inv(object_pose), grasp_pose)
+        return handle, object_pose, grasp_pose, object_to_eef
+
+    def initial_task_state(
+        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+    ) -> TaskState:
+        return TaskState(
+            batch_size=case.batch_size,
+            device=scenario.robot.device,
+            held_objects={scenario.control_part: _held_object_state(scenario, case)},
+        )
+
+    @staticmethod
+    def _held_parameters(
+        handle: AtomicObjectHandle,
+        object_pose: torch.Tensor,
+        grasp_pose: torch.Tensor,
+        object_to_eef: torch.Tensor,
+    ) -> dict[str, object]:
+        return {
+            "object_initial_pose": object_pose.detach().cpu().tolist(),
+            "grasp_pose": grasp_pose.detach().cpu().tolist(),
+            "object_to_eef": object_to_eef.detach().cpu().tolist(),
+            "object_config": dict(handle.config),
+        }
+
+
+class _MoveHeldObjectCases(_HeldObjectCases):
+    """Move an already held rigid object to one frozen target pose."""
+
+    skill_id = "move_held_object"
+
+    def generate_case(
+        self,
+        scenario: "AtomicTaskScenario",
+        suite: SuiteCfg,
+        track: TrackCfg,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        batch_size: int,
+    ) -> BenchmarkCase:
+        handle, object_pose, grasp_pose, object_to_eef = self._prepare_start(
+            scenario, config
+        )
+        target_object = object_pose.clone()
+        target_object[:, :3, 3] += torch.tensor(
+            _float_vector(
+                config.get("target_object_offset_m"),
+                name="target_object_offset_m",
+                length=3,
+                default=(0.08, 0.08, 0.04),
+            ),
+            dtype=object_pose.dtype,
+            device=object_pose.device,
+        )
+        target_eef = torch.bmm(target_object, object_to_eef)
+        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        references = scenario.solve_reference_qpos(start_qpos, target_eef[:, None])
+        name = _case_name(config)
+        return BenchmarkCase(
+            suite_version=suite.suite_version,
+            track=track.id,
+            scenario_id=self.skill_id,
+            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            seed=seed,
+            batch_size=batch_size,
+            num_waypoints=1,
+            path_shape="held_object_transport",
+            start_state_bin="object_held",
+            start_qpos=start_qpos,
+            target_waypoints=target_eef[:, None],
+            reference_qpos=references,
+            robot_id=suite.robot.id,
+            skill_id=self.skill_id,
+            object_id=handle.object_id,
+            task_difficulty=_difficulty(config),
+            primary_success="task_success",
+            full_start_qpos=scenario.robot.get_qpos().clone(),
+            case_parameters={
+                **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
+                "sample_count": int(config.get("sample_count", 80)),
+                "target_object_pose": target_object.detach().cpu().tolist(),
+                "object_position_threshold_m": float(
+                    config.get("object_position_threshold_m", 0.04)
+                ),
+                "difficulty_factors": dict(config.get("difficulty_factors", {})),
+            },
+        )
+
+    def build_invocation(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        adapter: "PlannerAdapter",
+    ) -> ActionInvocation:
+        return ActionInvocation(
+            skill_id=self.skill_id,
+            goal=HeldObjectPoseGoal(
+                _case_pose(case, "target_object_pose", device=scenario.robot.device)
+            ),
+            binding=ActionBinding(
+                manipulators={"primary": scenario.control_part},
+                end_effectors={"primary": scenario.end_effector_part},
+            ),
+            motion_policy=MotionPolicy(
+                planner=adapter.motion_policy_planner,
+                strategy="motion_gen",
+                sample_count=int(case.case_parameters["sample_count"]),
+            ),
+            skill_options=MoveHeldObjectOptions(pick_rotate_upright=0.0),
+        )
+
+    def task_result(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        compiled: CompiledTrajectory,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[torch.Tensor, str]:
+        final_object = observation.final_object_pose
+        if final_object is None:
+            return torch.zeros_like(observation.execution_success), "object_goal_miss"
+        target = _case_pose(case, "target_object_pose", device=final_object.device)
+        error = torch.linalg.vector_norm(
+            final_object[:, :3, 3] - target[:, :3, 3], dim=-1
+        )
+        held = compiled.projected_context.get_held_object(scenario.control_part)
+        success = (
+            observation.execution_success
+            & _motion_valid_mask(motion_outcomes, device=error.device)
+            & (held is not None)
+            & (error <= float(case.case_parameters["object_position_threshold_m"]))
+        )
+        return success, "object_goal_miss"
+
+
+class _PlaceCases(_HeldObjectCases):
+    """Place an already held rigid object and release it under physics."""
+
+    skill_id = "place"
+
+    def generate_case(
+        self,
+        scenario: "AtomicTaskScenario",
+        suite: SuiteCfg,
+        track: TrackCfg,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        batch_size: int,
+    ) -> BenchmarkCase:
+        handle, object_pose, grasp_pose, object_to_eef = self._prepare_start(
+            scenario, config
+        )
+        target_object = handle.initial_pose.clone()
+        target_object[:, :3, 3] += torch.tensor(
+            _float_vector(
+                config.get("target_object_offset_m"),
+                name="target_object_offset_m",
+                length=3,
+                default=(0.10, 0.10, 0.0),
+            ),
+            dtype=object_pose.dtype,
+            device=object_pose.device,
+        )
+        release = torch.bmm(target_object, object_to_eef)
+        lift_height = float(config.get("retract_height_m", 0.10))
+        approach = release.clone()
+        approach[:, 2, 3] += lift_height
+        retract = approach.clone()
+        targets = torch.stack([approach, release, retract], dim=1)
+        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        references = scenario.solve_reference_qpos(start_qpos, targets)
+        name = _case_name(config)
+        return BenchmarkCase(
+            suite_version=suite.suite_version,
+            track=track.id,
+            scenario_id=self.skill_id,
+            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            seed=seed,
+            batch_size=batch_size,
+            num_waypoints=3,
+            path_shape="approach_release_retract",
+            start_state_bin="object_held",
+            start_qpos=start_qpos,
+            target_waypoints=targets,
+            reference_qpos=references,
+            robot_id=suite.robot.id,
+            skill_id=self.skill_id,
+            object_id=handle.object_id,
+            task_difficulty=_difficulty(config),
+            primary_success="task_success",
+            full_start_qpos=scenario.robot.get_qpos().clone(),
+            case_parameters={
+                **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
+                "sample_count": int(config.get("sample_count", 120)),
+                "release_pose": release.detach().cpu().tolist(),
+                "target_object_pose": target_object.detach().cpu().tolist(),
+                "hand_interp_steps": int(config.get("hand_interp_steps", 12)),
+                "retract_height_m": lift_height,
+                "object_position_threshold_m": float(
+                    config.get("object_position_threshold_m", 0.05)
+                ),
+                "difficulty_factors": dict(config.get("difficulty_factors", {})),
+            },
+        )
+
+    def build_invocation(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        adapter: "PlannerAdapter",
+    ) -> ActionInvocation:
+        return ActionInvocation(
+            skill_id=self.skill_id,
+            goal=PlaceGoal(
+                _case_pose(case, "release_pose", device=scenario.robot.device)
+            ),
+            binding=ActionBinding(
+                manipulators={"primary": scenario.control_part},
+                end_effectors={"primary": scenario.end_effector_part},
+            ),
+            motion_policy=MotionPolicy(
+                planner=adapter.motion_policy_planner,
+                strategy="motion_gen",
+                sample_count=int(case.case_parameters["sample_count"]),
+            ),
+            skill_options=PlaceOptions(
+                hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
+                lift_height=float(case.case_parameters["retract_height_m"]),
+            ),
+        )
+
+    def task_result(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        compiled: CompiledTrajectory,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[torch.Tensor, str]:
+        final_object = observation.final_object_pose
+        if final_object is None:
+            return torch.zeros_like(observation.execution_success), "object_not_placed"
+        target = _case_pose(case, "target_object_pose", device=final_object.device)
+        error = torch.linalg.vector_norm(
+            final_object[:, :3, 3] - target[:, :3, 3], dim=-1
+        )
+        released = (
+            compiled.projected_context.get_held_object(scenario.control_part) is None
+        )
+        success = (
+            observation.execution_success
+            & _motion_valid_mask(motion_outcomes, device=error.device)
+            & released
+            & (error <= float(case.case_parameters["object_position_threshold_m"]))
+        )
+        return success, "object_not_placed"
+
+
+class _PressCases(AtomicSkillCaseProvider):
+    """Close the gripper, reach a contact pose, and retract."""
+
+    skill_id = "press"
+    requires_gripper = True
+
+    def generate_case(
+        self,
+        scenario: "AtomicTaskScenario",
+        suite: SuiteCfg,
+        track: TrackCfg,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        batch_size: int,
+    ) -> BenchmarkCase:
+        scenario.restore_base_robot()
+        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_pose = scenario.robot.compute_fk(
+            start_qpos, name=scenario.control_part, to_matrix=True
+        )
+        press_pose = start_pose.clone()
+        press_pose[:, :3, 3] += torch.tensor(
+            _float_vector(
+                config.get("target_offset_m"),
+                name="target_offset_m",
+                length=3,
+                default=(0.0, 0.0, -0.08),
+            ),
+            dtype=start_pose.dtype,
+            device=start_pose.device,
+        )
+        targets = torch.stack([press_pose, start_pose], dim=1)
+        references = scenario.solve_reference_qpos(start_qpos, targets)
+        name = _case_name(config)
+        return BenchmarkCase(
+            suite_version=suite.suite_version,
+            track=track.id,
+            scenario_id=self.skill_id,
+            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            seed=seed,
+            batch_size=batch_size,
+            num_waypoints=2,
+            path_shape="press_retract",
+            start_state_bin="pre_action",
+            start_qpos=start_qpos,
+            target_waypoints=targets,
+            reference_qpos=references,
+            robot_id=suite.robot.id,
+            skill_id=self.skill_id,
+            task_difficulty=_difficulty(config),
+            primary_success="task_success",
+            full_start_qpos=scenario.robot.get_qpos().clone(),
+            case_parameters={
+                "sample_count": int(config.get("sample_count", 80)),
+                "press_pose": press_pose.detach().cpu().tolist(),
+                "hand_interp_steps": int(config.get("hand_interp_steps", 8)),
+                "difficulty_factors": dict(config.get("difficulty_factors", {})),
+            },
+        )
+
+    def build_invocation(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        adapter: "PlannerAdapter",
+    ) -> ActionInvocation:
+        return ActionInvocation(
+            skill_id=self.skill_id,
+            goal=PressGoal(
+                _case_pose(case, "press_pose", device=scenario.robot.device)
+            ),
+            binding=ActionBinding(
+                manipulators={"primary": scenario.control_part},
+                end_effectors={"primary": scenario.end_effector_part},
+            ),
+            motion_policy=MotionPolicy(
+                planner=adapter.motion_policy_planner,
+                strategy="motion_gen",
+                sample_count=int(case.case_parameters["sample_count"]),
+            ),
+            skill_options=PressOptions(
+                hand_interp_steps=int(case.case_parameters["hand_interp_steps"])
+            ),
+        )
+
+    def task_result(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        compiled: CompiledTrajectory,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[torch.Tensor, str]:
+        del scenario, case, compiled
+        success = observation.execution_success & _motion_valid_mask(
+            motion_outcomes, device=observation.execution_success.device
+        )
+        return success, "press_pose_miss"
+
+
 class AtomicTaskScenario(ScenarioProvider):
     """Run fixed Atomic Actions through an adapter-owned MotionGenerator."""
 
-    required_capabilities = frozenset({"eef_waypoint", "atomic_action"})
+    required_capabilities = frozenset(
+        {"eef_waypoint", "joint_waypoint", "atomic_action"}
+    )
 
     def __init__(self) -> None:
         self.simulation: SimulationManager | None = None
@@ -604,12 +1216,14 @@ class AtomicTaskScenario(ScenarioProvider):
         simulation.update(step=1)
 
         if any(
-            isinstance(value, Mapping) and value.get("id") == "pick_up"
+            isinstance(value, Mapping) and value.get("id") in _GRIPPER_SKILLS
             for value in track.config.get("skills", [])
         ):
             gripper_value = track.config.get("gripper")
             if not isinstance(gripper_value, Mapping):
-                raise ValueError("Atomic PickUp tracks must define a gripper mapping.")
+                raise ValueError(
+                    "Atomic gripper-action tracks must define a gripper mapping."
+                )
             end_effector_part = gripper_value.get("control_part")
             if not isinstance(end_effector_part, str) or not end_effector_part:
                 raise ValueError("gripper.control_part must be a non-empty string.")
@@ -715,9 +1329,7 @@ class AtomicTaskScenario(ScenarioProvider):
         """Bind one AtomicActionEngine to the adapter-owned MotionGenerator."""
         del first_case
         control_profiles = None
-        if any(
-            provider.skill_id == "pick_up" for provider in self._case_providers.values()
-        ):
+        if any(provider.requires_gripper for provider in self._case_providers.values()):
             if (
                 self.end_effector_part is None
                 or self._gripper_open is None
@@ -757,7 +1369,18 @@ class AtomicTaskScenario(ScenarioProvider):
         active_id = case.object_id
         for index, handle in enumerate(self._objects.values()):
             if handle.object_id == active_id:
-                handle.reset()
+                initial_pose = case.case_parameters.get("object_initial_pose")
+                if initial_pose is None:
+                    handle.reset()
+                else:
+                    handle.entity.set_local_pose(
+                        torch.tensor(
+                            initial_pose,
+                            dtype=torch.float32,
+                            device=robot.device,
+                        )
+                    )
+                    handle.entity.clear_dynamics()
             else:
                 handle.park(index)
         simulation.update(step=2)
@@ -776,7 +1399,9 @@ class AtomicTaskScenario(ScenarioProvider):
             raise RuntimeError(
                 "Atomic Task invocations must pin the adapter motion backend."
             )
-        return self._engine.compile((invocation,))
+        task = provider.initial_task_state(self, case)
+        context = None if task is None else self._engine.initial_context(task=task)
+        return self._engine.compile((invocation,), context=context)
 
     def plan_contract_error(self, result: object) -> str | None:
         """Accept compiled Atomic Action trajectories instead of raw plans."""
@@ -843,6 +1468,30 @@ class AtomicTaskScenario(ScenarioProvider):
             tracking = observation.joint_tracking_rmse_rad
             object_lift = observation.object_lift_delta_m
 
+        executed_translation_mm: torch.Tensor | None = None
+        executed_rotation_deg: torch.Tensor | None = None
+        if observation is not None:
+            final_target = case.target_waypoints[:, -1]
+            executed_translation_mm = (
+                torch.linalg.vector_norm(
+                    observation.final_tcp_pose[:, :3, 3] - final_target[:, :3, 3],
+                    dim=-1,
+                )
+                * 1000.0
+            )
+            executed_relative = (
+                final_target[:, :3, :3].transpose(-1, -2)
+                @ observation.final_tcp_pose[:, :3, :3]
+            )
+            executed_trace = torch.diagonal(executed_relative, dim1=-2, dim2=-1).sum(
+                dim=-1
+            )
+            executed_rotation_deg = (
+                torch.arccos(torch.clamp((executed_trace - 1.0) * 0.5, -1.0, 1.0))
+                * 180.0
+                / math.pi
+            )
+
         durations = result.trajectory.duration.detach().to("cpu")
         outcomes: list[CaseOutcome] = []
         for index, outcome in enumerate(motion_outcomes):
@@ -877,6 +1526,16 @@ class AtomicTaskScenario(ScenarioProvider):
                     ),
                     replan_count=0,
                     failure_code=failure_code,
+                    executed_final_translation_err_mm=(
+                        None
+                        if executed_translation_mm is None
+                        else float(executed_translation_mm[index].item())
+                    ),
+                    executed_final_rotation_err_deg=(
+                        None
+                        if executed_rotation_deg is None
+                        else float(executed_rotation_deg[index].item())
+                    ),
                 )
             )
         trajectory_duration = (
@@ -919,7 +1578,7 @@ class AtomicTaskScenario(ScenarioProvider):
             return None
         self.reset_case(self.simulation, self.robot, case, self.control_part)
         compiled = result if isinstance(result, CompiledTrajectory) else None
-        replayable = compiled is not None and self._is_replayable(compiled)
+        replayable = compiled is not None and self._is_recordable(compiled)
         provider = self._case_providers.get(case.case_id)
         video_path = build_video_path(
             output_dir, algorithm_id, case.skill_id, case.case_id
@@ -976,10 +1635,12 @@ class AtomicTaskScenario(ScenarioProvider):
             to_matrix=True,
         )
         object_lift = None
+        final_object_pose = None
         if object_handle is not None and initial_object_position is not None:
-            final_object_position = object_handle.entity.get_local_pose(to_matrix=True)[
-                :, :3, 3
-            ]
+            final_object_pose = object_handle.entity.get_local_pose(
+                to_matrix=True
+            ).clone()
+            final_object_position = final_object_pose[:, :3, 3]
             object_lift = final_object_position[:, 2] - initial_object_position[:, 2]
         return _ExecutionObservation(
             execution_success=torch.isfinite(observed).all(dim=1)
@@ -989,6 +1650,8 @@ class AtomicTaskScenario(ScenarioProvider):
             execution_time_ms=elapsed_ms,
             task_completion_time_s=simulated_execution_time,
             object_lift_delta_m=object_lift,
+            final_arm_qpos=self.robot.get_qpos(name=self.control_part).clone(),
+            final_object_pose=final_object_pose,
         )
 
     def _physics_settings(self) -> _PhysicsReplaySettings:
@@ -1021,6 +1684,12 @@ class AtomicTaskScenario(ScenarioProvider):
             and bool(compiled.plan_success.all().item())
             and bool(torch.isfinite(trajectory).all().item())
         )
+
+    @staticmethod
+    def _is_recordable(compiled: CompiledTrajectory) -> bool:
+        """Allow finite failed planner rollouts in diagnostic videos."""
+        trajectory = compiled.trajectory.positions
+        return trajectory.shape[1] > 0 and bool(torch.isfinite(trajectory).all().item())
 
     def _replay_physics(
         self,
@@ -1212,17 +1881,26 @@ class AtomicTaskScenario(ScenarioProvider):
         self.robot.clear_dynamics()
 
     def set_robot_start(
-        self, manipulator_qpos: torch.Tensor, *, open_gripper: bool
+        self,
+        manipulator_qpos: torch.Tensor,
+        *,
+        open_gripper: bool,
+        grasp_gripper: bool = False,
     ) -> None:
-        """Install a manipulator start and optional open-gripper command."""
+        """Install a manipulator start and optional gripper command."""
         if self.robot is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
+        if open_gripper and grasp_gripper:
+            raise ValueError("The gripper cannot start both open and grasping.")
         for target in (False, True):
             self.robot.set_qpos(manipulator_qpos, name=self.control_part, target=target)
-            if open_gripper:
-                if self.end_effector_part is None or self._gripper_open is None:
-                    raise RuntimeError("Open-gripper state is unavailable.")
-                command = self._gripper_open.unsqueeze(0).expand(
+            if open_gripper or grasp_gripper:
+                gripper_qpos = (
+                    self._gripper_open if open_gripper else self._gripper_grasp
+                )
+                if self.end_effector_part is None or gripper_qpos is None:
+                    raise RuntimeError("Requested gripper state is unavailable.")
+                command = gripper_qpos.unsqueeze(0).expand(
                     manipulator_qpos.shape[0], -1
                 )
                 self.robot.set_qpos(command, name=self.end_effector_part, target=target)
@@ -1274,5 +1952,9 @@ class AtomicTaskScenario(ScenarioProvider):
 
 
 register_atomic_skill_provider("move_end_effector", _MoveEndEffectorCases)
+register_atomic_skill_provider("move_held_object", _MoveHeldObjectCases)
+register_atomic_skill_provider("move_joints", _MoveJointsCases)
 register_atomic_skill_provider("pick_up", _PickUpCases)
+register_atomic_skill_provider("place", _PlaceCases)
+register_atomic_skill_provider("press", _PressCases)
 register_scenario_provider("atomic_task", AtomicTaskScenario)

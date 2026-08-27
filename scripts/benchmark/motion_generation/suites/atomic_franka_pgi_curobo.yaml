@@ -14,15 +14,16 @@ planners:
     role: candidate
     enabled: false
     config:
-      model_revision: nmg-cartesian-300m
+      model_revision: nmg-cartesian-k1-3-900m
       onnx_model_path: null
-      num_waypoints: 8
+      num_waypoints: 3
       max_steps: 240
       action_scale: 0.2
       use_relative_obs: true
       intermediate_orientation: true
       pos_eps: 0.01
       rot_eps: 0.1
+      joint_eps: 0.02
       policy_frame_from_world:
         - [-1.0, 0.0, 0.0, 0.0]
         - [0.0, -1.0, 0.0, 0.0]
@@ -103,6 +104,18 @@ tracks:
                 waypoint_count: 2
                 maximum_translation_m: 0.13
                 obstacles: 0
+        - id: move_joints
+          sample_count: 80
+          joint_limit_margin_rad: 0.05
+          joint_threshold_rad: 0.02
+          cases:
+            - name: relative_multi_joint
+              task_difficulty: simple
+              target_offsets_rad:
+                - [0.12, -0.08, 0.10, 0.12, -0.08, 0.10, -0.10]
+              difficulty_factors:
+                waypoint_count: 1
+                active_joints: 7
         - id: pick_up
           sample_count: 120
           grasp_source: antipodal
@@ -124,3 +137,38 @@ tracks:
                 approach: top
                 pre_grasp_clearance_m: 0.15
                 required_lift_m: 0.04
+        - id: move_held_object
+          sample_count: 80
+          held_object_offset_m: [0.0, 0.0, 0.18]
+          target_object_offset_m: [0.08, 0.08, 0.04]
+          object_position_threshold_m: 0.04
+          cases:
+            - name: cube_transport
+              object: cube_50mm
+              task_difficulty: simple
+              difficulty_factors:
+                translation_m: 0.12
+                object_preheld: true
+        - id: place
+          sample_count: 120
+          held_object_offset_m: [0.0, 0.0, 0.18]
+          target_object_offset_m: [0.10, 0.10, 0.0]
+          retract_height_m: 0.10
+          hand_interp_steps: 12
+          object_position_threshold_m: 0.05
+          cases:
+            - name: cube_table_place
+              object: cube_50mm
+              task_difficulty: simple
+              difficulty_factors:
+                translation_m: 0.14
+                object_preheld: true
+        - id: press
+          sample_count: 80
+          hand_interp_steps: 8
+          cases:
+            - name: vertical_press
+              task_difficulty: simple
+              target_offset_m: [0.0, 0.0, -0.08]
+              difficulty_factors:
+                press_depth_m: 0.08

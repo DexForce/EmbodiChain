@@ -141,7 +141,11 @@ def _case_to_dict(case: BenchmarkCase) -> dict[str, Any]:
             "method": (
                 "reference_qpos_fk"
                 if case.skill_id == "N/A"
-                else "independent_sequential_ik"
+                else (
+                    "joint_limits_and_reference_fk"
+                    if case.skill_id == "move_joints"
+                    else "independent_sequential_ik"
+                )
             ),
             "reference_qpos": case.reference_qpos.detach().cpu().tolist(),
         },

@@ -29,8 +29,8 @@ in that run's `videos/` directory.
 - Extensible planner, scenario, robot, Atomic Action, and object registries
 - `free-space-common` track with fixed manifests and start-state bins
 - `atomic-task` track with frozen robot/object/task manifests and common physics replay
-- Initial Atomic Task slice: Franka + PGI, cuRobo, `MoveEndEffector`, and
-  antipodal-grasp `PickUp` on a declarative cube
+- Single-arm Atomic Task slice: Franka + PGI with `MoveEndEffector`,
+  `MoveJoints`, `PickUp`, `MoveHeldObject`, `Place`, and `Press`
 - Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics
 - Direct, batched NMG ONNX adapter (`candidate`, enabled when a model path is supplied)
 - Lifecycle timing: construct / prepare / cold / warm
@@ -58,5 +58,5 @@ in that run's `videos/` directory.
 - `collision-deployment` and obstacle-aware common-input tracks
 - Atomic Task execution is currently `B=1`; the supplied suite covers only
   Franka + PGI and cuRobo
-- Remaining skills: `MoveHeldObject`, `Place`, `Press`, and action chains
+- Dual-arm actions and multi-action chains
 - Latency-budget Pareto sweeps, confidence intervals, subprocess isolation

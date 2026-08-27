@@ -124,7 +124,14 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
         ("atomic-task", "atomic_task")
     ]
     skills = suite.enabled_tracks()[0].config["skills"]
-    assert [item["id"] for item in skills] == ["move_end_effector", "pick_up"]
+    assert [item["id"] for item in skills] == [
+        "move_end_effector",
+        "move_joints",
+        "pick_up",
+        "move_held_object",
+        "place",
+        "press",
+    ]
     gripper = suite.enabled_tracks()[0].config["gripper"]
     assert gripper == {
         "control_part": "hand",
@@ -160,7 +167,14 @@ def test_atomic_invocation_pins_motion_generator_and_selected_planner():
 
 
 def test_atomic_skill_and_object_extensions_are_registry_driven():
-    assert atomic_skill_provider_names() == ("move_end_effector", "pick_up")
+    assert atomic_skill_provider_names() == (
+        "move_end_effector",
+        "move_held_object",
+        "move_joints",
+        "pick_up",
+        "place",
+        "press",
+    )
     assert atomic_object_kind_names() == ("cube", "mesh")
     with pytest.raises(ValueError, match="Unknown atomic object kind"):
         create_atomic_object(Mock(), {"id": "new_object", "kind": "not_registered"})
