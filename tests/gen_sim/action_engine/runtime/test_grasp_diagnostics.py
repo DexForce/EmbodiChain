@@ -122,3 +122,56 @@ def test_dual_grasp_trace_separates_generation_angle_nms_and_collision(
         "paired": True,
     }
     assert generator.last_dual_trace is not trace
+
+
+def test_generator_context_selects_non_crossing_pair_and_canonical_half_turn() -> None:
+    generator = _TracingAntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(model_id="pair_test")
+    )
+    left_poses = torch.stack((_pose_with_y(-0.2), _pose_with_y(0.2)))
+    left_poses[0, 0, 0] = -1.0
+    left_poses[0, 1, 1] = -1.0
+    right_poses = torch.stack((_pose_with_y(0.2), _pose_with_y(-0.2)))
+    result = {
+        "left": {
+            "is_success": True,
+            "grasp_poses": left_poses,
+            "open_lengths": torch.ones(2),
+            "total_cost": torch.tensor([0.1, 0.0]),
+        },
+        "right": {
+            "is_success": True,
+            "grasp_poses": right_poses,
+            "open_lengths": torch.ones(2),
+            "total_cost": torch.tensor([0.1, 0.0]),
+        },
+    }
+
+    with generator.dual_arm_selection_context(
+        left_eef=torch.eye(4).unsqueeze(0),
+        right_eef=torch.eye(4).unsqueeze(0),
+        left_base=_pose_with_y(-0.3).unsqueeze(0),
+        right_base=_pose_with_y(0.3).unsqueeze(0),
+        left_to_right_direction=torch.tensor([0.0, 1.0, 0.0]),
+        pair_rank=0,
+        minimum_separation=0.08,
+        minimum_lateral_gap=0.05,
+    ):
+        selected, trace = generator._select_pair(result, row_index=0)
+
+    assert selected is not None
+    assert trace is not None
+    assert trace["selected"] is True
+    assert trace["selected_left_index"] == 0
+    assert trace["selected_right_index"] == 0
+    assert trace["selected_left_half_turn"] is True
+    torch.testing.assert_close(
+        selected["left"]["grasp_poses"][0, :3, :3],
+        torch.eye(3),
+    )
+
+
+def _pose_with_y(y: float) -> torch.Tensor:
+    pose = torch.eye(4)
+    pose[1, 3] = y
+    return pose

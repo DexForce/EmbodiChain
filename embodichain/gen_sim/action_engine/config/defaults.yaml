@@ -230,6 +230,13 @@ runtime:
         middle_empty_ratio: 0.4
         grasp_opening_margin: 0.02
         grasp_seed: 17393
+        grasp_pair_candidate_count: 3
+        minimum_grasp_separation: 0.08
+        minimum_grasp_lateral_gap: 0.05
+        maximum_joint_step: 0.25
+        maximum_wrist_orientation_error: 0.20
+        inter_arm_capsule_radius: 0.04
+        minimum_inter_arm_clearance: 0.01
         is_filter_ground_collision: false
         release_sample_interval: 60
         release_gripper_tolerance: 0.08
