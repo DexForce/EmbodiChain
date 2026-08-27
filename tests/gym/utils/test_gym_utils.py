@@ -48,7 +48,7 @@ from embodichain.utils.utility import load_config, save_config
 _REPOSITORY_ROOT = Path(__file__).parents[3]
 _CUBE_GYM_CONFIG_PATH = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json"
+    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json"
 )
 CUBE_ROBOT_PROFILE_ID = "expert_program_ur5_pick_place"
 CUBE_SCENE_REGISTRY_ID = "expert_program_repeated_pick_place"

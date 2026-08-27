@@ -1078,8 +1078,8 @@ class SemanticIntegrationManifest:
             engine=engine,
         )
         try:
-            bound_profile = engine.bind_skill_profile(
-                self.robot_profile,
+            bound_profile = self.robot_profile.bind(
+                engine,
                 endpoint_adapters=endpoint_adapters,
             )
         except Exception as exc:  # noqa: BLE001 - add semantic integration path
@@ -1171,10 +1171,7 @@ class BoundSemanticIntegration:
         )
         if robot_profile.engine is not engine:
             raise ValueError("robot_profile belongs to a different engine.")
-        if engine.skill_profile is not robot_profile:
-            raise ValueError(
-                "robot_profile must be the canonical profile installed on engine."
-            )
+        robot_profile.assert_current()
         if robot_profile.source_profile is not manifest.robot_profile:
             raise ValueError(
                 "robot_profile does not match the semantic integration manifest."
@@ -1211,15 +1208,16 @@ class BoundSemanticIntegration:
         path: tuple[PathPart, ...] = ("call",),
     ) -> BoundSemanticCall:
         """Resolve one call against exact installed skills, resources, and preset."""
-        if self._engine.skill_profile is not self._robot_profile:
+        try:
+            self._robot_profile.assert_current()
+        except RuntimeError as exc:
             raise SemanticValidationError(
                 SemanticDiagnostic(
-                    "semantic_profile_stale",
+                    "semantic_catalog_stale",
                     ("integration", "robot_profile"),
-                    "The engine's canonical robot profile changed after this "
-                    "semantic integration was bound.",
+                    str(exc),
                 )
-            )
+            ) from exc
         linked = self._manifest.link_call(call, path=path)
         installed = self._engine.skills.get(linked.descriptor.skill_id)
         if installed is None or installed != linked.descriptor.target_descriptor:

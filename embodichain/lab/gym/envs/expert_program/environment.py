@@ -62,7 +62,6 @@ from embodichain.lab.sim.skills.parallel_runtime import (
     analyze_parallel_branches,
 )
 from embodichain.lab.sim.skills.profiles import (
-    BoundRobotSkillProfile,
     ResourceEndpoint,
     ResourceEndpointAdapter,
     RobotSkillProfile,
@@ -604,17 +603,6 @@ class ExpertProgramEnvironmentAdapter:
                 "create_atomic_action_engine() must return an AtomicActionEngine."
             )
         if self._registration is not None:
-            bound_profile = engine.skill_profile
-            if type(bound_profile) is not BoundRobotSkillProfile:
-                raise IntegrationFingerprintMismatch(
-                    "The standard factory engine must own one exact bound robot "
-                    "profile."
-                )
-            if bound_profile.source_profile is not profile:
-                raise IntegrationFingerprintMismatch(
-                    "The standard factory engine is bound to a different robot "
-                    "profile object than the adapter validated."
-                )
             self._registration.validate_engine(engine)
 
         registered_lowerers = self._registered_lowerers
@@ -650,10 +638,13 @@ class ExpertProgramEnvironmentAdapter:
         )
         if self._registration is not None:
             self._validate_registration_ownership()
-            # ``manifest.bind`` resolves endpoints again and replaces the
-            # engine-owned bound profile. Revalidate that second live result so a
-            # provider cannot pass factory construction and drift before compile.
-            self._registration.validate_engine(engine)
+            bound_profile = semantic.compiler.integration.robot_profile
+            if bound_profile.source_profile is not profile:
+                raise IntegrationFingerprintMismatch(
+                    "The semantic runtime bound a different robot profile object "
+                    "than the adapter validated."
+                )
+            self._registration.validate_bound_profile(bound_profile)
         selection = ExpertProgramIntegrationCfg(
             robot_profile=integration.robot_profile,
             scene_registry=integration.scene_registry,

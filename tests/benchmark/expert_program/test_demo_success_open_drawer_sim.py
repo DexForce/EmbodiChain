@@ -32,8 +32,10 @@ from scripts.benchmark.expert_program.demo_success import (
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
-_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "gym/expert_program/open_drawer.json"
-_OPEN_DRAWER_EXPERT_PROGRAM = _TASK_CONFIG_ROOT / "expert_program/open_drawer.yaml"
+_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/env.json"
+_OPEN_DRAWER_EXPERT_PROGRAM = (
+    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/expert/program.yaml"
+)
 _CASE_ID = "open_drawer_live"
 _SEED = 0
 _NUM_ENVS = 1

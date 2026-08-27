@@ -41,7 +41,10 @@ from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    require_shared_task_state_key,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -112,24 +115,29 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
         control_part = manipulator.control_part
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
+        task_state_key = require_shared_task_state_key(
+            motion_endpoint,
+            grasp_endpoint,
+            participant="Pour primary participant",
+        )
 
-        held_object = context.get_held_object(control_part)
+        held_object = context.get_held_object(task_state_key)
         if held_object is None:
             raise ValueError(
-                "Pour requires an object held by control part "
-                f"{control_part!r} - run PickUp first."
+                "Pour requires an object held by task-state resource "
+                f"{task_state_key!r} - run PickUp first."
             )
         affordance = held_object.semantics.affordance
         if not isinstance(affordance, AxisAlignAffordance):
             raise ValueError(
                 "Pour requires the held object to use an AxisAlignAffordance."
             )
-        eligible = context.task.exclusive_held_object_mask(control_part)
+        eligible = context.task.exclusive_held_object_mask(task_state_key)
         if not eligible.any():
             return self.failed_plan(
                 request,
                 context,
-                message="Held object is not exclusive to the control part.",
+                message="Held object is not exclusive to the task-state resource.",
             )
 
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)

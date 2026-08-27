@@ -627,9 +627,8 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
             )
         engine = AtomicActionEngine(
             motion_generator,
+            control_profiles=profile.action_control_profiles(),
             grasp_pose_generators=self._grasp_pose_generators,
-            skill_profile=profile,
-            endpoint_adapters=self._endpoint_adapters,
         )
         self._registration.validate_engine(engine)
         return engine

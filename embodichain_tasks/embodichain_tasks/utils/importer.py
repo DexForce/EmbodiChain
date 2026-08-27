@@ -14,11 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Recursive sub-package importer for auto-registration of task environments.
+"""Recursive module importer for auto-registration of task environments.
 
 This follows the same pattern as IsaacLab's ``isaaclab_tasks`` — recursively
-import every sub-package so that each task's ``__init__.py`` triggers its
-``@register_env`` → ``gym.register()`` call chain.
+import every module so that each task's ``@register_env`` decorator triggers
+its ``gym.register()`` call chain.
 """
 
 from __future__ import annotations
@@ -30,19 +30,19 @@ __all__ = ["import_packages"]
 
 
 def import_packages(package_name: str, blacklist: list[str] | None = None) -> None:
-    """Recursively import all sub-packages of *package_name*.
+    """Recursively import all modules below *package_name*.
 
-    Each imported sub-package executes its ``__init__.py``, which triggers
-    ``@register_env`` decorators that call ``gym.register()``.
+    Each imported task module executes its ``@register_env`` decorators, which
+    call ``gym.register()``.
 
     Args:
         package_name: The fully-qualified package name (e.g. ``"embodichain_tasks"``).
-        blacklist: Sub-package names to skip (e.g. ``["utils"]``).
+        blacklist: Module or package names to skip (e.g. ``["utils"]``).
     """
     blacklist = blacklist or []
     package = importlib.import_module(package_name)
 
-    for _, name, is_pkg in pkgutil.walk_packages(
+    for _, name, _ in pkgutil.walk_packages(
         package.__path__, prefix=package_name + "."
     ):
         if any(

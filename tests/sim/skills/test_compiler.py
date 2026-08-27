@@ -236,6 +236,25 @@ class _InspectLowerer(RegisteredSemanticLowerer):
         )
 
 
+class _RetainingInspectLowerer(_InspectLowerer):
+    """Test extension that safely exposes retained-object look-ahead."""
+
+    def __init__(self, target: SemanticPose) -> None:
+        super().__init__()
+        self.target = target.snapshot()
+
+    def pick_lookahead_targets(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        picked_object: SceneObjectRef,
+        bound: BoundSemanticCall,
+        previous_target: SemanticObjectTarget | None,
+    ) -> tuple[SemanticObjectTarget, ...] | None:
+        del call, picked_object, bound, previous_target
+        return (SemanticObjectTarget(pose=self.target),)
+
+
 class _DerivedGraspGoal(GraspGoal):
     """Executable subclass that an extension must not smuggle into the core."""
 
@@ -485,7 +504,10 @@ def _engine(
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
     generator.supports_dynamic_collision_world = supports_dynamic_collision_world
-    return AtomicActionEngine(generator, skill_profile=profile)
+    return AtomicActionEngine(
+        generator,
+        control_profiles=profile.action_control_profiles(),
+    )
 
 
 def _integration(
@@ -1151,6 +1173,48 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     engine.resolve(grounded.invocation)
 
 
+def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
+    """Pickup feasibility must screen the object pose that Place will use."""
+    registry, providers = _scene_registry()
+    object_pose = torch.eye(4).repeat(2, 1, 1)
+    object_pose[:, :3, :3] = torch.tensor(
+        (
+            (0.0, -1.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+    )
+    providers[0].pose = object_pose
+    templates = _action_option_templates()
+    templates["place"] = PlaceOptions(preserve_current_object_orientation=True)
+    compiler, _ = _compiler(
+        registry,
+        profile=_profile(
+            preset=_preset("safe", action_option_templates=templates),
+        ),
+    )
+    drop = SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0))
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            Place(object=SceneObjectRef("cube"), at=drop),
+        )
+    )
+
+    analyzed_target = workflow.calls[0].downstream_object_targets[0]
+    grounded = compiler.ground(workflow, 0, _context(registry))
+    options = grounded.invocation.skill_options
+
+    assert analyzed_target.preserve_current_object_orientation is True
+    assert type(options) is PickUpOptions
+    downstream = options.downstream_object_target_poses[0]
+    assert isinstance(downstream, torch.Tensor)
+    torch.testing.assert_close(
+        downstream[:, :3, 3], drop.to_matrix()[:3, 3].repeat(2, 1)
+    )
+    torch.testing.assert_close(downstream[:, :3, :3], object_pose[:, :3, :3])
+
+
 def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> None:
     registry, _ = _scene_registry(dynamic_collision=True)
     profile = _profile(
@@ -1389,6 +1453,43 @@ def test_place_uses_verified_object_to_eef_transform() -> None:
     engine.resolve(grounded.invocation)
 
 
+def test_place_can_keep_observed_object_orientation_at_target() -> None:
+    registry, (cube_provider, _) = _scene_registry()
+    cube_pose = torch.eye(4).repeat(2, 1, 1)
+    cube_pose[:, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    cube_provider.pose = cube_pose
+    templates = _action_option_templates()
+    templates["place"] = PlaceOptions(preserve_current_object_orientation=True)
+    compiler, _ = _compiler(
+        registry,
+        profile=_profile(
+            preset=_preset("safe", action_option_templates=templates),
+        ),
+    )
+    pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    semantics = compiler.ground(
+        pick_workflow,
+        0,
+        _context(registry),
+    ).invocation.goal.semantics
+    object_to_eef = torch.eye(4).repeat(2, 1, 1)
+    object_to_eef[:, 2, 3] = 0.12
+    context = _held_context(registry, semantics, object_to_eef)
+    drop = SemanticPose((0.5, -0.2, 0.4), (1.0, 0.0, 0.0, 0.0))
+    workflow = compiler.analyze((Place(object=SceneObjectRef("cube"), at=drop),))
+
+    grounded = compiler.ground(workflow, 0, context)
+
+    goal = grounded.invocation.goal
+    assert type(goal) is PlaceGoal
+    assert isinstance(goal.xpos, torch.Tensor)
+    target = drop.to_matrix().repeat(2, 1, 1)
+    target[:, :3, :3] = cube_pose[:, :3, :3]
+    torch.testing.assert_close(goal.xpos, torch.bmm(target, object_to_eef))
+
+
 def test_relation_place_composes_late_target_with_verified_transform() -> None:
     registry, _ = _scene_registry()
     compiler, _ = _compiler(registry)
@@ -1506,6 +1607,39 @@ def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
     grounded = compiler.ground(workflow, 1, _context(registry))
     assert grounded.invocation.skill_id == "pick_up"
     engine.resolve(grounded.invocation)
+
+
+def test_registered_lowerer_can_certify_retained_object_lookahead() -> None:
+    """A safe registered bridge contributes targets without executable code."""
+    registry, _ = _scene_registry()
+    registered_target = SemanticPose(
+        (0.25, 0.1, 0.4),
+        (1.0, 0.0, 0.0, 0.0),
+    )
+    place_target = SemanticPose(
+        (0.3, 0.0, 0.2),
+        (1.0, 0.0, 0.0, 0.0),
+    )
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(_RetainingInspectLowerer(registered_target),),
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            RegisteredSemanticCall(call_id="vendor.inspect"),
+            Place(object=SceneObjectRef("cube"), at=place_target),
+        )
+    )
+
+    targets = workflow.calls[0].downstream_object_targets
+
+    assert len(targets) == 2
+    torch.testing.assert_close(
+        targets[0].pose.to_matrix(), registered_target.to_matrix()
+    )
+    torch.testing.assert_close(targets[1].pose.to_matrix(), place_target.to_matrix())
 
 
 @pytest.mark.parametrize(

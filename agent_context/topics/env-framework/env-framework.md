@@ -9,6 +9,7 @@
 
 | File | Role |
 |---|---|
+| `embodichain/__main__.py` | Unified CLI dispatch, including `list-env` environment discovery |
 | `embodichain/lab/gym/envs/base_env.py` | `BaseEnv(gym.Env)` + `EnvCfg` — low-level env loop |
 | `embodichain/lab/gym/envs/types.py` | `ControllerAction` — owned controller-ready action boundary |
 | `embodichain/lab/gym/envs/embodied_env.py` | `EmbodiedEnv(BaseEnv)` + `EmbodiedEnvCfg` — modular task base class |
@@ -129,13 +130,16 @@ class MyTaskEnv(EmbodiedEnv):
    `REGISTERED_ENVS` dict, keyed by `uid`.
 3. It also calls `gym.register()` so the env is available via
    `gym.make(uid)`.
-4. `kwargs` passed to `@register_env` must be **JSON-serialisable** (no
+4. Simulator tasks with a supported RL training config declare
+   `supports_rl=True`; this is stored on `EnvSpec` and is not forwarded to the
+   environment constructor.
+5. `kwargs` passed to `@register_env` must be **JSON-serialisable** (no
    classes/types). A `RuntimeError` is raised otherwise.
-5. Use `override=True` to re-register an existing uid (useful in scripts/tests).
+6. Use `override=True` to re-register an existing uid (useful in scripts/tests).
 
 ### Gym ID convention
 
-Format: `<TaskName>-v<N>` (e.g. `PourWater-v3`, `PushCubeRL`).
+Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
 ### Configuration-owned Expert Program environment
@@ -170,6 +174,28 @@ env = make("MyTask-v1", cfg=my_cfg)
 ```
 
 Or via gymnasium: `gym.make("MyTask-v1")`.
+
+### Listing registered environments
+
+`embodichain list-env` calls `discover_task_packages()` and prints a stable
+table whose `Task` column is a directory tree derived from task-first modules
+and packaged `configs/tasks/` paths. The other columns show the environment ID
+and supported use:
+
+- `[Expert Demo: Expert Program]` comes from a task-local Gym config declaring
+  `expert_program_path` or `expert_program_runtime`;
+- `[Expert Demo: Handwritten Trajectory]` means the registered task class
+  overrides `create_demo_segments()` or `create_demo_action_list()`;
+- `[RL]` comes from explicit simulator `supports_rl`, a task-local agents
+  directory, or a registered lightweight learning environment;
+- `[Environment Only]` means none of those supported execution paths is
+  currently declared.
+
+Configuration-owned Expert Program IDs are included from their packaged task
+configs without eagerly building or registering the runtime. Duplicate
+JSON/YAML variants and registry entries merge case-insensitively into one task
+leaf. The framework-level `EmbodiedEnv-v1` registration is omitted because it
+is a reusable base environment rather than an installed task-package entry.
 
 ---
 
@@ -274,37 +300,36 @@ from the event config before the event manager is created.
 
 Use the `/add-task-env` skill. It scaffolds:
 
-1. A new file under `embodichain_tasks/embodichain_tasks/<category>/`.
-2. `@register_env("<GymId>")` decorator on the class.
-3. `EmbodiedEnvCfg` subclass with robot, sensor, object configs.
-4. Stub implementations of `_setup_robot()`, `evaluate()`, `get_reward()`.
-5. Export entry in the category package's `__init__.py`.
-6. Test stub.
+1. A task-named module at
+   `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`.
+2. The `@register_env("<GymId>")` decorator in that module.
+3. A task-local `configs/tasks/<category-path>/<task>/env.{json,yaml}`
+   containing the scene and MDP configuration.
+4. Optional task-local Expert Program or RL configuration artifacts.
+5. A module `__all__` declaration and focused test stub.
+
+The category path starts with a top-level task family and may include a
+subdomain. Tableware tasks use `manipulation/tableware`; general manipulation
+tasks can stay directly under `manipulation`.
+
+Do not organize task ownership around a solution method such as `rl` or
+`expert_program`. Keep registration in the task-named module and do not create
+a same-named Python package for a task that has only one Python entry point.
 
 ### Minimal manual skeleton
 
 ```python
+from typing import Any
+
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
-@configclass
-class MyTaskCfg(EmbodiedEnvCfg):
-    robot: RobotCfg = MISSING
-
 @register_env("MyTask-v1", max_episode_steps=300)
 class MyTaskEnv(EmbodiedEnv):
-    def __init__(self, cfg: MyTaskCfg = MyTaskCfg(), **kwargs):
+    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs: Any) -> None:
         super().__init__(cfg, **kwargs)
 
-    def _setup_robot(self, **kwargs) -> Robot:
-        # load robot, set self.single_action_space
-        ...
-
-    def evaluate(self, **kwargs) -> dict:
-        return {"success": ..., "fail": ...}
-
-    def get_reward(self, obs, action, info) -> torch.Tensor:
-        ...
+    # Keep only behavior that cannot be expressed by task-local config here.
 ```
 
 ---

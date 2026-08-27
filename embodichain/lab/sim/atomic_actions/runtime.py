@@ -186,9 +186,9 @@ class ActionPlanningServices:
     ) -> ActionBinding:
         """Build a generic binding from explicit robot control-part names.
 
-        This is the advanced direct-core construction path. Profile-backed
-        callers obtain the same :class:`ActionBinding` from
-        ``BoundRobotSkillProfile.resolve()``.
+        This is the advanced direct-core construction path. Higher-level
+        binding layers may produce the same :class:`ActionBinding` through
+        their own resource resolution.
 
         Args:
             contract: Typed endpoint contract for the bound skill.

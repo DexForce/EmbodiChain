@@ -1835,8 +1835,7 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
     endpoint = assembly.robot_profile.resources["mobile_base"].endpoints["motion"]
     assert isinstance(endpoint, _MobileEndpoint)
     assert "test.mobile_velocity" in assembly.command_encoder.transport_ids
-    assert assembly.engine.skill_profile is not None
-    resolved = assembly.engine.skill_profile.resources["mobile_base"]
+    resolved = assembly.compiler.integration.robot_profile.resources["mobile_base"]
     assert isinstance(resolved.endpoints["motion"].runtime_target, _MobileTarget)
     assert resolved.claim.claim_tokens == frozenset({"controller:base_velocity"})
 

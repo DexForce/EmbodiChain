@@ -17,14 +17,16 @@
 """Official task environments for EmbodiChain.
 
 Importing this package triggers auto-registration of all task environments
-via recursive sub-package import. Each task sub-package's ``__init__.py``
-calls ``@register_env`` which registers the environment in gymnasium's
-global registry.
+via recursive module import. Each task-named module executes its
+``@register_env`` decorator, registering the environment in gymnasium's global
+registry.
 """
 
 from __future__ import annotations
 
 from .utils.importer import import_packages
+
+__all__: list[str] = []
 
 _BLACKLIST = ["utils"]
 

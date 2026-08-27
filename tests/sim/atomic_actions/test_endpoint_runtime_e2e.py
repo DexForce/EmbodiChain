@@ -475,8 +475,8 @@ def test_custom_planar_velocity_endpoint_runs_from_profile_through_router() -> N
         },
         defaults={"drive_velocity": ResourceBinding({"body": "mobile_base"})},
     )
-    bound = engine.bind_skill_profile(
-        profile,
+    bound = profile.bind(
+        engine,
         endpoint_adapters={_PlanarVelocityEndpoint: _PlanarVelocityAdapter()},
     )
     binding = bound.resolve("drive_velocity").action_binding

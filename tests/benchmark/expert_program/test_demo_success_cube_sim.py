@@ -31,8 +31,10 @@ from scripts.benchmark.expert_program.demo_success import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_CUBE_GYM_CONFIG = get_config_path("gym/expert_program/repeated_pick_place.json")
-_CUBE_EXPERT_PROGRAM = get_config_path("expert_program/repeated_pick_place.yaml")
+_CUBE_GYM_CONFIG = get_config_path("tasks/manipulation/repeated_pick_place/env.json")
+_CUBE_EXPERT_PROGRAM = get_config_path(
+    "tasks/manipulation/repeated_pick_place/expert/program.yaml"
+)
 _CASE_ID = "repeated_cube_three_cycle_live"
 _SEED = 0
 _NUM_ENVS = 1

@@ -38,9 +38,11 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "embodichain_tasks" / "configs"
 _PROGRAMS = {
-    Path("expert_program/repeated_pick_place.yaml"): "repeated_cube_pick_place",
-    Path("expert_program/open_drawer.yaml"): "slide_open_drawer",
-    Path("expert_program/hand_over.yaml"): "dual_ur5_hand_over",
+    Path("tasks/manipulation/repeated_pick_place/expert/program.yaml"): (
+        "repeated_cube_pick_place"
+    ),
+    Path("tasks/manipulation/open_drawer/expert/program.yaml"): "slide_open_drawer",
+    Path("tasks/manipulation/hand_over/expert/program.yaml"): "dual_ur5_hand_over",
 }
 
 

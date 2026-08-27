@@ -270,7 +270,7 @@ def _engine_for_integration(
     generator.supports_dynamic_collision_world = supports_dynamic_collision_world
     return AtomicActionEngine(
         generator,
-        skill_profile=integration.robot_profile,
+        control_profiles=integration.robot_profile.action_control_profiles(),
     )
 
 
@@ -767,7 +767,9 @@ def test_safe_preset_requires_dynamic_collision_for_dynamic_scene(
     assert provider.calls == 0
 
 
-def test_safe_preset_rejects_unsupported_dynamic_planner_before_observation() -> None:
+def test_safe_preset_rejects_unsupported_dynamic_planner_before_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     registry, provider = _scene_registry(
         with_default=True,
         dynamic_collision=True,
@@ -780,8 +782,14 @@ def test_safe_preset_rejects_unsupported_dynamic_planner_before_observation() ->
         ),
     )
     engine = _engine_for_integration(integration)
-    bind_skill_profile = Mock(wraps=engine.bind_skill_profile)
-    engine.bind_skill_profile = bind_skill_profile  # type: ignore[method-assign]
+    bind_called = False
+
+    def record_bind(*args: object, **kwargs: object) -> None:
+        nonlocal bind_called
+        del args, kwargs
+        bind_called = True
+
+    monkeypatch.setattr(RobotSkillProfile, "bind", record_bind)
 
     with pytest.raises(SemanticValidationError) as error:
         integration.bind(registry, engine)
@@ -798,7 +806,7 @@ def test_safe_preset_rejects_unsupported_dynamic_planner_before_observation() ->
     )
     assert diagnostic.candidates == ()
     assert "('cube',)" in diagnostic.message
-    bind_skill_profile.assert_not_called()
+    assert bind_called is False
     assert provider.calls == 0
 
 
@@ -892,7 +900,7 @@ def test_bound_integration_cannot_bypass_safe_dynamic_planner_preflight() -> Non
         ),
     )
     engine = _engine_for_integration(integration)
-    bound_profile = engine.bind_skill_profile(integration.robot_profile)
+    bound_profile = integration.robot_profile.bind(engine)
 
     with pytest.raises(SemanticValidationError) as error:
         BoundSemanticIntegration(
@@ -1005,18 +1013,17 @@ def test_safe_preset_preserves_policy_without_dynamic_collision(
     assert provider.calls == 0
 
 
-def test_bound_semantic_integration_rejects_engine_profile_rebind() -> None:
+def test_bound_semantic_integration_survives_independent_profile_binding() -> None:
     registry, _ = _scene_registry(with_default=True)
     integration = _semantic_integration(registry)
     engine = _engine_for_integration(integration)
-    stale = integration.bind(registry, engine)
+    first = integration.bind(registry, engine)
 
-    engine.bind_skill_profile(integration.robot_profile)
+    second = integration.robot_profile.bind(engine)
+    linked = first.link_call(Pick(object=SceneObjectRef("cube")))
 
-    with pytest.raises(SemanticValidationError) as error:
-        stale.link_call(Pick(object=SceneObjectRef("cube")))
-
-    assert error.value.diagnostic.code == "semantic_profile_stale"
+    assert second is not first.robot_profile
+    assert linked.robot_profile is first.robot_profile
 
 
 def test_bound_semantic_integration_rejects_manifest_subclass_behavior() -> None:
@@ -1026,8 +1033,7 @@ def test_bound_semantic_integration_rejects_manifest_subclass_behavior() -> None
     registry, _ = _scene_registry(with_default=True)
     integration = _semantic_integration(registry)
     engine = _engine_for_integration(integration)
-    bound_profile = engine.skill_profile
-    assert bound_profile is not None
+    bound_profile = integration.robot_profile.bind(engine)
     live_manifest = LiveManifest(
         scene=integration.scene,
         robot_profile=integration.robot_profile,

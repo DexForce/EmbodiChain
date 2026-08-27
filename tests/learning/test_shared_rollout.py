@@ -185,7 +185,7 @@ def test_shared_rollout_collects_policy_and_env_fields():
 @pytest.mark.requires_tasks
 def test_embodied_env_writes_next_fields_into_external_rollout():
     gym_config = load_json(
-        "embodichain_tasks/configs/agents/rl/basic/cart_pole/gym_config.json"
+        "embodichain_tasks/configs/tasks/classic_control/cart_pole/env.json"
     )
     env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
     env_cfg = deepcopy(env_cfg)

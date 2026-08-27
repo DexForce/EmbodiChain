@@ -734,12 +734,6 @@ class ExpertProgramIntegrationCatalog:
                     f"Live skill {skill_id!r} differs from the registered "
                     "semantic target descriptor."
                 )
-        bound_profile = engine.skill_profile
-        if type(bound_profile) is not BoundRobotSkillProfile:
-            raise IntegrationFingerprintMismatch(
-                "The standard live engine must own one exact bound robot profile."
-            )
-        self.validate_bound_endpoint_extensions(bound_profile)
 
     def validate_bound_endpoint_extensions(
         self,
@@ -748,6 +742,7 @@ class ExpertProgramIntegrationCatalog:
         """Match every live resolved endpoint to its fingerprinted declaration."""
         if type(bound_profile) is not BoundRobotSkillProfile:
             raise TypeError("bound_profile must be exactly BoundRobotSkillProfile.")
+        bound_profile.assert_current()
         if bound_profile.profile_id != self.robot_profile_id:
             raise IntegrationFingerprintMismatch(
                 "The bound robot profile ID differs from the registered profile."
@@ -1505,9 +1500,17 @@ class SimulationExpertProgramRegistration:
         self.catalog.scene.validate_registry(registry)
 
     def validate_engine(self, engine: AtomicActionEngine) -> None:
-        """Validate live skills and resolved endpoints against this registration."""
+        """Validate live atomic skills against this registration."""
         self.assert_unchanged()
         self.catalog.validate_engine(engine)
+
+    def validate_bound_profile(
+        self,
+        bound_profile: BoundRobotSkillProfile,
+    ) -> None:
+        """Validate resolved semantic endpoints against this registration."""
+        self.assert_unchanged()
+        self.catalog.validate_bound_endpoint_extensions(bound_profile)
 
     def validate_robot_profile(
         self,

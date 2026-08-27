@@ -68,7 +68,7 @@ def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "embodichain_tasks/configs/gym/expert_program/hand_over.json"
+        / "embodichain_tasks/configs/tasks/manipulation/hand_over/env.json"
     )
 
 
@@ -96,12 +96,10 @@ def test_hand_over_registers_plain_embodied_env_from_config() -> None:
     cfg = _configured_env_cfg()
     spec = REGISTERED_ENVS[_ENV_ID]
 
-    from embodichain_tasks.expert_program import __all__
+    from embodichain_tasks.manipulation import __all__
 
     assert __all__ == []
-    assert (
-        importlib.util.find_spec("embodichain_tasks.expert_program.hand_over") is None
-    )
+    assert importlib.util.find_spec("embodichain_tasks.manipulation.hand_over") is None
     assert spec.cls is EmbodiedEnv
     assert spec.max_episode_steps == 1200
     assert spec.expert_program_registration is not None
@@ -117,7 +115,7 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
     payload = _gym_payload()
 
     assert payload["id"] == _ENV_ID
-    assert payload["expert_program_path"] == "../../expert_program/hand_over.yaml"
+    assert payload["expert_program_path"] == "expert/program.yaml"
     assert payload["sensor"] == []
     assert payload["env"]["extensions"] == {}
     settle = payload["env"]["events"]["settle_can_on_reset"]

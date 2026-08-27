@@ -509,6 +509,10 @@ embodichain.lab.sim.atomic_actions
    PickUpOptions
    PlaceOptions
    PoseGoalValue
+   PushObject
+   PushObjectGoal
+   PushObjectOptions
+   PushObjectToolCalibration
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    RunnerStepCallback
@@ -1875,6 +1879,28 @@ embodichain.workspace_cache_cli
 
    main
 
+embodichain_tasks.classic_control.cart_pole
+--------------------------------------------
+
+Cart-pole environment registration under the task-first import path.
+
+.. currentmodule:: embodichain_tasks.classic_control.cart_pole
+
+.. autosummary::
+
+   CartPoleEnv
+
+embodichain_tasks.classic_control.point_mass
+---------------------------------------------
+
+Differentiable lightweight point-mass task and learning-environment registration.
+
+.. currentmodule:: embodichain_tasks.classic_control.point_mass
+
+.. autosummary::
+
+   PointMassEnv
+
 embodichain_tasks.configs
 -------------------------
 
@@ -1884,33 +1910,77 @@ embodichain_tasks.configs
 
    get_config_path
 
-embodichain_tasks.rl
---------------------
+embodichain_tasks.manipulation.push_cube
+----------------------------------------
 
-.. currentmodule:: embodichain_tasks.rl
-
-.. autosummary::
-
-   build_env
-
-embodichain_tasks.rl.basic
---------------------------
-
-.. currentmodule:: embodichain_tasks.rl.basic
+.. currentmodule:: embodichain_tasks.manipulation.push_cube
 
 .. autosummary::
 
-   CartPoleEnv
-   PointMassEnv
+   PushCubeEnv
 
-embodichain_tasks.rl.basic.point_mass
--------------------------------------
+embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
+-----------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.rl.basic.point_mass
+.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
 
 .. autosummary::
 
-   PointMassEnv
+   BlocksRankingRGBEnv
+
+embodichain_tasks.manipulation.tableware.blocks_ranking_size
+------------------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_size
+
+.. autosummary::
+
+   BlocksRankingSizeEnv
+
+embodichain_tasks.manipulation.tableware.match_object_container
+---------------------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.match_object_container
+
+.. autosummary::
+
+   MatchObjectContainerEnv
+
+embodichain_tasks.manipulation.tableware.place_object_drawer
+------------------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.place_object_drawer
+
+.. autosummary::
+
+   PlaceObjectDrawerEnv
+
+embodichain_tasks.manipulation.tableware.scoop_ice
+--------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.scoop_ice
+
+.. autosummary::
+
+   ScoopIce
+
+embodichain_tasks.manipulation.tableware.stack_blocks_two
+---------------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_blocks_two
+
+.. autosummary::
+
+   StackBlocksTwoEnv
+
+embodichain_tasks.manipulation.tableware.stack_cups
+---------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_cups
+
+.. autosummary::
+
+   StackCupsEnv
 
 embodichain_tasks.special.simple_task
 -------------------------------------
@@ -1929,98 +1999,6 @@ embodichain_tasks.special.stay_still_save
 .. autosummary::
 
    StayStillSaveEnv
-
-embodichain_tasks.tableware.blocks_ranking_rgb
-----------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.blocks_ranking_rgb
-
-.. autosummary::
-
-   BlocksRankingRGBEnv
-
-embodichain_tasks.tableware.blocks_ranking_size
------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.blocks_ranking_size
-
-.. autosummary::
-
-   BlocksRankingSizeEnv
-
-embodichain_tasks.tableware.match_object_container
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.match_object_container
-
-.. autosummary::
-
-   MatchObjectContainerEnv
-
-embodichain_tasks.tableware.place_object_drawer
------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.place_object_drawer
-
-.. autosummary::
-
-   PlaceObjectDrawerEnv
-
-embodichain_tasks.tableware.pour_water.action_bank
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.pour_water.action_bank
-
-.. autosummary::
-
-   PourWaterActionBank
-
-embodichain_tasks.tableware.pour_water.pour_water
--------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.pour_water.pour_water
-
-.. autosummary::
-
-   PourWaterEnv
-   PourWaterAgentEnv
-
-embodichain_tasks.tableware.rearrangement
------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.rearrangement
-
-.. autosummary::
-
-   RearrangementEnv
-   RearrangementAgentEnv
-
-embodichain_tasks.tableware.scoop_ice
--------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.scoop_ice
-
-.. autosummary::
-
-   ScoopIce
-
-embodichain_tasks.tableware.stack_blocks_two
---------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.stack_blocks_two
-
-.. autosummary::
-
-   StackBlocksTwoEnv
-
-embodichain_tasks.tableware.stack_cups
---------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.stack_cups
-
-.. autosummary::
-
-   StackCupsEnv
 
 embodichain_tasks.utils.importer
 --------------------------------

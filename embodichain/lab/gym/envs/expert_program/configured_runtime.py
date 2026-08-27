@@ -28,10 +28,12 @@ from threading import Lock
 from typing import TYPE_CHECKING, TypeVar
 
 from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
-    _ARTICULATION_LINK_SLIDE_CALL_ID,
     _AntipodalGraspPoseGeneratorFactory,
     _ArticulationLinkSlideLowererFactory,
     _JointPositionConstraintEvidenceProviderFactory,
+    _MoveHeldObjectLowererFactory,
+    _PourLowererFactory,
+    _PushObjectLowererFactory,
 )
 from embodichain.lab.gym.envs.expert_program.catalog import (
     SimulationExpertProgramRegistration,
@@ -61,10 +63,13 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionRunnerCfg,
     HandOverOptions,
     MotionPolicy,
+    MoveHeldObjectOptions,
     PickUpOptions,
     PlaceOptions,
+    PourOptions,
+    PushObjectOptions,
+    PushObjectToolCalibration,
     RecoveryPolicy,
-    Slide,
     SlideOptions,
     TrackingPolicy,
 )
@@ -392,6 +397,7 @@ def _decode_antipodal_grasp(
                 "aliases",
                 "relative_pose",
                 "mesh_env_id",
+                "internal_axis",
             }
         ),
     )
@@ -439,6 +445,15 @@ def _decode_antipodal_grasp(
             config.get("mesh_env_id", 0),
             path=f"{path}.mesh_env_id",
             minimum=0,
+        ),
+        internal_axis=(
+            _finite_tuple(
+                config["internal_axis"],
+                path=f"{path}.internal_axis",
+                expected_length=3,
+            )
+            if "internal_axis" in config
+            else None
         ),
     )
 
@@ -641,16 +656,33 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         optional=frozenset(
             {
                 "hand_interp_steps",
+                "grasp_settle_steps",
+                "release_settle_steps",
                 "pick_object_part",
                 "lift_height",
                 "pre_grasp_distance",
                 "approach_direction",
                 "approach_alignment_max_angle",
+                "obj_upright_direction",
+                "rotate_upright",
+                "grasp_frame_to_eef",
+                "fixed_object_to_eef",
                 "max_approach_retract_z",
                 "cartesian_waypoint_count",
+                "preserve_current_object_orientation",
                 "direction",
                 "approach_distance",
                 "translation_distance",
+                "rotate_angle",
+                "approach_height",
+                "retract_height",
+                "contact_distance",
+                "push_overshoot",
+                "completion_tolerance",
+                "object_contact_offset",
+                "support_frame_planar_contact_offset",
+                "contact_frame_to_eef",
+                "tool_calibrations",
             }
         ),
     )
@@ -663,11 +695,16 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             optional=frozenset(
                 {
                     "hand_interp_steps",
+                    "grasp_settle_steps",
                     "pick_object_part",
                     "lift_height",
                     "pre_grasp_distance",
                     "approach_direction",
                     "approach_alignment_max_angle",
+                    "obj_upright_direction",
+                    "rotate_upright",
+                    "grasp_frame_to_eef",
+                    "fixed_object_to_eef",
                 }
             ),
         )
@@ -677,6 +714,12 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 config["hand_interp_steps"],
                 path=f"{path}.hand_interp_steps",
                 minimum=1,
+            )
+        if "grasp_settle_steps" in config:
+            kwargs["grasp_settle_steps"] = _integer(
+                config["grasp_settle_steps"],
+                path=f"{path}.grasp_settle_steps",
+                minimum=0,
             )
         if "pick_object_part" in config:
             kwargs["pick_object_part"] = _identifier(
@@ -708,6 +751,44 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 minimum=0.0,
                 maximum=math.pi / 2,
             )
+        if "obj_upright_direction" in config:
+            import torch
+
+            kwargs["obj_upright_direction"] = torch.tensor(
+                _finite_tuple(
+                    config["obj_upright_direction"],
+                    path=f"{path}.obj_upright_direction",
+                    expected_length=3,
+                ),
+                dtype=torch.float32,
+            )
+        if "rotate_upright" in config:
+            kwargs["rotate_upright"] = _real(
+                config["rotate_upright"],
+                path=f"{path}.rotate_upright",
+            )
+        if "grasp_frame_to_eef" in config:
+            import torch
+
+            kwargs["grasp_frame_to_eef"] = torch.tensor(
+                _finite_tuple(
+                    config["grasp_frame_to_eef"],
+                    path=f"{path}.grasp_frame_to_eef",
+                    expected_length=16,
+                ),
+                dtype=torch.float32,
+            ).reshape(4, 4)
+        if "fixed_object_to_eef" in config:
+            import torch
+
+            kwargs["fixed_object_to_eef"] = torch.tensor(
+                _finite_tuple(
+                    config["fixed_object_to_eef"],
+                    path=f"{path}.fixed_object_to_eef",
+                    expected_length=16,
+                ),
+                dtype=torch.float32,
+            ).reshape(4, 4)
         return PickUpOptions(**kwargs)
     if kind == "place":
         config = _mapping(
@@ -717,9 +798,11 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             optional=frozenset(
                 {
                     "hand_interp_steps",
+                    "release_settle_steps",
                     "lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
+                    "preserve_current_object_orientation",
                 }
             ),
         )
@@ -729,6 +812,12 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 config["hand_interp_steps"],
                 path=f"{path}.hand_interp_steps",
                 minimum=1,
+            )
+        if "release_settle_steps" in config:
+            kwargs["release_settle_steps"] = _integer(
+                config["release_settle_steps"],
+                path=f"{path}.release_settle_steps",
+                minimum=0,
             )
         if "lift_height" in config:
             kwargs["lift_height"] = _real(
@@ -747,7 +836,150 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 path=f"{path}.cartesian_waypoint_count",
                 minimum=1,
             )
+        if "preserve_current_object_orientation" in config:
+            kwargs["preserve_current_object_orientation"] = _boolean(
+                config["preserve_current_object_orientation"],
+                path=f"{path}.preserve_current_object_orientation",
+            )
         return PlaceOptions(**kwargs)
+    if kind == "move_held_object":
+        _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+        )
+        return MoveHeldObjectOptions()
+    if kind == "pour":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset({"rotate_angle"}),
+        )
+        kwargs = {}
+        if "rotate_angle" in config:
+            kwargs["rotate_angle"] = _real(
+                config["rotate_angle"],
+                path=f"{path}.rotate_angle",
+            )
+        return PourOptions(**kwargs)
+    if kind == "push_object":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "hand_interp_steps",
+                    "approach_height",
+                    "retract_height",
+                    "contact_distance",
+                    "push_overshoot",
+                    "completion_tolerance",
+                    "object_contact_offset",
+                    "support_frame_planar_contact_offset",
+                    "contact_frame_to_eef",
+                    "tool_calibrations",
+                }
+            ),
+        )
+        kwargs: dict[str, object] = {}
+        if "hand_interp_steps" in config:
+            kwargs["hand_interp_steps"] = _integer(
+                config["hand_interp_steps"],
+                path=f"{path}.hand_interp_steps",
+                minimum=1,
+            )
+        for field_name in (
+            "approach_height",
+            "retract_height",
+            "contact_distance",
+            "push_overshoot",
+            "completion_tolerance",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _real(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    minimum=0.0,
+                )
+        if "object_contact_offset" in config:
+            import torch
+
+            kwargs["object_contact_offset"] = torch.tensor(
+                _finite_tuple(
+                    config["object_contact_offset"],
+                    path=f"{path}.object_contact_offset",
+                    expected_length=3,
+                ),
+                dtype=torch.float32,
+            )
+        if "support_frame_planar_contact_offset" in config:
+            import torch
+
+            kwargs["support_frame_planar_contact_offset"] = torch.tensor(
+                _finite_tuple(
+                    config["support_frame_planar_contact_offset"],
+                    path=f"{path}.support_frame_planar_contact_offset",
+                    expected_length=3,
+                ),
+                dtype=torch.float32,
+            )
+        if "contact_frame_to_eef" in config:
+            import torch
+
+            kwargs["contact_frame_to_eef"] = torch.tensor(
+                _finite_tuple(
+                    config["contact_frame_to_eef"],
+                    path=f"{path}.contact_frame_to_eef",
+                    expected_length=16,
+                ),
+                dtype=torch.float32,
+            ).reshape(4, 4)
+        if "tool_calibrations" in config:
+            import torch
+
+            calibrations: list[PushObjectToolCalibration] = []
+            for index, item in enumerate(
+                _sequence(
+                    config["tool_calibrations"],
+                    path=f"{path}.tool_calibrations",
+                )
+            ):
+                calibration_path = f"{path}.tool_calibrations[{index}]"
+                calibration = _mapping(
+                    item,
+                    path=calibration_path,
+                    required=frozenset({"control_part", "contact_frame_to_eef"}),
+                    optional=frozenset({"contact_distance"}),
+                )
+                calibrations.append(
+                    PushObjectToolCalibration(
+                        control_part=_identifier(
+                            calibration["control_part"],
+                            path=f"{calibration_path}.control_part",
+                        ),
+                        contact_frame_to_eef=torch.tensor(
+                            _finite_tuple(
+                                calibration["contact_frame_to_eef"],
+                                path=f"{calibration_path}.contact_frame_to_eef",
+                                expected_length=16,
+                            ),
+                            dtype=torch.float32,
+                        ).reshape(4, 4),
+                        contact_distance=(
+                            None
+                            if "contact_distance" not in calibration
+                            else _real(
+                                calibration["contact_distance"],
+                                path=f"{calibration_path}.contact_distance",
+                                minimum=0.0,
+                            )
+                        ),
+                    )
+                )
+            kwargs["tool_calibrations"] = tuple(calibrations)
+        return PushObjectOptions(**kwargs)
     if kind == "slide":
         config = _mapping(
             value,
@@ -814,7 +1046,8 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['hand_over', 'pick_up', 'place', 'slide']."
+        "['hand_over', 'move_held_object', 'pick_up', 'place', 'pour', "
+        "'push_object', 'slide']."
     )
 
 
@@ -1375,55 +1608,142 @@ def _decode_registered_lowerer(
     value: object,
     *,
     path: str,
-) -> _ArticulationLinkSlideLowererFactory:
+) -> (
+    _ArticulationLinkSlideLowererFactory
+    | _MoveHeldObjectLowererFactory
+    | _PourLowererFactory
+    | _PushObjectLowererFactory
+):
     """Decode one allowlisted registered semantic lowerer factory."""
-    config = _mapping(
+    common = _mapping(
         value,
         path=path,
-        required=frozenset(
+        required=frozenset({"kind"}),
+        optional=frozenset(
             {
-                "kind",
                 "articulation_id",
                 "articulation_simulation_uid",
                 "link_entity_id",
                 "translation_axis",
+                "target_pose_mode",
+                "target_id",
+                "reference_entity_id",
+                "relative_pose",
+                "object_id",
+                "routes",
             }
         ),
-        optional=frozenset({"target_pose_mode"}),
     )
-    kind = _identifier(config["kind"], path=f"{path}.kind")
-    if kind != "articulation_link_slide":
-        raise ValueError(
-            f"Unsupported {path}.kind {kind!r}; supported kinds are "
-            "['articulation_link_slide']."
+    kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind == "articulation_link_slide":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {
+                    "kind",
+                    "articulation_id",
+                    "articulation_simulation_uid",
+                    "link_entity_id",
+                    "translation_axis",
+                }
+            ),
+            optional=frozenset({"target_pose_mode"}),
         )
-    target_pose_mode = _identifier(
-        config.get("target_pose_mode", "live"),
-        path=f"{path}.target_pose_mode",
-    )
-    if target_pose_mode not in {"live", "snapshot"}:
-        raise ValueError(
-            f"{path}.target_pose_mode must be one of ['live', 'snapshot']."
+        target_pose_mode = _identifier(
+            config.get("target_pose_mode", "live"),
+            path=f"{path}.target_pose_mode",
         )
-    return _ArticulationLinkSlideLowererFactory(
-        articulation_id=_identifier(
-            config["articulation_id"],
-            path=f"{path}.articulation_id",
-        ),
-        articulation_simulation_uid=_identifier(
-            config["articulation_simulation_uid"],
-            path=f"{path}.articulation_simulation_uid",
-        ),
-        link_entity_id=_identifier(
-            config["link_entity_id"],
-            path=f"{path}.link_entity_id",
-        ),
-        translation_axis=_finite_tuple(
-            config["translation_axis"],
-            path=f"{path}.translation_axis",
-            expected_length=3,
-        ),
-        target_pose_mode=target_pose_mode,
+        if target_pose_mode not in {"live", "snapshot"}:
+            raise ValueError(
+                f"{path}.target_pose_mode must be one of ['live', 'snapshot']."
+            )
+        return _ArticulationLinkSlideLowererFactory(
+            articulation_id=_identifier(
+                config["articulation_id"],
+                path=f"{path}.articulation_id",
+            ),
+            articulation_simulation_uid=_identifier(
+                config["articulation_simulation_uid"],
+                path=f"{path}.articulation_simulation_uid",
+            ),
+            link_entity_id=_identifier(
+                config["link_entity_id"],
+                path=f"{path}.link_entity_id",
+            ),
+            translation_axis=_finite_tuple(
+                config["translation_axis"],
+                path=f"{path}.translation_axis",
+                expected_length=3,
+            ),
+            target_pose_mode=target_pose_mode,
+        )
+    if kind == "move_held_object":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {
+                    "kind",
+                    "target_id",
+                    "reference_entity_id",
+                    "relative_pose",
+                }
+            ),
+        )
+        return _MoveHeldObjectLowererFactory(
+            target_id=_identifier(config["target_id"], path=f"{path}.target_id"),
+            reference_entity_id=_identifier(
+                config["reference_entity_id"],
+                path=f"{path}.reference_entity_id",
+            ),
+            relative_pose=_finite_tuple(
+                config["relative_pose"],
+                path=f"{path}.relative_pose",
+                expected_length=16,
+            ),
+        )
+    if kind == "pour":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "object_id"}),
+        )
+        return _PourLowererFactory(
+            object_id=_identifier(config["object_id"], path=f"{path}.object_id")
+        )
+    if kind == "push_object":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes"}),
+        )
+        routes: list[tuple[str, str]] = []
+        for index, route_value in enumerate(
+            _sequence(config["routes"], path=f"{path}.routes")
+        ):
+            route_path = f"{path}.routes[{index}]"
+            route = _mapping(
+                route_value,
+                path=route_path,
+                required=frozenset({"object_id", "target_entity_id"}),
+            )
+            routes.append(
+                (
+                    _identifier(
+                        route["object_id"],
+                        path=f"{route_path}.object_id",
+                    ),
+                    _identifier(
+                        route["target_entity_id"],
+                        path=f"{route_path}.target_entity_id",
+                    ),
+                )
+            )
+        return _PushObjectLowererFactory(routes=tuple(routes))
+    raise ValueError(
+        f"Unsupported {path}.kind {kind!r}; supported kinds are "
+        "['articulation_link_slide', 'move_held_object', 'pour', 'push_object']."
     )
 
 
@@ -1479,7 +1799,13 @@ class _DecodedRuntimeServices:
         tuple[str, _AntipodalGraspPoseGeneratorFactory], ...
     ] = ()
     handover_pose_providers: tuple[ConfiguredHandOverPoseProvider, ...] = ()
-    registered_semantic_lowerers: tuple[_ArticulationLinkSlideLowererFactory, ...] = ()
+    registered_semantic_lowerers: tuple[
+        _ArticulationLinkSlideLowererFactory
+        | _MoveHeldObjectLowererFactory
+        | _PourLowererFactory
+        | _PushObjectLowererFactory,
+        ...,
+    ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
 
 
@@ -1538,10 +1864,10 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
             )
         )
     )
-    if len(lowerers) > 1:
+    lowerer_call_ids = tuple(factory.call_id for factory in lowerers)
+    if len(set(lowerer_call_ids)) != len(lowerer_call_ids):
         raise ValueError(
-            f"{path}.registered_semantic_lowerers supports at most one "
-            "articulation-link Slide declaration."
+            f"{path}.registered_semantic_lowerers contains duplicate call IDs."
         )
     evidence = (
         None
@@ -1604,12 +1930,12 @@ def _decode_configured_expert_program_runtime(
     services = _decode_runtime_services(config.get("runtime_services", {}))
 
     call_catalog = builtin_semantic_call_catalog()
-    if services.registered_semantic_lowerers:
+    for lowerer_factory in services.registered_semantic_lowerers:
         call_catalog = call_catalog.with_descriptor(
             SemanticCallDescriptor(
-                call_id=_ARTICULATION_LINK_SLIDE_CALL_ID,
+                call_id=lowerer_factory.call_id,
                 spec_type=RegisteredSemanticCall,
-                target_descriptor=Slide.descriptor(),
+                target_descriptor=lowerer_factory.target_descriptor,
             )
         )
     registration = SimulationExpertProgramRegistration(

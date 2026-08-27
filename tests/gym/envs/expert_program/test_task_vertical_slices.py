@@ -70,10 +70,12 @@ from embodichain.lab.sim.skills.scene import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_REPEATED_CUBE_PROGRAM = Path("expert_program/repeated_pick_place.yaml")
-_REPEATED_CUBE_GYM_CONFIG = Path("gym/expert_program/repeated_pick_place.json")
-_OPEN_DRAWER_PROGRAM = Path("expert_program/open_drawer.yaml")
-_OPEN_DRAWER_GYM_CONFIG = Path("gym/expert_program/open_drawer.json")
+_REPEATED_CUBE_PROGRAM = Path(
+    "tasks/manipulation/repeated_pick_place/expert/program.yaml"
+)
+_REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/env.json")
+_OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/expert/program.yaml")
+_OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/env.json")
 _OPEN_DRAWER_CALL_ID = "simulation.articulation_link_slide"
 _OPEN_DRAWER_ENTITY_ID = "drawer"
 _OPEN_DRAWER_HANDLE_ID = "drawer_handle"
@@ -623,8 +625,8 @@ def test_open_drawer_lowerer_owns_a_snapshot_of_the_current_target_pose() -> Non
 def test_examples_have_no_task_specific_environment_modules() -> None:
     """Both examples are assembled from config against plain EmbodiedEnv."""
     for module_name in (
-        "embodichain_tasks.expert_program.repeated_pick_place",
-        "embodichain_tasks.expert_program.open_drawer",
+        "embodichain_tasks.manipulation.repeated_pick_place",
+        "embodichain_tasks.manipulation.open_drawer",
     ):
         assert importlib.util.find_spec(module_name) is None
     _, _, cube_spec = _configure_cube_environment()
@@ -721,8 +723,8 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
 @pytest.mark.parametrize(
     "relative_path",
     (
-        Path("gym/expert_program/repeated_pick_place.json"),
-        Path("gym/expert_program/open_drawer.json"),
+        Path("tasks/manipulation/repeated_pick_place/env.json"),
+        Path("tasks/manipulation/open_drawer/env.json"),
     ),
 )
 def test_example_gym_configs_omit_auxiliary_runtime_mechanisms(

@@ -43,8 +43,10 @@ from embodichain.lab.sim.atomic_actions import (
     EndpointBinding,
     EndpointTrackingChannelBinding,
     EndpointTrackingFeedbackAddress,
+    EntityState,
     ExecutionEventKind,
     ExecutionRunnerCfg,
+    FORWARD_KINEMATICS_CAPABILITY,
     HeldObjectGuardRequest,
     HeldObjectState,
     JointPositionTarget,
@@ -141,6 +143,7 @@ class _ObservationProvider:
     def __init__(self) -> None:
         self.calls = 0
         self.task_states: list[TaskState] = []
+        self.entities: dict[str, EntityState] = {}
 
     def observe(self, task_state: TaskState) -> PlanningContext:
         self.calls += 1
@@ -153,7 +156,11 @@ class _ObservationProvider:
                 qvel=torch.zeros(BATCH_SIZE, 1),
             ),
             task=task_state,
-            scene=SceneSnapshot(timestamp=timestamp, version=self.calls),
+            scene=SceneSnapshot(
+                timestamp=timestamp,
+                version=self.calls,
+                entities=self.entities,
+            ),
             env_ids=torch.arange(BATCH_SIZE, dtype=torch.long),
         )
 
@@ -696,6 +703,7 @@ class _WorkflowRecoveryCompiler(SemanticSkillCompiler):
                     adapter_id="test",
                     target=JointPositionTarget("virtual", (0,)),
                     task_state_key="left_gripper",
+                    capabilities=frozenset({FORWARD_KINEMATICS_CAPABILITY}),
                     joint_ids=(0,),
                 ),
             ),
@@ -1192,6 +1200,39 @@ def test_runtime_reacquires_a_lost_source_with_a_real_pick_then_retries() -> Non
         "left_gripper"
     )
     assert result.task_state.get_held_object("left_gripper") is None
+
+
+def test_runtime_reconciles_completed_pick_with_observed_attachment_pose() -> None:
+    """The next semantic call receives the physical, not projected, grasp frame."""
+    system = _workflow_recovery_system(
+        (_workflow_decision(_mask(True, True), _mask(False, False)),)
+    )
+    object_poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
+    object_poses[0, :3, 3] = torch.tensor([0.5, 0.1, 0.2])
+    object_poses[1, :3, 3] = torch.tensor([-0.2, 0.3, 0.4])
+    observed_relations = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
+    observed_relations[0, :3, 3] = torch.tensor([0.1, 0.02, 0.3])
+    observed_relations[1, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    observed_relations[1, :3, 3] = torch.tensor([0.0, -0.1, 0.2])
+    endpoint_poses = torch.bmm(object_poses, observed_relations)
+    system.observation.entities["cube"] = EntityState(object_poses)
+    system.engine.robot.compute_fk.return_value = endpoint_poses
+
+    result = system.runtime.run(Pick(object=SceneObjectRef("cube")))
+
+    assert result.status is SkillStatus.COMPLETED
+    held = result.task_state.get_held_object("left_gripper")
+    assert held is not None
+    torch.testing.assert_close(held.object_to_eef, observed_relations)
+    torch.testing.assert_close(held.grasp_xpos, endpoint_poses)
+    system.engine.robot.compute_fk.assert_called_once()
+    call = system.engine.robot.compute_fk.call_args
+    assert call.kwargs["name"] == "virtual"
+    assert call.kwargs["env_ids"] == [0, 1]
+    assert call.kwargs["to_matrix"] is True
+    torch.testing.assert_close(call.kwargs["qpos"], torch.zeros(BATCH_SIZE, 1))
 
 
 def test_runtime_retries_directly_when_verified_source_relation_remains() -> None:

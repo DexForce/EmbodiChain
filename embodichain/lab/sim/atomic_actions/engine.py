@@ -36,12 +36,6 @@ from .tracking import TrackingRuntime
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
-    from embodichain.lab.sim.skills import (
-        BoundRobotSkillProfile,
-        ResourceEndpoint,
-        ResourceEndpointAdapter,
-        RobotSkillProfile,
-    )
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession
@@ -57,10 +51,6 @@ class AtomicActionEngine:
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         load_builtins: bool = True,
-        skill_profile: RobotSkillProfile | None = None,
-        endpoint_adapters: (
-            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
-        ) = None,
         tracking_runtime: TrackingRuntime | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
@@ -73,29 +63,10 @@ class AtomicActionEngine:
                 control-part name.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
-            skill_profile: Optional authoritative robot skill profile. Its
-                command profiles are installed automatically and validated
-                after built-in actions are loaded. ``control_profiles`` and
-                ``skill_profile`` are mutually exclusive.
-            endpoint_adapters: Optional exact-type endpoint adapters used when
-                binding ``skill_profile``. Invalid without a profile.
             tracking_runtime: Optional exact-version feedback, projector, and
                 metric registries. Built-in joint tracking is installed when
                 omitted.
         """
-        if endpoint_adapters is not None and skill_profile is None:
-            raise ValueError("endpoint_adapters requires skill_profile.")
-        if skill_profile is not None:
-            from embodichain.lab.sim.skills import RobotSkillProfile
-
-            if not isinstance(skill_profile, RobotSkillProfile):
-                raise TypeError("skill_profile must be a RobotSkillProfile or None.")
-            if control_profiles is not None:
-                raise ValueError(
-                    "control_profiles and skill_profile are mutually exclusive; "
-                    "the profile is the authoritative semantic-command source."
-                )
-            control_profiles = skill_profile.action_control_profiles()
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
@@ -104,14 +75,8 @@ class AtomicActionEngine:
         )
         self._actions: dict[str, AtomicAction] = {}
         self._skill_catalog_revision = 0
-        self._skill_profile: BoundRobotSkillProfile | None = None
         if load_builtins:
             self._load_builtin_actions()
-        if skill_profile is not None:
-            self._skill_profile = skill_profile.bind(
-                self,
-                endpoint_adapters=endpoint_adapters,
-            )
 
     @property
     def motion_generator(self) -> MotionGenerator:
@@ -181,48 +146,11 @@ class AtomicActionEngine:
     def skill_catalog_revision(self) -> int:
         """Return the monotonic installed semantic-skill catalog revision.
 
-        Replacing an agent-visible implementation advances the revision even
-        when its public descriptor is equal. Bound profiles and semantic
-        compilers can therefore reject stale implementation ownership.
+        Installing or replacing an agent-visible implementation advances the
+        revision even when its public descriptor is equal. External binding and
+        compilation layers can therefore reject stale implementation snapshots.
         """
         return self._skill_catalog_revision
-
-    @property
-    def skill_profile(self) -> BoundRobotSkillProfile | None:
-        """Return the currently bound semantic robot profile, when configured."""
-        return self._skill_profile
-
-    def bind_skill_profile(
-        self,
-        profile: RobotSkillProfile,
-        *,
-        endpoint_adapters: (
-            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
-        ) = None,
-    ) -> BoundRobotSkillProfile:
-        """Validate and bind a profile after custom action installation.
-
-        The engine's immutable control-part profiles must already contain the
-        profile commands lowered into the current action core. Generic
-        non-core endpoint commands remain on resolved endpoints. Prefer the
-        constructor's ``skill_profile`` argument when no custom actions need
-        to be installed first.
-
-        Args:
-            profile: Authoritative robot resource and policy profile.
-            endpoint_adapters: Optional exact-type endpoint adapters used for
-                custom controller declarations.
-
-        Returns:
-            Validated profile bound to this engine and its installed actions.
-        """
-        from embodichain.lab.sim.skills import RobotSkillProfile
-
-        if not isinstance(profile, RobotSkillProfile):
-            raise TypeError("profile must be a RobotSkillProfile.")
-        bound = profile.bind(self, endpoint_adapters=endpoint_adapters)
-        self._skill_profile = bound
-        return bound
 
     def bind_control_parts(
         self,
@@ -265,7 +193,6 @@ class AtomicActionEngine:
         goal: GoalT,
         *,
         control_parts: Mapping[str, Mapping[str, str]] | None = None,
-        resources: Mapping[str, str] | None = None,
         motion_policy: MotionPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
         skill_options: OptionsT | None = None,
@@ -275,19 +202,14 @@ class AtomicActionEngine:
     ) -> ActionInvocation[GoalT, OptionsT]:
         """Construct a grounded invocation while naming the skill only once.
 
-        ``control_parts`` uses the advanced direct-core binding path. When it is
-        omitted, the engine must own a bound robot skill profile; ``resources``
-        then optionally selects logical resource IDs by skill-local slot. An
-        omitted resource selection uses the profile's unique or default binding.
-        This method resolves bindings only; profile policy presets and runner
-        configuration remain responsibilities of the semantic runtime layer.
+        ``control_parts`` uses the advanced direct-core binding path. Profile-
+        based integrations resolve an :class:`ActionBinding` in the semantic
+        layer and construct :class:`ActionInvocation` directly.
 
         Args:
             skill_id: Stable identifier of an installed atomic skill.
             goal: Action-specific typed goal.
-            control_parts: Optional direct ``slot -> endpoint -> control_part``
-                mapping.
-            resources: Optional profile ``slot -> resource_id`` selections.
+            control_parts: Direct ``slot -> endpoint -> control_part`` mapping.
             motion_policy: Optional invocation motion policy.
             recovery_policy: Optional invocation recovery policy.
             skill_options: Optional action-specific invocation options.
@@ -300,24 +222,13 @@ class AtomicActionEngine:
             ``compile``, and ``start``.
 
         Raises:
-            ValueError: If binding sources conflict or no binding source is
-                available.
-            KeyError: If the skill or an explicitly selected resource is unknown.
+            ValueError: If ``control_parts`` is omitted.
+            KeyError: If the skill or control part is unknown.
             TypeError: If an invocation field or binding input has an invalid type.
         """
-        if control_parts is not None and resources is not None:
-            raise ValueError("control_parts and resources are mutually exclusive.")
-        if control_parts is not None:
-            binding = self.bind_control_parts(skill_id, control_parts)
-        else:
-            profile = self.skill_profile
-            if profile is None:
-                if resources is not None:
-                    raise ValueError("resources requires a bound RobotSkillProfile.")
-                raise ValueError(
-                    "control_parts is required when no RobotSkillProfile is bound."
-                )
-            binding = profile.resolve(skill_id, resources).action_binding
+        if control_parts is None:
+            raise ValueError("control_parts is required for direct-core invocation.")
+        binding = self.bind_control_parts(skill_id, control_parts)
 
         return ActionInvocation(
             skill_id=skill_id,
@@ -368,7 +279,6 @@ class AtomicActionEngine:
             and existing_descriptor.binding_contract is not None
         ):
             self._skill_catalog_revision += 1
-        self._skill_profile = None
 
     def _load_builtin_actions(self) -> None:
         """Create and bind fresh built-in action instances for this engine."""

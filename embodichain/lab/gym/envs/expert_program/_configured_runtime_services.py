@@ -24,15 +24,28 @@ from typing import TYPE_CHECKING, ClassVar
 
 import torch
 
+from embodichain.utils.math import axis_angle_to_rotation_matrix
+
 from embodichain.lab.gym.envs.expert_program.extensions import (
     ControlPartEvidenceProviderFactory,
     RegisteredSemanticLowererFactory,
 )
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
+    Affordance,
     AtomicActionEngine,
+    AxisAlignAffordance,
+    HeldObjectPoseGoal,
+    MoveHeldObject,
+    MoveHeldObjectOptions,
     ObjectSemantics,
     PlanningContext,
+    Pour,
+    PourGoal,
+    PourOptions,
+    PushObject,
+    PushObjectGoal,
+    PushObjectOptions,
     SceneEntityPose,
     SceneProvider,
     SkillDescriptor,
@@ -53,13 +66,16 @@ from embodichain.lab.sim.skills import (
     ControlPartSimulationEvidenceProvider,
     EffectEvidenceCollectionContext,
     EffectEvidenceProvider,
+    GRASP_AFFORDANCE_CAPABILITY,
     HeldObjectStateExpectation,
     RegisteredSemanticCall,
     RegisteredSemanticLowerer,
     SceneArticulationRef,
     SceneLinkRef,
+    SceneObjectRef,
     SceneRegistry,
     SemanticLowering,
+    SemanticObjectTarget,
 )
 
 if TYPE_CHECKING:
@@ -68,6 +84,9 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _ARTICULATION_LINK_SLIDE_CALL_ID = "simulation.articulation_link_slide"
+_MOVE_HELD_OBJECT_CALL_ID = "simulation.move_held_object"
+_POUR_CALL_ID = "simulation.pour"
+_PUSH_OBJECT_CALL_ID = "simulation.push_object"
 _SLIDE_TARGET_POSE_MODES = frozenset({"live", "snapshot"})
 
 
@@ -90,6 +109,37 @@ def _axis(value: tuple[float, float, float]) -> tuple[float, float, float]:
         or math.sqrt(sum(item * item for item in normalized)) <= 1.0e-6
     ):
         raise ValueError("translation_axis must contain three finite non-zero values.")
+    return normalized
+
+
+def _pose(value: tuple[float, ...]) -> tuple[float, ...]:
+    """Validate and own one flattened SE(3) transform."""
+    if type(value) is not tuple or len(value) != 16:
+        raise TypeError("relative_pose must be an exact 16-value tuple.")
+    normalized = tuple(float(item) for item in value)
+    if not all(math.isfinite(item) for item in normalized):
+        raise ValueError("relative_pose must contain only finite values.")
+    pose = torch.tensor(normalized, dtype=torch.float64).reshape(4, 4)
+    if not torch.allclose(
+        pose[3],
+        torch.tensor((0.0, 0.0, 0.0, 1.0), dtype=torch.float64),
+        atol=1.0e-6,
+        rtol=0.0,
+    ):
+        raise ValueError("relative_pose must have bottom row [0, 0, 0, 1].")
+    rotation = pose[:3, :3]
+    if not torch.allclose(
+        rotation.T @ rotation,
+        torch.eye(3, dtype=torch.float64),
+        atol=1.0e-6,
+        rtol=0.0,
+    ) or not torch.isclose(
+        torch.linalg.det(rotation),
+        torch.tensor(1.0, dtype=torch.float64),
+        atol=1.0e-6,
+        rtol=0.0,
+    ):
+        raise ValueError("relative_pose must contain a proper SE(3) rotation.")
     return normalized
 
 
@@ -241,6 +291,7 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
 
     call_id: ClassVar[str] = _ARTICULATION_LINK_SLIDE_CALL_ID
     revision: ClassVar[str] = "2"
+    target_descriptor: ClassVar[SkillDescriptor] = Slide.descriptor()
 
     articulation_id: str
     articulation_simulation_uid: str
@@ -330,6 +381,372 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
             self.link_entity_id,
             target_pose_mode=self.target_pose_mode,
         )
+
+
+class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
+    """Lower one configured live-relative target to ``MoveHeldObject``."""
+
+    call_id: ClassVar[str] = _MOVE_HELD_OBJECT_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
+
+    def __init__(
+        self,
+        target_id: str,
+        reference_entity_id: str,
+        relative_pose: tuple[float, ...],
+    ) -> None:
+        self._target_id = _identifier(target_id, field_name="target_id")
+        self._reference_entity_id = _identifier(
+            reference_entity_id,
+            field_name="reference_entity_id",
+        )
+        self._relative_pose = _pose(relative_pose)
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Construct one late-bound object-space transport goal."""
+        del context, bound
+        if type(option_template) is not MoveHeldObjectOptions:
+            raise TypeError(
+                "Configured held-object transport requires an exact "
+                "MoveHeldObjectOptions template."
+            )
+        self._validate_call(call)
+        return SemanticLowering(goal=HeldObjectPoseGoal(self._target_pose()))
+
+    def pick_lookahead_targets(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        picked_object: SceneObjectRef,
+        bound: BoundSemanticCall,
+        previous_target: SemanticObjectTarget | None,
+    ) -> tuple[SemanticObjectTarget, ...] | None:
+        """Expose transport reachability while retaining the picked object."""
+        del picked_object, bound, previous_target
+        self._validate_call(call)
+        return (SemanticObjectTarget(pose=self._target_pose()),)
+
+    def _validate_call(self, call: RegisteredSemanticCall) -> None:
+        """Require the configured immutable target selector."""
+        arguments = dict(call.arguments)
+        if arguments != {"target": self._target_id}:
+            raise ValueError(
+                f"{self.call_id} arguments must select configured target "
+                f"{self._target_id!r}."
+            )
+
+    def _target_pose(self) -> SceneEntityPose:
+        """Return one independently owned late-bound transport target."""
+        return SceneEntityPose(
+            self._reference_entity_id,
+            relative_pose=torch.tensor(
+                self._relative_pose,
+                dtype=torch.float32,
+            ).reshape(4, 4),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
+    """Create one configured live-relative ``MoveHeldObject`` lowerer."""
+
+    call_id: ClassVar[str] = _MOVE_HELD_OBJECT_CALL_ID
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
+
+    target_id: str
+    reference_entity_id: str
+    relative_pose: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        _identifier(self.target_id, field_name="target_id")
+        _identifier(self.reference_entity_id, field_name="reference_entity_id")
+        object.__setattr__(self, "relative_pose", _pose(self.relative_pose))
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Build one lowerer after validating its live reference entity."""
+        del simulation
+        if engine.robot is not robot:
+            raise ValueError(
+                "MoveHeldObject lowerer requires the engine's exact robot."
+            )
+        scene_registry.lookup(self.reference_entity_id)
+        return _MoveHeldObjectLowerer(
+            self.target_id,
+            self.reference_entity_id,
+            self.relative_pose,
+        )
+
+
+class _PourLowerer(RegisteredSemanticLowerer):
+    """Lower one configured held-object pouring request."""
+
+    call_id: ClassVar[str] = _POUR_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = Pour.descriptor()
+
+    def __init__(
+        self,
+        object_id: str,
+        internal_axis: tuple[float, float, float] = (1.0, 0.0, 0.0),
+    ) -> None:
+        self._object_id = _identifier(object_id, field_name="object_id")
+        axis = torch.tensor(internal_axis, dtype=torch.float32)
+        if axis.shape != (3,) or not torch.isfinite(axis).all():
+            raise ValueError("internal_axis must contain three finite values.")
+        magnitude = torch.linalg.vector_norm(axis)
+        if magnitude <= 1.0e-6:
+            raise ValueError("internal_axis must be non-zero.")
+        self._internal_axis = axis / magnitude
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Construct the typed goal while policy presets own the tilt angle."""
+        del context, bound
+        if type(option_template) is not PourOptions:
+            raise TypeError("Configured Pour requires an exact PourOptions template.")
+        self._validate_call(call)
+        return SemanticLowering(goal=PourGoal())
+
+    def pick_lookahead_targets(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        picked_object: SceneObjectRef,
+        bound: BoundSemanticCall,
+        previous_target: SemanticObjectTarget | None,
+    ) -> tuple[SemanticObjectTarget, ...] | None:
+        """Expose the configured tilt and return for pickup feasibility."""
+        self._validate_call(call)
+        if picked_object.entity_id != self._object_id:
+            return None
+        if (
+            previous_target is None
+            or type(previous_target.pose) is not SceneEntityPose
+            or previous_target.pose.relative_pose is None
+        ):
+            return ()
+        options = bound.preset.action_option_template(call.semantic_id)
+        if type(options) is not PourOptions:
+            raise TypeError(
+                "Configured Pour look-ahead requires an exact PourOptions template."
+            )
+        source = previous_target.pose
+        tilted_relative = source.relative_pose.clone()
+        local_rotation = axis_angle_to_rotation_matrix(
+            self._internal_axis.to(tilted_relative) * options.rotate_angle
+        )
+        tilted_relative[:3, :3] = torch.matmul(
+            tilted_relative[:3, :3],
+            local_rotation,
+        )
+        tilted = SemanticObjectTarget(
+            pose=SceneEntityPose(
+                source.entity_id,
+                relative_pose=tilted_relative,
+                minimum_confidence=source.minimum_confidence,
+            )
+        )
+        return (tilted, previous_target)
+
+    def _validate_call(self, call: RegisteredSemanticCall) -> None:
+        """Require the configured immutable held-object selector."""
+        arguments = dict(call.arguments)
+        if arguments != {"object": self._object_id}:
+            raise ValueError(
+                f"{self.call_id} arguments must name only configured object "
+                f"{self._object_id!r}."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class _PourLowererFactory(RegisteredSemanticLowererFactory):
+    """Create a pouring lowerer for one axis-aware grasp object."""
+
+    call_id: ClassVar[str] = _POUR_CALL_ID
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = Pour.descriptor()
+
+    object_id: str
+
+    def __post_init__(self) -> None:
+        _identifier(self.object_id, field_name="object_id")
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Validate the object's selected grasp semantics before construction."""
+        del simulation
+        if engine.robot is not robot:
+            raise ValueError("Pour lowerer requires the engine's exact robot.")
+        object_ref = scene_registry.resolve(
+            self.object_id,
+            expected_type=SceneObjectRef,
+        )
+        grasp_ref = scene_registry.resolve_affordance(
+            object_ref,
+            capability=GRASP_AFFORDANCE_CAPABILITY,
+        )
+        semantics = scene_registry.object_semantics(
+            object_ref,
+            affordance=grasp_ref,
+        )
+        if not isinstance(semantics.affordance, AxisAlignAffordance):
+            raise TypeError(
+                "Configured Pour requires an AxisAlignAffordance grasp payload."
+            )
+        internal_axis = semantics.affordance.internal_axis.detach().cpu().tolist()
+        return _PourLowerer(
+            self.object_id,
+            tuple(float(value) for value in internal_axis),
+        )
+
+
+class _PushObjectLowerer(RegisteredSemanticLowerer):
+    """Lower configured object-target routes to the built-in planar push."""
+
+    call_id: ClassVar[str] = _PUSH_OBJECT_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = PushObject.descriptor()
+
+    def __init__(
+        self,
+        routes: tuple[tuple[str, str], ...],
+        semantics: tuple[ObjectSemantics, ...],
+    ) -> None:
+        if len(routes) != len(semantics):
+            raise ValueError("PushObject routes and semantics must have equal length.")
+        self._routes = {
+            route: object_semantics
+            for route, object_semantics in zip(routes, semantics, strict=True)
+        }
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Construct a late-bound object and target push goal."""
+        del context, bound
+        if type(option_template) is not PushObjectOptions:
+            raise TypeError(
+                "Configured planar pushing requires an exact PushObjectOptions "
+                "template."
+            )
+        arguments = dict(call.arguments)
+        if set(arguments) != {"object", "target"}:
+            raise ValueError(
+                f"{self.call_id} arguments must contain only 'object' and 'target'."
+            )
+        route = (arguments["object"], arguments["target"])
+        semantics = self._routes.get(route)
+        if semantics is None:
+            raise ValueError(
+                f"{self.call_id} does not declare object-target route {route!r}."
+            )
+        return SemanticLowering(
+            goal=PushObjectGoal(
+                semantics=semantics,
+                target_pose=SceneEntityPose(route[1]),
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _PushObjectLowererFactory(RegisteredSemanticLowererFactory):
+    """Create one lowerer for an immutable set of rigid-object push routes."""
+
+    call_id: ClassVar[str] = _PUSH_OBJECT_CALL_ID
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = PushObject.descriptor()
+
+    routes: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        if type(self.routes) is not tuple or not self.routes:
+            raise ValueError("PushObject routes must be a non-empty exact tuple.")
+        normalized: list[tuple[str, str]] = []
+        for index, route in enumerate(self.routes):
+            if type(route) is not tuple or len(route) != 2:
+                raise TypeError(
+                    f"PushObject routes[{index}] must be an exact two-value tuple."
+                )
+            normalized.append(
+                (
+                    _identifier(route[0], field_name=f"routes[{index}].object_id"),
+                    _identifier(
+                        route[1],
+                        field_name=f"routes[{index}].target_entity_id",
+                    ),
+                )
+            )
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("PushObject routes must be unique.")
+        if len({object_id for object_id, _ in normalized}) != len(normalized):
+            raise ValueError("PushObject routes must select each object at most once.")
+        object.__setattr__(self, "routes", tuple(normalized))
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Validate configured scene entities and create one fresh lowerer."""
+        del simulation
+        if engine.robot is not robot:
+            raise ValueError("PushObject lowerer requires the engine's exact robot.")
+        canonical_routes: list[tuple[str, str]] = []
+        semantics: list[ObjectSemantics] = []
+        for object_id, target_entity_id in self.routes:
+            object_registration = scene_registry.lookup(
+                object_id,
+                expected_type=SceneObjectRef,
+            )
+            target_registration = scene_registry.lookup(target_entity_id)
+            canonical_routes.append(
+                (
+                    object_registration.ref.entity_id,
+                    target_registration.ref.entity_id,
+                )
+            )
+            semantics.append(
+                ObjectSemantics(
+                    affordance=Affordance(),
+                    geometry={},
+                    label=object_registration.semantic_type or "object",
+                    entity_id=object_registration.ref.entity_id,
+                )
+            )
+        return _PushObjectLowerer(tuple(canonical_routes), tuple(semantics))
 
 
 class _JointPositionConstraintObserver:
