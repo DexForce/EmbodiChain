@@ -191,7 +191,12 @@ class _FakeArticulation:
         self._qpos = torch.tensor([[qpos]], dtype=torch.float32)
         self._limits = torch.tensor([[[0.0, 0.2]]], dtype=torch.float32)
         self._pose = _pose(0.0, 0.0, 0.7)
+        self._handle_pose = _pose(0.05, 0.0, 0.72)
+        self._handle_pose[:, :3, :3] = torch.tensor(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
         self._vertices = _box_vertices(0.05)
+        self._handle_vertices = _box_vertices(0.02)
         self._triangles = torch.tensor([[0, 1, 2], [0, 2, 3]], dtype=torch.int64)
         self._joint_info = SimpleNamespace(
             joint_type=SimpleNamespace(name="PRISMATIC"),
@@ -222,9 +227,13 @@ class _FakeArticulation:
     def get_link_pose(self, link_name: str, *, to_matrix: bool) -> torch.Tensor:
         assert link_name in self.link_names
         assert to_matrix
+        if link_name == "handle":
+            return self._handle_pose.clone()
         return self._pose.clone()
 
     def get_link_vert_face(self, link_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        if link_name == "handle":
+            return self._handle_vertices.clone(), self._triangles.clone()
         assert link_name == "drawer_link"
         return self._vertices.clone(), self._triangles.clone()
 
@@ -399,8 +408,8 @@ def test_press_grounding_adapts_top_surface_and_depth_to_mainline_contract() -> 
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
+        entity_id="button",
         label="button",
-        entity=entity,
     )
     step = program.semantic_steps[0]
     action = program.edges[0].actions[0]
@@ -437,7 +446,12 @@ def test_press_grounding_uses_calibrated_prismatic_button_state() -> None:
     env.agent_config = {
         "articulation_settings": {"button": {"slide_joint": [0.0, 0.02]}}
     }
-    semantics = ObjectSemantics(affordance=Affordance(), geometry={})
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity_id="button",
+        label="button",
+    )
     step = program.semantic_steps[0]
 
     grounded = ActionGrounder(program, env, lambda _uid: semantics).ground(
@@ -1526,8 +1540,8 @@ def _held_state(
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
+        entity_id=entity.uid,
         label=entity.uid,
-        entity=entity,
     )
     left_eef, right_eef = env.get_current_xpos_agent()
     eef = left_eef if arm == "left_arm" else right_eef
@@ -1551,8 +1565,8 @@ def _coordinated_held_state(
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
+        entity_id=entity.uid,
         label=entity.uid,
-        entity=entity,
     )
     left_eef, right_eef = env.get_current_xpos_agent()
     object_pose = entity.get_local_pose(to_matrix=True)
@@ -3876,10 +3890,11 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         affordance=AntipodalAffordance(
             object_label="can",
             mesh_vertices=vertices,
+            mesh_triangles=entity.get_triangles(env_ids=[0]),
         ),
         geometry={"mesh_vertices": vertices},
+        entity_id="can",
         label="can",
-        entity=entity,
     )
     grounder = ActionGrounder(program, env, lambda _uid: semantics)
 
@@ -4048,10 +4063,11 @@ def test_pour_grounding_targets_receiver_without_physical_contents() -> None:
         affordance=AntipodalAffordance(
             object_label="source",
             mesh_vertices=_box_vertices(0.05),
+            mesh_triangles=source.get_triangles(env_ids=[0]),
         ),
         geometry={},
+        entity_id="source",
         label="source",
-        entity=source,
     )
     grounder = ActionGrounder(program, env, lambda _uid: semantics)
     state = ExecutionState(last_qpos=env.robot.get_qpos())
@@ -4101,7 +4117,12 @@ def test_articulation_grounding_reuses_slide_and_observes_joint_state(
     grounder = ActionGrounder(
         program,
         env,
-        lambda _uid: ObjectSemantics(affordance=Affordance(), geometry={}),
+        lambda uid: ObjectSemantics(
+            affordance=Affordance(),
+            geometry={},
+            entity_id=uid,
+            label=uid,
+        ),
     )
     step = program.semantic_steps[0]
     edge = program.edges[0]
@@ -4114,8 +4135,13 @@ def test_articulation_grounding_reuses_slide_and_observes_joint_state(
     )
 
     assert isinstance(grounded.target, SlideGoal)
-    assert grounded.target.grasp_xpos is not None
+    assert grounded.target.semantics.entity_id == "drawer:handle"
+    assert torch.equal(grounded.target.target_pose, articulation._handle_pose)
     assert isinstance(grounded.target.semantics.affordance, SlideAffordance)
+    assert torch.equal(
+        grounded.target.semantics.affordance.mesh_vertices,
+        articulation._handle_vertices,
+    )
     assert grounded.cfg["direction"] == direction
     assert grounded.cfg["translation_distance"] == pytest.approx(0.2)
     assert grounded.cfg["articulation_joint_name"] == "slide_joint"
@@ -4124,7 +4150,7 @@ def test_articulation_grounding_reuses_slide_and_observes_joint_state(
     )
     assert torch.allclose(
         grounded.target.semantics.affordance.translation_axis,
-        torch.tensor([-1.0, 0.0, 0.0]),
+        torch.tensor([0.0, 1.0, 0.0]),
     )
     assert edge.actions[0]["failure_policy"] == "task_required"
 
@@ -4173,7 +4199,12 @@ def test_turn_knob_requires_setting_map_and_reuses_twist() -> None:
     grounder = ActionGrounder(
         program,
         env,
-        lambda _uid: ObjectSemantics(affordance=Affordance(), geometry={}),
+        lambda uid: ObjectSemantics(
+            affordance=Affordance(),
+            geometry={},
+            entity_id=uid,
+            label=uid,
+        ),
     )
     step = program.semantic_steps[0]
 
@@ -4206,7 +4237,12 @@ def test_turn_knob_requires_setting_map_and_reuses_twist() -> None:
         ActionGrounder(
             program,
             env,
-            lambda _uid: ObjectSemantics(affordance=Affordance(), geometry={}),
+            lambda uid: ObjectSemantics(
+                affordance=Affordance(),
+                geometry={},
+                entity_id=uid,
+                label=uid,
+            ),
         ).ground(
             program.edges[0].actions[0],
             program.semantic_steps[0],
@@ -6131,8 +6167,8 @@ def test_coordinated_transport_direction_is_grounded_from_live_pose(
                 "mesh_vertices": entity.get_vertices(env_ids=[0], scale=True),
                 "mesh_triangles": entity.get_triangles(env_ids=[0]),
             },
+            entity_id=uid,
             label=uid,
-            entity=entity,
         )
 
     step = program.semantic_steps[0]
@@ -6273,8 +6309,8 @@ def test_lay_flat_surface_height_uses_rotated_live_mesh() -> None:
         lambda uid: ObjectSemantics(
             affordance=Affordance(),
             geometry={},
+            entity_id=uid,
             label=uid,
-            entity=entities[uid],
         ),
     )
     grounded = grounder.ground(
@@ -6339,8 +6375,8 @@ def test_orient_object_anchors_final_pose_to_support_not_live_lift_height() -> N
         lambda uid: ObjectSemantics(
             affordance=Affordance(),
             geometry={},
+            entity_id=uid,
             label=uid,
-            entity=entities[uid],
         ),
     )
 
@@ -6414,8 +6450,8 @@ def test_orient_grounding_uses_mature_robot_profile_policy() -> None:
         lambda uid: ObjectSemantics(
             affordance=Affordance(),
             geometry={},
+            entity_id=uid,
             label=uid,
-            entity=entities[uid],
         ),
     )
 
@@ -6785,8 +6821,8 @@ def test_coordinated_placement_uses_live_typed_target_and_profile_parts() -> Non
         return ObjectSemantics(
             affordance=Affordance(),
             geometry={},
+            entity_id=uid,
             label=uid,
-            entity=entities[uid],
         )
 
     step = program.semantic_steps[0]

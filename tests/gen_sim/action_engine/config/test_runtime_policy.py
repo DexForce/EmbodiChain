@@ -128,7 +128,7 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
     assert generation["environment"]["recording"] == {
         "enabled": True,
         "resolution": [640, 360],
-        "interval_step": 1,
+        "interval_step": 5,
     }
     assert generation["scene"]["object_length_sample_points"] == 5000
     assert generation["dataset"]["control_frequency"] == 25
@@ -163,14 +163,14 @@ def test_e1_motion_defaults_match_atomic_action_tutorial_cadence() -> None:
     }
 
 
-def test_axis_align_defaults_match_atomic_action_tutorial_cadence() -> None:
+def test_axis_align_defaults_preserve_action_engine_clearance_policy() -> None:
     axis_align = default_runtime_policy("dual_franka").motion_defaults["AxisAlign"]
 
     assert axis_align == {
         "sample_interval": 180,
         "pre_grasp_distance": pytest.approx(0.15),
         "lift_height": pytest.approx(0.16),
-        "lower_distance": pytest.approx(0.03),
+        "lower_distance": pytest.approx(0.16),
         "hand_interp_steps": 12,
     }
 

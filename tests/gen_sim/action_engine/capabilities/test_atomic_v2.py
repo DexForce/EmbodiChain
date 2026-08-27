@@ -45,6 +45,7 @@ from embodichain.lab.sim.atomic_actions import (
     RuntimeCommandFrame,
     TimedTrajectory,
     TimedCommandSequence,
+    TrackingPolicy,
 )
 
 
@@ -91,6 +92,7 @@ class _TestEngine:
             ),
             joint_trajectory=trajectory,
             recovery_policy=invocation.recovery_policy,
+            tracking_policy=TrackingPolicy.timed(),
             planned_scene_version=context.scene.version,
             planned_collision_world_revision=(0,) * context.batch_size,
             diagnostics=PlannerDiagnostics(backend="test"),
