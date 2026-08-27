@@ -14,8 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generative simulation tests."""
-
 from __future__ import annotations
 
-__all__: list[str] = []
+__all__ = ["SceneServiceError"]
+
+
+class SceneServiceError(RuntimeError):
+    """A transient or remote Scene Engine service failure."""

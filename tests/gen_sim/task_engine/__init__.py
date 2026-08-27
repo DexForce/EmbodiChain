@@ -14,8 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generative simulation tests."""
+"""Tests for Task Engine semantics and orchestration."""
 
 from __future__ import annotations
-
-__all__: list[str] = []
