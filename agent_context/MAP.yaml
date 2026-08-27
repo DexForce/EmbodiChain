@@ -886,7 +886,6 @@ topics:
       - open drawer
       - hand over
       - pour water
-      - rearrangement
       - 配置生成环境
       - 运行时环境注册
     paths:
@@ -903,7 +902,6 @@ topics:
       - embodichain_tasks/configs/tasks/manipulation/open_drawer/
       - embodichain_tasks/configs/tasks/manipulation/hand_over/
       - embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/
-      - embodichain_tasks/configs/tasks/manipulation/tableware/rearrangement/
     related_topics:
       - atomic-actions
       - env-framework
