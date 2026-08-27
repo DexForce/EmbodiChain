@@ -606,6 +606,7 @@ topics:
       - SceneSnapshotSupplier
       - SceneProvider
       - RigidObjectSceneProvider
+      - create_simulation_atomic_action_engine
       - SceneRegistry
       - RegistrySceneProvider
       - SceneEntityRef

@@ -30,8 +30,8 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     EndEffectorPoseGoal,
     GraspGoal,
     HeldObjectPoseGoal,
@@ -121,8 +121,9 @@ def main() -> None:
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
