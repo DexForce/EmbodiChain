@@ -867,6 +867,85 @@ def test_config_builders_reject_unknown_gripper_before_materialization(
         )
 
 
+@pytest.mark.parametrize(
+    ("ik_solver", "class_type"),
+    (("ur", "URSolver"), ("pytorch", "PytorchSolver")),
+)
+def test_fast_gym_config_materializes_selected_ur10_ik_solver(
+    gym_export: Path,
+    ik_solver: str,
+    class_type: str,
+) -> None:
+    scene = prepare_scene(gym_export)
+    config = build_fast_gym_config(
+        scene,
+        task_name="solver_profile_task",
+        task_description="Exercise one generated IK solver.",
+        robot_profile="ur10",
+        gripper_model="robotiq",
+        ik_solver=ik_solver,
+        execution_program_hash="d" * 64,
+        max_episodes=1,
+        max_episode_steps=20,
+    )
+    robot = config["robot"]
+    extension = config["env"]["extensions"]
+    tcp = [list(row) for row in get_gripper_profile("robotiq").tcp_transform]
+
+    assert extension["action_engine"]["ik_solver"] == ik_solver
+    assert extension["agent_ik_solver"] == ik_solver
+    for arm in ("left_arm", "right_arm"):
+        solver = robot["solver_cfg"][arm]
+        assert solver["class_type"] == class_type
+        assert solver["tcp"] == tcp
+        assert solver["end_link_name"] == f"{arm.split('_')[0]}_ee_link"
+        assert solver["root_link_name"] == f"{arm.split('_')[0]}_base_link"
+        if ik_solver == "pytorch":
+            assert solver["num_samples"] == 30
+
+
+def test_fast_gym_config_rejects_analytic_ur_solver_for_franka(
+    gym_export: Path,
+) -> None:
+    scene = prepare_scene(gym_export)
+
+    with pytest.raises(ValueError, match="Franka.*URSolver"):
+        build_fast_gym_config(
+            scene,
+            task_name="invalid_solver",
+            task_description="Reject incompatible IK.",
+            robot_profile="franka",
+            ik_solver="ur",
+            execution_program_hash="e" * 64,
+            max_episodes=1,
+            max_episode_steps=20,
+        )
+
+
+def test_agent_config_serializes_concrete_ik_solver(gym_export: Path) -> None:
+    scene = prepare_scene(gym_export)
+
+    ur = build_agent_config(
+        task_name="ur_solver_task",
+        robot_profile="ur10",
+        ik_solver="auto",
+        execution_program_hash="f" * 64,
+        source_config_path=scene.source_config_path,
+        uid_map=scene.uid_map,
+    )
+    pytorch = build_agent_config(
+        task_name="pytorch_solver_task",
+        robot_profile="ur10",
+        ik_solver="pytorch",
+        execution_program_hash="1" * 64,
+        source_config_path=scene.source_config_path,
+        uid_map=scene.uid_map,
+    )
+
+    assert ur["ik_solver"] == "ur"
+    assert pytorch["ik_solver"] == "pytorch"
+
+
 def test_agent_config_serializes_selected_gripper(gym_export: Path) -> None:
     scene = prepare_scene(gym_export)
     config = build_agent_config(
@@ -1652,6 +1731,7 @@ def test_generation_cli_defaults_to_mature_robot_without_scene_randomization() -
     assert args.randomize_scene is False
     assert args.planning_mode == "offline"
     assert args.planner_mode is None
+    assert args.ik_solver == "auto"
     assert not hasattr(args, "instruction_parser")
     assert not hasattr(args, "task_agent")
 

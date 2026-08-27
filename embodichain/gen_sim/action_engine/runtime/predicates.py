@@ -266,7 +266,7 @@ def _arm_values(
     if callable(getter):
         left, right = getter()
         values = []
-        for value in (left, right):
+        for side, value in zip(("left", "right"), (left, right)):
             if value is None:
                 values.append(None)
                 continue
@@ -275,6 +275,17 @@ def _arm_values(
                 item = item.unsqueeze(0).repeat(int(env.num_envs), 1, 1)
             elif kind == "gripper_state" and item.ndim == 1:
                 item = item.unsqueeze(0)
+            if kind == "gripper_state":
+                configured = getattr(
+                    env,
+                    "agent_gripper_state_joint_indices",
+                    {},
+                )
+                indices = (
+                    configured.get(side) if isinstance(configured, Mapping) else None
+                )
+                if indices is not None:
+                    item = item[:, list(indices)]
             values.append(item)
         return values[0], values[1]
     if kind != "gripper_state":
@@ -285,7 +296,12 @@ def _arm_values(
         ids = list(getattr(env, f"{side}_eef_joints", ()))
         if not ids:
             return None
-        values.append(qpos[:, ids])
+        item = qpos[:, ids]
+        configured = getattr(env, "agent_gripper_state_joint_indices", {})
+        indices = configured.get(side) if isinstance(configured, Mapping) else None
+        if indices is not None:
+            item = item[:, list(indices)]
+        values.append(item)
     return values[0], values[1]
 
 
@@ -681,11 +697,13 @@ def evaluate_predicate(
             dim=-1,
         )
     if kind in {"both_grippers_open", "grippers_open"}:
-        if not hasattr(env, "get_current_gripper_state_agent"):
+        gripper_values = _arm_values(env, "gripper_state")
+        if gripper_values is None:
             return _constant(env, False)
-        left, right = env.get_current_gripper_state_agent()
         results = []
-        for side, value in zip(("left", "right"), (left, right)):
+        for side, value in zip(("left", "right"), gripper_values):
+            if value is None:
+                return _constant(env, False)
             value = torch.as_tensor(value, dtype=torch.float32, device=env.device)
             if value.ndim == 1:
                 value = value.unsqueeze(0).repeat(int(env.num_envs), 1)
@@ -697,6 +715,10 @@ def evaluate_predicate(
             )
             if expected.ndim == 1:
                 expected = expected.unsqueeze(0).repeat(int(env.num_envs), 1)
+            configured = getattr(env, "agent_gripper_state_joint_indices", {})
+            indices = configured.get(side) if isinstance(configured, Mapping) else None
+            if indices is not None:
+                expected = expected[:, list(indices)]
             results.append(
                 torch.linalg.vector_norm(value - expected, dim=-1)
                 <= float(spec.get("tolerance", defaults["gripper_state_tolerance"]))

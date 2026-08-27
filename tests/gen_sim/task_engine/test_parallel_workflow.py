@@ -273,9 +273,11 @@ class _Executor:
         successes: list[list[bool]],
         *,
         expected_dataset_saving: bool = False,
+        expected_show_grasp_poses: bool = False,
     ) -> None:
         self.successes = successes
         self.expected_dataset_saving = expected_dataset_saving
+        self.expected_show_grasp_poses = expected_show_grasp_poses
         self.calls = 0
 
     def __call__(
@@ -287,11 +289,13 @@ class _Executor:
         num_envs: int,
         dataset_saving: bool = False,
         failure_policy: str = "stop",
+        show_grasp_poses: bool = False,
     ):
         values = self.successes[min(self.calls, len(self.successes) - 1)]
         self.calls += 1
         assert len(values) == num_envs
         assert dataset_saving is self.expected_dataset_saving
+        assert show_grasp_poses is self.expected_show_grasp_poses
         assert failure_policy == "stop"
         return {
             "status": "succeeded" if all(values) else "failed",
@@ -301,6 +305,32 @@ class _Executor:
                 for index, success in enumerate(values)
             ],
         }
+
+
+def test_parallel_workflow_propagates_grasp_pose_visualization(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        action_agent=_ActionAgent(),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor(
+            [[True]],
+            expected_show_grasp_poses=True,
+        ),
+    )
+
+    result = workflow.run(
+        _request(tmp_path),
+        workflow_cfg=TaskEngineWorkflowCfg(),
+        planning_cfg=TaskEnginePlanningCfg(),
+        execution_cfg=TaskEngineExecutionCfg(num_envs=1),
+        show_grasp_poses=True,
+    )
+
+    assert result.succeeded
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -405,12 +435,14 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
         "candidate_count": 3,
         "planning_mode": "offline",
         "gripper_model": "pgi",
+        "ik_solver": "auto",
         "max_episodes": 1,
         "max_episode_steps": 6000,
     }
     assert manifest["configuration"]["execution"]["dataset_saving"] is False
     assert coordinator.kwargs[0]["max_episode_steps"] == 6000
     assert coordinator.kwargs[0]["gripper_model"] == "pgi"
+    assert coordinator.kwargs[0]["ik_solver"] == "auto"
     assert coordinator.kwargs[0]["final_inspection"]["scene_revision_id"] == "0" * 64
     assert (
         coordinator.kwargs[0]["unbound_action_plan"]["candidate_id"] == "candidate_01"
@@ -502,6 +534,9 @@ def test_subprocess_executor_controls_dataset_saving_and_copies_trajectory(
     trajectory = tmp_path / "trajectory-source"
     trajectory.mkdir()
     (trajectory / "episode.json").write_text("{}\n", encoding="utf-8")
+    grasp_image = trajectory / "env_0000" / "grasp_poses" / "task_01.png"
+    grasp_image.parent.mkdir(parents=True)
+    grasp_image.write_bytes(b"grasp-pose-png")
     captured = {}
     provenance = build_execution_provenance(episode_seed=7)
 
@@ -551,6 +586,7 @@ def test_subprocess_executor_controls_dataset_saving_and_copies_trajectory(
         num_envs=4,
         dataset_saving=dataset_saving,
         failure_policy="continue",
+        show_grasp_poses=True,
     )
 
     assert report["status"] == "succeeded"
@@ -563,10 +599,14 @@ def test_subprocess_executor_controls_dataset_saving_and_copies_trajectory(
     assert " prepare" not in " ".join(captured["command"])
     assert " workflow" not in " ".join(captured["command"])
     assert ("--filter_dataset_saving" in captured["command"]) is expects_filter
+    assert "--show-grasp-poses" in captured["command"]
     assert captured["command"][-2:] == ["--failure-policy", "continue"]
     assert captured["log_path"] == attempt / "action.log"
     assert (attempt / "action.log").read_text(encoding="utf-8") == "child output\n"
     assert (attempt / "trajectory" / "episode.json").is_file()
+    assert (
+        attempt / "trajectory" / "env_0000" / "grasp_poses" / "task_01.png"
+    ).read_bytes() == b"grasp-pose-png"
     process = json.loads((attempt / "process.json").read_text(encoding="utf-8"))
     assert process["combined_log"] == "action.log"
     assert process["stdout"] == "ok"

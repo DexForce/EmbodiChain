@@ -43,6 +43,7 @@ from .config_builder import (
     VLM_CAMERA_UIDS,
     build_agent_config,
     build_fast_gym_config,
+    canonical_robot_profile,
 )
 from .models import GeneratedConfigPaths
 from .source_scene import prepare_scene
@@ -64,6 +65,7 @@ def generate_action_engine_config(
     task_spec: Mapping[str, Any] | str | Path | None = None,
     robot_profile: str = str(_TASK_DEFAULTS["default_robot_profile"]),
     gripper_model: str = str(_TASK_DEFAULTS["default_gripper_model"]),
+    ik_solver: str = str(_TASK_DEFAULTS["default_ik_solver"]),
     llm_model: str | None = None,
     source_scene_z_rotation_degrees: float | None = None,
     source_scene_xy_translation: Sequence[float] | None = None,
@@ -95,8 +97,15 @@ def generate_action_engine_config(
     if planning_mode not in {"offline", "ab"}:
         raise ValueError("planning_mode must be 'offline' or 'ab'.")
     from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
+    from embodichain.gen_sim.action_engine.solver_profiles import (
+        resolve_ik_solver_mode,
+    )
 
     gripper_model = get_gripper_profile(gripper_model).model.value
+    ik_solver = resolve_ik_solver_mode(
+        ik_solver,
+        canonical_robot_profile(robot_profile),
+    )
     _raise_if_outputs_exist(
         output_dir,
         overwrite=overwrite,
@@ -232,6 +241,7 @@ def generate_action_engine_config(
         task_name=task_name,
         robot_profile=robot_profile,
         gripper_model=gripper_model,
+        ik_solver=ik_solver,
         execution_program_hash=program_hash,
         source_config_path=scene.source_config_path,
         uid_map=scene.uid_map,
@@ -259,6 +269,7 @@ def generate_action_engine_config(
         task_description=task_description,
         robot_profile=robot_profile,
         gripper_model=gripper_model,
+        ik_solver=ik_solver,
         execution_program_hash=program_hash,
         max_episodes=max_episodes,
         max_episode_steps=max_episode_steps,
@@ -744,8 +755,14 @@ def _validate_agent_config(config: Mapping[str, Any]) -> None:
     if config.get("scene_requirements") != SCENE_REQUIREMENTS_FILENAME:
         raise ValueError("Agent config must point to canonical SceneRequirements.")
     from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
+    from embodichain.gen_sim.action_engine.solver_profiles import (
+        resolve_ik_solver_mode,
+    )
 
     get_gripper_profile(config.get("gripper_model"))
+    solver = config.get("ik_solver")
+    if resolve_ik_solver_mode(solver, str(config.get("robot_profile"))) != solver:
+        raise ValueError("Agent config must store a concrete IK solver mode.")
     graph_path = config.get("seed_task_graph")
     if (
         not isinstance(graph_path, str)

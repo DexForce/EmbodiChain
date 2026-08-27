@@ -87,6 +87,8 @@ class GripperProfile:
     tcp_transform: _Transform
     left_control_joints: tuple[str, ...]
     right_control_joints: tuple[str, ...]
+    left_state_joints: tuple[str, ...]
+    right_state_joints: tuple[str, ...]
     left_mimic_joints: tuple[str, ...]
     right_mimic_joints: tuple[str, ...]
     mimic_multipliers: tuple[float, ...]
@@ -123,12 +125,28 @@ class GripperProfile:
             == mimic_count
         ):
             raise ValueError("Gripper mimic metadata must have matching lengths.")
+        state_count = len(self.left_state_joints)
+        if not state_count or len(self.right_state_joints) != state_count:
+            raise ValueError(
+                "Gripper profiles require matching non-empty state joints."
+            )
         if len(self.simulated_joint_initial_positions) != len(
             self.simulated_joint_names("left")
         ):
             raise ValueError(
                 "Gripper simulated initial positions must match physical joints."
             )
+        for side in ("left", "right"):
+            controls = set(self.control_joint_names(side))
+            states = set(self.state_joint_names(side))
+            if not states <= controls:
+                raise ValueError(f"Gripper {side} state joints must be control joints.")
+            overlap = states & set(self.mimic_joint_names(side))
+            if overlap:
+                raise ValueError(
+                    "Gripper state and mimic joints must be disjoint; "
+                    f"{side} overlaps: {sorted(overlap)}."
+                )
 
     def control_joint_names(self, side: _Side) -> tuple[str, ...]:
         """Return the exact assembled control-joint names for one hand."""
@@ -139,6 +157,16 @@ class GripperProfile:
         """Return exact assembled mimic-joint names for one hand."""
         self._validate_side(side)
         return self.left_mimic_joints if side == "left" else self.right_mimic_joints
+
+    def state_joint_names(self, side: _Side) -> tuple[str, ...]:
+        """Return joints that define semantic open/closed state for one hand."""
+        self._validate_side(side)
+        return self.left_state_joints if side == "left" else self.right_state_joints
+
+    def state_joint_indices(self, side: _Side) -> tuple[int, ...]:
+        """Return semantic-state indices within one hand's command vector."""
+        controls = self.control_joint_names(side)
+        return tuple(controls.index(name) for name in self.state_joint_names(side))
 
     def simulated_joint_names(self, side: _Side) -> tuple[str, ...]:
         """Return physical movable joints in assembled qpos order for one hand."""
@@ -165,6 +193,9 @@ class GripperProfile:
             "asset_path": self.asset_path,
             "control_joints": {
                 side: list(self.control_joint_names(side)) for side in ("left", "right")
+            },
+            "state_joints": {
+                side: list(self.state_joint_names(side)) for side in ("left", "right")
             },
             "mimic_joints": {
                 side: [
@@ -209,6 +240,8 @@ _PGI_PROFILE = GripperProfile(
     ),
     left_control_joints=("left_gripper_finger1_joint_1",),
     right_control_joints=("right_gripper_finger1_joint_1",),
+    left_state_joints=("left_gripper_finger1_joint_1",),
+    right_state_joints=("right_gripper_finger1_joint_1",),
     left_mimic_joints=("left_gripper_finger2_joint_1",),
     right_mimic_joints=("right_gripper_finger2_joint_1",),
     mimic_multipliers=(1.0,),
@@ -259,6 +292,8 @@ _ROBOTIQ_PROFILE = GripperProfile(
         "right_inner_knuckle_joint",
         "right_inner_finger_joint",
     ),
+    left_state_joints=("left_finger_joint",),
+    right_state_joints=("right_finger_joint",),
     left_mimic_joints=(
         "left_inner_knuckle_joint",
         "left_inner_finger_joint",

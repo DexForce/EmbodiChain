@@ -58,7 +58,7 @@ def test_pgi_profile_owns_asset_control_mimic_tcp_and_grasp_geometry() -> None:
     assert profile.grasp_model.opening_margin == pytest.approx(0.03)
 
 
-def test_robotiq_profile_preserves_existing_rotation_and_joint_semantics() -> None:
+def test_robotiq_profile_separates_commanded_mimics_from_state_joint() -> None:
     profile = get_gripper_profile("robotiq")
 
     assert profile.asset_path == ("Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf")
@@ -69,6 +69,31 @@ def test_robotiq_profile_preserves_existing_rotation_and_joint_semantics() -> No
         "left_right_outer_knuckle_joint",
         "left_right_inner_knuckle_joint",
         "left_right_inner_finger_joint",
+    )
+    assert profile.control_joint_names("right") == (
+        "right_finger_joint",
+        "right_left_inner_knuckle_joint",
+        "right_left_inner_finger_joint",
+        "right_outer_knuckle_joint",
+        "right_inner_knuckle_joint",
+        "right_inner_finger_joint",
+    )
+    assert profile.mimic_joint_names("left") == (
+        "left_inner_knuckle_joint",
+        "left_inner_finger_joint",
+        "left_right_outer_knuckle_joint",
+        "left_right_inner_knuckle_joint",
+        "left_right_inner_finger_joint",
+    )
+    assert profile.state_joint_names("left") == ("left_finger_joint",)
+    assert profile.state_joint_names("right") == ("right_finger_joint",)
+    assert profile.state_joint_indices("left") == (0,)
+    assert profile.state_joint_indices("right") == (0,)
+    assert set(profile.state_joint_names("left")).isdisjoint(
+        profile.mimic_joint_names("left")
+    )
+    assert set(profile.state_joint_names("right")).isdisjoint(
+        profile.mimic_joint_names("right")
     )
     assert profile.open_positions == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     assert profile.close_positions == (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)

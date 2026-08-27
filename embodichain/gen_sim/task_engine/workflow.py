@@ -107,6 +107,7 @@ class SubprocessActionExecutor:
         num_envs: int,
         dataset_saving: bool = False,
         failure_policy: str = "stop",
+        show_grasp_poses: bool = False,
     ) -> Mapping[str, Any]:
         """Run one simulator attempt and preserve its report and trajectory.
 
@@ -118,6 +119,7 @@ class SubprocessActionExecutor:
             dataset_saving: Whether to enable the Gym project's dataset recorder.
             failure_policy: Whether failed dependencies stop or permit downstream
                 diagnostic execution.
+            show_grasp_poses: Whether to write the valid E5 grasp pair as a PNG.
 
         Returns:
             Validated Action Engine execution report.
@@ -126,6 +128,8 @@ class SubprocessActionExecutor:
         attempt_root = Path(output_root).expanduser().resolve()
         if failure_policy not in {"stop", "continue"}:
             raise ValueError("failure_policy must be 'stop' or 'continue'.")
+        if not isinstance(show_grasp_poses, bool):
+            raise TypeError("show_grasp_poses must be a boolean.")
         attempt_root.mkdir(parents=True, exist_ok=False)
         command = [
             sys.executable,
@@ -142,6 +146,8 @@ class SubprocessActionExecutor:
         ]
         if not dataset_saving:
             command.append("--filter_dataset_saving")
+        if show_grasp_poses:
+            command.append("--show-grasp-poses")
         command.extend(["--failure-policy", failure_policy])
         log_path = attempt_root / "action.log"
         print(
@@ -296,6 +302,7 @@ class TaskEngineWorkflow:
         base_seed: int = 0,
         dataset_saving: bool = False,
         failure_policy: str = "stop",
+        show_grasp_poses: bool = False,
         run_id: str | None = None,
         created_at: datetime | None = None,
         overwrite: bool = False,
@@ -315,6 +322,7 @@ class TaskEngineWorkflow:
             dataset_saving: Whether Action attempts may initialize dataset recording.
             failure_policy: Whether failed dependencies stop or permit downstream
                 diagnostic execution.
+            show_grasp_poses: Whether to write the valid E5 grasp pair as a PNG.
             run_id: Optional externally allocated run identifier.
             created_at: Optional timezone-aware run creation timestamp.
             overwrite: Whether to atomically replace an existing run directory.
@@ -326,6 +334,8 @@ class TaskEngineWorkflow:
         normalized = validate_task_run_request(request)
         if not isinstance(dataset_saving, bool):
             raise TypeError("dataset_saving must be a boolean.")
+        if not isinstance(show_grasp_poses, bool):
+            raise TypeError("show_grasp_poses must be a boolean.")
         if failure_policy not in {"stop", "continue"}:
             raise ValueError("failure_policy must be 'stop' or 'continue'.")
         if workflow_cfg is None or planning_cfg is None or execution_cfg is None:
@@ -652,6 +662,7 @@ class TaskEngineWorkflow:
                         candidate_count=effective_candidate_count,
                         planning_mode=planning_cfg.planning_mode,
                         gripper_model=planning_cfg.gripper_model,
+                        ik_solver=planning_cfg.ik_solver,
                         vlm_model=vlm_model,
                         max_episodes=planning_cfg.max_episodes,
                         max_episode_steps=planning_cfg.max_episode_steps,
@@ -860,13 +871,18 @@ class TaskEngineWorkflow:
                     "error": None,
                 }
                 try:
+                    execution_options = {
+                        "seed": action_seed,
+                        "num_envs": execution_cfg.num_envs,
+                        "dataset_saving": bool(dataset_saving),
+                        "failure_policy": failure_policy,
+                    }
+                    if show_grasp_poses:
+                        execution_options["show_grasp_poses"] = True
                     report = self.action_executor(
                         preparation.output_dir,
                         action_root,
-                        seed=action_seed,
-                        num_envs=execution_cfg.num_envs,
-                        dataset_saving=bool(dataset_saving),
-                        failure_policy=failure_policy,
+                        **execution_options,
                     )
                     successes = _environment_successes(
                         report,
@@ -1038,6 +1054,7 @@ class TaskEngineWorkflow:
                         "candidate_count": planning_cfg.candidate_count,
                         "planning_mode": planning_cfg.planning_mode,
                         "gripper_model": planning_cfg.gripper_model,
+                        "ik_solver": planning_cfg.ik_solver,
                         "max_episodes": planning_cfg.max_episodes,
                         "max_episode_steps": planning_cfg.max_episode_steps,
                         "planner": deepcopy(planning_cfg.planner),

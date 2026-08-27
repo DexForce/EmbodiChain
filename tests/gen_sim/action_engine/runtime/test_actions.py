@@ -705,11 +705,22 @@ def test_coordinated_pickment_geometry_candidates_are_live_and_continuous() -> N
     )
 
     preferred = [
-        candidates[0].cfg["middle_empty_ratio"]
+        next(
+            candidate.cfg["middle_empty_ratio"]
+            for candidate in candidates
+            if candidate.motion_policy["coordinated_grasp"]["approach_candidate_label"]
+            == "robot_forward_down"
+        )
         for candidates in (vertical, tilted, horizontal)
     ]
     assert preferred[0] < preferred[1] < preferred[2]
-    assert yawed[0].cfg["middle_empty_ratio"] == pytest.approx(preferred[0])
+    yawed_forward_down = next(
+        candidate
+        for candidate in yawed
+        if candidate.motion_policy["coordinated_grasp"]["approach_candidate_label"]
+        == "robot_forward_down"
+    )
+    assert yawed_forward_down.cfg["middle_empty_ratio"] == pytest.approx(preferred[0])
     for candidates in (vertical, tilted, horizontal, yawed):
         assert candidates
         assert torch.allclose(
@@ -718,8 +729,45 @@ def test_coordinated_pickment_geometry_candidates_are_live_and_continuous() -> N
         )
         assert torch.allclose(
             candidates[0].cfg["approach_direction"],
-            torch.tensor([0.0, 0.0, -1.0]),
+            torch.tensor([2**-0.5, 0.0, -(2**-0.5)]),
         )
+        assert any(
+            torch.allclose(
+                candidate.cfg["approach_direction"],
+                torch.tensor([0.0, 0.0, -1.0]),
+            )
+            for candidate in candidates
+        )
+
+
+def test_coordinated_pickment_approach_family_follows_live_shared_reach() -> None:
+    adapter = AtomicActionAdapter(_planner_env())
+    capability = adapter.capabilities.get("CoordinatedPickment")
+    grounded = _coordinated_grounded(
+        _rotation_z(90.0),
+        vertices=_cuboid_vertices(0.20, 0.08, 0.02),
+    )
+    left = torch.eye(4).repeat(2, 1, 1)
+    right = torch.eye(4).repeat(2, 1, 1)
+    left[:, 0, 3] = -0.3
+    right[:, 0, 3] = 0.3
+    left[:, 1, 3] = right[:, 1, 3] = -0.5
+    adapter._coordinated_arm_bases = lambda: (left, right)
+
+    candidates = adapter._adapt_coordinated_pickment_grasps(grounded, capability)
+
+    trace = candidates[0].motion_policy["coordinated_grasp"]
+    assert trace["approach_candidate_label"] == "robot_forward_down"
+    torch.testing.assert_close(
+        candidates[0].cfg["approach_direction"],
+        torch.tensor([0.0, 2**-0.5, -(2**-0.5)]),
+    )
+    assert trace["grasp_seed"] == 17_393
+    assert [item["label"] for item in trace["approach_candidates"][:3]] == [
+        "robot_forward_down",
+        "current",
+        "robot_forward",
+    ]
 
 
 def test_coordinated_pickment_geometry_candidates_are_deterministic_for_tray() -> None:
@@ -773,6 +821,38 @@ def test_robotiq_grasp_generator_preserves_existing_geometry() -> None:
     assert generator.gripper_model.max_opening_width == pytest.approx(0.15)
     assert generator.gripper_model.finger_length == pytest.approx(0.13)
     assert generator.collision_cfg.opening_margin == pytest.approx(0.01)
+
+
+def test_coordinated_robotiq_generator_uses_e5_opening_margin_only() -> None:
+    adapter = AtomicActionAdapter(_planner_env(gripper_model="robotiq"))
+
+    coordinated = adapter._grasp_pose_generators(
+        filter_ground_collision=False,
+        opening_margin=0.02,
+    )["physical_left_eef"]
+    ordinary = adapter._grasp_pose_generators()["physical_left_eef"]
+
+    assert coordinated.collision_cfg.opening_margin == pytest.approx(0.02)
+    assert ordinary.collision_cfg.opening_margin == pytest.approx(0.01)
+
+
+def test_adapter_validates_declared_runtime_ik_solver_classes() -> None:
+    pytorch_solver_type = type("PytorchSolver", (), {})
+    env = _planner_env()
+    env.agent_ik_solver = "pytorch"
+    env.robot.get_solver = lambda **_kwargs: pytorch_solver_type()
+
+    adapter = AtomicActionAdapter(env)
+
+    assert adapter.ik_solver == "pytorch"
+    assert adapter.ik_solver_classes == {
+        "left_arm": "PytorchSolver",
+        "right_arm": "PytorchSolver",
+    }
+
+    env.agent_ik_solver = "ur"
+    with pytest.raises(ValueError, match="left_arm.*URSolver.*PytorchSolver"):
+        AtomicActionAdapter(env)
 
 
 @pytest.mark.parametrize("gripper_model", ["pgi", "robotiq"])

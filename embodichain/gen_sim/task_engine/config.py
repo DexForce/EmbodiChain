@@ -37,6 +37,7 @@ __all__ = [
 ]
 
 TASK_ENGINE_DEFAULTS_SCHEMA: Final = "embodichain.task-engine-defaults/v1"
+_IK_SOLVER_MODES: Final = ("auto", "ur", "pytorch")
 
 
 @configclass
@@ -109,6 +110,7 @@ class TaskEnginePlanningCfg:
     candidate_count: int = 3
     planning_mode: str = "offline"
     gripper_model: str = "pgi"
+    ik_solver: str = "auto"
     max_episodes: int = 1
     max_episode_steps: int = 6000
     planner: dict[str, Any] = {}
@@ -128,6 +130,11 @@ class TaskEnginePlanningCfg:
             raise ValueError(
                 f"Unsupported gripper model {self.gripper_model!r}; expected one "
                 "of: pgi, robotiq."
+            )
+        if self.ik_solver not in _IK_SOLVER_MODES:
+            raise ValueError(
+                f"Unsupported IK solver mode {self.ik_solver!r}; expected one of: "
+                "auto, ur, pytorch."
             )
         if not isinstance(self.planner, Mapping):
             raise TypeError("planner must be a mapping.")
@@ -184,6 +191,7 @@ def load_task_engine_config(
         "candidate_count",
         "planning_mode",
         "gripper_model",
+        "ik_solver",
         "max_episodes",
         "max_episode_steps",
     }

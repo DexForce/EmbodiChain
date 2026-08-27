@@ -182,6 +182,7 @@ class TaskEngineCoordinator:
         overwrite: bool = False,
         planning_mode: str = "offline",
         gripper_model: str = "pgi",
+        ik_solver: str = "auto",
         vlm_model: str | None = None,
         max_episodes: int | None = None,
         max_episode_steps: int | None = None,
@@ -359,6 +360,7 @@ class TaskEngineCoordinator:
                 "task_spec": grounded_plan["task_spec"],
                 "robot_profile": robot_profile,
                 "gripper_model": gripper_model,
+                "ik_solver": ik_solver,
                 "source_scene_z_rotation_degrees": (
                     adaptation.prepared_scene.z_rotation_degrees
                 ),

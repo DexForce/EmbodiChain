@@ -601,6 +601,7 @@ def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
     assert result.bound
     assert generator_calls
     assert generator_calls[0]["gripper_model"] == "pgi"
+    assert generator_calls[0]["ik_solver"] == "auto"
     assert not (result.output_dir / ".task_engine_input").exists()
     grounded = json.loads(
         (result.output_dir / "grounded_task_plan.json").read_text(encoding="utf-8")
@@ -885,6 +886,8 @@ def test_unified_cli_explicit_planner_mode_overrides_packaged_yaml(
                 str(tmp_path / "history"),
                 "--planner-mode",
                 "ik_interp",
+                "--ik-solver",
+                "pytorch",
             ]
         )
         == 0
@@ -892,6 +895,7 @@ def test_unified_cli_explicit_planner_mode_overrides_packaged_yaml(
 
     planning_cfg = captured["planning_cfg"]
     assert planning_cfg.planner == {"mode": "ik_interp"}
+    assert planning_cfg.ik_solver == "pytorch"
     assert json.loads(capsys.readouterr().out)["status"] == "prepared"
 
 
@@ -1031,6 +1035,29 @@ def test_public_cli_exposes_prepare_run_and_run_all_modes() -> None:
     assert arguments.dataset_saving is True
     assert arguments.failure_policy == "stop"
     assert arguments.planner_mode is None
+    assert arguments.ik_solver is None
+    assert arguments.show_grasp_poses is False
+
+
+def test_run_all_cli_accepts_grasp_pose_visualization() -> None:
+    arguments = cli.build_parser().parse_args(
+        [
+            "run-all",
+            "--mode",
+            "scene",
+            "--task-id",
+            "task",
+            "--instruction",
+            "move the tray",
+            "--scene",
+            "scene",
+            "--output-root",
+            "history",
+            "--show-grasp-poses",
+        ]
+    )
+
+    assert arguments.show_grasp_poses is True
 
 
 def test_prepare_cli_stops_before_simulator_execution(

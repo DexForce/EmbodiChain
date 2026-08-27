@@ -79,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show physical collision geometry after every reset.",
     )
     parser.add_argument(
+        "--show-grasp-poses",
+        action="store_true",
+        help="Write one static PNG for the valid grasp pair selected by E5.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -127,6 +132,9 @@ def _validate_run_contract(
 ) -> None:
     """Validate the small cross-artifact contract before simulator startup."""
     from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
+    from embodichain.gen_sim.action_engine.solver_profiles import (
+        validate_robot_ik_solver_contract,
+    )
 
     configured_task = agent_config.get("task_name")
     if configured_task != task_name:
@@ -157,6 +165,18 @@ def _validate_run_contract(
             "Gym and agent configs have different gripper models: "
             f"gym={gym_gripper!r}, agent={agent_gripper!r}."
         )
+    extensions = gym_config.get("env", {}).get("extensions", {})
+    gym_solver = extension.get("ik_solver")
+    env_solver = extensions.get("agent_ik_solver")
+    agent_solver = agent_config.get("ik_solver")
+    if gym_solver is None and env_solver is None and agent_solver is None:
+        return
+    if gym_solver != agent_solver or env_solver != agent_solver:
+        raise ValueError(
+            "Gym and agent configs have different IK solvers: "
+            f"gym={gym_solver!r}, env={env_solver!r}, agent={agent_solver!r}."
+        )
+    validate_robot_ik_solver_contract(gym_config.get("robot", {}), str(agent_solver))
 
 
 def cli() -> int | None:
@@ -210,6 +230,8 @@ def cli() -> int | None:
         "runtime_backend": str(args.runtime_backend),
         "task_name": str(args.task_name),
     }
+    if args.show_grasp_poses:
+        runtime_arguments["show_grasp_poses"] = True
     any_failed = False
     task_engine_reports: list[ExecutionReport] = []
     episode_index = 0
@@ -234,6 +256,7 @@ def cli() -> int | None:
             result = execute(
                 regenerate=bool(args.regenerate),
                 failure_policy=str(args.failure_policy),
+                show_grasp_poses=bool(args.show_grasp_poses),
                 runtime_run_id=run_id,
                 episode_index=episode_index,
             )

@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 import logging
+from pathlib import Path
 from threading import RLock
 from typing import Any
 
@@ -185,6 +186,7 @@ class ProgramExecutor:
         capability_registry: Any | None = None,
         scene_provider: SceneProvider | None = None,
         failure_policy: str = "stop",
+        show_grasp_poses: bool = False,
     ) -> None:
         self.program = program
         self.env = env
@@ -195,6 +197,10 @@ class ProgramExecutor:
                 "ProgramExecutor failure_policy must be 'stop' or 'continue'."
             )
         self.failure_policy = str(failure_policy)
+        if not isinstance(show_grasp_poses, bool):
+            raise TypeError("ProgramExecutor show_grasp_poses must be a boolean.")
+        self.show_grasp_poses = show_grasp_poses
+        self._runtime_output_dir: Path | None = None
         if runtime_policy is None:
             profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
             runtime_policy = default_runtime_policy(profile)
@@ -365,6 +371,7 @@ class ProgramExecutor:
             runtime_policy_hash=runtime_policy_hash(self.runtime_policy),
             failure_policy=self.failure_policy,
         )
+        self._runtime_output_dir = recorder.output_dir
         aggregate_failed = torch.zeros(
             int(self.env.num_envs),
             dtype=torch.bool,
@@ -3302,6 +3309,234 @@ class ProgramExecutor:
         )
         return attempted & held & reached
 
+    @staticmethod
+    def _rotation_error_radians(
+        actual: torch.Tensor,
+        expected: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return the geodesic angle between batched rotation matrices."""
+        relative = torch.matmul(actual.transpose(1, 2), expected)
+        cosine = (torch.diagonal(relative, dim1=1, dim2=2).sum(dim=1) - 1.0) * 0.5
+        return torch.acos(torch.clamp(cosine, -1.0, 1.0))
+
+    def _coordinated_physical_trace(
+        self,
+        uid: str,
+        state: ExecutionState,
+        grounded: GroundedAction,
+        outcome: ActionOutcome,
+        attempted: torch.Tensor,
+        *,
+        object_pose_before: torch.Tensor,
+        execution_observations: Mapping[str, Any],
+        dual_hold: torch.Tensor,
+        accepted: torch.Tensor,
+    ) -> dict[str, Any]:
+        """Describe the measured E5 tracking, closure, lift, and acceptance state."""
+        device = self.env.device
+        actual_object = self._entity_pose(uid).to(device=device, dtype=torch.float32)
+        before = object_pose_before.to(device=device, dtype=torch.float32)
+        target = grounded.target_object_pose
+        if not isinstance(target, torch.Tensor):
+            target_pose = torch.full_like(actual_object, torch.nan)
+            reached = torch.zeros_like(attempted)
+        else:
+            target_pose = torch.as_tensor(
+                target,
+                dtype=torch.float32,
+                device=device,
+            )
+            if target_pose.shape == (4, 4):
+                target_pose = target_pose.unsqueeze(0).repeat(
+                    int(self.env.num_envs), 1, 1
+                )
+            tolerance = float(
+                grounded.cfg.get(
+                    "postcondition_tolerance",
+                    self.runtime_policy.predicate_fallbacks["position_tolerance"],
+                )
+            )
+            reached = (
+                torch.linalg.vector_norm(
+                    actual_object[:, :3, 3] - target_pose[:, :3, 3], dim=1
+                )
+                <= tolerance
+            )
+
+        displacement = actual_object[:, :3, 3] - before[:, :3, 3]
+        intended = target_pose[:, :3, 3] - before[:, :3, 3]
+        intended_distance = torch.linalg.vector_norm(intended, dim=1)
+        intended_direction = intended / intended_distance[:, None].clamp_min(1.0e-8)
+        displacement_distance = torch.linalg.vector_norm(displacement, dim=1)
+        displacement_projection = torch.sum(displacement * intended_direction, dim=1)
+        direction_cosine = displacement_projection / displacement_distance.clamp_min(
+            1.0e-8
+        )
+        direction_cosine = torch.where(
+            (intended_distance > 1.0e-8) & (displacement_distance > 1.0e-8),
+            direction_cosine,
+            torch.zeros_like(direction_cosine),
+        )
+
+        maximum_object_z = torch.as_tensor(
+            execution_observations.get("maximum_object_z", before[:, 2, 3]),
+            dtype=torch.float32,
+            device=device,
+        )
+        eef_values = self.env.get_current_xpos_agent()
+        gripper_values = self.env.get_current_gripper_state_agent()
+        actual_qpos = self.env.robot.get_qpos().to(device=device, dtype=torch.float32)
+        terminal_qpos = outcome.trajectory[:, -1].to(device=device, dtype=torch.float32)
+        gripper_tolerance = float(
+            self.runtime_policy.predicate_fallbacks["held_gripper_tolerance"]
+        )
+        arms: dict[str, Any] = {}
+        for arm_index, arm in enumerate(("left_arm", "right_arm")):
+            control_part = arm_control_part(self.env, arm)
+            held = state.get_held_object(control_part)
+            actual_eef = torch.as_tensor(
+                eef_values[arm_index],
+                dtype=torch.float32,
+                device=device,
+            )
+            gripper = torch.as_tensor(
+                gripper_values[arm_index],
+                dtype=torch.float32,
+                device=device,
+            )
+            open_state = torch.as_tensor(
+                self.env.open_state,
+                dtype=torch.float32,
+                device=device,
+            ).flatten()
+            close_state = torch.as_tensor(
+                self.env.close_state,
+                dtype=torch.float32,
+                device=device,
+            ).flatten()
+            repeats = (gripper.shape[-1] + open_state.numel() - 1) // open_state.numel()
+            expected_open = open_state.repeat(repeats)[: gripper.shape[-1]]
+            expected_close = close_state.repeat(repeats)[: gripper.shape[-1]]
+            open_distance = torch.linalg.vector_norm(
+                gripper - expected_open.unsqueeze(0), dim=1
+            )
+            close_distance = torch.linalg.vector_norm(
+                gripper - expected_close.unsqueeze(0), dim=1
+            )
+            arm_joint_ids = list(self.env.robot.get_joint_ids(name=control_part))
+            hand_part = self.env.get_agent_eef_control_part(arm_index == 0)
+            hand_joint_ids = (
+                []
+                if hand_part is None
+                else list(self.env.robot.get_joint_ids(name=hand_part))
+            )
+            arm_trace: dict[str, Any] = {
+                "control_part": control_part,
+                "actual_eef_pose": actual_eef.detach().cpu().tolist(),
+                "gripper_qpos": gripper.detach().cpu().tolist(),
+                "gripper_open_distance": open_distance.detach().cpu().tolist(),
+                "gripper_close_distance": close_distance.detach().cpu().tolist(),
+                "gripper_closed": (open_distance > gripper_tolerance)
+                .detach()
+                .cpu()
+                .tolist(),
+                "arm_joint_tracking_error": torch.linalg.vector_norm(
+                    actual_qpos[:, arm_joint_ids] - terminal_qpos[:, arm_joint_ids],
+                    dim=1,
+                )
+                .detach()
+                .cpu()
+                .tolist(),
+                "gripper_joint_tracking_error": (
+                    torch.linalg.vector_norm(
+                        actual_qpos[:, hand_joint_ids]
+                        - terminal_qpos[:, hand_joint_ids],
+                        dim=1,
+                    )
+                    if hand_joint_ids
+                    else torch.zeros(int(self.env.num_envs), device=device)
+                )
+                .detach()
+                .cpu()
+                .tolist(),
+            }
+            if held is not None:
+                planned_relation = held.object_to_eef.to(
+                    device=device, dtype=torch.float32
+                )
+                expected_eef = torch.bmm(actual_object, planned_relation)
+                actual_relation = torch.bmm(torch.linalg.inv(actual_object), actual_eef)
+                planned_target_eef = held.grasp_xpos.to(
+                    device=device, dtype=torch.float32
+                )
+                arm_trace.update(
+                    {
+                        "planned_grasp_pose": planned_target_eef.detach()
+                        .cpu()
+                        .tolist(),
+                        "planned_object_to_eef": planned_relation.detach()
+                        .cpu()
+                        .tolist(),
+                        "actual_object_to_eef": actual_relation.detach().cpu().tolist(),
+                        "eef_target_position_error": torch.linalg.vector_norm(
+                            actual_eef[:, :3, 3] - planned_target_eef[:, :3, 3],
+                            dim=1,
+                        )
+                        .detach()
+                        .cpu()
+                        .tolist(),
+                        "eef_target_orientation_error": self._rotation_error_radians(
+                            actual_eef[:, :3, :3], planned_target_eef[:, :3, :3]
+                        )
+                        .detach()
+                        .cpu()
+                        .tolist(),
+                        "eef_relation_position_error": torch.linalg.vector_norm(
+                            actual_eef[:, :3, 3] - expected_eef[:, :3, 3], dim=1
+                        )
+                        .detach()
+                        .cpu()
+                        .tolist(),
+                        "eef_relation_orientation_error": self._rotation_error_radians(
+                            actual_eef[:, :3, :3], expected_eef[:, :3, :3]
+                        )
+                        .detach()
+                        .cpu()
+                        .tolist(),
+                    }
+                )
+            arms[arm] = arm_trace
+
+        return {
+            "attempted": attempted.detach().cpu().tolist(),
+            "dual_hold_predicate": dual_hold.detach().cpu().tolist(),
+            "semantic_target_reached": reached.detach().cpu().tolist(),
+            "accepted": accepted.detach().cpu().tolist(),
+            "object_pose_before": before.detach().cpu().tolist(),
+            "object_pose_after": actual_object.detach().cpu().tolist(),
+            "object_target_pose": target_pose.detach().cpu().tolist(),
+            "object_displacement": displacement.detach().cpu().tolist(),
+            "object_displacement_distance": displacement_distance.detach()
+            .cpu()
+            .tolist(),
+            "object_intended_distance": intended_distance.detach().cpu().tolist(),
+            "object_displacement_projection": displacement_projection.detach()
+            .cpu()
+            .tolist(),
+            "object_displacement_direction_cosine": direction_cosine.detach()
+            .cpu()
+            .tolist(),
+            "maximum_object_lift": (maximum_object_z - before[:, 2, 3])
+            .detach()
+            .cpu()
+            .tolist(),
+            "maximum_object_z_waypoint": execution_observations.get(
+                "maximum_object_z_waypoint"
+            ),
+            "segment_observations": execution_observations.get("segments", {}),
+            "arms": arms,
+        }
+
     def _commit_coordinated_ownership(
         self,
         uid: str,
@@ -3445,6 +3680,11 @@ class ProgramExecutor:
             for message in dict.fromkeys(selected_warnings):
                 log_warning(message)
         grounded, outcome = selected
+        if (
+            self.show_grasp_poses
+            and capability.config_materializer == "coordinated_pickment"
+        ):
+            self._write_selected_coordinated_grasp_pose(step, outcome)
         if capability.state_effect == "transfer_hold":
             outcome = replace(
                 outcome,
@@ -3458,18 +3698,80 @@ class ProgramExecutor:
             )
         self._remember_target(step, grounded)
         successful = active & outcome.success
+        object_pose_before = self._entity_pose(step.object_uid).detach().clone()
+        execution_observations: dict[str, Any] = {
+            "maximum_object_z": object_pose_before[:, 2, 3].detach().clone(),
+            "maximum_object_z_waypoint": None,
+            "segments": {},
+        }
+        segment_stops = {
+            int(segment["stop"]) - 1: name
+            for name, segment in outcome.planner_trace.get(
+                "action_segments", {}
+            ).items()
+            if int(segment.get("stop", 0)) > 0
+        }
+
+        def observe_waypoint(waypoint_index: int) -> None:
+            object_pose = self._entity_pose(step.object_uid).detach().clone()
+            higher = object_pose[:, 2, 3] > execution_observations["maximum_object_z"]
+            execution_observations["maximum_object_z"] = torch.where(
+                higher,
+                object_pose[:, 2, 3],
+                execution_observations["maximum_object_z"],
+            )
+            if bool(higher.any()):
+                execution_observations["maximum_object_z_waypoint"] = waypoint_index
+            segment_name = segment_stops.get(waypoint_index)
+            if segment_name is not None:
+                eef = self.env.get_current_xpos_agent()
+                gripper = self.env.get_current_gripper_state_agent()
+                execution_observations["segments"][segment_name] = {
+                    "waypoint": waypoint_index,
+                    "object_pose": object_pose.detach().cpu().tolist(),
+                    "left_eef_pose": torch.as_tensor(eef[0]).detach().cpu().tolist(),
+                    "right_eef_pose": torch.as_tensor(eef[1]).detach().cpu().tolist(),
+                    "left_gripper_qpos": torch.as_tensor(gripper[0])
+                    .detach()
+                    .cpu()
+                    .tolist(),
+                    "right_gripper_qpos": torch.as_tensor(gripper[1])
+                    .detach()
+                    .cpu()
+                    .tolist(),
+                }
+
         actions = self.adapter.execute_trajectory(
             outcome.trajectory,
             active=successful,
+            waypoint_observer=observe_waypoint,
         )
         physical_failed = torch.zeros_like(failed)
         committed_state = outcome.state_after(successful)
         if capability.state_effect == "coordinated_hold":
+            dual_hold = evaluate_predicate(
+                self.env,
+                {"type": "held_by_both_grippers", "object": step.object_uid},
+                coordinated_state=committed_state,
+            )
             physical = self._physical_coordinated_hold(
                 step.object_uid,
                 committed_state,
                 grounded,
                 successful,
+            )
+            outcome.planner_trace["physical_execution"] = (
+                self._coordinated_physical_trace(
+                    step.object_uid,
+                    committed_state,
+                    grounded,
+                    outcome,
+                    successful,
+                    object_pose_before=object_pose_before,
+                    execution_observations=execution_observations,
+                    dual_hold=dual_hold,
+                    accepted=physical,
+                )
             )
             physical_failed |= successful & ~physical
             successful = physical
@@ -3572,6 +3874,37 @@ class ProgramExecutor:
             [outcome.planner_trace],
             successful,
         )
+
+    def _write_selected_coordinated_grasp_pose(
+        self,
+        step: SemanticStep,
+        outcome: ActionOutcome,
+    ) -> None:
+        """Write the valid env-zero grasp pair selected by one E5 plan."""
+        from .grasp_debug import (
+            grasp_pose_image_path,
+            render_coordinated_grasp_pose_png,
+            selected_coordinated_grasp_scene,
+        )
+
+        if self._runtime_output_dir is None:
+            return
+        try:
+            scene = selected_coordinated_grasp_scene(
+                outcome,
+                left_control_part=arm_control_part(self.env, "left_arm"),
+                right_control_part=arm_control_part(self.env, "right_arm"),
+            )
+            if scene is None:
+                return
+            path = grasp_pose_image_path(self._runtime_output_dir, step.id)
+            render_coordinated_grasp_pose_png(scene, path)
+            outcome.planner_trace["grasp_pose_visualization"] = path.as_posix()
+            log_info(f"E5 grasp pose visualization: {path}")
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"
+            outcome.planner_trace["grasp_pose_visualization_error"] = message
+            log_warning(f"Unable to render E5 grasp poses: {message}")
 
     def _rebase_held_state(
         self,
@@ -3719,6 +4052,53 @@ class ProgramExecutor:
             )
             released = active & opened
             physical_failed = active & ~opened
+            gripper_values = self.env.get_current_gripper_state_agent()
+            open_state = torch.as_tensor(
+                self.env.open_state,
+                dtype=torch.float32,
+                device=self.env.device,
+            ).flatten()
+            gripper_trace: dict[str, Any] = {}
+            for arm_index, arm in enumerate(("left", "right")):
+                gripper = torch.as_tensor(
+                    gripper_values[arm_index],
+                    dtype=torch.float32,
+                    device=self.env.device,
+                )
+                repeats = (
+                    gripper.shape[-1] + open_state.numel() - 1
+                ) // open_state.numel()
+                expected_open = open_state.repeat(repeats)[: gripper.shape[-1]]
+                gripper_trace[f"{arm}_gripper_qpos"] = gripper.detach().cpu().tolist()
+                gripper_trace[f"{arm}_gripper_open_error"] = (
+                    torch.linalg.vector_norm(
+                        gripper - expected_open.unsqueeze(0), dim=1
+                    )
+                    .detach()
+                    .cpu()
+                    .tolist()
+                )
+            release_trace = {
+                "active": active.detach().cpu().tolist(),
+                "both_grippers_open": opened.detach().cpu().tolist(),
+                "released": released.detach().cpu().tolist(),
+                "release_gripper_tolerance": float(
+                    coordinated_policy.get(
+                        "release_gripper_tolerance",
+                        self.runtime_policy.predicate_fallbacks[
+                            "gripper_state_tolerance"
+                        ],
+                    )
+                ),
+                "object_pose_after_release": self._entity_pose(step.object_uid)
+                .detach()
+                .cpu()
+                .tolist(),
+                **gripper_trace,
+            }
+            for outcome in outcomes.values():
+                if outcome is not None:
+                    outcome.planner_trace["physical_release"] = deepcopy(release_trace)
             control_parts = (
                 arm_control_part(self.env, "left_arm"),
                 arm_control_part(self.env, "right_arm"),
