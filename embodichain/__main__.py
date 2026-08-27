@@ -30,8 +30,12 @@ import json
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from importlib.resources.abc import Traversable
 from typing import Any
+
+try:
+    from importlib.resources.abc import Traversable
+except ModuleNotFoundError:  # Python 3.10 compatibility.
+    from importlib.abc import Traversable
 
 from embodichain import __version__
 
