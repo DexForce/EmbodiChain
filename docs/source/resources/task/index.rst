@@ -61,7 +61,7 @@ Environment catalog
      - ``PlaceObjectDrawer-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/tableware/place_object_drawer/env.json``
    * - Tableware
-     - ``PourWater-v3``
+     - ``PourWater-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json``
    * - Tableware
      - ``ScoopIce-v1``

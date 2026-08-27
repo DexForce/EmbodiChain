@@ -139,7 +139,7 @@ class MyTaskEnv(EmbodiedEnv):
 
 ### Gym ID convention
 
-Format: `<TaskName>-v<N>` (e.g. `PourWater-v3`, `PushCubeRL`).
+Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
 ### Configuration-owned Expert Program environment
@@ -177,14 +177,25 @@ Or via gymnasium: `gym.make("MyTask-v1")`.
 
 ### Listing registered environments
 
-`embodichain list-env` calls `discover_task_packages()` and prints one stable,
-case-insensitively sorted environment list. Labels distinguish runtime type
-(`Simulator` or `Lightweight`) from the `RL` capability, so simulator-backed
-`CartPoleRL` and `PushCubeRL` appear as `[Simulator, RL]`. Lightweight learning
-environments always carry `[Lightweight, RL]`. The command lists
-import-registered environments only; configuration-owned Expert Program IDs
-remain process-local and appear only after their task-local `env.json` has been
-loaded through `config_to_cfg()`.
+`embodichain list-env` calls `discover_task_packages()` and prints a stable
+table whose `Task` column is a directory tree derived from task-first modules
+and packaged `configs/tasks/` paths. The other columns show the environment ID
+and supported use:
+
+- `[Expert Demo: Expert Program]` comes from a task-local Gym config declaring
+  `expert_program_path` or `expert_program_runtime`;
+- `[Expert Demo: Handwritten Trajectory]` means the registered task class
+  overrides `create_demo_segments()` or `create_demo_action_list()`;
+- `[RL]` comes from explicit simulator `supports_rl`, a task-local agents
+  directory, or a registered lightweight learning environment;
+- `[Environment Only]` means none of those supported execution paths is
+  currently declared.
+
+Configuration-owned Expert Program IDs are included from their packaged task
+configs without eagerly building or registering the runtime. Duplicate
+JSON/YAML variants and registry entries merge case-insensitively into one task
+leaf. The framework-level `EmbodiedEnv-v1` registration is omitted because it
+is a reusable base environment rather than an installed task-package entry.
 
 ---
 

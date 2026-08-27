@@ -339,7 +339,7 @@ The packaged tasks demonstrate five different integration paths:
 | `ExpertProgramRepeatedPickPlace-v1` | Bounded repeat of built-in `Pick` and `Place` calls with cyclic targets | Trajectory completion only; effect checks, settling, validation, and recovery are disabled |
 | `ExpertProgramOpenDrawer-v1` | Registered simulation call lowered to the built-in `Slide` primitive | Trajectory completion only; effect checks, settling, validation, and recovery are disabled |
 | `HandOver-v1` | Built-in coordinated `HandOver` over disjoint source and destination resources | Rigid-object settling plus measured object-near-target validation |
-| `PourWater-v3` | Registered transport and pour calls lowered to `MoveHeldObject` and `Pour` after a built-in `Pick` | Measured cup/bottle settling plus final object-near-target validation |
+| `PourWater-v1` | Registered transport and pour calls lowered to `MoveHeldObject` and `Pour` after a built-in `Pick` | Measured cup/bottle settling plus final object-near-target validation |
 | `Rearrangement-v3` | Registered `simulation.push_object` calls lowered to `PushObject`; each utensil is pushed, settled, and conditionally corrected from the latest pose | Per-utensil settling and measured object-near-target validation |
 
 All five IDs are created while their Gym JSON is loaded. The shared configured

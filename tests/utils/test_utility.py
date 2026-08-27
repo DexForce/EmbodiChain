@@ -86,7 +86,7 @@ class TestLoadConfig:
             "pour_water/env.json"
         )
 
-        assert loaded["id"] == "PourWater-v3"
+        assert loaded["id"] == "PourWater-v1"
 
 
 if __name__ == "__main__":

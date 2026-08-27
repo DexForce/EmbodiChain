@@ -234,7 +234,7 @@ evidence fails closed. Resource disjointness alone is never sufficient.
 - `HandOver-v1` exercises the coordinated built-in call over disjoint source
   and destination resources with configured hand-over poses, measured gripper
   evidence, settling, and final-target validation.
-- `PourWater-v3` uses registered `simulation.move_held_object` and
+- `PourWater-v1` uses registered `simulation.move_held_object` and
   `simulation.pour` calls after built-in Pick. The configured lowerers preserve
   verified held-object state and keep task motion values in the selected robot
   policy preset.

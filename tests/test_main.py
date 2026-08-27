@@ -16,8 +16,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
-from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -78,13 +79,12 @@ def test_dispatch_forwards_subcommand_arguments(
     assert received == ["--asset_path", "robot.urdf", "--headless"]
 
 
-def test_list_env_discovers_and_prints_sorted_capability_labels(
+def test_list_env_discovers_and_prints_task_tree(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """List-env separates runtime type from explicit RL capability."""
+    """List-env renders folder hierarchy and precise task capabilities."""
     from embodichain.lab.gym.utils import registration
-    from embodichain.learning.rl import env as learning_env
 
     discovery_calls: list[None] = []
     monkeypatch.setattr(
@@ -93,42 +93,112 @@ def test_list_env_discovers_and_prints_sorted_capability_labels(
         lambda: discovery_calls.append(None),
     )
     monkeypatch.setattr(
-        registration,
-        "REGISTERED_ENVS",
-        {
-            "Zulu-v1": SimpleNamespace(supports_rl=False),
-            "alpha-v1": SimpleNamespace(supports_rl=False),
-            "PushCubeRL": SimpleNamespace(supports_rl=True),
-        },
-    )
-    monkeypatch.setattr(
-        learning_env,
-        "get_registered_learning_env_names",
-        lambda: ["zeta_rl", "BetaRL"],
+        cli,
+        "_collect_environment_entries",
+        lambda: [
+            cli._EnvironmentListEntry(
+                "CartPoleRL",
+                ("classic_control", "cart_pole"),
+                {cli._RL},
+            ),
+            cli._EnvironmentListEntry(
+                "HandOver-v1",
+                ("manipulation", "hand_over"),
+                {cli._EXPERT_PROGRAM},
+            ),
+            cli._EnvironmentListEntry(
+                "BlocksRankingRGB-v1",
+                ("manipulation", "tableware", "blocks_ranking_rgb"),
+                {cli._HANDWRITTEN_DEMO},
+            ),
+            cli._EnvironmentListEntry(
+                "StackCups-v1",
+                ("manipulation", "tableware", "stack_cups"),
+                set(),
+            ),
+        ],
     )
 
     cli.main(["list-env"])
 
     assert discovery_calls == [None]
-    assert capsys.readouterr().out == (
-        "Environments (5):\n"
-        "  alpha-v1 [Simulator]\n"
-        "  BetaRL [Lightweight, RL]\n"
-        "  PushCubeRL [Simulator, RL]\n"
-        "  zeta_rl [Lightweight, RL]\n"
-        "  Zulu-v1 [Simulator]\n"
-    )
+    assert capsys.readouterr().out == """\
++------------------------------------------------------------------------------------+
+|                                  Environments (4)                                  |
++------------------------+---------------------+-------------------------------------+
+| Task                   | Environment ID      | Capability                          |
++------------------------+---------------------+-------------------------------------+
+| classic_control/       |                     |                                     |
+|   cart_pole            | CartPoleRL          | RL                                  |
+| manipulation/          |                     |                                     |
+|   hand_over            | HandOver-v1         | Expert Demo: Expert Program         |
+|   tableware/           |                     |                                     |
+|     blocks_ranking_rgb | BlocksRankingRGB-v1 | Expert Demo: Handwritten Trajectory |
+|     stack_cups         | StackCups-v1        | Environment Only                    |
++------------------------+---------------------+-------------------------------------+
+"""
 
 
-def test_list_env_help_explains_config_defined_registration(
+def test_list_env_help_explains_environment_only_label(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """List-env help explains why config-owned IDs may be absent."""
+    """List-env help defines the fallback capability label."""
     with pytest.raises(SystemExit) as exc_info:
         cli.main(["list-env", "--help"])
 
     assert exc_info.value.code == 0
-    assert "Configuration-defined Expert Program IDs" in capsys.readouterr().out
+    assert "Environment Only" in capsys.readouterr().out
+
+
+def test_config_environment_entries_use_task_paths_and_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Task-local configs provide hierarchy and explicit capabilities."""
+    expert_task = tmp_path / "manipulation" / "pick_place"
+    expert_task.mkdir(parents=True)
+    (expert_task / "env.json").write_text(
+        json.dumps(
+            {
+                "id": "PickPlace-v1",
+                "expert_program_path": "expert/program.yaml",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rl_task = tmp_path / "classic_control" / "point_mass"
+    agents = rl_task / "agents"
+    agents.mkdir(parents=True)
+    (agents / "ppo.json").write_text(
+        json.dumps(
+            {
+                "trainer": {
+                    "learning_env": {"name": "PointMassRL"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entries = cli._config_environment_entries([tmp_path])
+
+    expert = entries["pickplace-v1"]
+    assert expert.task_path == ("manipulation", "pick_place")
+    assert expert.capabilities == {cli._EXPERT_PROGRAM}
+    learning = entries["pointmassrl"]
+    assert learning.task_path == ("classic_control", "point_mass")
+    assert learning.capabilities == {cli._RL}
+
+
+def test_handwritten_demo_detection_uses_environment_hooks() -> None:
+    """Only task classes overriding a demo hook are handwritten demos."""
+    from embodichain_tasks.manipulation.tableware.blocks_ranking_size import (
+        BlocksRankingSizeEnv,
+    )
+    from embodichain_tasks.special.simple_task import SimpleTaskEnv
+
+    assert cli._implements_handwritten_demo(SimpleTaskEnv)
+    assert not cli._implements_handwritten_demo(BlocksRankingSizeEnv)
 
 
 def test_subcommand_help_uses_complete_command_parser(
