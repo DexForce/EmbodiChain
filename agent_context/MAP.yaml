@@ -31,6 +31,8 @@ topics:
       - manual update
       - GPU physics
       - simulation lifecycle
+      - ArticulationJointKinematics
+      - get_parent_joint_chain
     paths:
       - topics/simulation-system/simulation-system.md
     source_of_truth:
@@ -41,6 +43,7 @@ topics:
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
       - embodichain/lab/sim/objects/__init__.py
+      - embodichain/lab/sim/objects/articulation.py
       - embodichain/lab/sim/sensors/__init__.py
       - embodichain/lab/sim/solvers/__init__.py
       - embodichain/lab/sim/planners/__init__.py
@@ -714,7 +717,13 @@ topics:
       - SceneEntityPose
       - PressGoal.target_pose
       - SlideGoal.target_pose
+      - OpenDoorGoal.target_pose
       - TwistGoal.target_pose
+      - OpenDoorGoal.open_fraction
+      - OpenDoorAffordance.opening_direction
+      - OpenDoorAffordance.from_articulation
+      - hinge_joint_name
+      - ObservedArticulationJointState
       - open_loop
       - axis_translation_keyframes
       - dynamic goal

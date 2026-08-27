@@ -60,7 +60,7 @@ _SUPPORT_SURFACE_UID = "support_surface"
 _SCENE_ID = "dual_ur5_handover_v1"
 _PROFILE_ID = "dual_ur5_handover_v1"
 _OPEN_QPOS = 0.0
-_GRASP_QPOS = 0.025
+_GRASP_QPOS = 0.04
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
 
 
@@ -174,7 +174,7 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     )
     assert [item.uid for item in cfg.background] == [_SUPPORT_SURFACE_UID]
     assert [item.uid for item in cfg.rigid_object] == [_CAN_SIMULATION_UID]
-    assert cfg.rigid_object[0].max_convex_hull_num == 1
+    assert cfg.rigid_object[0].max_convex_hull_num == 16
     assert cfg.expert_program is not None
     assert cfg.expert_program.program_id == "dual_ur5_hand_over"
 
@@ -309,11 +309,13 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     }
     preset = binding.presets[0]
     assert preset.preset_id == "safe"
-    assert preset.motion_policy.sample_count == 200
+    assert preset.motion_policy.strategy == "motion_gen"
+    assert preset.motion_policy.sample_count == 140
     assert preset.tracking_policy.in_flight is not None
     assert preset.tracking_policy.in_flight.metrics[0].tolerance == pytest.approx(1.0)
     assert preset.tracking_policy.terminal.metrics[0].tolerance == pytest.approx(1.0)
     assert preset.recovery_policy.max_action_retries == 0
+    assert preset.recovery_policy.goal_rotation_threshold == pytest.approx(0.5)
     assert preset.workflow_recovery_policy.max_recovery_attempts == 2
     assert preset.runner_cfg.minimum_cycle_time == pytest.approx(0.04)
     assert preset.runner_cfg.hold_during_effect_verification is False
@@ -322,7 +324,7 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     hand_over_options = preset.action_option_templates["hand_over"]
     assert type(hand_over_options) is HandOverOptions
     assert hand_over_options.pre_grasp_distance == pytest.approx(0.08)
-    assert hand_over_options.lift_height == pytest.approx(0.15)
+    assert hand_over_options.lift_height == pytest.approx(0.08)
     assert hand_over_options.hand_interp_steps == 10
     assert dict(binding.grounding_providers) == {
         "hand_over": ConfiguredHandOverPoseProvider.provider_id,
@@ -345,6 +347,12 @@ def test_hand_over_program_preflights_against_configured_registration() -> None:
     assert len(segments) == 1
     assert segments[0].name == "hand_over_can"
     assert [type(call.call) for call in segments[0].calls] == [HandOver]
+    hand_over = segments[0].calls[0].call
+    assert hand_over.final_target is not None
+    pose_provider = registration.handover_pose_providers[0]
+    assert hand_over.final_target.position.tolist() == pytest.approx(
+        pose_provider.final_position
+    )
     assert len(segments[0].post_policies) == 1
     assert len(segments[0].validators) == 1
 
@@ -385,11 +393,65 @@ def test_real_sim_expert_episode_transfers_can_with_configured_runtime() -> None
         segment = result.segments[0]
         assert segment.name == "hand_over_can"
         assert segment.success
-        runtime = segment.metadata["runtime"]
+        metadata = segment.metadata
+        runtime = metadata["runtime"]
         assert runtime["kind"] == "skill_result"
         assert runtime["status"] == "completed"
         assert [call["semantic_id"] for call in runtime["calls"]] == ["hand_over"]
-        assert segment.metadata["validation"]["accepted_mask"] == [True]
+        for call in runtime["calls"]:
+            assert call["status"] == "completed"
+            assert call["masks"] == {
+                "entered": [True],
+                "completed": [True],
+                "failed": [False],
+            }
+            assert call["plan_attempts"]
+            assert call["plan_attempts"][-1]["plan_success_mask"] == [True]
+            assert call["effects"]
+            decision = call["effects"][-1]["decision"]
+            assert decision["success_mask"] == [True]
+            assert decision["failure_mask"] == [False]
+            assert {
+                expectation["expectation_id"]
+                for expectation in decision["expectations"]
+                if expectation["satisfied_mask"] == [True]
+            } == {"source", "destination"}
+
+        transfer_effect = runtime["calls"][0]["effects"][-1]
+        assert transfer_effect["effect_spec"]["semantic_id"] == "hand_over"
+        assert set(transfer_effect["evidence"]) == {
+            "source.constraint",
+            "destination.constraint",
+        }
+        for evidence in transfer_effect["evidence"].values():
+            assert evidence["valid_mask"] == [True]
+            assert evidence["acquisition_errors"] == [None]
+            assert evidence["env_ids"] == [0]
+        assert transfer_effect["evidence"]["source.constraint"]["values"] == [False]
+        assert transfer_effect["evidence"]["destination.constraint"]["values"] == [
+            False
+        ]
+
+        post_policies = metadata["post_policies"]
+        assert len(post_policies) == 1
+        assert post_policies[0]["kind"] == "wait_stable"
+        assert post_policies[0]["result_mask"] == [True]
+        assert post_policies[0]["result"]["status"] == "settled"
+        assert post_policies[0]["result"]["state"]["settled_mask"] == [True]
+        assert post_policies[0]["result"]["state"]["timeout_mask"] == [False]
+
+        validation = metadata["validation"]
+        assert validation["runtime_success_mask"] == [True]
+        assert validation["eligible_mask_before_validation"] == [True]
+        assert validation["post_policy_success_mask"] == [True]
+        assert validation["accepted_mask"] == [True]
+        assert len(validation["validators"]) == 1
+        validator = validation["validators"][0]
+        assert validator["kind"] == "object_near_target"
+        assert validator["result_mask"] == [True]
+        assert validator["result"]["accepted_mask"] == [True]
+        assert validator["result"]["position_tolerance"] == pytest.approx(0.12)
+        assert validator["result"]["position_error"][0] <= 0.12
     finally:
         if env is not None:
             env.close()

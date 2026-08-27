@@ -268,6 +268,22 @@ remain mutable, but they never establish identity.
 or a previously returned pose cannot change the published snapshot. Publish a
 new scene version for every material dynamic-state change.
 
+`OpenDoorGoal.open_fraction` owns the desired absolute hinge state: `0` maps to
+the `OpenDoorAffordance` closed legal endpoint and `1` to its open endpoint.
+`OpenDoorAffordance.opening_direction` owns the closed-to-open joint-coordinate
+direction and defaults to increasing qpos; reverse-coordinate hinges configure
+`-1` at affordance construction. `OpenDoorAffordance.from_articulation()`
+consumes only `Articulation.get_parent_joint_chain()`: automatic hinge
+selection skips fixed joints and requires exactly one active revolute ancestor;
+prismatic ancestors, latch joints, and other multi-active chains require an
+explicit `hinge_joint_name`. The planner automatically matches the
+affordance-resolved parent revolute joint name to one unique
+`SceneSnapshot.articulation_joints` observation, computes a row-local opening
+delta from measured qpos, holds rows already at target, and fails rows with
+invalid observations, illegal targets, or targets behind the current opening
+state. Interpolation density, approach/retract distances, and joint comparison
+tolerance remain `OpenDoorOptions` policy values.
+
 ## Scene registry integration
 
 `embodichain.lab.sim.skills.SceneRegistry` is the canonical integration catalog.
@@ -481,6 +497,7 @@ Scene dependencies must match the poses each primitive actually consumes:
 | `PushObject` | Its semantic object ID plus a `SceneEntityPose` in `target_pose`. Both dependencies are monitored through `approach`; contact and push intentionally move the object. |
 | `Press` | `PressGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `Slide` | `SlideGoal.target_pose` when it is a `SceneEntityPose`; the local grasp mesh does not own the link. |
+| `OpenDoor` | `OpenDoorGoal.target_pose` when it is a `SceneEntityPose`; monitoring stops after the `reach` segment so grasp- and hinge-induced handle motion does not trigger recovery. |
 | `Twist` | `TwistGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
 | `HandOver` | Its semantic object ID plus a `SceneEntityPose` in `HandOverGoal.target_pose`. The unified action observes the object before pickup, derives its middle transfer pose from the two arm roots, and owns pickup through final release. |

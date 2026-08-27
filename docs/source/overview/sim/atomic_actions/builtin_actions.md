@@ -141,6 +141,14 @@ The animations below are the focused simulator demos under
 <img src="../../../_static/atomic_actions/slide_push.gif" alt="Slide push demo" width="480" style="max-width: 100%;" />
 :::
 
+:::{grid-item-card} `OpenDoor`
+:link: builtin-open-door
+:link-type: ref
+
+`open_door` · sampled handle grasp and parent-hinge rotation
+<img src="../../../_static/atomic_actions/open_door.gif" alt="OpenDoor demo" width="480" style="max-width: 100%;" />
+:::
+
 :::{grid-item-card} `Twist`
 :link: builtin-twist
 :link-type: ref
@@ -194,6 +202,7 @@ The animations below are the focused simulator demos under
 | `place` | `PlaceGoal`, `AssembleGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | any active attachment must be exclusive to `primary.motion`; `AssembleGoal` requires one | detach object |
 | `press` | `PressGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
 | `slide` | `SlideGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `SlideAffordance` + link pose | open-loop motion; application verifies joint travel/grasp |
+| `open_door` | `OpenDoorGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `OpenDoorAffordance` + handle-link pose + live hinge qpos | open-loop motion; application verifies hinge travel/grasp |
 | `twist` | `TwistGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `TwistAffordance` + target pose | open-loop motion; application verifies joint travel/grasp |
 | `coordinated_pickment` | `CoordinatedPickGoal` | `left.motion`, `left.grasp`, `right.motion`, `right.grasp` | both grasp endpoints: `open`, `grasp` | semantic object/entity | attach the shared object to both motion targets |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing.motion`, `placing.grasp`, `support.motion`, `support.grasp` | `placing.grasp`: `open`, `grasp`; `support.grasp`: `grasp` | two distinct objects, each held exclusively by its motion target | optionally detach placing object; preserve support attachment |
@@ -259,6 +268,7 @@ entity as a recovery dependency.
 | `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; monitored through `approach` only |
 | `AxisAlign.grasp_xpos` | yes | yes |
 | `AxisAlign` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `OpenDoorGoal.target_pose` | yes | yes; monitored through `reach` only |
 | `HandOverGoal.target_pose` | yes | yes |
 | `HandOver` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the initial object pose |
 | Coordinated pickup implicit initial pose via `ObjectSemantics.entity_id` | implicit snapshot reference | yes; only when `object_initial_pose` is omitted |
@@ -731,6 +741,64 @@ axis-aligned Cartesian samples rather than sparse joint-space endpoints.
 plans and replays a pull first, then replans a push from the drawer's measured
 post-pull link pose.
 
+(builtin-open-door)=
+
+## `OpenDoor`
+
+Plans **approach -> reach -> close -> open -> release -> retract** for a door
+handle. Construct `OpenDoorAffordance` with
+`OpenDoorAffordance.from_articulation(articulation, link_name)`. Starting at the
+configured handle link, the factory consumes
+`Articulation.get_parent_joint_chain()`, skips only fixed intermediates, and
+automatically selects the hinge only when the chain has one active revolute
+ancestor. A prismatic ancestor, revolute latch/handle joint, or any other
+multi-active chain is ambiguous and requires `hinge_joint_name`. The selected
+axis and origin are converted into the handle-link frame without exposing
+native simulator joint-info objects to the affordance. The affordance owns the
+joint-coordinate opening direction: it defaults to increasing qpos, while
+reverse-coordinate hinges pass `opening_direction=-1` to the factory. It
+stores only local geometry, the handle mesh, resolved joint name, limits, and
+opening direction; it does not retain the live articulation.
+
+The action infers the positive-opening approach direction from the hinge axis
+and the hinge-to-handle radial vector, then samples a handle grasp as `Slide`
+does. `OpenDoorGoal.open_fraction` is an absolute semantic target: `0` maps to
+the affordance-owned closed legal endpoint and `1` maps to its open endpoint,
+including hinges whose opening direction decreases joint position. At planning
+time, the resolved joint name must uniquely match a live
+`SceneSnapshot.articulation_joints` observation. Each environment rotates only
+by `target_position - observed_position`; invalid observations, out-of-range
+targets, and targets that would move toward closing fail that row, while rows
+already at the target succeed with a hold trajectory.
+
+For active rows, the opening segment interpolates handle-link poses around the
+resolved hinge axis and applies the initial rigid `link -> EEF` transform to
+recover the corresponding EEF poses. After release, retract follows the
+approach direction after it has rotated with the open door.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `open_door` |
+| Goal | `OpenDoorGoal(semantics=..., target_pose=..., open_fraction=...)` |
+| Binding contract | `primary.motion` plus disjoint `primary.grasp` |
+| Motion | approach, reach, close, hinge arc, release, rotated-direction retract |
+| Effect | explicitly open-loop; no hinge travel or grasp success is claimed |
+
+`OpenDoorOptions` controls hand close/open interpolation, circular-arc
+keyframes, approach/retract distances, and joint-position comparison
+tolerance. The desired opening state belongs to `OpenDoorGoal`, not the
+planner options. The bound `primary.grasp` endpoint must provide `open` and
+`grasp`. The planner reserves at least one opening-segment sample for the
+segment start plus one for every configured door-arc keyframe; the full motion
+policy therefore needs
+`sample_count >= 2 * hand_interp_steps + door_waypoint_count + 7`.
+
+**Example:** `scripts/tutorials/atomic_action/open_door.py` configures only the
+microwave's `door_handle` link. Automatic traversal resolves `door_hinge`
+through the intermediate fixed joint. Its absolute `--open_angle` value is
+normalized against the resolved hinge limits and passed as the goal's
+`open_fraction`.
+
 (builtin-twist)=
 
 ## `Twist`
@@ -763,7 +831,7 @@ the grasp pose's negative z-axis; the target-local twist axis belongs to
 translation, and regrasping are outside its contract; an `Unscrew` action should
 model those behaviors separately.
 
-For all three primitives, `SkillDescriptor.open_loop` is `True`. Trajectory
+For all four primitives, `SkillDescriptor.open_loop` is `True`. Trajectory
 completion therefore means commanded motion completion only. Applications that
 need semantic success must observe button/contact or articulation state and
 verify it outside the side-effect-free planner.

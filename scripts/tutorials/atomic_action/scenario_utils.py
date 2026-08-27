@@ -43,7 +43,7 @@ from embodichain.lab.sim.robots import build_dual_arm_cfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg, SolverCfg, URSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    GRIPPER_HAND_JOINT_PATTERN,
+    ROBOTIQ_2F_140_TCP,
     TutorialRobot,
     create_tutorial_robot_cfg,
 )
@@ -233,41 +233,47 @@ def create_dual_tutorial_robot_cfg(
     hand_damping: float = 1e2,
     hand_max_effort: float = 1e4,
 ) -> RobotCfg:
-    """Build a dual tutorial robot from the selected arm and shared PGI hand.
+    """Build a dual tutorial robot from the selected arm and hand.
 
     Franka always uses its PyTorch kinematics solver; ``solver="ur"`` selects
-    the analytical solver only when ``robot_type="ur5"``. The mounting layout,
-    control-part names, gripper component, and downstream action bindings stay
-    identical across both robot choices.
+    the analytical solver for UR5 and UR10. UR5 and Franka use the shared PGI
+    hand, while ``ur10`` uses the six-DOF Robotiq 2F-140 and its
+    rotated 0.23 m TCP. The mounting layout, control-part names, and downstream
+    action bindings stay identical across robot choices.
 
     Args:
         robot_type: Arm family to mount on both sides.
         uid: Simulation robot identifier.
         urdf_name: Cache name for the assembled dual-arm URDF.
-        tcp_z: PGI tool-center-point offset along local Z.
-        solver: Preferred UR5 solver implementation.
-        ur_ik_nearest_weight: Optional nearest-solution weights for UR5 IK.
+        tcp_z: PGI tool-center-point offset along local Z. The UR10/Robotiq
+            variant uses its fixed mounting TCP instead.
+        solver: Preferred UR solver implementation.
+        ur_ik_nearest_weight: Optional nearest-solution weights for UR IK.
         pytorch_num_samples: Number of PyTorch IK seed samples.
         init_pos: Root position of the assembled robot.
         init_rot: Root xyz Euler rotation in degrees.
         left_arm_home: Optional left-arm initial configuration.
         right_arm_home: Optional right-arm initial configuration.
-        hand_stiffness: PGI joint drive stiffness.
-        hand_damping: PGI joint drive damping.
-        hand_max_effort: PGI joint maximum effort.
+        hand_stiffness: Hand joint drive stiffness.
+        hand_damping: Hand joint drive damping.
+        hand_max_effort: Hand joint maximum effort.
 
     Returns:
-        A dual-arm robot configuration with two PGI grippers.
+        A dual-arm robot configuration with two matching grippers.
     """
     base_cfg = create_tutorial_robot_cfg(robot_type)
-    tcp = [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, tcp_z],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
+    tcp = (
+        ROBOTIQ_2F_140_TCP
+        if robot_type == "ur10"
+        else (
+            (1.0, 0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, tcp_z),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    )
     base_solver = base_cfg.solver_cfg["arm"]
-    if robot_type == "ur5" and solver == "ur":
+    if robot_type in {"ur5", "ur10"} and solver == "ur":
         base_solver.tcp = tcp
         base_solver.ik_nearest_weight = ur_ik_nearest_weight
     else:
@@ -279,12 +285,13 @@ def create_dual_tutorial_robot_cfg(
         )
         base_cfg.solver_cfg["arm"] = base_solver
 
+    hand_joint_pattern = base_cfg.control_parts["hand"][0]
     for property_name, value in (
         ("stiffness", hand_stiffness),
         ("damping", hand_damping),
         ("max_effort", hand_max_effort),
     ):
-        getattr(base_cfg.drive_pros, property_name)[GRIPPER_HAND_JOINT_PATTERN] = value
+        getattr(base_cfg.drive_pros, property_name)[hand_joint_pattern] = value
 
     arm_facing_rotation = make_yaw_transform(
         (0.0, 0.0, 0.0),
@@ -297,8 +304,8 @@ def create_dual_tutorial_robot_cfg(
     cfg = build_dual_arm_cfg(base_cfg, mounts)
 
     # ``build_dual_arm_cfg`` duplicates the arm component and all control
-    # parts. The tutorial robots intentionally keep the PGI as a separate URDF
-    # component, so mount one copy on each assembled arm as well.
+    # parts. Tutorial robots intentionally keep their gripper as a separate
+    # URDF component, so mount one copy on each assembled arm as well.
     cfg.urdf_cfg.fname = urdf_name
     hand_component = base_cfg.urdf_cfg.components["hand"]
     for side in ("left", "right"):
@@ -358,24 +365,25 @@ def add_dual_tutorial_robot(
     hand_damping: float = 1e2,
     hand_max_effort: float = 1e4,
 ) -> Robot:
-    """Add a dual UR5 or Franka tutorial robot to a simulation.
+    """Add a supported dual-arm tutorial robot to a simulation.
 
     Args:
         sim: Simulation manager that owns the robot.
         robot_type: Arm family to mount on both sides.
         uid: Simulation robot identifier.
         urdf_name: Cache name for the assembled dual-arm URDF.
-        tcp_z: PGI tool-center-point offset along local Z.
-        solver: Preferred UR5 solver implementation.
-        ur_ik_nearest_weight: Optional nearest-solution weights for UR5 IK.
+        tcp_z: PGI tool-center-point offset along local Z. The UR10/Robotiq
+            variant uses its fixed mounting TCP instead.
+        solver: Preferred UR solver implementation.
+        ur_ik_nearest_weight: Optional nearest-solution weights for UR IK.
         pytorch_num_samples: Number of PyTorch IK seed samples.
         init_pos: Root position of the assembled robot.
         init_rot: Root xyz Euler rotation in degrees.
         left_arm_home: Optional left-arm initial configuration.
         right_arm_home: Optional right-arm initial configuration.
-        hand_stiffness: PGI joint drive stiffness.
-        hand_damping: PGI joint drive damping.
-        hand_max_effort: PGI joint maximum effort.
+        hand_stiffness: Hand joint drive stiffness.
+        hand_damping: Hand joint drive damping.
+        hand_max_effort: Hand joint maximum effort.
 
     Returns:
         The added dual-arm robot instance.
