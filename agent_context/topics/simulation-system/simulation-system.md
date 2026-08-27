@@ -54,9 +54,9 @@ EnvCfg.sim_cfg
        → Default/PhysX may materialize native handles eagerly
        → Newton keeps physical descriptors deferred
   → SimulationManager.prepare()
-       → finalize/rebuild pending Spawn descriptors
-       → configure source-backed articulations against materialized exact names
-       → rebuild Newton once when those descriptors changed
+       → for Newton, resolve source metadata and configure exact-name overlays
+       → finalize/rebuild pending Spawn descriptors once
+       → for Default, apply pending source overlays to materialized handles
        → prepare manager-owned runtime buffers for the committed revision
        → bind declared EmbodiChain facades in place
        → attach sensors whose parents are now materialized
@@ -108,9 +108,13 @@ the scene can be assembled before a native window is opened. It sets
 the configured Arena layout, and owns a thin Spawn scene coordinator. With the
 Default backend, preparing the Arena layout lets `add_*` materialize native
 entities immediately, so articulation metadata and render nodes are available
-before finalization. Newton builds its immutable model at `prepare()`. A Viser
-backend forces `headless=True`; Viser and the native DexSim window are mutually
-exclusive.
+before finalization. A source-backed articulation added to an eager Default
+result is loaded first and then receives its exact-name typed properties on the
+live native articulation. Newton defers physical materialization until
+`prepare()`: EmbodiChain first reads exact URDF metadata through a disposable
+render-only skeleton, applies the source-name overlays, and then builds the
+immutable Newton model once. A Viser backend forces `headless=True`; Viser and
+the native DexSim window are mutually exclusive.
 
 The default ground plane authors its repeated texture coordinates in the Spawn
 render descriptor before materialization, so native and offscreen render paths
@@ -118,12 +122,14 @@ receive identical UV data on their first GPU upload.
 
 `SimulationManager.prepare()` is the backend-neutral readiness boundary for
 Default CPU, Direct GPU, and Newton. It is idempotent. Topology is committed
-only when dirty. Runtime preparation is recorded by committed topology
-revision: Default CUDA calls `World.init_gpu_physics()`, while Default CPU and
-Newton need no additional manager call after Spawn commit. Facade binding and
-sensor attachment are retried on every call. A failed source configurator or
-binding therefore remains retryable; already completed declarations are not
-reconfigured or rebound. `init_gpu_physics()` and
+only when dirty. Newton source resolution and exact-name configuration precede
+the first commit; Default source configuration follows native materialization.
+A failed resolver or configurator remains pending and retryable. Runtime
+preparation is recorded by committed topology revision: Default CUDA calls
+`World.init_gpu_physics()`, while Default CPU and Newton need no additional
+manager call after Spawn commit. Facade binding and sensor attachment are
+retried on every call; already completed declarations are not reconfigured or
+rebound. `init_gpu_physics()` and
 `finalize_newton_physics()` remain compatibility aliases, but new code should
 call `prepare()`.
 
@@ -138,7 +144,7 @@ readiness path defensively before advancing the requested physics steps.
 | Area | Owner | Routed topic |
 |------|-------|--------------|
 | World, arenas, asset registries, physics update, cleanup | `sim_manager.py` | `simulation-system` |
-| Spawn declaration, commit/rebuild, and facade binding | `spawn/scene.py`, `spawn/descriptors.py` | `simulation-system` |
+| Spawn declaration, source resolution, commit/rebuild, and facade binding | `spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` | `simulation-system` |
 | Backend-neutral batched state/property access | `objects/backends/spawn.py` | `simulation-system` |
 | Shared object, render, physics, drive, and URDF configs | `cfg.py` | `configclass-pattern` for config mechanics |
 | Rigid, articulation, robot, light, constraint, gizmo | `objects/` | `robot-system` for robots |
@@ -236,13 +242,14 @@ being duplicated in both backend blocks. `link_attrs` accepts the same grouped
 rigid-body schema for partial per-link overrides.
 
 For articulations, `SimulationManager._declare_spawn_articulation()` supplies
-`configure_articulation_desc()` as the source-configuration callback. DexSim
-materializes and translates URDF/USD link and joint names first; preserve mode
-leaves those descriptors untouched, while overlay mode applies exact-name
-link/joint fields second. Default applies the configured typed properties to
-the loaded native articulation. Newton configures every unique per-instance
-descriptor and performs one explicit scene rebuild before facade binding. Do
-not duplicate these writes in `Articulation._apply_spawn_config()`.
+`configure_articulation_desc()` as the source-configuration callback. Preserve
+mode leaves source descriptors untouched, while overlay mode applies
+exact-name link/joint fields. Default obtains those names from its loaded
+native articulation and applies the typed properties live. Newton resolves the
+same metadata first and consumes the configured descriptor during its initial
+immutable-model build, so initial source configuration must not be implemented
+as finalize-then-rebuild. Do not duplicate these writes in
+`Articulation._apply_spawn_config()`.
 
 Rigid USD objects follow the same overlay rule: parsed source descriptors are
 updated field-by-field, never replaced wholesale by a partial config. The
@@ -289,9 +296,8 @@ legacy layer can eventually be removed as one unit.
 - Newton descriptor or topology mutations that cannot update the immutable
   runtime model live remain pending until the next `prepare()` rebuild.
 - Apply Newton collision and articulation-joint configuration to the
-  source-translated Spawn descriptors, then rebuild once before binding;
-  post-bind object initialization is only for state and supported live batch
-  properties.
+  source-translated Spawn descriptors before the first model build; post-bind
+  object initialization is only for state and supported live batch properties.
 - Manual update is the default; normal environment stepping must advance
   physics through `SimulationManager.update()`.
 - Reset only the requested environment rows and honor

@@ -2219,21 +2219,20 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
     ) -> list[list[DriveType]]:
-        """Get the backend drive type for the selected joints.
+        """Get the portable drive type for the selected joints.
 
         Args:
             joint_ids: Joint indices to query. If None, queries all joints.
             env_ids: Environment indices to query. If None, queries all environments.
 
         Returns:
-            Backend drive types grouped by environment, with one
+            Drive types grouped by environment, with one
             :class:`~dexsim.types.DriveType` per selected joint.
+
+            Newton has no acceleration-drive equivalent. Its passive target
+            mode maps to :attr:`DriveType.NONE`; every active Newton target
+            mode maps to :attr:`DriveType.FORCE`.
         """
-        if self._data is not None and self._data.is_newton_backend:
-            raise RuntimeError(
-                "get_joint_drive_type() exposes DexSim DriveType semantics; "
-                "use get_joint_target_mode() for Newton."
-            )
         local_env_ids = self._all_indices if env_ids is None else env_ids
         if joint_ids is None:
             local_joint_ids = np.arange(self.dof, dtype=np.int32)
@@ -2246,8 +2245,20 @@ class Articulation(BatchEntity):
 
         drive_types: list[list[DriveType]] = []
         for env_idx in local_env_ids:
-            entity_drive_types = self._entities[int(env_idx)].get_drive()[-1]
-            drive_types.append(list(np.asarray(entity_drive_types)[local_joint_ids]))
+            entity = self._entities[int(env_idx)]
+            if self._data is not None and self._data.is_newton_backend:
+                target_modes = np.asarray(entity.get_newton_drive()[-1])[
+                    local_joint_ids
+                ]
+                drive_types.append(
+                    [
+                        DriveType.NONE if int(mode) == 0 else DriveType.FORCE
+                        for mode in target_modes
+                    ]
+                )
+            else:
+                entity_drive_types = np.asarray(entity.get_drive()[-1])[local_joint_ids]
+                drive_types.append(list(entity_drive_types))
         return drive_types
 
     def get_joint_target_mode(

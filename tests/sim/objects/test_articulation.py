@@ -417,16 +417,16 @@ class BaseArticulationTest:
             )
         )
 
+        expected_drive_types = [
+            [DriveType.NONE] * passive_articulation.dof for _ in range(NUM_ARENAS)
+        ]
+        assert passive_articulation.get_joint_drive_type() == expected_drive_types
+
         if self.sim.is_newton_backend:
             expected_target_modes = [
                 [0] * passive_articulation.dof for _ in range(NUM_ARENAS)
             ]
             assert passive_articulation.get_joint_target_mode() == expected_target_modes
-        else:
-            expected_drive_types = [
-                [DriveType.NONE] * passive_articulation.dof for _ in range(NUM_ARENAS)
-            ]
-            assert passive_articulation.get_joint_drive_type() == expected_drive_types
 
     def test_preserve_mode_ignores_urdf_physics_overrides(self):
         """Preserve mode keeps source-resolved URDF link and joint physics."""

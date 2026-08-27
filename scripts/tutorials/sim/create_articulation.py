@@ -202,9 +202,12 @@ def main() -> None:
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
 
-    # Configure the simulation. Window creation is deferred until the asset is loaded.
+    open_native_window = not args.headless and not args.viser
+
+    # Construct the World without a window so Spawn can finish first. The
+    # requested native window is opened explicitly after create_articulation().
     sim_cfg = SimulationManagerCfg(
-        headless=args.headless,
+        headless=True,
         sim_device=args.device,
         num_envs=args.num_envs,
         arena_space=2.0,
@@ -219,7 +222,7 @@ def main() -> None:
         articulation = create_articulation(sim)
         print(f"[INFO]: Initial joint positions: {articulation.get_qpos()}", flush=True)
 
-        if not args.headless and not args.viser:
+        if open_native_window:
             sim.open_window()
 
         print("[INFO]: Running simulation. Press Ctrl+C to stop.", flush=True)
