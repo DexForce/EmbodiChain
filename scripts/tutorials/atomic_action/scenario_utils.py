@@ -440,7 +440,7 @@ def create_manual_object_semantics(obj: RigidObject, label: str) -> ObjectSemant
         label=label,
         geometry={},
         affordance=Affordance(object_label=label),
-        entity=obj,
+        entity_id=obj.uid,
     )
 
 

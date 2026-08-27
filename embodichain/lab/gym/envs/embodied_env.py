@@ -84,6 +84,7 @@ from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.expert_program import (
         CompiledProgram,
+        ExpertProgramAdapterFactory,
         ExpertProgramCfg,
         ExpertProgramEnvironmentAdapter,
     )
@@ -323,9 +324,29 @@ class EmbodiedEnv(BaseEnv):
         wrapped_create_demo_action_list._demo_action_shape_wrapped = True
         setattr(cls, "create_demo_action_list", wrapped_create_demo_action_list)
 
-    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
+    def __init__(
+        self,
+        cfg: EmbodiedEnvCfg,
+        *,
+        expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
+        **kwargs,
+    ):
+        if expert_program_adapter_factory is not None:
+            from embodichain.lab.gym.envs.expert_program import (
+                ExpertProgramAdapterFactory,
+            )
+
+            if not isinstance(
+                expert_program_adapter_factory,
+                ExpertProgramAdapterFactory,
+            ):
+                raise TypeError(
+                    "expert_program_adapter_factory must implement "
+                    "ExpertProgramAdapterFactory or be None."
+                )
         self.affordance_datas = {}
         self.action_bank = None
+        self._expert_program_adapter: ExpertProgramEnvironmentAdapter | None = None
         self._active_expert_program_bridge: AtomicDemoBridge | None = None
 
         extensions = getattr(cfg, "extensions", {}) or {}
@@ -341,6 +362,19 @@ class EmbodiedEnv(BaseEnv):
         self.dataset_manager: DatasetManager | None = None
 
         super().__init__(cfg, **kwargs)
+
+        if expert_program_adapter_factory is not None:
+            from embodichain.lab.gym.envs.expert_program import (
+                ExpertProgramEnvironmentAdapter,
+            )
+
+            adapter = expert_program_adapter_factory.create_adapter(self)
+            if type(adapter) is not ExpertProgramEnvironmentAdapter:
+                raise TypeError(
+                    "ExpertProgramAdapterFactory.create_adapter() must return "
+                    "exactly ExpertProgramEnvironmentAdapter."
+                )
+            self._expert_program_adapter = adapter
 
         dataset_terms = getattr(self.cfg.dataset, "__dict__", self.cfg.dataset)
         if dataset_terms and not self.cfg.filter_dataset_saving:
@@ -1958,15 +1992,20 @@ class EmbodiedEnv(BaseEnv):
 
     @property
     def expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
-        """Return the explicit adapter used by declarative expert programs.
+        """Return the adapter injected after the environment built its scene.
 
-        Environments that configure :attr:`EmbodiedEnvCfg.expert_program`
-        override this property and return their reusable adapter.
+        A registered environment normally receives an
+        :class:`ExpertProgramAdapterFactory` through its :class:`EnvSpec`.
+        Advanced integrations may still override this property.
         """
-        raise NotImplementedError(
-            "An environment with cfg.expert_program must expose "
-            "expert_program_adapter."
-        )
+        adapter = self._expert_program_adapter
+        if adapter is None:
+            raise NotImplementedError(
+                "An environment with an Expert Program must receive an "
+                "expert_program_adapter_factory or override "
+                "expert_program_adapter."
+            )
+        return adapter
 
     def _checked_expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
         """Return the exact configured adapter before touching live providers."""
@@ -2024,11 +2063,17 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Per-environment task-success mask.
         """
-        expert_program = getattr(getattr(self, "cfg", None), "expert_program", None)
-        if expert_program is None:
-            return super().is_task_success(**kwargs)
         bridge = self._active_expert_program_bridge
-        if bridge is None or not bridge.program_completed:
+        expert_program = getattr(getattr(self, "cfg", None), "expert_program", None)
+        if bridge is None:
+            if expert_program is None:
+                return super().is_task_success(**kwargs)
+            return torch.zeros(
+                self.num_envs,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        if not bridge.program_completed:
             return torch.zeros(
                 self.num_envs,
                 dtype=torch.bool,
@@ -2042,26 +2087,44 @@ class EmbodiedEnv(BaseEnv):
             )
         return completion.to(device=self.device)
 
-    def create_demo_segments(self, *args, **kwargs) -> Iterable[DemoSegment] | None:
+    def create_demo_segments(
+        self,
+        *args,
+        expert_program: ExpertProgramCfg | CompiledProgram | None = None,
+        **kwargs,
+    ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
 
-        When ``cfg.expert_program`` is configured, the environment compiles it
-        through an explicit scene-provider hook and creates an atomic demo bridge
-        through an explicit runtime-port factory hook. Otherwise, the default
-        adapter wraps ``create_demo_action_list`` in one segment. Multi-object
-        tasks may return a lazy generator so each segment can be planned from
-        the scene state left by the previous one.
+        An episode-level ``expert_program`` takes precedence over the static
+        configuration. This lets trusted callers supply a model-produced,
+        already compiled program without mutating :attr:`cfg`. Otherwise, a
+        configured program is compiled through the injected adapter. With no
+        selected program, the legacy action-list path remains unchanged.
 
         Args:
             *args: Positional arguments forwarded to the legacy planner.
+            expert_program: Optional episode-level program config or provider-free
+                compiled program.
             **kwargs: Keyword arguments forwarded to the legacy planner.
 
         Returns:
             Segment sequence, or ``None`` when planning fails.
         """
-        expert_program = getattr(getattr(self, "cfg", None), "expert_program", None)
-        if expert_program is not None:
-            compiled_program = self.compile_expert_program(expert_program)
+        selected_program = expert_program
+        if selected_program is None:
+            selected_program = getattr(
+                getattr(self, "cfg", None),
+                "expert_program",
+                None,
+            )
+        if selected_program is not None:
+            from embodichain.lab.gym.envs.expert_program import CompiledProgram
+
+            compiled_program = (
+                selected_program
+                if type(selected_program) is CompiledProgram
+                else self.compile_expert_program(selected_program)
+            )
             bridge = self.create_expert_program_bridge(compiled_program)
             self._active_expert_program_bridge = bridge
             return bridge.iter_segments()

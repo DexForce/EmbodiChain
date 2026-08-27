@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+import json
+from pathlib import Path
 from threading import Event, Lock
 from types import SimpleNamespace
 from typing import ClassVar
@@ -31,19 +33,25 @@ from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramValidationError,
     IntegrationFingerprintMismatch,
     SimulationArticulationLinkBinding,
+    SimulationExpertProgramAdapterFactory,
     SimulationExpertProgramRegistration,
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
     SupportSurfaceAffordanceBinding,
     decode_expert_program,
 )
+from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+    _decode_configured_expert_program_runtime,
+)
 from embodichain.lab.gym.utils.registration import EnvSpec
 from embodichain.lab.sim.atomic_actions import (
+    ActionOptions,
     Affordance,
     AtomicActionEngine,
     PlanningContext,
     SceneProvider,
     SceneSnapshot,
+    SkillDescriptor,
 )
 from embodichain.lab.sim.skills import (
     CONTROL_PART_EVIDENCE_PROVIDER_ID,
@@ -66,7 +74,9 @@ from embodichain.lab.sim.skills import (
     SceneRegistry,
     SemanticRelationTarget,
     RegisteredSemanticCall,
+    RegisteredSemanticLowerer,
     SemanticCallDescriptor,
+    SemanticLowering,
     SkillPolicyPreset,
     SupportSurfaceAffordance,
     SupportSurfaceRelationTargetGrounder,
@@ -83,12 +93,80 @@ from embodichain.lab.sim.skills.effects import EffectMonitorRef
 from embodichain.lab.sim.skills.parallel_runtime import (
     ParallelCommandSafetyValidator,
 )
-from embodichain_tasks.expert_program.repeated_pick_place import (
-    ROBOT_PROFILE_ID as CUBE_ROBOT_PROFILE_ID,
-    SCENE_REGISTRY_ID as CUBE_SCENE_REGISTRY_ID,
-    create_repeated_pick_place_robot_profile_binding as create_cube_robot_profile_binding,
-    create_repeated_pick_place_scene_binding as create_cube_scene_binding,
+
+_CATALOG_REGISTERED_CALL_ID = "test.catalog_call"
+_CUBE_RUNTIME_PRESET_ID = "trajectory"
+_REPOSITORY_ROOT = Path(__file__).parents[4]
+_CUBE_GYM_CONFIG_PATH = (
+    _REPOSITORY_ROOT
+    / "embodichain_tasks/configs/gym/expert_program/repeated_pick_place.json"
 )
+
+
+def _cube_runtime():
+    """Decode a fresh cube integration from the production Gym config."""
+    payload = json.loads(_CUBE_GYM_CONFIG_PATH.read_text(encoding="utf-8"))
+    return _decode_configured_expert_program_runtime(payload["expert_program_runtime"])
+
+
+def create_cube_scene_binding() -> SimulationSceneBinding:
+    """Return a fresh provider-free cube scene binding from config."""
+    return _cube_runtime().registration.scene_binding
+
+
+def create_cube_robot_profile_binding():
+    """Return a fresh provider-free cube robot profile binding from config."""
+    return _cube_runtime().registration.robot_profile_binding
+
+
+_CUBE_REFERENCE_RUNTIME = _cube_runtime()
+CUBE_ROBOT_PROFILE_ID = (
+    _CUBE_REFERENCE_RUNTIME.registration.robot_profile_binding.profile_id
+)
+CUBE_SCENE_REGISTRY_ID = _CUBE_REFERENCE_RUNTIME.registration.scene_binding.registry_id
+_CATALOG_REGISTERED_TARGET = (
+    builtin_semantic_call_catalog().descriptors["pick"].target_descriptor
+)
+assert _CATALOG_REGISTERED_TARGET is not None
+
+
+class _CatalogRegisteredLowerer(RegisteredSemanticLowerer):
+    """Live lowerer sentinel for registration factory lifecycle tests."""
+
+    call_id: ClassVar[str] = _CATALOG_REGISTERED_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = _CATALOG_REGISTERED_TARGET
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Remain unreachable in registration lifecycle tests."""
+        del call, context, bound, option_template
+        raise AssertionError("Catalog tests must not lower semantic calls.")
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogRegisteredLowererFactory:
+    """Frozen declaration creating a fresh lowerer per runtime assembly."""
+
+    call_id: ClassVar[str] = _CATALOG_REGISTERED_CALL_ID
+    revision: ClassVar[str] = "1"
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Return one fresh stateless lowerer."""
+        del simulation, robot, scene_registry, engine
+        return _CatalogRegisteredLowerer()
 
 
 class _CatalogRelationGrounder(RelationTargetGrounder):
@@ -370,12 +448,11 @@ class _CatalogCustomTrackingMetric(TrackingMetricCfg):
 def _program_payload(
     *,
     scene_registry: str = CUBE_SCENE_REGISTRY_ID,
-    runtime_preset: str = "safe",
+    runtime_preset: str = _CUBE_RUNTIME_PRESET_ID,
     object_id: str = "cube",
 ) -> dict[str, object]:
     """Return one minimal catalog-linked program payload."""
     return {
-        "schema_version": 2,
         "program_id": "catalog_pick",
         "integration": {
             "robot_profile": CUBE_ROBOT_PROFILE_ID,
@@ -458,6 +535,9 @@ def _place_relation_catalog(
         runtime_transport_declarations=base.runtime_transport_declarations,
         parallel_safety_declaration=base.parallel_safety_declaration,
         control_part_evidence_declaration=(base.control_part_evidence_declaration),
+        registered_semantic_lowerer_declarations=(
+            base.registered_semantic_lowerer_declarations
+        ),
         fingerprint="0" * 64,
         _required_skills={},
     )
@@ -466,12 +546,11 @@ def _place_relation_catalog(
 def _place_relation_payload() -> dict[str, object]:
     """Return one Place(on=object) program requiring relation grounding."""
     return {
-        "schema_version": 2,
         "program_id": "catalog_place_relation",
         "integration": {
             "robot_profile": CUBE_ROBOT_PROFILE_ID,
             "scene_registry": "relation_scene",
-            "runtime_preset": "safe",
+            "runtime_preset": _CUBE_RUNTIME_PRESET_ID,
         },
         "targets": {},
         "program": {
@@ -486,14 +565,13 @@ def _place_relation_payload() -> dict[str, object]:
 
 
 def _parallel_pick_payload() -> dict[str, object]:
-    """Return one schema-v2 parallel program rooted at an exact config path."""
+    """Return one parallel program rooted at an exact config path."""
     return {
-        "schema_version": 2,
         "program_id": "catalog_parallel_pick",
         "integration": {
             "robot_profile": CUBE_ROBOT_PROFILE_ID,
             "scene_registry": CUBE_SCENE_REGISTRY_ID,
-            "runtime_preset": "safe",
+            "runtime_preset": _CUBE_RUNTIME_PRESET_ID,
         },
         "targets": {},
         "program": {
@@ -525,7 +603,11 @@ def _registration_with_preset(
     binding = create_cube_robot_profile_binding()
     return SimulationExpertProgramRegistration(
         scene_binding=create_cube_scene_binding(),
-        robot_profile_binding=replace(binding, presets=(preset,)),
+        robot_profile_binding=replace(
+            binding,
+            presets=(preset,),
+            default_preset=preset.preset_id,
+        ),
     )
 
 
@@ -701,32 +783,61 @@ def test_parallel_safety_creation_and_history_are_one_registration_lock_scope() 
     assert factory_type._max_active == 1
 
 
-def test_standard_registration_rejects_registered_semantic_descriptors() -> None:
-    """Executable lowerer extensions are outside the standard factory contract."""
+def test_standard_registration_requires_exact_registered_lowerer_factory_coverage() -> (
+    None
+):
+    """Every registered descriptor has one fingerprinted lowerer factory."""
     catalog = builtin_semantic_call_catalog()
-    target = catalog.descriptors["pick"].target_descriptor
+    target = _CATALOG_REGISTERED_TARGET
     assert target is not None and target.binding_contract is not None
     custom = SemanticCallDescriptor(
-        call_id="test.catalog_call",
+        call_id=_CATALOG_REGISTERED_CALL_ID,
         spec_type=RegisteredSemanticCall,
-        skill_id=target.skill_id,
-        binding_contract=target.binding_contract,
         target_descriptor=target,
     )
 
-    with pytest.raises(ValueError, match="Registered semantic call"):
+    with pytest.raises(ValueError, match="lowerer factories"):
         SimulationExpertProgramRegistration(
             scene_binding=create_cube_scene_binding(),
             robot_profile_binding=create_cube_robot_profile_binding(),
             call_catalog=catalog.with_descriptor(custom),
         )
 
+    registration = SimulationExpertProgramRegistration(
+        scene_binding=create_cube_scene_binding(),
+        robot_profile_binding=create_cube_robot_profile_binding(),
+        call_catalog=catalog.with_descriptor(custom),
+        registered_semantic_lowerer_factories=(_CatalogRegisteredLowererFactory(),),
+    )
+
+    declaration = registration.catalog.registered_semantic_lowerer_declarations[
+        _CATALOG_REGISTERED_CALL_ID
+    ]
+    assert declaration.factory_type is _CatalogRegisteredLowererFactory
+    assert declaration.revision == "1"
+
+    robot, scene_registry, engine = _parallel_live_inputs()
+    first = registration.create_registered_semantic_lowerers(
+        simulation=object(),
+        robot=robot,
+        scene_registry=scene_registry,
+        engine=engine,
+    )
+    second = registration.create_registered_semantic_lowerers(
+        simulation=object(),
+        robot=robot,
+        scene_registry=scene_registry,
+        engine=engine,
+    )
+    assert len(first) == len(second) == 1
+    assert first[0] is not second[0]
+
 
 def test_standard_registration_rejects_nonbuiltin_effect_monitor() -> None:
     """Custom effect-monitor factories cannot be injected after registration."""
     base = create_cube_robot_profile_binding().presets[0]
     preset = SkillPolicyPreset(
-        "safe",
+        base.preset_id,
         action_option_templates=base.action_option_templates,
         motion_policy=base.motion_policy,
         tracking_policy=base.tracking_policy,
@@ -745,7 +856,7 @@ def test_standard_registration_rejects_tracking_metric_without_builtin_evaluator
     """Metric evaluator availability is proven before simulation startup."""
     base = create_cube_robot_profile_binding().presets[0]
     preset = SkillPolicyPreset(
-        "safe",
+        base.preset_id,
         action_option_templates=base.action_option_templates,
         motion_policy=base.motion_policy,
         tracking_policy=TrackingPolicy(
@@ -898,7 +1009,6 @@ def test_fingerprint_covers_workflow_recovery_policy() -> None:
     base = create_cube_robot_profile_binding().presets[0]
     changed = SkillPolicyPreset(
         base.preset_id,
-        schema_version=base.schema_version,
         action_option_templates=base.action_option_templates,
         motion_policy=base.motion_policy,
         tracking_policy=base.tracking_policy,
@@ -1084,3 +1194,35 @@ def test_env_spec_keeps_typed_registration_out_of_gym_kwargs() -> None:
 
     assert spec.expert_program_registration is registration
     assert spec.gym_spec.kwargs == {"physical_option": 3}
+
+
+def test_env_spec_derives_registration_and_injects_runtime_factory() -> None:
+    """One runtime declaration owns static preflight and live environment binding."""
+
+    class _Environment:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    registration = _registration()
+    factory = SimulationExpertProgramAdapterFactory(registration)
+    spec = EnvSpec(
+        "RuntimeFactoryTest-v1",
+        _Environment,
+        default_kwargs={"physical_option": 3},
+        expert_program_adapter_factory=factory,
+    )
+
+    environment = spec.make(cfg=object())
+
+    assert spec.expert_program_registration is registration
+    assert spec.expert_program_adapter_factory is factory
+    assert environment.kwargs["expert_program_adapter_factory"] is factory
+    assert spec.gym_spec.kwargs == {"physical_option": 3}
+
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        spec.make(
+            cfg=object(),
+            expert_program_adapter_factory=SimulationExpertProgramAdapterFactory(
+                registration
+            ),
+        )

@@ -55,7 +55,7 @@ def _validated_pose(
 
 @dataclass(frozen=True, slots=True)
 class ConfiguredHandOverPoseProvider(HandOverPoseProvider):
-    """Resolve hand-over targets from immutable embodiment configuration.
+    """Resolve a hand-over delivery target from immutable configuration.
 
     The provider carries object-space poses rather than arm trajectories. The
     shared semantic compiler and atomic ``HandOver`` implementation remain
@@ -64,39 +64,20 @@ class ConfiguredHandOverPoseProvider(HandOverPoseProvider):
     the provider suitable for task-registration catalog fingerprinting.
 
     Args:
-        middle_position: World-frame object position at transfer time.
-        middle_quaternion_wxyz: World-frame object orientation at transfer time.
         final_position: World-frame object delivery position.
         final_quaternion_wxyz: World-frame object delivery orientation.
     """
 
     provider_id: ClassVar[str] = "simulation.configured_handover_pose"
 
-    middle_position: tuple[float, float, float]
-    middle_quaternion_wxyz: tuple[float, float, float, float]
     final_position: tuple[float, float, float]
     final_quaternion_wxyz: tuple[float, float, float, float]
 
     def __post_init__(self) -> None:
-        middle = _validated_pose(
-            self.middle_position,
-            self.middle_quaternion_wxyz,
-            field_name="middle",
-        )
         final = _validated_pose(
             self.final_position,
             self.final_quaternion_wxyz,
             field_name="final",
-        )
-        object.__setattr__(
-            self,
-            "middle_position",
-            tuple(float(value) for value in middle.position.tolist()),
-        )
-        object.__setattr__(
-            self,
-            "middle_quaternion_wxyz",
-            tuple(float(value) for value in middle.quaternion_wxyz.tolist()),
         )
         object.__setattr__(
             self,
@@ -116,7 +97,7 @@ class ConfiguredHandOverPoseProvider(HandOverPoseProvider):
         context: PlanningContext,
         bound: BoundSemanticCall,
     ) -> HandOverPoseTargets:
-        """Return independently owned object-space transfer targets.
+        """Return an independently owned object-space delivery target.
 
         Args:
             call: Canonical hand-over semantic call.
@@ -124,16 +105,10 @@ class ConfiguredHandOverPoseProvider(HandOverPoseProvider):
             bound: Engine/profile-bound hand-over call.
 
         Returns:
-            Configured middle and final object-space targets.
+            Configured final object-space target.
         """
         del call, context, bound
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(
-                pose=SemanticPose(
-                    position=self.middle_position,
-                    quaternion_wxyz=self.middle_quaternion_wxyz,
-                )
-            ),
             final=SemanticObjectTarget(
                 pose=SemanticPose(
                     position=self.final_position,

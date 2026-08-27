@@ -69,6 +69,7 @@ from embodichain.lab.sim.skills.scene import (
     SceneAffordanceRef,
     SceneCollisionRole,
     SceneCollisionWorldMode,
+    SceneEntityMetadata,
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
@@ -94,7 +95,7 @@ def _action_option_templates() -> dict[str, object]:
 
 
 def _preset(preset_id: str, **kwargs: object) -> SkillPolicyPreset:
-    """Build one complete schema-v3 test preset."""
+    """Build one complete test preset."""
     kwargs.setdefault("action_option_templates", _action_option_templates())
     return SkillPolicyPreset(preset_id, **kwargs)
 
@@ -374,6 +375,30 @@ def test_scene_manifest_projection_does_not_copy_affordance_payload() -> None:
 
     assert _CopyTrackedAffordance.copies == 0
     assert provider.calls == 0
+
+
+def test_scene_entity_manifest_uses_canonical_metadata_normalization() -> None:
+    """Static manifests should not redefine registry metadata normalization."""
+    metadata = SceneEntityMetadata(
+        ref=SceneObjectRef("cube"),
+        aliases=("visible_cube", "cube_alias", "visible_cube"),
+    )
+
+    manifest = SceneEntityManifest.from_metadata(metadata)
+
+    assert isinstance(manifest, SceneEntityMetadata)
+    assert manifest.aliases == metadata.aliases
+
+
+def test_scene_manifest_rejects_alias_colliding_with_its_canonical_id() -> None:
+    """Static and live catalogs should enforce the same alias collision rule."""
+    entry = SceneEntityManifest(
+        ref=SceneObjectRef("cube"),
+        aliases=("cube",),
+    )
+
+    with pytest.raises(ValueError, match="collides with canonical entity ID"):
+        SceneManifest((entry,))
 
 
 def test_scene_manifest_detects_grounding_metadata_drift() -> None:
@@ -656,8 +681,6 @@ def test_registered_payload_scene_refs_are_statically_resolved() -> None:
     extension = SemanticCallDescriptor(
         call_id="vendor.inspect",
         spec_type=RegisteredSemanticCall,
-        skill_id=pick.skill_id,
-        binding_contract=pick.binding_contract,
         target_descriptor=pick.target_descriptor,
     )
     integration = SemanticIntegrationManifest(

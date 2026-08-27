@@ -14,6 +14,44 @@ earlier call. Each call receives a fresh scene observation, owns one
 `ExecutionSession`, verifies its physical effect, and commits verified symbolic
 state before the next call is grounded.
 
+## Architecture and ownership
+
+An Expert Program is a strict frontend to the semantic-skill runtime, not a
+second planner, scheduler, effect system, or simulation loop:
+
+```text
+JSON / YAML
+    -> strict schema-v2 decoder
+    -> ExpertProgramCfg
+    -> ExpertProgramCompiler + provider-free SceneManifest
+    -> CompiledProgram
+    -> ExpertProgramEnvironmentAdapter provider-aware preflight
+    -> AtomicDemoBridge
+    -> SkillRuntime -> ExecutionRunner -> AtomicActionEngine
+    -> DemoSegment actions consumed by normal env.step()
+```
+
+Python semantic calls and serialized programs converge at
+`SemanticCallSpec`. They use the same `SemanticSkillCompiler`, runtime effect
+monitors, robot profile, and typed atomic-action core.
+
+| Responsibility | Canonical owner |
+| --- | --- |
+| Serialized structure, discriminators, and bounds | Expert Program config, loader, and decoder |
+| Static scene identity and aliases | `SceneManifest`, projected from `SceneRegistry` |
+| Semantic analysis, resource binding, and lowering | `SemanticSkillCompiler` |
+| Robot resources, endpoint capabilities, and policy presets | `RobotSkillProfile` |
+| Atomic planning and bounded action recovery | `AtomicActionEngine` and `ExecutionRunner` |
+| Semantic-call lifecycle and verified symbolic state | `SkillRuntime` |
+| Physical evidence and effect decisions | Typed evidence providers and effect monitors |
+| Gym action buffering and step handshake | `AtomicDemoBridge` and the demo executor |
+| Settling and application acceptance | Segment post-policy and validator ports |
+| Final task success | Completed bridge acceptance exposed by `EmbodiedEnv` |
+
+These dependencies are one-way. The simulation semantic-skill package does not
+import Gym frontend types, and the bridge does not reproduce planning,
+scheduling, effect verification, recovery, or safe-stop behavior.
+
 ## Author a program
 
 Schema version 2 is the only accepted schema. It supports bounded `sequence`,
@@ -27,6 +65,36 @@ rejected before physical execution or command emission.
 versions. An extension with a physical effect must also register its typed
 compiler/effect contract; a serialized call ID alone cannot manufacture effect
 verification semantics.
+
+The top-level shape is:
+
+```text
+ExpertProgramCfg
+  schema_version: 2
+  program_id
+  integration
+    robot_profile
+    scene_registry
+    runtime_preset
+  targets
+  program
+```
+
+The supported program nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`,
+`InvokeCfg`, and `ParallelCfg`. `BarrierCfg` belongs to one parallel block and
+is not a standalone node. Built-in calls are `PickCfg`, `PlaceCfg`, and
+`HandOverCfg`; `RegisteredSemanticCallCfg` is the explicit extension boundary.
+The standard segment validators check either a rigid object's measured position
+against a target or a named articulation joint against inclusive position
+bounds.
+
+The registered-call payload has its own schema revision, independent of the
+top-level program version. Config construction enforces the same structural
+invariants as decoding, while provider-aware validation separately resolves
+catalog, scene, profile, preset, post-policy, and validator IDs. The loader and
+decoder reject duplicate keys, unknown fields and discriminators, non-finite
+numbers, invalid UTF-8, executable values, environment traversal, excessive
+nesting, excessive nodes, excessive repeats, and excessive expanded calls.
 
 The repeated-cube task is configured entirely as semantic calls:
 
@@ -139,6 +207,23 @@ evaluators, and effect-evidence backends still require registration-owned
 provider-factory contracts. Whole-body controllers expressed through existing
 joint control parts continue to use the built-in joint route.
 
+`SimulationExpertProgramRegistration` is the standard task-owned trust
+boundary. Besides the provider-free scene/profile declarations, it owns the
+call catalog, settling presets, relation grounders, hand-over pose providers,
+endpoint adapters, ordered runtime transports, and optional parallel-safety,
+control-part-evidence, and registered-lowerer factories. These declarations
+enter one immutable integration fingerprint and are checked again against the
+live engine, endpoints, and scene registry during runtime assembly. Supplying a
+registration forbids helper arguments from replacing its components after
+preflight.
+
+Every registered semantic-call descriptor must have exactly one matching
+`RegisteredSemanticLowererFactory`. Its frozen provider-free declaration fixes
+the call ID and factory revision; the call catalog fixes the payload schema and
+target descriptor. Each runtime assembly gets a fresh lowerer and revalidates
+its call ID, schema version, and target descriptor, preventing mutable
+task-local lowerers from becoming an untracked runtime side channel.
+
 Relation and rendezvous semantics are also explicit integration capabilities.
 `Place(on=...)` and `Place(inside=...)` require an exact typed/versioned
 `RelationTargetGrounder` for the selected affordance payload. `HandOver`
@@ -177,6 +262,29 @@ settling outcomes, and validator results in deterministic JSON-safe values.
 Trajectory segments are trace ranges inside one atomic plan; they do not create
 independent recovery or timeout boundaries.
 
+Three success boundaries remain distinct:
+
+| Boundary | Meaning |
+| --- | --- |
+| Atomic or semantic effect monitor | Decides whether one physical call succeeded and participates in recovery |
+| Program-segment post-policy | Advances environment behavior such as settling after motion completion |
+| Program-segment validator | Decides whether the application or dataset segment is acceptable |
+
+For each participating row, segment acceptance is the conjunction of semantic
+runtime success, every post-policy result, and every validator result. Final
+Expert Program success is published only after all lazy segment lifecycles have
+been consumed normally.
+
+Curated manipulation calls may also install physical boundaries inside an
+atomic plan. A held-object guard detects a lost relation before a dependent
+named segment, while a phase-effect gate blocks entry until the preceding
+attachment or release transition has physical evidence. They can reconcile
+only action-authorized state removals and never create simulator constraints,
+freeze bodies, or override poses. After terminal reconciliation, a bounded
+workflow recovery policy may retry from still-verified state or perform a real
+semantic `Pick` before retrying the original call. Successful peer rows remain
+at the shared call barrier.
+
 Parallel blocks additionally require an authoritative
 `ParallelCommandSafetyValidator`. Resource-claim disjointness is necessary but
 is not treated as proof of physical safety. If no validator is installed, the
@@ -213,6 +321,25 @@ lazy bridge instead, because a synchronous runtime would bypass the required
 `AtomicSkills.from_components(...)` with explicit observation, command,
 evidence, and clock ports.
 
+## Reference integrations
+
+The packaged tasks demonstrate three different integration paths:
+
+| Environment | Declarative path | Acceptance boundary |
+| --- | --- | --- |
+| `ExpertProgramRepeatedPickPlace-v1` | Bounded repeat of built-in `Pick` and `Place` calls with cyclic targets | Trajectory completion only; effect checks, settling, validation, and recovery are disabled |
+| `ExpertProgramOpenDrawer-v1` | Registered simulation call lowered to the built-in `Slide` primitive | Trajectory completion only; effect checks, settling, validation, and recovery are disabled |
+| `HandOver-v1` | Built-in coordinated `HandOver` over disjoint source and destination resources | Rigid-object settling plus measured object-near-target validation |
+
+All three IDs are created while their Gym JSON is loaded. The shared configured
+runtime decoder builds a provider-free scene, robot profile, and allowlisted
+live services, then registers the existing `EmbodiedEnv` under the JSON-selected
+ID. The task package contains no task-specific environment subclasses.
+
+The two trajectory-only examples are demonstrations, not physical task-success
+claims. Open Drawer's `Slide` completion, in particular, does not prove measured
+drawer travel.
+
 For the lower-level planning and execution contracts, see {doc}`index`. For
 robot resource and endpoint declarations, see {doc}`robot_skill_profiles`.
 
@@ -235,3 +362,19 @@ simulation acceptance.
 Articulated tasks should reuse the existing motion-centric `Slide` primitive and
 verify articulation completion at the application boundary. A dedicated drawer
 or `OperateArticulation` semantic path is intentionally not part of this API.
+
+## Qualification boundaries
+
+The reusable contracts and focused tests do not by themselves qualify every
+physical task. Before broader task-level claims, run the repeated-cube and Open
+Drawer integrations across controlled seeds and the intended randomization
+envelope, then inspect their persisted segment metadata. Concurrent task
+migration additionally requires an environment-qualified
+`ParallelCommandSafetyValidator`; resource disjointness alone is insufficient.
+
+A generic `DeclarativeExpertProgramEnv` is intentionally deferred. Concrete
+tasks still own scene assets, sensors, evidence sources, and their immutable
+integration registration. Custom non-control-part endpoints on the standard
+path currently use timed/open-loop completion until registration-owned
+closed-loop feedback, projection, metric, and evidence-provider factories are
+defined for those endpoint families.

@@ -115,7 +115,6 @@ def test_program_rejects_nested_repeat_expansion_above_static_budget() -> None:
 
     with pytest.raises(ValueError, match="expands to more than"):
         ExpertProgramCfg(
-            schema_version=2,
             program_id="too_large",
             integration=_integration(),
             targets={},
@@ -154,7 +153,6 @@ def test_programmatic_config_rejects_unknown_target_reference() -> None:
 
     with pytest.raises(ValueError, match="Unknown target reference 'missing'"):
         ExpertProgramCfg(
-            schema_version=2,
             program_id="missing_target",
             integration=_integration(),
             targets={},

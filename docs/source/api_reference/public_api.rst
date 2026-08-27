@@ -656,6 +656,7 @@ embodichain.lab.sim.atomic_actions.plans
    CompiledTrajectory
    EffectVerificationRequirement
    PlannerDiagnostics
+   PlanningFailure
    TimedTrajectory
    TrajectorySegment
    normalize_success_mask
@@ -1881,54 +1882,6 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
-
-embodichain_tasks.expert_program
---------------------------------
-
-Declarative task references that bind packaged Expert Programs to live
-simulation scenes, robot skill profiles, and atomic actions.
-
-.. currentmodule:: embodichain_tasks.expert_program
-
-.. autosummary::
-
-   ExpertProgramOpenDrawerEnv
-   ExpertProgramRepeatedPickPlaceEnv
-   HandOverEnv
-
-embodichain_tasks.expert_program.hand_over
-------------------------------------------
-
-.. currentmodule:: embodichain_tasks.expert_program.hand_over
-
-.. autosummary::
-
-   HandOverEnv
-   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
-   HAND_OVER_POSE_PROVIDER
-   create_hand_over_robot_profile_binding
-   create_hand_over_scene_binding
-
-embodichain_tasks.expert_program.open_drawer
---------------------------------------------
-
-.. currentmodule:: embodichain_tasks.expert_program.open_drawer
-
-.. autosummary::
-
-   ExpertProgramOpenDrawerEnv
-
-embodichain_tasks.expert_program.repeated_pick_place
-----------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.expert_program.repeated_pick_place
-
-.. autosummary::
-
-   ExpertProgramRepeatedPickPlaceEnv
-   REPEATED_PICK_PLACE_EXPERT_PROGRAM_REGISTRATION
-   create_repeated_pick_place_robot_profile_binding
-   create_repeated_pick_place_scene_binding
 
 embodichain_tasks.rl
 --------------------

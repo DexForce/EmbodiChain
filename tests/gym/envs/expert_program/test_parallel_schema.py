@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for Expert Program schema Version 2 parallel nodes."""
+"""Tests for Expert Program parallel nodes."""
 
 from __future__ import annotations
 
@@ -34,9 +34,8 @@ from embodichain.lab.gym.envs.expert_program.decoder import (
 )
 
 
-def _payload(*, schema_version: int = 2) -> dict[str, object]:
+def _payload() -> dict[str, object]:
     return {
-        "schema_version": schema_version,
         "program_id": "parallel_pick",
         "integration": {
             "robot_profile": "dual_arm",
@@ -66,10 +65,9 @@ def _payload(*, schema_version: int = 2) -> dict[str, object]:
     }
 
 
-def test_decode_schema_v2_parallel_with_explicit_barrier() -> None:
+def test_decode_parallel_with_explicit_barrier() -> None:
     config = decode_expert_program(_payload())
 
-    assert config.schema_version == 2
     assert type(config.program) is ParallelCfg
     assert len(config.program.branches) == 2
     assert config.program.barrier == BarrierCfg(
@@ -77,14 +75,6 @@ def test_decode_schema_v2_parallel_with_explicit_barrier() -> None:
         timeout_steps=200,
         failure_policy="fail_fast",
     )
-
-
-def test_schema_v1_is_rejected_before_program_decoding() -> None:
-    with pytest.raises(ExpertProgramDecodeError) as error:
-        decode_expert_program(_payload(schema_version=1))
-
-    assert error.value.code == "unsupported_schema_version"
-    assert error.value.path == ("schema_version",)
 
 
 def test_parallel_requires_two_branches_and_explicit_barrier() -> None:
@@ -109,7 +99,6 @@ def test_parallel_requires_two_branches_and_explicit_barrier() -> None:
 def test_barrier_is_not_valid_as_a_standalone_program() -> None:
     with pytest.raises(TypeError, match="exact ProgramNodeCfg"):
         ExpertProgramCfg(
-            schema_version=2,
             program_id="invalid_barrier",
             integration=ExpertProgramIntegrationCfg(
                 robot_profile="profile",

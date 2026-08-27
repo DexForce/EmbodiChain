@@ -25,6 +25,7 @@ import torch
 
 from embodichain.lab.gym.envs.demo import DemoSegment
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs.expert_program import CompiledProgram
 
 
 class _FakeBridge:
@@ -58,6 +59,7 @@ def _uninitialized_env(cls: type[EmbodiedEnv], expert_program: object) -> Embodi
     env.cfg = SimpleNamespace(expert_program=expert_program)
     env.sim = SimpleNamespace(device=torch.device("cpu"))
     env._num_envs = 2
+    env._expert_program_adapter = None
     env._active_expert_program_bridge = None
     return env
 
@@ -87,6 +89,37 @@ def test_create_demo_segments_uses_explicit_compiler_and_bridge_hooks() -> None:
     assert env.compiled_input is program
     assert env.bridge_input is compiled_program
     assert env._active_expert_program_bridge is bridge
+
+
+def test_episode_program_takes_precedence_over_static_configuration() -> None:
+    """Callers can select a fresh declarative program for one episode."""
+    configured_program = object()
+    episode_program = object()
+    compiled_program = object()
+    bridge = _FakeBridge(DemoSegment(actions=(), name="episode"))
+    env = _uninitialized_env(_DeclarativeEnv, configured_program)
+    env.compiled_program = compiled_program
+    env.bridge = bridge
+
+    segments = env.create_demo_segments(expert_program=episode_program)
+
+    assert tuple(segments)[0].name == "episode"
+    assert env.compiled_input is episode_program
+    assert env.bridge_input is compiled_program
+
+
+def test_episode_compiled_program_bypasses_recompilation() -> None:
+    """A trusted MLLM frontend can pass its canonical compiled snapshot."""
+    compiled_program = object.__new__(CompiledProgram)
+    bridge = _FakeBridge(DemoSegment(actions=(), name="model"))
+    env = _uninitialized_env(_DeclarativeEnv, object())
+    env.bridge = bridge
+
+    segments = env.create_demo_segments(expert_program=compiled_program)
+
+    assert tuple(segments)[0].name == "model"
+    assert not hasattr(env, "compiled_input")
+    assert env.bridge_input is compiled_program
 
 
 def test_configured_program_requires_explicit_adapter() -> None:
@@ -120,3 +153,14 @@ def test_expert_program_success_uses_the_completed_bridge_mask() -> None:
     assert success.dtype == torch.bool
     assert success.device == env.device
     assert success.tolist() == [True, False]
+
+
+def test_dynamic_expert_program_success_does_not_require_static_config() -> None:
+    """Episode-injected programs publish the same completed bridge result."""
+    env = _uninitialized_env(EmbodiedEnv, None)
+    env._active_expert_program_bridge = SimpleNamespace(
+        program_completed=True,
+        completion_mask=torch.tensor([False, True]),
+    )
+
+    assert env.is_task_success().tolist() == [False, True]

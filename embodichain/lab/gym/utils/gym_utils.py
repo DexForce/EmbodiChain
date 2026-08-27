@@ -403,6 +403,14 @@ def config_to_cfg(
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
+    A config containing ``expert_program_runtime`` is decoded before the
+    serialized Expert Program is loaded. After the remaining environment
+    values parse successfully, the existing
+    :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class is registered under
+    the config's ``id`` with the decoded runtime factory.
+    Re-loading an identical declaration is idempotent; an ID collision with a
+    different declaration fails closed.
+
     Args:
         config (dict): The configuration dictionary containing robot, sensor, light, background, and interactive objects.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
@@ -460,6 +468,21 @@ def config_to_cfg(
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
+    configured_expert_program_runtime = None
+    if "expert_program_runtime" in config:
+        if expert_program_path_override is None and "expert_program_path" not in config:
+            raise ValueError(
+                "expert_program_runtime requires expert_program_path or an "
+                "expert_program_path_override."
+            )
+        from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+            _decode_configured_expert_program_runtime,
+        )
+
+        configured_expert_program_runtime = _decode_configured_expert_program_runtime(
+            config["expert_program_runtime"]
+        )
+
     configured_expert_program_path = config.get("expert_program_path")
     if expert_program_path_override is not None or "expert_program_path" in config:
         if expert_program_path_override is not None:
@@ -485,10 +508,13 @@ def config_to_cfg(
         from embodichain.lab.gym.envs.expert_program.loader import (
             load_expert_program,
         )
-        from embodichain.lab.gym.utils.registration import get_env_spec
 
-        env_spec = get_env_spec(config["id"])
-        registration = env_spec.expert_program_registration
+        if configured_expert_program_runtime is None:
+            from embodichain.lab.gym.utils.registration import get_env_spec
+
+            registration = get_env_spec(config["id"]).expert_program_registration
+        else:
+            registration = configured_expert_program_runtime.registration
         if registration is not None:
             registration.assert_unchanged()
         expert_program = load_expert_program(
@@ -768,6 +794,17 @@ def config_to_cfg(
                 params=term_params_modified.get("params", {}),
             )
             setattr(env_cfg.actions, term_name, action_term)
+
+    if configured_expert_program_runtime is not None:
+        from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+            _register_configured_expert_program_runtime,
+        )
+
+        _register_configured_expert_program_runtime(
+            config["id"],
+            configured_expert_program_runtime,
+            max_episode_steps=env_cfg.max_episode_steps,
+        )
 
     return env_cfg
 
