@@ -117,6 +117,8 @@ def _callable_constructs_real_sim(obj):
 
 def _requires_real_sim(item):
     """Return whether a test item creates a real SimulationManager."""
+    if item.get_closest_marker("subprocess_sim") is not None:
+        return False
     if item.get_closest_marker("requires_sim") is not None:
         return True
     if item.get_closest_marker("no_sim") is not None:

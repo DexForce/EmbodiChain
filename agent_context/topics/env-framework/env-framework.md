@@ -9,10 +9,13 @@
 
 | File | Role |
 |---|---|
+| `embodichain/__main__.py` | Unified CLI dispatch, including `list-env` environment discovery |
 | `embodichain/lab/gym/envs/base_env.py` | `BaseEnv(gym.Env)` + `EnvCfg` — low-level env loop |
 | `embodichain/lab/gym/envs/types.py` | `ControllerAction` — owned controller-ready action boundary |
 | `embodichain/lab/gym/envs/embodied_env.py` | `EmbodiedEnv(BaseEnv)` + `EmbodiedEnvCfg` — modular task base class |
 | `embodichain/lab/gym/utils/registration.py` | `@register_env` decorator + `REGISTERED_ENVS` registry + `make()` |
+| `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing and config-owned runtime registration |
+| `embodichain/lab/gym/envs/expert_program/configured_runtime.py` | Strict built-in Expert Program runtime decoder |
 | `embodichain_tasks/embodichain_tasks/__init__.py` | Recursively imports official tasks to trigger registration |
 | `embodichain/lab/gym/envs/managers/__init__.py` | Manager re-exports: `EventManager`, `ObservationManager`, `RewardManager`, `ActionManager`, `DatasetManager` |
 | `embodichain/lab/gym/envs/wrapper/no_fail.py` | `NoFailWrapper` — forces `is_task_success() → True` |
@@ -86,8 +89,15 @@ gym.Env
 
 ### Expert Program completion (`embodied_env.py`, `expert_program/bridge.py`)
 
-- `EmbodiedEnvCfg.expert_program` remains opt-in and requires an explicit
-  `ExpertProgramEnvironmentAdapter` supplied by the concrete environment.
+- `EmbodiedEnvCfg.expert_program` remains opt-in. A registered task may attach
+  an `ExpertProgramAdapterFactory` to its `EnvSpec`; `EmbodiedEnv` binds the
+  exact adapter after `BaseEnv` has initialized the live scene and robot.
+- A standard simulation adapter factory exposes its immutable registration, so
+  `EnvSpec` derives the catalog used by `config_to_cfg()` preflight from the
+  same declaration that later creates the live adapter.
+- `create_demo_segments(expert_program=...)` accepts a config or trusted
+  `CompiledProgram` for one episode, allowing an MLLM frontend to use the same
+  bridge without mutating the environment's static config.
 - `create_demo_segments()` retains the active `AtomicDemoBridge` while its lazy
   segments execute.
 - For an enabled program, `is_task_success()` returns all false until the bridge
@@ -120,14 +130,41 @@ class MyTaskEnv(EmbodiedEnv):
    `REGISTERED_ENVS` dict, keyed by `uid`.
 3. It also calls `gym.register()` so the env is available via
    `gym.make(uid)`.
-4. `kwargs` passed to `@register_env` must be **JSON-serialisable** (no
+4. Simulator tasks with a supported RL training config declare
+   `supports_rl=True`; this is stored on `EnvSpec` and is not forwarded to the
+   environment constructor.
+5. `kwargs` passed to `@register_env` must be **JSON-serialisable** (no
    classes/types). A `RuntimeError` is raised otherwise.
-5. Use `override=True` to re-register an existing uid (useful in scripts/tests).
+6. Use `override=True` to re-register an existing uid (useful in scripts/tests).
 
 ### Gym ID convention
 
-Format: `<TaskName>-v<N>` (e.g. `PourWater-v3`, `PushCubeRL`).
+Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
+
+### Configuration-owned Expert Program environment
+
+A simple supported Expert Program does not require a task subclass. Its Gym
+config can include an `expert_program_runtime` declaration; `config_to_cfg()`
+strictly decodes the declaration, uses its immutable catalog to preflight the
+program, parses the remaining environment config, and then calls
+`register_env_function(EmbodiedEnv, config["id"], ...)`.
+
+The ID is selected by the config and may be any free valid Gym ID. Loading the
+same ID with the same runtime and episode limit is idempotent. Reusing it for a
+different class, runtime declaration, or limit fails closed; the loader does
+not use `override=True`. Registration is process-local, so callers must load
+the Gym config before calling `gym.make(id)`. Such an ID is not present merely
+because task-package discovery ran.
+
+The runtime has no task-level kind. It composes a typed scene and robot profile
+with optional allowlisted live-service declarations. The built-in service
+leaves currently cover antipodal parallel-jaw grasp generation, configured
+hand-over poses, articulation-link Slide lowering, and joint-position
+constraint evidence. New executable provider families require a core
+allowlisted implementation and decoder entry; never serialize dotted imports
+or arbitrary callables into this config boundary. The three official Expert
+Program examples use this path and have no task environment subclass.
 
 ### Instantiation
 
@@ -137,6 +174,28 @@ env = make("MyTask-v1", cfg=my_cfg)
 ```
 
 Or via gymnasium: `gym.make("MyTask-v1")`.
+
+### Listing registered environments
+
+`embodichain list-env` calls `discover_task_packages()` and prints a stable
+table whose `Task` column is a directory tree derived from task-first modules
+and packaged `configs/tasks/` paths. The other columns show the environment ID
+and supported use:
+
+- `[Expert Demo: Expert Program]` comes from a task-local Gym config declaring
+  `expert_program_path` or `expert_program_runtime`;
+- `[Expert Demo: Handwritten Trajectory]` means the registered task class
+  overrides `create_demo_segments()` or `create_demo_action_list()`;
+- `[RL]` comes from explicit simulator `supports_rl`, a task-local agents
+  directory, or a registered lightweight learning environment;
+- `[Environment Only]` means none of those supported execution paths is
+  currently declared.
+
+Configuration-owned Expert Program IDs are included from their packaged task
+configs without eagerly building or registering the runtime. Duplicate
+JSON/YAML variants and registry entries merge case-insensitively into one task
+leaf. The framework-level `EmbodiedEnv-v1` registration is omitted because it
+is a reusable base environment rather than an installed task-package entry.
 
 ---
 
@@ -241,37 +300,36 @@ from the event config before the event manager is created.
 
 Use the `/add-task-env` skill. It scaffolds:
 
-1. A new file under `embodichain_tasks/embodichain_tasks/<category>/`.
-2. `@register_env("<GymId>")` decorator on the class.
-3. `EmbodiedEnvCfg` subclass with robot, sensor, object configs.
-4. Stub implementations of `_setup_robot()`, `evaluate()`, `get_reward()`.
-5. Export entry in the category package's `__init__.py`.
-6. Test stub.
+1. A task-named module at
+   `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`.
+2. The `@register_env("<GymId>")` decorator in that module.
+3. A task-local `configs/tasks/<category-path>/<task>/env.{json,yaml}`
+   containing the scene and MDP configuration.
+4. Optional task-local Expert Program or RL configuration artifacts.
+5. A module `__all__` declaration and focused test stub.
+
+The category path starts with a top-level task family and may include a
+subdomain. Tableware tasks use `manipulation/tableware`; general manipulation
+tasks can stay directly under `manipulation`.
+
+Do not organize task ownership around a solution method such as `rl` or
+`expert_program`. Keep registration in the task-named module and do not create
+a same-named Python package for a task that has only one Python entry point.
 
 ### Minimal manual skeleton
 
 ```python
+from typing import Any
+
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
-@configclass
-class MyTaskCfg(EmbodiedEnvCfg):
-    robot: RobotCfg = MISSING
-
 @register_env("MyTask-v1", max_episode_steps=300)
 class MyTaskEnv(EmbodiedEnv):
-    def __init__(self, cfg: MyTaskCfg = MyTaskCfg(), **kwargs):
+    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs: Any) -> None:
         super().__init__(cfg, **kwargs)
 
-    def _setup_robot(self, **kwargs) -> Robot:
-        # load robot, set self.single_action_space
-        ...
-
-    def evaluate(self, **kwargs) -> dict:
-        return {"success": ..., "fail": ...}
-
-    def get_reward(self, obs, action, info) -> torch.Tensor:
-        ...
+    # Keep only behavior that cannot be expressed by task-local config here.
 ```
 
 ---
@@ -389,6 +447,8 @@ parent; the first `warmup_steps` samples are discarded.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `KeyError: "Env X not found in registry"` | Task entry-point package not imported → `@register_env` never ran | Check the `embodichain.tasks` entry point and package import |
+| Config-owned Expert Program ID is missing | `gym.make(id)` ran before its Gym config passed through `config_to_cfg()` | Load/build the environment config first, then construct the registered ID |
+| Config-owned ID reports a different runtime | The same process already registered that ID with different runtime data or episode limit | Choose a new ID or keep the declaration identical; do not override it |
 | `RuntimeError: non json dumpable kwargs` | Passing class/type objects to `@register_env(…, kwarg=SomeClass)` | Use string keys + lookup mapping instead |
 | `single_action_space is None` | `_setup_robot()` didn't set `self.single_action_space` | Set it before returning the Robot |
 | `_setup_robot()` returns `None` | Forgot to return the Robot instance | Ensure `return robot` |

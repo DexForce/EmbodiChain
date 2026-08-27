@@ -19,8 +19,10 @@
 The port in this module deliberately consumes the same explicit
 :class:`SimulationSceneBinding` used to construct the semantic scene registry.
 It never scans a simulation or guesses a native entity from a canonical name.
-Post-policy actions are full-qpos holds and therefore remain inside the normal
-Gym ``env.step()`` path owned by :class:`AtomicDemoBridge`.
+Post-policy actions remain inside the normal Gym ``env.step()`` path owned by
+:class:`AtomicDemoBridge`. Rows eligible for the policy reuse full drive targets
+so physical contact does not erase position-control preload; rows already
+inactive use fresh measured-position holds.
 """
 
 from __future__ import annotations
@@ -102,7 +104,8 @@ class SimulationSegmentPolicyPort:
     Args:
         simulation: Live simulation used only for UIDs declared in
             ``scene_binding``.
-        robot: Live robot used to produce controller-safe full-qpos holds.
+        robot: Live robot used to produce full target-qpos holds while the
+            post-policy observes settling.
         scene_binding: Exact canonical-to-native scene declaration.
         settle_presets: Named settling policies. ``None`` installs the shared
             ``rigid_object`` and ``articulation`` presets.
@@ -126,7 +129,9 @@ class SimulationSegmentPolicyPort:
     ) -> None:
         if type(scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
-        qpos = self._read_robot_qpos(robot)
+        qpos = self._read_robot_qpos(robot, target=False)
+        self._robot_qpos_shape = qpos.shape
+        self._robot_qpos_device = qpos.device
         if env_ids is None:
             env_ids = torch.arange(
                 qpos.shape[0],
@@ -235,7 +240,7 @@ class SimulationSegmentPolicyPort:
         segment: Any,
         active_mask: torch.Tensor,
     ) -> Iterator[torch.Tensor]:
-        """Yield full-qpos hold actions until active rows settle or time out.
+        """Yield full target-qpos hold actions until rows settle or time out.
 
         Args:
             policy: Exact compiled ``wait_stable`` policy.
@@ -245,7 +250,10 @@ class SimulationSegmentPolicyPort:
                 not participate in settling, timeout, or success results.
 
         Yields:
-            Fresh full-qpos hold commands consumed by ordinary ``env.step()``.
+            Fresh full target-qpos hold commands consumed by ordinary
+            ``env.step()``. Reading drive targets instead of measured joint
+            positions preserves contact preload in position-controlled tools.
+            Rows inactive when the policy starts use fresh measured qpos holds.
 
         Timeout is a normal row-local result boundary. Timed-out rows are
         exposed through :meth:`post_policy_result` and
@@ -307,7 +315,7 @@ class SimulationSegmentPolicyPort:
                 return
             if bool(state.timeout_mask.any().item()):
                 return
-            yield self._read_robot_qpos(self._robot)
+            yield self._hold_robot_qpos(active_mask)
             elapsed_steps += 1
 
     def post_policy_result(
@@ -496,12 +504,16 @@ class SimulationSegmentPolicyPort:
         return accepted
 
     @staticmethod
-    def _read_robot_qpos(robot: Robot) -> torch.Tensor:
-        """Capture one finite full-robot position batch."""
+    def _read_robot_qpos(robot: Robot, *, target: bool) -> torch.Tensor:
+        """Capture one finite current- or target-qpos full-robot batch."""
+        if type(target) is not bool:
+            raise TypeError("target must be a bool.")
+        mode = "target" if target else "current"
+        call = f"robot.get_qpos(target={target})"
         get_qpos = getattr(robot, "get_qpos", None)
         if not callable(get_qpos):
-            raise TypeError("robot must provide get_qpos().")
-        qpos = get_qpos()
+            raise TypeError(f"robot must provide {call}.")
+        qpos = get_qpos(target=target)
         if (
             not isinstance(qpos, torch.Tensor)
             or not qpos.is_floating_point()
@@ -509,10 +521,39 @@ class SimulationSegmentPolicyPort:
             or qpos.shape[0] == 0
             or qpos.shape[1] == 0
         ):
-            raise ValueError("robot.get_qpos() must return floating shape (B, J).")
+            raise ValueError(
+                f"{call} must return {mode} floating full-qpos shape (B, J)."
+            )
         if not bool(torch.isfinite(qpos).all().item()):
-            raise ValueError("robot.get_qpos() must contain finite values.")
+            raise ValueError(f"{call} must return finite {mode} qpos values.")
         return qpos.clone()
+
+    def _hold_robot_qpos(self, active_mask: torch.Tensor) -> torch.Tensor:
+        """Keep initial active rows on targets and inactive rows on current qpos."""
+        target_qpos = self._read_robot_qpos(self._robot, target=True)
+        if (
+            target_qpos.shape != self._robot_qpos_shape
+            or target_qpos.device != self._robot_qpos_device
+        ):
+            raise ValueError(
+                "robot.get_qpos(target=True) target full qpos must match the "
+                "construction-time current full qpos shape and device."
+            )
+        if bool(active_mask.all().item()):
+            return target_qpos
+
+        current_qpos = self._read_robot_qpos(self._robot, target=False)
+        if (
+            current_qpos.shape != self._robot_qpos_shape
+            or current_qpos.device != self._robot_qpos_device
+        ):
+            raise ValueError(
+                "robot.get_qpos(target=False) current full qpos must match the "
+                "construction-time current full qpos shape and device."
+            )
+        hold_qpos = current_qpos.clone()
+        hold_qpos[active_mask] = target_qpos[active_mask]
+        return hold_qpos
 
     def _validate_active_mask(self, active_mask: torch.Tensor) -> torch.Tensor:
         """Return one owned row mask aligned with the simulator batch."""

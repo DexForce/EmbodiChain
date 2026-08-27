@@ -31,6 +31,8 @@ topics:
       - manual update
       - GPU physics
       - simulation lifecycle
+      - ArticulationJointKinematics
+      - get_parent_joint_chain
     paths:
       - topics/simulation-system/simulation-system.md
     source_of_truth:
@@ -41,6 +43,7 @@ topics:
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
       - embodichain/lab/sim/objects/__init__.py
+      - embodichain/lab/sim/objects/articulation.py
       - embodichain/lab/sim/sensors/__init__.py
       - embodichain/lab/sim/solvers/__init__.py
       - embodichain/lab/sim/planners/__init__.py
@@ -71,6 +74,8 @@ topics:
       - gym environment
       - register env
       - task registration
+      - list env
+      - list-env
       - 环境框架
       - 任务环境
       - env profiler
@@ -83,6 +88,9 @@ topics:
       - EmbodiedEnv
       - BaseEnv
       - register_env
+      - list-env
+      - environment listing
+      - supports_rl
       - gym
       - task
       - step
@@ -97,17 +105,20 @@ topics:
     paths:
       - topics/env-framework/env-framework.md
     source_of_truth:
+      - embodichain/__main__.py
       - embodichain/lab/gym/envs/base_env.py
       - embodichain/lab/gym/envs/types.py
       - embodichain/lab/gym/envs/demo.py
       - embodichain/lab/gym/envs/embodied_env.py
       - embodichain/lab/gym/envs/expert_program/bridge.py
+      - embodichain/learning/rl/env.py
       - embodichain_tasks/embodichain_tasks/
       - embodichain/lab/gym/utils/
     related_topics:
       - simulation-system
       - manager-functor
       - sim-visualization
+      - expert-programs
     status: active
 
   - id: manager-functor
@@ -387,7 +398,11 @@ topics:
       - embodichain/lab/sim/planners/utils.py
       - embodichain/lab/sim/skills/scene.py
       - embodichain/toolkits/graspkit/pose_generator.py
-      - embodichain_tasks/embodichain_tasks/expert_program/repeated_pick_place.py
+      - embodichain/lab/gym/envs/expert_program/configured_runtime.py
+      - embodichain/lab/gym/envs/expert_program/_configured_runtime_services.py
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/env.json
+      - embodichain_tasks/configs/tasks/manipulation/hand_over/env.json
     related_topics:
       - simulation-system
       - robot-system
@@ -460,8 +475,11 @@ topics:
       - embodichain/lab/gym/utils/gym_utils.py
       - embodichain/lab/gym/utils/registration.py
       - embodichain/utils/utility.py
-      - embodichain_tasks/configs/agents/rl/
-      - embodichain_tasks/embodichain_tasks/rl/
+      - embodichain_tasks/configs/tasks/
+      - embodichain_tasks/configs/tasks/classic_control/
+      - embodichain_tasks/configs/tasks/manipulation/push_cube/
+      - embodichain_tasks/embodichain_tasks/classic_control/
+      - embodichain_tasks/embodichain_tasks/manipulation/push_cube.py
     related_topics:
       - simulation-system
       - env-framework
@@ -554,6 +572,7 @@ topics:
       - AtomicAction
       - ActionInvocation
       - AtomicActionEngine
+      - trajectory-only execution
       - trajectory ops
       - 原子动作
     keywords:
@@ -568,10 +587,13 @@ topics:
       - ParallelJawGripperModelCfg
       - grasp pose generator
       - ActionPlan
+      - PlanningFailure
       - TrajectorySegment
       - TimedTrajectory
       - PlanningContext
       - ExecutionSession
+      - ExecutionEvent
+      - TRAJECTORY_SEGMENT_ENTERED
       - EffectVerificationRequest
       - EffectVerificationResult
       - eligible_mask
@@ -609,10 +631,14 @@ topics:
       - ObjectSemantics
       - entity_id
       - frozen ObjectSemantics
-      - legacy uid
-      - stable entity identity
+      - canonical entity identity
       - snapshot grounding
       - AssembleGoal
+      - PushObject
+      - PushObjectGoal
+      - PushObjectOptions
+      - PushObjectToolCalibration
+      - push_object
       - AssembleAffordance
       - base_pose
       - _scene_dependencies
@@ -658,6 +684,7 @@ topics:
       - SemanticSkillCompiler
       - SkillRuntime
       - AtomicSkills
+      - SemanticCallAvailability
       - SkillResult
       - SkillFailure
       - execution_prefix_length
@@ -690,7 +717,13 @@ topics:
       - SceneEntityPose
       - PressGoal.target_pose
       - SlideGoal.target_pose
+      - OpenDoorGoal.target_pose
       - TwistGoal.target_pose
+      - OpenDoorGoal.open_fraction
+      - OpenDoorAffordance.opening_direction
+      - OpenDoorAffordance.from_articulation
+      - hinge_joint_name
+      - ObservedArticulationJointState
       - open_loop
       - axis_translation_keyframes
       - dynamic goal
@@ -784,6 +817,7 @@ topics:
       - embodichain/lab/sim/skills/parallel.py
       - embodichain/lab/sim/skills/parallel_runtime.py
       - embodichain/lab/sim/skills/runtime.py
+      - embodichain/lab/sim/skills/_assembly.py
       - embodichain/lab/sim/skills/__init__.py
       - scripts/tutorials/semantic_skill/
     related_topics:
@@ -791,4 +825,87 @@ topics:
       - motion-planning
       - robot-system
       - ik-solvers
+      - expert-programs
+    status: active
+
+  - id: expert-programs
+    title: Declarative Expert Programs
+    aliases:
+      - expert program
+      - expert programs
+      - declarative expert program
+      - declarative expert programs
+      - expert program schema
+      - expert program compiler
+      - expert program bridge
+      - expert program registration
+      - 专家程序
+      - 声明式专家程序
+    keywords:
+      - ExpertProgramCfg
+      - ExpertProgramCompiler
+      - CompiledProgram
+      - ExpertProgramEnvironmentAdapter
+      - SimulationExpertProgramRegistration
+      - RegisteredSemanticLowererFactory
+      - RegisteredSemanticLowererDeclaration
+      - AtomicDemoBridge
+      - DemoSegment
+      - SimulationSceneBinding
+      - SimulationRobotSkillProfileBinding
+      - create_simulation_expert_program_adapter
+      - load_expert_program
+      - decode_expert_program
+      - expert_program_path
+      - expert_program_runtime
+      - configured Expert Program runtime
+      - config-driven environment
+      - runtime environment ID
+      - dynamic environment registration
+      - SequenceCfg
+      - RepeatCfg
+      - SegmentCfg
+      - InvokeCfg
+      - ParallelCfg
+      - BarrierCfg
+      - RegisteredSemanticCallCfg
+      - ObjectNearTargetValidatorCfg
+      - ArticulationJointPositionValidatorCfg
+      - integration fingerprint
+      - provider-aware preflight
+      - segment acceptance
+      - trajectory-only preset
+      - effect_monitors
+      - target_pose_mode
+      - simulation.move_held_object
+      - simulation.pour
+      - simulation.push_object
+      - program completion mask
+      - repeated pick place
+      - open drawer
+      - hand over
+      - pour water
+      - rearrangement
+      - 配置生成环境
+      - 运行时环境注册
+    paths:
+      - topics/expert-programs/expert-programs.md
+    source_of_truth:
+      - embodichain/agents/mllm/expert_program.py
+      - embodichain/lab/gym/envs/expert_program/
+      - embodichain/lab/gym/envs/embodied_env.py
+      - embodichain/lab/gym/envs/demo.py
+      - embodichain/lab/scripts/run_env.py
+      - embodichain/lab/sim/skills/calls.py
+      - embodichain/lab/sim/skills/compiler.py
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/
+      - embodichain_tasks/configs/tasks/manipulation/hand_over/
+      - embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/
+      - embodichain_tasks/configs/tasks/manipulation/tableware/rearrangement/
+    related_topics:
+      - atomic-actions
+      - env-framework
+      - simulation-system
+      - motion-planning
     status: active

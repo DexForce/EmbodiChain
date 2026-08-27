@@ -18,18 +18,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
+import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
 import yaml
 
+from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramCompiler,
+    SimulationRobotSkillProfileBinding,
     decode_expert_program,
 )
+from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+    _decode_configured_expert_program_runtime,
+)
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.gym.envs.expert_program.bridge import (
     AtomicDemoBridge,
     BufferedGymCommandSink,
@@ -38,11 +48,15 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
 )
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
+    AtomicActionEngine,
+    DynamicCollisionMode,
     EntityState,
     ObjectSemantics,
+    Slide,
     SlideAffordance,
     SlideOptions,
     TaskState,
+    TimedTerminalAcceptance,
 )
 from embodichain.lab.sim.skills.calls import Pick, Place, RegisteredSemanticCall
 from embodichain.lab.sim.skills.runtime import SkillResult, SkillStatus
@@ -50,18 +64,29 @@ from embodichain.lab.sim.skills.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRegistration,
+    SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
 )
-from embodichain_tasks.expert_program import open_drawer as drawer_task
-from embodichain_tasks.expert_program import repeated_pick_place as cube_task
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_REPEATED_CUBE_PROGRAM = Path("expert_program/repeated_pick_place.yaml")
-_OPEN_DRAWER_PROGRAM = Path("expert_program/open_drawer.yaml")
+_REPEATED_CUBE_PROGRAM = Path(
+    "tasks/manipulation/repeated_pick_place/expert/program.yaml"
+)
+_REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/env.json")
+_OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/expert/program.yaml")
+_OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/env.json")
+_OPEN_DRAWER_CALL_ID = "simulation.articulation_link_slide"
+_OPEN_DRAWER_ENTITY_ID = "drawer"
+_OPEN_DRAWER_HANDLE_ID = "drawer_handle"
+_OPEN_DRAWER_HANDLE_LINK_NAME = "large_handle_bar"
+_OPEN_DRAWER_SCENE_ID = "expert_program_open_drawer"
+_OPEN_DRAWER_PROFILE_ID = "expert_program_ur5_slide"
 _LIFECYCLE_BATCH_SIZE = 2
 _LIFECYCLE_ROBOT_DOF = 3
 _LIFECYCLE_STEP_DT = 0.02
+_EXPECTED_TRAJECTORY_SAMPLE_COUNT = 40
+_EXPECTED_GRASP_SAMPLES = 1_000
 
 
 class _NeverObserveProvider:
@@ -198,103 +223,6 @@ class _CompletedSegmentRuntime:
         return self._result
 
 
-class _LifecyclePostPolicyPort:
-    """Run every packaged settle policy and expose deterministic metadata."""
-
-    def __init__(
-        self,
-        observation: _FreshObservationPort,
-        lifecycle_events: list[tuple[str, int]],
-    ) -> None:
-        self._observation = observation
-        self._lifecycle_events = lifecycle_events
-        self.active_masks: list[torch.Tensor] = []
-        self._metadata: dict[int, dict[str, object]] = {}
-
-    def validate_policy(self, policy: object, *, segment: object) -> None:
-        del policy, segment
-
-    def actions(
-        self,
-        policy: object,
-        *,
-        segment: object,
-        active_mask: torch.Tensor,
-    ):
-        segment_index = int(getattr(segment, "segment_index"))
-        generation = self._observation.generations[-1]
-        self._lifecycle_events.append(("settle", segment_index))
-        self.active_masks.append(active_mask.clone())
-        self._metadata[id(policy)] = {
-            "status": "settled",
-            "segment_index": segment_index,
-            "observation_generation": generation,
-        }
-        yield torch.zeros(
-            (_LIFECYCLE_BATCH_SIZE, _LIFECYCLE_ROBOT_DOF),
-            dtype=torch.float32,
-        )
-
-    def post_policy_result(
-        self,
-        policy: object,
-        *,
-        segment: object,
-    ) -> torch.Tensor:
-        del policy, segment
-        return self.active_masks[-1].clone()
-
-    def post_policy_metadata(
-        self,
-        policy: object,
-        *,
-        segment: object,
-    ) -> dict[str, object]:
-        del segment
-        return dict(self._metadata[id(policy)])
-
-
-class _LifecycleValidatorPort:
-    """Validate every segment and filter one row after the first cycle."""
-
-    def __init__(
-        self,
-        observation: _FreshObservationPort,
-        lifecycle_events: list[tuple[str, int]],
-    ) -> None:
-        self._observation = observation
-        self._lifecycle_events = lifecycle_events
-        self._metadata: dict[int, dict[str, object]] = {}
-
-    def validate_validator(self, validator: object, *, segment: object) -> None:
-        del validator, segment
-
-    def validate(self, validator: object, *, segment: object) -> torch.Tensor:
-        segment_index = int(getattr(segment, "segment_index"))
-        generation = self._observation.generations[-1]
-        self._lifecycle_events.append(("validate", segment_index))
-        result = (
-            torch.tensor([True, False])
-            if segment_index == 0
-            else torch.ones(_LIFECYCLE_BATCH_SIZE, dtype=torch.bool)
-        )
-        self._metadata[id(validator)] = {
-            "segment_index": segment_index,
-            "observation_generation": generation,
-            "accepted_mask": result.tolist(),
-        }
-        return result
-
-    def validator_metadata(
-        self,
-        validator: object,
-        *,
-        segment: object,
-    ) -> dict[str, object]:
-        del segment
-        return dict(self._metadata[id(validator)])
-
-
 def _read_payload(relative_path: Path) -> dict[str, object]:
     """Load one packaged JSON/YAML example as inert data."""
     path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
@@ -304,6 +232,36 @@ def _read_payload(relative_path: Path) -> dict[str, object]:
         payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert type(payload) is dict
     return payload
+
+
+def _cube_runtime():
+    """Decode a fresh cube runtime directly from the packaged Gym config."""
+    payload = _read_payload(_REPEATED_CUBE_GYM_CONFIG)
+    return _decode_configured_expert_program_runtime(payload["expert_program_runtime"])
+
+
+def _drawer_runtime():
+    """Decode a fresh drawer runtime directly from the packaged Gym config."""
+    payload = _read_payload(_OPEN_DRAWER_GYM_CONFIG)
+    return _decode_configured_expert_program_runtime(payload["expert_program_runtime"])
+
+
+def _cube_robot_profile_binding() -> SimulationRobotSkillProfileBinding:
+    """Return the config-declared repeated Pick/Place robot profile."""
+    return _cube_runtime().registration.robot_profile_binding
+
+
+def _drawer_robot_profile_binding() -> SimulationRobotSkillProfileBinding:
+    """Return the config-declared Open Drawer robot profile."""
+    return _drawer_runtime().registration.robot_profile_binding
+
+
+def _configure_cube_environment():
+    """Load the packaged config and perform its runtime registration."""
+    path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / _REPEATED_CUBE_GYM_CONFIG
+    payload = _read_payload(_REPEATED_CUBE_GYM_CONFIG)
+    cfg = config_to_cfg(payload, source_path=path)
+    return payload, cfg, REGISTERED_ENVS[str(payload["id"])]
 
 
 def _cube_compiler() -> ExpertProgramCompiler:
@@ -342,8 +300,15 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
     """The packaged cube task expands to three independently scoped cycles."""
     config = decode_expert_program(_read_payload(_REPEATED_CUBE_PROGRAM))
 
-    assert config.integration.scene_registry == cube_task.SCENE_REGISTRY_ID
-    assert config.integration.robot_profile == cube_task.ROBOT_PROFILE_ID
+    runtime = _cube_runtime()
+    assert (
+        config.integration.scene_registry
+        == runtime.registration.scene_binding.registry_id
+    )
+    assert (
+        config.integration.robot_profile
+        == runtime.registration.robot_profile_binding.profile_id
+    )
 
     segments = tuple(_cube_compiler().compile(config))
 
@@ -355,19 +320,8 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
     assert [
         segment.calls[1].target_selections[0].value_index for segment in segments
     ] == [0, 1, 0]
-    assert [
-        segment.validators[0].target_selection.value_index for segment in segments
-    ] == [
-        0,
-        1,
-        0,
-    ]
-    assert all(
-        segment.post_policies[0].cfg.kind == "wait_stable" for segment in segments
-    )
-    assert all(
-        segment.validators[0].cfg.position_tolerance == 0.12 for segment in segments
-    )
+    assert all(segment.post_policies == () for segment in segments)
+    assert all(segment.validators == () for segment in segments)
 
 
 def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
@@ -382,21 +336,16 @@ def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
         clock,
     )
     runtime = _CompletedSegmentRuntime(observation, lifecycle_events)
-    post_port = _LifecyclePostPolicyPort(observation, lifecycle_events)
-    validator_port = _LifecycleValidatorPort(observation, lifecycle_events)
     bridge = AtomicDemoBridge(
         compiled,
         runtime,
         sink,
         clock,
-        post_policy_port=post_port,
-        validator_port=validator_port,
     )
 
     iterator = iter(bridge.iter_segments())
     segment_names: list[str | None] = []
     segment_metadata: list[dict[str, object]] = []
-    action_metadata: list[dict[str, object]] = []
     accepted_masks: list[list[bool]] = []
     for segment_index in range(3):
         observation_count = len(observation.generations)
@@ -408,9 +357,8 @@ def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
         actions = tuple(demo_segment.actions)
 
         assert observation.generations == list(range(1, segment_index + 2))
-        assert len(actions) == 1
+        assert actions == ()
         assert demo_segment.metadata["validation"] is None
-        action_metadata.append(dict(actions[0].metadata))
         accepted_masks.append(demo_segment.validator().tolist())
         segment_metadata.append(dict(demo_segment.metadata))
 
@@ -421,74 +369,35 @@ def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
     assert runtime.analysis_window_lengths == [6, 4, 2]
     assert runtime.executed_semantic_ids == ["pick", "place"] * 3
     assert observation.generations == [1, 2, 3]
-    assert lifecycle_events == [
-        ("observe", 1),
-        ("settle", 0),
-        ("validate", 0),
-        ("observe", 2),
-        ("settle", 1),
-        ("validate", 1),
-        ("observe", 3),
-        ("settle", 2),
-        ("validate", 2),
-    ]
+    assert lifecycle_events == [("observe", 1), ("observe", 2), ("observe", 3)]
     assert runtime.eligible_masks[0] is None
     assert [mask.tolist() for mask in runtime.eligible_masks[1:]] == [
-        [True, False],
-        [True, False],
-    ]
-    assert [mask.tolist() for mask in post_port.active_masks] == [
         [True, True],
-        [True, False],
-        [True, False],
+        [True, True],
     ]
-    assert accepted_masks == [[True, False]] * 3
+    assert accepted_masks == [[True, True]] * 3
 
     for segment_index, metadata in enumerate(segment_metadata):
-        eligible_before = [True, True] if segment_index == 0 else [True, False]
-        validator_result = [True, False] if segment_index == 0 else [True, True]
         assert metadata["expert_program_id"] == compiled.program_id
         assert metadata["program_segment_index"] == segment_index
         assert metadata["semantic_call_indices"] == [
             2 * segment_index,
             2 * segment_index + 1,
         ]
-        assert metadata["post_policy_count"] == 1
-        assert metadata["validator_count"] == 1
+        assert metadata["post_policy_count"] == 0
+        assert metadata["validator_count"] == 0
         runtime_metadata = metadata["runtime"]
         assert isinstance(runtime_metadata, dict)
         assert runtime_metadata["message"] == (
             f"observation_generation={segment_index + 1}"
         )
-        post_policies = metadata["post_policies"]
-        assert isinstance(post_policies, list)
-        assert post_policies[0]["kind"] == "wait_stable"
-        assert post_policies[0]["result_mask"] == eligible_before
-        assert post_policies[0]["result"] == {
-            "status": "settled",
-            "segment_index": segment_index,
-            "observation_generation": segment_index + 1,
-        }
+        assert metadata["post_policies"] == []
         validation = metadata["validation"]
         assert isinstance(validation, dict)
-        assert validation["eligible_mask_before_validation"] == eligible_before
-        assert validation["accepted_mask"] == [True, False]
-        validators = validation["validators"]
-        assert validators[0]["kind"] == "object_near_target"
-        assert validators[0]["result_mask"] == validator_result
-        assert validators[0]["result"] == {
-            "segment_index": segment_index,
-            "observation_generation": segment_index + 1,
-            "accepted_mask": validator_result,
-        }
+        assert validation["eligible_mask_before_validation"] == [True, True]
+        assert validation["accepted_mask"] == [True, True]
+        assert validation["validators"] == []
         json.dumps(metadata, allow_nan=False, sort_keys=True)
-
-        assert action_metadata[segment_index]["bridge_action_kind"] == (
-            "program_post_policy"
-        )
-        assert action_metadata[segment_index]["program_segment_index"] == (
-            segment_index
-        )
 
 
 def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
@@ -519,12 +428,16 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
 
 
 def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
-    """The drawer task supplies a validated call, never a trajectory."""
+    """The drawer config supplies one registered call with no acceptance hooks."""
     payload = _read_payload(_OPEN_DRAWER_PROGRAM)
-    config = decode_expert_program(payload)
+    registration = _drawer_runtime().registration
+    config = decode_expert_program(
+        payload,
+        validation_context=registration.catalog,
+    )
 
-    assert config.integration.scene_registry == drawer_task.SCENE_REGISTRY_ID
-    assert config.integration.robot_profile == drawer_task.ROBOT_PROFILE_ID
+    assert config.integration.scene_registry == _OPEN_DRAWER_SCENE_ID
+    assert config.integration.robot_profile == _OPEN_DRAWER_PROFILE_ID
 
     segments = tuple(_drawer_compiler().compile(config))
 
@@ -533,29 +446,101 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     assert len(segments[0].calls) == 1
     call = segments[0].calls[0].call
     assert type(call) is RegisteredSemanticCall
-    assert call.call_id == "embodichain_tasks.open_drawer"
+    assert call.call_id == _OPEN_DRAWER_CALL_ID
     assert dict(call.arguments) == {
         "handle": "drawer_handle",
     }
     assert dict(call.resources) == {"primary": "manipulator"}
-    validator = segments[0].validators[0].cfg
-    assert validator.articulation == "drawer"
-    assert validator.joint == "cabinet_to_drawer"
-    assert validator.minimum_position == 0.10
+    assert segments[0].post_policies == ()
+    assert segments[0].validators == ()
 
 
-def test_open_drawer_lowerer_preserves_legacy_payload_compatibility() -> None:
-    """Schema-v1 option fields remain accepted only as preset-matching input."""
+def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
+    """The decoded registration owns call discovery and fresh live lowerers."""
+    registration = _drawer_runtime().registration
+
+    assert tuple(registration.catalog.registered_semantic_lowerer_declarations) == (
+        _OPEN_DRAWER_CALL_ID,
+    )
+    assert (
+        registration.catalog.call_catalog.discover(
+            _OPEN_DRAWER_CALL_ID
+        ).target_descriptor
+        == Slide.descriptor()
+    )
+
+    class Drawer:
+        link_names = (_OPEN_DRAWER_HANDLE_LINK_NAME,)
+
+        @staticmethod
+        def get_link_vert_face(name: str) -> tuple[torch.Tensor, torch.Tensor]:
+            assert name == _OPEN_DRAWER_HANDLE_LINK_NAME
+            return (
+                torch.tensor([[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+                torch.tensor([[0, 1, 2]]),
+            )
+
+    drawer_ref = SceneArticulationRef(_OPEN_DRAWER_ENTITY_ID)
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=drawer_ref,
+                state_provider=_NeverObserveProvider(),
+            ),
+            SceneEntityRegistration(
+                ref=SceneLinkRef(_OPEN_DRAWER_HANDLE_ID),
+                state_provider=_NeverObserveProvider(),
+                parent=drawer_ref,
+                native_name=_OPEN_DRAWER_HANDLE_LINK_NAME,
+            ),
+        )
+    )
+    robot = object()
+    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
+        robot=robot,
+        device=torch.device("cpu"),
+    )
+    simulation = SimpleNamespace(
+        get_articulation=lambda identifier: (
+            Drawer() if identifier == "drawer" else None
+        )
+    )
+
+    first = registration.create_registered_semantic_lowerers(
+        simulation=simulation,
+        robot=robot,
+        scene_registry=registry,
+        engine=engine,
+    )
+    second = registration.create_registered_semantic_lowerers(
+        simulation=simulation,
+        robot=robot,
+        scene_registry=registry,
+        engine=engine,
+    )
+
+    assert type(first[0]) is type(second[0])
+    assert type(first[0]).call_id == _OPEN_DRAWER_CALL_ID
+    assert first[0] is not second[0]
+
+
+def test_open_drawer_lowerer_accepts_only_canonical_payload() -> None:
+    """Serialized calls name the handle while presets own motion options."""
     options = SlideOptions(
         direction="pull",
         hand_interp_steps=12,
         approach_distance=0.10,
         translation_distance=0.18,
     )
-    lowerer = drawer_task._OpenDrawerSlideLowerer(
+    from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
+        _ArticulationLinkSlideLowerer,
+    )
+
+    lowerer = _ArticulationLinkSlideLowerer(
         ObjectSemantics(
             label="drawer_handle",
-            entity_id=drawer_task.HANDLE_ENTITY_ID,
+            entity_id=_OPEN_DRAWER_HANDLE_ID,
             geometry={},
             affordance=SlideAffordance(
                 mesh_vertices=torch.tensor(
@@ -564,34 +549,26 @@ def test_open_drawer_lowerer_preserves_legacy_payload_compatibility() -> None:
                 mesh_triangles=torch.tensor([[0, 1, 2]]),
                 translation_axis=torch.tensor([0.0, 1.0, 0.0]),
             ),
-        )
+        ),
+        _OPEN_DRAWER_HANDLE_ID,
     )
-    minimal = {"handle": drawer_task.HANDLE_ENTITY_ID}
-    legacy = {
-        **minimal,
-        "direction": options.direction,
-        "hand_interp_steps": options.hand_interp_steps,
-        "approach_distance": options.approach_distance,
-        "translation_distance": options.translation_distance,
-    }
+    minimal = {"handle": _OPEN_DRAWER_HANDLE_ID}
+    lowering = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id=_OPEN_DRAWER_CALL_ID,
+            arguments=minimal,
+        ),
+        context=None,  # type: ignore[arg-type]
+        bound=None,  # type: ignore[arg-type]
+        option_template=options,
+    )
+    assert lowering.goal.target_pose.entity_id == _OPEN_DRAWER_HANDLE_ID
 
-    for arguments in (minimal, legacy):
-        lowering = lowerer.lower(
-            RegisteredSemanticCall(
-                call_id=drawer_task.OPEN_DRAWER_CALL_ID,
-                arguments=arguments,
-            ),
-            context=None,  # type: ignore[arg-type]
-            bound=None,  # type: ignore[arg-type]
-            option_template=options,
-        )
-        assert lowering.goal.target_pose.entity_id == drawer_task.HANDLE_ENTITY_ID
-
-    with pytest.raises(ValueError, match="legacy option fields"):
+    with pytest.raises(ValueError, match="motion options belong"):
         lowerer.lower(
             RegisteredSemanticCall(
-                call_id=drawer_task.OPEN_DRAWER_CALL_ID,
-                arguments={**legacy, "direction": "push"},
+                call_id=_OPEN_DRAWER_CALL_ID,
+                arguments={**minimal, "direction": "push"},
             ),
             context=None,  # type: ignore[arg-type]
             bound=None,  # type: ignore[arg-type]
@@ -599,28 +576,167 @@ def test_open_drawer_lowerer_preserves_legacy_payload_compatibility() -> None:
         )
 
 
-def test_task_classes_do_not_override_motion_or_demo_generation() -> None:
-    """Both environments delegate planning and execution to the shared runtime."""
-    forbidden_overrides = {
-        "create_demo_action_list",
-        "create_demo_segments",
-        "_generate_eef_motion",
-        "_initialize_atomic_actions",
-        "_observe_grasp_constraint",
-        "_plan_pick_place_cycle",
-    }
+def test_open_drawer_lowerer_owns_a_snapshot_of_the_current_target_pose() -> None:
+    """Snapshot mode lowers one current pose without a dynamic scene reference."""
+    from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
+        _ArticulationLinkSlideLowerer,
+    )
 
-    for env_type in (
-        cube_task.ExpertProgramRepeatedPickPlaceEnv,
-        drawer_task.ExpertProgramOpenDrawerEnv,
+    observed_pose = torch.eye(4, dtype=torch.float32)
+    lowerer = _ArticulationLinkSlideLowerer(
+        ObjectSemantics(
+            label="drawer_handle",
+            entity_id=_OPEN_DRAWER_HANDLE_ID,
+            geometry={},
+            affordance=SlideAffordance(
+                mesh_vertices=torch.tensor(
+                    [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]
+                ),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+                translation_axis=torch.tensor([0.0, 1.0, 0.0]),
+            ),
+        ),
+        _OPEN_DRAWER_HANDLE_ID,
+        target_pose_mode="snapshot",
+    )
+    context = SimpleNamespace(
+        scene=SimpleNamespace(
+            entities={
+                _OPEN_DRAWER_HANDLE_ID: SimpleNamespace(pose=observed_pose),
+            }
+        )
+    )
+
+    lowering = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id=_OPEN_DRAWER_CALL_ID,
+            arguments={"handle": _OPEN_DRAWER_HANDLE_ID},
+        ),
+        context=context,  # type: ignore[arg-type]
+        bound=None,  # type: ignore[arg-type]
+        option_template=SlideOptions(),
+    )
+    observed_pose[0, 0] = 2.0
+
+    assert isinstance(lowering.goal.target_pose, torch.Tensor)
+    assert torch.equal(lowering.goal.target_pose, torch.eye(4))
+
+
+def test_examples_have_no_task_specific_environment_modules() -> None:
+    """Both examples are assembled from config against plain EmbodiedEnv."""
+    for module_name in (
+        "embodichain_tasks.manipulation.repeated_pick_place",
+        "embodichain_tasks.manipulation.open_drawer",
     ):
-        assert forbidden_overrides.isdisjoint(env_type.__dict__)
+        assert importlib.util.find_spec(module_name) is None
+    _, _, cube_spec = _configure_cube_environment()
+    assert cube_spec.cls is EmbodiedEnv
 
 
-def test_cube_task_declares_the_canonical_scene_and_profile_ids() -> None:
-    """The repeated task owns one canonical scene/profile integration."""
-    assert cube_task.SCENE_REGISTRY_ID == "expert_program_repeated_pick_place"
-    assert cube_task.ROBOT_PROFILE_ID == "expert_program_ur5_pick_place"
+def test_cube_config_registers_embodied_env_with_its_runtime_factory() -> None:
+    """Repeated Pick/Place needs no environment subclass or task module."""
+    payload, cfg, spec = _configure_cube_environment()
+    expected = _cube_runtime()
+
+    assert payload["id"] == "ExpertProgramRepeatedPickPlace-v1"
+    assert cfg.expert_program is not None
+    assert spec.cls is EmbodiedEnv
+    assert spec.max_episode_steps == payload["max_episode_steps"]
+    assert spec.expert_program_registration is not None
+    assert (
+        spec.expert_program_registration.fingerprint
+        == expected.registration.fingerprint
+    )
+    assert spec.expert_program_adapter_factory is not None
+    assert (
+        spec.expert_program_adapter_factory.registration
+        is spec.expert_program_registration
+    )
+    assert (
+        spec.expert_program_adapter_factory.configuration_fingerprint
+        == expected.configuration_fingerprint
+    )
+
+
+def test_cube_config_declares_the_canonical_scene_and_profile_ids() -> None:
+    """The repeated config owns one canonical scene/profile integration."""
+    registration = _cube_runtime().registration
+
+    assert registration.scene_binding.registry_id == (
+        "expert_program_repeated_pick_place"
+    )
+    assert registration.robot_profile_binding.profile_id == (
+        "expert_program_ur5_pick_place"
+    )
+
+
+@pytest.mark.parametrize(
+    ("create_binding", "expected_grasp_samples"),
+    (
+        (_cube_robot_profile_binding, _EXPECTED_GRASP_SAMPLES),
+        (_drawer_robot_profile_binding, _EXPECTED_GRASP_SAMPLES),
+    ),
+)
+def test_example_profiles_execute_only_open_loop_trajectories(
+    create_binding: Callable[[], SimulationRobotSkillProfileBinding],
+    expected_grasp_samples: int,
+) -> None:
+    """Both tutorials use timed execution without effects or retry layers."""
+    binding = create_binding()
+    preset = binding.presets[0]
+
+    assert preset.preset_id == "trajectory"
+    assert preset.motion_policy.sample_count == _EXPECTED_TRAJECTORY_SAMPLE_COUNT
+    assert preset.motion_policy.dynamic_collision_mode is DynamicCollisionMode.OFF
+    assert preset.tracking_policy.in_flight is None
+    assert isinstance(preset.tracking_policy.terminal, TimedTerminalAcceptance)
+    assert preset.tracking_policy.terminal.settle_duration == 0.0
+    assert preset.recovery_policy.max_replans == 0
+    assert preset.recovery_policy.max_action_retries == 0
+    assert preset.workflow_recovery_policy.max_recovery_attempts == 0
+    assert dict(preset.effect_monitors) == {}
+    assert preset.runner_cfg.hold_on_completion is False
+    assert preset.runner_cfg.hold_during_effect_verification is False
+    assert expected_grasp_samples == _EXPECTED_GRASP_SAMPLES
+
+
+def test_cube_runtime_parameters_are_owned_by_gym_config() -> None:
+    """Trajectory and grasp costs are visible and editable in serialized data."""
+    runtime = _read_payload(_REPEATED_CUBE_GYM_CONFIG)["expert_program_runtime"]
+    profile = runtime["robot_profile"]
+    services = runtime["runtime_services"]
+
+    assert profile["presets"][0]["motion"]["sample_count"] == (
+        _EXPECTED_TRAJECTORY_SAMPLE_COUNT
+    )
+    assert services["grasp_pose_generators"]["hand"]["sample_count"] == (
+        _EXPECTED_GRASP_SAMPLES
+    )
+
+
+def test_cube_registration_has_no_contact_evidence_route() -> None:
+    """The trajectory tutorial does not construct its former contact observer."""
+    declaration = _cube_runtime().registration.catalog.control_part_evidence_declaration
+    assert declaration is None
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        Path("tasks/manipulation/repeated_pick_place/env.json"),
+        Path("tasks/manipulation/open_drawer/env.json"),
+    ),
+)
+def test_example_gym_configs_omit_auxiliary_runtime_mechanisms(
+    relative_path: Path,
+) -> None:
+    """Runnable examples keep only deterministic simulation and motion inputs."""
+    payload = _read_payload(relative_path)
+
+    assert payload["sensor"] == []
+    assert payload["env"]["events"] == {}
+    assert payload["env"]["dataset"] == {}
+    assert "physics_config" not in payload
 
 
 def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:

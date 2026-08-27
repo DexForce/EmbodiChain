@@ -18,6 +18,7 @@ embodichain.lab.sim.atomic_actions
       ControlPartCommandProfile
       ActionControlOverrides
       ActionInvocation
+      PhaseEffectGateRequirement
       ResolvedActionRequest
       ActionOptions
       MotionPolicy
@@ -36,6 +37,7 @@ embodichain.lab.sim.atomic_actions
       TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
+      PlanningFailure
       ActionPlan
       CompiledTrajectory
 
@@ -75,6 +77,10 @@ embodichain.lab.sim.atomic_actions
       EffectVerificationRequest
       EffectVerificationRequirement
       EffectVerificationResult
+      PhaseEffectGateRequest
+      PhaseEffectGateResult
+      HeldObjectGuardRequest
+      HeldObjectGuardResult
       ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind
@@ -94,6 +100,9 @@ embodichain.lab.sim.atomic_actions
       HeldObjectPoseGoal
       PourGoal
       PourOptions
+      PushObjectGoal
+      PushObjectOptions
+      PushObjectToolCalibration
       PlaceGoal
       AssembleGoal
       PressGoal
@@ -102,6 +111,9 @@ embodichain.lab.sim.atomic_actions
       SlideGoal
       SlideOptions
       SlideAffordance
+      OpenDoorGoal
+      OpenDoorOptions
+      OpenDoorAffordance
       TwistGoal
       TwistOptions
       TwistAffordance
@@ -113,9 +125,11 @@ embodichain.lab.sim.atomic_actions
       AxisAlign
       MoveHeldObject
       Pour
+      PushObject
       Place
       Press
       Slide
+      OpenDoor
       Twist
       CoordinatedPickment
       CoordinatedPlacement
@@ -229,6 +243,9 @@ Planning and state
    :members:
 
 .. autoclass:: TimedTrajectory
+   :members:
+
+.. autoclass:: PlanningFailure
    :members:
 
 .. autoclass:: RuntimeCommandPayload

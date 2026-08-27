@@ -18,8 +18,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 import torch
+
+from embodichain.lab.sim.objects import ArticulationJointKinematics
 
 from embodichain.lab.sim.atomic_actions.affordance import (
     Affordance,
@@ -27,6 +31,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     AssembleAffordance,
     AxisAlignAffordance,
     InteractionPoints,
+    OpenDoorAffordance,
     PressAffordance,
     SlideAffordance,
     TwistAffordance,
@@ -231,6 +236,171 @@ class TestSlideAffordance:
             )
 
 
+class TestOpenDoorAffordance:
+    @staticmethod
+    def _joint(
+        name: str,
+        joint_type: str,
+        parent_link_name: str,
+        child_link_name: str,
+    ) -> ArticulationJointKinematics:
+        return ArticulationJointKinematics(
+            name=name,
+            joint_type=joint_type,
+            parent_link_name=parent_link_name,
+            child_link_name=child_link_name,
+            axis=(
+                torch.tensor([0.0, 0.0, 1.0])
+                if joint_type == "revolute"
+                else torch.zeros(3)
+            ),
+            origin_pose=torch.eye(4),
+            joint_limits=(0.0, 2.0) if joint_type != "fixed" else (0.0, 0.0),
+        )
+
+    @staticmethod
+    def _articulation_with_parent_hinge() -> Mock:
+        fixed_joint = TestOpenDoorAffordance._joint(
+            "door_to_door_handle_fixed",
+            "fixed",
+            "door",
+            "door_handle",
+        )
+        hinge_joint = TestOpenDoorAffordance._joint(
+            "door_hinge",
+            "revolute",
+            "body",
+            "door",
+        )
+        articulation = Mock(
+            spec=[
+                "get_parent_joint_chain",
+                "get_link_pose",
+                "get_link_vert_face",
+            ]
+        )
+        articulation.get_parent_joint_chain.return_value = (
+            fixed_joint,
+            hinge_joint,
+        )
+        articulation.fixed_joint = fixed_joint
+        articulation.hinge_joint = hinge_joint
+        body_pose = torch.eye(4).unsqueeze(0)
+        handle_pose = torch.eye(4).unsqueeze(0)
+        handle_pose[:, 0, 3] = 1.0
+        poses = {
+            "body": body_pose,
+            "door_handle": handle_pose,
+        }
+        articulation.get_link_pose.side_effect = lambda link_name, **_: poses[link_name]
+        articulation.get_link_vert_face.return_value = (
+            torch.tensor(
+                [
+                    [0.9, -0.1, 0.0],
+                    [1.1, -0.1, 0.0],
+                    [1.0, 0.1, 0.0],
+                ]
+            ),
+            torch.tensor([[0, 1, 2]]),
+        )
+        return articulation
+
+    def test_resolves_first_parent_revolute_joint_from_handle_link(self):
+        articulation = self._articulation_with_parent_hinge()
+
+        affordance = OpenDoorAffordance.from_articulation(
+            articulation,
+            "door_handle",
+        )
+
+        assert affordance.joint_name == "door_hinge"
+        assert torch.allclose(
+            affordance.rotation_axis,
+            torch.tensor([0.0, 0.0, 1.0]),
+        )
+        assert affordance.axis_origin == pytest.approx((-1.0, 0.0, 0.0))
+        assert affordance.joint_limits == pytest.approx((0.0, 2.0))
+        assert affordance.opening_direction == 1
+        articulation.get_parent_joint_chain.assert_called_once_with("door_handle")
+
+    def test_accepts_affordance_owned_negative_opening_direction(self):
+        articulation = self._articulation_with_parent_hinge()
+
+        affordance = OpenDoorAffordance.from_articulation(
+            articulation,
+            "door_handle",
+            opening_direction=-1,
+        )
+
+        assert affordance.opening_direction == -1
+
+    def test_rejects_handle_without_parent_revolute_joint(self):
+        articulation = self._articulation_with_parent_hinge()
+        articulation.get_parent_joint_chain.return_value = (articulation.fixed_joint,)
+
+        with pytest.raises(ValueError, match="No active parent joint"):
+            OpenDoorAffordance.from_articulation(articulation, "door_handle")
+
+    def test_requires_explicit_hinge_across_prismatic_ancestor(self):
+        articulation = self._articulation_with_parent_hinge()
+        prismatic = self._joint(
+            "handle_slide",
+            "prismatic",
+            "door",
+            "door_handle",
+        )
+        articulation.get_parent_joint_chain.return_value = (
+            prismatic,
+            articulation.hinge_joint,
+        )
+
+        with pytest.raises(ValueError, match="Ambiguous active ancestors"):
+            OpenDoorAffordance.from_articulation(articulation, "door_handle")
+
+        affordance = OpenDoorAffordance.from_articulation(
+            articulation,
+            "door_handle",
+            hinge_joint_name="door_hinge",
+        )
+        assert affordance.joint_name == "door_hinge"
+
+    def test_requires_explicit_hinge_when_handle_has_revolute_latch(self):
+        articulation = self._articulation_with_parent_hinge()
+        latch = self._joint(
+            "handle_latch",
+            "revolute",
+            "door",
+            "door_handle",
+        )
+        articulation.get_parent_joint_chain.return_value = (
+            latch,
+            articulation.hinge_joint,
+        )
+
+        with pytest.raises(ValueError, match="Ambiguous active ancestors"):
+            OpenDoorAffordance.from_articulation(articulation, "door_handle")
+
+    def test_rejects_explicit_non_revolute_hinge(self):
+        articulation = self._articulation_with_parent_hinge()
+        prismatic = self._joint(
+            "handle_slide",
+            "prismatic",
+            "door",
+            "door_handle",
+        )
+        articulation.get_parent_joint_chain.return_value = (
+            prismatic,
+            articulation.hinge_joint,
+        )
+
+        with pytest.raises(ValueError, match="must be revolute"):
+            OpenDoorAffordance.from_articulation(
+                articulation,
+                "door_handle",
+                hinge_joint_name="handle_slide",
+            )
+
+
 class TestPressAffordance:
     def test_requires_explicit_surface_press_position(self):
         with pytest.raises(TypeError, match="press_position"):
@@ -347,10 +517,6 @@ class TestAssembleAffordance:
 
     def test_default_fields(self):
         aff = AssembleAffordance()
-        assert aff.base_object_label == ""
-        assert aff.assemble_object_label == ""
-        assert aff.base_object_entity is None
-        assert aff.assemble_object_entity is None
         assert torch.equal(aff.assemble_to_base_pose, torch.eye(4))
 
     def test_get_assemble_object_pose_single_base_pose(self):

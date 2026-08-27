@@ -85,6 +85,7 @@ from embodichain.lab.sim.skills import (
     RobotSkillProfile,
     SkillPolicyPreset,
     UnsupportedSkillError,
+    WorkflowRecoveryPolicy,
 )
 
 _JOINT_IDS = {
@@ -646,8 +647,8 @@ def test_custom_endpoint_adapter_resolves_commands_and_physical_claim() -> None:
     engine = _engine(control_profiles={}, load_builtins=False)
     engine.register(_VelocityNavigateAction())
 
-    bound = engine.bind_skill_profile(
-        profile,
+    bound = profile.bind(
+        engine,
         endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
     )
     resolved = bound.resolve("navigate_velocity")
@@ -707,8 +708,8 @@ def test_custom_endpoint_joint_claim_survives_action_binding_lowering() -> None:
     )
     engine = _engine(control_profiles={}, load_builtins=False)
     engine.register(_VelocityNavigateAction())
-    bound = engine.bind_skill_profile(
-        profile,
+    bound = profile.bind(
+        engine,
         endpoint_adapters={_BaseVelocityEndpoint: JointClaimAdapter()},
     )
 
@@ -758,36 +759,6 @@ def test_custom_endpoint_joint_claim_must_fit_robot_dof() -> None:
                 _BaseVelocityEndpoint: OutOfRangeJointClaimAdapter(),
             },
         )
-
-
-def test_engine_constructor_forwards_custom_endpoint_adapters() -> None:
-    source = _engine(control_profiles={}, load_builtins=False)
-    profile = RobotSkillProfile(
-        "mobile",
-        resources={
-            "mobile_base": RobotResource(
-                "mobile_base",
-                endpoints={
-                    "motion": _BaseVelocityEndpoint(
-                        "base_velocity",
-                        capabilities=frozenset({"motion.base.velocity"}),
-                    )
-                },
-            )
-        },
-    )
-
-    engine = AtomicActionEngine(
-        source.motion_generator,
-        load_builtins=False,
-        skill_profile=profile,
-        endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
-    )
-
-    assert engine.skill_profile is not None
-    assert engine.skill_profile.resources["mobile_base"].claim.claim_tokens == (
-        frozenset({"controller:base_velocity"})
-    )
 
 
 def test_custom_endpoint_claim_tokens_protect_distinct_leaf_aliases() -> None:
@@ -1405,7 +1376,6 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     second = bound.preset()
 
     assert first is not second
-    assert first.schema_version == 2
     assert first.required_planner == "stub_planner"
     assert first.motion_policy.sample_count == 80
     assert first.tracking_policy is not second.tracking_policy
@@ -1427,8 +1397,6 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         bound.preset(skill_id="typo")
     with pytest.raises(KeyError, match="not an installed"):
         bound.preset("safe", skill_id="typo")
-    with pytest.raises(ValueError, match=r"supported versions are \[2\]"):
-        SkillPolicyPreset("legacy", action_option_templates={}, schema_version=1)
     with pytest.raises(ValueError, match="required_planner"):
         SkillPolicyPreset("invalid", action_option_templates={}, required_planner="")
 
@@ -1446,6 +1414,35 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     )
     with pytest.raises(ProfileValidationError, match="requires planner"):
         incompatible.bind(_engine(control_profiles=_command_profiles()))
+
+
+def test_workflow_recovery_policy_is_bounded_and_snapshotted() -> None:
+    source = WorkflowRecoveryPolicy(max_recovery_attempts=2)
+    preset = SkillPolicyPreset(
+        "recovering",
+        action_option_templates={},
+        workflow_recovery_policy=source,
+    )
+
+    first = preset.workflow_recovery_policy
+    second = preset.snapshot().workflow_recovery_policy
+
+    assert first.max_recovery_attempts == 2
+    assert second == first
+    assert first is not source
+    assert second is not first
+    assert (
+        SkillPolicyPreset(
+            "disabled", action_option_templates={}
+        ).workflow_recovery_policy.max_recovery_attempts
+        == 0
+    )
+    for invalid in (True, 1.5, "2"):
+        with pytest.raises(TypeError, match="must be an integer"):
+            WorkflowRecoveryPolicy(invalid)  # type: ignore[arg-type]
+    for invalid in (-1, 101):
+        with pytest.raises(ValueError, match=r"\[0, 100\]"):
+            WorkflowRecoveryPolicy(invalid)
 
 
 def test_policy_preset_defaults_exact_builtin_effect_monitor_refs() -> None:
@@ -1620,28 +1617,18 @@ def test_profile_rejects_default_for_uninstalled_skill() -> None:
         )
 
 
-def test_engine_can_install_profile_as_authoritative_command_source() -> None:
+def test_profile_configures_engine_before_semantic_binding() -> None:
     source_engine = _engine(control_profiles=_command_profiles())
     profile = _profile(defaults={"pick_up": ResourceBinding({"primary": "left_actor"})})
 
-    engine = AtomicActionEngine(source_engine.motion_generator, skill_profile=profile)
+    engine = AtomicActionEngine(
+        source_engine.motion_generator,
+        control_profiles=profile.action_control_profiles(),
+    )
+    bound = profile.bind(engine)
 
-    assert engine.skill_profile is not None
-    assert engine.skill_profile.resolve("pick_up").resource_ids == {
-        "primary": "left_actor"
-    }
+    assert bound.resolve("pick_up").resource_ids == {"primary": "left_actor"}
     assert set(engine.control_profiles) == {"left_hand", "right_hand"}
-
-
-def test_engine_rejects_endpoint_adapters_without_skill_profile() -> None:
-    source = _engine(control_profiles={}, load_builtins=False)
-
-    with pytest.raises(ValueError, match="requires skill_profile"):
-        AtomicActionEngine(
-            source.motion_generator,
-            load_builtins=False,
-            endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
-        )
 
 
 def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
@@ -1666,7 +1653,8 @@ def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
 
     engine.register(Replacement(), replace=True)
 
-    assert engine.skill_profile is None
+    with pytest.raises(RuntimeError, match="changed after"):
+        bound.assert_current()
     with pytest.raises(RuntimeError, match="changed after"):
         _ = bound.skills
 

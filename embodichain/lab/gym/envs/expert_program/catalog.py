@@ -36,6 +36,8 @@ from embodichain.lab.sim.atomic_actions import (
     EndpointTrackingFeedbackAddress,
     GRASP_CAPABILITY,
     JOINT_POSITION_CHANNEL,
+    SceneProvider,
+    SkillDescriptor,
 )
 from embodichain.lab.sim.atomic_actions.primitives import BUILTIN_ACTION_TYPES
 from embodichain.lab.sim.atomic_actions.tracking import (
@@ -53,11 +55,14 @@ from embodichain.lab.sim.skills import (
     PLACE_ON_AFFORDANCE_CAPABILITY,
     POSE_RELATION_EFFECT_CHANNEL,
     BoundRobotSkillProfile,
+    ContainerRelationTargetGrounder,
+    EffectEvidenceProvider,
     HandOverPoseProvider,
     Place,
     RelationTargetGrounder,
     RobotSkillProfile,
     RegisteredSemanticCall,
+    RegisteredSemanticLowerer,
     ResourceEndpoint,
     ResourceEndpointAdapter,
     SceneAffordanceRef,
@@ -68,6 +73,7 @@ from embodichain.lab.sim.skills import (
     SceneRegistry,
     SemanticCallCatalog,
     SemanticIntegrationManifest,
+    SupportSurfaceRelationTargetGrounder,
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.skills.effects import (
@@ -99,7 +105,14 @@ from .decoder import (
 )
 from .bridge import RuntimeTransportActionEncoder
 from .extensions import (
+    ControlPartEvidenceProviderDeclaration,
+    ControlPartEvidenceProviderFactory,
+    EndpointAdapterDeclaration,
     ParallelCommandSafetyValidatorFactory,
+    ParallelSafetyDeclaration,
+    RegisteredSemanticLowererDeclaration,
+    RegisteredSemanticLowererFactory,
+    RuntimeTransportDeclaration,
     StandardExtensionDeclarations,
     build_standard_extension_declarations,
     validate_immutable_extension_declaration,
@@ -107,9 +120,9 @@ from .extensions import (
 from .simulation import SimulationRobotSkillProfileBinding, SimulationSceneBinding
 from .simulation_policies import default_simulation_settle_presets
 
-_CATALOG_FINGERPRINT_SCHEMA_VERSION = 2
+_CATALOG_FINGERPRINT_SCHEMA_VERSION = 4
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
-_VALIDATOR_KINDS = frozenset({"object_near_target"})
+_VALIDATOR_KINDS = frozenset({"articulation_joint_position", "object_near_target"})
 
 
 class IntegrationFingerprintMismatch(RuntimeError):
@@ -289,6 +302,18 @@ def _snapshot_relation_grounders(
     return tuple(values)
 
 
+def _builtin_relation_grounders(
+    scene_binding: SimulationSceneBinding,
+) -> tuple[RelationTargetGrounder, ...]:
+    """Install standard grounders for declared production relation bindings."""
+    values: list[RelationTargetGrounder] = []
+    if scene_binding.support_surfaces:
+        values.append(SupportSurfaceRelationTargetGrounder())
+    if scene_binding.containers:
+        values.append(ContainerRelationTargetGrounder())
+    return tuple(values)
+
+
 def _snapshot_relation_grounder_keys(
     values: frozenset[tuple[str, type[Affordance], str]],
 ) -> frozenset[tuple[str, type[Affordance], str]]:
@@ -344,22 +369,31 @@ def _snapshot_handover_pose_providers(
     return tuple(values)
 
 
-def _validate_standard_call_catalog(call_catalog: SemanticCallCatalog) -> None:
-    """Reject semantic lowerer extensions from the standard registration path."""
+def _validate_standard_call_catalog(
+    call_catalog: SemanticCallCatalog,
+    lowerer_declarations: Mapping[str, RegisteredSemanticLowererDeclaration],
+) -> None:
+    """Require exact built-ins and factory coverage for every registered call."""
     builtins = builtin_semantic_call_catalog().descriptors
+    registered_call_ids: set[str] = set()
     for descriptor in call_catalog.descriptors.values():
         if descriptor.spec_type is RegisteredSemanticCall:
-            raise ValueError(
-                f"Registered semantic call {descriptor.call_id!r} is not "
-                "supported by the standard simulation registration; only "
-                "curated semantic calls may be registered."
-            )
+            registered_call_ids.add(descriptor.call_id)
+            continue
         expected = builtins.get(descriptor.call_id)
         if expected != descriptor:
             raise ValueError(
                 f"Semantic call {descriptor.call_id!r} does not match its exact "
                 "curated descriptor."
             )
+    declared_call_ids = set(lowerer_declarations)
+    if registered_call_ids != declared_call_ids:
+        raise ValueError(
+            "Registered semantic call descriptors and lowerer factories must "
+            "cover exactly the same call IDs; "
+            f"missing={sorted(registered_call_ids - declared_call_ids)}, "
+            f"unused={sorted(declared_call_ids - registered_call_ids)}."
+        )
 
 
 def _validate_standard_effect_monitors(profile: RobotSkillProfile) -> None:
@@ -421,8 +455,20 @@ class ExpertProgramIntegrationCatalog:
     call_catalog: SemanticCallCatalog
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]]
     settle_preset_ids: frozenset[str]
-    extensions: StandardExtensionDeclarations
+    endpoint_adapter_declarations: Mapping[
+        type[ResourceEndpoint], EndpointAdapterDeclaration
+    ]
+    runtime_transport_declarations: tuple[RuntimeTransportDeclaration, ...]
+    parallel_safety_declaration: ParallelSafetyDeclaration | None
+    control_part_evidence_declaration: ControlPartEvidenceProviderDeclaration | None
+    registered_semantic_lowerer_declarations: Mapping[
+        str, RegisteredSemanticLowererDeclaration
+    ]
     fingerprint: str
+    _required_skills: Mapping[str, SkillDescriptor] = field(
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
@@ -440,18 +486,50 @@ class ExpertProgramIntegrationCatalog:
             "relation_grounder_keys",
             _snapshot_relation_grounder_keys(self.relation_grounder_keys),
         )
-        if type(self.extensions) is not StandardExtensionDeclarations:
-            raise TypeError("extensions must be exactly StandardExtensionDeclarations.")
+        extensions = StandardExtensionDeclarations(
+            endpoint_adapters=self.endpoint_adapter_declarations,
+            runtime_transports=self.runtime_transport_declarations,
+            parallel_safety=self.parallel_safety_declaration,
+            control_part_evidence=self.control_part_evidence_declaration,
+            registered_semantic_lowerers=(
+                self.registered_semantic_lowerer_declarations
+            ),
+        )
         profile_endpoint_types = frozenset(
             type(endpoint)
             for resource in self.robot_profile.resources.values()
             for endpoint in resource.endpoints.values()
         )
-        if profile_endpoint_types != frozenset(self.extensions.endpoint_adapters):
+        if profile_endpoint_types != frozenset(extensions.endpoint_adapters):
             raise ValueError(
-                "extensions.endpoint_adapters must cover every exact robot "
+                "endpoint_adapter_declarations must cover every exact robot "
                 "profile endpoint type and no others."
             )
+        object.__setattr__(
+            self,
+            "endpoint_adapter_declarations",
+            extensions.endpoint_adapters,
+        )
+        object.__setattr__(
+            self,
+            "runtime_transport_declarations",
+            extensions.runtime_transports,
+        )
+        object.__setattr__(
+            self,
+            "parallel_safety_declaration",
+            extensions.parallel_safety,
+        )
+        object.__setattr__(
+            self,
+            "control_part_evidence_declaration",
+            extensions.control_part_evidence,
+        )
+        object.__setattr__(
+            self,
+            "registered_semantic_lowerer_declarations",
+            extensions.registered_semantic_lowerers,
+        )
         if self.robot_profile.profile_id != self.robot_profile_id:
             raise ValueError("robot_profile_id must match robot_profile.profile_id.")
         preset_ids = frozenset(self.settle_preset_ids)
@@ -466,6 +544,11 @@ class ExpertProgramIntegrationCatalog:
             )
         ):
             raise ValueError("fingerprint must be a lowercase SHA-256 digest.")
+        object.__setattr__(
+            self,
+            "_required_skills",
+            MappingProxyType(dict(self._required_skills)),
+        )
 
     def validate_integration(
         self,
@@ -497,16 +580,9 @@ class ExpertProgramIntegrationCatalog:
         *,
         path: ConfigPath,
     ) -> None:
-        """Validate semantic-call catalog and payload revision references."""
+        """Validate that the semantic call is present in the integration catalog."""
         call_id = call.call_id if type(call) is RegisteredSemanticCallCfg else call.kind
-        descriptor = self.call_catalog.discover(call_id)
-        if type(call) is RegisteredSemanticCallCfg and (
-            call.schema_version != descriptor.schema_version
-        ):
-            raise ValueError(
-                f"Semantic call {call_id!r} requires schema_version "
-                f"{descriptor.schema_version}, got {call.schema_version}."
-            )
+        self.call_catalog.discover(call_id)
 
     def _validate_place_relation_grounder(
         self,
@@ -623,7 +699,7 @@ class ExpertProgramIntegrationCatalog:
         for segment in compiled.iter_segments():
             if (
                 segment.parallel_block is not None
-                and self.extensions.parallel_safety is None
+                and self.parallel_safety_declaration is None
             ):
                 raise ExpertProgramValidationError(
                     "parallel_safety_factory_not_registered",
@@ -651,22 +727,13 @@ class ExpertProgramIntegrationCatalog:
         """Require the live engine to expose every statically selected skill."""
         if not isinstance(engine, AtomicActionEngine):
             raise TypeError("engine must be an AtomicActionEngine.")
-        for descriptor in self.call_catalog.descriptors.values():
-            skill_id = descriptor.skill_id
-            expected = descriptor.target_descriptor
-            assert skill_id is not None and expected is not None
+        for skill_id, expected in self._required_skills.items():
             actual = engine.skills.get(skill_id)
             if actual != expected:
                 raise IntegrationFingerprintMismatch(
                     f"Live skill {skill_id!r} differs from the registered "
                     "semantic target descriptor."
                 )
-        bound_profile = engine.skill_profile
-        if type(bound_profile) is not BoundRobotSkillProfile:
-            raise IntegrationFingerprintMismatch(
-                "The standard live engine must own one exact bound robot profile."
-            )
-        self.validate_bound_endpoint_extensions(bound_profile)
 
     def validate_bound_endpoint_extensions(
         self,
@@ -675,6 +742,7 @@ class ExpertProgramIntegrationCatalog:
         """Match every live resolved endpoint to its fingerprinted declaration."""
         if type(bound_profile) is not BoundRobotSkillProfile:
             raise TypeError("bound_profile must be exactly BoundRobotSkillProfile.")
+        bound_profile.assert_current()
         if bound_profile.profile_id != self.robot_profile_id:
             raise IntegrationFingerprintMismatch(
                 "The bound robot profile ID differs from the registered profile."
@@ -682,7 +750,7 @@ class ExpertProgramIntegrationCatalog:
 
         transport_owner_by_target_type = {
             target_type: transport
-            for transport in self.extensions.runtime_transports
+            for transport in self.runtime_transport_declarations
             for target_type in transport.target_types
         }
         expected_resource_ids = frozenset(self.robot_profile.resources)
@@ -725,7 +793,7 @@ class ExpertProgramIntegrationCatalog:
                         "registered robot profile."
                     )
                 endpoint_type = type(endpoint.endpoint)
-                declaration = self.extensions.endpoint_adapters.get(endpoint_type)
+                declaration = self.endpoint_adapter_declarations.get(endpoint_type)
                 if declaration is None:
                     raise IntegrationFingerprintMismatch(
                         f"Bound endpoint {location!r} has undeclared exact type "
@@ -872,6 +940,8 @@ def _registration_payload(
     endpoint_adapters: tuple[ResourceEndpointAdapter, ...],
     runtime_transports: tuple[RuntimeTransportActionEncoder, ...],
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
+    control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
+    registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
     return {
@@ -916,6 +986,13 @@ def _registration_payload(
             ),
             "runtime_transports": extensions.runtime_transports,
             "parallel_safety": extensions.parallel_safety,
+            "control_part_evidence": extensions.control_part_evidence,
+            "registered_semantic_lowerers": tuple(
+                sorted(
+                    extensions.registered_semantic_lowerers.values(),
+                    key=lambda declaration: declaration.call_id,
+                )
+            ),
         },
         "endpoint_adapters": tuple(
             {
@@ -949,6 +1026,28 @@ def _registration_payload(
                 "provider": _provider_fingerprint_declaration(parallel_safety_factory),
             }
         ),
+        "control_part_evidence_factory": (
+            None
+            if control_part_evidence_factory is None
+            else {
+                "declaration": extensions.control_part_evidence,
+                "provider": _provider_fingerprint_declaration(
+                    control_part_evidence_factory
+                ),
+            }
+        ),
+        "registered_semantic_lowerer_factories": tuple(
+            {
+                "declaration": extensions.registered_semantic_lowerers[
+                    getattr(type(factory), "call_id")
+                ],
+                "provider": _provider_fingerprint_declaration(factory),
+            }
+            for factory in sorted(
+                registered_semantic_lowerer_factories,
+                key=lambda value: getattr(type(value), "call_id"),
+            )
+        ),
         "post_policy_kinds": _POST_POLICY_KINDS,
         "settle_presets": settle_presets,
         "validator_kinds": _VALIDATOR_KINDS,
@@ -972,6 +1071,10 @@ class SimulationExpertProgramRegistration:
     endpoint_adapters: tuple[ResourceEndpointAdapter, ...] = ()
     runtime_transports: tuple[RuntimeTransportActionEncoder, ...] = ()
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None = None
+    control_part_evidence_factory: ControlPartEvidenceProviderFactory | None = None
+    registered_semantic_lowerer_factories: tuple[
+        RegisteredSemanticLowererFactory, ...
+    ] = ()
     catalog: ExpertProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -979,6 +1082,26 @@ class SimulationExpertProgramRegistration:
         compare=False,
     )
     _parallel_safety_validator_lock: LockType = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _control_part_evidence_provider_history: list[EffectEvidenceProvider] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _control_part_evidence_provider_lock: LockType = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _registered_semantic_lowerer_history: list[RegisteredSemanticLowerer] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _registered_semantic_lowerer_lock: LockType = field(
         init=False,
         repr=False,
         compare=False,
@@ -994,10 +1117,17 @@ class SimulationExpertProgramRegistration:
             )
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
-        _validate_standard_call_catalog(self.call_catalog)
         settle_presets = _snapshot_settle_presets(self.settle_presets)
         object.__setattr__(self, "settle_presets", settle_presets)
-        relation_grounders = _snapshot_relation_grounders(self.relation_grounders)
+        configured_relation_grounders = _snapshot_relation_grounders(
+            self.relation_grounders
+        )
+        relation_grounders = _snapshot_relation_grounders(
+            (
+                *_builtin_relation_grounders(self.scene_binding),
+                *configured_relation_grounders,
+            )
+        )
         object.__setattr__(self, "relation_grounders", relation_grounders)
         relation_grounder_keys = frozenset(
             _relation_grounder_key(grounder) for grounder in relation_grounders
@@ -1020,6 +1150,14 @@ class SimulationExpertProgramRegistration:
             endpoint_adapters=self.endpoint_adapters,
             runtime_transports=self.runtime_transports,
             parallel_safety_factory=self.parallel_safety_factory,
+            control_part_evidence_factory=self.control_part_evidence_factory,
+            registered_semantic_lowerer_factories=(
+                self.registered_semantic_lowerer_factories
+            ),
+        )
+        _validate_standard_call_catalog(
+            self.call_catalog,
+            extensions.registered_semantic_lowerers,
         )
         selected_handover_provider = profile.grounding_providers.get("hand_over")
         registered_handover_provider_ids = {
@@ -1040,6 +1178,7 @@ class SimulationExpertProgramRegistration:
             if (descriptor := action_type.descriptor()).agent_visible
             and descriptor.binding_contract is not None
         }
+        required_skills: dict[str, SkillDescriptor] = {}
         for descriptor in self.call_catalog.descriptors.values():
             target = descriptor.target_descriptor
             installed = builtin_skills.get(descriptor.skill_id)
@@ -1049,6 +1188,7 @@ class SimulationExpertProgramRegistration:
                     f"{descriptor.skill_id!r}, which is not installed by the "
                     "standard simulation factory."
                 )
+            required_skills[descriptor.skill_id] = target
 
         fingerprint = _digest(
             _registration_payload(
@@ -1065,6 +1205,10 @@ class SimulationExpertProgramRegistration:
                 endpoint_adapters=self.endpoint_adapters,
                 runtime_transports=self.runtime_transports,
                 parallel_safety_factory=self.parallel_safety_factory,
+                control_part_evidence_factory=self.control_part_evidence_factory,
+                registered_semantic_lowerer_factories=(
+                    self.registered_semantic_lowerer_factories
+                ),
             )
         )
         object.__setattr__(
@@ -1078,12 +1222,23 @@ class SimulationExpertProgramRegistration:
                 call_catalog=self.call_catalog,
                 relation_grounder_keys=relation_grounder_keys,
                 settle_preset_ids=frozenset(settle_presets),
-                extensions=extensions,
+                endpoint_adapter_declarations=extensions.endpoint_adapters,
+                runtime_transport_declarations=extensions.runtime_transports,
+                parallel_safety_declaration=extensions.parallel_safety,
+                control_part_evidence_declaration=extensions.control_part_evidence,
+                registered_semantic_lowerer_declarations=(
+                    extensions.registered_semantic_lowerers
+                ),
                 fingerprint=fingerprint,
+                _required_skills=required_skills,
             ),
         )
         object.__setattr__(self, "_parallel_safety_validator_history", [])
         object.__setattr__(self, "_parallel_safety_validator_lock", Lock())
+        object.__setattr__(self, "_control_part_evidence_provider_history", [])
+        object.__setattr__(self, "_control_part_evidence_provider_lock", Lock())
+        object.__setattr__(self, "_registered_semantic_lowerer_history", [])
+        object.__setattr__(self, "_registered_semantic_lowerer_lock", Lock())
 
     @property
     def fingerprint(self) -> str:
@@ -1095,7 +1250,6 @@ class SimulationExpertProgramRegistration:
         scene = self.scene_binding.declare()
         profile = self.robot_profile_binding.declare()
         try:
-            _validate_standard_call_catalog(self.call_catalog)
             _validate_standard_effect_monitors(profile)
             _validate_standard_tracking_metrics(profile)
             extensions = build_standard_extension_declarations(
@@ -1103,6 +1257,14 @@ class SimulationExpertProgramRegistration:
                 endpoint_adapters=self.endpoint_adapters,
                 runtime_transports=self.runtime_transports,
                 parallel_safety_factory=self.parallel_safety_factory,
+                control_part_evidence_factory=self.control_part_evidence_factory,
+                registered_semantic_lowerer_factories=(
+                    self.registered_semantic_lowerer_factories
+                ),
+            )
+            _validate_standard_call_catalog(
+                self.call_catalog,
+                extensions.registered_semantic_lowerers,
             )
             relation_grounders = _snapshot_relation_grounders(self.relation_grounders)
             relation_grounder_keys = frozenset(
@@ -1126,6 +1288,10 @@ class SimulationExpertProgramRegistration:
                     endpoint_adapters=self.endpoint_adapters,
                     runtime_transports=self.runtime_transports,
                     parallel_safety_factory=self.parallel_safety_factory,
+                    control_part_evidence_factory=self.control_part_evidence_factory,
+                    registered_semantic_lowerer_factories=(
+                        self.registered_semantic_lowerer_factories
+                    ),
                 )
             )
         except (TypeError, ValueError) as exc:
@@ -1151,19 +1317,166 @@ class SimulationExpertProgramRegistration:
             }
         )
 
+    def create_registered_semantic_lowerers(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> tuple[RegisteredSemanticLowerer, ...]:
+        """Create fresh live lowerers declared by this registration."""
+        self.assert_unchanged()
+        if type(scene_registry) is not SceneRegistry:
+            raise TypeError("scene_registry must be exactly SceneRegistry.")
+        if not isinstance(engine, AtomicActionEngine):
+            raise TypeError("engine must be an AtomicActionEngine.")
+        if engine.robot is not robot:
+            raise ValueError("engine and factory must reference the exact same robot.")
+
+        created: list[RegisteredSemanticLowerer] = []
+        with self._registered_semantic_lowerer_lock:
+            for factory in self.registered_semantic_lowerer_factories:
+                call_id = _exact_identifier(
+                    getattr(type(factory), "call_id", None),
+                    field_name="RegisteredSemanticLowererFactory.call_id",
+                )
+                lowerer = factory.create(
+                    simulation=simulation,
+                    robot=robot,
+                    scene_registry=scene_registry,
+                    engine=engine,
+                )
+                if not isinstance(lowerer, RegisteredSemanticLowerer):
+                    raise TypeError(
+                        "RegisteredSemanticLowererFactory.create() must return a "
+                        "RegisteredSemanticLowerer."
+                    )
+                if any(
+                    lowerer is previous
+                    for previous in self._registered_semantic_lowerer_history
+                ):
+                    raise ValueError(
+                        "RegisteredSemanticLowererFactory.create() must return a "
+                        "fresh lowerer for every runtime assembly owned by this "
+                        "registration."
+                    )
+                descriptor = self.call_catalog.discover(call_id)
+                lowerer_type = type(lowerer)
+                if getattr(lowerer_type, "call_id", None) != call_id:
+                    raise ValueError(
+                        "The live registered lowerer call_id must match its "
+                        "factory declaration."
+                    )
+                if (
+                    getattr(lowerer_type, "target_descriptor", None)
+                    != descriptor.target_descriptor
+                ):
+                    raise ValueError(
+                        f"Live lowerer {call_id!r} target_descriptor must exactly "
+                        "match the registered catalog target."
+                    )
+                self._registered_semantic_lowerer_history.append(lowerer)
+                created.append(lowerer)
+        return tuple(created)
+
+    def create_control_part_evidence_provider(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        scene_provider: SceneProvider,
+    ) -> EffectEvidenceProvider | None:
+        """Create the registration-owned live control-part evidence provider.
+
+        Args:
+            simulation: Simulation that owns the selected robot and sensors.
+            robot: Exact robot selected by the environment factory.
+            scene_registry: Exact live semantic scene registry.
+            engine: Atomic-action engine assembled for the robot.
+            scene_provider: Shared synchronized live scene provider.
+
+        Returns:
+            Fresh registered provider, or ``None`` when no factory is declared.
+        """
+        self.assert_unchanged()
+        factory = self.control_part_evidence_factory
+        if factory is None:
+            return None
+        if type(scene_registry) is not SceneRegistry:
+            raise TypeError("scene_registry must be exactly SceneRegistry.")
+        if not isinstance(engine, AtomicActionEngine):
+            raise TypeError("engine must be an AtomicActionEngine.")
+        if engine.robot is not robot:
+            raise ValueError("engine and factory must reference the exact same robot.")
+        if not isinstance(scene_provider, SceneProvider):
+            raise TypeError("scene_provider must implement SceneProvider.")
+        declaration = self.catalog.control_part_evidence_declaration
+        if declaration is None:
+            raise AssertionError(
+                "A registered control-part evidence factory lost its declaration."
+            )
+        with self._control_part_evidence_provider_lock:
+            provider = factory.create(
+                simulation=simulation,
+                robot=robot,
+                scene_registry=scene_registry,
+                engine=engine,
+                scene_provider=scene_provider,
+            )
+            if not isinstance(provider, EffectEvidenceProvider):
+                raise TypeError(
+                    "control_part_evidence_factory.create() must return an "
+                    "EffectEvidenceProvider."
+                )
+            if (provider.provider_id, provider.revision) != (
+                declaration.provider_id,
+                declaration.revision,
+            ):
+                raise ValueError(
+                    "The live control-part evidence provider identity must match "
+                    "its exact registration declaration."
+                )
+            if any(
+                provider is previous
+                for previous in self._control_part_evidence_provider_history
+            ):
+                raise ValueError(
+                    "ControlPartEvidenceProviderFactory.create() must return a "
+                    "fresh provider for every runtime assembly owned by this "
+                    "registration."
+                )
+            self._control_part_evidence_provider_history.append(provider)
+        return provider
+
     def create_parallel_safety_validator(
         self,
         *,
         simulation: object,
         robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
     ) -> ParallelCommandSafetyValidator | None:
         """Create and strictly validate the registration-owned live safety gate."""
         self.assert_unchanged()
         factory = self.parallel_safety_factory
         if factory is None:
             return None
+        if type(scene_registry) is not SceneRegistry:
+            raise TypeError("scene_registry must be exactly SceneRegistry.")
+        if not isinstance(engine, AtomicActionEngine):
+            raise TypeError("engine must be an AtomicActionEngine.")
+        if engine.robot is not robot:
+            raise ValueError("engine and factory must reference the exact same robot.")
         with self._parallel_safety_validator_lock:
-            validator = factory.create(simulation=simulation, robot=robot)
+            validator = factory.create(
+                simulation=simulation,
+                robot=robot,
+                scene_registry=scene_registry,
+                engine=engine,
+            )
             if not isinstance(validator, ParallelCommandSafetyValidator):
                 raise TypeError(
                     "parallel_safety_factory.create() must return a "
@@ -1187,9 +1500,17 @@ class SimulationExpertProgramRegistration:
         self.catalog.scene.validate_registry(registry)
 
     def validate_engine(self, engine: AtomicActionEngine) -> None:
-        """Validate live skills and resolved endpoints against this registration."""
+        """Validate live atomic skills against this registration."""
         self.assert_unchanged()
         self.catalog.validate_engine(engine)
+
+    def validate_bound_profile(
+        self,
+        bound_profile: BoundRobotSkillProfile,
+    ) -> None:
+        """Validate resolved semantic endpoints against this registration."""
+        self.assert_unchanged()
+        self.catalog.validate_bound_endpoint_extensions(bound_profile)
 
     def validate_robot_profile(
         self,

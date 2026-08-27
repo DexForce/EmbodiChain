@@ -42,10 +42,13 @@ from embodichain.lab.sim.atomic_actions import (
     AssembleGoal,
     AtomicActionEngine,
     ControlPartCommandProfile,
+    EntityState,
     GraspGoal,
     PickUpOptions,
     PlaceOptions,
     MotionPolicy,
+    SceneEntityPose,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.data import get_data_path
@@ -141,7 +144,7 @@ def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
 ) -> Robot:
-    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
@@ -315,11 +318,15 @@ def run_assemble_demo(
         sim.update(step=10)
 
     assemble_affordance = AssembleAffordance(
-        base_object_label="cube",
-        base_object_entity=cube,
-        assemble_object_label="soda_can",
-        assemble_object_entity=can,
         assemble_to_base_pose=assemble_to_base,
+    )
+    scene = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={
+            can.uid: EntityState(can.get_local_pose(to_matrix=True)),
+            cube.uid: EntityState(cube.get_local_pose(to_matrix=True)),
+        },
     )
     endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_hand"}}
     compiled = engine.compile(
@@ -336,7 +343,10 @@ def run_assemble_demo(
             ),
             engine.make_invocation(
                 "place",
-                AssembleGoal(affordance=assemble_affordance),
+                AssembleGoal(
+                    affordance=assemble_affordance,
+                    base_pose=SceneEntityPose(cube.uid),
+                ),
                 control_parts=endpoint_mapping,
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
@@ -345,7 +355,10 @@ def run_assemble_demo(
                 skill_options=place_options,
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            scene=scene,
+            control_dt=sim.sim_config.physics_dt,
+        ),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions

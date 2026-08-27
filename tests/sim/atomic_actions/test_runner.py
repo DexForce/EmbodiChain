@@ -42,6 +42,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
+    HeldObjectGuardRequest,
     HeldObjectState,
     JOINT_POSITION_CAPABILITY,
     JointPositionPayload,
@@ -49,6 +50,9 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionTarget,
     MotionPolicy,
     ObjectSemantics,
+    PhaseEffectGateRequest,
+    PhaseEffectGateRequirement,
+    PhaseEffectGateResult,
     PlanningContextTrackingFeedbackProvider,
     PlanningContext,
     RecoveryPolicy,
@@ -57,6 +61,7 @@ from embodichain.lab.sim.atomic_actions import (
     RuntimeCommandFrame,
     RuntimeEndpointTarget,
     RunnerStatus,
+    RunnerStep,
     SceneSnapshot,
     SkillBindingContract,
     SkillEndpointRequirement,
@@ -80,6 +85,49 @@ FIRST_INTERVAL = 0.1
 SECOND_INTERVAL = 0.2
 MINIMUM_CYCLE_TIME = 0.01
 TARGET_POSITION = 1.0
+
+
+def _effect_result(
+    verification_id: int,
+    success_mask: torch.Tensor,
+    failure_mask: torch.Tensor,
+    *,
+    invalidation_mask: torch.Tensor | None = None,
+    retry_mask: torch.Tensor | None = None,
+) -> EffectVerificationResult:
+    """Build an explicit terminal decision that retries failed rows by default."""
+    return EffectVerificationResult(
+        verification_id=verification_id,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+        invalidation_mask=(
+            torch.zeros_like(failure_mask)
+            if invalidation_mask is None
+            else invalidation_mask
+        ),
+        retry_mask=failure_mask if retry_mask is None else retry_mask,
+    )
+
+
+def _phase_gate_result(
+    request: PhaseEffectGateRequest,
+    *,
+    success: bool,
+    batch_size: int,
+) -> PhaseEffectGateResult:
+    """Build one all-row gate decision correlated with a runner request."""
+    success_mask = torch.full((batch_size,), success, dtype=torch.bool)
+    failure_mask = torch.zeros(batch_size, dtype=torch.bool)
+    return PhaseEffectGateResult(
+        verification_id=request.verification_id,
+        gate_id=request.gate_id,
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+        retry_mask=failure_mask,
+    )
 
 
 class FakeClock:
@@ -274,9 +322,15 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         )
     )
 
-    def __init__(self, *, with_effect: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        with_effect: bool = False,
+        with_phase_gate: bool = False,
+    ) -> None:
         super().__init__()
         self.with_effect = with_effect
+        self.with_phase_gate = with_phase_gate
         self.plan_count = 0
 
     def _plan(
@@ -306,7 +360,10 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         effects = StateDelta()
         if self.with_effect:
             semantics = ObjectSemantics(
-                affordance=Affordance(), geometry={}, label="runner-object"
+                affordance=Affordance(),
+                geometry={},
+                entity_id="runner-object",
+                label="runner-object",
             )
             held = HeldObjectState(
                 semantics=semantics,
@@ -320,6 +377,9 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
             success=True,
             trajectory=trajectory,
             expected_effects=effects,
+            segment_lengths=(
+                {"prepare": 2, "commit": 1} if self.with_phase_gate else None
+            ),
         )
 
 
@@ -334,11 +394,14 @@ def _timed_action_binding(action: TimedAction) -> ActionBinding:
 def _make_runner(
     *,
     with_effect: bool = False,
+    with_phase_gate: bool = False,
     batch_size: int = BATCH_SIZE,
     control_joint_ids: tuple[int, ...] | None = None,
     max_action_retries: int = 2,
     action_timeout: float = 10.0,
     tracking_runtime: TrackingRuntime | None = None,
+    hold_on_completion: bool = True,
+    hold_during_effect_verification: bool = True,
 ) -> tuple[
     ExecutionRunner,
     FakeClock,
@@ -361,7 +424,10 @@ def _make_runner(
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub"
-    action = TimedAction(with_effect=with_effect)
+    action = TimedAction(
+        with_effect=with_effect,
+        with_phase_gate=with_phase_gate,
+    )
     engine = AtomicActionEngine(generator, tracking_runtime=tracking_runtime)
     engine.register(action)
     initial_task = TaskState.empty(batch_size, "cpu")
@@ -378,6 +444,16 @@ def _make_runner(
             max_action_retries=max_action_retries,
             action_timeout=action_timeout,
         ),
+        phase_effect_gates=(
+            (
+                PhaseEffectGateRequirement(
+                    gate_id="physical_ready",
+                    segment_name="commit",
+                ),
+            )
+            if with_phase_gate
+            else ()
+        ),
     )
     session = engine.start((invocation,), initial_context)
     runner = ExecutionRunner(
@@ -385,7 +461,11 @@ def _make_runner(
         provider,
         sink,
         clock=clock,
-        cfg=ExecutionRunnerCfg(minimum_cycle_time=MINIMUM_CYCLE_TIME),
+        cfg=ExecutionRunnerCfg(
+            minimum_cycle_time=MINIMUM_CYCLE_TIME,
+            hold_on_completion=hold_on_completion,
+            hold_during_effect_verification=hold_during_effect_verification,
+        ),
     )
     return runner, clock, provider, sink, action
 
@@ -395,9 +475,29 @@ def _successful_effect_result(
     request: EffectVerificationRequest,
 ) -> EffectVerificationResult:
     """Correlate a successful result with the pending effect boundary."""
-    return EffectVerificationResult(
+    return _effect_result(
         verification_id=request.verification_id,
         success_mask=torch.ones(
+            context.batch_size,
+            dtype=torch.bool,
+            device=context.robot.qpos.device,
+        ),
+        failure_mask=torch.zeros(
+            context.batch_size,
+            dtype=torch.bool,
+            device=context.robot.qpos.device,
+        ),
+    )
+
+
+def _unresolved_effect_result(
+    context: PlanningContext,
+    request: EffectVerificationRequest,
+) -> EffectVerificationResult:
+    """Keep every row pending at the current effect boundary."""
+    return _effect_result(
+        verification_id=request.verification_id,
+        success_mask=torch.zeros(
             context.batch_size,
             dtype=torch.bool,
             device=context.robot.qpos.device,
@@ -455,6 +555,147 @@ def test_runner_dispatches_only_when_timed_waypoint_is_due() -> None:
     assert second.wait_duration == pytest.approx(SECOND_INTERVAL)
     assert third.command_count == 3
     assert third.wait_duration == pytest.approx(SECOND_INTERVAL)
+
+
+def test_runner_calls_held_object_guard_with_fresh_command_phase() -> None:
+    runner, _, _, sink, _ = _make_runner()
+    observed: list[tuple[float, HeldObjectGuardRequest]] = []
+
+    def verifier(
+        context: PlanningContext,
+        request: HeldObjectGuardRequest,
+    ) -> None:
+        observed.append((context.robot.timestamp, request))
+        return None
+
+    first = runner.step(held_object_guard_verifier=verifier)
+
+    assert first.status is RunnerStatus.RUNNING
+    assert len(sink.sent) == 1
+    assert len(observed) == 1
+    timestamp, request = observed[0]
+    assert timestamp == 0.0
+    assert request.verification_id == 0
+    assert request.segment_name == "timed"
+    assert request.attempt_generation == 0
+    assert request.invocation_index == 0
+    assert request.next_waypoint_index == 0
+
+
+def test_runner_guard_exception_performs_cancel_then_observed_hold() -> None:
+    runner, clock, _, sink, _ = _make_runner()
+    runner.step()
+    clock.advance(FIRST_INTERVAL)
+
+    def verifier(
+        context: PlanningContext,
+        request: HeldObjectGuardRequest,
+    ) -> None:
+        del context, request
+        raise RuntimeError("guard evidence unavailable")
+
+    failed = runner.step(held_object_guard_verifier=verifier)
+
+    assert failed.status is RunnerStatus.FAILED
+    assert [dispatch.operation for dispatch in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert [target.target_id for target in sink.cancelled[0]] == ["arm"]
+    assert failed.message is not None
+    assert "guard evidence unavailable" in failed.message
+
+
+def test_runner_phase_gate_polls_fresh_state_and_replays_preceding_command() -> None:
+    runner, clock, _, sink, _ = _make_runner(with_phase_gate=True)
+    requests: list[tuple[float, PhaseEffectGateRequest]] = []
+
+    first = runner.step()
+    clock.advance(first.wait_duration)
+    boundary = runner.step()
+    assert boundary.tick is not None
+    assert boundary.tick.pending_phase_effect_gate is not None
+    clock.advance(boundary.wait_duration)
+
+    def verifier(
+        context: PlanningContext,
+        request: PhaseEffectGateRequest,
+    ) -> PhaseEffectGateResult:
+        requests.append((context.robot.timestamp, request))
+        return _phase_gate_result(
+            request,
+            success=len(requests) == 2,
+            batch_size=context.batch_size,
+        )
+
+    unresolved = runner.step(phase_effect_gate_verifier=verifier)
+    assert unresolved.tick is not None
+    assert unresolved.tick.pending_phase_effect_gate is not None
+    clock.advance(unresolved.wait_duration)
+    released = runner.step(phase_effect_gate_verifier=verifier)
+
+    assert released.status is RunnerStatus.RUNNING
+    assert released.tick is not None
+    assert released.tick.pending_phase_effect_gate is None
+    assert [value[1].verification_id for value in requests] == [0, 1]
+    assert [value[1].next_waypoint_index for value in requests] == [2, 2]
+    assert [value[1].segment_name for value in requests] == ["commit", "commit"]
+    assert requests[0][0] < requests[1][0]
+    assert len(sink.sent) == 4
+    boundary_payload = sink.sent[1].commands[0].payload
+    replay_payload = sink.sent[2].commands[0].payload
+    released_payload = sink.sent[3].commands[0].payload
+    assert isinstance(boundary_payload, JointPositionPayload)
+    assert isinstance(replay_payload, JointPositionPayload)
+    assert isinstance(released_payload, JointPositionPayload)
+    assert torch.equal(replay_payload.positions, boundary_payload.positions)
+    assert torch.allclose(
+        released_payload.positions,
+        torch.full((BATCH_SIZE, ROBOT_DOF), TARGET_POSITION),
+    )
+    assert any(
+        event.kind is ExecutionEventKind.PHASE_EFFECT_GATE_SATISFIED
+        for event in released.tick.events
+    )
+
+
+def test_blocking_runner_returns_unverified_phase_gate_boundary() -> None:
+    runner, _, _, sink, _ = _make_runner(with_phase_gate=True)
+
+    blocked = runner.run_until_blocked()
+
+    assert blocked.status is RunnerStatus.RUNNING
+    assert blocked.tick is not None
+    assert blocked.tick.pending_phase_effect_gate is not None
+    assert blocked.tick.pending_phase_effect_gate.segment_name == "commit"
+    assert len(sink.sent) == 2
+
+
+def test_runner_phase_gate_verifier_exception_performs_safe_stop() -> None:
+    runner, clock, _, sink, _ = _make_runner(with_phase_gate=True)
+    first = runner.step()
+    clock.advance(first.wait_duration)
+    boundary = runner.step()
+    clock.advance(boundary.wait_duration)
+
+    def verifier(
+        context: PlanningContext,
+        request: PhaseEffectGateRequest,
+    ) -> PhaseEffectGateResult:
+        del context, request
+        raise RuntimeError("gate evidence unavailable")
+
+    failed = runner.step(phase_effect_gate_verifier=verifier)
+
+    assert failed.status is RunnerStatus.FAILED
+    assert [dispatch.operation for dispatch in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert failed.message is not None
+    assert "gate evidence unavailable" in failed.message
 
 
 def test_runner_dispatches_transport_neutral_endpoint_frames() -> None:
@@ -857,6 +1098,62 @@ def test_blocking_runner_resumes_a_stored_effect_verification_boundary() -> None
     assert completed.tick.task_state.get_held_object("arm") is not None
 
 
+def test_runner_holds_while_effect_verification_is_pending_by_default() -> None:
+    runner, _, _, sink, _ = _make_runner(with_effect=True)
+
+    blocked = runner.run_until_blocked()
+
+    assert blocked.status is RunnerStatus.RUNNING
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    assert [item.operation for item in blocked.dispatches] == [CommandOperation.HOLD]
+    assert len(sink.held) == 1
+    assert [target.target_id for target in sink.held[0][0]] == ["arm"]
+
+
+def test_runner_skips_all_effect_pending_holds_when_disabled() -> None:
+    runner, clock, _, sink, _ = _make_runner(
+        with_effect=True,
+        hold_on_completion=False,
+        hold_during_effect_verification=False,
+    )
+
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    assert blocked.dispatches == ()
+
+    polls: list[RunnerStep] = []
+    for _ in range(2):
+        clock.advance(MINIMUM_CYCLE_TIME)
+        polls.append(runner.step(effect_verifier=_unresolved_effect_result))
+
+    assert all(step.status is RunnerStatus.RUNNING for step in polls)
+    assert all(
+        step.tick is not None and step.tick.pending_effect is not None for step in polls
+    )
+    assert all(step.dispatches == () for step in polls)
+    assert sink.held == []
+
+
+def test_effect_success_adds_no_hold_when_pending_and_completion_holds_are_disabled() -> (
+    None
+):
+    runner, clock, _, sink, _ = _make_runner(
+        with_effect=True,
+        hold_on_completion=False,
+        hold_during_effect_verification=False,
+    )
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    clock.advance(MINIMUM_CYCLE_TIME)
+
+    completed = runner.step(effect_verifier=_successful_effect_result)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert completed.tick is not None and completed.tick.pending_effect is None
+    assert completed.dispatches == ()
+    assert sink.held == []
+
+
 def test_resumed_effect_verifier_uses_a_fresh_observation() -> None:
     runner, clock, _, _, _ = _make_runner(with_effect=True)
     blocked = runner.run_until_blocked()
@@ -958,7 +1255,7 @@ def test_effect_verifier_is_not_called_after_deadline_and_session_retries() -> N
 
 def test_effect_result_and_effect_verifier_are_mutually_exclusive() -> None:
     runner, _, _, sink, action = _make_runner(with_effect=True)
-    result = EffectVerificationResult(
+    result = _effect_result(
         verification_id=0,
         success_mask=torch.tensor([True]),
         failure_mask=torch.tensor([False]),
@@ -1018,7 +1315,7 @@ def test_all_false_effect_updates_keep_polling_the_same_request() -> None:
         request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
         observed_requests.append((request.verification_id, request.attempt_generation))
-        return EffectVerificationResult(
+        return _effect_result(
             verification_id=request.verification_id,
             success_mask=torch.zeros(context.batch_size, dtype=torch.bool),
             failure_mask=torch.zeros(context.batch_size, dtype=torch.bool),
@@ -1054,7 +1351,7 @@ def test_partial_effect_verifier_receives_the_committed_task_state() -> None:
             None if held is None or held.env_mask is None else held.env_mask.tolist()
         )
         if request.env_mask.tolist() == [True, True]:
-            return EffectVerificationResult(
+            return _effect_result(
                 verification_id=request.verification_id,
                 success_mask=torch.tensor([True, False]),
                 failure_mask=torch.tensor([False, False]),
@@ -1063,7 +1360,7 @@ def test_partial_effect_verifier_receives_the_committed_task_state() -> None:
         assert held is not None and held.env_mask is not None
         assert held.env_mask.tolist() == [True, False]
         assert torch.equal(context.task.held_objects["arm"].env_mask, held.env_mask)
-        return EffectVerificationResult(
+        return _effect_result(
             verification_id=request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -1125,6 +1422,34 @@ def test_runner_effect_timeout_exhaustion_cancels_and_holds() -> None:
     assert sink.cancel_count == 1
 
 
+def test_effect_timeout_still_cancels_and_holds_when_pending_holds_are_disabled() -> (
+    None
+):
+    runner, clock, _, sink, _ = _make_runner(
+        with_effect=True,
+        max_action_retries=0,
+        action_timeout=2.0,
+        hold_on_completion=False,
+        hold_during_effect_verification=False,
+    )
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    assert sink.held == []
+    request = blocked.tick.pending_effect
+    clock.advance(request.deadline - clock.now() + MINIMUM_CYCLE_TIME)
+
+    failed = runner.step()
+
+    assert failed.status is RunnerStatus.FAILED
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert len(sink.held) == 1
+    assert [target.target_id for target in sink.held[0][0]] == ["arm"]
+
+
 def test_runner_deactivation_refreshes_cached_effect_request() -> None:
     runner, _, _, _, _ = _make_runner(with_effect=True, batch_size=2)
     blocked = runner.run_until_blocked()
@@ -1148,7 +1473,7 @@ def test_runner_deactivation_refreshes_cached_effect_request() -> None:
         context: PlanningContext,
         request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
-        return EffectVerificationResult(
+        return _effect_result(
             verification_id=request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -1168,7 +1493,7 @@ def test_blocking_runner_fails_safely_for_a_mismatched_effect_result() -> None:
         context: PlanningContext,
         request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
-        return EffectVerificationResult(
+        return _effect_result(
             verification_id=request.verification_id + 1,
             success_mask=torch.ones(context.batch_size, dtype=torch.bool),
             failure_mask=torch.zeros(context.batch_size, dtype=torch.bool),

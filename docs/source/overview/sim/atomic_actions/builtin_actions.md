@@ -73,7 +73,7 @@ The animations below are the focused simulator demos under
 :link: builtin-axis-align
 :link-type: ref
 
-`axis_align` · grasp, lift, align an object-local axis, and release
+`axis_align` · grasp, lift, and align an object-local axis
 
 <img src="../../../_static/atomic_actions/axis_align_horizontal.gif" alt="Axis align horizontal demo" width="480" style="max-width: 100%;" />
 <img src="../../../_static/atomic_actions/axis_align_upright.gif" alt="Axis align upright demo" width="480" style="max-width: 100%;" />
@@ -95,6 +95,13 @@ The animations below are the focused simulator demos under
 `pour` · rotate an already-held object about its local internal axis
 
 <img src="../../../_static/atomic_actions/pour.gif" alt="Pour demo" width="480" style="max-width: 100%;" />
+:::
+
+:::{grid-item-card} `PushObject`
+:link: builtin-push-object
+:link-type: ref
+
+`push_object` · contact and translate a free rigid object on its support plane
 :::
 
 :::{grid-item-card} `Place`
@@ -132,6 +139,14 @@ The animations below are the focused simulator demos under
 
 <img src="../../../_static/atomic_actions/slide_pull.gif" alt="Slide pull demo" width="480" style="max-width: 100%;" />
 <img src="../../../_static/atomic_actions/slide_push.gif" alt="Slide push demo" width="480" style="max-width: 100%;" />
+:::
+
+:::{grid-item-card} `OpenDoor`
+:link: builtin-open-door
+:link-type: ref
+
+`open_door` · sampled handle grasp and parent-hinge rotation
+<img src="../../../_static/atomic_actions/open_door.gif" alt="OpenDoor demo" width="480" style="max-width: 100%;" />
 :::
 
 :::{grid-item-card} `Twist`
@@ -180,12 +195,14 @@ The animations below are the focused simulator demos under
 | `move_end_effector` | `EndEffectorPoseGoal` | `primary.motion` | none | none | none |
 | `move_joints` | `JointPositionGoal` | `primary.motion` | named target only: command matching `target` on `primary.motion` | none | none |
 | `pick_up` | `GraspGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | semantic object/entity | attach object to the `primary.motion` target |
-| `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | unheld object with `AxisAlignAffordance` | open-loop pick, align, lower, and release |
+| `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | unheld object with `AxisAlignAffordance` | open-loop pick and align while retaining the grasp |
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | object held exclusively by the `primary.motion` target | preserve attachment |
 | `pour` | `PourGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | exclusively held object with `AxisAlignAffordance` | preserve attachment; open-loop rotate and return |
+| `push_object` | `PushObjectGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | free rigid object plus target support pose | open-loop planar push; application validates the measured landing pose |
 | `place` | `PlaceGoal`, `AssembleGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | any active attachment must be exclusive to `primary.motion`; `AssembleGoal` requires one | detach object |
 | `press` | `PressGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
 | `slide` | `SlideGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `SlideAffordance` + link pose | open-loop motion; application verifies joint travel/grasp |
+| `open_door` | `OpenDoorGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `OpenDoorAffordance` + handle-link pose + live hinge qpos | open-loop motion; application verifies hinge travel/grasp |
 | `twist` | `TwistGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `TwistAffordance` + target pose | open-loop motion; application verifies joint travel/grasp |
 | `coordinated_pickment` | `CoordinatedPickGoal` | `left.motion`, `left.grasp`, `right.motion`, `right.grasp` | both grasp endpoints: `open`, `grasp` | semantic object/entity | attach the shared object to both motion targets |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing.motion`, `placing.grasp`, `support.motion`, `support.grasp` | `placing.grasp`: `open`, `grasp`; `support.grasp`: `grasp` | two distinct objects, each held exclusively by its motion target | optionally detach placing object; preserve support attachment |
@@ -243,6 +260,7 @@ entity as a recovery dependency.
 | `MoveEndEffector.xpos` | yes | yes |
 | `MoveJoints.target` | no | no |
 | `MoveHeldObject.object_target_pose` | yes | yes |
+| `PushObject.target_pose` | yes | yes; the object and target are monitored through `approach` only |
 | `Place.xpos` | yes | yes |
 | `CoordinatedPickGoal.object_target_pose` / `object_initial_pose` | yes | yes |
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
@@ -250,6 +268,7 @@ entity as a recovery dependency.
 | `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; monitored through `approach` only |
 | `AxisAlign.grasp_xpos` | yes | yes |
 | `AxisAlign` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `OpenDoorGoal.target_pose` | yes | yes; monitored through `reach` only |
 | `HandOverGoal.target_pose` | yes | yes |
 | `HandOver` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the initial object pose |
 | Coordinated pickup implicit initial pose via `ObjectSemantics.entity_id` | implicit snapshot reference | yes; only when `object_initial_pose` is omitted |
@@ -393,7 +412,7 @@ bound motion target.
 | Skill ID | `pick_up` |
 | Goal | `GraspGoal(semantics=..., grasp_xpos=None)` |
 | Binding contract | `primary.motion` plus disjoint `primary.grasp` |
-| Precondition | `ObjectSemantics.entity_id` resolves in the planning snapshot; the deprecated live `entity` fallback remains temporarily; an `AntipodalAffordance` is required when no explicit grasp pose is supplied |
+| Precondition | `ObjectSemantics.entity_id` resolves in the planning snapshot; the deprecated live `entity` fallback remains temporarily; an `AntipodalAffordance` is required when neither an explicit grasp pose nor `fixed_object_to_eef` is supplied |
 | Effect | write `HeldObjectState` for the bound motion target |
 | Verification | the attachment effect must be verified during closed-loop execution |
 
@@ -404,9 +423,12 @@ dependency, so material target motion invalidates and replans an executing
 dispatched, dependency monitoring stops: contact-, close-, and lift-induced
 object motion must not be misclassified as an external target update. Tracking
 and collision-world checks remain active independently. When `grasp_xpos` is
-omitted, the action samples valid affordance grasps, evaluates
-reachability, and stores the selected `object_to_eef` transform in the expected
-held-object state. Later object-centric skills reuse that transform.
+omitted and `fixed_object_to_eef` is configured, the action composes that
+object-relative calibration directly with the observed object pose. This path
+bypasses affordance sampling, `rotate_upright`, and `grasp_frame_to_eef`. Without
+the fixed calibration, the action samples valid affordance grasps and evaluates
+reachability. Both paths store the selected `object_to_eef` transform in the
+expected held-object state so later object-centric skills can reuse it.
 
 Set `ObjectSemantics.entity_id` to the same stable ID used by the scene
 snapshot. `PickUp` resolves that object pose once per planning attempt, uses the
@@ -419,8 +441,11 @@ Important `PickUpOptions` fields:
 
 | Field | Purpose |
 |---|---|
-| `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and approach direction |
+| `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and world-frame approach direction |
 | `lift_height`, `hand_interp_steps` | Lift distance and close-segment discretization |
+| `grasp_settle_steps` | Closed-hand hold frames before lifting |
+| `grasp_frame_to_eef` | Fixed SE(3) calibration from canonical grasp frames to the robot TCP |
+| `fixed_object_to_eef` | Optional task/robot-calibrated SE(3) grasp that bypasses affordance sampling when the goal has no explicit grasp |
 | `pick_object_part` | Affordance region: currently `center`, `top`, or `bottom` |
 | `approach_alignment_max_angle` | Optional TCP approach-alignment filter |
 | `downstream_object_target_poses` | Optional future reachability constraints used in grasp selection |
@@ -438,11 +463,11 @@ target recovery, see
 
 ## `AxisAlign`
 
-Executes **approach -> reach -> close -> lift -> align -> lower -> open** while
+Executes **approach -> reach -> close -> lift -> align** while
 grouping arm motion into two planner calls: the open-gripper `approach` phase
 contains the pre-grasp and grasp targets, and the closed-gripper `manipulate`
-phase contains lift, alignment, and lowering targets. The `close` and `open`
-segments are local hand interpolation and do not call the motion generator.
+phase contains the lift and alignment targets. The `close` segment is local
+hand interpolation and does not call the motion generator.
 Only the final aligned pose is sent to the planner; the alignment sample budget
 controls trajectory resolution without expanding the rotation into one CuRobo
 `plan_pose` call per intermediate orientation.
@@ -459,7 +484,7 @@ derives every end-effector keyframe through the fixed grasp transform.
 | Goal | `AxisAlignGoal(semantics=..., grasp_xpos=None)` |
 | Binding | manipulator + end effector role `primary` |
 | Precondition | an `AxisAlignAffordance`; the object pose resolves from `ObjectSemantics.entity_id` or the deprecated live entity fallback |
-| Motion | approach, grasp, lift, rotate in place, lower, release |
+| Motion | approach, grasp, lift, and rotate in place while retaining the grasp |
 | Effect | explicitly open-loop; no final object-pose success is claimed |
 
 An explicit `grasp_xpos` accepts the same pose forms as `GraspGoal`; omitting it
@@ -468,8 +493,8 @@ rotation axis, using grasp cost as the tie-breaker. When a currently horizontal
 object axis is aligned to world-up, the initial grasp orientation is pre-rotated
 45 degrees opposite the alignment rotation. This reduces the arm's table-side
 sweep during upright manipulation. `AxisAlignOptions` extends `PickUpOptions`
-with `target_axis` and `lower_distance`. Shared and per-environment target axes
-use shapes `(3,)` and `(B, 3)` respectively. Zero or non-finite axes are
+with `target_axis`. Shared and per-environment target axes use shapes `(3,)`
+and `(B, 3)` respectively. Zero or non-finite axes are
 rejected, and exactly opposite axes use a deterministic 180-degree rotation
 rather than an unstable cross-product direction.
 
@@ -483,10 +508,16 @@ rather than an unstable cross-product direction.
 
 Moves an already attached object to an object-frame target while keeping the
 hand closed. The caller specifies the desired **object pose**, not an EEF pose;
-the action derives `target_object_pose @ object_to_eef` from verified task state.
-When upright transport needs the current object orientation, it derives it from
-the observed EEF pose and verified `object_to_eef` relation rather than reading
-a live scene entity.
+the action derives `target_object_pose @ object_to_eef` from verified task state
+and sends that exact EEF target to the motion planner. It does not replace the
+requested orientation with an implicit transport orientation. A caller that
+needs upright or tilted transport must encode that orientation in the object
+target itself.
+
+After a successful semantic call, `SkillRuntime` reconciles an active held
+relation from the terminal object observation and forward kinematics when both
+are available. Consequently, later object-space calls use the measured
+attachment instead of indefinitely projecting the originally selected grasp.
 
 | Contract | Value |
 |---|---|
@@ -498,8 +529,7 @@ a live scene entity.
 | Effect | none; the existing attachment is preserved |
 | Dynamic target | explicit pose or `SceneEntityPose` |
 
-The bound `primary.grasp` endpoint must provide `grasp`; optional
-upright-transport settings belong to `MoveHeldObjectOptions`. The participant's
+The bound `primary.grasp` endpoint must provide `grasp`. The participant's
 motion and grasp endpoints are selected through `ActionBinding`; generic timing
 is explicit on the planner result or planning context, while trajectory
 sampling remains in `MotionPolicy`. In a vectorized batch, rows
@@ -540,6 +570,42 @@ planner can chain the outbound and return legs.
 **Example:** `scripts/tutorials/atomic_action/pour.py` compiles a horizontal
 `PickUp` followed by `Pour`.
 
+(builtin-push-object)=
+
+## `PushObject`
+
+Pushes a free rigid object toward an object-space target on the target pose's
+support plane. `PushObjectGoal` owns the object's semantic identity and an
+explicit pose or late-bound `SceneEntityPose`. The action closes the configured
+end effector, approaches a calibrated contact point from above, makes contact,
+translates along the measured planar object-to-target direction, and retracts.
+
+The primitive intentionally declares no symbolic placement effect. Contact and
+sliding are open-loop physics interactions, so a task must use a measured
+segment validator such as `object_near_target` before accepting a demonstration.
+Object and target scene dependencies are monitored only through `approach`;
+motion caused by the contact and push phases is therefore not misclassified as
+an external dynamic-goal update.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `push_object` |
+| Goal | `PushObjectGoal(semantics=..., target_pose=...)` |
+| Binding | manipulator + end effector role `primary` |
+| Precondition | a free rigid object and a target pose whose local Z axis is the support normal |
+| Motion | close, approach, contact, planar push, retract |
+| Effect | none; verify the measured object pose at the task boundary |
+
+`PushObjectOptions` owns contact distance, overshoot, approach/retract heights,
+the object-local contact point, and an optional support-frame planar offset.
+The support-frame override keeps corrective pushes on the same side even when
+a thin object flips or yaws after first contact. `completion_tolerance` makes a
+later corrective invocation return a hold trajectory when the latest measured
+pose is already close enough. `PushObjectToolCalibration` can override the
+contact transform and clearance for a bound control part, which keeps
+asymmetric left/right tool geometry in the robot profile rather than in task
+control code.
+
 (builtin-place)=
 
 ## `Place`
@@ -571,8 +637,10 @@ The bound `primary.grasp` endpoint must provide `open` and `grasp`. Important
 |---|---|
 | `lift_height` | Approach and retract height |
 | `hand_interp_steps` | Open-segment discretization |
+| `release_settle_steps` | Open-hand hold frames before retracting |
 | `max_approach_retract_z` | Optional world-Z ceiling for approach/retract poses |
 | `cartesian_waypoint_count` | Fixed-orientation translation keyframes per segment |
+| `preserve_current_object_orientation` | Keep the observed object orientation while using the target translation |
 
 **Example:** `scripts/tutorials/atomic_action/place.py`
 
@@ -673,6 +741,64 @@ axis-aligned Cartesian samples rather than sparse joint-space endpoints.
 plans and replays a pull first, then replans a push from the drawer's measured
 post-pull link pose.
 
+(builtin-open-door)=
+
+## `OpenDoor`
+
+Plans **approach -> reach -> close -> open -> release -> retract** for a door
+handle. Construct `OpenDoorAffordance` with
+`OpenDoorAffordance.from_articulation(articulation, link_name)`. Starting at the
+configured handle link, the factory consumes
+`Articulation.get_parent_joint_chain()`, skips only fixed intermediates, and
+automatically selects the hinge only when the chain has one active revolute
+ancestor. A prismatic ancestor, revolute latch/handle joint, or any other
+multi-active chain is ambiguous and requires `hinge_joint_name`. The selected
+axis and origin are converted into the handle-link frame without exposing
+native simulator joint-info objects to the affordance. The affordance owns the
+joint-coordinate opening direction: it defaults to increasing qpos, while
+reverse-coordinate hinges pass `opening_direction=-1` to the factory. It
+stores only local geometry, the handle mesh, resolved joint name, limits, and
+opening direction; it does not retain the live articulation.
+
+The action infers the positive-opening approach direction from the hinge axis
+and the hinge-to-handle radial vector, then samples a handle grasp as `Slide`
+does. `OpenDoorGoal.open_fraction` is an absolute semantic target: `0` maps to
+the affordance-owned closed legal endpoint and `1` maps to its open endpoint,
+including hinges whose opening direction decreases joint position. At planning
+time, the resolved joint name must uniquely match a live
+`SceneSnapshot.articulation_joints` observation. Each environment rotates only
+by `target_position - observed_position`; invalid observations, out-of-range
+targets, and targets that would move toward closing fail that row, while rows
+already at the target succeed with a hold trajectory.
+
+For active rows, the opening segment interpolates handle-link poses around the
+resolved hinge axis and applies the initial rigid `link -> EEF` transform to
+recover the corresponding EEF poses. After release, retract follows the
+approach direction after it has rotated with the open door.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `open_door` |
+| Goal | `OpenDoorGoal(semantics=..., target_pose=..., open_fraction=...)` |
+| Binding contract | `primary.motion` plus disjoint `primary.grasp` |
+| Motion | approach, reach, close, hinge arc, release, rotated-direction retract |
+| Effect | explicitly open-loop; no hinge travel or grasp success is claimed |
+
+`OpenDoorOptions` controls hand close/open interpolation, circular-arc
+keyframes, approach/retract distances, and joint-position comparison
+tolerance. The desired opening state belongs to `OpenDoorGoal`, not the
+planner options. The bound `primary.grasp` endpoint must provide `open` and
+`grasp`. The planner reserves at least one opening-segment sample for the
+segment start plus one for every configured door-arc keyframe; the full motion
+policy therefore needs
+`sample_count >= 2 * hand_interp_steps + door_waypoint_count + 7`.
+
+**Example:** `scripts/tutorials/atomic_action/open_door.py` configures only the
+microwave's `door_handle` link. Automatic traversal resolves `door_hinge`
+through the intermediate fixed joint. Its absolute `--open_angle` value is
+normalized against the resolved hinge limits and passed as the goal's
+`open_fraction`.
+
 (builtin-twist)=
 
 ## `Twist`
@@ -705,7 +831,7 @@ the grasp pose's negative z-axis; the target-local twist axis belongs to
 translation, and regrasping are outside its contract; an `Unscrew` action should
 model those behaviors separately.
 
-For all three primitives, `SkillDescriptor.open_loop` is `True`. Trajectory
+For all four primitives, `SkillDescriptor.open_loop` is `True`. Trajectory
 completion therefore means commanded motion completion only. Applications that
 need semantic success must observe button/contact or articulation state and
 verify it outside the side-effect-free planner.

@@ -34,8 +34,10 @@ from embodichain.lab.sim.atomic_actions import (
     AxisAlignGoal,
     AxisAlignOptions,
     ControlPartCommandProfile,
+    EntityState,
     MotionPolicy,
     ObjectSemantics,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -133,7 +135,6 @@ def create_axis_align_semantics(
         label=semantics.label,
         geometry=semantics.geometry,
         properties=semantics.properties,
-        entity=semantics.entity,
         entity_id=semantics.entity_id,
         affordance=AxisAlignAffordance(
             mesh_vertices=antipodal.mesh_vertices,
@@ -144,7 +145,7 @@ def create_axis_align_semantics(
 
 
 def main() -> None:
-    """Plan and replay a grasp, axis alignment, lowering, and release."""
+    """Plan and replay a grasp followed by axis alignment."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(sim, tcp_z=0.15)
@@ -210,12 +211,18 @@ def main() -> None:
                     ),
                     pre_grasp_distance=0.15,
                     lift_height=0.16,
-                    lower_distance=0.03,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
+            ),
+            control_dt=sim.sim_config.physics_dt,
+        ),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan AxisAlign demo trajectory.")

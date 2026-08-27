@@ -40,6 +40,7 @@ from dexsim.utility import log_warning
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnvCfg
     from embodichain.lab.gym.envs.expert_program import (
+        ExpertProgramAdapterFactory,
         SimulationExpertProgramRegistration,
     )
 
@@ -69,8 +70,12 @@ class EnvSpec:
         max_episode_steps=None,
         default_kwargs: dict = None,
         expert_program_registration: SimulationExpertProgramRegistration | None = None,
+        expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
+        supports_rl: bool = False,
     ):
         """A specification for a Embodied environment."""
+        if type(supports_rl) is not bool:
+            raise TypeError("supports_rl must be a bool.")
         if expert_program_registration is not None:
             from embodichain.lab.gym.envs.expert_program import (
                 SimulationExpertProgramRegistration,
@@ -84,15 +89,72 @@ class EnvSpec:
                     "expert_program_registration must be exactly "
                     "SimulationExpertProgramRegistration or None."
                 )
+        if expert_program_adapter_factory is not None:
+            from embodichain.lab.gym.envs.expert_program import (
+                ExpertProgramAdapterFactory,
+            )
+
+            if not isinstance(
+                expert_program_adapter_factory,
+                ExpertProgramAdapterFactory,
+            ):
+                raise TypeError(
+                    "expert_program_adapter_factory must implement "
+                    "ExpertProgramAdapterFactory or be None."
+                )
+            factory_registration = getattr(
+                expert_program_adapter_factory,
+                "registration",
+                None,
+            )
+            if factory_registration is not None:
+                from embodichain.lab.gym.envs.expert_program import (
+                    SimulationExpertProgramRegistration,
+                )
+
+                if (
+                    type(factory_registration)
+                    is not SimulationExpertProgramRegistration
+                ):
+                    raise TypeError(
+                        "expert_program_adapter_factory.registration must be "
+                        "exactly SimulationExpertProgramRegistration."
+                    )
+            if (
+                expert_program_registration is not None
+                and factory_registration is not None
+                and factory_registration is not expert_program_registration
+            ):
+                raise ValueError(
+                    "expert_program_adapter_factory must own the exact "
+                    "expert_program_registration."
+                )
+            if expert_program_registration is None:
+                expert_program_registration = factory_registration
         self.uid = uid
         self.cls = cls
         self.max_episode_steps = max_episode_steps
         self.default_kwargs = {} if default_kwargs is None else default_kwargs
+        self.supports_rl = supports_rl
         self.expert_program_registration = expert_program_registration
+        self.expert_program_adapter_factory = expert_program_adapter_factory
 
     def make(self, **kwargs):
         _kwargs = self.default_kwargs.copy()
         _kwargs.update(kwargs)
+        if self.expert_program_adapter_factory is not None:
+            supplied_factory = _kwargs.get("expert_program_adapter_factory")
+            if (
+                supplied_factory is not None
+                and supplied_factory is not self.expert_program_adapter_factory
+            ):
+                raise ValueError(
+                    "A registered Expert Program adapter factory cannot be "
+                    "overridden at environment construction."
+                )
+            _kwargs["expert_program_adapter_factory"] = (
+                self.expert_program_adapter_factory
+            )
         return self.cls(**_kwargs)
 
     @property
@@ -116,6 +178,8 @@ def register(
     max_episode_steps=None,
     default_kwargs: dict = None,
     expert_program_registration: SimulationExpertProgramRegistration | None = None,
+    expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
+    supports_rl: bool = False,
 ):
     """Register a Embodied environment."""
 
@@ -131,7 +195,9 @@ def register(
         cls,
         max_episode_steps=max_episode_steps,
         default_kwargs=default_kwargs,
+        supports_rl=supports_rl,
         expert_program_registration=expert_program_registration,
+        expert_program_adapter_factory=expert_program_adapter_factory,
     )
 
 
@@ -205,10 +271,8 @@ def build_env(env_id: str, base_env_cfg: EmbodiedEnvCfg):
     A thin convenience wrapper around :func:`make` that deep-copies the base
     config so callers can safely mutate the resulting environment's cfg
     without affecting shared defaults. This helper used to live in the task
-    package (``embodichain_tasks.rl``); it now lives with the registry so
-    that core code paths such as RL training do not need to depend on a task
-    package. ``embodichain_tasks.rl`` re-exports it for backward
-    compatibility.
+    package; it now lives with the registry so that core code paths such as RL
+    training do not need to depend on an official task package.
 
     Args:
         env_id: Registered environment id (see :func:`register_env`).
@@ -230,7 +294,9 @@ def register_env(
     max_episode_steps=None,
     override=False,
     *,
+    supports_rl: bool = False,
     expert_program_registration: SimulationExpertProgramRegistration | None = None,
+    expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
     **kwargs,
 ):
     """A decorator to register Embodied environments.
@@ -239,6 +305,7 @@ def register_env(
         uid (str): unique id of the environment.
         max_episode_steps (int): maximum number of steps in an episode.
         override (bool): whether to override the environment if it is already registered.
+        supports_rl: Whether the environment has a supported RL training path.
 
     Notes:
         - `max_episode_steps` is processed differently from other keyword arguments in gym.
@@ -258,7 +325,9 @@ def register_env(
             uid,
             override,
             max_episode_steps,
+            supports_rl=supports_rl,
             expert_program_registration=expert_program_registration,
+            expert_program_adapter_factory=expert_program_adapter_factory,
             **kwargs,
         )
         return cls
@@ -272,7 +341,9 @@ def register_env_function(
     override=False,
     max_episode_steps=None,
     *,
+    supports_rl: bool = False,
     expert_program_registration: SimulationExpertProgramRegistration | None = None,
+    expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
     **kwargs,
 ):
     if uid in REGISTERED_ENVS:
@@ -291,7 +362,9 @@ def register_env_function(
         cls,
         max_episode_steps=max_episode_steps,
         default_kwargs=deepcopy(kwargs),
+        supports_rl=supports_rl,
         expert_program_registration=expert_program_registration,
+        expert_program_adapter_factory=expert_program_adapter_factory,
     )
 
     # Register for gym
@@ -365,10 +438,9 @@ def _import_task_package(ep: importlib.metadata.EntryPoint):
 def discover_task_packages() -> list[str]:
     """Import all registered task packages via ``embodichain.tasks`` entry_points.
 
-    Each task package's ``__init__.py`` recursively imports its sub-packages,
-    which triggers ``@register_env`` → ``gym.register()``. After this call,
-    all tasks from all installed packages are available in gymnasium's global
-    registry.
+    Each task package recursively imports its task modules, which triggers
+    ``@register_env`` → ``gym.register()``. After this call, all tasks from all
+    installed packages are available in gymnasium's global registry.
 
     Returns:
         List of entry point names that were successfully imported.

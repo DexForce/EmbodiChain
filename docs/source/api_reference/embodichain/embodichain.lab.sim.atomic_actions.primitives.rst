@@ -31,12 +31,17 @@ full-robot timed trajectory and uncommitted expected effects.
       MoveHeldObjectOptions
       Pour
       PourOptions
+      PushObject
+      PushObjectOptions
+      PushObjectToolCalibration
       Place
       PlaceOptions
       Press
       PressOptions
       Slide
       SlideOptions
+      OpenDoor
+      OpenDoorOptions
       Twist
       TwistOptions
       CoordinatedPickment
@@ -57,10 +62,12 @@ full-robot timed trajectory and uncommitted expected effects.
       AxisAlignGoal
       HeldObjectPoseGoal
       PourGoal
+      PushObjectGoal
       PlaceGoal
       AssembleGoal
       PressGoal
       SlideGoal
+      OpenDoorGoal
       TwistGoal
       CoordinatedPickGoal
       CoordinatedPlacementGoal
@@ -116,6 +123,14 @@ Pour
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
 
+PushObject
+----------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.push_object
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
 Place
 -----
 
@@ -136,6 +151,14 @@ Slide
 -----
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.slide
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+OpenDoor
+--------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.open_door
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
