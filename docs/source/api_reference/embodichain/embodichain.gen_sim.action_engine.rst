@@ -159,6 +159,30 @@ Supporting planning utilities
 .. automodule:: embodichain.gen_sim.action_engine.runtime
    :members:
 
+.. automodule:: embodichain.gen_sim.action_engine.runtime.actions
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.atomic_compat
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.body_grasp
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.coordinated_safety
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.frames
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.geometry_axes
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.grounding
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.grasp_diagnostics
+   :members:
+
 .. automodule:: embodichain.gen_sim.action_engine.runtime.loader
    :members:
 
@@ -166,6 +190,15 @@ Supporting planning utilities
    :members:
 
 .. automodule:: embodichain.gen_sim.action_engine.runtime.motion_policy
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.predicates
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.robot_parts
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.solver_compat
    :members:
 
 .. automodule:: embodichain.gen_sim.action_engine.runtime.state
