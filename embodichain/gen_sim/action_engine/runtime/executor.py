@@ -393,11 +393,15 @@ class ProgramExecutor:
                     edge.id: self._dependency_failures(edge, edge_failures)
                     for edge in ready
                 }
+                safety_dependency_failed = {
+                    edge.id: self._safety_dependency_failures(edge, edge_failures)
+                    for edge in ready
+                }
                 scheduling_blocked = {
                     edge_id: (
                         failed
                         if self.failure_policy == "stop"
-                        else torch.zeros_like(failed)
+                        else safety_dependency_failed[edge_id]
                     )
                     for edge_id, failed in dependency_failed.items()
                 }
@@ -1541,6 +1545,22 @@ class ProgramExecutor:
             result |= failures[dependency]
         return result
 
+    def _safety_dependency_failures(
+        self,
+        edge: ExecutionEdge,
+        failures: Mapping[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Keep failed safety cleanup prerequisites blocked in continue mode."""
+        result = torch.zeros(
+            int(self.env.num_envs), dtype=torch.bool, device=self.env.device
+        )
+        for dependency in edge.depends_on:
+            if (dependency, edge.id) in self._completion_only_dependencies:
+                continue
+            if self._edge_failure_policy(self.edges[dependency]) == "safety_required":
+                result |= failures[dependency]
+        return result
+
     def _completion_only_dependency_edges(self) -> frozenset[tuple[str, str]]:
         """Resolve linker-added resource ordering to executable edge pairs."""
         graph = self.program.seed_graph
@@ -2681,7 +2701,10 @@ class ProgramExecutor:
         if held_object is not None:
             return held_object.grasp_xpos
         target = outcome.grounded.target
-        return getattr(target, "xpos", None)
+        target_pose = getattr(target, "xpos", None)
+        if isinstance(target_pose, torch.Tensor) and target_pose.dim() == 4:
+            return target_pose[:, -1]
+        return target_pose
 
     def _state_for(self, step: SemanticStep, arm: str) -> ExecutionState:
         """Refresh qpos while retaining holds across TaskGroup boundaries."""

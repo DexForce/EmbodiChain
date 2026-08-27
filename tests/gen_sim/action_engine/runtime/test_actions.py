@@ -62,6 +62,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.planners import CuroboPlannerCfg, ToppraPlannerCfg
 from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
+from embodichain.utils.logger import log_warning
 
 
 class _MeshEntity:
@@ -924,6 +925,235 @@ def test_retreat_uses_row_local_motion_planner_reachability_search(
     assert search["strategy"] == "bounded_motion_planner"
     assert search["selected_target_z"].tolist() == pytest.approx([1.20, 1.35])
     assert len(search["attempts"]) == len(attempted_targets)
+
+
+def test_lift_clear_reachability_search_uses_only_vertical_candidates(
+    monkeypatch: Any,
+) -> None:
+    env = _planner_env()
+    adapter = AtomicActionAdapter(env)
+    reference = torch.eye(4).repeat(2, 1, 1)
+    reference[:, 2, 3] = 1.05
+    requested = reference.clone()
+    requested[:, 2, 3] = 1.35
+    height_thresholds = torch.tensor([1.24, 1.00])
+    attempted_targets: list[torch.Tensor] = []
+
+    def plan(invocation: Any, _context: Any) -> ActionPlan:
+        target = invocation.goal.xpos.clone()
+        attempted_targets.append(target)
+        height_reachable = target[:, 2, 3] <= height_thresholds
+        baseward_reachable = target[:, 1, 3] < -0.05
+        success = height_reachable | baseward_reachable
+        terminal = target[:, 2, 3, None].repeat(1, 8)
+        positions = torch.stack((torch.zeros_like(terminal), terminal), dim=1)
+        trajectory = TimedTrajectory.from_uniform_step(
+            positions,
+            env_ids=torch.arange(2),
+            step_dt=0.01,
+        )
+        return ActionPlan(
+            skill_id="move_end_effector",
+            plan_success=success,
+            commands=_commands_for(trajectory),
+            joint_trajectory=trajectory,
+            recovery_policy=RecoveryPolicy(),
+            tracking_policy=TrackingPolicy.timed(),
+            planned_scene_version=0,
+            planned_collision_world_revision=(0, 0),
+            diagnostics=PlannerDiagnostics(backend="fake"),
+            expected_effects=StateDelta(),
+        )
+
+    monkeypatch.setattr(adapter, "_engine", lambda: _FakeEngine(plan))
+    grounded = GroundedAction(
+        "MoveEndEffector",
+        "right_arm",
+        "arm",
+        EndEffectorPoseGoal(xpos=requested),
+        {
+            "sample_interval": 10,
+            "retreat_height": 0.30,
+            "minimum_retreat_height": 0.05,
+            "retreat_distance": 0.10,
+        },
+        motion_policy={
+            "collision_safety": "required",
+            "retreat_reachability_search": True,
+            "retreat_search_mode": "vertical_only",
+            "retreat_reference_pose": reference,
+            "minimum_retreat_height": 0.05,
+            "retreat_distance": 0.10,
+        },
+    )
+
+    outcome = adapter.plan(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, 8)),
+    )
+
+    assert all(
+        torch.equal(target[:, 1, 3], reference[:, 1, 3]) for target in attempted_targets
+    )
+    assert outcome.success.tolist() == [True, False]
+    assert outcome.grounded.target.xpos[:, 1, 3].tolist() == pytest.approx([0.0, 0.0])
+
+
+def test_retreat_after_lift_search_reduces_only_horizontal_distance(
+    monkeypatch: Any,
+) -> None:
+    env = _planner_env()
+    adapter = AtomicActionAdapter(env)
+    reference = torch.eye(4).repeat(2, 1, 1)
+    reference[:, 2, 3] = 1.35
+    requested = reference.clone()
+    requested[:, 1, 3] = -0.20
+    attempted_targets: list[torch.Tensor] = []
+
+    def plan(invocation: Any, _context: Any) -> ActionPlan:
+        target = invocation.goal.xpos.clone()
+        attempted_targets.append(target)
+        success = target[:, 1, 3].abs() <= 0.10 + 1.0e-6
+        if not bool(success.all()):
+            log_warning("Synthetic unreachable horizontal retreat candidate.")
+        terminal = target[:, 1, 3, None].repeat(1, 8)
+        positions = torch.stack((torch.zeros_like(terminal), terminal), dim=1)
+        trajectory = TimedTrajectory.from_uniform_step(
+            positions,
+            env_ids=torch.arange(2),
+            step_dt=0.01,
+        )
+        return ActionPlan(
+            skill_id="move_end_effector",
+            plan_success=success,
+            commands=_commands_for(trajectory),
+            joint_trajectory=trajectory,
+            recovery_policy=RecoveryPolicy(),
+            tracking_policy=TrackingPolicy.timed(),
+            planned_scene_version=0,
+            planned_collision_world_revision=(0, 0),
+            diagnostics=PlannerDiagnostics(backend="fake"),
+            expected_effects=StateDelta(),
+        )
+
+    monkeypatch.setattr(adapter, "_engine", lambda: _FakeEngine(plan))
+    grounded = GroundedAction(
+        "MoveEndEffector",
+        "right_arm",
+        "arm",
+        EndEffectorPoseGoal(xpos=requested),
+        {
+            "sample_interval": 10,
+            "minimum_retreat_distance": 0.05,
+            "retreat_search_samples": 4,
+        },
+        motion_policy={
+            "collision_safety": "required",
+            "retreat_reachability_search": True,
+            "retreat_search_mode": "horizontal_only",
+            "retreat_reference_pose": reference,
+        },
+    )
+
+    outcome = adapter.plan(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, 8)),
+    )
+
+    attempted_distances = torch.stack(
+        [
+            torch.linalg.vector_norm(target[:, :2, 3] - reference[:, :2, 3], dim=1)
+            for target in attempted_targets
+        ]
+    )
+    torch.testing.assert_close(
+        attempted_distances,
+        torch.tensor([[0.20, 0.20], [0.15, 0.15], [0.10, 0.10]]),
+    )
+    assert all(
+        torch.equal(target[:, 2, 3], reference[:, 2, 3]) for target in attempted_targets
+    )
+    assert bool(outcome.success.all())
+    search = outcome.planner_trace["reachability_search"]
+    assert search["selected_candidates"] == ["distance_2", "distance_2"]
+    assert search["selected_target_distance"].tolist() == pytest.approx([0.10, 0.10])
+    assert search["suppressed_warnings"] == 2
+
+
+def test_tool_down_reorientation_uses_waypoints_and_yaw_candidates(
+    monkeypatch: Any,
+) -> None:
+    env = _planner_env()
+    adapter = AtomicActionAdapter(env)
+    reference = torch.eye(4).repeat(2, 1, 1)
+    reference[:, :3, :3] = _rotation_x(55.0)
+    reference[:, :3, 3] = torch.tensor([0.1, -0.2, 1.35])
+    attempted_targets: list[torch.Tensor] = []
+
+    def plan(invocation: Any, _context: Any) -> ActionPlan:
+        target = invocation.goal.xpos.clone()
+        attempted_targets.append(target)
+        success = torch.full((2,), len(attempted_targets) >= 2, dtype=torch.bool)
+        if not bool(success.all()):
+            log_warning("Synthetic unreachable tool-down yaw candidate.")
+        positions = torch.zeros(2, 30, 8)
+        trajectory = TimedTrajectory.from_uniform_step(
+            positions,
+            env_ids=torch.arange(2),
+            step_dt=0.01,
+        )
+        return ActionPlan(
+            skill_id="move_end_effector",
+            plan_success=success,
+            commands=_commands_for(trajectory),
+            joint_trajectory=trajectory,
+            recovery_policy=RecoveryPolicy(),
+            tracking_policy=TrackingPolicy.timed(),
+            planned_scene_version=0,
+            planned_collision_world_revision=(0, 0),
+            diagnostics=PlannerDiagnostics(backend="fake"),
+            expected_effects=StateDelta(),
+        )
+
+    monkeypatch.setattr(adapter, "_engine", lambda: _FakeEngine(plan))
+    grounded = GroundedAction(
+        "MoveEndEffector",
+        "right_arm",
+        "arm",
+        EndEffectorPoseGoal(xpos=reference),
+        {
+            "sample_interval": 30,
+            "reorient_tool_down": True,
+            "reorient_reference_pose": reference,
+            "reorient_waypoint_count": 5,
+            "reorient_yaw_degrees": [0.0, 45.0, -45.0],
+        },
+        motion_policy={
+            "reorient_tool_down": True,
+            "reorient_reference_pose": reference,
+        },
+    )
+
+    outcome = adapter.plan(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, 8)),
+    )
+
+    assert len(attempted_targets) == 2
+    for target in attempted_targets:
+        assert target.shape == (2, 5, 4, 4)
+        torch.testing.assert_close(
+            target[:, :, :3, 3],
+            reference[:, None, :3, 3].expand(-1, 5, -1),
+        )
+        torch.testing.assert_close(
+            target[:, -1, :3, 2],
+            torch.tensor([0.0, 0.0, -1.0]).repeat(2, 1),
+            atol=1.0e-6,
+            rtol=1.0e-6,
+        )
+    assert bool(outcome.success.all())
+    assert outcome.grounded.motion_policy["reorient_selected_yaw_degrees"] == 45.0
 
 
 def test_curobo_generator_receives_generated_static_obstacles(

@@ -456,7 +456,7 @@ def _recipe(
                 {},
                 motion_policy(),
             )
-            retreat = _node(
+            reorient = _node(
                 group_id,
                 3,
                 "MoveEndEffector",
@@ -467,16 +467,53 @@ def _recipe(
                 {
                     "kind": "policy_pose",
                     "source": "release",
-                    "operation": "retreat_after_lift",
+                    "operation": "reorient_tool_down",
                 },
                 [lift_clear["id"]],
                 "cleanup",
                 {},
                 motion_policy(("orientation", "upright")),
             )
-            home = _node(
+            post_reorient_lift = _node(
                 group_id,
                 4,
+                "MoveEndEffector",
+                task_type,
+                object_uid,
+                actor,
+                "arm",
+                {
+                    "kind": "policy_pose",
+                    "source": "release",
+                    "operation": "lift_clear",
+                    "requires_arm_clear": True,
+                },
+                [reorient["id"]],
+                "cleanup",
+                {},
+                motion_policy(),
+            )
+            retreat = _node(
+                group_id,
+                5,
+                "MoveEndEffector",
+                task_type,
+                object_uid,
+                actor,
+                "arm",
+                {
+                    "kind": "policy_pose",
+                    "source": "release",
+                    "operation": "retreat_after_lift",
+                },
+                [post_reorient_lift["id"]],
+                "cleanup",
+                {},
+                motion_policy(("orientation", "upright")),
+            )
+            home = _node(
+                group_id,
+                6,
                 "MoveJoints",
                 task_type,
                 object_uid,
@@ -494,7 +531,14 @@ def _recipe(
                 motion_policy(),
             )
             return (
-                [alignment, lift_clear, retreat, home],
+                [
+                    alignment,
+                    lift_clear,
+                    reorient,
+                    post_reorient_lift,
+                    retreat,
+                    home,
+                ],
                 "orient_object",
                 goal,
                 success,
@@ -957,6 +1001,7 @@ def _recipe(
         nodes = [pick]
         if terminal_behavior == "place":
             release_sync_group = f"{group_id}__dual_release"
+            releases = []
             for index, arm, release_role in (
                 (2, "left_arm", "participant"),
                 (3, "right_arm", "commit"),
@@ -981,6 +1026,54 @@ def _recipe(
                 )
                 release["sync_group"] = release_sync_group
                 nodes.append(release)
+                releases.append(release)
+            release_ids = [release["id"] for release in releases]
+            lifts = []
+            for index, arm in ((4, "left_arm"), (5, "right_arm")):
+                lift = _node(
+                    group_id,
+                    index,
+                    "MoveEndEffector",
+                    task_type,
+                    object_uid,
+                    {"mode": "required", "arm": arm},
+                    "arm",
+                    {
+                        "kind": "policy_pose",
+                        "source": "release",
+                        "operation": "lift_clear",
+                        "verify_lift_clear": True,
+                    },
+                    release_ids,
+                    "cleanup",
+                    {},
+                    motion_policy(),
+                )
+                nodes.append(lift)
+                lifts.append(lift)
+            lift_ids = [lift["id"] for lift in lifts]
+            for index, arm in ((6, "left_arm"), (7, "right_arm")):
+                nodes.append(
+                    _node(
+                        group_id,
+                        index,
+                        "MoveJoints",
+                        task_type,
+                        object_uid,
+                        {"mode": "required", "arm": arm},
+                        "arm",
+                        {
+                            "kind": "joint_state",
+                            "source": "initial",
+                            "operation": "e5_home",
+                            "required_home": True,
+                        },
+                        lift_ids,
+                        "cleanup",
+                        {},
+                        motion_policy(),
+                    )
+                )
         success_type = task_success_type(task_type, params)
         success = (
             {"type": success_type, "object": object_uid}

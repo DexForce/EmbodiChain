@@ -356,7 +356,15 @@ def test_unfamiliar_wording_and_categories_flow_through_injected_llm_stages() ->
                 terminal_behavior="place",
             ),
             [_binding("move_fixture.object", "aerogel_fixture_7")],
-            ["CoordinatedPickment", "MoveJoints", "MoveJoints"],
+            [
+                "CoordinatedPickment",
+                "MoveJoints",
+                "MoveJoints",
+                "MoveEndEffector",
+                "MoveEndEffector",
+                "MoveJoints",
+                "MoveJoints",
+            ],
             "semantic_goal",
         ),
         (
@@ -412,7 +420,7 @@ def test_e5_symbolic_intent_reaches_the_seed_graph(
         )
         assert graph["task_groups"][0]["goal"]["relation"] == "behind"
     if name == "dual_move_place":
-        release_nodes = graph["nodes"][1:]
+        release_nodes = graph["nodes"][1:3]
         assert {node["actor"]["arm"] for node in release_nodes} == {
             "left_arm",
             "right_arm",

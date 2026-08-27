@@ -75,6 +75,7 @@ from .state import ExecutionState
 __all__ = ["ActionGrounder", "LiveArrangementPlan", "LivePlacementPlan"]
 
 _E2_CLEARANCE_RETREAT_DISTANCE = 0.20
+_E2_REORIENT_MINIMUM_CLEARANCE = 0.15
 DEFAULT_INTERNAL_AXIS = (0.0, 0.0, 1.0)
 DEFAULT_TARGET_AXIS = (0.0, 0.0, 1.0)
 
@@ -949,11 +950,35 @@ class ActionGrounder:
                 arm,
                 reference_eef_pose,
             )
-            if operation == "retreat":
+            if operation in {"retreat", "lift_clear", "retreat_after_lift"}:
                 policy["retreat_reachability_search"] = True
                 policy["retreat_reference_pose"] = retreat_reference.clone()
+            if operation == "lift_clear":
+                policy["retreat_search_mode"] = "vertical_only"
+                if bool(binding.get("verify_lift_clear", False)):
+                    policy["verify_lift_clear"] = True
+                policy["minimum_clearance"] = max(
+                    float(policy.get("minimum_clearance", 0.0)),
+                    _E2_REORIENT_MINIMUM_CLEARANCE,
+                )
+            if operation == "reorient_tool_down":
+                policy["reorient_tool_down"] = True
+                policy["reorient_reference_pose"] = retreat_reference.clone()
+                policy["reorient_waypoint_count"] = 5
+                policy["reorient_yaw_degrees"] = [
+                    0.0,
+                    45.0,
+                    -45.0,
+                    90.0,
+                    -90.0,
+                    180.0,
+                ]
+                policy["minimum_clearance"] = _E2_REORIENT_MINIMUM_CLEARANCE
             if operation == "retreat_after_lift":
                 policy["retreat_distance"] = _E2_CLEARANCE_RETREAT_DISTANCE
+                policy["minimum_retreat_distance"] = 0.05
+                policy["retreat_search_mode"] = "horizontal_only"
+                policy["retreat_search_samples"] = 4
             if source in {"release", "handover"}:
                 policy["clearance_object_uid"] = step.object_uid
                 policy["collision_safety"] = "required"
@@ -971,12 +996,16 @@ class ActionGrounder:
                     device=object_pose.device,
                 )
             target = EndEffectorPoseGoal(
-                xpos=self._retreat_pose(
-                    arm,
-                    policy,
-                    retreat_reference,
-                    clear_exchange=source == "handover",
-                    retreat_after_lift=operation == "retreat_after_lift",
+                xpos=(
+                    retreat_reference.clone()
+                    if operation == "reorient_tool_down"
+                    else self._retreat_pose(
+                        arm,
+                        policy,
+                        retreat_reference,
+                        clear_exchange=source == "handover",
+                        retreat_after_lift=operation == "retreat_after_lift",
+                    )
                 )
             )
         elif kind == "visual_constraint":
@@ -993,6 +1022,8 @@ class ActionGrounder:
                     "cannot resolve a visual_constraint."
                 )
         elif kind == "joint_state":
+            if bool(binding.get("required_home", False)):
+                policy["verify_required_home"] = True
             target = JointPositionGoal(
                 target=self._joint_target(
                     arm,

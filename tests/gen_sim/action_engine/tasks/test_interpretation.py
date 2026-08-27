@@ -599,8 +599,12 @@ def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
         "CoordinatedPickment",
         "MoveJoints",
         "MoveJoints",
+        "MoveEndEffector",
+        "MoveEndEffector",
+        "MoveJoints",
+        "MoveJoints",
     ]
-    release_nodes = released["nodes"][1:]
+    release_nodes = released["nodes"][1:3]
     assert all(
         node["depends_on"] == [released["nodes"][0]["id"]] for node in release_nodes
     )
@@ -638,6 +642,70 @@ def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
         ("add", "arm_free", "left_arm"),
         ("add", "arm_free", "right_arm"),
     }
+    lift_nodes = released["nodes"][3:5]
+    release_ids = {node["id"] for node in release_nodes}
+    assert {node["actor"]["arm"] for node in lift_nodes} == {
+        "left_arm",
+        "right_arm",
+    }
+    assert all(node["role"] == "cleanup" for node in lift_nodes)
+    assert all(node["control"] == "arm" for node in lift_nodes)
+    assert all(set(node["depends_on"]) == release_ids for node in lift_nodes)
+    assert all(
+        node["target_binding"]
+        == {
+            "kind": "policy_pose",
+            "source": "release",
+            "operation": "lift_clear",
+            "verify_lift_clear": True,
+        }
+        for node in lift_nodes
+    )
+    assert all(
+        node["contract"]["requires"]
+        == [{"predicate": "arm_free", "arm": node["actor"]["arm"]}]
+        for node in lift_nodes
+    )
+    assert all(
+        node["contract"]["effects"]
+        == [
+            {
+                "op": "add",
+                "atom": {"predicate": "arm_clear", "arm": node["actor"]["arm"]},
+            }
+        ]
+        for node in lift_nodes
+    )
+    assert all(
+        node["contract"]["failure_policy"] == "safety_required" for node in lift_nodes
+    )
+    home_nodes = released["nodes"][5:]
+    lift_ids = {node["id"] for node in lift_nodes}
+    assert {node["actor"]["arm"] for node in home_nodes} == {
+        "left_arm",
+        "right_arm",
+    }
+    assert all(node["role"] == "cleanup" for node in home_nodes)
+    assert all(node["control"] == "arm" for node in home_nodes)
+    assert all(set(node["depends_on"]) == lift_ids for node in home_nodes)
+    assert all(
+        node["target_binding"]
+        == {
+            "kind": "joint_state",
+            "source": "initial",
+            "operation": "e5_home",
+            "required_home": True,
+        }
+        for node in home_nodes
+    )
+    assert all(
+        node["contract"]["requires"]
+        == [{"predicate": "arm_clear", "arm": node["actor"]["arm"]}]
+        for node in home_nodes
+    )
+    assert all(
+        node["contract"]["failure_policy"] == "safety_required" for node in home_nodes
+    )
     from embodichain.gen_sim.action_engine.runtime import load_execution_program
 
     program = load_execution_program(released)
@@ -645,8 +713,17 @@ def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
         action["atomic_action_class"]
         for edge in program.edges
         for action in edge.actions
-    ] == ["CoordinatedPickment", "MoveJoints", "MoveJoints"]
-    assert len(program.edges[-1].actions) == 2
+    ] == [
+        "CoordinatedPickment",
+        "MoveJoints",
+        "MoveJoints",
+        "MoveEndEffector",
+        "MoveEndEffector",
+        "MoveJoints",
+        "MoveJoints",
+    ]
+    assert len(program.edges[1].actions) == 2
+    assert all(len(edge.actions) == 1 for edge in program.edges[2:])
 
     in_place_spec = deepcopy(released_spec)
     in_place_params = in_place_spec["task_instances"][0]["params"]
@@ -655,6 +732,10 @@ def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
     in_place = instantiate_seed_graph(in_place_spec, grounded.role_bindings)
     assert [node["atomic_action"] for node in in_place["nodes"]] == [
         "CoordinatedPickment",
+        "MoveJoints",
+        "MoveJoints",
+        "MoveEndEffector",
+        "MoveEndEffector",
         "MoveJoints",
         "MoveJoints",
     ]
@@ -767,6 +848,10 @@ def test_task1_2_open_reference_generates_coordinated_pick_move_and_release() ->
     ]
     assert [node["atomic_action"] for node in graph["nodes"]] == [
         "CoordinatedPickment",
+        "MoveJoints",
+        "MoveJoints",
+        "MoveEndEffector",
+        "MoveEndEffector",
         "MoveJoints",
         "MoveJoints",
     ]

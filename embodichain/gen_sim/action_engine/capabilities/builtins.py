@@ -649,7 +649,7 @@ def _build_coordinated_transport_phases(
     )
     if step["goal"]["terminal_behavior"] != "place":
         return phases
-    return phases + (
+    release = (
         PhaseTemplate(
             name="dual_release",
             state_semantic="Both grippers release the transported object",
@@ -672,6 +672,47 @@ def _build_coordinated_transport_phases(
             ),
         ),
     )
+    lifts = tuple(
+        PhaseTemplate(
+            name=f"{side}_lift_clear",
+            state_semantic=f"The {side} end effector lifts clear of the object",
+            actions=(
+                ActionTemplate(
+                    "MoveEndEffector",
+                    {
+                        "kind": "policy_pose",
+                        "source": "release",
+                        "operation": "lift_clear",
+                        "verify_lift_clear": True,
+                    },
+                    build_motion_policy(),
+                    actor={"mode": "required", "arm": f"{side}_arm"},
+                ),
+            ),
+        )
+        for side in ("left", "right")
+    )
+    homes = tuple(
+        PhaseTemplate(
+            name=f"{side}_home",
+            state_semantic=f"The {side} arm returns to its initial state",
+            actions=(
+                ActionTemplate(
+                    "MoveJoints",
+                    {
+                        "kind": "joint_state",
+                        "source": "initial",
+                        "operation": "e5_home",
+                        "required_home": True,
+                    },
+                    build_motion_policy(),
+                    actor={"mode": "required", "arm": f"{side}_arm"},
+                ),
+            ),
+        )
+        for side in ("left", "right")
+    )
+    return phases + release + lifts + homes
 
 
 def _build_press_phases(step: Mapping[str, Any]) -> tuple[PhaseTemplate, ...]:
