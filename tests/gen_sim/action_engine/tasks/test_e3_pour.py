@@ -111,7 +111,7 @@ def test_seed_graph_rejects_legacy_dual_arm_e3_goal() -> None:
     graph = _graph()
     graph["task_groups"][0]["goal"]["pour_mode"] = "dual_arm"
 
-    with pytest.raises(ValueError, match="unsupported dual-arm E3 fields"):
+    with pytest.raises(ValueError, match="unsupported dual-arm pour fields"):
         validate_seed_graph(graph)
 
 

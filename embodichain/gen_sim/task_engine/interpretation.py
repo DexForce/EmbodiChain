@@ -365,111 +365,22 @@ def _normalize_instruction_intent_fields(
                     "reason": "e5_hold_defaults_to_lift",
                 }
             )
-    _normalize_handover_arm_continuity(raw_steps, changes)
-    return result, changes
-
-
-def _normalize_handover_arm_continuity(
-    steps: Sequence[Any],
-    changes: list[dict[str, Any]],
-) -> None:
-    """Repair a same-arm E4 only when adjacent ownership fixes both roles."""
-    by_id: dict[str, Mapping[str, Any]] = {}
-    for step in steps:
-        if not isinstance(step, dict) or set(step) != _STEP_KEYS:
-            return
-        step_id = step.get("id")
-        if not isinstance(step_id, str) or not step_id or step_id in by_id:
-            return
-        by_id[step_id] = step
-
-    explicit_arms = {"left_arm", "right_arm"}
-    for index, step in enumerate(steps):
-        assert isinstance(step, dict)
-        transfer = step.get("transfer_arm")
-        receive = step.get("receive_arm")
-        if (
-            step.get("task_type") != "E4"
-            or transfer not in explicit_arms
-            or transfer != receive
-        ):
-            continue
-
-        object_key = _object_lineage_key(step, by_id)
-        upstream_arm: str | None = None
-        for producer in reversed(steps[:index]):
-            assert isinstance(producer, Mapping)
-            if object_key is None or _object_lineage_key(producer, by_id) != object_key:
-                continue
-            candidate = (
-                producer.get("receive_arm")
-                if producer.get("task_type") == "E4"
-                else producer.get("required_arm")
+        if task_type == "E4" and raw_step.get("terminal_behavior") == "none":
+            terminal = (
+                "place"
+                if isinstance(target, Mapping) and target.get("kind") != "none"
+                else "hold"
             )
-            if candidate in explicit_arms:
-                upstream_arm = str(candidate)
-            break
-
-        downstream_arm: str | None = None
-        for consumer in steps[index + 1 :]:
-            assert isinstance(consumer, Mapping)
-            if object_key is None or _object_lineage_key(consumer, by_id) != object_key:
-                continue
-            candidate = (
-                consumer.get("transfer_arm")
-                if consumer.get("task_type") == "E4"
-                else consumer.get("required_arm")
-            )
-            if candidate in explicit_arms:
-                downstream_arm = str(candidate)
-            break
-
-        desired_transfer = upstream_arm or str(transfer)
-        desired_receive = downstream_arm or str(receive)
-        if desired_transfer == desired_receive:
-            continue
-        for field, desired in (
-            ("transfer_arm", desired_transfer),
-            ("receive_arm", desired_receive),
-        ):
-            if step[field] == desired:
-                continue
-            previous = step[field]
-            step[field] = desired
+            raw_step["terminal_behavior"] = terminal
             changes.append(
                 {
-                    "path": f"steps[{index}].{field}",
-                    "from": previous,
-                    "to": desired,
-                    "reason": "handover_arm_continuity",
+                    "path": f"steps[{index}].terminal_behavior",
+                    "from": "none",
+                    "to": terminal,
+                    "reason": "e4_terminal_inferred_from_own_target",
                 }
             )
-
-
-def _object_lineage_key(
-    step: Mapping[str, Any],
-    by_id: Mapping[str, Mapping[str, Any]],
-    seen: frozenset[str] = frozenset(),
-) -> tuple[str, str] | None:
-    """Resolve object identity only through explicit step-result lineage."""
-    selector = step.get("object")
-    if not isinstance(selector, Mapping):
-        return None
-    kind = selector.get("kind")
-    if kind == "scene_ref":
-        step_id = step.get("id")
-        if not isinstance(step_id, str) or not step_id:
-            return None
-        return ("step_result", step_id)
-    if kind != "step_result":
-        return None
-    producer_id = selector.get("step_id")
-    if not isinstance(producer_id, str) or producer_id in seen:
-        return None
-    producer = by_id.get(producer_id)
-    if producer is None:
-        return None
-    return _object_lineage_key(producer, by_id, seen | {producer_id})
+    return result, changes
 
 
 def _empty_selector() -> dict[str, Any]:
@@ -639,7 +550,7 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
             f"{context} {task_type} requires an object selector."
         )
     target_kind = str(step["target"]["kind"])
-    if task_type not in {"E1", "E3", "E5"} and step["relation"] != "none":
+    if task_type not in {"E1", "E3", "E4", "E5"} and step["relation"] != "none":
         raise ValueError(f"{context} {task_type} does not accept relation.")
     if task_type == "E3" and step["relation"] != "above":
         raise ValueError(f"{context} E3 relation must be above.")
@@ -675,6 +586,24 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
             )
         if step["relation"] == "none" and task_type == "E3":
             raise ValueError(f"{context} {task_type} requires a symbolic relation.")
+    elif task_type == "E4":
+        terminal = str(step["terminal_behavior"])
+        effective_terminal = (
+            "place" if terminal == "none" and target_kind != "none" else terminal
+        )
+        if effective_terminal == "none":
+            effective_terminal = "hold"
+        if effective_terminal not in _TERMINAL_BEHAVIORS - {"none"}:
+            raise ValueError(f"{context} E4 requires terminal_behavior hold/place.")
+        if effective_terminal == "place":
+            if target_kind == "none" or step["relation"] == "none":
+                raise ValueError(
+                    f"{context} E4 terminal_behavior=place requires target and relation."
+                )
+        elif target_kind != "none" or step["relation"] != "none":
+            raise ValueError(
+                f"{context} E4 terminal_behavior=hold cannot carry target or relation."
+            )
     elif task_type == "E5":
         direction = str(step["direction"])
         terminal = str(step["terminal_behavior"])
@@ -696,7 +625,7 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
                 )
     elif target_kind != "none":
         raise ValueError(f"{context} {task_type} does not accept a target selector.")
-    if task_type != "E5":
+    if task_type not in {"E4", "E5"}:
         if step["direction"] != "none":
             raise ValueError(f"{context} direction is only valid for E5.")
         if step["terminal_behavior"] != "none":
@@ -742,9 +671,11 @@ def _instruction_prompt(instruction: str) -> str:
         "paths, or reasoning. Encode explicit ordering with depends_on; same-action set "
         "members may remain independent. Use empty strings and 'none' for "
         "inapplicable required fields. A request to retract the transfer arm "
-        "immediately after an E4 handover is a mandatory runtime retreat/home "
-        "barrier for that E4; do "
-        "not emit a separate task step for it. The exact output keys are steps -> id, "
+        "E4 owns the complete transfer. For a handover followed by placement in "
+        "the same user intent, emit one E4 with target, relation, and "
+        "terminal_behavior=place; do not emit a trailing E1. Use "
+        "terminal_behavior=hold only when the receiver should keep holding the "
+        "object. The exact output keys are steps -> id, "
         "task_type, object, target, relation, required_arm, transfer_arm, "
         "receive_arm, orientation_goal, target_state, target_setting, layout, "
         "axis, direction, terminal_behavior, depends_on; each selector has kind, "
@@ -755,7 +686,7 @@ def _instruction_prompt(instruction: str) -> str:
         "Emptying, dumping, or pouring contents from one container into another "
         "is exactly one E3 step: object selects the source container, target "
         "selects the receiving container, and relation=above. Pickup and staging "
-        "are internal to E3; do not emit a separate E1 for an explicit grab. "
+        "are internal to that E3 step. "
         "Opening or pulling out a drawer is E6 with object selecting that drawer "
         "and target_state=open. Closing or pushing in a drawer is E7 with object "
         "selecting that drawer and target_state=closed. "
@@ -772,11 +703,11 @@ def _instruction_prompt(instruction: str) -> str:
         "and terminal_behavior=hold. Use hold unless the instruction explicitly "
         "says to put/release the object. For pick "
         "and release at the original location, use direction=none and place. A dual-arm "
-        "pick/move/transport request is E5, not E1. Final checklist: every step "
+        "pick/move/transport request uses E5. Final checklist: every step "
         "has all 16 step keys; every object and target "
         "has all 5 selector keys. For an inapplicable field use the canonical "
         "default shown in the example, never omit the field. E4 must explicitly "
-        "state transfer_arm and receive_arm. E1/E3 must explicitly state target "
+        "state transfer_arm, receive_arm, and terminal_behavior. E1/E3 must explicitly state target "
         "and relation (except E1 layout=line)."
     )
 
@@ -872,7 +803,7 @@ def _instruction_repair_guidance(error: Exception) -> str:
             "\nMissing-target repair rule for E3: keep task_type=E3. object is "
             "the source container whose contents are poured, target is the "
             "receiving container, and relation must be above. An explicit grab "
-            "is part of E3 and must not be reclassified as E1.\n"
+            "is part of the same E3 task.\n"
         )
     return (
         "\nMissing-target repair rule: for a non-line E1 placement, object is "

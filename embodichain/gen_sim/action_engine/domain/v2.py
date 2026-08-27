@@ -623,21 +623,32 @@ def _validate_task_group_semantics(
     nodes: Sequence[Mapping[str, Any]],
     groups: Sequence[Mapping[str, Any]],
 ) -> None:
+    from .task_contracts import task_contract
+
     node_by_id = {str(node["id"]): node for node in nodes}
-    required_actions = {
-        "E1": set(),
-        "E2": set(),
-        "E3": {"Pour"},
-        "E4": {"HandOver"},
-        "E5": set(),
-        "E6": {"PullArticulatedPart"},
-        "E7": {"PushArticulatedPart"},
-        "E8": {"TurnKnob"},
-        "E9": {"Press"},
-    }
     for group in groups:
         task_type = str(group["task_type"])
-        if task_type == "E3":
+        contract = task_contract(task_type)
+        group_nodes = [node_by_id[node_id] for node_id in group["node_ids"]]
+        actions = {str(node["atomic_action"]) for node in group_nodes}
+        if group.get("role") == "recovery":
+            goal = group.get("goal", {})
+            if goal.get("recovery_capability") != "object_upright":
+                raise ValueError(
+                    f"Recovery TaskGroup {group['id']!r} requires a registered "
+                    "recovery_capability."
+                )
+            required = {"PickUp", "MoveHeldObject"}
+            if goal.get("terminal_behavior") == "place":
+                required.add("Place")
+            missing = required - actions
+            if missing:
+                raise ValueError(
+                    f"Recovery TaskGroup {group['id']!r} is missing capability "
+                    f"actions: {sorted(missing)}."
+                )
+            continue
+        if contract.success_type == "poured":
             goal = group.get("goal", {})
             unsupported = sorted(
                 {"pour_mode", "pouring_arm", "holding_arm"} & set(goal)
@@ -645,13 +656,15 @@ def _validate_task_group_semantics(
             if unsupported:
                 raise ValueError(
                     f"SeedGraph TaskGroup {group['id']!r} uses unsupported "
-                    f"dual-arm E3 fields {unsupported}; regenerate it as a "
+                    f"dual-arm pour fields {unsupported}; regenerate it as a "
                     "single-arm pour over a fixed target container."
                 )
-        group_nodes = [node_by_id[node_id] for node_id in group["node_ids"]]
-        actions = {str(node["atomic_action"]) for node in group_nodes}
-        missing = required_actions[task_type] - actions
-        if task_type == "E1":
+        missing = set(contract.signature_actions) - actions
+        if (
+            contract.resource_mode == "single_arm"
+            and contract.success_type == "semantic_goal"
+            and not contract.terminal_success_types
+        ):
             if not actions.intersection({"MoveHeldObject", "Place"}):
                 missing = {"MoveHeldObject|Place"}
             elif "PickUp" not in actions:
@@ -659,24 +672,25 @@ def _validate_task_group_semantics(
                 precondition = first.get("precondition", {})
                 if precondition.get("type") != "object_held":
                     missing = {"PickUp|object_held precondition"}
-        if task_type == "E2" and "AxisAlign" not in actions:
+        if contract.success_type == "object_upright" and "AxisAlign" not in actions:
             missing = {"MoveHeldObject", "Place"} - actions
             if "PickUp" not in actions:
                 first = group_nodes[0]
                 precondition = first.get("precondition", {})
                 if precondition.get("type") != "object_held":
                     missing.add("PickUp|object_held precondition")
-        # Recovery may explicitly preserve a verified downstream hold. Ordinary
-        # E2 groups always complete their supported world state with Place.
-        if (
-            task_type == "E2"
-            and "Place" not in actions
-            and group.get("goal", {}).get("terminal_behavior") == "hold"
-            and "MoveHeldObject" in actions
-            and group.get("role") == "recovery"
-        ):
-            missing.discard("Place")
-        if task_type == "E5" and not actions.intersection(
+        if contract.resource_mode == "handover":
+            terminal_behavior = str(
+                group.get("goal", {}).get("terminal_behavior", "hold")
+            )
+            if terminal_behavior == "place" and "Place" not in actions:
+                missing.add("Place")
+            if terminal_behavior == "hold" and "Place" in actions:
+                raise ValueError(
+                    f"SeedGraph TaskGroup {group['id']!r} cannot release during "
+                    "terminal_behavior='hold'."
+                )
+        if contract.resource_mode == "coordinated" and not actions.intersection(
             {"CoordinatedPickment", "CoordinatedPlacement"}
         ):
             missing = {"CoordinatedPickment|CoordinatedPlacement"}

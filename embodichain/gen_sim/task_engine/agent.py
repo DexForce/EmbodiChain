@@ -276,14 +276,14 @@ def _canonicalize_intent(intent: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _target_affordances(task_type: str, relation: str) -> list[str]:
-    if task_type == "E3" or (task_type == "E1" and relation == "inside"):
+    if task_type == "E3" or relation == "inside":
         return ["container"]
     return []
 
 
 def _target_structure(task_type: str, relation: str) -> str:
-    if task_type == "E1" and relation == "on":
+    if relation == "on":
         return "physical_entity"
-    if task_type == "E3" or (task_type == "E1" and relation == "inside"):
+    if task_type == "E3" or relation == "inside":
         return "rigid_object"
     return "spatial_reference"

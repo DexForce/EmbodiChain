@@ -36,7 +36,6 @@ from embodichain.gen_sim.action_engine.domain import normalize_placement_relatio
 from embodichain.gen_sim.action_engine.orientation import (
     AlignAxisConstraint,
     MatchRotationConstraint,
-    OrientationConstraint,
     compile_orientation_constraint,
 )
 from embodichain.lab.sim.atomic_actions import (
@@ -106,6 +105,19 @@ def _live_pose(env: Any, uid: str) -> torch.Tensor:
     if entity is None:
         raise ValueError(f"Unknown scene entity {uid!r}.")
     return _batched_pose(entity.get_local_pose(to_matrix=True), env)
+
+
+def _placement_relation(step: SemanticStep) -> str:
+    """Normalize a placement relation from the step's own goal contract."""
+    relation = str(step.goal.get("relation", "none"))
+    if relation in {"none", "handover", "held_above_initial"}:
+        return relation
+    if (
+        step.postcondition.get("type") == "semantic_goal"
+        or step.goal.get("terminal_behavior") == "place"
+    ):
+        return normalize_placement_relation(relation)
+    return relation
 
 
 def _local_vertices(entity: Any, env: Any, env_id: int = 0) -> torch.Tensor:
@@ -695,30 +707,7 @@ class ActionGrounder:
             raise ValueError("target_binding must be a mapping.")
         kind = str(binding.get("kind", ""))
         orientation = compile_orientation_constraint(step.goal)
-        is_handover_continuation = self._is_handover_continuation(step)
-        uses_handover_staging = (
-            kind == "handover_staging"
-            and capability.target_materializer == "semantic_held_object"
-        )
-        use_upright_transport_policy = (
-            is_handover_continuation or uses_handover_staging
-        ) and self._uses_upright_transport_policy(
-            step,
-            orientation,
-        )
-        extra_modifiers: tuple[tuple[str, str], ...] = ()
-        if (
-            is_handover_continuation
-            and use_upright_transport_policy
-            and capability.target_materializer
-            in {
-                "semantic_held_object",
-                "current_held_pose",
-                "eef_pose",
-            }
-        ):
-            extra_modifiers = (("orientation", "upright"),)
-        policy = self.policy(action, extra_modifiers=extra_modifiers)
+        policy = self.policy(action)
         if kind == "joint_state":
             joint_defaults = self.runtime_policy.grounding["joint_state"]
             source = binding.get("source")
@@ -751,7 +740,7 @@ class ActionGrounder:
                 # replace it with collision-unaware joint interpolation.
                 policy["collision_safety"] = "required"
         object_pose = _live_pose(self.env, step.object_uid)
-        if step.operator == "orient_object":
+        if "upright_local_axis" in step.goal:
             policy["upright_local_axis"] = self._upright_local_axis(step)
             if capability.target_materializer == "object_grasp":
                 policy["obj_upright_direction"] = self._upright_local_direction(step)
@@ -1107,11 +1096,7 @@ class ActionGrounder:
                 ),
             )
         placement_support_uid = self._placement_support_uid(step)
-        placement_relation = (
-            normalize_placement_relation(step.goal.get("relation", "on"))
-            if step.operator == "place_relative"
-            else str(step.goal.get("relation", "none"))
-        )
+        placement_relation = _placement_relation(step)
         is_on_placement = (
             binding.get("kind") == "semantic_goal"
             and binding.get("phase", "final") != "staging"
@@ -1285,19 +1270,6 @@ class ActionGrounder:
         ):
             return "table"
         return None
-
-    def _is_handover_continuation(self, step: SemanticStep) -> bool:
-        if step.operator != "place_relative":
-            return False
-        predecessors = {
-            candidate.id: candidate for candidate in self.program.semantic_steps
-        }
-        return any(
-            (predecessor := predecessors.get(dependency)) is not None
-            and predecessor.operator == "handover"
-            and predecessor.object_uid == step.object_uid
-            for dependency in step.depends_on
-        )
 
     def _visual_target(
         self,
@@ -1718,6 +1690,17 @@ class ActionGrounder:
         phase: str,
         orientation_reference_pose: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if phase == "handover_exit":
+            receive_arm = str(step.goal.get("receive_arm", ""))
+            if receive_arm not in {"left_arm", "right_arm"}:
+                raise ValueError("handover_exit requires a concrete receive_arm.")
+            target = self._handover_receiver_exit(object_pose, receive_arm, policy)
+            target[:, :3, :3] = self._target_rotation(
+                step,
+                object_pose,
+                orientation_reference_pose=orientation_reference_pose,
+            )
+            return target
         if step.operator in {"arrange_line", "place_in_line"}:
             arrangement = self.arrangements.get(step.id)
             if arrangement is None:
@@ -1763,7 +1746,9 @@ class ActionGrounder:
             if phase == "staging":
                 target[:, 2, 3] += float(policy["transport_clearance"])
             return target
-        if step.operator == "orient_object":
+        if step.goal.get("position_anchor") in {"initial_xy", "live_xy"} and isinstance(
+            step.goal.get("support_object"), str
+        ):
             initial = None
             if step.goal.get("position_anchor", "initial_xy") == "initial_xy":
                 initial = getattr(self.env, "agent_initial_object_poses", {}).get(
@@ -1830,11 +1815,7 @@ class ActionGrounder:
         # Operators without a relational goal (for example press or a
         # direction-only coordinated transport) must preserve the live origin
         # instead of being silently projected onto a synthetic table support.
-        relation = (
-            normalize_placement_relation(step.goal.get("relation", "on"))
-            if step.operator == "place_relative"
-            else str(step.goal.get("relation", "none"))
-        )
+        relation = _placement_relation(step)
         distance = float(self._policy_value(policy, "relation_distance"))
         relation_frame = str(step.goal.get("relation_frame", "world"))
         forward_distance = distance
@@ -1945,7 +1926,8 @@ class ActionGrounder:
             orientation_reference_pose=orientation_reference_pose,
         )
         if (
-            step.operator == "coordinated_transport"
+            step.actor.get("mode") == "coordinated"
+            and "terminal_behavior" in step.goal
             and relation not in {"on", "on_top", "on_top_of", "inside"}
             and direction not in {"up", "down"}
         ):
@@ -1994,29 +1976,30 @@ class ActionGrounder:
                 supported_pose = object_pose
             supported_pose = _batched_pose(supported_pose, self.env)
             target[:, 2, 3] = supported_pose[:, 2, 3]
+        elif isinstance(step.goal.get("support_object"), str) and relation not in {
+            "none",
+            "handover",
+            "above",
+            "held_above_initial",
+        }:
+            support = _object(self.env, str(step.goal["support_object"]))
+            moved = _object(self.env, step.object_uid)
+            for env_id in range(int(self.env.num_envs)):
+                support_top = _world_vertices(support, self.env, env_id)[:, 2].max()
+                bottom = self._rotated_local_z_min(
+                    moved,
+                    target[env_id, :3, :3],
+                    env_id,
+                )
+                target[env_id, 2, 3] = (
+                    support_top
+                    + float(self._policy_value(policy, "surface_clearance"))
+                    - bottom
+                )
         if phase == "staging":
             # Staging is a runtime waypoint, not a persisted coordinate. This
             # keeps in-place orientation robust to the object's live height.
             target[:, 2, 3] += float(self._policy_value(policy, "transport_clearance"))
-        elif self._is_handover_continuation(step) and relation not in {
-            "on",
-            "on_top",
-            "on_top_of",
-            "inside",
-        }:
-            # A handover can leave the live rigid-body center a few centimetres
-            # below the original table-supported height.  Reusing that drifted
-            # height for the lateral placement target makes the can intersect
-            # the table during release and it may tip or slide.  Preserve the
-            # predecessor's supported height for the final held-object pose.
-            supported_pose = orientation_reference_pose
-            if supported_pose is None:
-                supported_pose = object_pose
-            supported_pose = _batched_pose(supported_pose, self.env)
-            target[:, 2, 3] = torch.maximum(
-                target[:, 2, 3],
-                supported_pose[:, 2, 3],
-            )
         return target
 
     def _pour_source_semantics(
@@ -2563,34 +2546,6 @@ class ActionGrounder:
         direction = torch.zeros(3, dtype=torch.float32, device=self.env.device)
         direction[axis_index] = 1.0
         return direction
-
-    def _uses_upright_transport_policy(
-        self,
-        step: SemanticStep,
-        constraint: OrientationConstraint,
-    ) -> bool:
-        """Return whether transport should retain upright-specific tuning.
-
-        A preceding upright operation may use higher-clearance motion settings
-        without turning that live posture into a hard terminal constraint.
-        """
-        if constraint.requires_upright_axis_alignment:
-            return True
-        if (
-            constraint.terms
-            or constraint.planning_preference != "minimize_rotation_from_current"
-        ):
-            return False
-        entity = _object(self.env, step.object_uid)
-        vertices = _local_vertices(entity, self.env, 0)
-        try:
-            axis_index = analyze_local_geometry_axes(vertices).long_axis_index
-        except ValueError:
-            return False
-        pose = _live_pose(self.env, step.object_uid)
-        cosine = pose[:, 2, axis_index].abs().clamp(0.0, 1.0)
-        tolerance = float(self.runtime_policy.predicate_fallbacks["upright_max_tilt"])
-        return bool(torch.all(torch.arccos(cosine) <= tolerance).item())
 
     @staticmethod
     def _upright_local_axis(step: SemanticStep) -> str:

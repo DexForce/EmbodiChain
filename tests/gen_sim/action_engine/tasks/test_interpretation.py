@@ -93,7 +93,7 @@ def _step(step_id: str, task_type: str, object_selector: dict, **values):
         "layout": "none",
         "axis": "none",
         "direction": "none",
-        "terminal_behavior": "none",
+        "terminal_behavior": "hold" if task_type == "E4" else "none",
         "depends_on": [],
     }
     result.update(values)
@@ -332,6 +332,7 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
         "HandOver",
         "MoveEndEffector",
         "MoveJoints",
+        "MoveHeldObject",
     ]
     assert handover_nodes[0]["motion_policy"] == {
         "modifiers": [{"type": "handover_role", "mode": "transfer"}]
@@ -360,6 +361,50 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
     ]
     assert "instruction-marker" in calls[0]["prompt"]
     assert calls[0]["model"] == "test-model"
+
+
+def test_complete_handover_place_intent_emits_one_e4_task() -> None:
+    intent = {
+        "steps": [
+            _step(
+                "handover_place",
+                "E4",
+                _selector("scene_ref", reference="object-alpha"),
+                target=_selector("scene_ref", reference="object-beta"),
+                relation="on",
+                transfer_arm="left_arm",
+                receive_arm="right_arm",
+                terminal_behavior="place",
+            )
+        ]
+    }
+    prompts: list[str] = []
+
+    def caller(**kwargs):
+        prompts.append(kwargs["prompt"])
+        return deepcopy(intent)
+
+    grounded = interpret_and_ground_task_spec(
+        "complete_handover_place",
+        "Use the left arm to hand the can to the right arm, then place it on the notebook.",
+        _scene(),
+        robot_profile="ur10",
+        caller=caller,
+        grounding_caller=_grounding_caller(
+            **{
+                "handover_place.object": "purple_can",
+                "handover_place.target": "orange_can",
+            }
+        ),
+    )
+    graph = instantiate_seed_graph(grounded.task_spec, grounded.role_bindings)
+
+    assert [item["task_type"] for item in grounded.task_spec["task_instances"]] == [
+        "E4"
+    ]
+    assert {node["task_type"] for node in graph["nodes"]} == {"E4"}
+    assert graph["task_groups"][0]["goal"]["terminal_behavior"] == "place"
+    assert "do not emit a trailing E1" in prompts[0]
 
 
 def test_six_step_repeated_objects_preserve_two_handover_continuations() -> None:
@@ -1044,7 +1089,7 @@ def test_interpreter_normalizes_registry_inapplicable_e4_required_arm() -> None:
     ]
 
 
-def test_interpreter_resolves_same_arm_handover_from_step_result_ownership() -> None:
+def test_interpreter_does_not_infer_handover_arms_from_adjacent_tasks() -> None:
     intent = {
         "steps": [
             _step(
@@ -1083,26 +1128,12 @@ def test_interpreter_resolves_same_arm_handover_from_step_result_ownership() -> 
     with pytest.raises(ValueError, match="transfer and receive arms must differ"):
         validate_instruction_intent(intent)
 
-    result = task_interpretation_module.interpret_instruction_draft(
-        "test-instruction-invalid-handover",
-        model="test-model",
-        caller=lambda **_kwargs: deepcopy(intent),
-    )
-
-    handover = result.intent["steps"][2]
-    assert (handover["transfer_arm"], handover["receive_arm"]) == (
-        "left_arm",
-        "right_arm",
-    )
-    assert result.attempts == 1
-    assert result.normalizations == (
-        {
-            "path": "steps[2].receive_arm",
-            "from": "left_arm",
-            "to": "right_arm",
-            "reason": "handover_arm_continuity",
-        },
-    )
+    with pytest.raises(ValueError, match="failed validation after one repair"):
+        task_interpretation_module.interpret_instruction_draft(
+            "test-instruction-invalid-handover",
+            model="test-model",
+            caller=lambda **_kwargs: deepcopy(intent),
+        )
 
 
 def test_interpreter_repairs_direct_reference_handover_from_later_arm_semantics() -> (
@@ -1315,7 +1346,7 @@ def test_missing_e3_target_repair_preserves_pour_semantics() -> None:
 
     assert "exactly one E3 step" in prompts[0]
     assert "Missing-target repair rule for E3" in prompts[1]
-    assert "must not be reclassified as E1" in prompts[1]
+    assert "part of the same E3 task" in prompts[1]
 
 
 def test_missing_e6_object_reaches_targeted_repair() -> None:
@@ -1838,6 +1869,7 @@ def test_multi_object_handover_keeps_both_order_and_holder_dependencies() -> Non
         "HandOver",
         "MoveEndEffector",
         "MoveJoints",
+        "MoveHeldObject",
     ]
     purple = next(group for group in graph["task_groups"] if group["id"] == "task_01")
     orange = next(group for group in graph["task_groups"] if group["id"] == "task_02")

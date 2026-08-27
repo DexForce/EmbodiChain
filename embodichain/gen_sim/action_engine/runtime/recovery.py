@@ -221,32 +221,16 @@ class RuntimeGraph:
             for node_id in descendants
             if str(node_by_id[node_id]["task_instance_id"]) == failed_group_id
         }
-        cleanup_suffix_ids: set[str] = set()
+        abandoned_suffix_ids: set[str] = set()
+        failed_capability = self.registry.get(str(failed_node["atomic_action"]))
         if (
-            str(failed_node["atomic_action"]) == "HandOver"
+            failed_capability.state_effect == "transfer_hold"
             and not preserve_failed_group_suffix
         ):
-            # A failed handover leaves ownership indeterminate.  Its
-            # transfer-arm retreat/home tail must not execute from a stale
-            # handover pose; recovery owns the cleanup before replanning.
-            cleanup_suffix_ids = {
-                node_id
-                for node_id in same_group_descendants
-                if node_by_id[node_id]["role"] == "cleanup"
-            }
-            non_cleanup_dependents = [
-                node_id
-                for node_id in same_group_descendants - cleanup_suffix_ids
-                if any(
-                    dependency in cleanup_suffix_ids
-                    for dependency in node_by_id[node_id]["depends_on"]
-                )
-            ]
-            if non_cleanup_dependents:
-                raise ValueError(
-                    "Cannot remove the HandOver cleanup suffix because it feeds "
-                    f"same-group non-cleanup nodes: {sorted(non_cleanup_dependents)}."
-                )
+            # A failed ownership transfer leaves every unfinished action in the
+            # same task invalid, including receiver-side continuation. Recovery
+            # replaces that suffix before downstream tasks are replanned.
+            abandoned_suffix_ids = set(same_group_descendants)
         first = [
             node
             for node in nodes
@@ -277,16 +261,16 @@ class RuntimeGraph:
                         dependency
                         for dependency in node["depends_on"]
                         if dependency != failed_node_id
-                        and dependency not in cleanup_suffix_ids
+                        and dependency not in abandoned_suffix_ids
                     ]
                     + terminal_ids
                 )
             )
-        if cleanup_suffix_ids:
+        if abandoned_suffix_ids:
             patched["nodes"] = [
                 node
                 for node in patched["nodes"]
-                if str(node["id"]) not in cleanup_suffix_ids
+                if str(node["id"]) not in abandoned_suffix_ids
             ]
             failed_group = next(
                 item
@@ -296,7 +280,7 @@ class RuntimeGraph:
             failed_group["node_ids"] = [
                 node_id
                 for node_id in failed_group["node_ids"]
-                if node_id not in cleanup_suffix_ids
+                if node_id not in abandoned_suffix_ids
             ]
         group["depends_on"] = list(
             dict.fromkeys([failed_group_id, *group.get("depends_on", [])])
@@ -475,10 +459,11 @@ def build_upright_recovery(
     revision: int,
     resume_failed_group: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Build a coordinate-free E2 recovery group for a fallen rigid object."""
+    """Build a coordinate-free capability recovery for a fallen rigid object."""
     failed = _node(graph, failed_node_id)
     object_uid = str(failed["object_uid"])
-    group_id = f"recovery_e2_{int(revision):02d}_{failed_node_id}"
+    task_type = str(failed["task_type"])
+    group_id = f"recovery_upright_{int(revision):02d}_{failed_node_id}"
     actor = _recovery_actor(graph, failed)
     held_consumer_arm = None
     if not resume_failed_group:
@@ -531,7 +516,7 @@ def build_upright_recovery(
             "target_binding": binding,
             "depends_on": dependencies,
             "task_instance_id": group_id,
-            "task_type": "E2",
+            "task_type": task_type,
             "role": "recovery" if index <= 3 else "cleanup",
             "precondition": {},
             "postcondition": {},
@@ -547,9 +532,9 @@ def build_upright_recovery(
         dependencies = [node_id]
     group = {
         "id": group_id,
-        "task_type": "E2",
+        "task_type": task_type,
         "role": "recovery",
-        "operator": "orient_object",
+        "operator": "recover_object_upright",
         "object_uid": object_uid,
         "actor": actor,
         "goal": {
@@ -561,6 +546,7 @@ def build_upright_recovery(
             "support_object": "table",
             "upright_local_axis": "long_axis",
             "terminal_behavior": "hold" if hold_for_downstream else "place",
+            "recovery_capability": "object_upright",
         },
         "depends_on": [],
         "parent_task_instance_id": str(failed["task_instance_id"]),

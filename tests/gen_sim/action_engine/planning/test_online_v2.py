@@ -109,7 +109,7 @@ def test_online_planner_sees_public_task_and_returns_complete_seed_graph() -> No
     assert "oracle" not in prompts[0]
     assert '"task_instances"' not in prompts[0]
     assert '"E4"' in prompts[0]
-    assert "Transfer one held object" in prompts[0]
+    assert "Transfer one object between arms" in prompts[0]
     assert graph["metadata"]["oracle_exposed"] is False
     assert any(
         node["target_binding"]["kind"] == "visual_constraint" for node in graph["nodes"]

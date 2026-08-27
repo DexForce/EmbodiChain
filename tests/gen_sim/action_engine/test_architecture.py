@@ -153,3 +153,45 @@ def test_runtime_core_has_no_action_name_dispatch_branches() -> None:
         if duplicated:
             offenders[relative] = duplicated
     assert offenders == {}
+
+
+def test_runtime_never_dispatches_on_task_operator_names() -> None:
+    forbidden = {"handover", "orient_object", "place_relative"}
+    offenders: list[str] = []
+    for relative in (
+        "runtime/executor.py",
+        "runtime/grounding.py",
+        "runtime/recovery.py",
+    ):
+        path = _PACKAGE_ROOT / relative
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            segment = ast.get_source_segment(source, node) or ""
+            literals = {
+                item.value
+                for item in ast.walk(node)
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            }
+            if ".operator" in segment and literals & forbidden:
+                offenders.append(f"{relative}:{node.lineno}")
+    assert offenders == []
+
+
+def test_runtime_recovery_contains_no_e_task_identity() -> None:
+    runtime_root = _PACKAGE_ROOT / "runtime"
+    offenders = {}
+    task_types = {f"E{index}" for index in range(1, 10)}
+    for path in sorted(runtime_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        literals = {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        duplicated = sorted(literals & task_types)
+        if duplicated:
+            offenders[path.relative_to(_PACKAGE_ROOT).as_posix()] = duplicated
+    assert offenders == {}

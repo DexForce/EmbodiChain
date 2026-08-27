@@ -313,6 +313,7 @@ def make_task_spec(
                 "transfer_arm": "left_arm",
                 "receive_arm": "right_arm",
                 "orientation_goal": "none",
+                "terminal_behavior": "hold",
             }
         )
     elif task_type == "E5":

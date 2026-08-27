@@ -221,38 +221,13 @@ def test_recovery_insertion_revises_runtime_graph_not_seed_graph() -> None:
     failed_node = next(
         node for node in graph["nodes"] if node["atomic_action"] == "HandOver"
     )
-    recovery_source = _graph("E2")
-    source_group = recovery_source["task_groups"][0]
-    recovery_group_id = "recovery_upright_01"
-    recovery_nodes = []
-    id_map = {
-        node["id"]: f"recovery_{index:02d}"
-        for index, node in enumerate(recovery_source["nodes"], start=1)
-    }
-    for node in recovery_source["nodes"]:
-        item = deepcopy(node)
-        item["id"] = id_map[node["id"]]
-        item["object_uid"] = failed_node["object_uid"]
-        item["target_binding"] = deepcopy(item["target_binding"])
-        if item["target_binding"].get("kind") == "object":
-            item["target_binding"]["object"] = failed_node["object_uid"]
-        item["depends_on"] = [id_map.get(dep, dep) for dep in node["depends_on"]]
-        recovery_nodes.append(item)
-    recovery_group = deepcopy(source_group)
-    recovery_group.update(
-        {
-            "id": recovery_group_id,
-            "role": "recovery",
-            "object_uid": failed_node["object_uid"],
-            "node_ids": [node["id"] for node in recovery_nodes],
-            "depends_on": [],
-            "parent_task_instance_id": failed_node["task_instance_id"],
-        }
+    recovery_nodes, recovery_group = build_upright_recovery(
+        graph,
+        failed_node_id=failed_node["id"],
+        revision=1,
+        resume_failed_group=True,
     )
-    recovery_group["success"] = {
-        "type": "object_upright",
-        "object": failed_node["object_uid"],
-    }
+    recovery_group_id = recovery_group["id"]
 
     patched = runtime.insert_recovery_subgraph(
         failed_node_id=failed_node["id"],
@@ -322,6 +297,9 @@ def test_failed_group_resume_recovery_places_before_prefix_replay() -> None:
         and node["role"] == "cleanup"
     }
     assert group["goal"]["terminal_behavior"] == "place"
+    assert group["task_type"] == "E4"
+    assert group["operator"] == "recover_object_upright"
+    assert group["goal"]["recovery_capability"] == "object_upright"
     assert [node["atomic_action"] for node in nodes] == [
         "PickUp",
         "MoveHeldObject",
@@ -330,6 +308,26 @@ def test_failed_group_resume_recovery_places_before_prefix_replay() -> None:
         "MoveJoints",
     ]
     assert original_cleanup <= {node["id"] for node in patched["nodes"]}
+
+
+@pytest.mark.parametrize("task_type", ("E1", "E3", "E4"))
+def test_upright_recovery_inherits_failed_task_identity_without_e2_dispatch(
+    task_type: str,
+) -> None:
+    graph = _graph(task_type)
+    failed = next(node for node in graph["nodes"] if node["role"] != "cleanup")
+
+    nodes, recovery_group = build_upright_recovery(
+        graph,
+        failed_node_id=failed["id"],
+        revision=1,
+        resume_failed_group=True,
+    )
+
+    assert recovery_group["task_type"] == task_type
+    assert recovery_group["operator"] == "recover_object_upright"
+    assert recovery_group["goal"]["recovery_capability"] == "object_upright"
+    assert {node["task_type"] for node in nodes} == {task_type}
 
 
 @pytest.mark.parametrize(
@@ -399,7 +397,7 @@ def test_local_recovery_replays_failed_group_prefix_and_preserves_seed_graph(
     recovery_edges = [
         event
         for event in recorder.edge_events
-        if event["step_id"].startswith("recovery_e2_")
+        if event["step_id"].startswith("recovery_upright_")
     ]
     replay_edges = [
         event for event in recorder.edge_events if event["step_id"] == step.id

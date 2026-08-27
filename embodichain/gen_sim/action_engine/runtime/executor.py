@@ -259,9 +259,7 @@ class ProgramExecutor:
             for step_id in group.get("semantic_step_ids", ())
         }
         arrangement_steps = [
-            step
-            for step in program.semantic_steps
-            if step.operator in {"arrange_line", "place_in_line"}
+            step for step in program.semantic_steps if step.goal.get("layout") == "line"
         ]
         arrangement_groups: dict[str, list[SemanticStep]] = {}
         for step in arrangement_steps:
@@ -286,8 +284,8 @@ class ProgramExecutor:
         placement_groups: dict[str, list[SemanticStep]] = {}
         for step in program.semantic_steps:
             if (
-                step.operator == "place_relative"
-                and step.goal.get("relation") == "inside"
+                step.goal.get("relation") == "inside"
+                and step.postcondition.get("type") == "semantic_goal"
                 and isinstance(step.goal.get("reference_object"), str)
             ):
                 placement_groups.setdefault(
@@ -563,7 +561,7 @@ class ProgramExecutor:
                     if (
                         self.placement_recovery_attempts
                         and bool(postcondition_failed.any())
-                        and step.operator == "place_relative"
+                        and step.postcondition.get("type") == "semantic_goal"
                         and normalize_placement_relation(
                             step.goal.get("relation", "on")
                         )
@@ -1023,7 +1021,7 @@ class ProgramExecutor:
         fallen_transition: torch.Tensor,
         recorder: RuntimeRecorder,
     ) -> _EdgeResult:
-        """Run the bounded E2 repair and replay only the failed vector rows."""
+        """Run bounded upright recovery and replay only the failed vector rows."""
         if self.runtime_graph is None or len(edge.actions) != 1:
             return result
         node_id = edge.actions[0].get("seed_node_id")
@@ -1770,7 +1768,15 @@ class ProgramExecutor:
             capability.state_effect == "hold"
             and capability.resource_mode == "single_arm_object"
             and step.actor.get("mode") in {"auto", "required"}
-            and step.operator != "orient_object"
+            and not self._is_in_place_orientation(step)
+        )
+
+    @staticmethod
+    def _is_in_place_orientation(step: SemanticStep) -> bool:
+        return (
+            step.goal.get("position_anchor") in {"initial_xy", "live_xy"}
+            and isinstance(step.goal.get("support_object"), str)
+            and "upright_local_axis" in step.goal
         )
 
     def _preferred_in_place_arm(
@@ -1779,7 +1785,7 @@ class ProgramExecutor:
         env_id: int,
     ) -> str | None:
         """Map a clearly sided in-place object to the robot-view arm slot."""
-        if step.operator != "orient_object":
+        if not self._is_in_place_orientation(step):
             return None
         initial = getattr(self.env, "agent_initial_object_poses", {}).get(
             step.object_uid
@@ -1878,12 +1884,20 @@ class ProgramExecutor:
             first_capability = self.adapter.capabilities.get(
                 str(first_action.get("atomic_action_class"))
             )
-            if step.operator == "handover" and first_capability.state_effect != "hold":
+            has_transfer = any(
+                self.adapter.capabilities.get(
+                    str(action.get("atomic_action_class"))
+                ).state_effect
+                == "transfer_hold"
+                for edge_id in step.edge_ids
+                for action in self.edges[edge_id].actions
+            )
+            if has_transfer and first_capability.state_effect != "hold":
                 # A coordinated handover has an internal, multi-arm planner.
                 # Do not let a speculative single-arm suffix plan veto the
                 # real execution (or create a misleading downstream pickup
                 # error) once a predecessor already established the transfer
-                # hold. A standalone E4 starts with PickUp and still needs its
+                # hold. A standalone transfer starts with PickUp and still needs its
                 # cached candidate plan for that first action.
                 source_state = self._state_for(step, arm)
                 has_hold = (
@@ -2112,11 +2126,8 @@ class ProgramExecutor:
                     capability = self.adapter.capabilities.get(
                         str(action.get("atomic_action_class"))
                     )
-                    if (
-                        step.operator == "handover"
-                        and capability.resource_mode == "coordinated_object"
-                    ):
-                        # A standalone E4 needs a speculative PickUp/staging
+                    if capability.state_effect == "transfer_hold":
+                        # A standalone transfer needs a speculative PickUp/staging
                         # prefix to choose and cache its transfer arm. The
                         # actual HandOver is coordinated, however, and must
                         # only be planned from the live post-staging state.
@@ -2613,15 +2624,7 @@ class ProgramExecutor:
         state: ExecutionState,
         grounded: GroundedAction,
     ) -> GroundedAction:
-        """Screen grasp poses against every later held-object target.
-
-        A handover is split across semantic steps: its staging ``MoveHeldObject``
-        edge is not part of the pickup step's local edge suffix.  Include that
-        first exchange pose here so ``PickUp`` can reject a grasp whose
-        ``object_to_eef`` transform makes the later transfer arm unreachable.
-        This keeps the screening speculative and bounded; no simulator steps
-        are sent while a candidate is being built.
-        """
+        """Screen grasp poses against later held-object targets in this task."""
         targets: list[torch.Tensor] = []
         start = step.edge_ids.index(pickup_edge_id) + 1
         for edge_id in step.edge_ids[start:]:
@@ -2629,6 +2632,13 @@ class ProgramExecutor:
             if len(edge.actions) != 1:
                 continue
             action = edge.actions[0]
+            action_actor = action.get("actor", {})
+            if (
+                isinstance(action_actor, Mapping)
+                and action_actor.get("mode") == "required"
+                and action_actor.get("arm") != arm
+            ):
+                continue
             if (
                 self.adapter.capabilities.get(
                     str(action.get("atomic_action_class"))
@@ -2645,7 +2655,6 @@ class ProgramExecutor:
             )
             if future.target_object_pose is not None:
                 targets.append(future.target_object_pose)
-        targets.extend(self._handover_successor_targets(step, arm, state))
         if not targets:
             return grounded
         existing = tuple(grounded.cfg.get("downstream_object_target_poses", ()))
@@ -2656,78 +2665,6 @@ class ProgramExecutor:
                 "downstream_object_target_poses": existing + tuple(targets),
             },
         )
-
-    def _handover_successor_targets(
-        self,
-        step: SemanticStep,
-        arm: str,
-        state: ExecutionState,
-    ) -> list[torch.Tensor]:
-        """Return staging poses for handovers downstream of a pickup.
-
-        ``SemanticStep.depends_on`` contains semantic IDs rather than edge IDs,
-        so walk the small dependency graph instead of assuming the handover is
-        an immediate child.  Only a handover that transfers this object from
-        the selected pickup arm is relevant to the grasp screen.
-        """
-        reachable = {step.id}
-        changed = True
-        while changed:
-            changed = False
-            for candidate in self.steps.values():
-                if candidate.id in reachable:
-                    continue
-                if any(dependency in reachable for dependency in candidate.depends_on):
-                    reachable.add(candidate.id)
-                    changed = True
-
-        targets: list[torch.Tensor] = []
-        for successor in self.steps.values():
-            if (
-                successor.id not in reachable
-                or successor.id == step.id
-                or successor.operator != "handover"
-                or successor.object_uid != step.object_uid
-            ):
-                continue
-            for edge_id in successor.edge_ids:
-                edge = self.edges[edge_id]
-                if len(edge.actions) != 1:
-                    continue
-                action = edge.actions[0]
-                binding = action.get("target_binding", {})
-                if not isinstance(binding, Mapping):
-                    continue
-                if binding.get("kind") != "handover_staging":
-                    continue
-                transfer_arm = str(
-                    binding.get(
-                        "transfer_arm",
-                        successor.goal.get("transfer_arm", ""),
-                    )
-                )
-                if transfer_arm != arm:
-                    break
-                try:
-                    grounded = self.grounder.ground(
-                        action,
-                        successor,
-                        arm=arm,
-                        state=state,
-                        orientation_reference_pose=self._orientation_references.get(
-                            successor.id,
-                            self._orientation_references.get(step.id),
-                        ),
-                    )
-                except (AttributeError, KeyError, ValueError):
-                    # A malformed/incomplete successor must not make an
-                    # otherwise valid pickup candidate disappear. The normal
-                    # successor execution will report that grounding error.
-                    break
-                if grounded.target_object_pose is not None:
-                    targets.append(grounded.target_object_pose)
-                break
-        return targets
 
     def _eef_target(self, outcome: ActionOutcome) -> torch.Tensor | None:
         state = outcome.next_state
@@ -2888,6 +2825,17 @@ class ProgramExecutor:
                 f"Edge {edge.id!r} must contain one action or an explicit dual pair."
             )
         assignments = self._assignments[step.id]
+        action_actor = edge.actions[0].get("actor", {})
+        if (
+            isinstance(action_actor, Mapping)
+            and action_actor.get("mode") == "required"
+            and action_actor.get("arm") in {"left_arm", "right_arm"}
+        ):
+            required_arm = str(action_actor["arm"])
+            assignments = [
+                required_arm if assignment is not None else None
+                for assignment in assignments
+            ]
         outcomes: dict[str, ActionOutcome | None] = {
             "left_arm": None,
             "right_arm": None,
@@ -4124,13 +4072,11 @@ class ProgramExecutor:
             success = torch.zeros_like(failed)
             log_info(f"Skipped verification for {step.id}: no active environments.")
             return failed, success, observed
-        relation = (
-            normalize_placement_relation(step.goal.get("relation", "on"))
-            if step.operator == "place_relative"
-            else str(step.goal.get("relation", ""))
-        )
-        reference = self._support_reference_uid(step)
         postcondition_type = step.postcondition.get("type")
+        relation = str(step.goal.get("relation", ""))
+        if postcondition_type == "semantic_goal" and relation not in {"", "none"}:
+            relation = normalize_placement_relation(relation)
+        reference = self._support_reference_uid(step)
         if postcondition_type in {"object_held", "handover_complete"}:
             # A planned hover target is not evidence that the object remains
             # grasped. Verify live TCP/object geometry and gripper closure.
@@ -4189,7 +4135,7 @@ class ProgramExecutor:
                 reference,
                 active,
             )
-        elif step.operator == "orient_object":
+        elif self._is_in_place_orientation(step):
             position_anchor = str(step.goal.get("position_anchor", "initial_xy"))
             anchor_pose = None
             if position_anchor == "initial_xy":
