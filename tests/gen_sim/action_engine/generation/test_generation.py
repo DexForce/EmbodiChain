@@ -378,7 +378,7 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
     assert "randomize_interact_can_pose" in config["env"]["events"]
     assert "randomize_table_height" in config["env"]["events"]
     recorder = config["env"]["events"]["record_camera"]
-    assert recorder["interval_step"] == 1
+    assert recorder["interval_step"] == 5
     assert recorder["params"]["resolution"] == [640, 360]
     assert recorder["params"]["intrinsics"] == pytest.approx(
         [280.0, 280.0, 320.0, 180.0]
@@ -433,7 +433,7 @@ def test_offline_recording_can_be_disabled_but_ab_keeps_audience_recorder(
     assert ab["env"]["events"]["record_camera"]["params"]["name"] == (
         "record_cam_audience_view"
     )
-    assert ab["env"]["events"]["record_camera"]["interval_step"] == 1
+    assert ab["env"]["events"]["record_camera"]["interval_step"] == 5
 
 
 @pytest.mark.parametrize(

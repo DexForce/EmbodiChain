@@ -324,6 +324,8 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
         "AxisAlign",
         "MoveEndEffector",
         "MoveEndEffector",
+        "MoveEndEffector",
+        "MoveEndEffector",
         "MoveJoints",
     ]
     assert [node["atomic_action"] for node in handover_nodes] == [

@@ -459,12 +459,7 @@ def _planner_env(
     )
 
 
-def test_semantics_prewarms_vhacd_cache_before_affordance(
-    monkeypatch: Any,
-) -> None:
-    """The lazy shared checker must see V-HACD's pickle, never create CoACD."""
-    events: list[str] = []
-    observed: dict[str, Any] = {}
+def test_semantics_builds_one_mesh_only_affordance() -> None:
     entity = _MeshEntity()
     env = SimpleNamespace(
         num_envs=1,
@@ -472,25 +467,7 @@ def test_semantics_prewarms_vhacd_cache_before_affordance(
         sim=SimpleNamespace(
             get_rigid_object=lambda uid: entity if uid == "cube" else None
         ),
-        agent_grasp_runtime_defaults={"max_decomposition_hulls": 8},
     )
-
-    def fake_prepare(**kwargs: Any) -> SimpleNamespace:
-        events.append("cache")
-        observed.update(kwargs)
-        return SimpleNamespace(status="hit")
-
-    def fake_affordance(**kwargs: Any) -> Affordance:
-        events.append("affordance")
-        observed["affordance_kwargs"] = kwargs
-        return Affordance()
-
-    monkeypatch.setattr(
-        actions,
-        "ensure_vhacd_grasp_collision_cache",
-        fake_prepare,
-    )
-    monkeypatch.setattr(actions, "AntipodalAffordance", fake_affordance)
 
     adapter = AtomicActionAdapter(env)
     first = adapter.semantics("cube")
@@ -498,15 +475,11 @@ def test_semantics_prewarms_vhacd_cache_before_affordance(
 
     assert first is second
     assert first.entity_id == "cube"
-    assert events == ["cache", "affordance"]
-    assert observed["max_decomposition_hulls"] == 8
-    assert observed["mesh_vertices"].dtype == torch.float32
-    assert observed["mesh_triangles"].dtype == torch.int64
-    assert set(observed["affordance_kwargs"]) == {
-        "object_label",
-        "mesh_vertices",
-        "mesh_triangles",
-    }
+    assert isinstance(first.affordance, AntipodalAffordance)
+    assert first.affordance.mesh_vertices is not None
+    assert first.affordance.mesh_triangles is not None
+    assert first.affordance.mesh_vertices.dtype == torch.float32
+    assert first.affordance.mesh_triangles.dtype == torch.int64
 
 
 def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None:

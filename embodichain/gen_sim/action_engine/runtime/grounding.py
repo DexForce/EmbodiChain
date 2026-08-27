@@ -2152,24 +2152,8 @@ class ActionGrounder:
                 "Slide grounding requires exactly one fixed contact endpoint "
                 f"on prismatic child link {child_link!r}; found {contact_links}."
             )
-        grasp_pose = _batched_pose(
-            articulation.get_link_pose(contact_links[0], to_matrix=True), self.env
-        )
-        # The bundled drawer contact frame owns TCP +Z as its approach axis.
-        # A local quarter turn aligns the parallel-gripper closing direction
-        # with the narrow handle, matching scripts/tutorials/sim/open_drawer.py.
-        grasp_roll = torch.eye(
-            4,
-            dtype=grasp_pose.dtype,
-            device=grasp_pose.device,
-        )
-        grasp_roll[0, 0] = 0.0
-        grasp_roll[0, 1] = -1.0
-        grasp_roll[1, 0] = 1.0
-        grasp_roll[1, 1] = 0.0
-        grasp_pose = torch.matmul(grasp_pose, grasp_roll)
-
-        vertices, triangles = articulation.get_link_vert_face(child_link)
+        contact_link = contact_links[0]
+        vertices, triangles = articulation.get_link_vert_face(contact_link)
         vertices = torch.as_tensor(
             vertices, dtype=torch.float32, device=self.env.device
         )
@@ -2177,12 +2161,12 @@ class ActionGrounder:
             triangles, dtype=torch.int64, device=self.env.device
         )
         if vertices.ndim != 2 or vertices.shape[-1] != 3 or not vertices.numel():
-            raise ValueError("Slide child link has no valid grasp geometry.")
+            raise ValueError("Slide contact link has no valid grasp geometry.")
         if triangles.ndim != 2 or triangles.shape[-1] != 3 or not triangles.numel():
-            raise ValueError("Slide child link has no valid triangle geometry.")
+            raise ValueError("Slide contact link has no valid triangle geometry.")
 
-        child_pose = _batched_pose(
-            articulation.get_link_pose(child_link, to_matrix=True), self.env
+        contact_pose = _batched_pose(
+            articulation.get_link_pose(contact_link, to_matrix=True), self.env
         )
         parent_pose = _batched_pose(
             articulation.get_link_pose(parent_link, to_matrix=True), self.env
@@ -2204,7 +2188,7 @@ class ActionGrounder:
         )
         push_world = -torch.nn.functional.normalize(opening_world, dim=1)
         push_local = torch.bmm(
-            child_pose[:, :3, :3].transpose(1, 2),
+            contact_pose[:, :3, :3].transpose(1, 2),
             push_world.unsqueeze(2),
         ).squeeze(2)
         push_local = torch.nn.functional.normalize(push_local, dim=1)
@@ -2249,7 +2233,6 @@ class ActionGrounder:
                 "articulation_joint_id": joint_id,
                 "articulation_initial_qpos": qpos,
                 "articulation_target_qpos": target_qpos,
-                "articulation_grasp_position": grasp_pose[:, :3, 3],
                 "articulation_push_axis_world": push_world,
             }
         )
@@ -2257,14 +2240,15 @@ class ActionGrounder:
         arm_base = left_base if arm == "left_arm" else right_base
         current_eef = self._current_eef_pose(arm)
         log_info(
-            f"Slide grounding {step.id}/{arm}: grasp_position="
-            f"{grasp_pose[0, :3, 3].detach().cpu().tolist()}, "
+            f"Slide grounding {step.id}/{arm}: contact_link={contact_link!r}, "
+            f"contact_position={contact_pose[0, :3, 3].detach().cpu().tolist()}, "
             f"push_axis={push_world[0].detach().cpu().tolist()}, "
             f"eef_position={current_eef[0, :3, 3].detach().cpu().tolist()}, "
             f"arm_base_position={arm_base[0, :3, 3].detach().cpu().tolist()}."
         )
+        contact_entity_id = f"{step.object_uid}:{contact_link}"
         affordance = SlideAffordance(
-            object_label=f"{step.object_uid}:{child_link}",
+            object_label=contact_entity_id,
             mesh_vertices=vertices,
             mesh_triangles=triangles,
             translation_axis=push_local[0],
@@ -2274,14 +2258,13 @@ class ActionGrounder:
         semantics = ObjectSemantics(
             affordance=affordance,
             geometry={"mesh_vertices": vertices, "mesh_triangles": triangles},
-            entity_id=f"{step.object_uid}:{child_link}",
-            label=f"{step.object_uid}:{child_link}",
+            entity_id=contact_entity_id,
+            label=contact_entity_id,
         )
         return (
             SlideGoal(
                 semantics=semantics,
-                target_pose=child_pose,
-                grasp_xpos=grasp_pose,
+                target_pose=contact_pose,
             ),
             scoped_policy,
         )

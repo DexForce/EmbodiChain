@@ -77,7 +77,6 @@ from embodichain.utils.logger import log_info, log_warning
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, quat_slerp
 
 from .body_grasp import AxisAlignBodyGraspAdapter
-from .grasp_collision_cache import ensure_vhacd_grasp_collision_cache
 from .models import ActionOutcome, GroundedAction
 from .state import ExecutionState
 
@@ -347,16 +346,6 @@ class AtomicActionAdapter:
             raise ValueError(f"Object {uid!r} has invalid mesh vertices.")
         if triangles.ndim != 2 or triangles.shape[-1] != 3 or triangles.numel() == 0:
             raise ValueError(f"Object {uid!r} has invalid mesh triangles.")
-
-        grasp_options = self.grasp_policy
-        max_hulls = int(grasp_options["max_decomposition_hulls"])
-        cache_result = ensure_vhacd_grasp_collision_cache(
-            mesh_vertices=vertices,
-            mesh_triangles=triangles,
-            max_decomposition_hulls=max_hulls,
-        )
-        if cache_result.status != "hit":
-            log_info(f"Prepared V-HACD grasp cache for {uid!r}: {cache_result.status}.")
 
         semantics = ObjectSemantics(
             label=uid,
