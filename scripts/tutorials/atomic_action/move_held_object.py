@@ -38,7 +38,7 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils import logger
@@ -49,6 +49,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -83,7 +84,7 @@ def create_pick_object(sim) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="paper_cup",
             shape=MeshCfg(fpath=get_data_path(OBJECT_MESH_PATH)),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,

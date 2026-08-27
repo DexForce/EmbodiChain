@@ -47,7 +47,6 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
@@ -62,6 +61,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -105,7 +105,7 @@ def create_drawer(
             init_rot=DRAWER_ORIENTATION,
             init_qpos=(0.0,),
             drive_pros=JointDrivePropertiesCfg(drive_type="none"),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 static_friction=1.0,
                 dynamic_friction=1.0,
             ),

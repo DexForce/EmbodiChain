@@ -47,11 +47,13 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_franka_panda_robot_cfg,
+    create_tutorial_rigid_body_physics,
     create_tutorial_argument_parser,
     create_tutorial_robot_cfg,
     create_ur5_gripper_robot_cfg,
     get_hand_open_close_qpos,
     replay_trajectory,
+    run_tutorial,
     should_open_tutorial_window,
     should_wait_for_tutorial_input,
 )
@@ -352,12 +354,78 @@ def test_curobo_motion_generator_factory_selects_curobo_backend() -> None:
     with patch(
         "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
     ) as motion_generator_cls:
-        result = create_curobo_motion_generator(robot)
+        result = create_curobo_motion_generator(robot, use_cuda_graph=False)
 
     cfg = motion_generator_cls.call_args.kwargs["cfg"]
     assert result is motion_generator_cls.return_value
     assert cfg.planner_cfg.planner_type == "curobo"
     assert cfg.planner_cfg.robot_uid == "tutorial_robot"
+    assert cfg.planner_cfg.use_cuda_graph is False
+
+
+def test_tutorial_rigid_body_physics_groups_backend_specific_properties() -> None:
+    physics = create_tutorial_rigid_body_physics(
+        mass=0.05,
+        static_friction=0.8,
+        dynamic_friction=0.4,
+        restitution=0.1,
+        linear_damping=0.2,
+        angular_damping=0.3,
+        max_depenetration_velocity=1.5,
+        enable_ccd=True,
+        min_position_iters=4,
+        min_velocity_iters=2,
+        contact_offset=0.01,
+        rest_offset=0.001,
+    )
+
+    assert physics.mass_props.mass == 0.05
+    assert physics.material_props.static_friction == 0.8
+    assert physics.material_props.dynamic_friction == 0.4
+    assert physics.material_props.restitution == 0.1
+    assert physics.rigid_props.linear_damping == 0.2
+    assert physics.rigid_props.angular_damping == 0.3
+    assert physics.rigid_props.max_depenetration_velocity == 1.5
+    assert physics.rigid_props.enable_ccd is True
+    assert physics.rigid_props.min_position_iters == 4
+    assert physics.rigid_props.min_velocity_iters == 2
+    assert physics.collision_props.contact_offset == 0.01
+    assert physics.collision_props.rest_offset == 0.001
+
+
+def test_run_tutorial_synchronizes_cuda_before_destroying_newton_scene() -> None:
+    sim = MagicMock()
+    sim.is_newton_backend = True
+    sim.is_window_recording.return_value = False
+
+    with (
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils."
+            "SimulationManager.is_instantiated",
+            return_value=True,
+        ),
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils."
+            "SimulationManager.get_instance",
+            return_value=sim,
+        ),
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils."
+            "SimulationManager.flush_cleanup_queue"
+        ) as flush_cleanup_queue,
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils." "torch.cuda.is_available",
+            return_value=True,
+        ),
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils." "torch.cuda.synchronize"
+        ) as synchronize,
+    ):
+        run_tutorial(lambda: None)
+
+    synchronize.assert_called_once_with()
+    sim.destroy.assert_called_once_with(exit_process=False)
+    flush_cleanup_queue.assert_called_once_with()
 
 
 def test_shared_robot_selection_keeps_ur5_default_and_accepts_franka() -> None:
