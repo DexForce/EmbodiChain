@@ -29,7 +29,10 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    DexsimRigidBodyPropertiesCfg,
+    JointDrivePropertiesCfg,
     RenderCfg,
+    RigidBodyPhysicsCfg,
     physics_cfg_for_backend,
 )
 from embodichain.lab.sim.objects import Articulation
@@ -37,8 +40,11 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 
 DRAWER_ASSET = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 DRAWER_USER_QPOS_LIMITS = {"slide_rails": [0.0, 0.18]}
-DRAWER_JOINT_FORCE = 1.0
-JOINT_LIMIT_TOLERANCE = 1.0e-3
+DRAWER_JOINT_FORCE_LIMIT = 1.0
+DRAWER_POSITION_GAIN = 20.0
+DRAWER_VELOCITY_GAIN = 4.0
+JOINT_POSITION_TOLERANCE = 1.0e-3
+JOINT_VELOCITY_TOLERANCE = 1.0e-2
 
 
 def create_articulation(sim: SimulationManager) -> Articulation:
@@ -53,15 +59,25 @@ def create_articulation(sim: SimulationManager) -> Articulation:
     Raises:
         RuntimeError: If the constructed backend joints are not passive.
     """
-    # Resolve the drawer URDF and configure its initial pose. ``drive_pros`` is
-    # intentionally omitted: ArticulationCfg defaults to drive_type="none".
+    # Resolve the drawer URDF and explicitly request the passive drive used by
+    # this tutorial while retaining all unconfigured asset properties.
     articulation_cfg = ArticulationCfg(
         uid="drawer",
         fpath=get_data_path(DRAWER_ASSET),
+        asset_physics_mode="overlay",
         init_pos=(0.0, 0.0, 0.05),
         fix_base=True,
+        drive_pros=JointDrivePropertiesCfg(drive_type="none"),
         # The asset limit is [0.0, 0.2]; keep 90% of its travel range.
         qpos_limits=DRAWER_USER_QPOS_LIMITS,
+        # Newton currently has no body-level damping setting. Remove the
+        # Default backend's damping so both passive models use zero damping.
+        attrs=RigidBodyPhysicsCfg(
+            rigid_props=DexsimRigidBodyPropertiesCfg(
+                linear_damping=0.0,
+                angular_damping=0.0,
+            )
+        ),
     )
 
     # Load one articulation instance into every simulation environment.
@@ -92,15 +108,26 @@ def create_articulation(sim: SimulationManager) -> Articulation:
     return articulation
 
 
-def apply_drawer_force(articulation: Articulation, opening: bool) -> None:
-    """Apply a joint force that opens or closes the drawer.
+def apply_drawer_force(
+    articulation: Articulation,
+    target_qpos: torch.Tensor,
+) -> None:
+    """Apply effort-limited PD control toward a drawer position.
 
     Args:
         articulation: Drawer articulation receiving the force.
-        opening: If True, apply positive force; otherwise apply negative force.
+        target_qpos: Target joint positions for every environment and joint.
     """
-    force = DRAWER_JOINT_FORCE if opening else -DRAWER_JOINT_FORCE
-    joint_forces = torch.full_like(articulation.get_qpos(), force)
+    position_error = target_qpos - articulation.get_qpos()
+    joint_forces = (
+        DRAWER_POSITION_GAIN * position_error
+        - DRAWER_VELOCITY_GAIN * articulation.get_qvel()
+    )
+    joint_forces = torch.clamp(
+        joint_forces,
+        min=-DRAWER_JOINT_FORCE_LIMIT,
+        max=DRAWER_JOINT_FORCE_LIMIT,
+    )
     articulation.set_qf(joint_forces)
 
 
@@ -109,47 +136,48 @@ def run_simulation(
     articulation: Articulation,
     max_steps: int | None = None,
 ) -> None:
-    """Open and close the drawer by reversing force at its joint limits.
+    """Open and close the drawer with effort-limited position tracking.
 
     Args:
         sim: Simulation manager to advance.
         articulation: Drawer articulation whose joints are updated.
         max_steps: Optional number of steps to run before returning.
     """
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     qpos_limits = articulation.get_qpos_limits()
     closed_qpos = qpos_limits[..., 0]
     open_qpos = qpos_limits[..., 1]
     opening = True
+    target_qpos = open_qpos
     step_count = 0
     print(
-        f"[INFO]: Applying +{DRAWER_JOINT_FORCE:.1f} N to open the drawer",
+        "[INFO]: Tracking the open position with joint effort limited to "
+        f"+/-{DRAWER_JOINT_FORCE_LIMIT:.1f} N",
         flush=True,
     )
     try:
         while max_steps is None or step_count < max_steps:
             qpos = articulation.get_qpos()
-            if opening and torch.all(qpos >= open_qpos - JOINT_LIMIT_TOLERANCE).item():
-                print(f"[INFO]: Drawer reached open limit: {qpos}", flush=True)
-                opening = False
+            qvel = articulation.get_qvel()
+            settled = torch.all(
+                (torch.abs(qpos - target_qpos) <= JOINT_POSITION_TOLERANCE)
+                & (torch.abs(qvel) <= JOINT_VELOCITY_TOLERANCE)
+            ).item()
+            if settled:
+                reached_position = "open" if opening else "closed"
                 print(
-                    f"[INFO]: Applying -{DRAWER_JOINT_FORCE:.1f} N to close the drawer",
+                    f"[INFO]: Drawer settled at {reached_position} position: "
+                    f"qpos={qpos}, qvel={qvel}",
                     flush=True,
                 )
-            elif (
-                not opening
-                and torch.all(qpos <= closed_qpos + JOINT_LIMIT_TOLERANCE).item()
-            ):
-                print(f"[INFO]: Drawer reached closed limit: {qpos}", flush=True)
-                opening = True
+                opening = not opening
+                target_qpos = open_qpos if opening else closed_qpos
+                target_position = "open" if opening else "closed"
                 print(
-                    f"[INFO]: Applying +{DRAWER_JOINT_FORCE:.1f} N to open the drawer",
+                    f"[INFO]: Tracking the {target_position} position",
                     flush=True,
                 )
 
-            apply_drawer_force(articulation, opening=opening)
+            apply_drawer_force(articulation, target_qpos=target_qpos)
             sim.update(step=1)
             step_count += 1
     except KeyboardInterrupt:
@@ -174,15 +202,18 @@ def main() -> None:
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
 
-    # Configure the simulation. Window creation is deferred until the asset is loaded.
+    open_native_window = not args.headless and not args.viser
+
+    # Construct the World without a window so Spawn can finish first. The
+    # requested native window is opened explicitly after create_articulation().
     sim_cfg = SimulationManagerCfg(
-        headless=args.headless,
+        headless=True,
         sim_device=args.device,
         num_envs=args.num_envs,
         arena_space=2.0,
         physics_dt=1.0 / 100.0,
-        render_cfg=RenderCfg(renderer=args.renderer),
         physics_cfg=physics_cfg_for_backend(args.physics),
+        render_cfg=RenderCfg(renderer=args.renderer),
         visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(sim_cfg)
@@ -191,7 +222,7 @@ def main() -> None:
         articulation = create_articulation(sim)
         print(f"[INFO]: Initial joint positions: {articulation.get_qpos()}", flush=True)
 
-        if not args.headless and not args.viser:
+        if open_native_window:
             sim.open_window()
 
         print("[INFO]: Running simulation. Press Ctrl+C to stop.", flush=True)

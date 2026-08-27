@@ -129,6 +129,7 @@ class BaseSolverTest:
             init_pos=(0, 0, 0),
         )
         self.robot: Robot = self.sim.add_robot(cfg=cfg)
+        self.sim.prepare()
 
     def test_ik(self):
         # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed

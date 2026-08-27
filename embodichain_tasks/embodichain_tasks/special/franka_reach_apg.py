@@ -195,8 +195,8 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
 
     def _cache_franka_buffers(self) -> None:
         """Cache joint-limit Warp arrays, EE body indices, and FK state."""
-        nm = self.sim.physics.newton_manager
-        model = nm._model
+        runtime = self.sim.differentiable_runtime
+        model = runtime.model
         # Warp's ``wp.zeros`` / ``wp.launch`` reject ``torch.device``
         # directly (``Invalid device identifier: cuda:0``), so cache the
         # Warp-compatible device string up-front.
@@ -234,8 +234,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
         shared Newton model. We pick the ``FRANKA_EE_BODY`` body for
         each env block (one global index per env).
         """
-        nm = self.sim.physics.newton_manager
-        model = nm._model
+        model = self.sim.differentiable_runtime.model
         n_envs = self.sim.num_envs
         n_per_env = len(model.body_label) // n_envs
         idx_per_env: list[int] = []
@@ -282,9 +281,9 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
 
     def _build_sim_state_dict(self, action: torch.Tensor) -> dict:
         """Detach FK primal buffers before the parent opens a Warp tape."""
-        nm = self.sim.physics.newton_manager
-        self._current_joint_q_snapshot = wp.clone(nm._state_0.joint_q)
-        self._fk_state = nm._model.state()
+        runtime = self.sim.differentiable_runtime
+        self._current_joint_q_snapshot = wp.clone(runtime.current_state.joint_q)
+        self._fk_state = runtime.model.state()
         return super()._build_sim_state_dict(action)
 
     def _make_kinematic_step_fn(self) -> Callable[[], Any]:
@@ -297,7 +296,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
         :meth:`_apply_action_kernel` before this callable runs.
         """
         env = self
-        model = env.sim.physics.newton_manager._model
+        model = env.sim.differentiable_runtime.model
 
         def _step():
             newton.eval_fk(
@@ -415,9 +414,9 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
 
         The parent :meth:`DifferentiableEmbodiedEnv.step` runs the
         differentiable bridge. After it returns, we update
-        ``nm._state_0.joint_q`` for non-terminal envs so the next step starts
+        both Spawn live states for non-terminal envs so the next step starts
         from the new configuration. The tape reads a per-forward detached
-        snapshot, so this live continuation cannot overwrite its primal input.
+        snapshot, so this continuation cannot overwrite its primal input.
         """
         if not isinstance(action, torch.Tensor):
             action = torch.as_tensor(action, dtype=torch.float32)
@@ -431,15 +430,24 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
         live = (~done_mask).nonzero(as_tuple=False).squeeze(-1)
         if live.numel() > 0:
             with torch.no_grad():
-                nm = self.sim.physics.newton_manager
-                joint_q_t = wp.to_torch(nm._state_0.joint_q).view(self.sim.num_envs, -1)
-                cur = joint_q_t[live, :FRANKA_NUM_ARM_JOINTS]
+                runtime = self.sim.differentiable_runtime
+                current_q = wp.to_torch(runtime.current_state.joint_q).view(
+                    self.sim.num_envs, -1
+                )
+                cur = current_q[live, :FRANKA_NUM_ARM_JOINTS]
                 delta = clamped_action[live].detach() * self._action_scale
                 lo = self._limit_lo_t.unsqueeze(0).expand_as(cur)
                 hi = self._limit_hi_t.unsqueeze(0).expand_as(cur)
-                joint_q_t[live, :FRANKA_NUM_ARM_JOINTS] = torch.clamp(
-                    cur + delta, lo, hi
-                )
+                next_q = torch.clamp(cur + delta, lo, hi)
+                for state in runtime.live_states:
+                    joint_q = wp.to_torch(state.joint_q).view(self.sim.num_envs, -1)
+                    joint_q[live, :FRANKA_NUM_ARM_JOINTS] = next_q
+                    newton.eval_fk(
+                        runtime.model,
+                        state.joint_q,
+                        state.joint_qd,
+                        state,
+                    )
         self.last_action = clamped_action.detach().clone()
         return obs, reward, terminated, truncated, info
 
@@ -474,23 +482,23 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
             self.step_count[env_ids] = 0
             self.last_action[env_ids] = 0.0
             self._sample_new_targets(env_ids)
-            nm = self.sim.physics.newton_manager
-            joint_q_t = wp.to_torch(nm._state_0.joint_q).view(self.sim.num_envs, -1)
-            joint_q_t[env_ids] = 0.0
-            newton.eval_fk(
-                nm._model,
-                nm._state_0.joint_q,
-                nm._state_0.joint_qd,
-                nm._state_0,
-            )
+            runtime = self.sim.differentiable_runtime
+            for state in runtime.live_states:
+                joint_q = wp.to_torch(state.joint_q).view(self.sim.num_envs, -1)
+                joint_q[env_ids] = 0.0
+                newton.eval_fk(
+                    runtime.model,
+                    state.joint_q,
+                    state.joint_qd,
+                    state,
+                )
         obs = self._initial_obs()
         return obs, {}
 
     def _initial_obs(self) -> torch.Tensor:
-        """Compute the initial obs from state_0 (no grad, no side effects)."""
+        """Compute the initial observation from the live Spawn state."""
         with torch.no_grad():
-            nm = self.sim.physics.newton_manager
-            state = nm._state_0
+            state = self.sim.differentiable_runtime.current_state
             n = self.sim.num_envs
             joint_q_t = wp.to_torch(state.joint_q).view(n, -1)
             body_q_flat = wp.to_torch(state.body_q).view(-1, 7)

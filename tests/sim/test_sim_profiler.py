@@ -22,6 +22,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim import Profiler, ProfilerCfg, SimulationManager
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg
 
 pytestmark = pytest.mark.no_sim
 
@@ -52,8 +53,10 @@ def _make_sim_update_probe(profiler: Profiler) -> SimulationManager:
     sim._visualization_runtime = None
     sim._visualization_sim_step = 0
     sim._visualization_sim_time = 0.0
+    sim.prepare = lambda: None
     sim.sim_config = types.SimpleNamespace(
         physics_dt=0.01,
+        physics_cfg=DefaultPhysicsCfg(),
         visualization=types.SimpleNamespace(backend="none"),
     )
     return sim

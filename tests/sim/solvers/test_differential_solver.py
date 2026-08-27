@@ -61,6 +61,7 @@ class BaseSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_differential_solver(self, arm_name: str):

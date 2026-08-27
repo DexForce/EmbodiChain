@@ -29,7 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 try:
     import psutil
@@ -82,7 +82,7 @@ class MeshObjectPreset:
     mesh_path: str = ""
     shape_type: str = "mesh"
     cube_size: tuple[float, float, float] | None = None
-    use_usd_properties: bool = False
+    asset_physics_mode: Literal["preserve", "overlay"] = "overlay"
     dynamic_friction: float = 0.97
     static_friction: float = 0.99
     restitution: float = 0.0
@@ -123,7 +123,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(0.8, 0.8, 0.8),
         mass=0.05,
         initial_z=0.05,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
     ),
     "coffee_cup": MeshObjectPreset(
         object_type="coffee_cup",
@@ -134,7 +134,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(4.0, 4.0, 4.0),
         mass=0.01,
         initial_z=0.01,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
     ),
     "cube": MeshObjectPreset(
         object_type="cube",
@@ -146,7 +146,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(1.0, 1.0, 1.0),
         mass=0.05,
         initial_z=0.05,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
         dynamic_friction=0.5,
         static_friction=0.5,
         contact_offset=0.003,
@@ -165,7 +165,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(0.75, 0.75, 1.0),
         mass=0.01,
         initial_z=0.05,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
         dynamic_friction=1.0,
         static_friction=1.0,
         contact_offset=0.003,
@@ -188,7 +188,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(1.0, 1.0, 1.0),
         mass=0.05,
         initial_z=0.05,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
     ),
 }
 COVERAGE_MESH_OBJECT_TYPES = ("sugar_box", "cube", "paper_cup")
@@ -555,7 +555,7 @@ def create_benchmark_object(
         init_pos=[position_case.xy[0], position_case.xy[1], preset.initial_z],
         init_rot=preset.init_rot,
         body_scale=preset.body_scale,
-        use_usd_properties=preset.use_usd_properties,
+        asset_physics_mode=preset.asset_physics_mode,
     )
     obj = sim.add_rigid_object(cfg=cfg)
     sim.update(step=10)

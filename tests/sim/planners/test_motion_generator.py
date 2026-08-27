@@ -97,6 +97,7 @@ class BaseTestMotionGenerator(object):
         cls.robot: Robot = cls.robot_sim.add_robot(
             cfg=CobotMagicCfg.from_dict(cfg_dict)
         )
+        cls.robot_sim.prepare()
 
         cls.arm_name = "left_arm"
 

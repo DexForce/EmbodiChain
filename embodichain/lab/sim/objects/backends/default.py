@@ -323,7 +323,7 @@ class DefaultRigidBodyView(RigidBodyViewBase):
     def apply_contact_offset(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         raise NotImplementedError(
             "Per-body contact_offset apply is not exposed by the default backend; "
-            "set it via RigidBodyAttributesCfg (consumed at build) instead."
+            "set it at build time with DexsimCollisionPropertiesCfg instead."
         )
 
     # -- Internal helpers ----------------------------------------------------

@@ -164,7 +164,8 @@ class _RigidObjectGroup:
 
 
 class _DeformableObject:
-    def __init__(self) -> None:
+    def __init__(self, deformable_type: str) -> None:
+        self.deformable_type = deformable_type
         local_vertices = np.array(
             [[0.0, 0.0, 0.0], [0.15, 0.0, 0.0], [0.0, 0.15, 0.0]],
             dtype=np.float32,
@@ -177,16 +178,10 @@ class _DeformableObject:
         )
         self._faces = np.array([[0, 1, 2]], dtype=np.int32)
 
-    def get_current_collision_vertices(self) -> np.ndarray:
+    def get_surface_vertices(self) -> np.ndarray:
         return self.vertices
 
-    def get_current_vertex_position(self) -> np.ndarray:
-        return self.vertices
-
-    def get_collision_surface_triangles(self, env_ids: list[int]) -> np.ndarray:
-        return self.get_triangles(env_ids)
-
-    def get_triangles(self, env_ids: list[int]) -> np.ndarray:
+    def get_surface_triangles(self, env_ids: list[int]) -> np.ndarray:
         return np.stack([self._faces for _ in env_ids])
 
 
@@ -224,17 +219,11 @@ class _Simulation:
     def get_rigid_object_group(self, uid: str) -> None:
         raise AssertionError(f"Unexpected rigid-object-group lookup: {uid}")
 
-    def get_soft_object_uid_list(self) -> list[str]:
+    def get_deformable_object_uid_list(self) -> list[str]:
         return []
 
-    def get_soft_object(self, uid: str) -> None:
-        raise AssertionError(f"Unexpected soft-object lookup: {uid}")
-
-    def get_cloth_object_uid_list(self) -> list[str]:
-        return []
-
-    def get_cloth_object(self, uid: str) -> None:
-        raise AssertionError(f"Unexpected cloth-object lookup: {uid}")
+    def get_deformable_object(self, uid: str) -> None:
+        raise AssertionError(f"Unexpected deformable-object lookup: {uid}")
 
     def get_sensor_uid_list(self) -> list[str]:
         return []
@@ -265,17 +254,11 @@ class _EmptySimulation:
     def get_articulation(self, uid: str) -> None:
         raise AssertionError(f"Unexpected articulation lookup: {uid}")
 
-    def get_soft_object_uid_list(self) -> list[str]:
+    def get_deformable_object_uid_list(self) -> list[str]:
         return []
 
-    def get_soft_object(self, uid: str) -> None:
-        raise AssertionError(f"Unexpected soft-object lookup: {uid}")
-
-    def get_cloth_object_uid_list(self) -> list[str]:
-        return []
-
-    def get_cloth_object(self, uid: str) -> None:
-        raise AssertionError(f"Unexpected cloth-object lookup: {uid}")
+    def get_deformable_object(self, uid: str) -> None:
+        raise AssertionError(f"Unexpected deformable-object lookup: {uid}")
 
     def get_sensor_uid_list(self) -> list[str]:
         return []
@@ -453,8 +436,8 @@ class _CompleteSimulation(_Simulation):
     def __init__(self) -> None:
         super().__init__()
         self.rigid_group = _RigidObjectGroup()
-        self.soft = _DeformableObject()
-        self.cloth = _DeformableObject()
+        self.soft = _DeformableObject("volume")
+        self.cloth = _DeformableObject("surface")
 
     def get_rigid_object_group_uid_list(self) -> list[str]:
         return ["pair"]
@@ -463,19 +446,11 @@ class _CompleteSimulation(_Simulation):
         assert uid == "pair"
         return self.rigid_group
 
-    def get_soft_object_uid_list(self) -> list[str]:
-        return ["jelly"]
+    def get_deformable_object_uid_list(self) -> list[str]:
+        return ["jelly", "flag"]
 
-    def get_soft_object(self, uid: str) -> _DeformableObject:
-        assert uid == "jelly"
-        return self.soft
-
-    def get_cloth_object_uid_list(self) -> list[str]:
-        return ["flag"]
-
-    def get_cloth_object(self, uid: str) -> _DeformableObject:
-        assert uid == "flag"
-        return self.cloth
+    def get_deformable_object(self, uid: str) -> _DeformableObject:
+        return {"jelly": self.soft, "flag": self.cloth}[uid]
 
 
 def test_manifest_deduplicates_geometry_and_escapes_paths() -> None:

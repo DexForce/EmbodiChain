@@ -1464,6 +1464,17 @@ class Robot(Articulation):
         )
         link_names = self.get_control_part_link_names(name=control_part)
 
+        if self.is_spawn_bound:
+            for env_idx in self._all_indices:
+                entity = self._entities[env_idx]
+                for link_name in link_names:
+                    self._spawn_result.set_physical_visible(
+                        (entity, link_name), rgba, visible
+                    )
+            for link_name in link_names:
+                self._has_collision_visible_node_dict[link_name] = True
+            return
+
         # create collision visible node if not exist
         if visible:
             for i, env_idx in enumerate(self._all_indices):

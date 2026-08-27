@@ -20,13 +20,22 @@ from collections.abc import Mapping
 import enum
 import json
 import os
+import warnings
 
 import dexsim
 import numpy as np
 import torch
 
-from typing import Sequence, Dict, Literal, List, Any, Optional, TYPE_CHECKING
-from dataclasses import field, MISSING
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    TYPE_CHECKING,
+)
+from dataclasses import field, fields, MISSING
 
 from dexsim.types import (
     DenoiserType,
@@ -47,10 +56,12 @@ from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
+from ._legacy_cfg import RigidBodyAttributesCfg, RigidBodyAttributesOverrideCfg
 from .shapes import ShapeCfg, MeshCfg
 from .workspace.cfg import RobotWorkspaceCfg
 
 if TYPE_CHECKING:
+    from dexsim.engine.newton_physics import NewtonCfg
     from dexsim.engine.newton_physics.solvers_cfg import NewtonSolverCfg
 
 # Global default renderer settings for simulation.
@@ -61,6 +72,38 @@ if TYPE_CHECKING:
 # concrete renderer here (e.g. in test fixtures) forces that renderer and takes
 # precedence over auto-selection.
 DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+
+AssetPhysicsMode = Literal["preserve", "overlay"]
+"""Policy for applying EmbodiChain physics to a file-backed asset."""
+
+
+def _resolve_asset_physics_mode(
+    mode: AssetPhysicsMode | None,
+    legacy_use_usd_properties: bool | None,
+    *,
+    default: AssetPhysicsMode,
+) -> AssetPhysicsMode:
+    """Resolve the source-agnostic policy and its deprecated USD alias."""
+    if mode is not None and mode not in ("preserve", "overlay"):
+        raise ValueError(
+            f"asset_physics_mode must be 'preserve' or 'overlay', got {mode!r}."
+        )
+    if legacy_use_usd_properties is not None:
+        legacy_mode: AssetPhysicsMode = (
+            "preserve" if legacy_use_usd_properties else "overlay"
+        )
+        if mode is not None and mode != legacy_mode:
+            raise ValueError(
+                "asset_physics_mode conflicts with deprecated use_usd_properties."
+            )
+        warnings.warn(
+            "use_usd_properties is deprecated; set "
+            "asset_physics_mode='preserve' or 'overlay' instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return legacy_mode
+    return default if mode is None else mode
 
 
 @configclass
@@ -159,23 +202,44 @@ class GPUMemoryCfg:
     total_aggregate_pairs_capacity: int = 2**10
 
 
+def _gravity_vector(
+    gravity: Sequence[float] | np.ndarray,
+) -> list[float]:
+    """Validate and normalize a backend-neutral gravity vector."""
+    values = np.asarray(gravity, dtype=np.float64).reshape(-1)
+    if values.size != 3 or not np.all(np.isfinite(values)):
+        raise ValueError("Gravity must contain three finite values.")
+    return values.tolist()
+
+
 @configclass
-class PhysicsCfg:
+class PhysicsBackendCfg:
+    """Backend-neutral simulation timing, device, and gravity configuration.
+
+    Concrete backend configs inherit this class.  The config type selects the
+    backend; no independent backend string can disagree with it.
+    """
+
+    physics_dt: float = 1.0 / 100.0
+    """Control-level simulation time step in seconds."""
+
+    device: str | torch.device = "cpu"
+    """Device used by the selected physics backend."""
+
+    gravity: Sequence[float] | np.ndarray = field(
+        default_factory=lambda: np.array([0.0, 0.0, -9.81])
+    )
+    """World gravity vector in meters per second squared."""
+
+
+@configclass
+class PhysicsCfg(PhysicsBackendCfg):
     """Configuration for the DexSim default physics backend.
 
     ``DefaultPhysicsCfg`` is the explicit backend-selecting subclass used by
     new code. This base name remains concrete for compatibility with existing
     configurations that instantiate ``PhysicsCfg`` directly.
     """
-
-    physics_dt: float = 1.0 / 100.0
-    """The time step for the physics simulation."""
-
-    device: str | torch.device = "cpu"
-    """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
-
-    gravity: np.ndarray = field(default_factory=lambda: np.array([0, 0, -9.81]))
-    """Gravity vector for the simulation environment."""
 
     bounce_threshold: float = 2.0
     """The speed threshold below which collisions will not produce bounce effects."""
@@ -204,7 +268,7 @@ class PhysicsCfg:
         retain their established defaults here.
         """
         args = {
-            "gravity": self.gravity.tolist(),
+            "gravity": _gravity_vector(self.gravity),
             "bounce_threshold": self.bounce_threshold,
             "enable_ccd": self.enable_ccd,
             "enable_enhanced_determinism": False,
@@ -219,11 +283,45 @@ class DefaultPhysicsCfg(PhysicsCfg):
 
 
 @configclass
-class NewtonPhysicsCfg:
-    """Configuration for DexSim Newton physics backend."""
+class NewtonCollisionPipelineCfg:
+    """Newton collision-pipeline settings owned at scene scope.
 
-    physics_dt: float = 1.0 / 100.0
-    """The time step for the physics simulation."""
+    These values map to DexSim's ``NewtonCollisionPipelineCfg``.  Per-shape
+    contact and SDF values belong to :class:`NewtonCollisionPropertiesCfg`
+    instead.
+    """
+
+    reduce_contacts: bool = True
+    """Whether to reduce mesh-mesh contacts."""
+
+    rigid_contact_max: int | None = None
+    """Optional rigid-contact capacity; ``None`` lets Newton estimate it."""
+
+    max_triangle_pairs: int = 4_000_000
+    """Maximum triangle pairs allocated by the narrow phase."""
+
+    soft_contact_max: int | None = None
+    """Optional soft-contact capacity."""
+
+    soft_contact_margin: float = 0.01
+    """Soft-contact generation margin in meters."""
+
+    broad_phase: Literal["nxn", "sap", "explicit"] | Any | None = None
+    """Built-in broad-phase mode or an expert backend object."""
+
+    shape_pairs_filtered: Any | None = None
+    """Optional precomputed shape pairs for explicit broad phase."""
+
+    narrow_phase: Any | None = None
+    """Optional expert narrow-phase object."""
+
+    sdf_hydroelastic_config: Any | None = None
+    """Optional Newton hydroelastic SDF configuration."""
+
+
+@configclass
+class NewtonPhysicsCfg(PhysicsBackendCfg):
+    """Configuration for DexSim Newton physics backend."""
 
     device: str | torch.device = "cuda:0"
     """The device for Newton physics simulation (e.g. ``cuda:0``)."""
@@ -240,6 +338,9 @@ class NewtonPhysicsCfg:
     debug_mode: bool = False
     """Whether to enable Newton debug mode."""
 
+    suppress_warp_kernel_logs: bool = True
+    """Whether to hide Warp startup and kernel compile/load messages during Newton updates."""
+
     solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = None
     """Optional Newton solver configuration.
 
@@ -249,16 +350,32 @@ class NewtonPhysicsCfg:
     backend uses DexSim's MuJoCo Warp solver config by default.
     """
 
+    collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] = field(
+        default_factory=NewtonCollisionPipelineCfg
+    )
+    """Scene-level Newton collision-pipeline configuration."""
+
+    enable_collision_pipeline: bool = True
+    """Whether Newton runs its rigid-contact collision pipeline."""
+
     broad_phase: Literal["nxn", "sap", "explicit"] | None = None
-    """Newton collision broad-phase implementation. If None, DexSim chooses its default."""
+    """Deprecated shortcut for ``collision_cfg.broad_phase``.
+
+    If both are set, ``collision_cfg.broad_phase`` wins.
+    """
 
     visualizer_enabled: bool = False
     """Whether to enable the Newton visualizer."""
 
+    def __post_init__(self) -> None:
+        """Normalize dictionary collision settings at the config boundary."""
+        if isinstance(self.collision_cfg, Mapping):
+            self.collision_cfg = NewtonCollisionPipelineCfg(**self.collision_cfg)
+
     def to_dexsim_cfg(
         self,
         gpu_id: int,
-    ):
+    ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
         from dexsim.engine.newton_physics import (
             FeatherstoneSolverCfg,
@@ -296,17 +413,25 @@ class NewtonPhysicsCfg:
                 "Newton gradient mode requires solver_type='semi_implicit'."
             )
 
+        collision_values = {
+            item.name: getattr(self.collision_cfg, item.name)
+            for item in fields(self.collision_cfg)
+        }
+        if collision_values["broad_phase"] is None:
+            collision_values["broad_phase"] = self.broad_phase
+        collision_values["requires_grad"] = self.requires_grad
+
         cfg = NewtonCfg(
             dt=self.physics_dt,
             num_substeps=self.num_substeps,
             device=device,
+            gravity=_gravity_vector(self.gravity),
             debug_mode=self.debug_mode,
             requires_grad=self.requires_grad,
+            suppress_warp_kernel_logs=self.suppress_warp_kernel_logs,
             solver_cfg=solver_cfg,
-            collision_pipeline_cfg=NewtonCollisionPipelineCfg(
-                broad_phase=self.broad_phase,
-                requires_grad=self.requires_grad,
-            ),
+            collision_pipeline_cfg=NewtonCollisionPipelineCfg(**collision_values),
+            enable_collision_pipeline=self.enable_collision_pipeline,
             sync_to_dexsim=True,
         )
         cfg.use_cuda_graph = self.use_cuda_graph and not self.requires_grad
@@ -435,7 +560,7 @@ class WindowRecordCfg:
 
 def physics_cfg_for_backend(
     backend: Literal["default", "newton"],
-) -> PhysicsCfg | NewtonPhysicsCfg:
+) -> PhysicsBackendCfg:
     """Return a default physics configuration instance for the given backend."""
     if backend == "newton":
         return NewtonPhysicsCfg()
@@ -443,7 +568,7 @@ def physics_cfg_for_backend(
 
 
 def physics_backend_from_cfg(
-    physics_cfg: PhysicsCfg | NewtonPhysicsCfg,
+    physics_cfg: PhysicsBackendCfg,
 ) -> Literal["default", "newton"]:
     """Infer the physics backend name from a physics configuration instance."""
     if isinstance(physics_cfg, NewtonPhysicsCfg):
@@ -456,7 +581,7 @@ def physics_backend_from_cfg(
     )
 
 
-def validate_physics_cfg(physics_cfg: PhysicsCfg | NewtonPhysicsCfg) -> None:
+def validate_physics_cfg(physics_cfg: PhysicsBackendCfg) -> None:
     """Validate that ``physics_cfg`` is a supported backend configuration."""
     physics_backend_from_cfg(physics_cfg)
 
@@ -473,331 +598,457 @@ class WindowCameraPoseCfg:
 
 
 @configclass
-class NewtonCollisionAttributesCfg:
-    """Newton-specific per-shape collision/contact attributes.
+class MassPropertiesCfg:
+    """Backend-neutral rigid-body mass properties.
 
-    Mirrors :class:`dexsim.spawn.descs.NewtonCollisionDesc` (which in turn
-    mirrors ``newton.ModelBuilder.ShapeConfig``), so the resolver can overlay
-    these fields by name. Margin and gap default to ``0.001 m``; the remaining
-    optional fields use ``None`` to keep the Newton backend default.
-
-    The backend-neutral quantities (sliding friction, restitution,
-    enable-collision) live on :class:`RigidBodyAttributesCfg` and are projected
-    onto the Newton ``mu`` / ``restitution`` / ``has_shape_collision`` shape
-    knobs by the resolver; they are NOT repeated here.
-    """
-
-    # -- Contact-material fields (per-solver subset, see NEWTON_CONTACT_SOLVER_FIELDS) --
-    ke: float | None = None
-    """Contact stiffness for compliant contacts."""
-    kd: float | None = None
-    """Contact damping for compliant contacts."""
-    kf: float | None = None
-    """Friction stiffness for compliant contacts."""
-    ka: float | None = None
-    """Adhesion stiffness for compliant contacts."""
-    kh: float | None = None
-    """Hydroelastic stiffness scale."""
-    mu_torsional: float | None = None
-    """Torsional friction coefficient."""
-    mu_rolling: float | None = None
-    """Rolling friction coefficient."""
-
-    # -- Solver-agnostic shape-config fields --
-    margin: float | None = 0.001
-    """Contact margin (shapes within this distance are considered in contact)."""
-    gap: float | None = 0.001
-    """Contact gap (rest distance between shapes)."""
-    is_solid: bool | None = None
-    """Whether the shape is solid (vs. hollow) for mass computation."""
-    collision_group: int | None = None
-    """Collision group id used by the broad-phase filter."""
-    collision_filter_parent: bool | None = None
-    """Whether to filter collisions with the parent body."""
-    has_particle_collision: bool | None = None
-    """Whether the shape collides with particles."""
-    is_visible: bool | None = None
-    """Whether the shape is visible to the Newton visualizer."""
-    is_site: bool | None = None
-    """Whether the shape is registered as a Newton site."""
-    is_hydroelastic: bool | None = None
-    """Whether to use hydroelastic contact for this shape."""
-
-    # -- SDF (signed distance field) collision params --
-    sdf_narrow_band_range: tuple[float, float] | None = None
-    """Narrow-band range [inner, outer] for SDF collision."""
-    sdf_target_voxel_size: float | None = None
-    """Target voxel size for SDF generation."""
-    sdf_max_resolution: int | None = None
-    """Maximum grid resolution for SDF generation."""
-    sdf_texture_format: str | None = None
-    """Texture format for SDF collision."""
-
-    @classmethod
-    def from_dict(cls, init_dict: Dict[str, Any]) -> NewtonCollisionAttributesCfg:
-        """Initialize the configuration from a dictionary."""
-        cfg = cls()
-        for key, value in init_dict.items():
-            if hasattr(cfg, key):
-                setattr(cfg, key, value)
-            else:
-                logger.log_warning(
-                    f"Key '{key}' not found in {cfg.__class__.__name__}."
-                )
-        return cfg
-
-    def to_newton_collision_desc(self):
-        """Build a :class:`dexsim.spawn.descs.NewtonCollisionDesc` from this cfg."""
-        from dexsim.spawn.descs import NewtonCollisionDesc
-
-        return NewtonCollisionDesc(
-            **{
-                f: getattr(self, f)
-                for f in (
-                    "ke",
-                    "kd",
-                    "kf",
-                    "ka",
-                    "kh",
-                    "mu_torsional",
-                    "mu_rolling",
-                    "margin",
-                    "gap",
-                    "is_solid",
-                    "collision_group",
-                    "collision_filter_parent",
-                    "has_particle_collision",
-                    "is_visible",
-                    "is_site",
-                    "is_hydroelastic",
-                    "sdf_narrow_band_range",
-                    "sdf_target_voxel_size",
-                    "sdf_max_resolution",
-                    "sdf_texture_format",
-                )
-            }
-        )
-
-
-def _merge_newton_subcfg(
-    override: NewtonCollisionAttributesCfg | None,
-    base: NewtonCollisionAttributesCfg | None,
-) -> NewtonCollisionAttributesCfg | None:
-    """Merge a Newton sub-config override onto a base.
-
-    For each Newton field, the override's non-None value wins, else the base's.
-    Returns ``None`` if neither side sets any field.
-    """
-    if override is None:
-        return base
-    if base is None:
-        return override
-    merged = NewtonCollisionAttributesCfg()
-    any_set = False
-    for field_name in merged.__dataclass_fields__:
-        if field_name == "newton":
-            continue
-        ov = getattr(override, field_name)
-        val = ov if ov is not None else getattr(base, field_name)
-        setattr(merged, field_name, val)
-        if val is not None:
-            any_set = True
-    return merged if any_set else None
-
-
-@configclass
-class RigidBodyAttributesCfg:
-    """Physical attributes for rigid bodies.
-
-    There are three parts of attributes that can be set:
-    1. The dynamic properties, such as mass, damping, etc.
-    2. The collision properties.
-    3. The physics material properties.
-
-    The ``newton`` sub-config carries Newton-specific per-shape contact/shape
-    knobs (``ke``/``kd``/``margin``/...) that have no default-backend equivalent; it is
-    ignored on the default backend and applied via the Newton desc-native
-    registration path when set.
-    """
-
-    mass: float = 1.0
-    """Mass of the rigid body in kilograms. 
-    
-    Set to 0 will use density to calculate mass.
-    """
-
-    density: float = 1000.0
-    """Density of the rigid body in kg/m^3."""
-
-    angular_damping: float = 0.7
-    """Angular damping coefficient."""
-
-    linear_damping: float = 0.7
-    """Linear damping coefficient."""
-
-    max_depenetration_velocity: float = 10.0
-    """Maximum depenetration velocity."""
-
-    sleep_threshold: float = 0.001
-    """Threshold below which the body can go to sleep."""
-
-    min_position_iters: int = 4
-    """Minimum position iterations."""
-
-    min_velocity_iters: int = 1
-    """Minimum velocity iterations."""
-
-    max_linear_velocity: float = 1e2
-    """Maximum linear velocity."""
-
-    max_angular_velocity: float = 1e2
-    """Maximum angular velocity."""
-
-    # collision properties.
-    enable_ccd: bool = False
-    """Enable continuous collision detection (CCD)."""
-
-    contact_offset: float = 0.002
-    """Contact offset for collision detection."""
-
-    rest_offset: float = 0.0
-    """Rest offset for collision detection."""
-
-    enable_collision: bool = True
-    """Enable collision for the rigid body."""
-
-    # physics material properties.
-    restitution: float = 0.0
-    """Restitution (bounciness) coefficient."""
-
-    dynamic_friction: float = 0.5
-    """Dynamic friction coefficient."""
-
-    static_friction: float = 0.5
-    """Static friction coefficient."""
-
-    newton: NewtonCollisionAttributesCfg | None = None
-    """Newton-specific per-shape contact/shape attributes (ignored on default backend)."""
-
-    def attr(self) -> PhysicalAttr:
-        """Convert to dexsim PhysicalAttr.
-
-        This is the legacy default-backend projection used by the default
-        backend. Newton-native fields (``self.newton``) are not representable
-        here; the Newton path uses
-        :func:`embodichain.lab.sim.physics_attrs.resolve_newton_shape` instead.
-        """
-        attr = PhysicalAttr()
-        attr.mass = self.mass
-        attr.contact_offset = self.contact_offset
-        attr.rest_offset = self.rest_offset
-        attr.dynamic_friction = self.dynamic_friction
-        attr.static_friction = self.static_friction
-        attr.angular_damping = self.angular_damping
-        attr.linear_damping = self.linear_damping
-        attr.sleep_threshold = self.sleep_threshold
-        attr.restitution = self.restitution
-        attr.enable_ccd = self.enable_ccd
-        attr.max_linear_velocity = self.max_linear_velocity
-        attr.max_angular_velocity = self.max_angular_velocity
-        attr.max_depenetration_velocity = self.max_depenetration_velocity
-        attr.min_position_iters = self.min_position_iters
-        attr.min_velocity_iters = self.min_velocity_iters
-        return attr
-
-    @classmethod
-    def from_dict(
-        cls, init_dict: Dict[str, str | float | int]
-    ) -> RigidBodyAttributesCfg:
-        """Initialize the configuration from a dictionary."""
-        cfg = cls()
-        for key, value in init_dict.items():
-            if key == "newton" and isinstance(value, dict):
-                setattr(cfg, key, NewtonCollisionAttributesCfg.from_dict(value))
-            elif hasattr(cfg, key):
-                setattr(cfg, key, value)
-            else:
-                logger.log_warning(
-                    f"Key '{key}' not found in {cfg.__class__.__name__}."
-                )
-        return cfg
-
-
-@configclass
-class RigidBodyAttributesOverrideCfg:
-    """Partial rigid-body attribute overrides for per-link physics configuration.
-
-    Fields set to ``None`` are not applied and retain values from the base
-    :class:`RigidBodyAttributesCfg`.
+    ``None`` means that the source asset or selected backend keeps ownership of
+    that value. Explicit inertia is used together with a positive mass;
+    otherwise mass has priority over density during Spawn compilation.
     """
 
     mass: float | None = None
+    """Body mass in kilograms."""
+
     density: float | None = None
-    angular_damping: float | None = None
+    """Uniform collision-shape density in kilograms per cubic meter."""
+
+    inertia: Sequence[float] | np.ndarray | None = None
+    """Three principal moments or a full 3-by-3 body-frame inertia tensor."""
+
+    com_position: Sequence[float] | np.ndarray | None = None
+    """Center-of-mass position in the body frame."""
+
+    com_quaternion: Sequence[float] | np.ndarray | None = None
+    """Center-of-mass orientation quaternion in ``wxyz`` order."""
+
+
+@configclass
+class RigidBodyPropertiesCfg:
+    """Single-root base for backend-specific rigid-body properties.
+
+    Actor type and mass properties are already backend-neutral, so the common
+    root intentionally has no fields today.
+    """
+
+
+@configclass
+class DexsimRigidBodyPropertiesCfg(RigidBodyPropertiesCfg):
+    """DexSim/default-backend rigid-body properties."""
+
     linear_damping: float | None = None
-    max_depenetration_velocity: float | None = None
-    sleep_threshold: float | None = None
-    min_position_iters: int | None = None
-    min_velocity_iters: int | None = None
+    angular_damping: float | None = None
+    has_gravity: bool | None = None
     max_linear_velocity: float | None = None
     max_angular_velocity: float | None = None
+    max_depenetration_velocity: float | None = None
+    retain_acceleration: bool | None = None
     enable_ccd: bool | None = None
+    min_position_iters: int | None = None
+    min_velocity_iters: int | None = None
+    sleep_threshold: float | None = None
+
+
+@configclass
+class NewtonRigidBodyPropertiesCfg(RigidBodyPropertiesCfg):
+    """Newton rigid-body extension point.
+
+    Newton currently consumes common mass properties and per-shape settings,
+    but exposes no additional body-level fields through DexSim Spawn.
+    """
+
+
+@configclass
+class CollisionPropertiesCfg:
+    """Backend-neutral collision properties."""
+
+    collision_enabled: bool | None = None
+    """Whether collision is enabled; ``None`` preserves the source/default."""
+
+
+@configclass
+class DexsimCollisionPropertiesCfg(CollisionPropertiesCfg):
+    """DexSim/default-backend collision geometry properties."""
+
     contact_offset: float | None = None
+    """Distance at which contact generation starts."""
+
     rest_offset: float | None = None
-    enable_collision: bool | None = None
-    restitution: float | None = None
-    dynamic_friction: float | None = None
+    """Separation distance maintained at rest."""
+
+
+@configclass
+class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
+    """Newton-native collision geometry, filtering, and SDF properties."""
+
+    margin: float | None = None
+    gap: float | None = None
+    is_solid: bool | None = None
+    collision_group: int | None = None
+    collision_filter_parent: bool | None = None
+    has_particle_collision: bool | None = None
+    is_visible: bool | None = None
+    is_site: bool | None = None
+    is_hydroelastic: bool | None = None
+    sdf_narrow_band_range: tuple[float, float] | None = None
+    sdf_target_voxel_size: float | None = None
+    sdf_max_resolution: int | None = None
+    sdf_texture_format: str | None = None
+    force_sdf: bool | None = None
+    sdf_padding: float | None = None
+
+
+@configclass
+class RigidBodyMaterialCfg:
+    """Backend-neutral rigid contact material properties."""
+
     static_friction: float | None = None
+    dynamic_friction: float | None = None
+    restitution: float | None = None
 
-    newton: NewtonCollisionAttributesCfg | None = None
-    """Newton-specific per-shape overrides (None means inherit the base newton sub-config)."""
 
-    def merge_with(self, base: RigidBodyAttributesCfg) -> PhysicalAttr:
-        """Build a :class:`~dexsim.types.PhysicalAttr` from base values and overrides.
+@configclass
+class DexsimRigidBodyMaterialCfg(RigidBodyMaterialCfg):
+    """DexSim/default-backend material extensions."""
 
-        .. note::
-            This returns the legacy default-backend projection and therefore drops the
-            Newton sub-config. For a Newton-aware merge that preserves
-            ``newton``, use :meth:`merged_cfg` and pass it to the Newton
-            resolver.
-        """
-        return self.merged_cfg(base).attr()
+    torsional_patch_radius: float | None = None
+    min_torsional_patch_radius: float | None = None
+    disable_strong_friction: bool | None = None
 
-    def merged_cfg(self, base: RigidBodyAttributesCfg) -> RigidBodyAttributesCfg:
-        """Merge overrides onto ``base`` into a full :class:`RigidBodyAttributesCfg`.
 
-        Unlike :meth:`merge_with`, this preserves the ``newton`` sub-config
-        (override's non-None sub-fields win, else base's) so the result can be
-        fed to the Newton resolver.
-        """
-        merged = RigidBodyAttributesCfg()
-        for field_name in merged.__dataclass_fields__:
-            if field_name == "newton":
+@configclass
+class NewtonRigidBodyMaterialCfg(RigidBodyMaterialCfg):
+    """Newton contact-material extensions.
+
+    Solver support differs by field.  The Spawn compiler warns through
+    DexSim when the selected Newton solver cannot consume a configured value.
+    """
+
+    ke: float | None = None
+    kd: float | None = None
+    kf: float | None = None
+    ka: float | None = None
+    kh: float | None = None
+    torsional_friction: float | None = None
+    rolling_friction: float | None = None
+
+
+_RIGID_PHYSICS_LEGACY_FIELD_GROUPS = {
+    "mass": "mass_props",
+    "density": "mass_props",
+    "inertia": "mass_props",
+    "com_position": "mass_props",
+    "com_quaternion": "mass_props",
+    "linear_damping": "rigid_props",
+    "angular_damping": "rigid_props",
+    "max_linear_velocity": "rigid_props",
+    "max_angular_velocity": "rigid_props",
+    "max_depenetration_velocity": "rigid_props",
+    "enable_ccd": "rigid_props",
+    "min_position_iters": "rigid_props",
+    "min_velocity_iters": "rigid_props",
+    "sleep_threshold": "rigid_props",
+    "contact_offset": "collision_props",
+    "rest_offset": "collision_props",
+    "static_friction": "material_props",
+    "dynamic_friction": "material_props",
+    "restitution": "material_props",
+}
+
+_RIGID_PHYSICS_GROUP_FIELDS = frozenset(
+    {"mass_props", "rigid_props", "collision_props", "material_props"}
+)
+
+
+def _physics_property_cfg_from_dict(
+    value: Mapping[str, Any] | object | None,
+    *,
+    common_type: type,
+    dexsim_type: type,
+    newton_type: type,
+    field_name: str,
+) -> object | None:
+    """Parse one polymorphic rigid-physics property slot."""
+    if value is None:
+        return None
+    if isinstance(value, common_type):
+        return value
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{field_name} must be a mapping or {common_type.__name__}.")
+    data = dict(value)
+    configured_backend = data.pop("backend", None)
+    if configured_backend is None:
+        common_fields = {item.name for item in fields(common_type)}
+        dexsim_fields = {item.name for item in fields(dexsim_type)} - common_fields
+        newton_fields = {item.name for item in fields(newton_type)} - common_fields
+        has_dexsim_fields = bool(dexsim_fields.intersection(data))
+        has_newton_fields = bool(newton_fields.intersection(data))
+        if has_dexsim_fields and has_newton_fields:
+            raise ValueError(
+                f"{field_name} mixes DexSim and Newton-only fields; select one "
+                "backend-specific property config."
+            )
+        backend = (
+            "dexsim"
+            if has_dexsim_fields
+            else "newton" if has_newton_fields else "common"
+        )
+    else:
+        backend = str(configured_backend).replace("-", "_").lower()
+    config_type = {
+        "common": common_type,
+        "default": dexsim_type,
+        "dexsim": dexsim_type,
+        "physx": dexsim_type,
+        "newton": newton_type,
+    }.get(backend)
+    if config_type is None:
+        raise ValueError(
+            f"{field_name}.backend must be 'common', 'dexsim', or 'newton', "
+            f"got {backend!r}."
+        )
+    try:
+        return config_type(**data)
+    except TypeError as exc:
+        raise TypeError(f"Invalid {field_name} configuration: {exc}") from exc
+
+
+def _physics_property_cfg_to_dict(
+    value: object | None,
+    *,
+    common_type: type,
+    dexsim_type: type,
+    newton_type: type,
+    field_name: str,
+) -> dict[str, Any] | None:
+    """Serialize one polymorphic property slot with a stable discriminator."""
+    if value is None:
+        return None
+    if isinstance(value, newton_type):
+        backend = "newton"
+    elif isinstance(value, dexsim_type):
+        backend = "dexsim"
+    elif type(value) is common_type:
+        backend = None
+    else:
+        raise TypeError(
+            f"Unsupported {field_name} config type {type(value).__name__!r}."
+        )
+    data = dict(value.to_dict())
+    if backend is not None:
+        data["backend"] = backend
+    return data
+
+
+@configclass
+class RigidBodyPhysicsCfg:
+    """Grouped rigid-body physics configuration used by Spawn.
+
+    Each logical property group has one slot.  A common config is portable;
+    a DexSim or Newton subclass adds only fields owned by that backend.  Every
+    field defaults to ``None`` so partial configs compose with source assets
+    without resetting unrelated properties.
+    """
+
+    mass_props: MassPropertiesCfg | None = None
+    rigid_props: RigidBodyPropertiesCfg | None = None
+    collision_props: CollisionPropertiesCfg | None = None
+    material_props: RigidBodyMaterialCfg | None = None
+
+    @classmethod
+    def from_dict(cls, init_dict: Mapping[str, Any]) -> RigidBodyPhysicsCfg:
+        """Parse grouped physics properties from a YAML/JSON-style mapping."""
+        unknown = set(init_dict) - _RIGID_PHYSICS_GROUP_FIELDS
+        if unknown:
+            raise KeyError(f"Unknown RigidBodyPhysicsCfg fields: {sorted(unknown)}")
+        cfg = cls()
+        if "mass_props" in init_dict:
+            value = init_dict["mass_props"]
+            if value is not None:
+                if not isinstance(value, (MassPropertiesCfg, Mapping)):
+                    raise TypeError(
+                        "mass_props must be a mapping or MassPropertiesCfg."
+                    )
+                cfg.mass_props = (
+                    value
+                    if isinstance(value, MassPropertiesCfg)
+                    else MassPropertiesCfg(**value)
+                )
+        if "rigid_props" in init_dict:
+            cfg.rigid_props = _physics_property_cfg_from_dict(
+                init_dict["rigid_props"],
+                common_type=RigidBodyPropertiesCfg,
+                dexsim_type=DexsimRigidBodyPropertiesCfg,
+                newton_type=NewtonRigidBodyPropertiesCfg,
+                field_name="rigid_props",
+            )
+        if "collision_props" in init_dict:
+            cfg.collision_props = _physics_property_cfg_from_dict(
+                init_dict["collision_props"],
+                common_type=CollisionPropertiesCfg,
+                dexsim_type=DexsimCollisionPropertiesCfg,
+                newton_type=NewtonCollisionPropertiesCfg,
+                field_name="collision_props",
+            )
+        if "material_props" in init_dict:
+            cfg.material_props = _physics_property_cfg_from_dict(
+                init_dict["material_props"],
+                common_type=RigidBodyMaterialCfg,
+                dexsim_type=DexsimRigidBodyMaterialCfg,
+                newton_type=NewtonRigidBodyMaterialCfg,
+                field_name="material_props",
+            )
+        return cfg
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize grouped properties without losing backend subclasses."""
+        return {
+            "mass_props": (
+                None if self.mass_props is None else self.mass_props.to_dict()
+            ),
+            "rigid_props": _physics_property_cfg_to_dict(
+                self.rigid_props,
+                common_type=RigidBodyPropertiesCfg,
+                dexsim_type=DexsimRigidBodyPropertiesCfg,
+                newton_type=NewtonRigidBodyPropertiesCfg,
+                field_name="rigid_props",
+            ),
+            "collision_props": _physics_property_cfg_to_dict(
+                self.collision_props,
+                common_type=CollisionPropertiesCfg,
+                dexsim_type=DexsimCollisionPropertiesCfg,
+                newton_type=NewtonCollisionPropertiesCfg,
+                field_name="collision_props",
+            ),
+            "material_props": _physics_property_cfg_to_dict(
+                self.material_props,
+                common_type=RigidBodyMaterialCfg,
+                dexsim_type=DexsimRigidBodyMaterialCfg,
+                newton_type=NewtonRigidBodyMaterialCfg,
+                field_name="material_props",
+            ),
+        }
+
+    @property
+    def enable_collision(self) -> bool:
+        """Compatibility view used by legacy object initialization."""
+        value = (
+            None
+            if self.collision_props is None
+            else self.collision_props.collision_enabled
+        )
+        return True if value is None else bool(value)
+
+    def attr(self) -> PhysicalAttr:
+        """Project supported values to the legacy DexSim ``PhysicalAttr``."""
+        attr = PhysicalAttr()
+        for cfg in (
+            self.mass_props,
+            (
+                self.rigid_props
+                if isinstance(self.rigid_props, DexsimRigidBodyPropertiesCfg)
+                else None
+            ),
+            (
+                self.collision_props
+                if isinstance(self.collision_props, DexsimCollisionPropertiesCfg)
+                else None
+            ),
+            self.material_props,
+        ):
+            if cfg is None:
                 continue
-            override_val = getattr(self, field_name)
-            if override_val is not None:
-                setattr(merged, field_name, override_val)
-            else:
-                setattr(merged, field_name, getattr(base, field_name))
-        merged.newton = _merge_newton_subcfg(self.newton, base.newton)
-        return merged
+            for item in fields(cfg):
+                value = getattr(cfg, item.name)
+                if value is not None and hasattr(attr, item.name):
+                    setattr(attr, item.name, value)
+        return attr
+
+    def __getattr__(self, name: str) -> Any:
+        """Provide read-only compatibility for legacy flat property access."""
+        group_name = _RIGID_PHYSICS_LEGACY_FIELD_GROUPS.get(name)
+        if group_name is None:
+            raise AttributeError(name)
+        group = object.__getattribute__(self, group_name)
+        if group is not None and hasattr(group, name):
+            value = getattr(group, name)
+            if value is not None:
+                return value
+        legacy_defaults = PhysicalAttr()
+        return getattr(legacy_defaults, name, None)
+
+
+def _rigid_body_attrs_from_dict(
+    value: Mapping[str, Any],
+    *,
+    override: bool = False,
+) -> RigidBodyPhysicsCfg | RigidBodyAttributesCfg | RigidBodyAttributesOverrideCfg:
+    """Parse grouped physics or the deprecated Default-only flat schema."""
+    grouped_fields = _RIGID_PHYSICS_GROUP_FIELDS.intersection(value)
+    if grouped_fields:
+        flat_fields = set(value) - _RIGID_PHYSICS_GROUP_FIELDS
+        if flat_fields:
+            raise ValueError(
+                "Do not mix deprecated flat rigid-body fields with grouped "
+                f"RigidBodyPhysicsCfg fields: {sorted(flat_fields)}"
+            )
+        return RigidBodyPhysicsCfg.from_dict(value)
+    legacy_type = RigidBodyAttributesOverrideCfg if override else RigidBodyAttributesCfg
+    return legacy_type.from_dict(dict(value))
+
+
+@configclass
+class ArticulationRootPropertiesCfg:
+    """Backend-neutral articulation-root properties."""
+
+    fixed_base: bool | None = None
+    """Whether the root is fixed to the world."""
+
+    self_collision_enabled: bool | None = None
+    """Whether links in the articulation may collide with each other."""
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, str | float | int | bool]
-    ) -> RigidBodyAttributesOverrideCfg:
-        """Initialize the configuration from a dictionary."""
-        cfg = cls()
-        for key, value in init_dict.items():
-            if key == "newton" and isinstance(value, dict):
-                setattr(cfg, key, NewtonCollisionAttributesCfg.from_dict(value))
-            elif hasattr(cfg, key):
-                setattr(cfg, key, value)
-            else:
-                logger.log_warning(
-                    f"Key '{key}' not found in {cfg.__class__.__name__}."
-                )
-        return cfg
+        cls,
+        init_dict: Mapping[str, Any],
+    ) -> ArticulationRootPropertiesCfg:
+        """Parse a common, DexSim, or Newton articulation-root config."""
+        data = dict(init_dict)
+        backend = str(data.pop("backend", "common")).replace("-", "_").lower()
+        config_type = {
+            "common": cls,
+            "default": DexsimArticulationRootPropertiesCfg,
+            "dexsim": DexsimArticulationRootPropertiesCfg,
+            "physx": DexsimArticulationRootPropertiesCfg,
+            "newton": NewtonArticulationRootPropertiesCfg,
+        }.get(backend)
+        if config_type is None:
+            raise ValueError(
+                "articulation_props.backend must be 'common', 'dexsim', or "
+                f"'newton', got {backend!r}."
+            )
+        return config_type(**data)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize articulation properties with their backend subtype."""
+        data: dict[str, Any] = {
+            "fixed_base": self.fixed_base,
+            "self_collision_enabled": self.self_collision_enabled,
+        }
+        if isinstance(self, NewtonArticulationRootPropertiesCfg):
+            data["backend"] = "newton"
+        elif isinstance(self, DexsimArticulationRootPropertiesCfg):
+            data["backend"] = "dexsim"
+        return data
+
+
+@configclass
+class DexsimArticulationRootPropertiesCfg(ArticulationRootPropertiesCfg):
+    """DexSim articulation-root extension point."""
+
+
+@configclass
+class NewtonArticulationRootPropertiesCfg(ArticulationRootPropertiesCfg):
+    """Newton articulation-root extension point."""
 
 
 @configclass
@@ -807,8 +1058,8 @@ class LinkPhysicsOverrideCfg:
     link_names_expr: list[str] = MISSING
     """Regex patterns matched against link names (full match)."""
 
-    attrs: RigidBodyAttributesOverrideCfg = RigidBodyAttributesOverrideCfg()
-    """Partial attribute overrides applied on top of :attr:`ArticulationCfg.attrs`."""
+    attrs: RigidBodyPhysicsCfg | RigidBodyAttributesOverrideCfg = RigidBodyPhysicsCfg()
+    """Partial grouped overrides, or a deprecated Default-only flat override."""
 
     replace_inertial: bool = False
     """Whether to recompute inertia when mass is overridden (DexSim flag)."""
@@ -819,7 +1070,7 @@ class LinkPhysicsOverrideCfg:
         cfg = cls()
         for key, value in init_dict.items():
             if key == "attrs" and isinstance(value, dict):
-                setattr(cfg, key, RigidBodyAttributesOverrideCfg.from_dict(value))
+                setattr(cfg, key, _rigid_body_attrs_from_dict(value, override=True))
             elif hasattr(cfg, key):
                 setattr(cfg, key, value)
             else:
@@ -1096,7 +1347,7 @@ class ClothPhysicalAttributesCfg:
 class JointDrivePropertiesCfg:
     """Properties to define the drive mechanism of a joint."""
 
-    drive_type: Literal["force", "acceleration", "none"] = "force"
+    drive_type: Literal["force", "acceleration", "none"] | None = None
     """Joint drive type to apply.
 
     If the drive type is "force", then the joint is driven by a force and the acceleration is computed based on the force applied.
@@ -1104,7 +1355,7 @@ class JointDrivePropertiesCfg:
     If the drive type is "none", then no force will be applied to joint.
     """
 
-    stiffness: Dict[str, float] | float = 1e4
+    stiffness: Dict[str, float] | float | None = None
     """Stiffness of the joint drive.
 
     The unit depends on the joint model:
@@ -1113,7 +1364,7 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s^2/rad (N-m/rad).
     """
 
-    damping: Dict[str, float] | float = 1e3
+    damping: Dict[str, float] | float | None = None
     """Damping of the joint drive.
 
     The unit depends on the joint model:
@@ -1122,20 +1373,20 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s/rad (N-m-s/rad).
     """
 
-    max_effort: Dict[str, float] | float = 1e10
+    max_effort: Dict[str, float] | float | None = None
     """Maximum effort that can be applied to the joint (in kg-m^2/s^2)."""
 
-    max_velocity: Dict[str, float] | float = 1e10
+    max_velocity: Dict[str, float] | float | None = None
     """Maximum velocity that the joint can reach (in rad/s or m/s).
 
     For linear joints, this is the maximum linear velocity with unit m/s.
     For angular joints, this is the maximum angular velocity with unit rad/s.
     """
 
-    friction: Dict[str, float] | float = 0.0
+    friction: Dict[str, float] | float | None = None
     """Friction coefficient of the joint"""
 
-    armature: Dict[str, float] | float = 0.0
+    armature: Dict[str, float] | float | None = None
     """Joint armature added to joint-space spatial inertia.
 
     Units depend on the joint model:
@@ -1147,7 +1398,7 @@ class JointDrivePropertiesCfg:
     @classmethod
     def from_dict(
         cls,
-        init_dict: Dict[str, str | float | int | Dict[str, float]],
+        init_dict: Dict[str, Any],
         *,
         defaults: JointDrivePropertiesCfg | None = None,
     ) -> JointDrivePropertiesCfg:
@@ -1161,8 +1412,22 @@ class JointDrivePropertiesCfg:
         Returns:
             Parsed joint-drive properties.
         """
-        cfg = defaults.copy() if defaults is not None else cls()
-        for key, value in init_dict.items():
+        data = dict(init_dict)
+        backend = str(data.pop("backend", "common")).replace("-", "_").lower()
+        wants_newton = backend == "newton" or "target_mode" in data
+        if backend not in {"common", "default", "dexsim", "physx", "newton"}:
+            raise ValueError(
+                "drive_pros.backend must be 'common', 'dexsim', or 'newton', "
+                f"got {backend!r}."
+            )
+        if wants_newton and not isinstance(defaults, NewtonJointDrivePropertiesCfg):
+            cfg = NewtonJointDrivePropertiesCfg()
+            if defaults is not None:
+                for item in fields(JointDrivePropertiesCfg):
+                    setattr(cfg, item.name, getattr(defaults, item.name))
+        else:
+            cfg = defaults.copy() if defaults is not None else cls()
+        for key, value in data.items():
             if hasattr(cfg, key):
                 setattr(cfg, key, value)
             else:
@@ -1170,6 +1435,34 @@ class JointDrivePropertiesCfg:
                     f"Key '{key}' not found in {cfg.__class__.__name__}."
                 )
         return cfg
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize joint properties with their backend subtype."""
+        data = {item.name: getattr(self, item.name) for item in fields(self)}
+        if isinstance(self, NewtonJointDrivePropertiesCfg):
+            data["backend"] = "newton"
+        return data
+
+
+@configclass
+class NewtonJointDrivePropertiesCfg(JointDrivePropertiesCfg):
+    """Newton-targeted joint-drive config.
+
+    Common gain, limit, friction, and armature fields are inherited rather
+    than repeated under native aliases.  ``target_mode`` is the only Newton
+    extension currently exposed by DexSim Spawn.
+    """
+
+    target_mode: (
+        Literal["none", "position", "velocity", "position_velocity"]
+        | Dict[
+            str,
+            Literal["none", "position", "velocity", "position_velocity"] | int,
+        ]
+        | int
+        | None
+    ) = None
+    """Newton actuator target mode, as a scalar or regex mapping."""
 
 
 @configclass
@@ -1198,7 +1491,9 @@ class ObjectBaseCfg:
         for key, value in init_dict.items():
             if hasattr(cfg, key):
                 attr = getattr(cfg, key)
-                if is_configclass(attr):
+                if key == "attrs" and isinstance(value, Mapping):
+                    setattr(cfg, key, _rigid_body_attrs_from_dict(value))
+                elif is_configclass(attr):
                     setattr(
                         cfg, key, attr.from_dict(value)
                     )  # Call from_dict on the attribute
@@ -1350,7 +1645,12 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     # TODO: supoort basic primitive shapes, such as box, sphere, etc cfg and spawn method.
 
-    attrs: RigidBodyAttributesCfg = RigidBodyAttributesCfg()
+    attrs: RigidBodyPhysicsCfg | RigidBodyAttributesCfg = RigidBodyPhysicsCfg()
+    """Rigid-body physics.
+
+    The grouped :class:`RigidBodyPhysicsCfg` is backend-aware. The deprecated
+    flat :class:`RigidBodyAttributesCfg` is accepted by the Default backend only.
+    """
 
     body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
 
@@ -1393,13 +1693,27 @@ class RigidObjectCfg(ObjectBaseCfg):
     body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
 
-    use_usd_properties: bool = False
-    """Whether to use physical properties from USD file instead of config.
-    
-    When True: Keep all physical properties (drive, physics attrs, etc.) from USD file.
-    When False (default): Override USD properties with config values.
-    Only effective for USD files.
+    asset_physics_mode: AssetPhysicsMode | None = None
+    """How a file-backed asset's physical properties are handled.
+
+    ``"preserve"`` keeps the USD-authored physics. ``"overlay"`` applies
+    configured properties on top of the parsed asset. ``None`` selects the
+    rigid-object default, ``"preserve"``. Procedural shapes always use config.
     """
+
+    use_usd_properties: bool | None = None
+    """Deprecated alias for :attr:`asset_physics_mode`.
+
+    ``True`` maps to ``"preserve"`` and ``False`` maps to ``"overlay"``.
+    """
+
+    def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
+        """Return the effective file-backed physics policy."""
+        return _resolve_asset_physics_mode(
+            self.asset_physics_mode,
+            self.use_usd_properties,
+            default="preserve",
+        )
 
     def to_dexsim_body_type(self) -> ActorType:
         """Convert the body type to dexsim ActorType."""
@@ -1416,36 +1730,52 @@ class RigidObjectCfg(ObjectBaseCfg):
 
 
 @configclass
-class SoftObjectCfg(ObjectBaseCfg):
-    """Configuration for a soft body asset in the simulation.
+class DeformableObjectCfg(ObjectBaseCfg):
+    """Common configuration contract for one deformable asset.
 
-    This class extends the base asset configuration to include specific properties for soft bodies,
-    such as physical attributes and collision group.
+    Concrete volume and surface configurations retain their native DexSim
+    properties. The discriminator is explicit so manager and visualization
+    code do not need to infer topology from a mesh or material type.
     """
 
-    voxel_attr: SoftbodyVoxelAttributesCfg = SoftbodyVoxelAttributesCfg()
-    """Tetra mesh voxelization attributes for the soft body."""
-
-    physical_attr: SoftbodyPhysicalAttributesCfg = SoftbodyPhysicalAttributesCfg()
-    """Physical attributes for the soft body."""
+    deformable_type: Literal["volume", "surface"] = MISSING
+    """Physical topology represented by the asset."""
 
     shape: MeshCfg = MeshCfg()
-    """Mesh configuration for the soft body."""
+    """Render and source-mesh configuration."""
 
 
 @configclass
-class ClothObjectCfg(ObjectBaseCfg):
-    """Configuration for a cloth body asset in the simulation.
+class VolumeDeformableObjectCfg(DeformableObjectCfg):
+    """Configuration for a volume deformable backed by DexSim ``SoftBody``."""
 
-    This class extends the base asset configuration to include specific properties for cloth bodies,
-    such as physical attributes and collision group.
-    """
+    deformable_type: Literal["volume"] = "volume"
+
+    voxel_attr: SoftbodyVoxelAttributesCfg = SoftbodyVoxelAttributesCfg()
+    """Tetrahedral simulation-mesh voxelization attributes."""
+
+    physical_attr: SoftbodyPhysicalAttributesCfg = SoftbodyPhysicalAttributesCfg()
+    """DexSim volume-deformable physical attributes."""
+
+
+@configclass
+class SoftObjectCfg(VolumeDeformableObjectCfg):
+    """Compatibility name for :class:`VolumeDeformableObjectCfg`."""
+
+
+@configclass
+class SurfaceDeformableObjectCfg(DeformableObjectCfg):
+    """Configuration for a surface deformable backed by DexSim ``ClothBody``."""
+
+    deformable_type: Literal["surface"] = "surface"
 
     physical_attr: ClothPhysicalAttributesCfg = ClothPhysicalAttributesCfg()
-    """Physical attributes for the cloth body."""
+    """DexSim surface-deformable physical attributes."""
 
-    shape: MeshCfg = MeshCfg()
-    """Mesh configuration for the cloth body."""
+
+@configclass
+class ClothObjectCfg(SurfaceDeformableObjectCfg):
+    """Compatibility name for :class:`SurfaceDeformableObjectCfg`."""
 
 
 @configclass
@@ -1989,15 +2319,20 @@ class ArticulationCfg(ObjectBaseCfg):
     fpath: str = None
     """Path to the articulation asset file."""
 
-    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(drive_type="none")
-    """Properties to define the drive mechanism of a joint."""
+    drive_pros: JointDrivePropertiesCfg | None = None
+    """Optional joint-drive overrides.
+
+    ``None`` preserves source drive properties. Individual ``None`` fields in
+    a provided config also preserve the corresponding source values.
+    """
 
     body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the articulation in the simulation world frame."""
 
-    attrs: RigidBodyAttributesCfg = RigidBodyAttributesCfg()
+    attrs: RigidBodyPhysicsCfg | RigidBodyAttributesCfg = RigidBodyPhysicsCfg()
     """Physical attributes for all links. We use default mass from the USD/URDF file if available.
-    The mass and density in attrs will only be used if specified.
+    The mass and density in attrs will only be used if specified. Deprecated
+    flat :class:`RigidBodyAttributesCfg` inputs are Default-backend-only.
     """
 
     link_attrs: dict[str, LinkPhysicsOverrideCfg] | None = None
@@ -2005,6 +2340,13 @@ class ArticulationCfg(ObjectBaseCfg):
 
     Each group applies :attr:`LinkPhysicsOverrideCfg.attrs` on top of :attr:`attrs` for
     matched links only. A link must not match more than one group.
+    """
+
+    articulation_props: ArticulationRootPropertiesCfg = ArticulationRootPropertiesCfg()
+    """Grouped articulation-root properties.
+
+    Non-``None`` values take precedence over the legacy ``fix_base`` and
+    ``disable_self_collision`` fields.
     """
 
     fix_base: bool = True
@@ -2057,13 +2399,36 @@ class ArticulationCfg(ObjectBaseCfg):
     Currently, the uv mapping is computed for each link with projection uv mapping method.
     """
 
-    use_usd_properties: bool = False
-    """Whether to use physical properties from USD file instead of config.
-    
-    When True: Keep all physical properties (drive, physics attrs, etc.) from USD file.
-    When False (default): Override USD properties with config values (URDF behavior).
-    Only effective for USD files, ignored for URDF files.
+    asset_physics_mode: AssetPhysicsMode | None = None
+    """How source-authored articulation physics is handled.
+
+    ``"preserve"`` keeps link, joint-drive, and joint-limit properties from
+    either USD or URDF. ``"overlay"`` applies only explicitly configured
+    values after the source has been resolved. ``None`` selects the generic
+    articulation default, ``"preserve"``.
+
+    Import policy such as URDF root fixation and body scale remains controlled
+    by its dedicated fields because standard URDF does not author those values.
     """
+
+    use_usd_properties: bool | None = None
+    """Deprecated alias for :attr:`asset_physics_mode`.
+
+    ``True`` maps to ``"preserve"`` and ``False`` maps to ``"overlay"`` for
+    both USD and URDF sources.
+    """
+
+    def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
+        """Return the effective file-backed physics policy."""
+        return _resolve_asset_physics_mode(
+            self.asset_physics_mode,
+            self.use_usd_properties,
+            default=self._default_asset_physics_mode(),
+        )
+
+    def _default_asset_physics_mode(self) -> AssetPhysicsMode:
+        """Return the policy used when no compatibility field is authored."""
+        return "preserve"
 
     @classmethod
     def from_dict(
@@ -2074,17 +2439,16 @@ class ArticulationCfg(ObjectBaseCfg):
         for key, value in init_dict.items():
             if key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
+            elif key == "attrs" and isinstance(value, Mapping):
+                cfg.attrs = _rigid_body_attrs_from_dict(value)
+            elif key == "drive_pros" and isinstance(value, Mapping):
+                cfg.drive_pros = JointDrivePropertiesCfg.from_dict(
+                    dict(value),
+                    defaults=cfg.drive_pros,
+                )
             elif hasattr(cfg, key):
                 attr = getattr(cfg, key)
-                if isinstance(attr, JointDrivePropertiesCfg) and isinstance(
-                    value, dict
-                ):
-                    setattr(
-                        cfg,
-                        key,
-                        JointDrivePropertiesCfg.from_dict(value, defaults=attr),
-                    )
-                elif is_configclass(attr):
+                if is_configclass(attr):
                     setattr(cfg, key, attr.from_dict(value))
                 else:
                     setattr(cfg, key, value)
@@ -2118,8 +2482,20 @@ class RobotCfg(ArticulationCfg):
     """Configuration for a robot asset in the simulation.
     """
 
-    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(drive_type="force")
+    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(
+        drive_type="force",
+        stiffness=1e4,
+        damping=1e3,
+        max_effort=1e10,
+        max_velocity=1e10,
+        friction=0.0,
+        armature=0.0,
+    )
     """Properties to define the drive mechanism of a joint."""
+
+    def _default_asset_physics_mode(self) -> AssetPhysicsMode:
+        """Keep the established Robot behavior of applying drive config."""
+        return "overlay"
 
     control_parts: Dict[str, List[str]] | None = None
     """Control parts is the mapping from part name to joint names.
@@ -2163,6 +2539,8 @@ class RobotCfg(ArticulationCfg):
         for key, value in init_dict.items():
             if key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
+            elif key == "attrs" and isinstance(value, Mapping):
+                cfg.attrs = _rigid_body_attrs_from_dict(value)
             elif hasattr(cfg, key):
                 attr = getattr(cfg, key)
                 if key == "urdf_cfg":
@@ -2253,34 +2631,37 @@ class RobotCfg(ArticulationCfg):
                 _visited = set()
             if isinstance(obj, enum.Enum):
                 return obj.value
-            if isinstance(obj, (dict, object)) and not isinstance(
-                obj, (str, int, float, bool, type(None))
-            ):
-                obj_id = id(obj)
-                if obj_id in _visited:
+            tracked_id = None
+            if not isinstance(obj, (str, int, float, bool, type(None))):
+                tracked_id = id(obj)
+                if tracked_id in _visited:
                     return None
-                _visited.add(obj_id)
+                _visited.add(tracked_id)
 
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            if isinstance(obj, dict):
-                return {
-                    (k.value if isinstance(k, enum.Enum) else str(k)): serialize(
-                        v, _visited
-                    )
-                    for k, v in obj.items()
-                }
-            if isinstance(obj, (list, tuple)):
-                return [serialize(v, _visited) for v in obj]
-            if hasattr(obj, "to_dict") and obj is not self:
-                return serialize(obj.to_dict(), _visited)
-            if hasattr(obj, "__dict__"):
-                return {
-                    k: serialize(v, _visited)
-                    for k, v in obj.__dict__.items()
-                    if v is not None
-                }
-            return obj
+            try:
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                if isinstance(obj, dict):
+                    return {
+                        (k.value if isinstance(k, enum.Enum) else str(k)): serialize(
+                            v, _visited
+                        )
+                        for k, v in obj.items()
+                    }
+                if isinstance(obj, (list, tuple)):
+                    return [serialize(v, _visited) for v in obj]
+                if hasattr(obj, "to_dict") and obj is not self:
+                    return serialize(obj.to_dict(), _visited)
+                if hasattr(obj, "__dict__"):
+                    return {
+                        k: serialize(v, _visited)
+                        for k, v in obj.__dict__.items()
+                        if v is not None
+                    }
+                return obj
+            finally:
+                if tracked_id is not None:
+                    _visited.remove(tracked_id)
 
         return serialize(self)
 

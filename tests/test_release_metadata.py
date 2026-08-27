@@ -16,12 +16,16 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 from packaging.requirements import Requirement
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 from scripts.validate_wheel_metadata import WheelMetadataError, validate_wheel
 from setup import get_package_dir, get_packages

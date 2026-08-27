@@ -190,6 +190,7 @@ class AssetsGravitySettler:
                         acd_method="vhacd",
                     )
                 )
+            sim.prepare()
             # Run simulation to settle all assets.
             sim.update(step=self.config.settle_steps)
 

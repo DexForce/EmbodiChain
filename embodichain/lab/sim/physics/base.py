@@ -114,18 +114,33 @@ class PhysicsBackend(ABC):
         """
         return None
 
+    @property
+    def differentiable_runtime(self):
+        """Return no differentiable runtime for non-Newton backends."""
+        return None
+
     # ------------------------------------------------------------------ #
     # Capabilities (override in subclasses; defaults are conservative)
     # ------------------------------------------------------------------ #
     @property
-    def supports_soft_bodies(self) -> bool:
-        """Whether this backend can simulate soft bodies."""
+    def supports_volume_deformables(self) -> bool:
+        """Whether this backend has a volume-deformable object adapter."""
         return False
 
     @property
-    def supports_cloth(self) -> bool:
-        """Whether this backend can simulate cloth bodies."""
+    def supports_surface_deformables(self) -> bool:
+        """Whether this backend has a surface-deformable object adapter."""
         return False
+
+    @property
+    def supports_soft_bodies(self) -> bool:
+        """Compatibility alias for volume-deformable support."""
+        return self.supports_volume_deformables
+
+    @property
+    def supports_cloth(self) -> bool:
+        """Compatibility alias for surface-deformable support."""
+        return self.supports_surface_deformables
 
     @property
     def supports_rigid_object_group(self) -> bool:

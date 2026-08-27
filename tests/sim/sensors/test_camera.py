@@ -67,6 +67,7 @@ class CameraTest:
         }
         cfg = SensorCfg.from_dict(cfg_dict)
         self.camera: Camera = self.sim.add_sensor(cfg)
+        self.sim.prepare()
 
     def test_get_data(self):
 

@@ -156,6 +156,7 @@ class Camera(BaseSensor):
         self._camera_names: list[tuple[dexsim.environment.Arena, str]] = []
         self._is_destroyed = False
         super().__init__(config, device, num_instances=len(self._arenas))
+        self.reset()
         if config.extrinsics.parent is not None and not defer_parent_attachment:
             self.attach_to_parent()
 

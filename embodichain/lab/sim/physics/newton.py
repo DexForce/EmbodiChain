@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib
 from typing import TYPE_CHECKING
+import weakref
 
 from .base import PhysicsBackend
 
@@ -28,6 +29,21 @@ if TYPE_CHECKING:
 __all__ = ["NewtonPhysicsBackend"]
 
 
+def is_newton_gradient_mode(result) -> bool:
+    """Return whether a finalized Spawn result uses Newton gradients."""
+    if result is None or getattr(result, "backend", None) != "newton":
+        return False
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+    backend = get_newton_backend(result.world)
+    if backend is None:
+        return False
+    return bool(
+        backend.cfg.requires_grad
+        or (backend.model is not None and backend.model.requires_grad)
+    )
+
+
 class NewtonPhysicsBackend(PhysicsBackend):
     """The DexSim Newton physics backend (Warp-based)."""
 
@@ -35,6 +51,10 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     #: Resolved Newton solver type after world configuration.
     solver_type: str | None = None
+
+    def __init__(self, manager) -> None:
+        super().__init__(manager)
+        self._differentiable_runtime = None
 
     # -- construction / world-config activation ------------------------- #
     def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
@@ -61,6 +81,30 @@ class NewtonPhysicsBackend(PhysicsBackend):
             "SimulationManager.spawn_result and its Spawned*/Batch APIs."
         )
 
+    @property
+    def differentiable_runtime(self):
+        """Return the differentiable facade over the Spawn-owned runtime."""
+        if self._differentiable_runtime is None:
+            from embodichain.lab.sim.diff.runtime import NewtonDifferentiableRuntime
+
+            owner_ref = weakref.ref(self)
+
+            def backend_provider():
+                owner = owner_ref()
+                if owner is None:
+                    return None
+                result = owner._manager.spawn_result
+                if result is None:
+                    return None
+                from dexsim.engine.newton_physics.backend_registry import (
+                    get_newton_backend,
+                )
+
+                return get_newton_backend(result.world)
+
+            self._differentiable_runtime = NewtonDifferentiableRuntime(backend_provider)
+        return self._differentiable_runtime
+
     # -- scene ---------------------------------------------------------- #
     def get_scene(self):
         raise RuntimeError(
@@ -70,8 +114,24 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     # -- capabilities --------------------------------------------------- #
     @property
+    def supports_volume_deformables(self) -> bool:
+        # Reserved entry point: add a Newton volume adapter before enabling.
+        return False
+
+    @property
+    def supports_surface_deformables(self) -> bool:
+        # Reserved entry point: add a Newton surface adapter before enabling.
+        return False
+
+    @property
     def supports_robot(self) -> bool:
         # Robots are SpawnedArticulations in the World-owned Newton model.
+        return True
+
+    @property
+    def supports_rigid_object_group(self) -> bool:
+        # Groups are env-major views over the Spawn rigid-body batch, which
+        # provides the same state and mass-property API on Newton.
         return True
 
     @property

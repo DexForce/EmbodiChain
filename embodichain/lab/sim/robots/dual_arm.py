@@ -50,6 +50,7 @@ import torch
 
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
+    NewtonJointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
 )
@@ -288,13 +289,16 @@ def _mirror_drive_pros(
     Returns:
         A fresh :class:`JointDrivePropertiesCfg` for the dual arm.
     """
-    new = JointDrivePropertiesCfg(drive_type=base_drive.drive_type)
-    for prop in _DRIVE_PROPS:
+    new = type(base_drive)(drive_type=base_drive.drive_type)
+    properties = list(_DRIVE_PROPS)
+    if isinstance(base_drive, NewtonJointDrivePropertiesCfg):
+        properties.append("target_mode")
+    for prop in properties:
         val = getattr(base_drive, prop, None)
         if val is None:
             continue
         if isinstance(val, dict):
-            mirrored: Dict[str, float] = {}
+            mirrored: Dict[str, object] = {}
             for pattern, v in val.items():
                 mirrored[_prefixed_name(str(pattern), "left_", "joint", name_case)] = v
                 mirrored[_prefixed_name(str(pattern), "right_", "joint", name_case)] = v
@@ -608,10 +612,8 @@ if __name__ == "__main__":
         }
     )
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     # Round-trip check: from_dict(to_dict()) reproduces the cfg.
     cfg2 = DualArmRobotCfg.from_dict(cfg.to_dict())

@@ -64,6 +64,7 @@ class BaseSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     def test_differential_solver(self):
         # Test differential solver with a 1x4x4 homogeneous matrix pose and a joint_seed

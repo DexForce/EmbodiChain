@@ -126,6 +126,7 @@ class BaseSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_ik(self, arm_name: str):

@@ -23,6 +23,8 @@ from .descriptors import (
     cloth_desc_from_cfg,
     rigid_desc_from_cfg,
     soft_desc_from_cfg,
+    surface_deformable_desc_from_cfg,
+    volume_deformable_desc_from_cfg,
 )
 from .usd import articulation_desc_from_usd, rigid_desc_from_usd
 
@@ -33,4 +35,6 @@ __all__ = [
     "rigid_desc_from_cfg",
     "rigid_desc_from_usd",
     "soft_desc_from_cfg",
+    "surface_deformable_desc_from_cfg",
+    "volume_deformable_desc_from_cfg",
 ]

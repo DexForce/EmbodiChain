@@ -26,9 +26,11 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import (
+    DeformableObject,
     SoftBodyData,
     SoftObject,
     SoftObjectCfg,
+    VolumeDeformableObject,
 )
 import pytest
 import torch
@@ -88,9 +90,9 @@ class BaseSoftObjectTest:
                 ),
             ),
         )
+        self.sim.prepare()
 
     def test_run_simulation(self):
-        self.sim.init_gpu_physics()
         for _ in range(100):
             self.sim.update(step=1)
         self.cow.reset()
@@ -99,7 +101,6 @@ class BaseSoftObjectTest:
 
     def test_get_deformable_mesh_geometry(self):
         """Test current collision vertices and matching surface triangles."""
-        self.sim.init_gpu_physics()
         vertices = self.cow.get_current_collision_vertices()
         triangles = self.cow.get_collision_surface_triangles(env_ids=[0])
 
@@ -107,11 +108,35 @@ class BaseSoftObjectTest:
         assert triangles.ndim == 3 and triangles.shape[0] == 1
         assert int(triangles.max()) < vertices.shape[1]
 
+    def test_unified_deformable_contract(self):
+        assert isinstance(self.cow, DeformableObject)
+        assert isinstance(self.cow, VolumeDeformableObject)
+        assert self.cow.deformable_type == "volume"
+        assert self.sim.get_deformable_object("cow") is self.cow
+        assert self.sim.get_soft_object("cow") is self.cow
+        assert self.sim.get_deformable_object_uid_list() == ["cow"]
+
+        positions = self.cow.get_current_nodal_position()
+        velocities = self.cow.get_current_nodal_velocity()
+        state = self.cow.get_current_nodal_state()
+        default_state = self.cow.get_default_nodal_state()
+        assert positions.shape[-1] == 3
+        assert velocities.shape == positions.shape
+        assert state.shape == (*positions.shape[:-1], 6)
+        assert default_state.shape == state.shape
+        torch.testing.assert_close(
+            self.cow.get_surface_vertices(),
+            self.cow.get_current_collision_vertices(),
+        )
+        torch.testing.assert_close(
+            self.cow.get_surface_triangles(env_ids=[0]),
+            self.cow.get_collision_surface_triangles(env_ids=[0]),
+        )
+
     def test_remove(self):
-        self.sim.remove_asset(self.cow.uid)
-        assert (
-            self.cow.uid not in self.sim._soft_objects
-        ), "Cow UID still present after removal"
+        with pytest.raises(NotImplementedError, match="pending removal"):
+            self.sim.remove_asset(self.cow.uid)
+        assert self.sim.get_deformable_object(self.cow.uid) is self.cow
 
     def teardown_method(self):
         """Clean up resources after each test method."""

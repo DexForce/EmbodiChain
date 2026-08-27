@@ -59,14 +59,14 @@ class DefaultPhysicsBackend(PhysicsBackend):
         return self._manager._world.get_physics_scene()
 
     # -- capabilities --------------------------------------------------- #
-    # The default backend supports soft/cloth on GPU; the GPU
+    # The default backend supports deformables on GPU; the GPU
     # precondition itself is enforced separately in SimulationManager.
     @property
-    def supports_soft_bodies(self) -> bool:
+    def supports_volume_deformables(self) -> bool:
         return True
 
     @property
-    def supports_cloth(self) -> bool:
+    def supports_surface_deformables(self) -> bool:
         return True
 
     @property

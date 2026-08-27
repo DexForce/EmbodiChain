@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import os
+import warnings as _warnings
+
 import dexsim
 import open3d as o3d
 
@@ -31,7 +33,6 @@ from dexsim.types import (
     ObjectCloneOptions,
     RigidBodyShape,
     SDFConfig,
-    ActorType,
 )
 from dexsim.engine import Articulation
 from dexsim.environment import Env, Arena
@@ -40,6 +41,9 @@ from dexsim.models import MeshObject
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     LinkPhysicsOverrideCfg,
+    RigidBodyAttributesCfg,
+    RigidBodyAttributesOverrideCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
     SoftObjectCfg,
     ClothObjectCfg,
@@ -60,138 +64,6 @@ def _is_newton_backend_active() -> bool:
     from embodichain.lab.sim.objects.backends import is_newton_scene
 
     return is_newton_scene(get_physics_scene())
-
-
-def _set_body_scale_after_rigidbody(obj: MeshObject, body_scale: tuple | list) -> None:
-    """Set body scale after rigid body creation for Newton compatibility."""
-    obj.set_body_scale(*body_scale)
-
-
-def _newton_solver_type() -> str | None:
-    """Return the active Newton solver type, or None if unavailable."""
-    try:
-        from embodichain.lab.sim.sim_manager import get_physics_scene
-
-        mgr = getattr(get_physics_scene(), "manager", None)
-        if mgr is None:
-            return None
-        return getattr(getattr(mgr, "cfg", None), "solver_cfg", None).solver_type
-    except Exception:
-        return None
-
-
-def _attach_newton_rigidbody_desc(
-    obj: MeshObject,
-    cfg: RigidObjectCfg,
-    body_type: ActorType,
-    shape_type: RigidBodyShape,
-) -> None:
-    """Attach rigid-body physics via dexsim's Newton desc-native path.
-
-    Used when ``cfg.attrs.newton`` is set on the Newton backend: builds the
-    resolved Newton shape descriptor (common fields projected + Newton-native
-    sub-config) and a ``RigidBodyPhysicsDesc`` body descriptor, populates the
-    ``mgr.dexsim_meta`` scaffolding that dexsim's registration/rebuild reads
-    (mirroring ``NewtonSpawnAdapter._attach_newton``), and registers via
-    ``register_mesh_object_to_newton_patch`` — fully bypassing the legacy
-    ``PhysicalAttr`` path so Newton-native contact/shape params reach the model.
-    Emits per-solver / backend-mismatch warnings.
-    """
-    from embodichain.lab.sim.sim_manager import get_physics_scene
-    from dexsim.engine.newton_physics.rigid_body.registration import (
-        register_mesh_object_to_newton_patch,
-    )
-    from dexsim.engine.newton_physics.registry import _get_entity_native_handle
-    from embodichain.lab.sim.physics_attrs import (
-        resolve_newton_body,
-        resolve_newton_shape,
-        warn_ignored_contact_fields,
-        warn_backend_mismatched_fields,
-    )
-
-    mgr = getattr(get_physics_scene(), "manager", None)
-    if mgr is None:
-        logger.log_error(
-            "Newton manager is unavailable; cannot attach rigid body via the "
-            "desc-native path."
-        )
-    shape = resolve_newton_shape(cfg.attrs)
-    solver_type = _newton_solver_type()
-    if solver_type is not None:
-        warn_ignored_contact_fields(shape, solver_type)
-    warn_backend_mismatched_fields(cfg.attrs, "newton")
-    body = resolve_newton_body(cfg.attrs, body_type)
-
-    # Populate the dexsim_meta scaffolding registration/rebuild read. This
-    # mirrors dexsim's NewtonSpawnAdapter._attach_newton meta dict so the body
-    # rebuilds correctly on the next finalize.
-    entity_handle = _get_entity_native_handle(obj)
-    arena = obj.get_arena() if hasattr(obj, "get_arena") else None
-    arena_handle = arena.get_native_handle() if arena is not None else -1
-    mgr.dexsim_meta[entity_handle] = {
-        "actor_type": body_type,
-        "shape_type": shape_type,
-        "node_scale": np.asarray(obj.get_scale(), dtype=np.float32).reshape(-1)[:3],
-        "body_scale": np.asarray(obj.get_body_scale(), dtype=np.float32).reshape(-1)[
-            :3
-        ],
-        "arena_native_handle": arena_handle,
-        "newton_world_index": -1,
-        "newton_shape": shape,
-        "newton_body": body,
-    }
-
-    register_mesh_object_to_newton_patch(
-        mgr,
-        obj,
-        body_type,
-        shape_type,
-        attr=None,
-        mesh_source_obj=obj,
-        newton_shape=shape,
-        newton_body=body,
-    )
-    # Newton requires body scale after rigid-body creation.
-    _set_body_scale_after_rigidbody(obj, cfg.body_scale)
-
-
-def _use_newton_desc_path(cfg: RigidObjectCfg) -> bool:
-    """Whether to route rigid-body spawn through the Newton desc-native path."""
-    return _is_newton_backend_active() and cfg.attrs.newton is not None
-
-
-def _newton_subcfg_has_fields(newton_cfg) -> bool:
-    """Return True if a Newton sub-config sets any field."""
-    if newton_cfg is None:
-        return False
-    return any(
-        getattr(newton_cfg, f.name, None) is not None
-        for f in newton_cfg.__dataclass_fields__
-        if f.name != "newton"
-    )
-
-
-def _warn_newton_articulation_native_attrs(cfg: "ArticulationCfg") -> None:
-    """Warn that Newton-native per-link contact params are not applied to articulations.
-
-    dexsim's ``NewtonArticulation`` exposes no per-link contact-material setter
-    (ke/kd/margin/...), so the ``attrs.newton`` sub-config on an articulation is
-    accepted for config symmetry but cannot be applied per-link on Newton today.
-    Common fields (mass/friction/restitution/contact_offset) are still applied
-    via the legacy ``set_physical_attr`` path.
-    """
-    sources = []
-    if _newton_subcfg_has_fields(getattr(cfg.attrs, "newton", None)):
-        sources.append("attrs.newton")
-    for group_name, group_cfg in (cfg.link_attrs or {}).items():
-        if _newton_subcfg_has_fields(getattr(group_cfg.attrs, "newton", None)):
-            sources.append(f"link_attrs['{group_name}'].attrs.newton")
-    if sources:
-        logger.log_warning(
-            "Newton-native per-link contact/shape params (" + ", ".join(sources) + ") "
-            "are not yet applied to articulation links on the Newton backend "
-            "(no dexsim per-link contact-material API). Common fields are applied."
-        )
 
 
 def get_dexsim_arenas() -> List[dexsim.environment.Arena]:
@@ -307,18 +179,43 @@ def _apply_link_physics_overrides(
         group_cfg = link_to_group.get(name)
         if group_cfg is None:
             continue
-        physical_attr = group_cfg.attrs.merge_with(cfg.attrs)
+        if not isinstance(group_cfg.attrs, RigidBodyAttributesOverrideCfg):
+            raise TypeError(
+                "The deprecated raw articulation path does not support grouped "
+                "link_attrs; use SimulationManager.add_articulation()."
+            )
+        base_attrs = cfg.attrs
+        if isinstance(base_attrs, RigidBodyPhysicsCfg):
+            base_attrs = RigidBodyAttributesCfg.from_grouped(base_attrs)
+        physical_attr = group_cfg.attrs.merge_with(base_attrs)
         replace_inertial = group_cfg.replace_inertial or (
             group_cfg.attrs.mass is not None
         )
         art.set_physical_attr(physical_attr, name, is_replace_inertial=replace_inertial)
 
 
-def default_articulation_clone_options() -> ObjectCloneOptions:
-    """Return clone options used when duplicating articulations across arenas."""
+def _warn_legacy_articulation_api(name: str) -> None:
+    _warnings.warn(
+        f"{name}() bypasses the Spawn ownership/configuration path and is "
+        "deprecated; declare the articulation through SimulationManager instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _default_articulation_clone_options() -> ObjectCloneOptions:
     options = ObjectCloneOptions()
     options.render.material = CloneStrategy.DEEP_COPY
     return options
+
+
+def default_articulation_clone_options() -> ObjectCloneOptions:
+    """Return legacy articulation clone options.
+
+    Deprecated: new scene code must use the Spawn declaration path.
+    """
+    _warn_legacy_articulation_api("default_articulation_clone_options")
+    return _default_articulation_clone_options()
 
 
 def default_rigid_object_clone_options() -> ObjectCloneOptions:
@@ -367,20 +264,24 @@ def spawn_articulation_entities(
     """Load one articulation prototype and clone it into additional arenas.
 
     DexSim configuration is applied once on the prototype before cloning.
+
+    Deprecated: use ``SimulationManager.add_articulation()`` or
+    ``SimulationManager.add_robot()``.
     """
+    _warn_legacy_articulation_api("spawn_articulation_entities")
     if cfg.uid is None:
         logger.log_error("Articulation uid must be set before spawning entities.")
 
     if clone_options is None:
-        clone_options = default_articulation_clone_options()
+        clone_options = _default_articulation_clone_options()
 
     source_env = env_list[0]
     prototype_name = f"{cfg.uid}_0"
     prototype = source_env.load_urdf(cfg.fpath)
     prototype.set_name(prototype_name)
 
-    if not cfg.use_usd_properties:
-        set_dexsim_articulation_cfg(prototype, cfg)
+    if cfg.resolve_asset_physics_mode() == "overlay":
+        _set_dexsim_articulation_cfg(prototype, cfg)
 
     entities = [prototype]
     for env_idx in range(1, len(env_list)):
@@ -419,14 +320,19 @@ def spawn_usd_articulation_entities(
     cache_dir: str | None = None,
     clone_options: ObjectCloneOptions | None = None,
 ) -> list[Articulation]:
-    """Import one USD articulation prototype and clone it into additional arenas."""
+    """Import one USD articulation prototype and clone it into additional arenas.
+
+    Deprecated: use ``SimulationManager.add_articulation()`` or
+    ``SimulationManager.add_robot()``.
+    """
+    _warn_legacy_articulation_api("spawn_usd_articulation_entities")
     if cfg.uid is None:
         logger.log_error("Articulation uid must be set before spawning entities.")
     if len(env_list) == 0:
         return []
 
     if clone_options is None:
-        clone_options = default_articulation_clone_options()
+        clone_options = _default_articulation_clone_options()
 
     source_env = env_list[0]
     prototype_name = f"{cfg.uid}_0"
@@ -436,8 +342,8 @@ def spawn_usd_articulation_entities(
     prototype = _find_single_articulation_in_usd_import(results, cfg.fpath)
     prototype.set_name(prototype_name)
 
-    if not cfg.use_usd_properties:
-        set_dexsim_articulation_cfg(prototype, cfg)
+    if cfg.resolve_asset_physics_mode() == "overlay":
+        _set_dexsim_articulation_cfg(prototype, cfg)
 
     entities = [prototype]
     for env_idx in range(1, len(env_list)):
@@ -461,26 +367,36 @@ def set_dexsim_articulation_cfg(
     art: Articulation | SpawnedArticulation,
     cfg: ArticulationCfg,
 ) -> None:
-    """Apply EmbodiChain articulation cfg to a single DexSim articulation entity.
+    """Apply cfg through the deprecated raw DexSim articulation path.
 
     Args:
         art: DexSim articulation (or Newton skeleton carrier) to configure.
         cfg: EmbodiChain articulation configuration.
     """
+    _warn_legacy_articulation_api("set_dexsim_articulation_cfg")
+    _set_dexsim_articulation_cfg(art, cfg)
+
+
+def _set_dexsim_articulation_cfg(
+    art: Articulation | SpawnedArticulation,
+    cfg: ArticulationCfg,
+) -> None:
+    """Implement the retained legacy path for compatibility wrappers."""
 
     is_newton_art = hasattr(art, "dexsim_meta_links")
+    if is_newton_art:
+        raise TypeError(
+            "The deprecated raw articulation configuration path is "
+            "Default-backend-only. Declare the asset through SimulationManager "
+            "and use grouped RigidBodyPhysicsCfg properties for Newton."
+        )
     lifecycle_state = getattr(getattr(art, "_mgr", None), "_lifecycle_state", None)
     lifecycle_name = getattr(lifecycle_state, "name", "")
-    if not is_newton_art or lifecycle_name == "BUILDER":
+    if lifecycle_name == "BUILDER" or not is_newton_art:
         art.set_body_scale(cfg.body_scale)
 
     link_names = art.get_link_names()
-    if is_newton_art:
-        for name in link_names:
-            art.set_physical_attr(cfg.attrs.attr(), name)
-        _warn_newton_articulation_native_attrs(cfg)
-    else:
-        art.set_physical_attr(cfg.attrs.attr())
+    art.set_physical_attr(cfg.attrs.attr())
     _apply_link_physics_overrides(art, cfg, link_names)
     art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
     art.set_articulation_flag(
@@ -603,14 +519,14 @@ def _configure_primitive_rigidbody(
     shape_type: RigidBodyShape,
 ) -> None:
     """Attach primitive rigid-body physics to a cube or sphere prototype."""
-    if is_newton_backend and cfg.attrs.newton is not None:
-        _attach_newton_rigidbody_desc(obj, cfg, body_type, shape_type)
-        return
-    if not is_newton_backend:
-        obj.set_body_scale(*cfg.body_scale)
-    obj.add_rigidbody(body_type, shape_type, cfg.attrs.attr())
     if is_newton_backend:
-        _set_body_scale_after_rigidbody(obj, cfg.body_scale)
+        raise TypeError(
+            "The deprecated raw rigid-object initialization path is "
+            "Default-backend-only. Use SimulationManager with grouped "
+            "RigidBodyPhysicsCfg properties for Newton."
+        )
+    obj.set_body_scale(*cfg.body_scale)
+    obj.add_rigidbody(body_type, shape_type, cfg.attrs.attr())
 
 
 def _import_usd_rigid_prototype(
@@ -641,6 +557,12 @@ def _load_rigid_mesh_prototype(
     is_newton_backend: bool,
 ) -> MeshObject:
     """Load and configure one mesh rigid-object prototype in the source arena."""
+    if is_newton_backend:
+        raise TypeError(
+            "The deprecated raw rigid-object initialization path is "
+            "Default-backend-only. Use SimulationManager with grouped "
+            "RigidBodyPhysicsCfg properties for Newton."
+        )
     option = _mesh_load_option_from_cfg(cfg)
     fpath = cfg.shape.fpath
     max_convex_hull_num, acd_method, sdf_resolution = _resolve_mesh_collision_params(
@@ -659,7 +581,7 @@ def _load_rigid_mesh_prototype(
             method=acd_method,
         )
     elif sdf_resolution > 0:
-        if not is_newton_backend and cfg.body_scale not in [
+        if cfg.body_scale not in [
             (1.0, 1.0, 1.0),
             [1.0, 1.0, 1.0],
         ]:
@@ -678,10 +600,7 @@ def _load_rigid_mesh_prototype(
         )
     else:
         obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
-        if is_newton_backend and cfg.attrs.newton is not None:
-            _attach_newton_rigidbody_desc(obj, cfg, body_type, RigidBodyShape.CONVEX)
-        else:
-            obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
+        obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
 
     _apply_mesh_uv_mapping(obj, cfg)
     return obj
@@ -741,6 +660,13 @@ def spawn_rigid_object_entities(
 
     body_type = cfg.to_dexsim_body_type()
     is_newton_backend = _is_newton_backend_active()
+    if is_newton_backend:
+        raise TypeError(
+            "spawn_rigid_object_entities() is a deprecated "
+            "Default-backend-only initialization path. Use "
+            "SimulationManager.add_rigid_object() with grouped "
+            "RigidBodyPhysicsCfg properties for Newton."
+        )
     source_env = env_list[0]
     prototype_name = f"{cfg.uid}_0"
 
@@ -750,7 +676,8 @@ def spawn_rigid_object_entities(
         if is_usd:
             prototype = _import_usd_rigid_prototype(source_env, fpath, prototype_name)
         else:
-            cfg.use_usd_properties = False
+            cfg.asset_physics_mode = "overlay"
+            cfg.use_usd_properties = None
             prototype = _load_rigid_mesh_prototype(
                 source_env,
                 cfg,

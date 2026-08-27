@@ -26,8 +26,25 @@ from .rigid_object_group import (
     RigidBodyGroupData,
     RigidObjectGroupCfg,
 )
-from .soft_object import SoftObject, SoftBodyData, SoftObjectCfg
-from .cloth_object import ClothObject, ClothBodyData, ClothObjectCfg
+from .deformable import (
+    ClothBodyData,
+    ClothObject,
+    DeformableObject,
+    DeformableObjectData,
+    SoftBodyData,
+    SoftObject,
+    SurfaceDeformableData,
+    SurfaceDeformableObject,
+    VolumeDeformableData,
+    VolumeDeformableObject,
+)
+from ..cfg import (
+    ClothObjectCfg,
+    DeformableObjectCfg,
+    SoftObjectCfg,
+    SurfaceDeformableObjectCfg,
+    VolumeDeformableObjectCfg,
+)
 from .articulation import Articulation, ArticulationData, ArticulationCfg
 from .robot import Robot, RobotCfg, RobotWorkspaceCfg
 from .light import Light, LightCfg

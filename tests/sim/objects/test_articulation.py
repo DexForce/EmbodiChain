@@ -30,11 +30,12 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
+    MassPropertiesCfg,
     physics_cfg_for_backend,
     RigidBodyAttributesCfg,
     RigidBodyAttributesOverrideCfg,
+    RigidBodyPhysicsCfg,
 )
-from embodichain.lab.sim.utility.sim_utils import _resolve_link_physics_groups
 from embodichain.data import get_data_path
 from dexsim.types import ActorType, DriveType
 
@@ -49,7 +50,9 @@ def _teardown_newton_physics() -> None:
 
 
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:
-    return art._entities[env_idx].get_physical_attr(link_name).static_friction
+    return art.get_link_physical_attr(link_names=[link_name], env_ids=[env_idx])[
+        0
+    ].static_friction
 
 
 class _EntityMethodOverride:
@@ -81,21 +84,6 @@ class TestRigidBodyAttributesOverride:
         assert abs(merged.dynamic_friction - 0.25) < 1e-6
         assert abs(merged.linear_damping - 0.5) < 1e-6
 
-    def test_resolve_link_physics_overlap_raises(self):
-        link_names = ["outer_box", "handle_xpos", "inner_drawer"]
-        link_attrs = {
-            "box": LinkPhysicsOverrideCfg(
-                link_names_expr=["outer_box", "handle_xpos"],
-                attrs=RigidBodyAttributesOverrideCfg(static_friction=0.9),
-            ),
-            "handle": LinkPhysicsOverrideCfg(
-                link_names_expr=["handle_xpos"],
-                attrs=RigidBodyAttributesOverrideCfg(static_friction=0.8),
-            ),
-        }
-        with pytest.raises(ValueError, match="multiple link_attrs groups"):
-            _resolve_link_physics_groups(link_names, link_attrs)
-
 
 class BaseArticulationTest:
     """Shared test logic for CPU and CUDA."""
@@ -120,15 +108,16 @@ class BaseArticulationTest:
         art_path = get_data_path(ART_PATH)
         assert os.path.isfile(art_path)
 
-        cfg_dict = {"fpath": art_path, "drive_pros": {"drive_type": "force"}}
+        cfg_dict = {
+            "fpath": art_path,
+            "asset_physics_mode": "overlay",
+            "drive_pros": {"drive_type": "force"},
+        }
         self.art: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg.from_dict(cfg_dict)
         )
 
-        if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
-        if physics == "newton":
-            self.sim.finalize_newton_physics()
+        self.sim.prepare()
 
     def test_local_pose_behavior(self):
         """Test set_local_pose and get_local_pose:
@@ -151,6 +140,90 @@ class BaseArticulationTest:
         assert torch.allclose(
             xyz, expected_pos, atol=1e-5
         ), f"FAIL: Drawer pose not set correctly: {xyz.tolist()}"
+
+    def test_body_data_exposes_link_mass_properties(self):
+        """Current and initialization-time link mass properties share one layout."""
+        data = self.art.body_data
+
+        assert data.mass.shape == (NUM_ARENAS, self.art.num_links)
+        assert data.inertia.shape == (NUM_ARENAS, self.art.num_links, 3)
+        assert data.com_pose.shape == (NUM_ARENAS, self.art.num_links, 7)
+        assert data.default_mass.shape == data.mass.shape
+        assert data.default_inertia.shape == data.inertia.shape
+        assert data.default_com_pose.shape == data.com_pose.shape
+        assert torch.allclose(self.art.default_link_masses, data.default_mass)
+
+    def test_reset_restores_default_link_mass_properties(self):
+        """Partial reset restores mass, inertia, and COM only for selected rows."""
+        data = self.art.body_data
+        link_name = self.art.link_names[0]
+        link_id = self.art.link_names.index(link_name)
+        env_ids = [0, 1]
+        default_mass = data.default_mass[env_ids, link_id : link_id + 1].clone()
+        default_inertia = data.default_inertia[env_ids, link_id : link_id + 1].clone()
+        default_com_pose = data.default_com_pose[env_ids, link_id : link_id + 1].clone()
+        changed_mass = default_mass + 0.5
+        changed_inertia = default_inertia * 1.25
+        changed_com_pose = default_com_pose.clone()
+        changed_com_pose[..., 0] += 0.02
+
+        self.art.set_mass(changed_mass, link_names=[link_name], env_ids=env_ids)
+        self.art.set_inertia(
+            changed_inertia,
+            link_names=[link_name],
+            env_ids=env_ids,
+        )
+        self.art.set_com_pose(
+            changed_com_pose,
+            link_names=[link_name],
+            env_ids=env_ids,
+        )
+        self.sim.prepare()
+
+        assert torch.allclose(
+            data.default_mass[env_ids, link_id : link_id + 1], default_mass
+        )
+        assert torch.allclose(
+            data.default_inertia[env_ids, link_id : link_id + 1], default_inertia
+        )
+        assert torch.allclose(
+            data.default_com_pose[env_ids, link_id : link_id + 1], default_com_pose
+        )
+
+        self.art.reset(env_ids=[env_ids[0]])
+        self.sim.prepare()
+        mass_after_partial = self.art.get_mass(link_names=[link_name], env_ids=env_ids)
+        inertia_after_partial = self.art.get_inertia(
+            link_names=[link_name], env_ids=env_ids
+        )
+        com_after_partial = self.art.get_com_pose(
+            link_names=[link_name], env_ids=env_ids
+        )
+
+        assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
+        assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
+        assert torch.allclose(inertia_after_partial[0], default_inertia[0], atol=1e-5)
+        assert torch.allclose(inertia_after_partial[1], changed_inertia[1], atol=1e-5)
+        assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
+        assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
+
+        self.art.reset(env_ids=[env_ids[1]])
+        self.sim.prepare()
+        assert torch.allclose(
+            self.art.get_mass(link_names=[link_name], env_ids=env_ids),
+            default_mass,
+            atol=1e-5,
+        )
+        assert torch.allclose(
+            self.art.get_inertia(link_names=[link_name], env_ids=env_ids),
+            default_inertia,
+            atol=1e-5,
+        )
+        assert torch.allclose(
+            self.art.get_com_pose(link_names=[link_name], env_ids=env_ids),
+            default_com_pose,
+            atol=1e-5,
+        )
 
     def test_control_api(self):
         """Test control API for setting and getting joint positions."""
@@ -333,12 +406,14 @@ class BaseArticulationTest:
             armature, expected_armature, atol=1e-5
         ), "FAIL: armature does not match expected filtered values"
 
-    def test_default_drive_type_is_none_after_construction(self):
-        """A default ArticulationCfg creates passive backend joint drives."""
+    def test_explicit_passive_drive_after_construction(self):
+        """An explicit passive overlay disables backend joint drives."""
         passive_articulation = self.sim.add_articulation(
             cfg=ArticulationCfg(
                 uid="passive_drawer",
                 fpath=get_data_path(ART_PATH),
+                asset_physics_mode="overlay",
+                drive_pros=JointDrivePropertiesCfg(drive_type="none"),
             )
         )
 
@@ -346,6 +421,50 @@ class BaseArticulationTest:
             [DriveType.NONE] * passive_articulation.dof for _ in range(NUM_ARENAS)
         ]
         assert passive_articulation.get_joint_drive_type() == expected_drive_types
+
+        if self.sim.is_newton_backend:
+            expected_target_modes = [
+                [0] * passive_articulation.dof for _ in range(NUM_ARENAS)
+            ]
+            assert passive_articulation.get_joint_target_mode() == expected_target_modes
+
+    def test_preserve_mode_ignores_urdf_physics_overrides(self):
+        """Preserve mode keeps source-resolved URDF link and joint physics."""
+        source = self.sim.add_articulation(
+            cfg=ArticulationCfg(
+                uid="source_drawer",
+                fpath=get_data_path(ART_PATH),
+                asset_physics_mode="preserve",
+                init_pos=(-1.0, 0.0, 0.0),
+            )
+        )
+        preserved = self.sim.add_articulation(
+            cfg=ArticulationCfg(
+                uid="preserved_drawer",
+                fpath=get_data_path(ART_PATH),
+                asset_physics_mode="preserve",
+                init_pos=(1.0, 0.0, 0.0),
+                attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=123.0)),
+                drive_pros=JointDrivePropertiesCfg(
+                    drive_type="none",
+                    stiffness=987.0,
+                    damping=654.0,
+                    max_effort=321.0,
+                    max_velocity=123.0,
+                ),
+                qpos_limits={".*": [-0.01, 0.01]},
+            )
+        )
+
+        assert torch.allclose(preserved.body_data.mass, source.body_data.mass)
+        assert torch.allclose(
+            preserved.body_data.qpos_limits,
+            source.body_data.qpos_limits,
+        )
+        for preserved_value, source_value in zip(
+            preserved.get_joint_drive(), source.get_joint_drive()
+        ):
+            assert torch.allclose(preserved_value, source_value)
 
     def test_joint_limit_getters_support_env_and_joint_filters(self):
         """Test joint limit getters support joint_ids and env_ids filtering."""
@@ -773,6 +892,7 @@ class BaseArticulationTest:
         cfg = ArticulationCfg(
             uid="drawer_cfg_qpos_limits",
             fpath=get_data_path(ART_PATH),
+            asset_physics_mode="overlay",
             drive_pros=JointDrivePropertiesCfg(drive_type="force"),
             qpos_limits={".*": [-0.05, 0.05]},
         )
@@ -797,6 +917,7 @@ class BaseArticulationTest:
         cfg = ArticulationCfg(
             uid="drawer_expanded_limits",
             fpath=get_data_path(ART_PATH),
+            asset_physics_mode="overlay",
             drive_pros=JointDrivePropertiesCfg(drive_type="force"),
             qpos_limits={joint_name: [expanded_lower, expanded_upper]},
         )
@@ -861,10 +982,12 @@ class BaseArticulationLinkPhysicsTest:
         cfg = ArticulationCfg(
             uid="drawer_global_attrs",
             fpath=self.art_path,
+            asset_physics_mode="overlay",
             drive_pros=JointDrivePropertiesCfg(drive_type="force"),
             attrs=RigidBodyAttributesCfg(static_friction=global_friction),
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
+        self.sim.prepare()
         for link_name in art.link_names:
             assert abs(_link_static_friction(art, link_name) - global_friction) < 1e-3
 
@@ -875,6 +998,7 @@ class BaseArticulationLinkPhysicsTest:
         cfg = ArticulationCfg(
             uid="drawer_link_attrs",
             fpath=self.art_path,
+            asset_physics_mode="overlay",
             drive_pros=JointDrivePropertiesCfg(drive_type="force"),
             attrs=RigidBodyAttributesCfg(static_friction=global_friction),
             link_attrs={
@@ -887,6 +1011,7 @@ class BaseArticulationLinkPhysicsTest:
             },
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
+        self.sim.prepare()
         assert abs(_link_static_friction(art, "handle_xpos") - handle_friction) < 1e-3
         for link_name in art.link_names:
             if link_name == "handle_xpos":
@@ -899,6 +1024,7 @@ class BaseArticulationLinkPhysicsTest:
             {
                 "uid": "drawer_link_attrs_dict",
                 "fpath": self.art_path,
+                "asset_physics_mode": "overlay",
                 "drive_pros": {"drive_type": "force"},
                 "attrs": {"static_friction": 0.4},
                 "link_attrs": {
@@ -910,6 +1036,7 @@ class BaseArticulationLinkPhysicsTest:
             }
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
+        self.sim.prepare()
         assert abs(_link_static_friction(art, "handle_xpos") - 0.77) < 1e-3
         assert abs(_link_static_friction(art, "outer_box") - 0.4) < 1e-3
 
@@ -918,19 +1045,29 @@ class BaseArticulationLinkPhysicsTest:
         cfg = ArticulationCfg(
             uid="drawer_runtime_attrs",
             fpath=self.art_path,
+            asset_physics_mode="overlay",
             drive_pros=JointDrivePropertiesCfg(drive_type="force"),
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
+        self.sim.prepare()
+        source_friction = {
+            link_name: _link_static_friction(art, link_name)
+            for link_name in art.link_names
+        }
         handle_friction = 0.66
         art.set_link_physical_attr(
             RigidBodyAttributesOverrideCfg(static_friction=handle_friction),
             link_names=["handle_xpos"],
         )
+        self.sim.prepare()
         assert abs(_link_static_friction(art, "handle_xpos") - handle_friction) < 1e-3
         for link_name in art.link_names:
             if link_name == "handle_xpos":
                 continue
-            assert abs(_link_static_friction(art, link_name) - 0.5) < 1e-3
+            assert (
+                abs(_link_static_friction(art, link_name) - source_friction[link_name])
+                < 1e-3
+            )
 
 
 class TestArticulationLinkPhysicsCPU(BaseArticulationLinkPhysicsTest):
@@ -1015,24 +1152,25 @@ class TestArticulationNewton(BaseArticulationTest):
     def test_set_physical_visible(self):
         super().test_set_physical_visible()
 
-    def test_set_link_physical_attr_mass_live_on_newton(self):
-        """Per-link mass set via set_link_physical_attr takes effect live on Newton.
-
-        On Newton, ``set_physical_attr`` is metadata-only; the fix pushes mass
-        live via ``set_link_mass`` (mirroring the dedicated set_mass). Verify a
-        runtime per-link mass override round-trips through get_mass.
-        """
+    def test_set_mass_rebuilds_mass_on_newton(self):
+        """A retained Newton per-link mass takes effect at prepare()."""
         link_name = self.art.link_names[0]
         original = self.art.get_mass(link_names=[link_name])[0, 0].item()
         new_mass = original + 1.5
-        self.art.set_link_physical_attr(
-            RigidBodyAttributesOverrideCfg(mass=new_mass),
+        self.art.set_mass(
+            torch.full(
+                (NUM_ARENAS, 1),
+                new_mass,
+                dtype=torch.float32,
+                device=self.sim.device,
+            ),
             link_names=[link_name],
         )
+        self.sim.prepare()
         live_mass = self.art.get_mass(link_names=[link_name])[0, 0].item()
         assert (
             abs(live_mass - new_mass) < 1e-3
-        ), f"per-link mass {new_mass} not applied live on Newton (got {live_mass})"
+        ), f"per-link mass {new_mass} not applied after Newton rebuild (got {live_mass})"
 
 
 if __name__ == "__main__":

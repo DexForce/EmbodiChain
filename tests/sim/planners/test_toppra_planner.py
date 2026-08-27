@@ -45,6 +45,7 @@ class TestToppraPlanner:
             "init_qpos": [0.0] * 16,
         }
         cls.robot = cls.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        cls.sim.prepare()
 
     def setup_method(self):
         self.setup_simulation()
