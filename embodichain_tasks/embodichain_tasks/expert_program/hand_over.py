@@ -24,7 +24,10 @@ pickup, transfer, placement, and release motion.
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, ClassVar
+
+import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
@@ -32,6 +35,7 @@ from embodichain.lab.gym.envs.expert_program import (
     AntipodalGraspAffordanceBinding,
     ConfiguredHandOverPoseProvider,
     ControlPartCommandPreset,
+    ControlPartEvidenceProviderFactory,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
     ExpertProgramCfg,
@@ -48,6 +52,7 @@ from embodichain.lab.gym.envs.managers.events import (
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim.atomic_actions import (
+    AtomicActionEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -55,6 +60,9 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionRunnerCfg,
     HandOverOptions,
     MotionPolicy,
+    RecoveryPolicy,
+    SceneProvider,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.cfg import (
     LightCfg,
@@ -63,7 +71,20 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.skills import SceneCollisionRole, SceneDynamics
+from embodichain.lab.sim.skills import (
+    BinaryEffectEvidenceQuery,
+    BinaryEffectObservation,
+    BinaryObservationCallback,
+    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+    ControlPartEvidenceAddress,
+    ControlPartSimulationEvidenceProvider,
+    EffectEvidenceCollectionContext,
+    EffectEvidenceProvider,
+    SceneCollisionRole,
+    SceneDynamics,
+    SceneRegistry,
+)
 from embodichain.lab.sim.skills.profiles import (
     SkillPolicyPreset,
     WorkflowRecoveryPolicy,
@@ -73,6 +94,9 @@ from ._common import (
     create_parallel_jaw_grasp_pose_generator,
     load_bundled_expert_program,
 )
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
 
 __all__ = [
     "HandOverEnv",
@@ -99,12 +123,19 @@ GRIPPER_FINGER_LENGTH = 0.12
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 GRIPPER_OPEN_QPOS = 0.0
-GRIPPER_GRASP_QPOS = 0.011
-GRIPPER_MASTER_DRIVE_STIFFNESS = 2e3
-GRIPPER_MASTER_DRIVE_DAMPING = 5e1
-GRIPPER_MASTER_DRIVE_MAX_EFFORT = 140.0
-HAND_OVER_SAMPLE_COUNT = 200
+GRIPPER_GRASP_QPOS = 0.04
+GRIPPER_MASTER_DRIVE_STIFFNESS = 1e3
+GRIPPER_MASTER_DRIVE_DAMPING = 1e2
+GRIPPER_MASTER_DRIVE_MAX_EFFORT = 1e4
+HAND_OVER_SAMPLE_COUNT = 140
 HAND_OVER_GRASP_SAMPLE_COUNT = 10_000
+HAND_OVER_PRE_GRASP_DISTANCE = 0.08
+HAND_OVER_LIFT_HEIGHT = 0.08
+HAND_OVER_HAND_INTERP_STEPS = 10
+HAND_OVER_TRACKING_ERROR_THRESHOLD = 1.0
+HAND_OVER_CONTROL_DT = 0.04
+HAND_OVER_DYNAMIC_GOAL_ROTATION_THRESHOLD = 0.5
+GRIPPER_CONSTRAINT_QPOS_THRESHOLD = 0.004
 
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
@@ -132,6 +163,62 @@ HAND_OVER_POSE_PROVIDER = ConfiguredHandOverPoseProvider(
     final_position=(0.0, -0.2, 0.6),
     final_quaternion_wxyz=(0.7071067812, 0.7071067812, 0.0, 0.0),
 )
+
+
+def _create_gripper_constraint_observer(
+    robot: Robot,
+) -> BinaryObservationCallback:
+    """Report whether a PGI gripper has measurably left its open position."""
+
+    def observe(
+        query: BinaryEffectEvidenceQuery,
+        context: EffectEvidenceCollectionContext,
+    ) -> BinaryEffectObservation:
+        address = query.source.address
+        if type(address) is not ControlPartEvidenceAddress:
+            raise TypeError("Gripper constraint evidence requires a control part.")
+        qpos = robot.get_qpos(name=address.control_part)
+        if qpos.dim() != 2 or qpos.shape[1] == 0:
+            raise ValueError("Gripper qpos must have non-empty shape (B, J).")
+        env_ids = context.env_ids.to(device=qpos.device, dtype=torch.long)
+        measured = qpos.index_select(0, env_ids)
+        closure = torch.amax(torch.abs(measured - GRIPPER_OPEN_QPOS), dim=1)
+        return BinaryEffectObservation(
+            values=closure >= GRIPPER_CONSTRAINT_QPOS_THRESHOLD,
+        )
+
+    return observe
+
+
+@dataclass(frozen=True, slots=True)
+class _HandOverControlPartEvidenceProviderFactory(ControlPartEvidenceProviderFactory):
+    """Create registration-owned gripper constraint evidence."""
+
+    provider_id: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_ID
+    revision: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        scene_provider: SceneProvider,
+    ) -> EffectEvidenceProvider:
+        """Bind measured PGI aperture evidence to one assembled runtime."""
+        from embodichain.lab.sim.objects import Robot
+
+        del simulation, scene_registry
+        if not isinstance(robot, Robot):
+            raise TypeError("HandOver evidence requires a simulation Robot.")
+        if engine.robot is not robot:
+            raise ValueError("HandOver evidence requires the engine's exact robot.")
+        return ControlPartSimulationEvidenceProvider(
+            robot,
+            scene_provider=scene_provider,
+            constraint_observer=_create_gripper_constraint_observer(robot),
+        )
 
 
 def _dual_ur5_robot_dict() -> dict[str, object]:
@@ -290,7 +377,7 @@ def _create_default_env_cfg() -> EmbodiedEnvCfg:
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=1,
+            max_convex_hull_num=16,
             init_pos=list(CAN_INITIAL_POSITION),
             init_rot=list(CAN_INITIAL_ROTATION_DEG),
             body_scale=CAN_SCALE,
@@ -396,16 +483,33 @@ def create_hand_over_robot_profile_binding() -> SimulationRobotSkillProfileBindi
                 "safe",
                 action_option_templates={
                     "hand_over": HandOverOptions(
-                        pre_grasp_distance=0.08,
-                        lift_height=0.08,
-                        hand_interp_steps=10,
+                        pre_grasp_distance=HAND_OVER_PRE_GRASP_DISTANCE,
+                        lift_height=HAND_OVER_LIFT_HEIGHT,
+                        hand_interp_steps=HAND_OVER_HAND_INTERP_STEPS,
                     ),
                 },
-                motion_policy=MotionPolicy(sample_count=HAND_OVER_SAMPLE_COUNT),
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=HAND_OVER_SAMPLE_COUNT,
+                ),
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=HAND_OVER_TRACKING_ERROR_THRESHOLD,
+                    terminal_max_abs_error=HAND_OVER_TRACKING_ERROR_THRESHOLD,
+                ),
+                # As in the tutorial, restarting the complete action after a
+                # gripper changes ownership would be physically unsafe.
+                recovery_policy=RecoveryPolicy(
+                    max_action_retries=0,
+                    # The soda can is rotationally symmetric about its axis;
+                    # contact during approach must not churn the whole plan for
+                    # small, grasp-equivalent orientation changes.
+                    goal_rotation_threshold=(HAND_OVER_DYNAMIC_GOAL_ROTATION_THRESHOLD),
+                ),
                 workflow_recovery_policy=WorkflowRecoveryPolicy(
                     max_recovery_attempts=2,
                 ),
                 runner_cfg=ExecutionRunnerCfg(
+                    minimum_cycle_time=HAND_OVER_CONTROL_DT,
                     hold_during_effect_verification=False,
                     hold_on_completion=False,
                 ),
@@ -422,6 +526,7 @@ HAND_OVER_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistration(
     scene_binding=create_hand_over_scene_binding(),
     robot_profile_binding=create_hand_over_robot_profile_binding(),
     handover_pose_providers=(HAND_OVER_POSE_PROVIDER,),
+    control_part_evidence_factory=_HandOverControlPartEvidenceProviderFactory(),
 )
 
 

@@ -36,7 +36,11 @@ from embodichain.lab.gym.utils.registration import (
 )
 from embodichain.lab.sim.atomic_actions import HandOverOptions
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.skills import HandOver
+from embodichain.lab.sim.skills import (
+    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+    HandOver,
+)
 
 # Trigger official task auto-registration (idempotent).
 discover_task_packages()
@@ -50,11 +54,14 @@ from embodichain_tasks.expert_program.hand_over import (  # noqa: E402
     GRIPPER_MASTER_DRIVE_STIFFNESS,
     GRIPPER_GRASP_QPOS,
     GRIPPER_OPEN_QPOS,
+    HAND_OVER_CONTROL_DT,
+    HAND_OVER_DYNAMIC_GOAL_ROTATION_THRESHOLD,
     HAND_OVER_EXPERT_PROGRAM_REGISTRATION,
     HAND_OVER_POSE_PROVIDER,
     HAND_OVER_ROBOT_PROFILE_ID,
     HAND_OVER_SCENE_REGISTRY_ID,
     HAND_OVER_SAMPLE_COUNT,
+    HAND_OVER_TRACKING_ERROR_THRESHOLD,
     SUPPORT_SURFACE_UID,
     HandOverEnv,
     _create_default_env_cfg,
@@ -62,7 +69,7 @@ from embodichain_tasks.expert_program.hand_over import (  # noqa: E402
     create_hand_over_scene_binding,
 )
 
-EXPECTED_GRIPPER_GRASP_QPOS = 0.011
+EXPECTED_GRIPPER_GRASP_QPOS = 0.04
 
 
 def _gym_config_path() -> Path:
@@ -159,7 +166,7 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     )
     assert [item.uid for item in cfg.background] == [SUPPORT_SURFACE_UID]
     assert [item.uid for item in cfg.rigid_object] == [CAN_SIMULATION_UID]
-    assert cfg.rigid_object[0].max_convex_hull_num == 1
+    assert cfg.rigid_object[0].max_convex_hull_num == 16
     assert cfg.expert_program is not None
     assert cfg.expert_program.program_id == "dual_ur5_hand_over"
 
@@ -204,6 +211,12 @@ def test_hand_over_registration_owns_scene_and_pose_provider() -> None:
     assert HAND_OVER_EXPERT_PROGRAM_REGISTRATION.handover_pose_providers == (
         HAND_OVER_POSE_PROVIDER,
     )
+    evidence = (
+        HAND_OVER_EXPERT_PROGRAM_REGISTRATION.catalog.control_part_evidence_declaration
+    )
+    assert evidence is not None
+    assert evidence.provider_id == CONTROL_PART_EVIDENCE_PROVIDER_ID
+    assert evidence.revision == CONTROL_PART_EVIDENCE_PROVIDER_REVISION
     assert (
         ConfiguredHandOverPoseProvider.provider_id
         == "simulation.configured_handover_pose"
@@ -232,7 +245,23 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     }
     assert binding.presets[0].preset_id == "safe"
     assert binding.presets[0].motion_policy.sample_count == HAND_OVER_SAMPLE_COUNT
+    assert binding.presets[0].motion_policy.strategy == "motion_gen"
+    tracking = binding.presets[0].tracking_policy
+    assert tracking.in_flight is not None
+    assert tracking.in_flight.metrics[0].tolerance == pytest.approx(
+        HAND_OVER_TRACKING_ERROR_THRESHOLD
+    )
+    assert tracking.terminal.metrics[0].tolerance == pytest.approx(
+        HAND_OVER_TRACKING_ERROR_THRESHOLD
+    )
+    assert binding.presets[0].recovery_policy.max_action_retries == 0
+    assert binding.presets[0].recovery_policy.goal_rotation_threshold == pytest.approx(
+        HAND_OVER_DYNAMIC_GOAL_ROTATION_THRESHOLD
+    )
     assert binding.presets[0].workflow_recovery_policy.max_recovery_attempts == 2
+    assert binding.presets[0].runner_cfg.minimum_cycle_time == pytest.approx(
+        HAND_OVER_CONTROL_DT
+    )
     assert binding.presets[0].runner_cfg.hold_during_effect_verification is False
     assert binding.presets[0].runner_cfg.hold_on_completion is False
     templates = binding.presets[0].action_option_templates
@@ -360,6 +389,11 @@ def test_task_config_compiles_through_real_simulation_factory(monkeypatch) -> No
     assert len(segments) == 1
     assert segments[0].name == "hand_over_can"
     assert [type(call.call) for call in segments[0].calls] == [HandOver]
+    hand_over = segments[0].calls[0].call
+    assert hand_over.final_target is not None
+    assert hand_over.final_target.position.tolist() == pytest.approx(
+        HAND_OVER_POSE_PROVIDER.final_position
+    )
     assert len(segments[0].post_policies) == 1
     assert len(segments[0].validators) == 1
     assert env.expert_program_adapter.scene_registry_id == (HAND_OVER_SCENE_REGISTRY_ID)
@@ -471,10 +505,14 @@ def test_real_sim_expert_episode_transfers_can_with_effect_and_validation_trace(
             assert call["plan_attempts"]
             assert call["plan_attempts"][-1]["plan_success_mask"] == [True]
             assert call["effects"]
-            assert call["effects"][-1]["decision"] == {
-                "success_mask": [True],
-                "failure_mask": [False],
-            }
+            decision = call["effects"][-1]["decision"]
+            assert decision["success_mask"] == [True]
+            assert decision["failure_mask"] == [False]
+            assert {
+                expectation["expectation_id"]
+                for expectation in decision["expectations"]
+                if expectation["satisfied_mask"] == [True]
+            } == {"source", "destination"}
 
         transfer_effect = runtime["calls"][0]["effects"][-1]
         assert transfer_effect["effect_spec"]["semantic_id"] == "hand_over"
