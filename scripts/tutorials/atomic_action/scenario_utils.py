@@ -32,7 +32,6 @@ from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import Affordance, ObjectSemantics
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
     RigidObjectCfg,
     RobotCfg,
     URDFCfg,
@@ -45,6 +44,7 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     GRIPPER_HAND_JOINT_PATTERN,
     TutorialRobot,
+    create_tutorial_rigid_body_physics,
     create_tutorial_robot_cfg,
 )
 
@@ -411,7 +411,7 @@ def add_support_surface(
         cfg=RigidObjectCfg(
             uid="support_surface",
             shape=CubeCfg(size=list(size)),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=10.0,
                 dynamic_friction=0.9,
                 static_friction=0.95,

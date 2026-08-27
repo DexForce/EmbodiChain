@@ -66,7 +66,10 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     sim.prepare()
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        use_cuda_graph=args.physics != "newton",
+    )
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
 

@@ -290,7 +290,7 @@ class Drawer(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "Drawer.zip"),
-            "eba30c852074388c2e5b634b1ae37572",
+            "3981636db1f4188146fce25d54084612",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

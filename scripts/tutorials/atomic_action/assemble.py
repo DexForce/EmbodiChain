@@ -47,7 +47,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
@@ -64,6 +64,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -169,7 +170,7 @@ def create_assemble_object(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="assemble_object",
             shape=MeshCfg(fpath=OBJECT_MESH_PATH, compute_uv=False),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,
@@ -200,7 +201,7 @@ def create_base_object(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="base_object",
             shape=CubeCfg(size=[CUBE_SIZE, CUBE_SIZE, CUBE_SIZE]),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=1.0,
                 dynamic_friction=0.9,
                 static_friction=0.95,
@@ -220,15 +221,20 @@ def create_base_object(sim: SimulationManager) -> RigidObject:
 def compute_can_half_height(can: RigidObject) -> float:
     """Return half the soda-can extent along world Z when laid on its side."""
     vertices = can.get_vertices(env_ids=[0], scale=True)[0].to(torch.float32)
-    rotated = vertices @ _CAN_INIT_ROTATION.T
+    rotation = _CAN_INIT_ROTATION.to(device=vertices.device, dtype=vertices.dtype)
+    rotated = vertices @ rotation.T
     extent_z = float(rotated[:, 2].max().item() - rotated[:, 2].min().item())
     return 0.5 * extent_z
 
 
-def make_assemble_to_base_pose(dz: float) -> torch.Tensor:
+def make_assemble_to_base_pose(
+    dz: float,
+    *,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
     """Build the can pose relative to the cube: above it, same orientation."""
-    pose = torch.eye(4, dtype=torch.float32)
-    pose[:3, :3] = _CAN_INIT_ROTATION
+    pose = torch.eye(4, dtype=torch.float32, device=device)
+    pose[:3, :3] = _CAN_INIT_ROTATION.to(device=pose.device, dtype=pose.dtype)
     pose[2, 3] = dz
     return pose
 
@@ -258,16 +264,20 @@ def run_assemble_demo(
         n_sample=args.n_sample,
         force_reannotate=args.force_reannotate,
     )
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        use_cuda_graph=args.physics != "newton",
+    )
     left_open, left_close = get_hand_open_close_qpos(
         robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
     )
 
+    cube_pose = cube.get_local_pose(to_matrix=True)
     can_half_z = compute_can_half_height(can)
     assemble_to_base = make_assemble_to_base_pose(
-        0.5 * CUBE_SIZE + can_half_z + ASSEMBLE_MARGIN
+        0.5 * CUBE_SIZE + can_half_z + ASSEMBLE_MARGIN,
+        device=cube_pose.device,
     )
-    cube_pose = cube.get_local_pose(to_matrix=True)
     assemble_object_target_pose = cube_pose[0] @ assemble_to_base
 
     num_envs = robot.get_qpos().shape[0]

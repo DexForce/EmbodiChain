@@ -49,10 +49,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     TaskState,
 )
-from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
-    RigidObjectCfg,
-)
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils import logger
@@ -76,6 +73,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     format_tensor,
@@ -231,7 +229,7 @@ def create_table(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="table",
             shape=MeshCfg(fpath=resolve_cached_data_path(TABLE_MESH_PATH)),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=10.0,
                 dynamic_friction=0.9,
                 static_friction=0.95,
@@ -252,7 +250,7 @@ def create_bread(sim: SimulationManager) -> RigidObject:
             shape=MeshCfg(
                 fpath=resolve_cached_data_path(BREAD_MESH_PATH), compute_uv=False
             ),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 contact_offset=0.003,
                 rest_offset=0.001,
@@ -277,7 +275,7 @@ def create_pan(sim: SimulationManager) -> RigidObject:
             shape=MeshCfg(
                 fpath=resolve_cached_data_path(PAN_MESH_PATH), compute_uv=False
             ),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,

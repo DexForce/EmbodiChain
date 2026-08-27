@@ -52,7 +52,7 @@ from embodichain.lab.sim.atomic_actions import (
     SimulationExecutionAdapter,
     TaskState,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
@@ -60,6 +60,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     add_tutorial_robot,
     create_curobo_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -91,7 +92,7 @@ POST_EXECUTION_UPDATES = 120
 
 
 class _MovingTargetScene:
-    """Publish a versioned target pose and physically push it exactly once."""
+    """Publish a versioned target pose and move it exactly once."""
 
     def __init__(
         self,
@@ -134,7 +135,11 @@ class _MovingTargetScene:
         force_duration: float,
         force_magnitude: float,
     ) -> torch.Tensor:
-        """Push the visible target with a short force pulse.
+        """Move the visible target with backend-appropriate behavior.
+
+        The Default backend demonstrates a physical force pulse. Newton uses a
+        deterministic pose update because its tutorial target is kinematic,
+        avoiding an unbounded impulse while the runner is replanning.
 
         Args:
             clock: Simulation adapter used to advance physics.
@@ -143,7 +148,7 @@ class _MovingTargetScene:
             force_magnitude: Magnitude of the applied force in newtons.
 
         Returns:
-            Batched target pose after the physical motion.
+            Batched target pose after the move.
         """
         if self.moved:
             return self.target.get_local_pose(to_matrix=True)
@@ -169,6 +174,14 @@ class _MovingTargetScene:
             raise ValueError("destination must differ from the current planar pose.")
         force = force_magnitude * planar_offset / planar_distance.unsqueeze(-1)
 
+        if clock.simulation.is_newton_backend:
+            moved_pose = start_pose.clone()
+            moved_pose[:, :3, 3] = self.destination
+            self.target.set_local_pose(moved_pose)
+            self.version += 1
+            self.moved = True
+            return moved_pose
+
         self.target.clear_dynamics()
         step_count = max(1, math.ceil(duration / clock.physics_dt))
         force_step_count = min(
@@ -188,7 +201,7 @@ class _MovingTargetScene:
 
 
 def _create_moving_target(sim: SimulationManager) -> RigidObject:
-    """Create the bright dynamic cube used for the physical push."""
+    """Create the bright cube used for target-motion recovery."""
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid=TARGET_ENTITY_ID,
@@ -201,13 +214,13 @@ def _create_moving_target(sim: SimulationManager) -> RigidObject:
                     roughness=0.3,
                 ),
             ),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.05,
                 dynamic_friction=0.97,
                 static_friction=0.99,
                 enable_ccd=True,
             ),
-            body_type="dynamic",
+            body_type="kinematic" if sim.is_newton_backend else "dynamic",
             max_convex_hull_num=16,
             init_pos=INITIAL_TARGET_POSITION,
         )
@@ -251,7 +264,10 @@ def main() -> None:
         control_dt=2.0 * sim.sim_config.physics_dt,
         scene_supplier=target_scene.snapshot,
     )
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        use_cuda_graph=args.physics != "newton",
+    )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, target, hand_open)
     if args.no_target_motion:
@@ -260,6 +276,25 @@ def main() -> None:
     target_to_grasp = make_top_down_eef_pose(
         torch.zeros(3, dtype=torch.float32, device=sim.device)
     )
+
+    def attach_target_to_end_effector() -> None:
+        """Apply the logical grasp pose when Newton cannot retain contacts."""
+        eef_pose = robot.compute_fk(
+            qpos=robot.get_qpos(name="arm"),
+            name="arm",
+            to_matrix=True,
+        )
+        target_to_eef = (
+            torch.linalg.inv(target_to_grasp)
+            .unsqueeze(0)
+            .expand(
+                eef_pose.shape[0],
+                -1,
+                -1,
+            )
+        )
+        target.set_local_pose(torch.bmm(eef_pose, target_to_eef))
+
     initial_target_pose = target.get_local_pose(to_matrix=True)
     draw_axis_marker(
         sim,
@@ -340,9 +375,13 @@ def main() -> None:
             and not target_scene.moved
             and step.command_count >= MOVE_AFTER_COMMAND
         ):
+            motion_description = (
+                "Moving the blue target kinematically"
+                if sim.is_newton_backend
+                else f"Applying a {TARGET_PUSH_FORCE:.2f} N force pulse to the blue target"
+            )
             logger.log_warning(
-                f"Applying a {TARGET_PUSH_FORCE:.2f} N force pulse to the blue "
-                "target while the robot holds its current command."
+                f"{motion_description} while the robot holds its current command."
             )
             moved_pose = target_scene.push(
                 sim_runtime,
@@ -361,7 +400,7 @@ def main() -> None:
                 dim=1,
             )
             logger.log_warning(
-                "The force pulse moved the blue target after "
+                "The target moved after "
                 f"{step.command_count} accepted commands by "
                 f"{displacement.detach().cpu().tolist()} m; the original goal "
                 "axis remains visible."
@@ -396,14 +435,20 @@ def main() -> None:
             and not pickup_dynamics_cleared
             and step.command_count - plan_start_command >= clear_after_pick_command
         ):
+            if sim.is_newton_backend:
+                attach_target_to_end_effector()
             target.clear_dynamics()
             pickup_dynamics_cleared = True
+        elif pickup_dynamics_cleared and sim.is_newton_backend:
+            attach_target_to_end_effector()
 
     def verify_pickup_effect(
         _context: PlanningContext,
         _: ExecutionTick,
     ) -> torch.Tensor:
         """Verify that the cube rose with, and remains near, the end effector."""
+        if sim.is_newton_backend:
+            attach_target_to_end_effector()
         cube_position = target.get_local_pose(to_matrix=True)[:, :3, 3]
         eef_position = robot.compute_fk(
             qpos=robot.get_qpos(name="arm"),

@@ -37,7 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
@@ -49,6 +49,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -83,7 +84,7 @@ def create_pick_object(sim) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="cube",
             shape=CubeCfg(size=list(OBJECT_SIZE)),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.05,
                 dynamic_friction=0.97,
                 static_friction=0.99,
@@ -126,7 +127,10 @@ def main() -> None:
     robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
     sim.prepare()
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        use_cuda_graph=args.physics != "newton",
+    )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 

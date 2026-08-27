@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import math
 import time
 from collections.abc import Callable, Collection, Sequence
@@ -35,9 +36,14 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.cfg import (
+    DexsimCollisionPropertiesCfg,
+    DexsimRigidBodyPropertiesCfg,
     LightCfg,
+    MassPropertiesCfg,
     MarkerCfg,
     RenderCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     RobotCfg,
     physics_cfg_for_backend,
 )
@@ -245,6 +251,11 @@ def run_tutorial(main: Callable[[], None]) -> None:
             if sim.is_window_recording():
                 sim.stop_window_record()
             sim.wait_window_record_saves()
+            if sim.is_newton_backend and torch.cuda.is_available():
+                # Newton owns CUDA resources that can still be referenced by
+                # asynchronous Torch work from an atomic-action plan.
+                gc.collect()
+                torch.cuda.synchronize()
             sim.destroy(exit_process=False)
             SimulationManager.flush_cleanup_queue()
 
@@ -339,17 +350,97 @@ def create_toppra_motion_generator(robot: Robot) -> MotionGenerator:
     )
 
 
-def create_curobo_motion_generator(robot: Robot) -> MotionGenerator:
+def create_tutorial_rigid_body_physics(
+    *,
+    mass: float | None = None,
+    static_friction: float | None = None,
+    dynamic_friction: float | None = None,
+    restitution: float | None = None,
+    linear_damping: float | None = None,
+    angular_damping: float | None = None,
+    max_depenetration_velocity: float | None = None,
+    enable_ccd: bool | None = None,
+    min_position_iters: int | None = None,
+    min_velocity_iters: int | None = None,
+    contact_offset: float | None = None,
+    rest_offset: float | None = None,
+) -> RigidBodyPhysicsCfg:
+    """Create portable rigid-body physics for an atomic-action tutorial.
+
+    Material and mass values apply to both physics backends. The remaining
+    values are retained in the Default-backend configuration group; Newton
+    safely ignores those properties because it has no equivalent controls.
+
+    Returns:
+        Grouped physics configuration accepted by both tutorial backends.
+    """
+    rigid_values = (
+        linear_damping,
+        angular_damping,
+        max_depenetration_velocity,
+        enable_ccd,
+        min_position_iters,
+        min_velocity_iters,
+    )
+    collision_values = (contact_offset, rest_offset)
+    material_values = (static_friction, dynamic_friction, restitution)
+    return RigidBodyPhysicsCfg(
+        mass_props=MassPropertiesCfg(mass=mass) if mass is not None else None,
+        rigid_props=(
+            DexsimRigidBodyPropertiesCfg(
+                linear_damping=linear_damping,
+                angular_damping=angular_damping,
+                max_depenetration_velocity=max_depenetration_velocity,
+                enable_ccd=enable_ccd,
+                min_position_iters=min_position_iters,
+                min_velocity_iters=min_velocity_iters,
+            )
+            if any(value is not None for value in rigid_values)
+            else None
+        ),
+        collision_props=(
+            DexsimCollisionPropertiesCfg(
+                contact_offset=contact_offset,
+                rest_offset=rest_offset,
+            )
+            if any(value is not None for value in collision_values)
+            else None
+        ),
+        material_props=(
+            RigidBodyMaterialCfg(
+                static_friction=static_friction,
+                dynamic_friction=dynamic_friction,
+                restitution=restitution,
+            )
+            if any(value is not None for value in material_values)
+            else None
+        ),
+    )
+
+
+def create_curobo_motion_generator(
+    robot: Robot,
+    *,
+    use_cuda_graph: bool = True,
+) -> MotionGenerator:
     """Create a cuRobo-backed motion generator for a tutorial robot.
 
     Args:
         robot: Robot whose trajectories will be planned.
+        use_cuda_graph: Whether cuRobo may capture CUDA graphs. Disable this
+            when the tutorial uses Newton physics, which owns CUDA graph
+            capture on the same device.
 
     Returns:
         The configured motion generator with an empty external collision world.
     """
     return MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=CuroboPlannerCfg(robot_uid=robot.uid))
+        cfg=MotionGenCfg(
+            planner_cfg=CuroboPlannerCfg(
+                robot_uid=robot.uid,
+                use_cuda_graph=use_cuda_graph,
+            )
+        )
     )
 
 

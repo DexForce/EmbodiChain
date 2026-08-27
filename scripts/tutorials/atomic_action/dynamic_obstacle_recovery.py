@@ -48,7 +48,6 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
     TimedCommandSequence,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
@@ -415,7 +414,6 @@ def main() -> None:
                     roughness=0.35,
                 ),
             ),
-            attrs=RigidBodyAttributesCfg(),
             body_type="kinematic",
             init_pos=list(OBSTACLE_START_POSITION),
             init_rot=[0.0, 0.0, 0.0],
@@ -429,6 +427,8 @@ def main() -> None:
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=robot.uid,
+                # Newton physics captures CUDA graphs on the same device.
+                use_cuda_graph=args.physics != "newton",
                 # The coarse default voxel fit under-covers the hand and
                 # fingertips. A denser fit plus modest padding matches the
                 # physical gripper without making the arm path infeasible.

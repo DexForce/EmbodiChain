@@ -42,7 +42,7 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg
@@ -57,6 +57,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_antipodal_semantics,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     get_hand_open_close_qpos,
     clone_local_pose_from_first_env,
@@ -151,7 +152,7 @@ def create_handover_object(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="handover_object",
             shape=MeshCfg(fpath=OBJECT_MESH_PATH, compute_uv=False),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,

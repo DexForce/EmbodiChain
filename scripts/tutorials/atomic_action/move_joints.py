@@ -65,7 +65,10 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     sim.prepare()
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        use_cuda_graph=args.physics != "newton",
+    )
 
     home = robot.get_qpos(name="arm")[0].clone()
     limits = robot.get_qpos_limits(name="arm")[0]
