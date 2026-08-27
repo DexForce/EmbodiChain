@@ -42,7 +42,7 @@ EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
     "StackCups-v1": "embodichain_tasks.manipulation.tableware.stack_cups",
     "StayStillSave-v1": "embodichain_tasks.special.stay_still_save",
 }
-REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3"}
+REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
 CONFIG_DEFINED_EXPERT_TASKS = {"pour_water"}
 RL_SIMULATOR_ENV_IDS = {"CartPoleRL", "PushCubeRL"}
 TABLEWARE_CONFIG_TASKS = {
