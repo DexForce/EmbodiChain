@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -768,6 +770,99 @@ def test_coordinated_pickment_approach_family_follows_live_shared_reach() -> Non
         "current",
         "robot_forward",
     ]
+    assert [candidate.cfg["grasp_pair_rank"] for candidate in candidates[:3]] == [
+        0,
+        1,
+        2,
+    ]
+
+
+def test_coordinated_pickment_rejects_boolean_pair_candidate_count() -> None:
+    adapter = AtomicActionAdapter(_planner_env())
+    capability = adapter.capabilities.get("CoordinatedPickment")
+    grounded = _coordinated_grounded(torch.eye(3))
+    grounded = replace(
+        grounded,
+        cfg={**grounded.cfg, "grasp_pair_candidate_count": True},
+    )
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        adapter._adapt_coordinated_pickment_grasps(grounded, capability)
+
+
+def test_coordinated_pickment_continues_after_pair_trajectory_audit_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = _planner_env()
+    adapter = AtomicActionAdapter(env)
+    positions = torch.zeros(2, 2, env.robot.dof)
+    trajectory = TimedTrajectory.from_uniform_step(
+        positions,
+        env_ids=torch.arange(2),
+        step_dt=0.01,
+    )
+    successful_plan = ActionPlan(
+        skill_id="coordinated_pickment",
+        plan_success=torch.ones(2, dtype=torch.bool),
+        commands=_commands_for(trajectory),
+        joint_trajectory=trajectory,
+        recovery_policy=RecoveryPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
+        planned_scene_version=0,
+        planned_collision_world_revision=(0, 0),
+        diagnostics=PlannerDiagnostics(backend="fake"),
+    )
+    engine = _FakeEngine(lambda *_args: successful_plan)
+    engine.grasp_pose_generators = {}
+    monkeypatch.setattr(adapter, "_engine_for", lambda *_args: engine)
+    monkeypatch.setattr(
+        adapter,
+        "_coordinated_pair_selection_context",
+        lambda *_args: nullcontext(),
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_latest_coordinated_grasp_trace",
+        lambda *_args: {
+            "pair_selection": {
+                "selected": True,
+                "selected_left_pose": torch.eye(4).tolist(),
+                "selected_right_pose": torch.eye(4).tolist(),
+            }
+        },
+    )
+    audited_ranks: list[int] = []
+
+    def audit(candidate, _invocation, plan, _context, _stages):
+        rank = int(candidate.cfg["grasp_pair_rank"])
+        audited_ranks.append(rank)
+        success = torch.full((2,), rank == 1, dtype=torch.bool)
+        diagnostics = (
+            plan.diagnostics
+            if bool(success.all())
+            else PlannerDiagnostics(
+                backend="fake",
+                failure=PlanningFailure("trajectory_safety_failed"),
+            )
+        )
+        return (
+            replace(plan, plan_success=success, diagnostics=diagnostics),
+            {"success": success.tolist()},
+        )
+
+    monkeypatch.setattr(adapter, "_audit_coordinated_trajectory", audit)
+    grounded = _coordinated_grounded(torch.eye(3))
+
+    outcome = adapter.plan(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, env.robot.dof)),
+    )
+
+    assert audited_ranks == [0, 1]
+    assert outcome.success.tolist() == [True, True]
+    trace = outcome.planner_trace["coordinated_grasp"]
+    assert trace["grasp_pair_rank"] == 1
+    assert len(trace["search_attempts"]) == 2
 
 
 def test_coordinated_pickment_geometry_candidates_are_deterministic_for_tray() -> None:

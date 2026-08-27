@@ -54,6 +54,8 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
     PlanningContext,
+    PlanningFailure,
+    PlannerDiagnostics,
     RecoveryPolicy,
     RobotObservation,
     RigidObjectSceneProvider,
@@ -80,6 +82,7 @@ from embodichain.utils.logger import log_info, log_warning
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, quat_slerp
 
 from .body_grasp import AxisAlignBodyGraspAdapter
+from .coordinated_safety import _trajectory_safety_report
 from .grasp_diagnostics import _TracingAntipodalGraspPoseGenerator
 from .models import ActionOutcome, GroundedAction
 from .state import ExecutionState
@@ -448,34 +451,53 @@ class AtomicActionAdapter:
                 if grasp_seed is None
                 else self._isolated_random_seed(int(grasp_seed))
             )
-            with seed_context, _capture_retreat_warnings(capture_warnings) as warnings:
+            pair_context = self._coordinated_pair_selection_context(
+                candidate_engine,
+                candidate,
+                context,
+            )
+            with (
+                seed_context,
+                pair_context,
+                _capture_retreat_warnings(capture_warnings) as warnings,
+            ):
                 candidate_plan = candidate_engine.plan(candidate_invocation, context)
             coordinated_trace = candidate.motion_policy.get("coordinated_grasp")
             if isinstance(coordinated_trace, dict):
-                grasp_stages = self._latest_coordinated_grasp_trace(candidate_engine)
-                if grasp_stages is not None:
-                    coordinated_trace["stages"] = grasp_stages
-                    coordinated_search_attempts.append(
-                        {
-                            "candidate_index": coordinated_trace.get("candidate_index"),
-                            "approach_candidate_label": coordinated_trace.get(
-                                "approach_candidate_label"
-                            ),
-                            "approach_direction": coordinated_trace.get(
-                                "approach_direction"
-                            ),
-                            "middle_empty_ratio": coordinated_trace.get(
-                                "selected_middle_empty_ratio"
-                            ),
-                            "plan_success": candidate_plan.plan_success.detach()
-                            .cpu()
-                            .tolist(),
-                            "planner_messages": list(
-                                candidate_plan.diagnostics.messages
-                            ),
-                            "stages": deepcopy(grasp_stages),
-                        }
-                    )
+                grasp_stages = (
+                    self._latest_coordinated_grasp_trace(candidate_engine) or {}
+                )
+                coordinated_trace["stages"] = grasp_stages
+                raw_plan_success = candidate_plan.plan_success.detach().clone()
+                candidate_plan, trajectory_audit = self._audit_coordinated_trajectory(
+                    candidate,
+                    candidate_invocation,
+                    candidate_plan,
+                    context,
+                    grasp_stages,
+                )
+                coordinated_trace["trajectory_audit"] = trajectory_audit
+                coordinated_search_attempts.append(
+                    {
+                        "candidate_index": coordinated_trace.get("candidate_index"),
+                        "approach_candidate_label": coordinated_trace.get(
+                            "approach_candidate_label"
+                        ),
+                        "approach_direction": coordinated_trace.get(
+                            "approach_direction"
+                        ),
+                        "middle_empty_ratio": coordinated_trace.get(
+                            "selected_middle_empty_ratio"
+                        ),
+                        "raw_plan_success": raw_plan_success.cpu().tolist(),
+                        "plan_success": candidate_plan.plan_success.detach()
+                        .cpu()
+                        .tolist(),
+                        "planner_messages": list(candidate_plan.diagnostics.messages),
+                        "stages": deepcopy(grasp_stages),
+                        "trajectory_audit": deepcopy(trajectory_audit),
+                    }
+                )
             if capture_warnings:
                 candidate_search_warnings.extend(warnings)
                 candidate_search_attempts += 1
@@ -1013,6 +1035,11 @@ class AtomicActionAdapter:
         grasp_seed = grounded.cfg.get("grasp_seed", _COORDINATED_GRASP_SEED)
         if type(grasp_seed) is not int or grasp_seed < 0:
             raise ValueError("grasp_seed must be a non-negative integer.")
+        pair_candidate_count = grounded.cfg.get("grasp_pair_candidate_count", 3)
+        if type(pair_candidate_count) is not int:
+            raise ValueError("grasp_pair_candidate_count must be an integer.")
+        if not 1 <= pair_candidate_count <= 8:
+            raise ValueError("grasp_pair_candidate_count must be in [1, 8].")
         trace = {
             "strategy": "live_geometry_approach_search",
             "local_pca_axes": eigenvectors.detach().cpu().tolist(),
@@ -1037,6 +1064,7 @@ class AtomicActionAdapter:
             ],
             "candidate_middle_empty_ratios": list(ratios),
             "grasp_seed": grasp_seed,
+            "grasp_pair_candidate_count": pair_candidate_count,
         }
         candidates: list[GroundedAction] = []
         candidate_index = 0
@@ -1044,35 +1072,40 @@ class AtomicActionAdapter:
             approach_candidates
         ):
             for ratio in ratios:
-                cfg = {
-                    **grounded.cfg,
-                    "left_to_right_arm_direction": shared_direction.clone(),
-                    "approach_direction": approach.clone(),
-                    "middle_empty_ratio": ratio,
-                    "grasp_seed": grasp_seed,
-                }
-                motion_policy = {
-                    **grounded.motion_policy,
-                    "grasp_seed": grasp_seed,
-                    "coordinated_grasp": {
-                        **trace,
-                        "candidate_index": candidate_index,
-                        "approach_candidate_index": approach_index,
-                        "approach_candidate_label": approach_label,
-                        "approach_direction": approach.detach().cpu().tolist(),
-                        "selected_middle_empty_ratio": ratio,
-                    },
-                }
-                candidates.append(
-                    replace(
-                        grounded,
-                        target=replace(target, object_initial_pose=live_pose.clone()),
-                        cfg=cfg,
-                        object_pose=live_pose.clone(),
-                        motion_policy=motion_policy,
+                for pair_rank in range(pair_candidate_count):
+                    cfg = {
+                        **grounded.cfg,
+                        "left_to_right_arm_direction": shared_direction.clone(),
+                        "approach_direction": approach.clone(),
+                        "middle_empty_ratio": ratio,
+                        "grasp_seed": grasp_seed,
+                        "grasp_pair_rank": pair_rank,
+                    }
+                    motion_policy = {
+                        **grounded.motion_policy,
+                        "grasp_seed": grasp_seed,
+                        "coordinated_grasp": {
+                            **trace,
+                            "candidate_index": candidate_index,
+                            "approach_candidate_index": approach_index,
+                            "approach_candidate_label": approach_label,
+                            "approach_direction": approach.detach().cpu().tolist(),
+                            "selected_middle_empty_ratio": ratio,
+                            "grasp_pair_rank": pair_rank,
+                        },
+                    }
+                    candidates.append(
+                        replace(
+                            grounded,
+                            target=replace(
+                                target, object_initial_pose=live_pose.clone()
+                            ),
+                            cfg=cfg,
+                            object_pose=live_pose.clone(),
+                            motion_policy=motion_policy,
+                        )
                     )
-                )
-                candidate_index += 1
+                    candidate_index += 1
         return tuple(candidates)
 
     @contextmanager
@@ -1109,6 +1142,424 @@ class AtomicActionAdapter:
         if not isinstance(generator, _TracingAntipodalGraspPoseGenerator):
             return None
         return generator.last_dual_trace
+
+    def _audit_pose_interpolation(
+        self,
+        start: torch.Tensor,
+        end: torch.Tensor,
+        waypoint_count: int,
+        *,
+        interpolate_orientation: bool,
+    ) -> torch.Tensor:
+        """Build the Cartesian reference used only by the GenSim FK audit."""
+        if waypoint_count <= 0:
+            return start[:, None].repeat(1, 0, 1, 1)
+        weights = torch.linspace(
+            0.0,
+            1.0,
+            waypoint_count,
+            dtype=start.dtype,
+            device=start.device,
+        )
+        result = start[:, None].repeat(1, waypoint_count, 1, 1)
+        result[:, :, :3, 3] = torch.lerp(
+            start[:, None, :3, 3],
+            end[:, None, :3, 3],
+            weights[None, :, None],
+        )
+        if not interpolate_orientation:
+            return result
+        start_quat = quat_from_matrix(start[:, :3, :3])
+        end_quat = quat_from_matrix(end[:, :3, :3])
+        end_quat = torch.where(
+            torch.sum(start_quat * end_quat, dim=1, keepdim=True) < 0.0,
+            -end_quat,
+            end_quat,
+        )
+        for waypoint_index, weight in enumerate(weights.tolist()):
+            interpolated = torch.stack(
+                [
+                    quat_slerp(start_quat[row], end_quat[row], tau=float(weight))
+                    for row in range(start.shape[0])
+                ]
+            )
+            result[:, waypoint_index, :3, :3] = matrix_from_quat(interpolated)
+        return result
+
+    def _coordinated_selected_grasp_poses(
+        self,
+        grasp_stages: Mapping[str, Any],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        rows = grasp_stages.get("environment_rows")
+        if rows is None:
+            rows = [grasp_stages]
+        left: list[torch.Tensor] = []
+        right: list[torch.Tensor] = []
+        for row in rows:
+            pair = row.get("pair_selection")
+            if not isinstance(pair, Mapping) or not bool(pair.get("selected", False)):
+                raise ValueError(
+                    "Trajectory audit requires one selected grasp pair per row."
+                )
+            left.append(
+                torch.as_tensor(
+                    pair["selected_left_pose"],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            )
+            right.append(
+                torch.as_tensor(
+                    pair["selected_right_pose"],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            )
+        return torch.stack(left), torch.stack(right)
+
+    def _arm_trajectory_fk(
+        self,
+        positions: torch.Tensor,
+        control_part: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return every TCP pose and every serial-chain link point."""
+        joint_ids = list(self.env.robot.get_joint_ids(name=control_part))
+        arm_qpos = positions[:, :, joint_ids]
+        batch_size, waypoint_count, dof = arm_qpos.shape
+        solver = self.env.robot.get_solver(name=control_part)
+        flat_qpos = arm_qpos.reshape(batch_size * waypoint_count, dof)
+        local_eef = solver.get_fk(flat_qpos).reshape(
+            batch_size,
+            waypoint_count,
+            4,
+            4,
+        )
+        base_pose = self.env.robot.get_link_pose(
+            link_name=solver.root_link_name,
+            to_matrix=True,
+        ).to(device=positions.device, dtype=positions.dtype)
+        eef = torch.matmul(base_pose[:, None], local_eef)
+        chain = getattr(solver, "pk_serial_chain", None)
+        if chain is None:
+            raise ValueError(f"{control_part} has no serial chain for capsule audit.")
+        link_transforms = chain.forward_kinematics(flat_qpos, end_only=False)
+        link_points: list[torch.Tensor] = []
+        for transform in link_transforms.values():
+            local = transform.get_matrix().reshape(
+                batch_size,
+                waypoint_count,
+                4,
+                4,
+            )
+            world = torch.matmul(base_pose[:, None], local)
+            link_points.append(world[:, :, :3, 3])
+        link_points.append(eef[:, :, :3, 3])
+        return eef, torch.stack(link_points, dim=2)
+
+    @staticmethod
+    def _audit_batched_pose(
+        value: Any,
+        *,
+        batch_size: int,
+        device: torch.device | str,
+        name: str,
+    ) -> torch.Tensor:
+        pose = torch.as_tensor(value, dtype=torch.float32, device=device)
+        if pose.shape == (4, 4):
+            pose = pose.unsqueeze(0).repeat(batch_size, 1, 1)
+        if pose.shape != (batch_size, 4, 4) or not bool(torch.isfinite(pose).all()):
+            raise ValueError(f"{name} must have finite shape ({batch_size}, 4, 4).")
+        return pose
+
+    def _coordinated_audit_references(
+        self,
+        candidate: GroundedAction,
+        invocation: ActionInvocation,
+        plan: ActionPlan,
+        actual_left: torch.Tensor,
+        actual_right: torch.Tensor,
+        grasp_stages: Mapping[str, Any],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        positions = plan.joint_trajectory
+        assert positions is not None
+        batch_size = positions.batch_size
+        initial = self._audit_batched_pose(
+            candidate.target.object_initial_pose,
+            batch_size=batch_size,
+            device=self.device,
+            name="object_initial_pose",
+        )
+        target = self._audit_batched_pose(
+            candidate.target.object_target_pose,
+            batch_size=batch_size,
+            device=self.device,
+            name="object_target_pose",
+        )
+        left_grasp, right_grasp = self._coordinated_selected_grasp_poses(grasp_stages)
+        left_relation = torch.bmm(torch.linalg.inv(initial), left_grasp)
+        right_relation = torch.bmm(torch.linalg.inv(initial), right_grasp)
+        desired_left = actual_left.clone()
+        desired_right = actual_right.clone()
+        segments = {segment.name: segment for segment in plan.segments}
+
+        def assign(
+            name: str,
+            left_value: torch.Tensor,
+            right_value: torch.Tensor,
+        ) -> None:
+            segment = segments[name]
+            desired_left[:, segment.start : segment.stop] = left_value
+            desired_right[:, segment.start : segment.stop] = right_value
+
+        approach = segments["approach"]
+        assign(
+            "approach",
+            self._audit_pose_interpolation(
+                actual_left[:, approach.start],
+                left_grasp,
+                approach.waypoint_count,
+                interpolate_orientation=True,
+            ),
+            self._audit_pose_interpolation(
+                actual_right[:, approach.start],
+                right_grasp,
+                approach.waypoint_count,
+                interpolate_orientation=True,
+            ),
+        )
+        close = segments["close"]
+        assign(
+            "close",
+            left_grasp[:, None].repeat(1, close.waypoint_count, 1, 1),
+            right_grasp[:, None].repeat(1, close.waypoint_count, 1, 1),
+        )
+        lift_pose = initial.clone()
+        lift_pose[:, 2, 3] += float(invocation.skill_options.lift_height)
+        lift = segments["lift"]
+        lift_object = self._audit_pose_interpolation(
+            initial,
+            lift_pose,
+            lift.waypoint_count,
+            interpolate_orientation=False,
+        )
+        assign(
+            "lift",
+            torch.matmul(lift_object, left_relation[:, None]),
+            torch.matmul(lift_object, right_relation[:, None]),
+        )
+        move = segments["move"]
+        move_object = self._audit_pose_interpolation(
+            lift_pose,
+            target,
+            move.waypoint_count,
+            interpolate_orientation=True,
+        )
+        assign(
+            "move",
+            torch.matmul(move_object, left_relation[:, None]),
+            torch.matmul(move_object, right_relation[:, None]),
+        )
+        hold = segments["hold"]
+        assign(
+            "hold",
+            torch.matmul(target, left_relation)[:, None].repeat(
+                1, hold.waypoint_count, 1, 1
+            ),
+            torch.matmul(target, right_relation)[:, None].repeat(
+                1, hold.waypoint_count, 1, 1
+            ),
+        )
+        return desired_left, desired_right
+
+    def _audit_coordinated_trajectory(
+        self,
+        candidate: GroundedAction,
+        invocation: ActionInvocation,
+        plan: ActionPlan,
+        context: PlanningContext,
+        grasp_stages: Mapping[str, Any],
+    ) -> tuple[ActionPlan, dict[str, Any]]:
+        """Reject unsafe E5 joint paths before they can become executable."""
+        del context
+        raw_success = plan.plan_success.to(device=self.device)
+        if plan.joint_trajectory is None or not bool(raw_success.any()):
+            return plan, {
+                "success": raw_success.detach().cpu().tolist(),
+                "skipped": True,
+                "reason": "planner_failed_or_missing_trajectory",
+            }
+        positions = plan.joint_trajectory.positions.to(
+            device=self.device,
+            dtype=torch.float32,
+        )
+        try:
+            left_arm, _, _ = self._parts("left_arm")
+            right_arm, _, _ = self._parts("right_arm")
+            left_eef, left_links = self._arm_trajectory_fk(positions, left_arm)
+            right_eef, right_links = self._arm_trajectory_fk(positions, right_arm)
+            desired_left, desired_right = self._coordinated_audit_references(
+                candidate,
+                invocation,
+                plan,
+                left_eef,
+                right_eef,
+                grasp_stages,
+            )
+            direction = torch.as_tensor(
+                candidate.cfg["left_to_right_arm_direction"],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            report = _trajectory_safety_report(
+                left_qpos=positions[:, :, self.env.robot.get_joint_ids(name=left_arm)],
+                right_qpos=positions[
+                    :, :, self.env.robot.get_joint_ids(name=right_arm)
+                ],
+                left_eef=left_eef,
+                right_eef=right_eef,
+                desired_left_eef=desired_left,
+                desired_right_eef=desired_right,
+                left_link_points=left_links,
+                right_link_points=right_links,
+                left_to_right_direction=direction,
+                maximum_joint_step=float(candidate.cfg.get("maximum_joint_step", 0.25)),
+                maximum_orientation_error=float(
+                    candidate.cfg.get("maximum_wrist_orientation_error", 0.20)
+                ),
+                minimum_lateral_gap=float(
+                    candidate.cfg.get("minimum_grasp_lateral_gap", 0.05)
+                ),
+                capsule_radius=float(
+                    candidate.cfg.get("inter_arm_capsule_radius", 0.04)
+                ),
+                minimum_capsule_clearance=float(
+                    candidate.cfg.get("minimum_inter_arm_clearance", 0.01)
+                ),
+                orientation_start_index={
+                    segment.name: segment.start for segment in plan.segments
+                }["close"],
+            )
+            audited_success = raw_success & report.success.to(device=self.device)
+            audit_trace = {
+                "success": audited_success.detach().cpu().tolist(),
+                "failed_checks": report.failed_checks,
+                "metrics": report.metrics,
+                "orientation_audit_start": "close",
+                "capsule_model": {
+                    "left_link_segments": left_links.shape[2] - 1,
+                    "right_link_segments": right_links.shape[2] - 1,
+                },
+                "thresholds": {
+                    "maximum_joint_step": float(
+                        candidate.cfg.get("maximum_joint_step", 0.25)
+                    ),
+                    "maximum_wrist_orientation_error": float(
+                        candidate.cfg.get("maximum_wrist_orientation_error", 0.20)
+                    ),
+                    "minimum_lateral_gap": float(
+                        candidate.cfg.get("minimum_grasp_lateral_gap", 0.05)
+                    ),
+                    "inter_arm_capsule_radius": float(
+                        candidate.cfg.get("inter_arm_capsule_radius", 0.04)
+                    ),
+                    "minimum_inter_arm_clearance": float(
+                        candidate.cfg.get("minimum_inter_arm_clearance", 0.01)
+                    ),
+                },
+            }
+        except Exception as exc:
+            audited_success = torch.zeros_like(raw_success)
+            audit_trace = {
+                "success": audited_success.detach().cpu().tolist(),
+                "failed_checks": {"audit_error": raw_success.cpu().tolist()},
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        if torch.equal(audited_success, raw_success):
+            return plan, audit_trace
+        failed_rows = (
+            torch.nonzero(
+                raw_success & ~audited_success,
+                as_tuple=False,
+            )
+            .flatten()
+            .tolist()
+        )
+        message = (
+            f"GenSim trajectory safety audit rejected environment(s) {failed_rows}."
+        )
+        diagnostics = PlannerDiagnostics(
+            backend=plan.diagnostics.backend,
+            messages=(*plan.diagnostics.messages, message),
+            metadata={
+                **dict(plan.diagnostics.metadata),
+                "gensim_trajectory_audit": audit_trace,
+            },
+            failure=PlanningFailure("gensim_trajectory_safety_failed"),
+        )
+        return (
+            replace(
+                plan,
+                plan_success=audited_success,
+                diagnostics=diagnostics,
+            ),
+            audit_trace,
+        )
+
+    @contextmanager
+    def _coordinated_pair_selection_context(
+        self,
+        engine: AtomicActionEngine,
+        candidate: GroundedAction,
+        context: PlanningContext,
+    ) -> Iterator[None]:
+        """Bind live wrists and arm bases to one synchronous E5 generator call."""
+        trace = candidate.motion_policy.get("coordinated_grasp")
+        if not isinstance(trace, Mapping):
+            yield
+            return
+        _, left_hand, _ = self._parts("left_arm")
+        if left_hand is None:
+            yield
+            return
+        generator = engine.grasp_pose_generators.get(left_hand)
+        if not isinstance(generator, _TracingAntipodalGraspPoseGenerator):
+            yield
+            return
+        left_arm, _, _ = self._parts("left_arm")
+        right_arm, _, _ = self._parts("right_arm")
+        qpos = context.robot.qpos.to(device=self.device, dtype=torch.float32)
+        left_ids = list(self.env.robot.get_joint_ids(name=left_arm))
+        right_ids = list(self.env.robot.get_joint_ids(name=right_arm))
+        left_eef = self.env.robot.compute_fk(
+            qpos[:, left_ids],
+            name=left_arm,
+            to_matrix=True,
+        )
+        right_eef = self.env.robot.compute_fk(
+            qpos[:, right_ids],
+            name=right_arm,
+            to_matrix=True,
+        )
+        left_base, right_base = self._coordinated_arm_bases()
+        with generator.dual_arm_selection_context(
+            left_eef=left_eef,
+            right_eef=right_eef,
+            left_base=left_base,
+            right_base=right_base,
+            left_to_right_direction=torch.as_tensor(
+                candidate.cfg["left_to_right_arm_direction"],
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            pair_rank=int(candidate.cfg.get("grasp_pair_rank", 0)),
+            minimum_separation=float(
+                candidate.cfg.get("minimum_grasp_separation", 0.08)
+            ),
+            minimum_lateral_gap=float(
+                candidate.cfg.get("minimum_grasp_lateral_gap", 0.05)
+            ),
+        ):
+            yield
 
     def _search_reachable_retreat(
         self,

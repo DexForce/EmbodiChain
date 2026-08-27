@@ -18,15 +18,34 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Iterator
 
 import torch
 import torch.nn.functional as F
 
 from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 
+from .coordinated_safety import (
+    _canonicalize_parallel_jaw_poses,
+    _rank_non_crossing_grasp_pairs,
+)
+
 __all__: list[str] = []
+
+
+@dataclass(frozen=True, slots=True)
+class _DualGraspSelectionContext:
+    left_eef: torch.Tensor
+    right_eef: torch.Tensor
+    left_base: torch.Tensor
+    right_base: torch.Tensor
+    left_to_right_direction: torch.Tensor
+    pair_rank: int
+    minimum_separation: float
+    minimum_lateral_gap: float
 
 
 class _TracingAntipodalGraspPoseGenerator(AntipodalGraspPoseGenerator):
@@ -35,11 +54,162 @@ class _TracingAntipodalGraspPoseGenerator(AntipodalGraspPoseGenerator):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._last_dual_trace: dict[str, Any] | None = None
+        self._selection_context: _DualGraspSelectionContext | None = None
 
     @property
     def last_dual_trace(self) -> dict[str, Any] | None:
         """Return an owned snapshot of the most recent dual-grasp trace."""
         return deepcopy(self._last_dual_trace)
+
+    @contextmanager
+    def dual_arm_selection_context(
+        self,
+        *,
+        left_eef: torch.Tensor,
+        right_eef: torch.Tensor,
+        left_base: torch.Tensor,
+        right_base: torch.Tensor,
+        left_to_right_direction: torch.Tensor,
+        pair_rank: int,
+        minimum_separation: float,
+        minimum_lateral_gap: float,
+    ) -> Iterator[None]:
+        """Install one invocation-local arm context for pair-aware selection."""
+        if self._selection_context is not None:
+            raise RuntimeError("Dual grasp selection context cannot be nested.")
+        if type(pair_rank) is not int or pair_rank < 0:
+            raise ValueError("pair_rank must be a non-negative integer.")
+        self._selection_context = _DualGraspSelectionContext(
+            left_eef=torch.as_tensor(left_eef, dtype=torch.float32).clone(),
+            right_eef=torch.as_tensor(right_eef, dtype=torch.float32).clone(),
+            left_base=torch.as_tensor(left_base, dtype=torch.float32).clone(),
+            right_base=torch.as_tensor(right_base, dtype=torch.float32).clone(),
+            left_to_right_direction=torch.as_tensor(
+                left_to_right_direction, dtype=torch.float32
+            ).clone(),
+            pair_rank=pair_rank,
+            minimum_separation=float(minimum_separation),
+            minimum_lateral_gap=float(minimum_lateral_gap),
+        )
+        try:
+            yield
+        finally:
+            self._selection_context = None
+
+    @staticmethod
+    def _failed_arm_result(reference: torch.Tensor) -> dict[str, Any]:
+        return {
+            "is_success": False,
+            "grasp_poses": torch.eye(
+                4,
+                dtype=torch.float32,
+                device=reference.device,
+            ),
+            "open_lengths": 0.0,
+            "total_cost": torch.zeros(1, device=reference.device),
+        }
+
+    def _select_pair(
+        self,
+        result: dict[str, dict[str, Any]] | None,
+        *,
+        row_index: int,
+    ) -> tuple[dict[str, dict[str, Any]] | None, dict[str, Any] | None]:
+        context = self._selection_context
+        if context is None or result is None:
+            return result, None
+        left = result["left"]
+        right = result["right"]
+        if not left.get("is_success", False) or not right.get("is_success", False):
+            return result, {
+                "requested_pair_rank": context.pair_rank,
+                "valid_pair_count": 0,
+                "selected": False,
+                "reason": "one_or_both_arms_have_no_candidates",
+            }
+        left_poses = torch.as_tensor(left["grasp_poses"], dtype=torch.float32)
+        right_poses = torch.as_tensor(right["grasp_poses"], dtype=torch.float32)
+        if left_poses.ndim == 2:
+            left_poses = left_poses.unsqueeze(0)
+        if right_poses.ndim == 2:
+            right_poses = right_poses.unsqueeze(0)
+        left_canonical = _canonicalize_parallel_jaw_poses(
+            left_poses,
+            context.left_eef[row_index],
+        )
+        right_canonical = _canonicalize_parallel_jaw_poses(
+            right_poses,
+            context.right_eef[row_index],
+        )
+        ranking = _rank_non_crossing_grasp_pairs(
+            left_canonical.poses,
+            right_canonical.poses,
+            left_costs=torch.as_tensor(left["total_cost"], dtype=torch.float32),
+            right_costs=torch.as_tensor(right["total_cost"], dtype=torch.float32),
+            left_rotation_costs=left_canonical.selected_rotation_radians,
+            right_rotation_costs=right_canonical.selected_rotation_radians,
+            left_base=context.left_base[row_index],
+            right_base=context.right_base[row_index],
+            left_to_right_direction=context.left_to_right_direction,
+            minimum_separation=context.minimum_separation,
+            minimum_lateral_gap=context.minimum_lateral_gap,
+        )
+        trace: dict[str, Any] = {
+            "requested_pair_rank": context.pair_rank,
+            "valid_pair_count": len(ranking.ranked_pairs),
+            "rejection_counts": dict(ranking.rejection_counts),
+            "left_half_turn_count": int(left_canonical.flipped.sum().item()),
+            "right_half_turn_count": int(right_canonical.flipped.sum().item()),
+            "selected": context.pair_rank < len(ranking.ranked_pairs),
+        }
+        if context.pair_rank >= len(ranking.ranked_pairs):
+            trace["reason"] = "requested_pair_rank_unavailable"
+            return {
+                "left": self._failed_arm_result(left_poses),
+                "right": self._failed_arm_result(right_poses),
+            }, trace
+        left_index, right_index = ranking.ranked_pairs[context.pair_rank]
+        left_pose = left_canonical.poses[left_index]
+        right_pose = right_canonical.poses[right_index]
+        trace.update(
+            {
+                "selected_left_index": left_index,
+                "selected_right_index": right_index,
+                "selected_pair_score": ranking.scores[context.pair_rank],
+                "selected_left_half_turn": bool(left_canonical.flipped[left_index]),
+                "selected_right_half_turn": bool(right_canonical.flipped[right_index]),
+                "selected_left_rotation_radians": float(
+                    left_canonical.selected_rotation_radians[left_index]
+                ),
+                "selected_right_rotation_radians": float(
+                    right_canonical.selected_rotation_radians[right_index]
+                ),
+                "selected_left_pose": left_pose.detach().cpu().tolist(),
+                "selected_right_pose": right_pose.detach().cpu().tolist(),
+                "selected_separation": float(
+                    torch.linalg.vector_norm(left_pose[:3, 3] - right_pose[:3, 3])
+                ),
+            }
+        )
+
+        def selected_arm(
+            arm: dict[str, Any],
+            poses: torch.Tensor,
+            index: int,
+        ) -> dict[str, Any]:
+            open_lengths = torch.as_tensor(arm["open_lengths"])
+            costs = torch.as_tensor(arm["total_cost"], dtype=torch.float32)
+            return {
+                "is_success": True,
+                "grasp_poses": poses[index : index + 1],
+                "open_lengths": open_lengths[index : index + 1],
+                "total_cost": costs.new_zeros(1),
+            }
+
+        return {
+            "left": selected_arm(left, left_canonical.poses, left_index),
+            "right": selected_arm(right, right_canonical.poses, right_index),
+        }, trace
 
     @staticmethod
     def _transform_points(points: torch.Tensor, pose: torch.Tensor) -> torch.Tensor:
@@ -134,6 +304,7 @@ class _TracingAntipodalGraspPoseGenerator(AntipodalGraspPoseGenerator):
             checker.query = original_query
 
         row_traces: list[dict[str, Any]] = []
+        selected_results: list[dict[str, dict[str, Any]] | None] = []
         for row_index, (object_pose, approach, result) in enumerate(
             zip(poses, directions, results, strict=True)
         ):
@@ -153,6 +324,11 @@ class _TracingAntipodalGraspPoseGenerator(AntipodalGraspPoseGenerator):
             right = {} if result is None else result["right"]
             left_final = self._candidate_count(left)
             right_final = self._candidate_count(right)
+            selected_result, pair_trace = self._select_pair(
+                result,
+                row_index=row_index,
+            )
+            selected_results.append(selected_result)
             row_traces.append(
                 {
                     "environment_index": row_index,
@@ -195,9 +371,10 @@ class _TracingAntipodalGraspPoseGenerator(AntipodalGraspPoseGenerator):
                         "right_final_count": right_final,
                         "paired": left_final > 0 and right_final > 0,
                     },
+                    "pair_selection": pair_trace,
                 }
             )
         self._last_dual_trace = (
             row_traces[0] if len(row_traces) == 1 else {"environment_rows": row_traces}
         )
-        return results
+        return selected_results
