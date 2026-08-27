@@ -128,6 +128,15 @@ class CaseOutcome:
     joint_tracking_rmse_rad: float | None = None
     object_lift_delta_m: float | None = None
     replan_count: int | None = None
+    min_translation_err_mm: float | None = None
+    min_rotation_err_deg: float | None = None
+    trajectory_moved: bool | None = None
+    waypoint_min_translation_err_mm: tuple[float, ...] = ()
+    waypoint_min_rotation_err_deg: tuple[float, ...] = ()
+    waypoint_min_rotation_err_deg_at_position: tuple[float | None, ...] = ()
+    waypoint_min_translation_err_mm_at_orientation: tuple[float | None, ...] = ()
+    executed_final_translation_err_mm: float | None = None
+    executed_final_rotation_err_deg: float | None = None
 
 
 @dataclass(frozen=True)

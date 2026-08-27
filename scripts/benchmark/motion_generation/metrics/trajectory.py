@@ -99,6 +99,10 @@ def match_ordered_waypoints(
             "arrival_indices": [],
             "position_errors_m": [],
             "rotation_errors_rad": [],
+            "min_position_errors_m": [],
+            "min_rotation_errors_rad": [],
+            "min_rotation_errors_at_position_rad": [],
+            "min_position_errors_at_orientation_m": [],
         }
 
     pos_error, rot_error = _pose_error_matrices(waypoints, trajectory_poses)
@@ -126,12 +130,35 @@ def match_ordered_waypoints(
     ]
     completed = len(arrival_indices)
     total = int(waypoints.shape[0])
+    min_rotation_at_position: list[float | None] = []
+    min_position_at_orientation: list[float | None] = []
+    for waypoint_index in range(total):
+        position_hits = pos_error[waypoint_index] <= position_threshold_m
+        rotation_hits = rot_error[waypoint_index] <= rotation_threshold_rad
+        min_rotation_at_position.append(
+            float(rot_error[waypoint_index, position_hits].min().item())
+            if bool(position_hits.any().item())
+            else None
+        )
+        min_position_at_orientation.append(
+            float(pos_error[waypoint_index, rotation_hits].min().item())
+            if bool(rotation_hits.any().item())
+            else None
+        )
     return {
         "ordered_waypoints_reached": completed == total,
         "completed_waypoint_ratio": completed / max(total, 1),
         "arrival_indices": arrival_indices,
         "position_errors_m": position_errors,
         "rotation_errors_rad": rotation_errors,
+        "min_position_errors_m": [
+            float(value) for value in pos_error.min(dim=1).values.tolist()
+        ],
+        "min_rotation_errors_rad": [
+            float(value) for value in rot_error.min(dim=1).values.tolist()
+        ],
+        "min_rotation_errors_at_position_rad": min_rotation_at_position,
+        "min_position_errors_at_orientation_m": min_position_at_orientation,
     }
 
 
@@ -351,18 +378,34 @@ def compute_case_outcomes(
         name=control_part,
         to_matrix=True,
     )
+    native_pose_batch = robot.compute_batch_fk(
+        qpos=positions,
+        name=control_part,
+        to_matrix=True,
+    )
     outcomes: list[CaseOutcome] = []
     for env_index in range(case.batch_size):
         native_qpos = positions[env_index]
         finite = finite_paths[env_index]
         if finite:
             validation_qpos = validation_qpos_batch[env_index]
-            poses = validation_pose_batch[env_index]
+            validation_poses = validation_pose_batch[env_index]
+            # Keep the benchmark's established, sample-count-normalized
+            # trajectory for all success and path metrics.  Native planner
+            # samples are retained below only for rollout diagnostics.
+            poses = validation_poses
+            native_poses = native_pose_batch[env_index]
         else:
             validation_qpos = torch.empty(
                 (0, positions.shape[-1]), device=robot.device, dtype=positions.dtype
             )
+            validation_poses = torch.empty(
+                (0, 4, 4), device=robot.device, dtype=positions.dtype
+            )
             poses = torch.empty((0, 4, 4), device=robot.device, dtype=positions.dtype)
+            native_poses = torch.empty(
+                (0, 4, 4), device=robot.device, dtype=positions.dtype
+            )
 
         waypoints = case.target_waypoints[env_index]
         matching = match_ordered_waypoints(
@@ -394,12 +437,23 @@ def compute_case_outcomes(
 
         if poses.shape[0] > 0:
             final_pos_m, final_rot_rad = get_pose_err(poses[-1], waypoints[-1])
+            all_pos_error, all_rot_error = _pose_error_matrices(
+                waypoints, native_poses
+            )
+            min_pos_m = float(all_pos_error[-1].min().item())
+            min_rot_rad = float(all_rot_error[-1].min().item())
             joint_length, cartesian_length, efficiency = _path_metrics(
-                validation_qpos, poses, waypoints
+                validation_qpos, validation_poses, waypoints
+            )
+            trajectory_moved = bool(
+                torch.linalg.vector_norm(native_qpos - native_qpos[:1], dim=-1).max()
+                > 1.0e-6
             )
         else:
             final_pos_m = final_rot_rad = None
+            min_pos_m = min_rot_rad = None
             joint_length = cartesian_length = efficiency = None
+            trajectory_moved = False
 
         if not finite:
             failure_code = "non_finite_trajectory"
@@ -454,6 +508,28 @@ def compute_case_outcomes(
                 path_efficiency=efficiency,
                 failure_code=failure_code,
                 planner_failure_code=planner_failure_code,
+                min_translation_err_mm=(
+                    min_pos_m * 1000.0 if min_pos_m is not None else None
+                ),
+                min_rotation_err_deg=(
+                    min_rot_rad * 180.0 / math.pi if min_rot_rad is not None else None
+                ),
+                trajectory_moved=trajectory_moved,
+                waypoint_min_translation_err_mm=tuple(
+                    float(value) * 1000.0 for value in matching["min_position_errors_m"]
+                ),
+                waypoint_min_rotation_err_deg=tuple(
+                    float(value) * 180.0 / math.pi
+                    for value in matching["min_rotation_errors_rad"]
+                ),
+                waypoint_min_rotation_err_deg_at_position=tuple(
+                    None if value is None else float(value) * 180.0 / math.pi
+                    for value in matching["min_rotation_errors_at_position_rad"]
+                ),
+                waypoint_min_translation_err_mm_at_orientation=tuple(
+                    None if value is None else float(value) * 1000.0
+                    for value in matching["min_position_errors_at_orientation_m"]
+                ),
             )
         )
     return tuple(outcomes)

@@ -745,7 +745,14 @@ class MotionGenerator:
         else:
             duration = result.duration
 
-        if start_qpos is not None and not success.all():
+        preserve_failed_positions = (
+            getattr(self.planner, "preserve_failed_plan_positions", False) is True
+        )
+        if (
+            start_qpos is not None
+            and not success.all()
+            and not preserve_failed_positions
+        ):
             held = (
                 start_qpos.to(dtype=positions.dtype).unsqueeze(1).expand_as(positions)
             )

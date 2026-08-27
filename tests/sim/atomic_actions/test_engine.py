@@ -218,6 +218,21 @@ def test_engine_compile_holds_failed_rows_for_remaining_actions() -> None:
     assert torch.all(compiled.trajectory.positions[1] == 0.0)
 
 
+def test_engine_compile_preserves_opted_in_failed_trajectory_for_diagnostics() -> None:
+    engine = _engine()
+    engine.motion_generator.planner.preserve_failed_plan_positions = True
+    engine.register(StubAction())
+    target = torch.tensor([[1.0, 1.0, 1.0], [float("nan"), 2.0, 2.0]])
+
+    compiled = engine.compile((_invocation(target),))
+
+    assert compiled.plan_success.tolist() == [True, False]
+    assert torch.equal(
+        compiled.trajectory.positions[1, -1], torch.tensor([0.0, 2.0, 2.0])
+    )
+    assert torch.all(compiled.projected_context.robot.qpos[1] == 0.0)
+
+
 def test_engine_compile_empty_sequence_is_successful_noop() -> None:
     engine = _engine()
     context = engine.initial_context()

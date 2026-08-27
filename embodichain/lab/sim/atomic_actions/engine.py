@@ -372,7 +372,19 @@ class AtomicActionEngine:
             previous_qpos = projected.robot.qpos
             plan = self.plan(invocation, projected)
             step_success = alive & plan.plan_success.to(self.device)
-            trajectory = plan.trajectory.hold_rows(step_success, previous_qpos)
+            preserve_failed_positions = (
+                getattr(
+                    self.motion_generator.planner,
+                    "preserve_failed_plan_positions",
+                    False,
+                )
+                is True
+            )
+            trajectory = (
+                plan.trajectory
+                if preserve_failed_positions
+                else plan.trajectory.hold_rows(step_success, previous_qpos)
+            )
             plans.append(plan)
             trajectories.append(trajectory)
 
