@@ -123,6 +123,7 @@ def test_axis_align_adapter_injects_the_selected_body_grasp_unchanged() -> None:
     goal = AxisAlignGoal(
         semantics=ObjectSemantics(
             label="can",
+            entity_id="can",
             geometry={},
             affordance=AxisAlignAffordance(
                 mesh_vertices=vertices,

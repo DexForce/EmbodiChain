@@ -301,7 +301,7 @@ class AtomicActionAdapter:
         )
 
     def semantics(self, uid: str) -> ObjectSemantics:
-        """Build object semantics once while retaining the live entity handle."""
+        """Build object semantics once for the stable scene entity ID."""
         cached = self._semantics.get(uid)
         if cached is not None:
             return cached
@@ -360,7 +360,7 @@ class AtomicActionAdapter:
 
         semantics = ObjectSemantics(
             label=uid,
-            entity=entity,
+            entity_id=uid,
             geometry={"mesh_vertices": vertices, "mesh_triangles": triangles},
             affordance=AntipodalAffordance(
                 object_label=uid,
@@ -628,11 +628,6 @@ class AtomicActionAdapter:
             raise ValueError(
                 "AxisAlign body grasp requires a finite grounded live object pose "
                 f"with shape ({self.num_envs}, 4, 4)."
-            )
-        if goal.semantics.entity_id is not None:
-            goal = replace(
-                goal,
-                semantics=replace(goal.semantics, entity_id=None),
             )
         _, hand_part, _ = self._parts(grounded.arm)
         if hand_part is None:
@@ -1590,7 +1585,7 @@ class AtomicActionAdapter:
             include(target_uid)
 
         for held in state.held_objects.values():
-            include(held.semantics.label, held.env_mask)
+            include(held.semantics.entity_id, held.env_mask)
         collision_exclusion_uids = grounded.motion_policy.get(
             "collision_exclusion_uids", ()
         )

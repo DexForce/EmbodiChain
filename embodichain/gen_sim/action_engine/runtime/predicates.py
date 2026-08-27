@@ -346,10 +346,8 @@ def _object_held(
         gripper = gripper_values[arm_index]
         if held is None or actual_eef is None or gripper is None:
             continue
-        label = getattr(held.semantics, "label", None)
-        if not label and held.semantics.entity is not None:
-            label = getattr(held.semantics.entity, "uid", None)
-        if label != uid:
+        entity_id = getattr(held.semantics, "entity_id", None)
+        if entity_id != uid:
             continue
         actual_eef = actual_eef.to(device=env.device, dtype=object_pose.dtype)
         expected_eef = torch.bmm(
@@ -395,10 +393,8 @@ def _coordinated_held(
         return result
     for held in held_relations:
         assert held is not None
-        label = getattr(held.semantics, "label", None)
-        if not label and getattr(held.semantics, "entity", None) is not None:
-            label = getattr(held.semantics.entity, "uid", None)
-        if label != uid:
+        entity_id = getattr(held.semantics, "entity_id", None)
+        if entity_id != uid:
             return result
     eef_values = _arm_values(env, "xpos")
     gripper_values = _arm_values(env, "gripper_state")

@@ -58,15 +58,10 @@ from embodichain.lab.sim.atomic_actions import (
     TwistAffordance,
     TwistGoal,
 )
-from embodichain.toolkits.graspkit.pg_grasp import (
-    AntipodalSamplerCfg,
-    GraspGeneratorCfg,
-    GripperCollisionCfg,
-)
 from embodichain.utils.logger import log_info
+
 from .frames import arm_base_poses, relation_offset, robot_frame_axes
 from .geometry_axes import analyze_local_geometry_axes
-from .grasp_collision_cache import ensure_vhacd_grasp_collision_cache
 from .models import ExecutionProgram, GroundedAction, SemanticStep
 from .motion_policy import resolve_motion_policy, with_motion_modifiers
 from .robot_parts import arm_control_part
@@ -798,9 +793,6 @@ class ActionGrounder:
                         custom_config=dict(affordance.custom_config),
                         mesh_vertices=affordance.mesh_vertices,
                         mesh_triangles=affordance.mesh_triangles,
-                        generator_cfg=affordance.generator_cfg,
-                        gripper_collision_cfg=affordance.gripper_collision_cfg,
-                        force_reannotate=affordance.force_reannotate,
                         internal_axis=self._upright_local_direction(step),
                     ),
                 )
@@ -2078,9 +2070,6 @@ class ActionGrounder:
                 custom_config=dict(affordance.custom_config),
                 mesh_vertices=affordance.mesh_vertices,
                 mesh_triangles=affordance.mesh_triangles,
-                generator_cfg=affordance.generator_cfg,
-                gripper_collision_cfg=affordance.gripper_collision_cfg,
-                force_reannotate=affordance.force_reannotate,
                 internal_axis=local_axes[0],
             ),
         )
@@ -2274,40 +2263,10 @@ class ActionGrounder:
             f"eef_position={current_eef[0, :3, 3].detach().cpu().tolist()}, "
             f"arm_base_position={arm_base[0, :3, 3].detach().cpu().tolist()}."
         )
-        grasp_options = self.runtime_policy.grasp
-        sampler = AntipodalSamplerCfg(
-            n_sample=int(grasp_options["antipodal_n_sample"]),
-            max_angle=float(grasp_options["antipodal_max_angle"]),
-            max_length=float(grasp_options["max_open_length"]),
-            min_length=float(grasp_options["min_open_length"]),
-        )
-        generator = GraspGeneratorCfg(
-            viser_port=int(grasp_options["viser_port"]),
-            antipodal_sampler_cfg=sampler,
-            max_deviation_angle=float(grasp_options["max_deviation_angle"]),
-            n_deviated_approach_directions=int(
-                grasp_options["n_deviated_approach_directions"]
-            ),
-        )
-        max_hulls = int(grasp_options["max_decomposition_hulls"])
-        collision = GripperCollisionCfg(
-            max_open_length=float(grasp_options["max_open_length"]),
-            finger_length=float(grasp_options["finger_length"]),
-            point_sample_dense=float(grasp_options["point_sample_dense"]),
-            max_decomposition_hulls=max_hulls,
-        )
-        ensure_vhacd_grasp_collision_cache(
-            mesh_vertices=vertices,
-            mesh_triangles=triangles,
-            max_decomposition_hulls=max_hulls,
-        )
         affordance = SlideAffordance(
             object_label=f"{step.object_uid}:{child_link}",
             mesh_vertices=vertices,
             mesh_triangles=triangles,
-            generator_cfg=generator,
-            gripper_collision_cfg=collision,
-            force_reannotate=bool(grasp_options["force_grasp_reannotate"]),
             translation_axis=push_local[0],
             joint_name=joint_name,
             joint_limits=(float(limits[0, 0]), float(limits[0, 1])),
@@ -2315,6 +2274,7 @@ class ActionGrounder:
         semantics = ObjectSemantics(
             affordance=affordance,
             geometry={"mesh_vertices": vertices, "mesh_triangles": triangles},
+            entity_id=f"{step.object_uid}:{child_link}",
             label=f"{step.object_uid}:{child_link}",
         )
         return (
@@ -2505,6 +2465,7 @@ class ActionGrounder:
         semantics = ObjectSemantics(
             affordance=affordance,
             geometry={"mesh_vertices": vertices},
+            entity_id=f"{step.object_uid}:{child_link}",
             label=f"{step.object_uid}:{child_link}",
         )
         scoped_policy = dict(policy)
