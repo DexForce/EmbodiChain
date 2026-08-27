@@ -606,6 +606,33 @@ class TestPinkSolverUnit:
                 np.diag([0.0] * 6 + [1.0]),
             )
 
+        frame_id = model.addJointFrame(joint_id)
+        frame_name = model.frames[frame_id].name
+
+        class CoupledJacobianConfiguration:
+            """Expose a primary Jacobian coupling root and actuated velocity."""
+
+            def __init__(self):
+                self.model = model
+
+            @staticmethod
+            def get_frame_jacobian(name: str) -> np.ndarray:
+                assert name == frame_name
+                jacobian = np.zeros((1, model.nv))
+                jacobian[0, 0] = 1.0
+                jacobian[0, -1] = 1.0
+                return jacobian
+
+        projected_task = NullSpacePostureTask(
+            cost=1.0,
+            controlled_frames=[frame_name],
+        )
+        projector = projected_task.compute_jacobian(CoupledJacobianConfiguration())
+
+        assert np.allclose(projector[:6, :], 0.0)
+        assert np.allclose(projector[:, :6], 0.0)
+        assert projector[6, 6] == pytest.approx(0.5)
+
 
 @pytest.mark.skip(reason="Skipping Pink tests temporarily")
 class TestPinkSolver(BaseSolverTest):

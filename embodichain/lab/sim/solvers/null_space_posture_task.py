@@ -70,7 +70,9 @@ class NullSpacePostureTask(Task):
 
     .. math::
 
-        \mathbf{J}_{\text{posture}}(\mathbf{q}) = \mathbf{N}(\mathbf{q}) = \mathbf{I} - \mathbf{J}_{\text{primary}}^+ \mathbf{J}_{\text{primary}}
+        \mathbf{J}_{\text{posture}}(\mathbf{q}) = \mathbf{M}\mathbf{N}(\mathbf{q})\mathbf{M}
+
+        \mathbf{N}(\mathbf{q}) = \mathbf{I} - \mathbf{J}_{\text{primary}}^+ \mathbf{J}_{\text{primary}}
 
     where:
         - :math:`\mathbf{J}_{\text{primary}}` is the combined Jacobian of all higher priority tasks
@@ -99,7 +101,7 @@ class NullSpacePostureTask(Task):
 
     .. math::
 
-        \left\| \mathbf{N}(\mathbf{q}) \mathbf{v} + \mathbf{M} \cdot (\mathbf{q} \ominus \mathbf{q}^*) \right\|_{W_{\text{posture}}}^2
+        \left\| \mathbf{M}\mathbf{N}(\mathbf{q})\mathbf{M} \mathbf{v} + \mathbf{M} \cdot (\mathbf{q} \ominus \mathbf{q}^*) \right\|_{W_{\text{posture}}}^2
 
     This formulation allows the robot to maintain a desired posture while respecting the constraints
     imposed by higher priority tasks (e.g., end-effector positioning).
@@ -271,10 +273,12 @@ class NullSpacePostureTask(Task):
             - :math:`\mathbf{J}_{\text{primary}}^+` is the pseudoinverse of the primary task Jacobian
             - :math:`\mathbf{I}` is the identity matrix
 
-        The null space projector ensures that joint velocities in the null space produce
-        zero velocity for the primary tasks: :math:`\mathbf{J}_{\text{primary}} \cdot \dot{\mathbf{q}}_{\text{null}} = \mathbf{0}`.
+        Applying the selection mask on both sides prevents unselected velocity
+        coordinates, including floating-base coordinates, from contributing to
+        either the posture residual rows or its optimization columns.
 
-        If no controlled frames are specified, returns the identity matrix.
+        If no controlled frames are specified, returns the joint-selection
+        matrix rather than an unmasked identity matrix.
 
         Args:
             configuration: Robot configuration :math:`\mathbf{q}`.
@@ -289,7 +293,9 @@ class NullSpacePostureTask(Task):
         # If no frame tasks are defined, return identity matrix (no null space projection)
         if not self._frame_names:
             projector = np.eye(configuration.model.nv)
-            return self._velocity_mask[:, None] * projector
+            return (
+                self._velocity_mask[:, None] * projector * self._velocity_mask[None, :]
+            )
 
         # Get Jacobians for all frame tasks and combine them
         J_frame_tasks = [
@@ -302,4 +308,4 @@ class NullSpacePostureTask(Task):
         projector = (
             np.eye(J_combined.shape[1]) - np.linalg.pinv(J_combined) @ J_combined
         )
-        return self._velocity_mask[:, None] * projector
+        return self._velocity_mask[:, None] * projector * self._velocity_mask[None, :]
