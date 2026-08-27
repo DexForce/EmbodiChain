@@ -119,6 +119,7 @@ ROBOT_DOF = ARM_DOF + HAND_DOF
 CONTROL_DT = 1.0 / 60.0
 DUAL_ARM_DOF = 2 * ARM_DOF
 DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
+DOOR_ENTITY_ID = "door"
 
 ActionT = TypeVar("ActionT", bound=AtomicAction)
 _ACTION_ENGINES: dict[int, AtomicActionEngine] = {}
@@ -385,7 +386,7 @@ def _door_scene(
         version=0,
         entities={"target": EntityState(pose)},
         articulation_joints={
-            ("door", "door_hinge"): ObservedArticulationJointState(
+            (DOOR_ENTITY_ID, "door_hinge"): ObservedArticulationJointState(
                 hinge_position,
                 valid_mask,
             )
@@ -2479,6 +2480,7 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> Non
     semantics = ObjectSemantics(
         affordance=affordance,
         geometry={},
+        entity_id=DOOR_ENTITY_ID,
         label="door_handle",
     )
     generator = _motion_generator()
@@ -2625,6 +2627,7 @@ def test_open_door_holds_failed_grasp_environment() -> None:
     semantics = ObjectSemantics(
         affordance=_door_affordance(),
         geometry={},
+        entity_id=DOOR_ENTITY_ID,
         label="door_handle",
     )
     generator = _motion_generator()
@@ -2667,6 +2670,7 @@ def test_open_door_fails_row_whose_target_would_close_hinge() -> None:
     semantics = ObjectSemantics(
         affordance=_door_affordance(),
         geometry={},
+        entity_id=DOOR_ENTITY_ID,
         label="door_handle",
     )
     action = _bind_action(_motion_generator(), OpenDoor())
@@ -2706,6 +2710,7 @@ def test_open_door_fails_rows_with_invalid_fraction_or_out_of_limit_hinge() -> N
     semantics = ObjectSemantics(
         affordance=_door_affordance(),
         geometry={},
+        entity_id=DOOR_ENTITY_ID,
         label="door_handle",
     )
     action = _bind_action(_motion_generator(), OpenDoor())
@@ -2742,6 +2747,7 @@ def test_open_door_holds_row_already_at_requested_open_fraction() -> None:
     semantics = ObjectSemantics(
         affordance=_door_affordance(),
         geometry={},
+        entity_id=DOOR_ENTITY_ID,
         label="door_handle",
     )
     action = _bind_action(_motion_generator(), OpenDoor())
@@ -2781,6 +2787,7 @@ def test_open_door_fails_when_live_hinge_observation_is_missing() -> None:
     semantics = ObjectSemantics(
         affordance=_door_affordance(),
         geometry={},
+        entity_id=DOOR_ENTITY_ID,
         label="door_handle",
     )
     action = _bind_action(_motion_generator(), OpenDoor())
@@ -2808,7 +2815,12 @@ def test_open_door_fails_when_live_hinge_observation_is_missing() -> None:
 
 def test_open_door_rejects_wrong_affordance_and_invalid_goal_shape() -> None:
     action = _bind_action(_motion_generator(), OpenDoor())
-    semantics = ObjectSemantics(affordance=Affordance(), geometry={}, label="handle")
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity_id=DOOR_ENTITY_ID,
+        label="handle",
+    )
 
     with pytest.raises(ValueError, match="OpenDoorAffordance"):
         _plan_action(
@@ -2832,6 +2844,7 @@ def test_open_door_validates_goal_binding_owner_and_endpoint_coverage() -> None:
     semantics = ObjectSemantics(
         affordance=_door_affordance(),
         geometry={},
+        entity_id=DOOR_ENTITY_ID,
         label="door_handle",
     )
     valid_goal = OpenDoorGoal(semantics, torch.eye(4), open_fraction=0.5)
