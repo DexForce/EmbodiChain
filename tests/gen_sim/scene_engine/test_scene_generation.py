@@ -16,8 +16,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
+from PIL import Image
 from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
@@ -26,11 +29,17 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene, SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation import (
+    _align_table_roots_individually,
+    _apply_visual_yaws_to_simready_asset_layouts,
     _apply_root_layout_updates_to_descendant_subtrees,
+    _optimize_simready_asset_visual_yaws,
     _project_child_aabb_centers_into_parent_aabb,
     _refine_on_children_bfs,
     _scene_graph_based_calibration,
     _table_on_asset_ids,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import (
+    VisualYawOptimizer,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
@@ -101,6 +110,166 @@ def test_scene_graph_calibration_makes_standing_asset_vertical() -> None:
     )
 
 
+def test_visual_yaw_optimizer_returns_zero_for_unobserved_asset(
+    tmp_path,
+) -> None:
+    glb_path = tmp_path / "book_001.glb"
+    glb_path.write_bytes(b"glTF")
+    scene_object = SceneObject(
+        id="book_001",
+        kind="asset",
+        category="book",
+        name="book",
+        description="book",
+        simready_glb_path=str(glb_path),
+    )
+
+    yaw_delta_degrees = VisualYawOptimizer(
+        scene_object=scene_object,
+        baked_scale_y_up=[1.0, 1.0, 1.0],
+        vlm_client=object(),
+        debug_output_root=tmp_path / "visual_yaw",
+    ).optimize_z_up_yaw_degrees()
+
+    assert yaw_delta_degrees == 0.0
+
+
+def test_visual_yaw_optimizer_queries_vlm_and_saves_yawed_debug_image(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    glb_path = tmp_path / "book_001.glb"
+    glb_path.write_bytes(b"glTF")
+    rgba_path = tmp_path / "book_001_rgba.png"
+    Image.new("RGBA", (64, 64), (255, 0, 0, 255)).save(rgba_path)
+
+    rendered_yaws: list[float] = []
+
+    def fake_render(*, z_up_yaw_degrees, output_path, **_) -> None:
+        rendered_yaws.append(z_up_yaw_degrees)
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (512, 512), "black").save(output_path)
+
+    class FakeVLM:
+        image_paths: list[Path] = []
+
+        def complete(self, *, image_path, **_) -> str:
+            self.image_paths.append(Path(image_path))
+            return '{"clockwise_yaw_degrees": 90, "reason": "long axis"}'
+
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer._render_canonical_oblique_view",
+        fake_render,
+    )
+    fake_vlm = FakeVLM()
+    yaw_degrees = VisualYawOptimizer(
+        scene_object=SceneObject(
+            id="book_001",
+            kind="asset",
+            category="book",
+            name="book",
+            description="book",
+            simready_glb_path=str(glb_path),
+            visible_rgba_path=str(rgba_path),
+        ),
+        baked_scale_y_up=[1.0, 1.0, 1.0],
+        vlm_client=fake_vlm,
+        debug_output_root=tmp_path / "visual_yaw",
+    ).optimize_z_up_yaw_degrees()
+
+    assert yaw_degrees == -90.0
+    assert rendered_yaws == [0.0, -90.0]
+    assert fake_vlm.image_paths == [tmp_path / "visual_yaw" / "book_001_vlm_input.png"]
+    assert (tmp_path / "visual_yaw" / "book_001_yaw_result.png").is_file()
+
+
+def test_simready_visual_yaw_queries_every_asset(monkeypatch, tmp_path) -> None:
+    queried_asset_ids: list[str] = []
+
+    class FakeVisualYawOptimizer:
+        def __init__(
+            self,
+            *,
+            scene_object,
+            baked_scale_y_up,
+            vlm_client,
+            debug_output_root,
+        ) -> None:
+            assert baked_scale_y_up == [1.0, 2.0, 3.0]
+            assert vlm_client is fake_vlm_client
+            assert debug_output_root == tmp_path / "visual_yaw"
+            queried_asset_ids.append(scene_object.id)
+
+        def optimize_z_up_yaw_degrees(self) -> float:
+            return 15.0
+
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation.VisualYawOptimizer",
+        FakeVisualYawOptimizer,
+    )
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="table",
+                description="table",
+            ),
+            SceneObject(
+                id="book_001",
+                kind="asset",
+                category="book",
+                name="book",
+                description="book",
+                simready_glb_path=str(tmp_path / "book_001.glb"),
+            ),
+            SceneObject(
+                id="cup_001",
+                kind="asset",
+                category="cup",
+                name="cup",
+                description="cup",
+                simready_glb_path=str(tmp_path / "cup_001.glb"),
+            ),
+        ]
+    )
+    fake_vlm_client = object()
+
+    yaw_deltas_by_id = _optimize_simready_asset_visual_yaws(
+        scene=scene,
+        simready_assets_layout=[{"id": "book_001"}, {"id": "cup_001"}],
+        coarse_layout_by_id={
+            "book_001": {"scale": [1.0, 2.0, 3.0]},
+            "cup_001": {"scale": [1.0, 2.0, 3.0]},
+        },
+        vlm_client=fake_vlm_client,
+        debug_output_root=tmp_path / "visual_yaw",
+    )
+
+    assert queried_asset_ids == ["book_001", "cup_001"]
+    assert yaw_deltas_by_id == {"book_001": 15.0, "cup_001": 15.0}
+
+
+def test_visual_yaws_replace_coarse_rotations_but_preserve_positions() -> None:
+    yawed_layout = _apply_visual_yaws_to_simready_asset_layouts(
+        simready_assets_layout=[
+            {
+                "id": "book_001",
+                "rot": [20.0, -15.0, 40.0],
+                "pos": [0.1, 0.2, 0.3],
+                "scale": [1.0, 1.0, 1.0],
+            }
+        ],
+        z_up_yaws_degrees_by_id={"book_001": 45.0},
+    )[0]
+
+    expected_z_up_yaw = Rotation.from_euler("z", 45.0, degrees=True).as_matrix()
+    assert np.allclose(_z_up_rotation_from_y_up_layout(yawed_layout), expected_z_up_yaw)
+    assert np.allclose(yawed_layout["pos"], [0.1, 0.2, 0.3])
+
+
 def test_table_root_update_propagates_its_pose_delta_to_descendants() -> None:
     scene_graph = SceneGraph(
         nodes=[
@@ -150,6 +319,99 @@ def test_table_root_update_propagates_its_pose_delta_to_descendants() -> None:
         layout_object_to_transform_matrix(refined_layouts[1])[:3, 3],
         [0.7, -0.05, 0.45],
     )
+
+
+def test_table_roots_align_independently_and_move_only_their_descendants(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class FakeAssetsGroupTableAligner:
+        aligned_root_ids: list[str] = []
+
+        def __init__(self, *, table_layout, assets_layout, geometry_root) -> None:
+            assert geometry_root == tmp_path / "geometry"
+            assert len(assets_layout) == 1
+            self.table_layout = table_layout
+            self.root_layout = assets_layout[0]
+
+        def align(self):
+            root_id = self.root_layout["id"]
+            assert isinstance(root_id, str)
+            self.aligned_root_ids.append(root_id)
+            vertical_delta_by_id = {"board_001": 0.4, "bottle_001": -0.2}
+            return self.table_layout, [
+                {
+                    **self.root_layout,
+                    "pos": [
+                        *self.root_layout["pos"][:2],
+                        self.root_layout["pos"][2] + vertical_delta_by_id[root_id],
+                    ],
+                }
+            ]
+
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation.AssetsGroupTableAligner",
+        FakeAssetsGroupTableAligner,
+    )
+    scene_graph = SceneGraph(
+        nodes=[
+            SceneGraphNode(object_id="table", parent_id=None),
+            SceneGraphNode(
+                object_id="board_001", parent_id="table", parent_relation="on"
+            ),
+            SceneGraphNode(
+                object_id="knife_001", parent_id="board_001", parent_relation="on"
+            ),
+            SceneGraphNode(
+                object_id="bottle_001", parent_id="table", parent_relation="on"
+            ),
+        ]
+    )
+    table_layout = {
+        "id": "table",
+        "rot": [0.0, 0.0, 0.0],
+        "pos": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0],
+    }
+    assets_layout = [
+        {
+            "id": "board_001",
+            "rot": [0.0, 0.0, 0.0],
+            "pos": [0.1, 0.2, 0.3],
+            "scale": [1.0, 1.0, 1.0],
+        },
+        {
+            "id": "knife_001",
+            "rot": [0.0, 0.0, 0.0],
+            "pos": [0.15, 0.25, 0.35],
+            "scale": [1.0, 1.0, 1.0],
+        },
+        {
+            "id": "bottle_001",
+            "rot": [0.0, 0.0, 0.0],
+            "pos": [0.5, 0.6, 0.8],
+            "scale": [1.0, 1.0, 1.0],
+        },
+    ]
+
+    _, aligned_assets_layout = _align_table_roots_individually(
+        scene_graph=scene_graph,
+        table_layout=table_layout,
+        assets_layout=assets_layout,
+        table_root_ids={"board_001", "bottle_001"},
+        geometry_root=tmp_path / "geometry",
+    )
+
+    aligned_layouts_by_id = {
+        str(asset_layout["id"]): asset_layout for asset_layout in aligned_assets_layout
+    }
+    assert FakeAssetsGroupTableAligner.aligned_root_ids == [
+        "board_001",
+        "bottle_001",
+    ]
+    assert np.allclose(aligned_layouts_by_id["board_001"]["pos"], [0.1, 0.2, 0.7])
+    assert np.allclose(aligned_layouts_by_id["knife_001"]["pos"], [0.15, 0.25, 0.75])
+    assert np.allclose(aligned_layouts_by_id["bottle_001"]["pos"], [0.5, 0.6, 0.6])
 
 
 def test_on_children_bfs_refines_every_non_table_parent(

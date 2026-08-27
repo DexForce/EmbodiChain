@@ -37,7 +37,10 @@ from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
+from embodichain.gen_sim.scene_engine.core.scene_graph import (
+    TABLE_OBJECT_ID,
+    SceneGraph,
+)
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
@@ -73,6 +76,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessor,
     SimReadyProcessorConfig,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import (
+    VisualYawOptimizer,
 )
 from embodichain.utils.logger import log_info
 
@@ -126,12 +132,12 @@ def generate_scene_and_refine(
     coarse_layout_by_id = {
         layout_object["id"]: layout_object for layout_object in coarse_layout
     }
-    # Explicit graph orientations use VLM front/top views before SimReady
-    # canonicalization; null leaves the geometry-server pose unchanged.
+    # Every graph asset, including null, receives a VLM check before SimReady
+    # canonicalization; null requests its natural stable tabletop pose.
     orientation_states_by_id = {
         node.object_id: node.orientation_state
         for node in scene_graph.nodes
-        if node.orientation_state is not None
+        if node.object_id != TABLE_OBJECT_ID
     }
     simready_processor = SimReadyProcessor(
         scene=scene,
@@ -148,6 +154,18 @@ def generate_scene_and_refine(
         vlm_client=vlm_client,
     )
     simready_assets_layout = simready_processor.process_assets()
+    # Replace unreliable coarse rotations with VLM-observed canonical z-up yaw.
+    visual_yaws_by_id = _optimize_simready_asset_visual_yaws(
+        scene=scene,
+        simready_assets_layout=simready_assets_layout,
+        coarse_layout_by_id=coarse_layout_by_id,
+        vlm_client=vlm_client,
+        debug_output_root=debug_output_root / "visual_yaw",
+    )
+    simready_assets_layout = _apply_visual_yaws_to_simready_asset_layouts(
+        simready_assets_layout=simready_assets_layout,
+        z_up_yaws_degrees_by_id=visual_yaws_by_id,
+    )
     simready_table_layout = simready_processor.process_table()
     # Concat then save the table info and the assets info in one JSON file.
     simready_layout = [simready_table_layout, *simready_assets_layout]
@@ -170,6 +188,86 @@ def generate_scene_and_refine(
         encoding="utf-8",
     )
     return scene
+
+
+def _optimize_simready_asset_visual_yaws(
+    *,
+    scene: Scene,
+    simready_assets_layout: list[dict[str, object]],
+    coarse_layout_by_id: dict[str, dict[str, object]],
+    vlm_client: OpenAICompatibleVLM,
+    debug_output_root: str | Path,
+) -> dict[str, float]:
+    """Query one absolute canonical z-up yaw for every observed SimReady asset."""
+    assets_by_id = {asset.id: asset for asset in scene.assets}
+    layout_ids = [layout.get("id") for layout in simready_assets_layout]
+    if not all(isinstance(layout_id, str) and layout_id for layout_id in layout_ids):
+        raise ValueError("Every SimReady asset layout must contain a non-empty id.")
+    if len(layout_ids) != len(set(layout_ids)):
+        raise ValueError("SimReady asset layouts must have unique ids.")
+    if set(layout_ids) != set(assets_by_id):
+        raise ValueError("SimReady asset layouts must match the scene asset ids.")
+
+    yaws_degrees_by_id: dict[str, float] = {}
+    for asset_layout in simready_assets_layout:
+        layout_id = asset_layout["id"]
+        assert isinstance(layout_id, str)
+        coarse_layout = coarse_layout_by_id.get(layout_id)
+        if coarse_layout is None:
+            raise ValueError(f"Coarse layout does not contain asset {layout_id!r}.")
+        coarse_scale = coarse_layout.get("scale")
+        if not isinstance(coarse_scale, list):
+            raise ValueError(
+                f"Coarse layout scale for asset {layout_id!r} must be a list."
+            )
+        yaws_degrees_by_id[layout_id] = VisualYawOptimizer(
+            scene_object=assets_by_id[layout_id],
+            baked_scale_y_up=coarse_scale,
+            vlm_client=vlm_client,
+            debug_output_root=debug_output_root,
+        ).optimize_z_up_yaw_degrees()
+    return yaws_degrees_by_id
+
+
+def _apply_visual_yaws_to_simready_asset_layouts(
+    *,
+    simready_assets_layout: list[dict[str, object]],
+    z_up_yaws_degrees_by_id: dict[str, float],
+) -> list[dict[str, object]]:
+    """Keep SimReady positions but replace each coarse rotation with canonical yaw."""
+    layout_ids = [layout.get("id") for layout in simready_assets_layout]
+    if not all(isinstance(layout_id, str) and layout_id for layout_id in layout_ids):
+        raise ValueError("Every SimReady asset layout must contain a non-empty id.")
+    typed_layout_ids = [str(layout_id) for layout_id in layout_ids]
+    if len(typed_layout_ids) != len(set(typed_layout_ids)):
+        raise ValueError("SimReady asset layouts must have unique ids.")
+    if set(z_up_yaws_degrees_by_id) != set(typed_layout_ids):
+        raise ValueError("Visual yaws must match the SimReady asset layout ids.")
+
+    y_up_to_z_up_matrix = np.eye(4)
+    y_up_to_z_up_matrix[:3, :3] = Rotation.from_euler(
+        "x", 90.0, degrees=True
+    ).as_matrix()
+    z_up_to_y_up_matrix = np.linalg.inv(y_up_to_z_up_matrix)
+    yawed_layouts: list[dict[str, object]] = []
+    for asset_layout, asset_id in zip(simready_assets_layout, typed_layout_ids):
+        original_matrix = layout_object_to_transform_matrix(asset_layout)
+        z_up_yaw_matrix = np.eye(4)
+        z_up_yaw_matrix[:3, :3] = Rotation.from_euler(
+            "z", z_up_yaws_degrees_by_id[asset_id], degrees=True
+        ).as_matrix()
+        # The canonical SimReady pose replaces the coarse layout rotation.
+        canonical_y_up_matrix = (
+            z_up_to_y_up_matrix @ z_up_yaw_matrix @ y_up_to_z_up_matrix
+        )
+        canonical_y_up_matrix[:3, 3] = original_matrix[:3, 3]
+        canonical_y_up_matrix[:3, :3] = canonical_y_up_matrix[:3, :3] @ np.diag(
+            np.linalg.norm(original_matrix[:3, :3], axis=0)
+        )
+        yawed_layouts.append(
+            transform_matrix_to_layout_object(asset_id, canonical_y_up_matrix)
+        )
+    return yawed_layouts
 
 
 def _generate_coarse_results_from_masks(
@@ -404,23 +502,15 @@ def _layout_refinement(
         log_info("Scene has no on-table assets; skipping table layout refinement.")
         return refined_table_layout, refined_assets_layout
 
-    # Move the direct on-table assets as one rigid group so their lowest AABB
-    # point is 2cm above the table. Descendants retain their relative transforms.
-    table_root_matrices_before_align = _layout_matrices_by_id(table_root_layouts)
-    group_table_aligner = AssetsGroupTableAligner(
+    # Each on-table root needs its own support height; its descendants follow it.
+    refined_table_layout, refined_assets_layout = _align_table_roots_individually(
+        scene_graph=scene_graph,
         table_layout=refined_table_layout,
-        assets_layout=table_root_layouts,
+        assets_layout=refined_assets_layout,
+        table_root_ids=table_root_ids,
         geometry_root=simready_geometry_output_root,
     )
-    # Align.
-    refined_table_layout, aligned_table_root_layouts = group_table_aligner.align()
-    refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
-        scene_graph=scene_graph,
-        assets_layout=refined_assets_layout,
-        updated_root_layouts=aligned_table_root_layouts,
-        root_matrices_before_update=table_root_matrices_before_align,
-    )
-    # After update the layouts, re-select those who are direct on-table children.
+    # Re-select direct table children after their independent vertical placement.
     table_root_layouts = _select_asset_layouts(
         assets_layout=refined_assets_layout,
         asset_ids=table_root_ids,
@@ -579,6 +669,49 @@ def _layout_refinement(
         assets_layout=refined_assets_layout,
         geometry_root=simready_geometry_output_root,
     )
+    return refined_table_layout, refined_assets_layout
+
+
+def _align_table_roots_individually(
+    *,
+    scene_graph: SceneGraph,
+    table_layout: dict[str, object],
+    assets_layout: list[dict[str, object]],
+    table_root_ids: set[str],
+    geometry_root: str | Path,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Place each direct on-table root above the table and move its subtree."""
+    refined_table_layout = table_layout
+    refined_assets_layout = assets_layout
+    # Preserve layout order while each root receives an independent z correction.
+    initial_table_root_layouts = _select_asset_layouts(
+        assets_layout=assets_layout,
+        asset_ids=table_root_ids,
+    )
+    for initial_root_layout in initial_table_root_layouts:
+        root_id = initial_root_layout.get("id")
+        if not isinstance(root_id, str) or not root_id:
+            raise ValueError(
+                "Every direct on-table layout must contain a non-empty id."
+            )
+        current_root_layouts = _select_asset_layouts(
+            assets_layout=refined_assets_layout,
+            asset_ids={root_id},
+        )
+        root_matrices_before_align = _layout_matrices_by_id(current_root_layouts)
+        aligned_table_layout, aligned_root_layouts = AssetsGroupTableAligner(
+            table_layout=refined_table_layout,
+            assets_layout=current_root_layouts,
+            geometry_root=geometry_root,
+        ).align()
+        refined_table_layout = aligned_table_layout
+        # Propagating the complete root delta keeps descendants attached to it.
+        refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+            scene_graph=scene_graph,
+            assets_layout=refined_assets_layout,
+            updated_root_layouts=aligned_root_layouts,
+            root_matrices_before_update=root_matrices_before_align,
+        )
     return refined_table_layout, refined_assets_layout
 
 
