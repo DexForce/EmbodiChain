@@ -94,9 +94,6 @@ class AxisAlignOptions(PickUpOptions):
     target_axis: torch.Tensor = torch.tensor([0.0, 0.0, 1.0])
     """Desired world-frame axis, shape ``(3,)`` or ``(B, 3)``."""
 
-    lower_distance: float = 0.03
-    """World-Z distance (m) to lower the aligned object before release."""
-
     def __post_init__(self) -> None:
         PickUpOptions.__post_init__(self)
         if (
@@ -108,15 +105,11 @@ class AxisAlignOptions(PickUpOptions):
             raise ValueError("target_axis must be a finite (3,) or (B, 3) tensor.")
         if torch.any(torch.linalg.vector_norm(self.target_axis, dim=-1) <= 1.0e-6):
             raise ValueError("target_axis must be non-zero.")
-        if not math.isfinite(self.lower_distance):
-            raise ValueError("lower_distance must be finite.")
-        if self.lower_distance < 0.0:
-            raise ValueError("lower_distance must be non-negative.")
         object.__setattr__(self, "target_axis", self.target_axis.clone())
 
 
 class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
-    """Grasp an object, align its local axis to a world axis, and release it."""
+    """Grasp an object and align its local axis to a world axis."""
 
     skill_id: ClassVar[str] = "axis_align"
     GoalType: ClassVar[type] = AxisAlignGoal
@@ -181,7 +174,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         request: ResolvedActionRequest[AxisAlignGoal, AxisAlignOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        """Plan all seven physical actions in two arm-planning phases."""
+        """Plan grasp, lift, and alignment in two arm-planning phases."""
         target = request.goal
         options = request.skill_options
         affordance = self._require_axis_align_affordance(target.semantics)
@@ -301,7 +294,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
         lifted_object_pose = torch.bmm(lift_xpos, pose_inv(object_to_eef))
 
-        n_approach, n_reach, n_lift, n_align, n_lower = self._motion_segment_lengths(
+        n_approach, n_reach, n_lift, n_align = self._motion_segment_lengths(
             request.motion_policy.sample_count,
             options.hand_interp_steps,
         )
@@ -317,14 +310,6 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             options.target_axis,
             waypoint_count=1,
         )
-        lower_xpos = translate_pose_world(
-            align_xpos[:, -1],
-            torch.tensor(
-                [0.0, 0.0, -options.lower_distance],
-                device=self.device,
-                dtype=torch.float32,
-            ),
-        )
 
         # CuRobo planning is grouped by gripper state.  The open-gripper phase
         # contains both the pre-grasp and grasp waypoints, so one generate call
@@ -339,21 +324,19 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             interpolation_dt,
         )
 
-        # Once the gripper is closed, lifting, alignment, and lowering form one
-        # continuous held-object phase.  Passing only those three semantic
+        # Once the gripper is closed, lifting and alignment form one continuous
+        # held-object phase.  Passing only those two semantic
         # endpoints retains the required ordering without expanding the rotation
         # into many CuRobo plan_pose calls.  Together with the open-gripper phase,
-        # the action now uses two MotionGenerator.generate calls and five backend
-        # target plans instead of n_align + 4 backend target plans.
-        post_close_xpos = torch.cat(
-            [lift_xpos[:, None], align_xpos, lower_xpos[:, None]], dim=1
-        )
+        # the action uses two MotionGenerator.generate calls and four backend
+        # target plans instead of n_align + 3 backend target plans.
+        post_close_xpos = torch.cat([lift_xpos[:, None], align_xpos], dim=1)
         post_close_success, post_close_arm = self._plan_pose_phase(
             post_close_xpos,
             pre_close_arm[:, -1],
             manipulator,
             request,
-            n_lift + n_align + n_lower,
+            n_lift + n_align,
             interpolation_dt,
         )
         success = grasp_success & normalize_success_mask(
@@ -368,16 +351,10 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             hand_grasp_qpos,
             n_waypoints=options.hand_interp_steps,
         )
-        hand_open = interpolate_hand_qpos(
-            hand_grasp_qpos,
-            hand_open_qpos,
-            n_waypoints=options.hand_interp_steps,
-        )
         segment_lengths = {
             "approach": pre_close_arm.shape[1],
             "close": hand_close.shape[1],
             "manipulate": post_close_arm.shape[1],
-            "open": hand_open.shape[1],
         }
         full = torch.empty(
             (self.num_envs, sum(segment_lengths.values()), self.robot_dof),
@@ -395,9 +372,6 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         stop = offset + post_close_arm.shape[1]
         full[:, offset:stop, arm_joint_ids] = post_close_arm
         full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
-        offset = stop
-        full[:, offset:, arm_joint_ids] = post_close_arm[:, -1].unsqueeze(1)
-        full[:, offset:, hand_joint_ids] = hand_open
 
         return self.build_plan(
             request,
@@ -606,16 +580,16 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
     def _motion_segment_lengths(
         sample_count: int,
         hand_interp_steps: int,
-    ) -> tuple[int, int, int, int, int]:
-        motion_count = sample_count - 2 * hand_interp_steps
-        if motion_count < 5:
+    ) -> tuple[int, int, int, int]:
+        motion_count = sample_count - hand_interp_steps
+        if motion_count < 4:
             raise ValueError(
                 "Not enough waypoints for AxisAlign. Increase sample_count or "
                 "decrease hand_interp_steps."
             )
-        base, remainder = divmod(motion_count, 5)
-        values = [base + (index < remainder) for index in range(5)]
-        return values[0], values[1], values[2], values[3], values[4]
+        base, remainder = divmod(motion_count, 4)
+        values = [base + (index < remainder) for index in range(4)]
+        return values[0], values[1], values[2], values[3]
 
     @staticmethod
     def _require_axis_align_affordance(

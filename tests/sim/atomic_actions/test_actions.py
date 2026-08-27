@@ -1694,7 +1694,6 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
             skill_options=AxisAlignOptions(
                 target_axis=torch.tensor([1.0, 0.0, 0.0]),
                 lift_height=0.1,
-                lower_distance=0.03,
             ),
         ),
         context,
@@ -1709,10 +1708,9 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
         "approach",
         "close",
         "manipulate",
-        "open",
     ]
     assert generator.generate.call_count == 2
-    assert len(solved_poses) == 5
+    assert len(solved_poses) == 4
     assert plan.expected_effects.is_empty
     assert context.task is original_task
     assert plan.scene_dependencies == ("target",)
@@ -1726,7 +1724,8 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
         torch.tensor([1.0, 0.0, 0.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
-    assert solved_poses[-1][:, 2, 3].tolist() == pytest.approx([0.07, 0.07])
+    assert solved_poses[-1][:, 2, 3].tolist() == pytest.approx([0.1, 0.1])
+    assert torch.all(trajectory.positions[:, -1, ARM_DOF:] == 1.0)
 
 
 def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> None:

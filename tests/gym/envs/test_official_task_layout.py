@@ -43,7 +43,7 @@ EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
     "StayStillSave-v1": "embodichain_tasks.special.stay_still_save",
 }
 REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
-CONFIG_DEFINED_EXPERT_TASKS = {"pour_water", "rearrangement"}
+CONFIG_DEFINED_EXPERT_TASKS = {"pour_water"}
 RL_SIMULATOR_ENV_IDS = {"CartPoleRL", "PushCubeRL"}
 TABLEWARE_CONFIG_TASKS = {
     "blocks_ranking_rgb",
@@ -51,7 +51,6 @@ TABLEWARE_CONFIG_TASKS = {
     "match_object_container",
     "place_object_drawer",
     "pour_water",
-    "rearrangement",
     "scoop_ice",
     "stack_blocks_two",
     "stack_cups",

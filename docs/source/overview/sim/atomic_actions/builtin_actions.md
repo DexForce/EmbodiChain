@@ -73,7 +73,7 @@ The animations below are the focused simulator demos under
 :link: builtin-axis-align
 :link-type: ref
 
-`axis_align` · grasp, lift, align an object-local axis, and release
+`axis_align` · grasp, lift, and align an object-local axis
 
 <img src="../../../_static/atomic_actions/axis_align_horizontal.gif" alt="Axis align horizontal demo" width="480" style="max-width: 100%;" />
 <img src="../../../_static/atomic_actions/axis_align_upright.gif" alt="Axis align upright demo" width="480" style="max-width: 100%;" />
@@ -195,7 +195,7 @@ The animations below are the focused simulator demos under
 | `move_end_effector` | `EndEffectorPoseGoal` | `primary.motion` | none | none | none |
 | `move_joints` | `JointPositionGoal` | `primary.motion` | named target only: command matching `target` on `primary.motion` | none | none |
 | `pick_up` | `GraspGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | semantic object/entity | attach object to the `primary.motion` target |
-| `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | unheld object with `AxisAlignAffordance` | open-loop pick, align, lower, and release |
+| `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | unheld object with `AxisAlignAffordance` | open-loop pick and align while retaining the grasp |
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | object held exclusively by the `primary.motion` target | preserve attachment |
 | `pour` | `PourGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | exclusively held object with `AxisAlignAffordance` | preserve attachment; open-loop rotate and return |
 | `push_object` | `PushObjectGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | free rigid object plus target support pose | open-loop planar push; application validates the measured landing pose |
@@ -463,11 +463,11 @@ target recovery, see
 
 ## `AxisAlign`
 
-Executes **approach -> reach -> close -> lift -> align -> lower -> open** while
+Executes **approach -> reach -> close -> lift -> align** while
 grouping arm motion into two planner calls: the open-gripper `approach` phase
 contains the pre-grasp and grasp targets, and the closed-gripper `manipulate`
-phase contains lift, alignment, and lowering targets. The `close` and `open`
-segments are local hand interpolation and do not call the motion generator.
+phase contains the lift and alignment targets. The `close` segment is local
+hand interpolation and does not call the motion generator.
 Only the final aligned pose is sent to the planner; the alignment sample budget
 controls trajectory resolution without expanding the rotation into one CuRobo
 `plan_pose` call per intermediate orientation.
@@ -484,7 +484,7 @@ derives every end-effector keyframe through the fixed grasp transform.
 | Goal | `AxisAlignGoal(semantics=..., grasp_xpos=None)` |
 | Binding | manipulator + end effector role `primary` |
 | Precondition | an `AxisAlignAffordance`; the object pose resolves from `ObjectSemantics.entity_id` or the deprecated live entity fallback |
-| Motion | approach, grasp, lift, rotate in place, lower, release |
+| Motion | approach, grasp, lift, and rotate in place while retaining the grasp |
 | Effect | explicitly open-loop; no final object-pose success is claimed |
 
 An explicit `grasp_xpos` accepts the same pose forms as `GraspGoal`; omitting it
@@ -493,8 +493,8 @@ rotation axis, using grasp cost as the tie-breaker. When a currently horizontal
 object axis is aligned to world-up, the initial grasp orientation is pre-rotated
 45 degrees opposite the alignment rotation. This reduces the arm's table-side
 sweep during upright manipulation. `AxisAlignOptions` extends `PickUpOptions`
-with `target_axis` and `lower_distance`. Shared and per-environment target axes
-use shapes `(3,)` and `(B, 3)` respectively. Zero or non-finite axes are
+with `target_axis`. Shared and per-environment target axes use shapes `(3,)`
+and `(B, 3)` respectively. Zero or non-finite axes are
 rejected, and exactly opposite axes use a deterministic 180-degree rotation
 rather than an unstable cross-product direction.
 
