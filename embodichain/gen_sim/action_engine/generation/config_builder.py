@@ -40,6 +40,10 @@ from embodichain.gen_sim.action_engine.gripper_profiles import (
     GripperProfile,
     get_gripper_profile,
 )
+from embodichain.gen_sim.action_engine.solver_profiles import (
+    resolve_ik_solver_mode,
+    validate_robot_ik_solver_contract,
+)
 from embodichain.gen_sim.action_engine.protocol import (
     ACTION_ENGINE_CONFIG_SCHEMA,
     ACTION_ENGINE_ENV_ID,
@@ -54,6 +58,7 @@ __all__ = [
     "build_agent_config",
     "build_fast_gym_config",
     "canonical_gripper_model",
+    "canonical_ik_solver",
     "canonical_robot_profile",
     "VLM_CAMERA_UIDS",
     "validate_fast_gym_config",
@@ -63,6 +68,7 @@ _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 _GENERATION_DEFAULTS = generation_defaults()
 _DEFAULT_TABLETOP_Z = float(_GENERATION_DEFAULTS["scene"]["default_tabletop_z"])
 _DEFAULT_GRIPPER_MODEL = str(_GENERATION_DEFAULTS["task"]["default_gripper_model"])
+_DEFAULT_IK_SOLVER = str(_GENERATION_DEFAULTS["task"]["default_ik_solver"])
 
 _ARM_SLOTS = {
     "left": {"arm": "left_arm", "eef": "left_eef"},
@@ -99,6 +105,11 @@ def canonical_gripper_model(model: str) -> str:
     return get_gripper_profile(model).model.value
 
 
+def canonical_ik_solver(mode: str, robot_profile: str) -> str:
+    """Resolve one generation-time IK solver mode for a robot profile."""
+    return resolve_ik_solver_mode(mode, canonical_robot_profile(robot_profile))
+
+
 def build_agent_config(
     *,
     task_name: str,
@@ -107,6 +118,7 @@ def build_agent_config(
     source_config_path: Path,
     uid_map: dict[str, str],
     gripper_model: str = _DEFAULT_GRIPPER_MODEL,
+    ik_solver: str = _DEFAULT_IK_SOLVER,
     static_obstacle_uids: Sequence[str] | None = None,
     dynamic_obstacle_uids: Sequence[str] | None = None,
     table_top_z: float | None = None,
@@ -120,6 +132,7 @@ def build_agent_config(
     """Build the small manifest consumed by ``run_agent``."""
     profile = canonical_robot_profile(robot_profile)
     selected_gripper = canonical_gripper_model(gripper_model)
+    selected_ik_solver = resolve_ik_solver_mode(ik_solver, profile)
     runtime_policy = default_runtime_policy(profile)
     explicit_dynamic_collision = (
         planner_policy is not None and "dynamic_collision" in planner_policy
@@ -174,6 +187,7 @@ def build_agent_config(
         "task_name": task_name,
         "robot_profile": profile,
         "gripper_model": selected_gripper,
+        "ik_solver": selected_ik_solver,
         "planning_mode": planning_mode,
         "task_spec": TASK_SPEC_FILENAME,
         "scene_requirements": SCENE_REQUIREMENTS_FILENAME,
@@ -245,6 +259,7 @@ def build_fast_gym_config(
     max_episodes: int,
     max_episode_steps: int,
     gripper_model: str = _DEFAULT_GRIPPER_MODEL,
+    ik_solver: str = _DEFAULT_IK_SOLVER,
     randomize_scene: bool = False,
     randomize_table_material: bool = False,
     planning_mode: str = "offline",
@@ -261,6 +276,7 @@ def build_fast_gym_config(
         graph_path = f"offline/{EXECUTION_PROGRAM_FILENAME}"
     profile = canonical_robot_profile(robot_profile)
     gripper_profile = get_gripper_profile(gripper_model)
+    selected_ik_solver = resolve_ik_solver_mode(ik_solver, profile)
 
     profile_config = _profile(profile)
     robot = _make_robot(
@@ -268,6 +284,7 @@ def build_fast_gym_config(
         profile_config,
         scene.table_top_z,
         gripper_profile=gripper_profile,
+        ik_solver=selected_ik_solver,
     )
     observations = _make_observations(robot, gripper_profile)
     # These two template fields describe serialization order to generation, not
@@ -299,6 +316,7 @@ def build_fast_gym_config(
         "task_name": task_name,
         "robot_profile": profile,
         "gripper_model": gripper_profile.model.value,
+        "ik_solver": selected_ik_solver,
         "planning_mode": planning_mode,
         "task_spec": TASK_SPEC_FILENAME,
         "scene_requirements": SCENE_REQUIREMENTS_FILENAME,
@@ -317,6 +335,7 @@ def build_fast_gym_config(
         "action_engine": engine_extension,
         "agent_robot_profile": profile,
         "agent_gripper_model": gripper_profile.model.value,
+        "agent_ik_solver": selected_ik_solver,
         "agent_arm_slots": deepcopy(_ARM_SLOTS),
         "agent_static_obstacle_uids": background_uids,
         "agent_dynamic_obstacle_uids": rigid_uids,
@@ -426,6 +445,10 @@ def validate_fast_gym_config(config: dict[str, Any]) -> None:
     if extensions.get("agent_gripper_model") != gripper_profile.model.value:
         raise ValueError("Gym config gripper model fields do not match.")
     _validate_robot_gripper_contract(config["robot"], gripper_profile)
+    ik_solver = action_engine.get("ik_solver")
+    if extensions.get("agent_ik_solver") != ik_solver:
+        raise ValueError("Gym config IK solver fields do not match.")
+    validate_robot_ik_solver_contract(config["robot"], str(ik_solver))
     graph_path = action_engine.get("seed_task_graph")
     if (
         not isinstance(graph_path, str)
@@ -466,6 +489,7 @@ def _make_robot(
     table_top_z: float | None,
     *,
     gripper_profile: GripperProfile,
+    ik_solver: str,
 ) -> dict[str, Any]:
     robot = _load_template(str(profile["template"]))
     tabletop_z = _DEFAULT_TABLETOP_Z if table_top_z is None else float(table_top_z)
@@ -503,9 +527,33 @@ def _make_robot(
             "fname"
         ] = f"dual_{family}_{gripper_profile.assembly_name}_basket"
     _apply_gripper_profile(robot, gripper_profile)
+    _apply_ik_solver(robot, ik_solver)
     if profile_id != canonical_robot_profile(profile_id):
         raise ValueError(f"Invalid canonical robot profile {profile_id!r}.")
     return robot
+
+
+def _apply_ik_solver(robot: dict[str, Any], mode: str) -> None:
+    """Materialize one concrete solver mode while preserving frames and TCPs."""
+    solvers = robot.get("solver_cfg")
+    if not isinstance(solvers, dict):
+        raise ValueError("Robot template requires solver_cfg.")
+    if mode == "pytorch":
+        for arm in ("left_arm", "right_arm"):
+            current = solvers.get(arm)
+            if not isinstance(current, dict):
+                raise ValueError(f"Robot template requires solver_cfg.{arm}.")
+            if current.get("class_type") == "PytorchSolver":
+                continue
+            solvers[arm] = {
+                "class_type": "PytorchSolver",
+                "urdf_path": current.get("urdf_path"),
+                "end_link_name": current["end_link_name"],
+                "root_link_name": current["root_link_name"],
+                "tcp": deepcopy(current["tcp"]),
+                "num_samples": 30,
+            }
+    validate_robot_ik_solver_contract(robot, mode)
 
 
 def _apply_gripper_profile(

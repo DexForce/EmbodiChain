@@ -121,6 +121,7 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
     )
     assert generation["physics"]["rigid_object"]["mass"] == pytest.approx(0.1)
     assert generation["task"]["default_gripper_model"] == "pgi"
+    assert generation["task"]["default_ik_solver"] == "auto"
     assert generation["environment"]["arm_aim_yaw_offset"] == {
         "left": pytest.approx(0.0),
         "right": pytest.approx(0.0),

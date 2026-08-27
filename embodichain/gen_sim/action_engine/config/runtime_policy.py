@@ -28,6 +28,7 @@ from typing import Any, Final
 
 from embodichain.gen_sim.action_engine.domain.motion import MOTION_MODIFIER_MODES
 from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
+from embodichain.gen_sim.action_engine.solver_profiles import resolve_ik_solver_mode
 from embodichain.utils import configclass
 from embodichain.utils.utility import load_config
 
@@ -468,6 +469,10 @@ def generation_defaults() -> dict[str, Any]:
     if not isinstance(task, Mapping):
         raise ValueError("Generation task defaults must be a mapping.")
     get_gripper_profile(task.get("default_gripper_model"))
+    resolve_ik_solver_mode(
+        task.get("default_ik_solver"),
+        "dual_ur10",
+    )
     return deepcopy(dict(value))
 
 

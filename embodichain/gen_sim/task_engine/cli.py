@@ -78,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--seed", type=int, default=0)
     run_parser.add_argument("--num-envs", type=int, default=None)
     run_parser.add_argument("--dataset-saving", action="store_true")
+    run_parser.add_argument("--show-grasp-poses", action="store_true")
     _add_failure_policy_argument(run_parser)
     return parser
 
@@ -111,6 +112,17 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("pgi", "robotiq"),
         default=None,
         help="Override the Task Engine planning gripper profile.",
+    )
+    parser.add_argument(
+        "--ik-solver",
+        choices=("auto", "ur", "pytorch"),
+        default=None,
+        help="Override the generation-time IK solver for both arms.",
+    )
+    parser.add_argument(
+        "--show-grasp-poses",
+        action="store_true",
+        help="Write one static PNG for the valid grasp pair selected by E5.",
     )
     parser.add_argument(
         "--planner-mode",
@@ -173,6 +185,8 @@ def _run_workflow(
     workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
     if args.gripper_model is not None:
         planning_cfg = replace(planning_cfg, gripper_model=args.gripper_model)
+    if args.ik_solver is not None:
+        planning_cfg = replace(planning_cfg, ik_solver=args.ik_solver)
     if args.planner_mode is not None:
         planning_cfg = replace(
             planning_cfg,
@@ -203,6 +217,7 @@ def _run_workflow(
             base_seed=args.base_seed,
             dataset_saving=args.dataset_saving,
             failure_policy=args.failure_policy,
+            show_grasp_poses=args.show_grasp_poses,
             run_id=allocation.run_id,
             created_at=allocation.created_at,
             execute=execute,
@@ -236,6 +251,7 @@ def _run_prepared_bundle(args: argparse.Namespace) -> int:
             num_envs=num_envs,
             dataset_saving=bool(args.dataset_saving),
             failure_policy=args.failure_policy,
+            show_grasp_poses=bool(args.show_grasp_poses),
         )
     environments = report.get("environments", ())
     successes = [

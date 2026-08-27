@@ -273,6 +273,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert planning.candidate_count == 3
     assert planning.planning_mode == "offline"
     assert planning.gripper_model == "pgi"
+    assert planning.ik_solver == "auto"
     assert planning.max_episodes == 1
     assert planning.max_episode_steps == 6000
     assert execution.num_envs == 1
@@ -298,6 +299,7 @@ planning:
   candidate_count: 7
   planning_mode: offline
   gripper_model: robotiq
+  ik_solver: pytorch
   max_episodes: 2
   max_episode_steps: 5000
   planner:
@@ -317,6 +319,7 @@ execution:
     assert workflow.max_action_attempts == 5
     assert planning.candidate_count == 7
     assert planning.gripper_model == "robotiq"
+    assert planning.ik_solver == "pytorch"
     assert planning.max_episodes == 2
     assert planning.max_episode_steps == 5000
     assert planning.planner == {"mode": "toppra"}
@@ -349,5 +352,7 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(planning_mode="unsupported")
     with pytest.raises(ValueError, match="pgi.*robotiq"):
         TaskEnginePlanningCfg(gripper_model="unsupported")
+    with pytest.raises(ValueError, match="auto.*ur.*pytorch"):
+        TaskEnginePlanningCfg(ik_solver="unsupported")
     with pytest.raises(ValueError, match="mode cannot be combined"):
         TaskEnginePlanningCfg(planner={"mode": "toppra", "dynamic_collision": True})

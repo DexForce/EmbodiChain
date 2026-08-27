@@ -31,6 +31,7 @@ from embodichain.gen_sim.action_engine.cli.run_agent import (
     _prepare_ab_branches,
     _publish_task_engine_report,
     _task_engine_exit_code,
+    _validate_run_contract,
 )
 from embodichain.gen_sim.action_engine.runtime import (
     ExecutionReport,
@@ -63,6 +64,58 @@ class _FakeEnv:
                 )
             }
         )
+
+
+def _solver_run_contract(ik_solver: str) -> tuple[dict, dict]:
+    class_type = "URSolver" if ik_solver == "ur" else "PytorchSolver"
+    gym_config = {
+        "env": {
+            "extensions": {
+                "action_engine": {
+                    "task_name": "solver_task",
+                    "seed_task_graph_hash": "a" * 64,
+                    "planning_mode": "offline",
+                    "gripper_model": "pgi",
+                    "ik_solver": ik_solver,
+                },
+                "agent_ik_solver": ik_solver,
+            }
+        },
+        "robot": {
+            "solver_cfg": {
+                "left_arm": {"class_type": class_type},
+                "right_arm": {"class_type": class_type},
+            }
+        },
+    }
+    agent_config = {
+        "task_name": "solver_task",
+        "seed_task_graph_hash": "a" * 64,
+        "planning_mode": "offline",
+        "gripper_model": "pgi",
+        "ik_solver": ik_solver,
+    }
+    return gym_config, agent_config
+
+
+@pytest.mark.parametrize("ik_solver", ["ur", "pytorch"])
+def test_run_contract_accepts_matching_concrete_ik_solver(ik_solver: str) -> None:
+    gym_config, agent_config = _solver_run_contract(ik_solver)
+
+    _validate_run_contract(gym_config, agent_config, "solver_task")
+
+
+def test_run_contract_rejects_ik_solver_artifact_drift() -> None:
+    gym_config, agent_config = _solver_run_contract("pytorch")
+    agent_config["ik_solver"] = "ur"
+
+    with pytest.raises(ValueError, match="different IK solvers"):
+        _validate_run_contract(gym_config, agent_config, "solver_task")
+
+    agent_config["ik_solver"] = "pytorch"
+    gym_config["robot"]["solver_cfg"]["right_arm"]["class_type"] = "URSolver"
+    with pytest.raises(ValueError, match="right_arm.*PytorchSolver"):
+        _validate_run_contract(gym_config, agent_config, "solver_task")
 
 
 def test_capture_ab_initial_frame_invokes_only_audience_recorder() -> None:

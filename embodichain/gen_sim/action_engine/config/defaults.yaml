@@ -22,6 +22,7 @@ generation:
   task:
     default_robot_profile: ur10
     default_gripper_model: pgi
+    default_ik_solver: auto
     max_episodes: 1
     max_episode_steps: 2000
   environment:
@@ -227,6 +228,8 @@ runtime:
         pre_grasp_distance: 0.10
         lift_height: 0.08
         middle_empty_ratio: 0.4
+        grasp_opening_margin: 0.02
+        grasp_seed: 17393
         is_filter_ground_collision: false
         release_sample_interval: 60
         release_gripper_tolerance: 0.08

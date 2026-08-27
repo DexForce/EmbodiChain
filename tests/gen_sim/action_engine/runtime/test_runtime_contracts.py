@@ -563,6 +563,23 @@ def test_documented_run_command_arguments_remain_compatible() -> None:
     assert args.seed == 17
     assert args.runtime_backend == "independent"
     assert args.failure_policy == "stop"
+    assert args.show_grasp_poses is False
+
+
+def test_run_command_accepts_grasp_pose_visualization() -> None:
+    args = build_run_parser().parse_args(
+        [
+            "--task_name",
+            "task4_2",
+            "--gym_config",
+            "/tmp/fast_gym_config.json",
+            "--agent_config",
+            "/tmp/agent_config.json",
+            "--show-grasp-poses",
+        ]
+    )
+
+    assert args.show_grasp_poses is True
 
 
 def test_run_command_accepts_continue_failure_policy() -> None:
@@ -1693,6 +1710,13 @@ def test_explicit_dual_gripper_release_commits_only_after_both_hands_open(
     assert executor._object_owners["tray"] == [expected_owner]
     assert executor._arm_owners["left_arm"] == (["tray"] if expect_held else [None])
     assert executor._arm_owners["right_arm"] == (["tray"] if expect_held else [None])
+    release = result.planner_traces[0]["physical_release"]
+    assert release["both_grippers_open"] == [opens]
+    assert release["released"] == [opens]
+    assert release["left_gripper_open_error"] == pytest.approx([0.0])
+    assert release["right_gripper_open_error"] == pytest.approx(
+        [0.0 if opens else torch.linalg.vector_norm(env.close_state).item()]
+    )
 
 
 @pytest.mark.parametrize(
@@ -1701,6 +1725,7 @@ def test_explicit_dual_gripper_release_commits_only_after_both_hands_open(
 )
 def test_coordinated_pickment_commits_only_after_physical_dual_hold(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     closes_both: bool,
     expected_failed: bool,
     expect_held: bool,
@@ -1724,7 +1749,13 @@ def test_coordinated_pickment_commits_only_after_physical_dual_hold(
             )
         )
     )
-    executor = ProgramExecutor(program, env, record_runtime=False)
+    executor = ProgramExecutor(
+        program,
+        env,
+        record_runtime=False,
+        show_grasp_poses=True,
+    )
+    executor._runtime_output_dir = tmp_path
     step = program.semantic_steps[0]
     edge = program.edges[0]
     executor._assignments[step.id] = ["coordinated"]
@@ -1764,6 +1795,14 @@ def test_coordinated_pickment_commits_only_after_physical_dual_hold(
         return []
 
     monkeypatch.setattr(executor.adapter, "execute_trajectory", execute_trajectory)
+    visualized: list[tuple[str, ActionOutcome]] = []
+    monkeypatch.setattr(
+        executor,
+        "_write_selected_coordinated_grasp_pose",
+        lambda selected_step, selected_outcome: visualized.append(
+            (selected_step.id, selected_outcome)
+        ),
+    )
 
     result = executor._execute_coordinated(edge, step, torch.tensor([False]))
 
@@ -1778,6 +1817,15 @@ def test_coordinated_pickment_commits_only_after_physical_dual_hold(
     assert executor._object_owners["tray"] == [expected_owner]
     assert executor._arm_owners["left_arm"] == (["tray"] if expect_held else [None])
     assert executor._arm_owners["right_arm"] == (["tray"] if expect_held else [None])
+    assert visualized == [(step.id, outcome)]
+    physical = result.planner_traces[0]["physical_execution"]
+    assert physical["dual_hold_predicate"] == [expect_held]
+    assert physical["semantic_target_reached"] == [True]
+    assert physical["accepted"] == [expect_held]
+    assert physical["object_displacement_distance"] == pytest.approx([0.0])
+    assert physical["arms"]["left_arm"]["gripper_closed"] == [True]
+    assert physical["arms"]["right_arm"]["gripper_closed"] == [closes_both]
+    assert len(physical["arms"]["left_arm"]["eef_relation_position_error"]) == 1
 
 
 def _handover_held_state(
@@ -4735,6 +4783,25 @@ def test_both_grippers_open_uses_the_live_reset_posture() -> None:
     assert opened.tolist() == [False]
 
 
+def test_gripper_predicates_measure_transmission_joint_not_commanded_mimics() -> None:
+    env = _FakeEnv()
+    env.agent_gripper_state_joint_indices = {
+        "left": (0,),
+        "right": (0,),
+    }
+    env.left_arm_init_gripper_state = torch.zeros(1, 2)
+    env.right_arm_init_gripper_state = torch.zeros(1, 2)
+    env.robot._qpos[:, env.left_eef_joints] = torch.tensor([0.02, 0.30])
+    env.robot._qpos[:, env.right_eef_joints] = torch.tensor([0.03, -0.25])
+
+    opened = evaluate_predicate(
+        env,
+        {"type": "both_grippers_open", "tolerance": 0.08},
+    )
+
+    assert opened.tolist() == [True]
+
+
 def test_object_supported_by_requires_overlap_and_vertical_contact() -> None:
     support_z = 0.75
     payload_z = support_z + 0.05 + 0.02 + 0.005
@@ -6977,12 +7044,14 @@ def test_environment_passes_failure_policy_to_program_executor(
     result = env_module.ActionEngineEnv.create_demo_action_list.__wrapped__(
         env,
         failure_policy="continue",
+        show_grasp_poses=True,
         runtime_run_id="run",
         episode_index=3,
     )
 
     assert result is expected
     assert captured["failure_policy"] == "continue"
+    assert captured["show_grasp_poses"] is True
     assert captured["run"] == {"run_id": "run", "episode_index": 3}
 
 

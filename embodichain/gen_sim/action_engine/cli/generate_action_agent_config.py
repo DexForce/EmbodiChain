@@ -113,6 +113,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Gripper asset, control, TCP, and grasp profile used by both arms.",
     )
     parser.add_argument(
+        "--ik-solver",
+        choices=("auto", "ur", "pytorch"),
+        default=str(_TASK_DEFAULTS["default_ik_solver"]),
+        help="Generation-time IK solver used by both arms.",
+    )
+    parser.add_argument(
         "--llm_model",
         "--llm-model",
         default=None,
@@ -222,6 +228,7 @@ def cli() -> None:
         task_spec=args.task_spec,
         robot_profile=args.robot_profile,
         gripper_model=args.gripper_model,
+        ik_solver=args.ik_solver,
         llm_model=args.llm_model,
         source_scene_z_rotation_degrees=args.source_scene_z_rotation_degrees,
         body_scale_policy=args.body_scale_policy,

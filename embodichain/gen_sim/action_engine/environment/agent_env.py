@@ -96,6 +96,10 @@ class ActionEngineEnv(EmbodiedEnv):
                 self.agent_config.get("gripper_model", "pgi"),
             )
         )
+        self.agent_gripper_state_joint_indices = {
+            side: selected_gripper.state_joint_indices(side)
+            for side in ("left", "right")
+        }
         agent_gripper = self.agent_config.get(
             "gripper_model", selected_gripper.model.value
         )
@@ -402,9 +406,12 @@ class ActionEngineEnv(EmbodiedEnv):
         self,
         regenerate: bool = False,
         failure_policy: str = "stop",
+        show_grasp_poses: bool = False,
         **kwargs: Any,
     ) -> Any:
         """Compile in memory when requested, then execute the program online."""
+        if not isinstance(show_grasp_poses, bool):
+            raise TypeError("show_grasp_poses must be a boolean.")
         program = load_agent_execution_program(
             self.agent_config,
             agent_config_path=self.agent_config_path,
@@ -427,6 +434,7 @@ class ActionEngineEnv(EmbodiedEnv):
             record_root=getattr(self, "action_engine_record_root", None),
             runtime_policy=self.runtime_policy,
             failure_policy=failure_policy,
+            show_grasp_poses=show_grasp_poses,
         )
         self.last_execution = executor.run(
             run_id=kwargs.get("runtime_run_id"),
