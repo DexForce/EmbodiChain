@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 import math
 from types import MappingProxyType
@@ -30,6 +31,7 @@ from embodichain.lab.sim.atomic_actions import (
     CommandAcknowledgement,
     CommandSink,
     ExecutionClock,
+    ExecutionRunnerCfg,
     PlanningContext,
     RuntimeCommandFrame,
     RuntimeEndpointTarget,
@@ -644,6 +646,7 @@ class ParallelSkillRuntime:
         *,
         timeout_steps: int,
         failure_policy: str = "fail_fast",
+        runner_cfg: ExecutionRunnerCfg | None = None,
     ) -> None:
         if not isinstance(branches, tuple) or len(branches) < 2:
             raise ValueError("ParallelSkillRuntime requires at least two branches.")
@@ -674,6 +677,8 @@ class ParallelSkillRuntime:
             raise ValueError("timeout_steps must be positive.")
         if failure_policy != "fail_fast":
             raise ValueError("failure_policy must be exactly 'fail_fast'.")
+        if runner_cfg is not None and not isinstance(runner_cfg, ExecutionRunnerCfg):
+            raise TypeError("runner_cfg must be an ExecutionRunnerCfg or None.")
         initial = branches[0].runtime.result
         for branch in branches[1:]:
             result = branch.runtime.result
@@ -696,6 +701,7 @@ class ParallelSkillRuntime:
         self._clock = clock
         self._timing_policy = timing_policy
         self._safety_validator = safety_validator
+        self._runner_cfg = deepcopy(runner_cfg or ExecutionRunnerCfg())
         self._timeout_steps = timeout_steps
         self._initial_state = initial.task_state
         self._task_state = initial.task_state
@@ -731,6 +737,7 @@ class ParallelSkillRuntime:
         *,
         timeout_steps: int,
         failure_policy: str = "fail_fast",
+        runner_cfg: ExecutionRunnerCfg | None = None,
         workflow_id: str = "parallel_static_analysis",
         branch_paths: Mapping[str, tuple[PathPart, ...]] | None = None,
     ) -> ParallelSkillRuntime:
@@ -750,6 +757,8 @@ class ParallelSkillRuntime:
                 synchronized outbound command.
             timeout_steps: Maximum environment steps at the barrier.
             failure_policy: Row-local barrier failure policy.
+            runner_cfg: Shared command timeout, safe-stop, completion-hold, and
+                minimum-cycle policy selected by the runtime preset.
             workflow_id: Stable prefix for provider-free claim analysis.
             branch_paths: Optional exact source path for every branch.
 
@@ -790,6 +799,7 @@ class ParallelSkillRuntime:
             safety_validator,
             timeout_steps=timeout_steps,
             failure_policy=failure_policy,
+            runner_cfg=runner_cfg,
         )
 
     @property
@@ -823,6 +833,11 @@ class ParallelSkillRuntime:
         return MappingProxyType(
             {branch.branch_id: branch.claim for branch in self._branches}
         )
+
+    @property
+    def runner_cfg(self) -> ExecutionRunnerCfg:
+        """Return an owned copy of the coordinator transport policy."""
+        return deepcopy(self._runner_cfg)
 
     def start(
         self,
@@ -914,6 +929,10 @@ class ParallelSkillRuntime:
                     accepted
                     and not self._pending.any()
                     and self._status is SkillStatus.RUNNING
+                    and (
+                        self._runner_cfg.hold_on_completion
+                        or bool((self._failure | self._cancelled).any().item())
+                    )
                 ):
                     self._terminal_hold_pending = True
                 self._finish_if_complete()
@@ -1068,8 +1087,12 @@ class ParallelSkillRuntime:
 
     def _record_transport_action(self) -> None:
         """Arm the next physical grid boundary after one accepted action."""
-        self._next_transport_at = self._read_clock() + self._timing_policy.step_dt
-        self._wait_duration = self._timing_policy.step_dt
+        interval = max(
+            self._timing_policy.step_dt,
+            self._runner_cfg.minimum_cycle_time,
+        )
+        self._next_transport_at = self._read_clock() + interval
+        self._wait_duration = interval
 
     def _update_barrier(self) -> None:
         results = {branch.branch_id: branch.runtime.result for branch in self._branches}
@@ -1209,7 +1232,15 @@ class ParallelSkillRuntime:
         # without producing another action, then send exactly one grid frame.
         self._dispatch_requested_hold()
         accepted = self._send_merged_frame(frame, lane_frames)
-        if accepted and not self._pending.any() and self._status is SkillStatus.RUNNING:
+        if (
+            accepted
+            and not self._pending.any()
+            and self._status is SkillStatus.RUNNING
+            and (
+                self._runner_cfg.hold_on_completion
+                or bool((self._failure | self._cancelled).any().item())
+            )
+        ):
             self._terminal_hold_pending = True
 
     def _dispatch_deferred_frame(self) -> bool:
@@ -1247,7 +1278,10 @@ class ParallelSkillRuntime:
             raise ParallelSafetyError(
                 "ParallelCommandSafetyValidator.validate() must return None."
             )
-        acknowledgement = self._command_sink.send(frame, timeout=1.0)
+        acknowledgement = self._command_sink.send(
+            frame,
+            timeout=self._runner_cfg.command_timeout,
+        )
         if not isinstance(acknowledgement, CommandAcknowledgement):
             raise TypeError("CommandSink.send() returned an invalid value.")
         if not acknowledgement.accepted:
@@ -1314,7 +1348,7 @@ class ParallelSkillRuntime:
         acknowledgement = self._command_sink.hold(
             tuple(targets.values()),
             context,
-            timeout=1.0,
+            timeout=self._runner_cfg.safe_stop_timeout,
         )
         if not isinstance(acknowledgement, CommandAcknowledgement):
             raise TypeError("CommandSink.hold() returned an invalid value.")
@@ -1366,7 +1400,10 @@ class ParallelSkillRuntime:
         snapshots = tuple(targets.values())
         errors: list[str] = []
         try:
-            cancel_ack = self._command_sink.cancel(snapshots, timeout=1.0)
+            cancel_ack = self._command_sink.cancel(
+                snapshots,
+                timeout=self._runner_cfg.safe_stop_timeout,
+            )
             if not isinstance(cancel_ack, CommandAcknowledgement):
                 raise TypeError("CommandSink.cancel() returned an invalid value.")
             if not cancel_ack.accepted:
@@ -1380,7 +1417,7 @@ class ParallelSkillRuntime:
                 hold_ack = self._command_sink.hold(
                     snapshots,
                     context,
-                    timeout=1.0,
+                    timeout=self._runner_cfg.safe_stop_timeout,
                 )
                 if not isinstance(hold_ack, CommandAcknowledgement):
                     raise TypeError("CommandSink.hold() returned an invalid value.")
@@ -1464,7 +1501,12 @@ class ParallelSkillRuntime:
             return
         self._merge_verified_state()
         if self._status is SkillStatus.RUNNING and not self._terminal_stop_forwarded:
-            self._dispatch_requested_hold(required=True, include_last_targets=True)
+            terminal_failure = bool((self._failure | self._cancelled).any().item())
+            require_hold = self._runner_cfg.hold_on_completion or terminal_failure
+            self._dispatch_requested_hold(
+                required=require_hold,
+                include_last_targets=require_hold,
+            )
         self._wait_duration = 0.0
         if self._failure.any():
             self._status = SkillStatus.FAILED

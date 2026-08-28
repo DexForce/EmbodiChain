@@ -28,6 +28,7 @@ from embodichain.lab.sim.atomic_actions import (
     ArticulationJointState,
     CommandAcknowledgement,
     EndpointCommand,
+    ExecutionRunnerCfg,
     JointPositionPayload,
     JointPositionTarget,
     PlanningContext,
@@ -82,6 +83,7 @@ class _OutboundSink:
         self.hold_targets: list[tuple[str, ...]] = []
         self.hold_fingerprints: list[tuple[object, ...]] = []
         self.operations: list[str] = []
+        self.timeouts: list[tuple[str, float]] = []
         self.holds = 0
         self.cancels = 0
 
@@ -91,7 +93,7 @@ class _OutboundSink:
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        del timeout
+        self.timeouts.append(("send", timeout))
         if self.raise_send:
             raise RuntimeError("send exploded")
         self.operations.append("send")
@@ -107,7 +109,8 @@ class _OutboundSink:
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        del context, timeout
+        del context
+        self.timeouts.append(("hold", timeout))
         self.operations.append("hold")
         self.holds += 1
         self.hold_targets.append(
@@ -126,7 +129,8 @@ class _OutboundSink:
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        del targets, timeout
+        del targets
+        self.timeouts.append(("cancel", timeout))
         self.operations.append("cancel")
         self.cancels += 1
         if self.reject_cancel:
@@ -604,6 +608,144 @@ def test_completion_hold_waits_for_clock_after_accepted_command() -> None:
 
     assert completed.status is SkillStatus.COMPLETED
     assert outbound.operations == ["send", "hold"]
+
+
+def test_parallel_runtime_uses_runner_transport_timeouts() -> None:
+    """Merged sends and safe stops share the selected preset runner policy."""
+    outbound = _OutboundSink()
+    clock = _Clock()
+    runtime = ParallelSkillRuntime(
+        (
+            _branch("left", 0, (_running_step(frame=_frame(0, (1.0, 1.0))),)),
+            _branch("right", 1, (_running_step(frame=_frame(1, (2.0, 2.0))),)),
+        ),
+        outbound,
+        clock,
+        ParallelTimingPolicy(0.1),
+        _AcceptSafety(),
+        timeout_steps=5,
+        runner_cfg=ExecutionRunnerCfg(
+            command_timeout=0.25,
+            safe_stop_timeout=0.75,
+            hold_on_completion=False,
+        ),
+    )
+
+    runtime.start()
+    runtime.step()
+    runtime.cancel("operator stop")
+
+    assert outbound.timeouts == [
+        ("send", pytest.approx(0.25)),
+        ("cancel", pytest.approx(0.75)),
+        ("hold", pytest.approx(0.75)),
+    ]
+
+
+def test_parallel_failure_safe_holds_when_completion_hold_is_disabled() -> None:
+    """Failure policy always cancels and holds independently of success policy."""
+    outbound = _OutboundSink()
+    runtime = ParallelSkillRuntime(
+        (
+            _branch("left", 0, (_running_step(frame=_frame(0, (1.0, 1.0))),)),
+            _branch("right", 1, (_running_step(frame=_frame(1, (2.0, 2.0))),)),
+        ),
+        outbound,
+        _Clock(),
+        ParallelTimingPolicy(0.1),
+        _RejectSafety(),
+        timeout_steps=5,
+        runner_cfg=ExecutionRunnerCfg(hold_on_completion=False),
+    )
+
+    runtime.start()
+    result = runtime.step()
+
+    assert result.status is SkillStatus.FAILED
+    assert outbound.operations == ["cancel", "hold"]
+
+
+def test_parallel_completion_respects_disabled_completion_hold() -> None:
+    """Successful completion does not synthesize a hold when policy disables it."""
+    left = _branch(
+        "left",
+        0,
+        (
+            _running_step(frame=_frame(0, (1.0, 1.0))),
+            _completed_step(),
+        ),
+        emit_terminal_hold=False,
+    )
+    right = _branch(
+        "right",
+        1,
+        (
+            _running_step(frame=_frame(1, (2.0, 2.0))),
+            _completed_step(),
+        ),
+        emit_terminal_hold=False,
+    )
+    outbound = _OutboundSink()
+    clock = _Clock()
+    runtime = ParallelSkillRuntime(
+        (left, right),
+        outbound,
+        clock,
+        ParallelTimingPolicy(0.1),
+        _AcceptSafety(),
+        timeout_steps=5,
+        runner_cfg=ExecutionRunnerCfg(hold_on_completion=False),
+    )
+
+    runtime.start()
+    runtime.step()
+    clock.time = 0.1
+    result = runtime.step()
+
+    assert result.status is SkillStatus.COMPLETED
+    assert outbound.operations == ["send"]
+
+
+def test_parallel_minimum_cycle_time_limits_coordinator_cadence() -> None:
+    """Coordinator dispatches no faster than the preset's minimum cycle time."""
+    left = _branch(
+        "left",
+        0,
+        (
+            _running_step(frame=_frame(0, (1.0, 1.0))),
+            _running_step(frame=_frame(0, (3.0, 3.0))),
+        ),
+    )
+    right = _branch(
+        "right",
+        1,
+        (
+            _running_step(frame=_frame(1, (2.0, 2.0))),
+            _running_step(frame=_frame(1, (4.0, 4.0))),
+        ),
+    )
+    outbound = _OutboundSink()
+    clock = _Clock()
+    runtime = ParallelSkillRuntime(
+        (left, right),
+        outbound,
+        clock,
+        ParallelTimingPolicy(0.1),
+        _AcceptSafety(),
+        timeout_steps=5,
+        runner_cfg=ExecutionRunnerCfg(minimum_cycle_time=0.25),
+    )
+
+    runtime.start()
+    first = runtime.step()
+    clock.time = 0.1
+    waiting = runtime.step()
+    clock.time = 0.25
+    runtime.step()
+
+    assert first.wait_duration == pytest.approx(0.25)
+    assert waiting.wait_duration == pytest.approx(0.15)
+    assert len(outbound.frames) == 2
 
 
 def test_parallel_runtime_fail_fast_is_row_local() -> None:

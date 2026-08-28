@@ -1,0 +1,18 @@
+program_id: slide_open_drawer
+integration:
+  robot_profile: expert_program_ur5_slide
+  scene_registry: expert_program_open_drawer
+  runtime_preset: trajectory
+targets: {}
+program:
+  kind: segment
+  name: open_drawer
+  steps:
+    kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.articulation_link_slide
+      arguments:
+        handle: drawer_handle
+      resources:
+        primary: manipulator

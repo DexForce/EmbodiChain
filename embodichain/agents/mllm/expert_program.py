@@ -21,7 +21,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from embodichain.lab.gym.envs.expert_program.cfg import (
-    EXPERT_PROGRAM_SCHEMA_VERSION,
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
     HandOverCfg,
@@ -84,7 +83,7 @@ def _iter_calls(
     raise ExpertProgramDecodeError(
         "mllm_program_node_not_allowed",
         (*path, "kind"),
-        "The MLLM frontend permits only sequential schema Version 2 program nodes.",
+        "The MLLM frontend permits only sequential program nodes.",
     )
 
 
@@ -117,12 +116,6 @@ def _validate_mllm_policy(
     raw_payload: dict[str, object],
 ) -> None:
     """Apply the narrow agent-facing policy after canonical decoding."""
-    if config.schema_version != EXPERT_PROGRAM_SCHEMA_VERSION:
-        raise ExpertProgramDecodeError(
-            "mllm_schema_version_not_allowed",
-            ("schema_version",),
-            "The MLLM frontend permits only Expert Program schema Version 2.",
-        )
     for call, path in _iter_calls(config.program, path=("program",)):
         if type(call) not in _CURATED_CALL_TYPES:
             raise ExpertProgramDecodeError(
@@ -145,12 +138,6 @@ def _validate_mllm_policy(
                 (*path, "resources"),
                 "MLLM responses cannot override robot resource bindings.",
             )
-        if type(call) is HandOverCfg and call.receiver is not None:
-            raise ExpertProgramDecodeError(
-                "mllm_resource_override_not_allowed",
-                (*path, "receiver"),
-                "MLLM responses cannot select a hand-over receiver resource.",
-            )
         if call.resources:
             raise ExpertProgramDecodeError(
                 "mllm_resource_override_not_allowed",
@@ -168,12 +155,11 @@ def decode_mllm_expert_program(
 ) -> ExpertProgramCfg:
     """Decode one untrusted model response into the canonical program config.
 
-    The model response is a single plain JSON object containing
-    ``schema_version``, ``program_id``, ``targets``, and ``program``. The trusted
-    host supplies ``integration``; a response attempting to select its own
-    integration is rejected rather than silently overwritten. Only the
-    sequential subset of schema version 2 and curated built-in calls are
-    admitted, and robot resource overrides are forbidden.
+    The model response is a single plain JSON object containing ``program_id``,
+    ``targets``, and ``program``. The trusted host supplies ``integration``; a
+    response attempting to select its own integration is rejected rather than
+    silently overwritten. Only the sequential subset and curated built-in calls
+    are admitted, and robot resource overrides are forbidden.
 
     Args:
         response: Untrusted model response containing one plain JSON document.

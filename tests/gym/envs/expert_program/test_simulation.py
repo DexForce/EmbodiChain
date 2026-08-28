@@ -25,6 +25,7 @@ import torch
 
 from embodichain.lab.gym.envs.expert_program.simulation import (
     AntipodalGraspAffordanceBinding,
+    ContainerAffordanceBinding,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
@@ -33,14 +34,20 @@ from embodichain.lab.gym.envs.expert_program.simulation import (
     SimulationRigidObjectBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
+    SupportSurfaceAffordanceBinding,
 )
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
+    AxisAlignAffordance,
     CARTESIAN_POSE_CAPABILITY,
     GRASP_CAPABILITY,
+    PickUpOptions,
 )
 from embodichain.lab.sim.skills import (
+    ContainerAffordance,
     GRASP_AFFORDANCE_CAPABILITY,
+    PLACE_IN_AFFORDANCE_CAPABILITY,
+    PLACE_ON_AFFORDANCE_CAPABILITY,
     RobotResource,
     SceneAffordanceRef,
     SceneArticulationRef,
@@ -48,7 +55,9 @@ from embodichain.lab.sim.skills import (
     SceneLinkRef,
     SceneObjectRef,
     SkillPolicyPreset,
+    SupportSurfaceAffordance,
 )
+from embodichain.lab.sim.skills.integration import SceneManifest
 from embodichain.lab.sim.skills.profiles import ResourceEndpoint
 
 _BATCH_SIZE = 2
@@ -187,6 +196,60 @@ def _scene_binding() -> SimulationSceneBinding:
                 revision="cube-grasp-v1",
             ),
         ),
+        support_surfaces=(
+            SupportSurfaceAffordanceBinding(
+                entity_id="cube_support_target",
+                parent_id="cube",
+                native_name="support_target",
+                object_target_pose=(
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.25,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ),
+                minimum_confidence=0.7,
+                is_default=True,
+            ),
+        ),
+        containers=(
+            ContainerAffordanceBinding(
+                entity_id="drawer_inside_target",
+                parent_id="drawer_handle_link",
+                native_name="inside_target",
+                object_target_pose=(
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.1,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ),
+                minimum_confidence=0.8,
+                is_default=True,
+            ),
+        ),
     )
 
 
@@ -220,7 +283,12 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
             ),
         ),
         defaults={"pick_up": {"primary": "manipulator"}},
-        presets=(SkillPolicyPreset("safe"),),
+        presets=(
+            SkillPolicyPreset(
+                "safe",
+                action_option_templates={"pick": PickUpOptions()},
+            ),
+        ),
         default_preset="safe",
     )
 
@@ -253,6 +321,81 @@ def test_scene_binding_builds_existing_registry_contracts() -> None:
         snapshot.entities["drawer_handle_link"].pose,
         simulation.articulation.link_pose,
     )
+    support_ref = registry.resolve_affordance(
+        "cube",
+        capability=PLACE_ON_AFFORDANCE_CAPABILITY,
+    )
+    support = registry.lookup(support_ref).affordance
+    assert type(support) is SupportSurfaceAffordance
+    assert support.minimum_confidence == pytest.approx(0.7)
+    assert torch.equal(
+        snapshot.entities[support_ref.entity_id].pose[:, 2, 3],
+        torch.full((_BATCH_SIZE,), 0.25),
+    )
+    container_ref = registry.resolve_affordance(
+        "drawer_handle_link",
+        capability=PLACE_IN_AFFORDANCE_CAPABILITY,
+    )
+    container = registry.lookup(container_ref).affordance
+    assert type(container) is ContainerAffordance
+    assert container.minimum_confidence == pytest.approx(0.8)
+    assert torch.allclose(
+        snapshot.entities[container_ref.entity_id].pose[:, 0, 3],
+        torch.tensor((0.4, 0.5)),
+    )
+
+
+def test_scene_manifest_uses_live_float32_pose_precision() -> None:
+    """Static preflight and live registry agree for decimal placement poses."""
+    binding = _scene_binding()
+    support = replace(
+        binding.support_surfaces[0],
+        object_target_pose=(
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.16,
+            0.0,
+            0.0,
+            1.0,
+            0.03,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+    )
+    configured = replace(binding, support_surfaces=(support,))
+
+    declared = configured.declare()
+    live = SceneManifest.from_registry(configured.build(_Simulation()))
+
+    assert declared.entries == live.entries
+
+
+def test_axis_aligned_grasp_binding_preserves_mesh_and_local_axis() -> None:
+    """Configured pouring geometry remains a valid antipodal grasp payload."""
+    binding = _scene_binding()
+    axis_grasp = replace(
+        binding.antipodal_grasps[0],
+        internal_axis=(1.0, 0.0, 0.0),
+    )
+    configured = replace(binding, antipodal_grasps=(axis_grasp,))
+
+    manifest_grasp = configured.declare().lookup(
+        "cube_grasp",
+        expected_type=SceneAffordanceRef,
+    )
+    live_grasp = configured.build(_Simulation()).lookup("cube_grasp").affordance
+
+    assert manifest_grasp.affordance_payload_type is AxisAlignAffordance
+    assert type(live_grasp) is AxisAlignAffordance
+    assert torch.equal(live_grasp.internal_axis, torch.tensor((1.0, 0.0, 0.0)))
+    assert live_grasp.mesh_vertices is not None
 
 
 def test_scene_binding_fails_closed_on_missing_native_entity() -> None:

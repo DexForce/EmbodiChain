@@ -43,8 +43,6 @@ from embodichain.lab.sim.skills.scene import (
 )
 
 from .cfg import (
-    EXPERT_PROGRAM_SCHEMA_VERSION,
-    REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION,
     MAX_EXPANDED_CALLS,
     MAX_REPEAT_COUNT,
     ArticulationJointPositionValidatorCfg,
@@ -160,7 +158,6 @@ def _snapshot_semantic_call(call: SemanticCallSpec) -> SemanticCallSpec:
     if type(call) is HandOver:
         return HandOver(
             object=_copy_scene_ref(call.object),
-            receiver=call.receiver,
             final_target=(
                 None if call.final_target is None else call.final_target.snapshot()
             ),
@@ -318,7 +315,7 @@ _COMPILED_VALIDATOR_TYPES = (
 
 @dataclass(frozen=True, slots=True)
 class CompiledBarrier:
-    """Explicit schema-v2 join semantics for one compiled parallel block."""
+    """Explicit join semantics for one compiled parallel block."""
 
     name: str
     timeout_steps: int
@@ -500,7 +497,6 @@ class _CallTemplate:
     at_target_id: str | None = None
     on: SceneObjectRef | SceneAffordanceRef | None = None
     inside: SceneObjectRef | SceneAffordanceRef | None = None
-    receiver: str | None = None
     final_target_id: str | None = None
     call_id: str | None = None
     arguments: Mapping[str, DeclarativeValue] | None = None
@@ -673,7 +669,6 @@ def _instantiate_call(
             selections.append(selection)
         call = HandOver(
             object=_copy_scene_ref(template.object),
-            receiver=template.receiver,
             final_target=final_target,
             resources=resources,
         )
@@ -963,7 +958,6 @@ def _iter_segments(
 class CompiledProgram:
     """Bounded provider-free segment snapshot used by preflight and execution."""
 
-    schema_version: int
     program_id: str
     _integration: ExpertProgramIntegrationCfg = field(repr=False, compare=False)
     _segments: tuple[CompiledProgramSegment, ...] = field(
@@ -980,19 +974,11 @@ class CompiledProgram:
     def _create(
         cls,
         *,
-        schema_version: int,
         program_id: str,
         integration: ExpertProgramIntegrationCfg,
         segments: tuple[CompiledProgramSegment, ...],
     ) -> CompiledProgram:
         """Create one compiler-owned materialized program."""
-        if (
-            type(schema_version) is not int
-            or schema_version != EXPERT_PROGRAM_SCHEMA_VERSION
-        ):
-            raise ValueError(
-                f"schema_version must be exactly {EXPERT_PROGRAM_SCHEMA_VERSION}."
-            )
         if type(program_id) is not str or not program_id:
             raise ValueError("program_id must be a non-empty string.")
         if type(integration) is not ExpertProgramIntegrationCfg:
@@ -1019,7 +1005,6 @@ class CompiledProgram:
             raise ValueError("Materialized call indices must be contiguous.")
 
         instance = object.__new__(cls)
-        object.__setattr__(instance, "schema_version", schema_version)
         object.__setattr__(instance, "program_id", program_id)
         object.__setattr__(
             instance,
@@ -1154,7 +1139,6 @@ class CompiledProgram:
 
 def _materialize_program(
     *,
-    schema_version: int,
     program_id: str,
     integration: ExpertProgramIntegrationCfg,
     targets: Mapping[str, tuple[SemanticPose, ...]],
@@ -1180,7 +1164,6 @@ def _materialize_program(
             )
         segments.append(segment)
     return CompiledProgram._create(
-        schema_version=schema_version,
         program_id=program_id,
         integration=integration,
         segments=tuple(segments),
@@ -1363,7 +1346,6 @@ class ExpertProgramCompiler:
                 kind="hand_over",
                 source_path=path,
                 object=object_ref,
-                receiver=cfg.receiver,
                 final_target_id=final_target_id,
                 resources=tuple(sorted(cfg.resources.items())),
             )
@@ -1373,12 +1355,6 @@ class ExpertProgramCompiler:
                     "invalid_discriminator",
                     (*path, "kind"),
                     "Expected 'registered'.",
-                )
-            if cfg.schema_version != REGISTERED_SEMANTIC_CALL_SCHEMA_VERSION:
-                raise ExpertProgramCompileError(
-                    "unsupported_registered_schema",
-                    (*path, "schema_version"),
-                    "Registered call schema_version must be exactly 1.",
                 )
             snapshot = RegisteredSemanticCall(
                 call_id=cfg.call_id,
@@ -1606,7 +1582,7 @@ class ExpertProgramCompiler:
                 raise ExpertProgramCompileError(
                     "nested_parallel",
                     path,
-                    "Nested Parallel nodes are forbidden in schema version 2.",
+                    "Nested Parallel nodes are forbidden.",
                 )
             if node.kind != "parallel":
                 raise ExpertProgramCompileError(
@@ -1640,7 +1616,7 @@ class ExpertProgramCompiler:
                 raise ExpertProgramCompileError(
                     "nested_parallel",
                     (*path, "branches"),
-                    "Nested Parallel nodes are forbidden in schema version 2.",
+                    "Nested Parallel nodes are forbidden.",
                 )
             barrier = node.barrier
             if barrier.kind != "barrier":
@@ -1718,13 +1694,6 @@ class ExpertProgramCompiler:
         """
         if type(config) is not ExpertProgramCfg:
             raise TypeError("config must be exactly ExpertProgramCfg.")
-        if config.schema_version != EXPERT_PROGRAM_SCHEMA_VERSION:
-            raise ExpertProgramCompileError(
-                "unsupported_schema_version",
-                ("schema_version",),
-                "Expert Program schema_version must be exactly "
-                f"{EXPERT_PROGRAM_SCHEMA_VERSION}.",
-            )
         targets = self._compile_targets(config.targets)
         root = self._compile_node(
             config.program,
@@ -1739,7 +1708,6 @@ class ExpertProgramCompiler:
             runtime_preset=config.integration.runtime_preset,
         )
         return _materialize_program(
-            schema_version=config.schema_version,
             program_id=config.program_id,
             integration=integration,
             targets=targets,

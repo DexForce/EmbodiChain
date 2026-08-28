@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from embodichain.utils import logger
+from embodichain.utils.nms import pose_nms
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
@@ -487,9 +488,24 @@ class _AntipodalMeshBackend:
         self,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
-        object_part: str = "center",
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool = True,
         visualize_collision: bool = False,
     ):
+        """Filter valid grasps, optionally to one projected half of the object.
+
+        Args:
+            object_pose: Current object pose with shape ``(4, 4)``.
+            approach_direction: World-frame gripper approach direction.
+            obj_longest_axis: Optional world-frame object axis. When ``None``,
+                all annotated antipodal pairs remain eligible (center mode).
+            is_positive_part: When an axis is supplied, select the positive
+                projected half if true and the negative half otherwise.
+            visualize_collision: Whether to visualize collision checks.
+
+        Returns:
+            Success, grasp poses, opening lengths, and grasp costs.
+        """
         if self._hit_point_pairs is None:
             logger.log_warning(
                 "No antipodal point pairs available. "
@@ -507,27 +523,39 @@ class _AntipodalMeshBackend:
         hit_points_ = self._apply_transform(hit_points, object_pose)
         mesh_vert_transformed = self._apply_transform(self.vertices, object_pose)
 
-        if object_part == "bottom":
-            z_max = mesh_vert_transformed[:, 2].max()
-            z_min = mesh_vert_transformed[:, 2].min()
-            z_threshold = z_min + (z_max - z_min) * 0.45
-            z_mask = (origin_points_[:, 2] < z_threshold) | (
-                hit_points_[:, 2] < z_threshold
-            )
-            origin_points_masked = origin_points_[z_mask]
-            hit_points_masked = hit_points_[z_mask]
-        elif object_part == "top":
-            z_max = mesh_vert_transformed[:, 2].max()
-            z_min = mesh_vert_transformed[:, 2].min()
-            z_threshold = z_min + (z_max - z_min) * 0.6
-            z_mask = (origin_points_[:, 2] > z_threshold) | (
-                hit_points_[:, 2] > z_threshold
-            )
-            origin_points_masked = origin_points_[z_mask]
-            hit_points_masked = hit_points_[z_mask]
-        else:
+        if obj_longest_axis is None:
             origin_points_masked = origin_points_
             hit_points_masked = hit_points_
+        else:
+            axis = torch.as_tensor(
+                obj_longest_axis,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            if axis.shape != (3,) or not torch.isfinite(axis).all():
+                raise ValueError("obj_longest_axis must be a finite (3,) tensor.")
+            axis_norm = torch.linalg.vector_norm(axis)
+            if axis_norm <= 1.0e-8:
+                raise ValueError("obj_longest_axis must be non-zero.")
+            if not isinstance(is_positive_part, bool):
+                raise TypeError("is_positive_part must be a bool.")
+            axis = axis / axis_norm
+            mesh_projection = torch.matmul(mesh_vert_transformed, axis)
+            mesh_projection_range = mesh_projection.max() - mesh_projection.min()
+            projection_posi_threshold = (
+                mesh_projection.min() + 0.65 * mesh_projection_range
+            )
+            projection_nega_threshold = (
+                mesh_projection.min() + 0.35 * mesh_projection_range
+            )
+            pair_centers = 0.5 * (origin_points_ + hit_points_)
+            pair_projection = torch.matmul(pair_centers, axis)
+            if is_positive_part:
+                part_mask = pair_projection > projection_posi_threshold
+            else:
+                part_mask = pair_projection < projection_nega_threshold
+            origin_points_masked = origin_points_[part_mask]
+            hit_points_masked = hit_points_[part_mask]
         return self._filter_valid_grasp_poses(
             origin_points_=origin_points_masked,
             hit_points_=hit_points_masked,
@@ -683,16 +711,15 @@ class _AntipodalMeshBackend:
         valid_centers = valid_centers.repeat(self._approach_direction_samples, 1)
         valid_open_lengths = valid_open_lengths.repeat(self._approach_direction_samples)
 
-        # TODO: too slow
-        # # remove near grasp poses using non-maximum suppression
-        # nms_indices = pose_nms_indices(
-        #     valid_grasp_poses,
-        #     angle_th=np.pi / 18,
-        #     dist_th=0.01,
-        # )
-        # valid_grasp_poses = valid_grasp_poses[nms_indices]
-        # valid_open_lengths = valid_open_lengths[nms_indices]
-        # valid_centers = valid_centers[nms_indices]
+        # Compress near-identical candidates before the more expensive
+        # collision query. Keep the per-pose metadata aligned with NMS output.
+        valid_grasp_poses, nms_indices = pose_nms(
+            valid_grasp_poses,
+            angle_th=np.pi / 36,
+            dist_th=0.005,
+        )
+        valid_open_lengths = valid_open_lengths[nms_indices]
+        valid_centers = valid_centers[nms_indices]
 
         is_colliding, max_penetration = self._collision_checker.query(
             object_pose,
@@ -725,7 +752,7 @@ class _AntipodalMeshBackend:
         center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
-        total_cost = 0.2 * angle_cost + 0.2 * length_cost + 0.6 * center_cost
+        total_cost = 0.25 * angle_cost + 0.25 * length_cost + 0.5 * center_cost
 
         n_valid = valid_grasp_poses.shape[0]
         if n_valid == 0:
@@ -785,7 +812,9 @@ class _AntipodalMeshBackend:
         """
         is_success, valid_grasp_poses, valid_open_lengths, total_cost = (
             self.get_valid_grasp_poses(
-                object_pose, approach_direction, visualize_collision
+                object_pose,
+                approach_direction,
+                visualize_collision=visualize_collision,
             )
         )
         if not is_success:

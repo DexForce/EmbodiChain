@@ -81,9 +81,12 @@ class TestLoadConfig:
     def test_load_packaged_official_task_config(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
 
-        loaded = load_config("embodichain_tasks/configs/gym/cobotmagic.json")
+        loaded = load_config(
+            "embodichain_tasks/configs/tasks/manipulation/tableware/"
+            "pour_water/env.json"
+        )
 
-        assert "id" in loaded
+        assert loaded["id"] == "PourWater-v1"
 
 
 if __name__ == "__main__":

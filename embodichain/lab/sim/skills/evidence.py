@@ -63,6 +63,7 @@ from .scene import (
     SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION,
     ArticulationJointEvidenceAddress,
 )
+from ._validation import validate_identifier as _validate_identifier
 
 _EFFECT_EXPECTATION_TYPES = (
     HeldObjectStateExpectation,
@@ -75,15 +76,6 @@ _EFFECT_BATCH_TYPES = (
     ScalarEffectEvidenceBatch,
     JointStateEvidenceBatch,
 )
-
-
-def _validate_identifier(value: str, *, field_name: str) -> str:
-    """Return one exact non-empty identifier."""
-    if type(value) is not str or not value or value != value.strip():
-        raise ValueError(
-            f"{field_name} must be a non-empty string without outer whitespace."
-        )
-    return value
 
 
 @dataclass(frozen=True, slots=True, eq=False)

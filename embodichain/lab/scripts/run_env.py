@@ -32,9 +32,6 @@ import torch
 import tqdm
 
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult, execute_demo_episode
-from embodichain.lab.gym.envs.expert_program.loader import (
-    load_expert_program as _load_expert_program,
-)
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -858,22 +855,6 @@ def cli(argv: Sequence[str] | None = None) -> None:
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
-    expert_program_path = getattr(args, "expert_program", None)
-    if expert_program_path is not None:
-        if getattr(env_cfg, "expert_program", None) is not None:
-            raise ValueError(
-                "Expert Program input is ambiguous: choose either the Gym "
-                "config's expert_program_path or --expert-program, not both."
-            )
-        env_cfg.expert_program = _load_expert_program(expert_program_path)
-    if (
-        getattr(env_cfg, "expert_program", None) is not None
-        and getattr(args, "action_config", None) is not None
-    ):
-        raise ValueError(
-            "Declarative Expert Programs and --action_config are mutually "
-            "exclusive execution sources."
-        )
 
     if args.replay and args.replay_mode == "control":
         log_info("Dataset saving disabled for control replay mode.", color="green")

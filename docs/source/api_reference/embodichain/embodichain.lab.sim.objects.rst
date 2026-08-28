@@ -28,6 +28,7 @@ bodies.
     RigidBodyGroupData
     RigidObjectGroupCfg
     Articulation
+    ArticulationJointKinematics
     ArticulationData
     ArticulationCfg
     SoftObject
@@ -103,6 +104,10 @@ Articulation
 .. autoclass:: Articulation
     :members:
     :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: ArticulationJointKinematics
+    :members:
     :show-inheritance:
 
 .. autoclass:: ArticulationData

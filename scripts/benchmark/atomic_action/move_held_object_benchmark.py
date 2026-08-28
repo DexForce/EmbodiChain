@@ -180,9 +180,11 @@ def _prepare_held_state(
         AtomicActionEngine,
         ControlPartCommandProfile,
         EndEffectorPoseGoal,
+        EntityState,
         GraspGoal,
         MotionPolicy,
         PickUpOptions,
+        SceneSnapshot,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
         get_hand_open_close_qpos,
@@ -242,7 +244,14 @@ def _prepare_held_state(
                 ),
             ),
         ),
-        atomic_engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        atomic_engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
+            ),
+            control_dt=sim.sim_config.physics_dt,
+        ),
     )
     is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions

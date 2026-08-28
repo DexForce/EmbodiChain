@@ -24,11 +24,13 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult
+from embodichain.lab.gym.envs.expert_program.loader import (
+    load_expert_program as _load_expert_program,
+)
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
 from embodichain.lab.scripts import run_env
 from embodichain.lab.scripts.run_env import (
     _create_parser,
-    _load_expert_program,
     _run_replay_control_loop,
     generate_function,
 )
@@ -45,7 +47,6 @@ VISER_POLL_INTERVAL = 0.05
 def _expert_program_payload() -> dict[str, object]:
     """Return one minimal strict Expert Program payload."""
     return {
-        "schema_version": 2,
         "program_id": "cli_pick",
         "integration": {
             "robot_profile": "default_robot",
@@ -190,12 +191,12 @@ def test_load_expert_program_safely_decodes_supported_files(
     [
         (
             "program.json",
-            '{"schema_version": 2, "schema_version": 2}',
+            '{"program_id": "one", "program_id": "two"}',
             "Duplicate JSON key",
         ),
         (
             "program.yaml",
-            "schema_version: 2\nschema_version: 2\n",
+            "program_id: one\nprogram_id: two\n",
             "found duplicate key",
         ),
     ],
@@ -217,7 +218,7 @@ def test_load_expert_program_rejects_duplicate_mapping_keys(
 def test_load_expert_program_rejects_unsupported_file_extension(tmp_path) -> None:
     """Only explicit JSON and YAML file formats are accepted."""
     path = tmp_path / "program.toml"
-    path.write_text("schema_version = 1", encoding="utf-8")
+    path.write_text('program_id = "cli_pick"', encoding="utf-8")
 
     with pytest.raises(ValueError, match=".json, .yaml, or .yml"):
         _load_expert_program(path)
@@ -549,7 +550,7 @@ def test_cli_aborts_before_closing_environment_once(monkeypatch) -> None:
     assert env.events == [abort_event, abort_event, ("close", None)]
 
 
-def test_cli_injects_decoded_expert_program_before_environment_creation(
+def test_cli_uses_program_already_loaded_by_config_builder(
     monkeypatch,
 ) -> None:
     """The CLI attaches the strict program config to the environment config."""
@@ -569,16 +570,13 @@ def test_cli_injects_decoded_expert_program_before_environment_creation(
     monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
     monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
     monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
-    monkeypatch.setattr(
-        run_env,
-        "build_env_cfg_from_args",
-        lambda parsed_args: (env_cfg, {"id": GYM_ID}, {}),
-    )
-    monkeypatch.setattr(
-        run_env,
-        "_load_expert_program",
-        MagicMock(return_value=decoded_program),
-    )
+
+    def build(parsed_args):
+        assert parsed_args is args
+        env_cfg.expert_program = decoded_program
+        return env_cfg, {"id": GYM_ID}, {}
+
+    monkeypatch.setattr(run_env, "build_env_cfg_from_args", build)
     monkeypatch.setattr(run_env.gymnasium, "make", make)
     monkeypatch.setattr(run_env, "main", lambda *args, **kwargs: None)
     monkeypatch.setattr(

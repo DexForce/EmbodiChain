@@ -235,7 +235,7 @@ jobs:
               "embodichain/VERSION",
               "embodichain/gen_sim/simready_pipeline/configs/gen_config.json",
               "embodichain_tasks/__init__.py",
-              "embodichain_tasks/configs/gym/cobotmagic.json",
+              "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json",
           }
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())

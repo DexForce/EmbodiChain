@@ -84,15 +84,22 @@ class _RigidObject:
 
 
 class _Robot:
-    """Full-qpos source used by post-policy hold actions."""
+    """Distinct current- and target-qpos source for post-policy holds."""
 
-    def __init__(self, qpos: torch.Tensor) -> None:
-        self.qpos = qpos
-        self.qpos_reads = 0
+    def __init__(
+        self,
+        current_qpos: torch.Tensor,
+        target_qpos: torch.Tensor | None = None,
+    ) -> None:
+        self.current_qpos = current_qpos.clone()
+        self.target_qpos = (
+            current_qpos.clone() if target_qpos is None else target_qpos.clone()
+        )
+        self.qpos_reads: list[bool] = []
 
-    def get_qpos(self) -> torch.Tensor:
-        self.qpos_reads += 1
-        return self.qpos.clone()
+    def get_qpos(self, target: bool = False) -> torch.Tensor:
+        self.qpos_reads.append(target)
+        return (self.target_qpos if target else self.current_qpos).clone()
 
 
 class _Articulation:
@@ -132,7 +139,6 @@ class _Simulation:
 def _compiled_segment(*, settle_preset: str = "fast"):
     """Compile one segment containing both supported policy types."""
     payload = {
-        "schema_version": 2,
         "program_id": "policy_test",
         "integration": {
             "robot_profile": "test_robot",
@@ -195,7 +201,6 @@ def _compiled_segment(*, settle_preset: str = "fast"):
 def _compiled_articulation_segment():
     """Compile one standard joint-position validator."""
     payload = {
-        "schema_version": 2,
         "program_id": "joint_policy_test",
         "integration": {
             "robot_profile": "test_robot",
@@ -211,7 +216,6 @@ def _compiled_articulation_segment():
                 "call": {
                     "kind": "registered",
                     "call_id": "example.slide",
-                    "schema_version": 1,
                     "arguments": {},
                 },
             },
@@ -243,10 +247,14 @@ def _port(
     positions: torch.Tensor,
     *,
     preset: DynamicSettleMonitorCfg | None = None,
+    target_qpos: torch.Tensor | None = None,
 ) -> tuple[SimulationSegmentPolicyPort, _RigidObject, _Robot]:
     """Build one policy port and expose its mutable test doubles."""
     entity = _RigidObject(positions)
-    robot = _Robot(torch.tensor([[1.0, 2.0], [3.0, 4.0]]))
+    robot = _Robot(
+        torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+        target_qpos=target_qpos,
+    )
     port = SimulationSegmentPolicyPort(
         _Simulation(entity),
         robot,
@@ -309,7 +317,7 @@ def test_pure_preflight_validates_hooks_without_reading_live_state() -> None:
     port.validate_policy(segment.post_policies[0], segment=segment)
     port.validate_validator(segment.validators[0], segment=segment)
 
-    assert robot.qpos_reads == 1
+    assert robot.qpos_reads == [False]
     assert entity.pose_reads == 0
 
 
@@ -321,14 +329,24 @@ def test_pure_preflight_rejects_unknown_settle_preset_without_observation() -> N
     with pytest.raises(KeyError, match="Unknown settle preset 'missing'"):
         port.validate_policy(segment.post_policies[0], segment=segment)
 
-    assert robot.qpos_reads == 1
+    assert robot.qpos_reads == [False]
     assert entity.pose_reads == 0
 
 
-def test_wait_stable_yields_fresh_full_qpos_holds_through_gym() -> None:
-    """Settling observes only after each yielded hold has been consumed."""
+def test_wait_stable_yields_fresh_target_qpos_holds_through_gym() -> None:
+    """Settling preserves loaded drive targets with independently owned holds."""
     segment = _compiled_segment()
-    port, _, robot = _port(torch.zeros(2, 3))
+    target_qpos = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    port, _, robot = _port(
+        torch.zeros(2, 3),
+        target_qpos=target_qpos,
+        preset=DynamicSettleMonitorCfg(
+            min_steps=0,
+            max_steps=4,
+            check_interval_steps=1,
+            required_stable_checks=3,
+        ),
+    )
     actions = port.actions(
         segment.post_policies[0],
         segment=segment,
@@ -336,11 +354,21 @@ def test_wait_stable_yields_fresh_full_qpos_holds_through_gym() -> None:
     )
 
     first = next(actions)
-    assert torch.equal(first, robot.qpos)
+    assert torch.equal(first, target_qpos)
+    assert not torch.equal(first, robot.current_qpos)
     first.fill_(99.0)
+
+    second = next(actions)
+    assert torch.equal(second, target_qpos)
+    assert second.data_ptr() != first.data_ptr()
     with pytest.raises(StopIteration):
         next(actions)
-    assert torch.equal(robot.qpos, torch.tensor([[1.0, 2.0], [3.0, 4.0]]))
+    assert torch.equal(
+        robot.current_qpos,
+        torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+    )
+    assert torch.equal(robot.target_qpos, target_qpos)
+    assert robot.qpos_reads == [False, True, True]
 
     metadata = port.post_policy_metadata(
         segment.post_policies[0],
@@ -352,11 +380,11 @@ def test_wait_stable_yields_fresh_full_qpos_holds_through_gym() -> None:
         "linear_velocity": 0.03,
         "angular_velocity": 0.2,
         "min_steps": 0,
-        "max_steps": 3,
+        "max_steps": 4,
         "check_interval_steps": 1,
-        "required_stable_checks": 2,
+        "required_stable_checks": 3,
     }
-    assert metadata["state"]["elapsed_steps"] == 1
+    assert metadata["state"]["elapsed_steps"] == 2
     assert metadata["state"]["settled_mask"] == [True, True]
     assert metadata["state"]["timeout_mask"] == [False, False]
     assert metadata["state"]["max_linear_speed"] == [0.0, 0.0]
@@ -364,6 +392,66 @@ def test_wait_stable_yields_fresh_full_qpos_holds_through_gym() -> None:
         segment.post_policies[0],
         segment=segment,
     ).tolist() == [True, True]
+
+
+def test_wait_stable_holds_active_targets_and_inactive_current_qpos() -> None:
+    """Initial inactive rows use measured holds while active rows keep preload."""
+    segment = _compiled_segment()
+    target_qpos = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    port, _, robot = _port(
+        torch.zeros(2, 3),
+        target_qpos=target_qpos,
+        preset=DynamicSettleMonitorCfg(
+            min_steps=0,
+            max_steps=4,
+            check_interval_steps=1,
+            required_stable_checks=3,
+        ),
+    )
+    active_mask = torch.tensor([True, False])
+    actions = port.actions(
+        segment.post_policies[0],
+        segment=segment,
+        active_mask=active_mask,
+    )
+    expected = torch.stack((target_qpos[0], robot.current_qpos[1]))
+
+    first = next(actions)
+    assert torch.equal(first, expected)
+    first.fill_(99.0)
+
+    second = next(actions)
+    assert torch.equal(second, expected)
+    assert second.data_ptr() != first.data_ptr()
+    with pytest.raises(StopIteration):
+        next(actions)
+
+    assert robot.qpos_reads == [False, True, False, True, False]
+    result = port.post_policy_result(
+        segment.post_policies[0],
+        segment=segment,
+    )
+    assert result.tolist() == [True, False]
+
+
+def test_wait_stable_rejects_wrong_target_width_for_all_active_rows() -> None:
+    """All-active settling fails closed on a malformed full target qpos."""
+    segment = _compiled_segment()
+    port, _, robot = _port(torch.zeros(2, 3))
+    robot.target_qpos = torch.zeros(2, 3)
+    actions = port.actions(
+        segment.post_policies[0],
+        segment=segment,
+        active_mask=torch.ones(2, dtype=torch.bool),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="target full qpos must match the construction-time current full qpos",
+    ):
+        next(actions)
+
+    assert robot.qpos_reads == [False, True]
 
 
 def test_wait_stable_returns_row_local_timeout_result_and_metadata() -> None:

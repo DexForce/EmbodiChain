@@ -245,7 +245,8 @@ controller.
 The canonical path resolves the skill through a bound profile:
 
 ```python
-resolved = engine.skill_profile.resolve(
+bound_profile = robot_profile.bind(engine)
+resolved = bound_profile.resolve(
     "pick_up",
     selections={"primary": "left_participant"},
 )
@@ -293,13 +294,13 @@ by the motion endpoint's control-part target.
 ### Control-part semantic commands
 
 On the canonical semantic path, declare embodiment commands on the
-{doc}`RobotSkillProfile <robot_skill_profiles>` and pass the profile through the
-engine's `skill_profile` argument. For a direct-core integration, register the
-same command profiles explicitly when constructing the engine. Profile command
-IDs are generic and selected by endpoint adapters; the built-in control-part
-adapter defaults them to concrete `robot.control_parts` names. Direct-core
-engine keys are always concrete control-part names. The command names remain
-semantic:
+{doc}`RobotSkillProfile <robot_skill_profiles>`, lower its control-part command
+profiles into the engine constructor, and then bind the profile in the semantic
+layer. For a direct-core integration, register the same command profiles
+explicitly when constructing the engine. Profile command IDs are generic and
+selected by endpoint adapters; the built-in control-part adapter defaults them
+to concrete `robot.control_parts` names. Direct-core engine keys are always
+concrete control-part names. The command names remain semantic:
 
 ```python
 engine = AtomicActionEngine(
@@ -385,10 +386,9 @@ world from one {doc}`SceneRegistry <../scene_registry>`. Direct use of
 Registration means that an implementation is installed, not that every robot
 can execute it. `engine.actions` contains direct-core implementations;
 `engine.skills` contains installed, agent-visible implementations with an
-explicit generic binding contract; and `engine.skill_profile.skills` applies
-embodiment capability filtering. Required task-state preconditions remain
-runtime conditions and are validated while an invocation is resolved and
-planned.
+explicit generic binding contract; and `bound_profile.skills` applies embodiment
+capability filtering. Required task-state preconditions remain runtime conditions
+and are validated while an invocation is resolved and planned.
 
 Use invocation `skill_options` whenever behavior varies per call. Two variants
 with the same stable skill ID therefore share one built-in implementation:
@@ -562,6 +562,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionStatus,
     RecoveryPolicy,
     SceneEntityPose,
+    TrackingPolicy,
 )
 
 moving_goal = ActionInvocation(
@@ -580,10 +581,13 @@ moving_goal = ActionInvocation(
     recovery_policy=RecoveryPolicy(
         max_replans=3,
         max_action_retries=2,
-        tracking_error_threshold=0.05,
         goal_translation_threshold=0.02,
         goal_rotation_threshold=0.087,
         action_timeout=30.0,
+    ),
+    tracking_policy=TrackingPolicy.joint_position(
+        in_flight_max_abs_error=0.05,
+        terminal_max_abs_error=0.05,
     ),
 )
 
@@ -769,10 +773,10 @@ should pass their fresh context explicitly.
 ```{attention}
 Automatic dynamic-goal invalidation is dependency-driven. A goal must contain a
 `SceneEntityPose`, or an object-centric primitive must explicitly declare the
-`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp` and the
-implicit-initial-pose path of coordinated pickup declare that dependency
-automatically. The deprecated live-entity fallback does not trigger
-scene-motion replanning.
+`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp`,
+`HandOver`, and the implicit-initial-pose path of coordinated pickup declare
+that dependency automatically. The deprecated live-entity fallback does not
+trigger scene-motion replanning.
 
 An `ActionPlan.scene_dependency_end_segment` may bound monitoring to the
 reversible portion of a staged action for every dependency.
@@ -791,7 +795,7 @@ changing their geometry requires rebuilding the planner world.
 ## Planning success versus physical success
 
 `ActionPlan.plan_success` only means a valid command plan was produced for an
-environment row. Pick, place, handover, and coordinated skills also return an
+environment row. Pick, place, and coordinated skills also return an
 uncommitted `StateDelta` describing the attachment state expected after
 execution.
 
@@ -799,13 +803,16 @@ execution.
 Multi-arm grasps use multiple entries that share the same `ObjectSemantics`;
 there is no parallel coordinated-attachment representation to synchronize.
 Consumers query per-environment active and exclusive-hold masks from that one
-map. A single-arm transport, release, or handover row fails safely while a
-second manipulator still holds the same semantic object or live entity.
+map. A single-arm transport or release row fails safely while a second
+manipulator still holds the same semantic object or live entity. The unified
+`HandOver` action instead requires both candidate arms to start unoccupied.
 
 At the terminal waypoint, an `ExecutionSession` requests an external
 correlated per-environment result before committing a non-empty effect:
 
 ```python
+import torch
+
 from embodichain.lab.sim.atomic_actions import EffectVerificationResult
 
 tick = session.tick(latest_context)
@@ -816,6 +823,8 @@ if tick.pending_effect is not None:
         verification_id=request.verification_id,
         success_mask=success_mask,
         failure_mask=failure_mask,
+        invalidation_mask=failure_mask,
+        retry_mask=torch.zeros_like(failure_mask),
     )
     tick = session.tick(latest_context, effect_result=effect_result)
 ```
@@ -828,6 +837,14 @@ and failure masks are disjoint subsets of the request mask; omitted request rows
 remain unresolved. Request IDs change after mask shrinkage or whole-action
 retry, so a delayed result cannot commit a newer attempt.
 
+Every result also classifies failed rows with `invalidation_mask` and
+`retry_mask`, both subsets of `failure_mask`. Invalidation applies the
+request's core-owned, removal-only `failure_invalidation`; the verifier cannot
+inject replacement state. Retry is valid only while the same invocation's
+physical preconditions remain satisfied. Other failed rows enter external
+recovery, and unresolved evidence at the deadline removes covered active
+verified state before recovery.
+
 `request.deadline` is expressed in the robot-observation timestamp domain.
 `RecoveryPolicy.action_timeout` covers both trajectory execution and the
 terminal effect wait; a retry invalidates the old request ID. With
@@ -835,6 +852,24 @@ terminal effect wait; a retry invalidates the old request ID. With
 its `effect_result`: schedule another call using `wait_duration`, re-read the
 current request, and submit a result for that current ID. Partial resolution and
 row deactivation can also replace the request before the delayed result arrives.
+
+The semantic compiler installs segment-scoped held-object guards and blocking
+physical-effect gates for curated manipulation calls. A guard observes a
+negative invariant before a due command and, on proven attachment loss,
+applies an action-authorized removal-only `StateDelta` before retry or
+`RECOVERY_REQUIRED`. A gate blocks entry to a named segment until the positive
+physical transition is verified. While unresolved, the waypoint cursor stays
+fixed and the preceding command is replayed for the synchronized active cohort,
+preserving gripper preload or open intent. Gate success unlocks motion without
+committing `TaskState`; terminal verification remains authoritative.
+
+Pick gates attachment before `lift`, and Place gates detachment before
+`retract`. The unified HandOver action gates source pickup before
+`pickup_transport`, destination pickup before `handover_release`, and source
+release before `place`; source- and destination-held guards cover the motion
+segments that depend on those relations. Each boundary owns an independent
+monitor and correlated request ID. These checks are observational and never
+create simulator attachments, freeze objects, or override poses.
 
 ## Action Agent integration
 
@@ -867,8 +902,9 @@ events without mutating a request implicitly.
 The semantic runtime is also useful without an agent. `run()` executes one
 known workflow and preserves verified state for a later workflow submitted at a
 terminal result boundary. Call-local recovery remains owned by
-`ExecutionRunner`; automatic skill replacement or symbolic-state reconciliation
-after a terminal failure is intentionally not provided. See
+`ExecutionRunner`; `SkillRuntime` performs terminal symbolic reconciliation and
+may use a bounded `WorkflowRecoveryPolicy` to retry from verified state or run
+a real semantic Pick before retrying the failed call. See
 {doc}`../semantic_skills` for the complete compiler/runtime and dynamic-task
 contract.
 

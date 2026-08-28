@@ -30,6 +30,8 @@ embodichain.lab.sim.skills
       SemanticRelationTarget
       RegisteredSemanticLowerer
       RelationTargetGrounder
+      ~embodichain.lab.sim.skills.compiler.ContainerRelationTargetGrounder
+      ~embodichain.lab.sim.skills.compiler.SupportSurfaceRelationTargetGrounder
       HandOverPoseTargets
       HandOverPoseProvider
       SemanticSkillCompiler
@@ -43,6 +45,7 @@ embodichain.lab.sim.skills
       SemanticIntegrationManifest
       SemanticDiagnostic
       SemanticValidationError
+      SemanticCallAvailability
       SemanticEffectVerifier
       AtomicSkills
       SkillRuntime
@@ -167,6 +170,12 @@ Semantic compilation and grounding
 .. autoclass:: RelationTargetGrounder
    :members:
 
+.. autoclass:: embodichain.lab.sim.skills.compiler.ContainerRelationTargetGrounder
+   :members:
+
+.. autoclass:: embodichain.lab.sim.skills.compiler.SupportSurfaceRelationTargetGrounder
+   :members:
+
 .. autoclass:: HandOverPoseTargets
    :members:
 
@@ -192,6 +201,9 @@ Semantic integration
    :members:
 
 .. autoclass:: SemanticValidationError
+   :members:
+
+.. autoclass:: SemanticCallAvailability
    :members:
 
 Semantic runtime

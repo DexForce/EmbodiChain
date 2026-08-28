@@ -30,6 +30,7 @@ from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
+    get_parallel_jaw_gripper_model,
 )
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
@@ -140,6 +141,33 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
     assert generator.gripper_model.model_id == "concrete_test_eef"
     assert "pgi" not in type(generator).__name__.lower()
     assert "pgi" not in type(generator.gripper_model).__name__.lower()
+
+
+def test_named_gripper_model_returns_the_pgi_geometry() -> None:
+    model = get_parallel_jaw_gripper_model("dh_pgi_140_80")
+
+    assert model.model_id == "dh_pgi_140_80"
+    assert model.min_opening_width == pytest.approx(0.005)
+    assert model.max_opening_width == pytest.approx(0.1)
+    assert model.finger_length == pytest.approx(0.12)
+    assert model.finger_width == pytest.approx(0.04)
+    assert model.finger_thickness == pytest.approx(0.01)
+    assert model.palm_depth == pytest.approx(0.096)
+
+
+def test_named_gripper_model_returns_independent_configs() -> None:
+    first = get_parallel_jaw_gripper_model("dh_pgi_140_80")
+    second = get_parallel_jaw_gripper_model("dh_pgi_140_80")
+
+    first.palm_depth = 1.0
+
+    assert first is not second
+    assert second.palm_depth == pytest.approx(0.096)
+
+
+def test_named_gripper_model_rejects_unknown_ids() -> None:
+    with pytest.raises(ValueError, match="unknown.*available.*dh_pgi_140_80"):
+        get_parallel_jaw_gripper_model("missing_gripper")
 
 
 def test_package_exposes_only_the_unified_generator_api() -> None:

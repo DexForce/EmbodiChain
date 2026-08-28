@@ -40,12 +40,13 @@ from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     AssembleAffordance,
     AssembleGoal,
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     GraspGoal,
     PickUpOptions,
     PlaceOptions,
     MotionPolicy,
+    SceneEntityPose,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.data import get_data_path
@@ -141,7 +142,7 @@ def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
 ) -> Robot:
-    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
@@ -292,8 +293,9 @@ def run_assemble_demo(
         lift_height=PLACE_LIFT_HEIGHT,
         hand_interp_steps=PLACE_HAND_INTERP_STEPS,
     )
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(can, cube),
         control_profiles={
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,
@@ -315,10 +317,6 @@ def run_assemble_demo(
         sim.update(step=10)
 
     assemble_affordance = AssembleAffordance(
-        base_object_label="cube",
-        base_object_entity=cube,
-        assemble_object_label="soda_can",
-        assemble_object_entity=can,
         assemble_to_base_pose=assemble_to_base,
     )
     endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_hand"}}
@@ -336,7 +334,10 @@ def run_assemble_demo(
             ),
             engine.make_invocation(
                 "place",
-                AssembleGoal(affordance=assemble_affordance),
+                AssembleGoal(
+                    affordance=assemble_affordance,
+                    base_pose=SceneEntityPose(cube.uid),
+                ),
                 control_parts=endpoint_mapping,
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",

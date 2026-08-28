@@ -38,9 +38,9 @@ This module provides the RL training entry script, responsible for parsing confi
 
 ## Usage Example
 ```bash
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_ppo.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml
 ```
 
 PointMass intentionally uses one differentiable PyTorch environment for both

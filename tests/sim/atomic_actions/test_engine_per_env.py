@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import replace
 import math
 from typing import ClassVar
@@ -39,7 +38,10 @@ from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
     EndpointBinding,
     EndpointCommand,
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
     EntityState,
+    EffectExpectationResult,
     ExecutionEventKind,
     ExecutionSession,
     ExecutionStatus,
@@ -47,13 +49,19 @@ from embodichain.lab.sim.atomic_actions import (
     EffectVerificationRequirement,
     EffectVerificationResult,
     GraspGoal,
+    HeldObjectGuardRequest,
+    HeldObjectGuardResult,
     HeldObjectState,
     JointPositionPayload,
     JointPositionTarget,
     MotionPolicy,
     ObjectSemantics,
     PlannerDiagnostics,
+    PlanningFailure,
     PlanningContext,
+    PhaseEffectGateRequest,
+    PhaseEffectGateRequirement,
+    PhaseEffectGateResult,
     RecoveryPolicy,
     ResolvedActionRequest,
     RobotObservation,
@@ -66,12 +74,41 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TaskState,
     TimedCommandSequence,
+    TimedTrackingSequence,
     TimedTrajectory,
+    TrackingFeedbackSourceRef,
+    TrackingFrame,
+    TrackingPolicy,
+    TrackingProjectorRef,
+    TrackingSetpoint,
     TrajectorySegment,
 )
-from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 from embodichain.lab.sim.planners import PlanOptions
+
+
+def _effect_result(
+    verification_id: int,
+    success_mask: torch.Tensor,
+    failure_mask: torch.Tensor,
+    *,
+    invalidation_mask: torch.Tensor | None = None,
+    retry_mask: torch.Tensor | None = None,
+    expectation_results: tuple[EffectExpectationResult, ...] = (),
+) -> EffectVerificationResult:
+    """Build an explicit terminal decision that retries failed rows by default."""
+    return EffectVerificationResult(
+        verification_id=verification_id,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+        invalidation_mask=(
+            torch.zeros_like(failure_mask)
+            if invalidation_mask is None
+            else invalidation_mask
+        ),
+        retry_mask=failure_mask if retry_mask is None else retry_mask,
+        expectation_results=expectation_results,
+    )
 
 
 class DynamicAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
@@ -116,6 +153,37 @@ class DynamicAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         )
 
 
+class PhaseGateAction(DynamicAction):
+    """Three-frame action with one gate before its terminal segment."""
+
+    skill_id: ClassVar[str] = "phase_gate"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        self.plan_count += 1
+        self.requests.append(request)
+        pose = resolve_pose_goal(goal.xpos, context, name="xpos")
+        target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
+        midpoint = torch.lerp(context.robot.qpos, target, 0.5)
+        trajectory = TimedTrajectory.from_uniform_step(
+            torch.stack([context.robot.qpos, midpoint, target], dim=1),
+            env_ids=context.env_ids,
+            step_dt=0.1,
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=trajectory,
+            segment_lengths={"prepare": 2, "commit": 1},
+        )
+
+
 class EffectAction(DynamicAction):
     """Dynamic test action that declares an attachment effect."""
 
@@ -131,7 +199,10 @@ class EffectAction(DynamicAction):
         pose = resolve_pose_goal(goal.xpos, context, name="xpos")
         target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
         semantics = ObjectSemantics(
-            affordance=Affordance(), geometry={}, label="object"
+            affordance=Affordance(),
+            geometry={},
+            entity_id="object",
+            label="object",
         )
         held = HeldObjectState(
             semantics=semantics,
@@ -149,6 +220,34 @@ class EffectAction(DynamicAction):
             success=True,
             trajectory=trajectory,
             expected_effects=StateDelta(held_object_updates={"arm": held}),
+        )
+
+
+class CandidateEffectAction(DynamicAction):
+    """Dynamic action that owns an uncommitted attachment baseline."""
+
+    skill_id: ClassVar[str] = "candidate_effect"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        plan = super()._plan(request, context)
+        held = HeldObjectState(
+            semantics=ObjectSemantics(
+                affordance=Affordance(),
+                geometry={},
+                label="object",
+                entity_id="object",
+            ),
+            object_to_eef=torch.eye(4),
+            grasp_xpos=torch.eye(4),
+        )
+        return replace(
+            plan,
+            effect_candidates=StateDelta(held_object_updates={"arm": held}),
         )
 
 
@@ -215,7 +314,35 @@ class FailedEffectAction(EffectAction):
         context: PlanningContext,
     ) -> ActionPlan:
         plan = super()._plan(request, context)
-        return replace(plan, plan_success=torch.zeros_like(plan.plan_success))
+        return replace(
+            plan,
+            plan_success=torch.zeros_like(plan.plan_success),
+            diagnostics=PlannerDiagnostics(
+                backend="test",
+                failure=PlanningFailure("planning_failed", retryable=True),
+            ),
+        )
+
+
+class NonRetryablePlanningFailureAction(DynamicAction):
+    """Reject one invalid goal without consuming action-retry budget."""
+
+    skill_id: ClassVar[str] = "non_retryable_failure"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        self.plan_count += 1
+        return self.failed_plan(
+            request,
+            context,
+            message="The grounded target violates the action contract.",
+            failure_code="invalid_goal",
+            retryable=False,
+        )
 
 
 class DiagnosticAction(DynamicAction):
@@ -291,7 +418,14 @@ class MixedEffectAction(EffectAction):
         plan = super()._plan(request, context)
         plan_success = torch.ones_like(plan.plan_success)
         plan_success[-1] = False
-        return replace(plan, plan_success=plan_success)
+        return replace(
+            plan,
+            plan_success=plan_success,
+            diagnostics=PlannerDiagnostics(
+                backend="test",
+                failure=PlanningFailure("planning_failed", retryable=True),
+            ),
+        )
 
 
 class NonuniformTimingAction(DynamicAction):
@@ -345,9 +479,14 @@ class DestinationSequenceAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]
         )
     )
 
-    def __init__(self, destinations: tuple[str | None, ...]) -> None:
+    def __init__(
+        self,
+        destinations: tuple[str | None, ...],
+        tracking_provider_revisions: tuple[str | None, ...] | None = None,
+    ) -> None:
         super().__init__()
         self.destinations = destinations
+        self.tracking_provider_revisions = tracking_provider_revisions
         self.plan_count = 0
 
     def _plan(
@@ -393,7 +532,7 @@ class DestinationSequenceAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]
                 device=context.robot.qpos.device,
             ),
         )
-        return self.build_command_plan(
+        plan = self.build_command_plan(
             request,
             context,
             success=True,
@@ -402,29 +541,35 @@ class DestinationSequenceAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]
                 env_ids=context.env_ids,
             ),
         )
-
-
-class UncopyableEntity(BatchEntity):
-    """Minimal live entity whose simulator identity must not be copied."""
-
-    def __init__(self) -> None:
-        self._pose = torch.eye(4).unsqueeze(0)
-
-    def __deepcopy__(self, memo: dict[int, object]) -> UncopyableEntity:
-        raise AssertionError("Live simulator entities must not be deep-copied.")
-
-    def set_local_pose(
-        self,
-        pose: torch.Tensor,
-        env_ids: Sequence[int] | None = None,
-    ) -> None:
-        self._pose = pose.clone()
-
-    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
-        return self._pose.clone()
-
-    def reset(self, env_ids: Sequence[int] | None = None) -> None:
-        return None
+        if self.tracking_provider_revisions is None:
+            return plan
+        provider_revision = self.tracking_provider_revisions[index]
+        if provider_revision is None or plan.tracking is None:
+            return plan
+        original = plan.tracking.frames[0].setpoints[0]
+        changed = TrackingSetpoint(
+            endpoint_key=original.endpoint_key,
+            binding=EndpointTrackingChannelBinding(
+                channel_id=original.binding.channel_id,
+                source=TrackingFeedbackSourceRef(
+                    provider_id=original.binding.source.provider_id,
+                    revision=provider_revision,
+                    address=original.binding.source.address,
+                ),
+                projector=TrackingProjectorRef(
+                    projector_id=original.binding.projector.projector_id,
+                    revision=original.binding.projector.revision,
+                ),
+            ),
+            desired=original.desired,
+        )
+        return replace(
+            plan,
+            tracking=TimedTrackingSequence(
+                plan.tracking.env_ids,
+                (TrackingFrame((changed,)),),
+            ),
+        )
 
 
 def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
@@ -448,6 +593,7 @@ def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
 
 def _destination_engine(
     destinations: tuple[str | None, ...],
+    tracking_provider_revisions: tuple[str | None, ...] | None = None,
 ) -> tuple[AtomicActionEngine, DestinationSequenceAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -465,7 +611,7 @@ def _destination_engine(
     generator.planner.cfg.planner_type = "stub"
     generator.supports_dynamic_collision_world = False
     engine = AtomicActionEngine(generator, load_builtins=False)
-    action = DestinationSequenceAction(destinations)
+    action = DestinationSequenceAction(destinations, tracking_provider_revisions)
     engine.register(action)
     return engine, action
 
@@ -497,6 +643,74 @@ def _context(
             entities={"target": EntityState(pose)},
         ),
         env_ids=torch.arange(batch_size, dtype=torch.long),
+    )
+
+
+def _with_held_object(
+    context: PlanningContext,
+    *,
+    env_mask: torch.Tensor | None = None,
+) -> PlanningContext:
+    """Attach one verified test object to the logical arm resource."""
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="object",
+        entity_id="object",
+    )
+    held = HeldObjectState(
+        semantics=semantics,
+        object_to_eef=torch.eye(4),
+        grasp_xpos=torch.eye(4),
+        env_mask=env_mask,
+    )
+    return replace(
+        context,
+        task=TaskState(
+            batch_size=context.batch_size,
+            device=context.robot.qpos.device,
+            held_objects={"arm": held},
+        ),
+    )
+
+
+def _held_object_loss_result(
+    request: HeldObjectGuardRequest,
+    *,
+    failure_mask: torch.Tensor,
+    retry_mask: torch.Tensor,
+) -> HeldObjectGuardResult:
+    """Build a loss result exactly correlated with one guard request."""
+    return HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=failure_mask,
+        state_invalidation=StateDelta(held_object_updates={"arm": None}),
+        retry_mask=retry_mask,
+        message="Observed object-to-endpoint slip.",
+    )
+
+
+def _phase_gate_result(
+    request: PhaseEffectGateRequest,
+    *,
+    success_mask: torch.Tensor,
+    failure_mask: torch.Tensor,
+    retry_mask: torch.Tensor | None = None,
+) -> PhaseEffectGateResult:
+    """Build one result exactly correlated with a pending segment-entry gate."""
+    return PhaseEffectGateResult(
+        verification_id=request.verification_id,
+        gate_id=request.gate_id,
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+        retry_mask=(failure_mask.clone() if retry_mask is None else retry_mask),
     )
 
 
@@ -593,7 +807,6 @@ def _invocation(
         recovery_policy=RecoveryPolicy(
             max_replans=max_replans,
             max_action_retries=max_action_retries,
-            tracking_error_threshold=0.05,
             goal_translation_threshold=0.02,
             action_timeout=action_timeout,
         ),
@@ -625,6 +838,29 @@ def _destination_invocation(
     )
 
 
+def _phase_gate_invocation(
+    engine: AtomicActionEngine,
+    *,
+    segment_name: str = "commit",
+    max_action_retries: int = 2,
+) -> ActionInvocation[EndEffectorPoseGoal]:
+    """Build a test invocation whose core owns one named segment gate."""
+    base = _invocation(
+        engine,
+        skill_id=PhaseGateAction.skill_id,
+        max_action_retries=max_action_retries,
+    )
+    return replace(
+        base,
+        phase_effect_gates=(
+            PhaseEffectGateRequirement(
+                gate_id="physical_ready",
+                segment_name=segment_name,
+            ),
+        ),
+    )
+
+
 def _effect_session(
     *,
     batch_size: int = 1,
@@ -632,6 +868,7 @@ def _effect_session(
     action_timeout: float = 30.0,
     eligible_mask: torch.Tensor | None = None,
     action: DynamicAction | None = None,
+    task_state: TaskState | None = None,
 ) -> tuple[ExecutionSession, ExecutionTick]:
     """Advance a test effect action to its verification boundary."""
     engine, _ = _engine(batch_size=batch_size)
@@ -651,9 +888,12 @@ def _effect_session(
     )
     qpos = tuple(0.0 for _ in range(batch_size))
     target = tuple(0.2 for _ in range(batch_size))
+    initial_context = _context(0.0, qpos, target, 0)
+    if task_state is not None:
+        initial_context = replace(initial_context, task=task_state)
     session = engine.start(
         (invocation,),
-        _context(0.0, qpos, target, 0),
+        initial_context,
         eligible_mask=eligible_mask,
     )
     session.tick(_context(0.0, qpos, target, 0))
@@ -685,6 +925,402 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert torch.all(_joint_positions(second.command) == 0.2)
     assert final.status is ExecutionStatus.COMPLETED
     assert final.eligible_mask.tolist() == [True]
+
+
+@pytest.mark.parametrize(
+    ("segment_name", "message"),
+    (("missing", "missing segment"), ("prepare", "first trajectory segment")),
+)
+def test_phase_effect_gate_requires_a_noninitial_named_segment(
+    segment_name: str,
+    message: str,
+) -> None:
+    engine, _ = _engine()
+    engine.register(PhaseGateAction())
+
+    with pytest.raises(ValueError, match=message):
+        engine.start(
+            (_phase_gate_invocation(engine, segment_name=segment_name),),
+            _context(0.0, 0.0, 0.2, 0),
+        )
+
+
+def test_unresolved_phase_effect_gate_replays_preceding_command_for_full_cohort() -> (
+    None
+):
+    engine, _ = _engine(batch_size=2)
+    action = PhaseGateAction()
+    engine.register(action)
+    initial = _context(0.0, (0.0, 0.0), (0.2, 0.4), 0)
+    session = engine.start((_phase_gate_invocation(engine),), initial)
+
+    first = session.tick(initial)
+    boundary = session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.4), 0))
+    request = boundary.pending_phase_effect_gate
+    assert request is not None
+    assert request.gate_id == "physical_ready"
+    assert request.segment_name == "commit"
+    assert request.next_waypoint_index == 2
+    assert request.env_mask.tolist() == [True, True]
+    assert torch.allclose(_joint_positions(first.command), torch.zeros(2, 2))
+    predecessor = _joint_positions(boundary.command)
+    assert torch.allclose(predecessor, torch.tensor([[0.1, 0.1], [0.2, 0.2]]))
+
+    unresolved = session.tick(
+        _context(0.2, (0.1, 0.2), (0.2, 0.4), 0),
+        phase_effect_gate_result=_phase_gate_result(
+            request,
+            success_mask=torch.tensor([True, False]),
+            failure_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    assert unresolved.status is ExecutionStatus.RUNNING
+    assert unresolved.pending_phase_effect_gate is not None
+    assert unresolved.pending_phase_effect_gate.verification_id == (
+        request.verification_id + 1
+    )
+    assert unresolved.pending_phase_effect_gate.next_waypoint_index == 2
+    assert torch.equal(_joint_positions(unresolved.command), predecessor)
+    assert unresolved.command is not None
+    assert unresolved.command.active_mask.tolist() == [True, True]
+    assert unresolved.task_state.held_objects == {}
+    kinds = [event.kind for event in (*boundary.events, *unresolved.events)]
+    assert kinds.count(ExecutionEventKind.PHASE_EFFECT_GATE_REQUIRED) == 1
+    assert ExecutionEventKind.PHASE_EFFECT_GATE_SATISFIED not in kinds
+    assert action.plan_count == 1
+
+
+def test_phase_effect_gate_success_unlocks_segment_without_committing_task_state() -> (
+    None
+):
+    engine, _ = _engine(batch_size=2)
+    engine.register(PhaseGateAction())
+    initial = _context(0.0, (0.0, 0.0), (0.2, 0.4), 0)
+    session = engine.start((_phase_gate_invocation(engine),), initial)
+    session.tick(initial)
+    boundary = session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.4), 0))
+    request = boundary.pending_phase_effect_gate
+    assert request is not None
+
+    released = session.tick(
+        _context(0.2, (0.1, 0.2), (0.2, 0.4), 0),
+        phase_effect_gate_result=_phase_gate_result(
+            request,
+            success_mask=torch.tensor([True, True]),
+            failure_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    assert released.pending_phase_effect_gate is None
+    assert torch.allclose(
+        _joint_positions(released.command),
+        torch.tensor([[0.2, 0.2], [0.4, 0.4]]),
+    )
+    assert released.task_state.held_objects == {}
+    satisfied = next(
+        event
+        for event in released.events
+        if event.kind is ExecutionEventKind.PHASE_EFFECT_GATE_SATISFIED
+    )
+    assert satisfied.env_mask.tolist() == [True, True]
+
+
+def test_phase_effect_gate_contradiction_retries_action_without_state_mutation() -> (
+    None
+):
+    engine, _ = _engine(batch_size=2)
+    action = PhaseGateAction()
+    engine.register(action)
+    initial = _context(0.0, (0.0, 0.0), (0.2, 0.4), 0)
+    session = engine.start(
+        (_phase_gate_invocation(engine, max_action_retries=1),),
+        initial,
+    )
+    session.tick(initial)
+    boundary = session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.4), 0))
+    request = boundary.pending_phase_effect_gate
+    assert request is not None
+
+    retried = session.tick(
+        _context(0.2, (0.1, 0.2), (0.2, 0.4), 0),
+        phase_effect_gate_result=_phase_gate_result(
+            request,
+            success_mask=torch.tensor([False, True]),
+            failure_mask=torch.tensor([True, False]),
+            retry_mask=torch.tensor([True, False]),
+        ),
+    )
+
+    assert retried.status is ExecutionStatus.RUNNING
+    assert retried.pending_phase_effect_gate is None
+    assert retried.command is not None
+    assert retried.command.active_mask.tolist() == [True, True]
+    assert action.plan_count == 2
+    assert session.plan_attempts[-1].attempt_generation == 1
+    assert session.plan_attempts[-1].action_retry_counts == (1, 0)
+    assert retried.task_state.held_objects == {}
+    kinds = [event.kind for event in retried.events]
+    assert ExecutionEventKind.PHASE_EFFECT_GATE_FAILED in kinds
+    assert ExecutionEventKind.ACTION_RETRY in kinds
+
+
+def test_stale_phase_effect_gate_result_is_rejected_after_unresolved_poll() -> None:
+    engine, _ = _engine()
+    engine.register(PhaseGateAction())
+    initial = _context(0.0, 0.0, 0.2, 0)
+    session = engine.start((_phase_gate_invocation(engine),), initial)
+    session.tick(initial)
+    boundary = session.tick(_context(0.1, 0.0, 0.2, 0))
+    request = boundary.pending_phase_effect_gate
+    assert request is not None
+    unresolved = session.tick(
+        _context(0.2, 0.1, 0.2, 0),
+        phase_effect_gate_result=_phase_gate_result(
+            request,
+            success_mask=torch.tensor([False]),
+            failure_mask=torch.tensor([False]),
+        ),
+    )
+    assert unresolved.pending_phase_effect_gate is not None
+
+    with pytest.raises(ValueError, match="verification_id"):
+        session.tick(
+            _context(0.3, 0.1, 0.2, 0),
+            phase_effect_gate_result=_phase_gate_result(
+                request,
+                success_mask=torch.tensor([True]),
+                failure_mask=torch.tensor([False]),
+            ),
+        )
+
+
+def test_held_object_loss_retries_only_failed_row_with_reconciled_state() -> None:
+    engine, _ = _engine(batch_size=2)
+    initial = _with_held_object(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session = engine.start(
+        (_invocation(engine, max_action_retries=1),),
+        initial,
+    )
+    request = session.held_object_guard_request
+    assert request is not None
+    assert request.attempt_generation == 0
+    assert request.invocation_index == 0
+    assert request.next_waypoint_index == 0
+    assert request.segment_name == "dynamic"
+    assert request.env_mask.tolist() == [True, True]
+    assert request.allowed_held_object_relations == (("arm", "object"),)
+    assert request.allowed_coordinated_held_object_relations == ()
+
+    retried = session.tick(
+        initial,
+        held_object_guard_result=_held_object_loss_result(
+            request,
+            failure_mask=torch.tensor([True, False]),
+            retry_mask=torch.tensor([True, False]),
+        ),
+    )
+
+    assert retried.status is ExecutionStatus.RUNNING
+    assert retried.command is not None
+    assert retried.command.active_mask.tolist() == [True, True]
+    held = retried.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None
+    assert held.env_mask.tolist() == [False, True]
+    lost = next(
+        event
+        for event in retried.events
+        if event.kind is ExecutionEventKind.HELD_OBJECT_LOST
+    )
+    retry = next(
+        event
+        for event in retried.events
+        if event.kind is ExecutionEventKind.ACTION_RETRY
+    )
+    assert lost.env_mask.tolist() == [True, False]
+    assert retry.env_mask.tolist() == [True, False]
+    assert session.plan_attempts[-1].action_retry_counts == (1, 0)
+
+
+def test_held_object_loss_result_requires_state_invalidation() -> None:
+    with pytest.raises(ValueError, match="must contain relation removals"):
+        HeldObjectGuardResult(
+            verification_id=0,
+            object_id="object",
+            attempt_generation=0,
+            invocation_index=0,
+            next_waypoint_index=0,
+            failure_mask=torch.tensor([True]),
+            state_invalidation=StateDelta(),
+            retry_mask=torch.tensor([False]),
+        )
+
+
+def test_held_object_guard_authorizes_action_owned_effect_candidate() -> None:
+    engine, _ = _engine()
+    engine.register(CandidateEffectAction())
+    initial = _context(0.0, 0.0, 0.2, 0)
+    session = engine.start(
+        (_invocation(engine, skill_id=CandidateEffectAction.skill_id),),
+        initial,
+    )
+    request = session.held_object_guard_request
+    assert request is not None
+    assert request.allowed_held_object_relations == (("arm", "object"),)
+
+    result = HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=torch.tensor([True]),
+        state_invalidation=StateDelta(held_object_updates={"arm": None}),
+        retry_mask=torch.tensor([False]),
+    )
+
+    tick = session.tick(initial, held_object_guard_result=result)
+
+    assert tick.status is ExecutionStatus.FAILED
+    assert any(
+        event.kind is ExecutionEventKind.HELD_OBJECT_LOST for event in tick.events
+    )
+
+
+def test_held_object_guard_rejects_unauthorized_state_invalidation() -> None:
+    engine, _ = _engine()
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    session = engine.start((_invocation(engine),), initial)
+    request = session.held_object_guard_request
+    assert request is not None
+
+    result = HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=torch.tensor([True]),
+        state_invalidation=StateDelta(held_object_updates={"unrelated_resource": None}),
+        retry_mask=torch.tensor([False]),
+    )
+    with pytest.raises(ValueError, match="authorized relation set"):
+        session.tick(initial, held_object_guard_result=result)
+
+
+def test_held_object_guard_rejects_wrong_object_identity_on_authorized_key() -> None:
+    engine, _ = _engine()
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    session = engine.start((_invocation(engine),), initial)
+    request = session.held_object_guard_request
+    assert request is not None
+
+    result = HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="another_object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=torch.tensor([True]),
+        state_invalidation=StateDelta(held_object_updates={"arm": None}),
+        retry_mask=torch.tensor([False]),
+    )
+    with pytest.raises(ValueError, match="key/object identity"):
+        session.tick(initial, held_object_guard_result=result)
+
+
+def test_stale_held_object_guard_result_is_rejected_within_same_attempt() -> None:
+    engine, _ = _engine()
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    session = engine.start((_invocation(engine),), initial)
+    first_request = session.held_object_guard_request
+    assert first_request is not None
+
+    session.tick(initial)
+    current_request = session.held_object_guard_request
+    assert current_request is not None
+    assert current_request.verification_id == first_request.verification_id + 1
+
+    stale = HeldObjectGuardResult(
+        verification_id=first_request.verification_id,
+        object_id="object",
+        attempt_generation=current_request.attempt_generation,
+        invocation_index=current_request.invocation_index,
+        next_waypoint_index=current_request.next_waypoint_index,
+        failure_mask=torch.tensor([False]),
+        state_invalidation=StateDelta(),
+        retry_mask=torch.tensor([False]),
+    )
+    with pytest.raises(ValueError, match="verification_id"):
+        session.tick(initial, held_object_guard_result=stale)
+
+
+def test_nonretry_held_object_loss_fails_row_while_peer_continues() -> None:
+    engine, _ = _engine(batch_size=2)
+    initial = _with_held_object(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session = engine.start((_invocation(engine),), initial)
+    request = session.held_object_guard_request
+    assert request is not None
+
+    partial = session.tick(
+        initial,
+        held_object_guard_result=_held_object_loss_result(
+            request,
+            failure_mask=torch.tensor([True, False]),
+            retry_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    assert partial.status is ExecutionStatus.RUNNING
+    assert partial.eligible_mask.tolist() == [False, True]
+    assert partial.command is not None
+    assert partial.command.active_mask.tolist() == [False, True]
+    held = partial.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None
+    assert held.env_mask.tolist() == [False, True]
+    event_masks = {
+        event.kind: event.env_mask.tolist()
+        for event in partial.events
+        if event.kind
+        in {
+            ExecutionEventKind.HELD_OBJECT_LOST,
+            ExecutionEventKind.RECOVERY_REQUIRED,
+        }
+    }
+    assert event_masks == {
+        ExecutionEventKind.HELD_OBJECT_LOST: [True, False],
+        ExecutionEventKind.RECOVERY_REQUIRED: [True, False],
+    }
+    assert len(session.plan_attempts) == 1
+    assert session.plan_attempts[0].action_retry_counts == (0, 0)
+
+
+def test_missing_or_out_of_phase_held_object_guard_result_preserves_state() -> None:
+    engine, _ = _engine()
+    action = EffectAction()
+    engine.register(action)
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    base = _invocation(engine)
+    invocation = ActionInvocation(
+        skill_id=action.skill_id,
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), initial)
+
+    first = session.tick(initial)
+    assert first.task_state.get_held_object("arm") is not None
+    session.tick(_with_held_object(_context(0.1, 0.0, 0.2, 0)))
+    pending = session.tick(_with_held_object(_context(0.2, 0.2, 0.2, 0)))
+
+    assert pending.pending_effect is not None
+    assert session.held_object_guard_request is None
+    preserved = session.tick(_with_held_object(_context(0.21, 0.2, 0.2, 0)))
+    held = preserved.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None
+    assert held.env_mask.tolist() == [True]
 
 
 def test_initial_eligibility_is_owned_and_masks_commands() -> None:
@@ -730,6 +1366,61 @@ def test_all_rows_planning_failure_skips_inactive_command_frames() -> None:
         event.kind is ExecutionEventKind.ACTION_PLANNING_FAILED
         for event in failed.events
     )
+
+
+def test_non_retryable_planning_failure_fails_without_spending_retry_budget() -> None:
+    engine, _ = _engine()
+    action = NonRetryablePlanningFailureAction()
+    engine.register(action)
+    invocation = _invocation(
+        engine,
+        skill_id=action.skill_id,
+        max_action_retries=5,
+    )
+
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    failed = session.tick(_context(0.0, 0.0, 0.2, 0))
+
+    assert failed.status is ExecutionStatus.FAILED
+    assert action.plan_count == 1
+    assert len(session.plan_attempts) == 1
+    assert not any(
+        event.kind is ExecutionEventKind.ACTION_RETRY for event in failed.events
+    )
+    planning_event = next(
+        event
+        for event in failed.events
+        if event.kind is ExecutionEventKind.ACTION_PLANNING_FAILED
+    )
+    assert planning_event.failure_code == "invalid_goal"
+    assert planning_event.retryable is False
+    failure = session.plan_attempts[0].plan.diagnostics.failure
+    assert failure is not None
+    assert failure.code == "invalid_goal"
+    assert not failure.retryable
+
+
+def test_execution_events_report_named_trajectory_segment_entries() -> None:
+    engine, _ = _engine()
+    action = PhaseGateAction()
+    engine.register(action)
+    invocation = _invocation(engine, skill_id=action.skill_id)
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+
+    ticks = (
+        session.tick(_context(0.0, 0.0, 0.2, 0)),
+        session.tick(_context(0.1, 0.0, 0.2, 0)),
+        session.tick(_context(0.2, 0.1, 0.2, 0)),
+    )
+    entries = [
+        event
+        for tick in ticks
+        for event in tick.events
+        if event.kind is ExecutionEventKind.TRAJECTORY_SEGMENT_ENTERED
+    ]
+
+    assert [event.segment_name for event in entries] == ["prepare", "commit"]
+    assert [event.env_mask.tolist() for event in entries] == [[True], [True]]
 
 
 def test_plan_attempt_records_snapshot_nested_metadata_at_installation() -> None:
@@ -933,15 +1624,14 @@ def test_session_commands_schedule_arrivals_and_final_settling() -> None:
     assert torch.allclose(command_durations[:, :-1].sum(dim=1), torch.tensor([0.4]))
 
 
-def test_request_snapshot_preserves_live_entity_identity() -> None:
-    entity = UncopyableEntity()
+def test_request_snapshot_preserves_stable_entity_identity() -> None:
     grasp_xpos = torch.eye(4).unsqueeze(0)
     geometry_extent = torch.tensor([0.1, 0.2, 0.3])
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={"extent": geometry_extent},
         label="object",
-        entity=entity,
+        entity_id="object",
     )
     goal = GraspGoal(semantics=semantics, grasp_xpos=grasp_xpos)
 
@@ -950,6 +1640,7 @@ def test_request_snapshot_preserves_live_entity_identity() -> None:
         goal=goal,
         binding=ActionBinding(owner_id="snapshot-test"),
         motion_policy=MotionPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
     )
@@ -958,7 +1649,7 @@ def test_request_snapshot_preserves_live_entity_identity() -> None:
 
     assert request.goal is not goal
     assert request.goal.semantics is not semantics
-    assert request.goal.semantics.entity is entity
+    assert request.goal.semantics.entity_id == "object"
     assert torch.equal(request.goal.grasp_xpos, torch.eye(4).unsqueeze(0))
     assert torch.equal(
         request.goal.semantics.geometry["extent"],
@@ -1137,6 +1828,23 @@ def test_empty_failed_replan_preserves_destination_for_same_target_retry() -> No
     resumed = session.tick(_context(0.2, 0.0, 0.3, 1))
     assert resumed.command is not None
     assert resumed.command.commands[0].target.target_id == "arm_a"
+
+
+def test_empty_failed_replan_does_not_erase_active_tracking_route() -> None:
+    engine, action = _destination_engine(
+        ("first", None, "first"),
+        tracking_provider_revisions=("1", None, "alternate"),
+    )
+    invocation = _destination_invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((invocation,), initial)
+
+    session.tick(initial)
+
+    with pytest.raises(ValueError, match="tracking source fingerprints"):
+        session.tick(_context(0.1, 0.0, 0.3, 1))
+
+    assert action.plan_count == 3
 
 
 def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
@@ -1598,6 +2306,7 @@ def test_session_revision_rejects_changed_target_address_fingerprint() -> None:
             owner_id=invocation.binding.owner_id,
             endpoints=(changed_endpoint,),
         ),
+        tracking_policy=TrackingPolicy.timed(),
         revision=1,
     )
 
@@ -1612,6 +2321,36 @@ def test_session_revision_rejects_changed_target_address_fingerprint() -> None:
     assert target.joint_ids == (0, 1)
 
 
+def test_tracking_continuity_rejection_leaves_revision_state_transactional(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = _engine()
+    invocation = _invocation(engine)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    replacement_context = _context(0.5, 0.2, 0.1, 0)
+    session = engine.start((invocation,), initial)
+    revised = replace(invocation, revision=1)
+    attempt_count = len(session.plan_attempts)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            session,
+            "_validate_tracking_continuity",
+            Mock(side_effect=ValueError("tracking route changed")),
+        )
+        with pytest.raises(ValueError, match="tracking route changed"):
+            session.revise_current(revised, context=replacement_context)
+
+    assert len(session.plan_attempts) == attempt_count
+    assert session.active_plan.invocation_revision == 0
+    assert session.latest_context.robot.timestamp == pytest.approx(0.0)
+
+    session.revise_current(revised, context=replacement_context)
+
+    assert session.active_plan.invocation_revision == 1
+    assert session.latest_context.robot.timestamp == pytest.approx(0.5)
+
+
 def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
     engine, _ = _engine()
     session = engine.start(
@@ -1623,7 +2362,7 @@ def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
     tick = session.tick(_context(0.1, 1.0, 0.2, 0))
 
     kinds = {event.kind for event in tick.events}
-    assert ExecutionEventKind.TRACKING_ERROR in kinds
+    assert ExecutionEventKind.TRACKING_DIVERGED in kinds
     assert ExecutionEventKind.RECOVERY_EXHAUSTED in kinds
     assert tick.status is ExecutionStatus.FAILED
     assert tick.eligible_mask.tolist() == [False]
@@ -1713,7 +2452,7 @@ def test_explicit_verification_with_empty_delta_preserves_task_state() -> None:
 
     completed = session.tick(
         _context(0.21, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True]),
             failure_mask=torch.tensor([False]),
@@ -1738,7 +2477,7 @@ def test_explicit_verification_keeps_partial_and_retry_row_lifecycle() -> None:
 
     retry = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             first_request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, True]),
@@ -1768,7 +2507,7 @@ def test_explicit_verification_keeps_partial_and_retry_row_lifecycle() -> None:
 
     completed = session.tick(
         _context(0.25, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             second_request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -1793,7 +2532,7 @@ def test_explicit_verification_partial_success_shrinks_request_without_state_del
 
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             first_request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -1812,7 +2551,7 @@ def test_explicit_verification_partial_success_shrinks_request_without_state_del
 
     completed = session.tick(
         _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             second_request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -1868,7 +2607,7 @@ def test_nonempty_effect_is_committed_only_after_external_verification() -> None
     still_waiting = session.tick(_context(0.25, 0.2, 0.2, 0))
     completed = session.tick(
         _context(0.3, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             waiting.pending_effect.verification_id,
             torch.tensor([True]),
             torch.tensor([False]),
@@ -1911,7 +2650,7 @@ def test_initially_ineligible_rows_never_receive_effects() -> None:
 
     completed = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -1932,7 +2671,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
 
     no_progress = session.tick(
         _context(0.205, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             first_request.verification_id,
             success_mask=torch.tensor([False, False]),
             failure_mask=torch.tensor([False, False]),
@@ -1943,7 +2682,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
 
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             first_request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -1966,7 +2705,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
     with pytest.raises(ValueError, match="verification_id"):
         session.tick(
             _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
-            effect_result=EffectVerificationResult(
+            effect_result=_effect_result(
                 first_request.verification_id,
                 success_mask=torch.tensor([False, True]),
                 failure_mask=torch.tensor([False, False]),
@@ -1976,7 +2715,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
     current_request = partial.pending_effect
     completed = session.tick(
         _context(0.23, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             current_request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -1992,17 +2731,45 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
 def test_effect_result_masks_are_owned_disjoint_and_request_scoped() -> None:
     success = torch.tensor([True, False])
     failure = torch.tensor([False, True])
-    result = EffectVerificationResult(0, success, failure)
+    result = _effect_result(0, success, failure)
     success.fill_(False)
     failure.fill_(False)
     assert result.success_mask.tolist() == [True, False]
     assert result.failure_mask.tolist() == [False, True]
 
     with pytest.raises(ValueError, match="must not overlap"):
-        EffectVerificationResult(
+        _effect_result(
             0,
             torch.tensor([True, False]),
             torch.tensor([True, False]),
+        )
+    with pytest.raises(ValueError, match="invalidation_mask must be a subset"):
+        _effect_result(
+            0,
+            torch.tensor([False, False]),
+            torch.tensor([True, False]),
+            invalidation_mask=torch.tensor([False, True]),
+        )
+    with pytest.raises(ValueError, match="retry_mask must be a subset"):
+        _effect_result(
+            0,
+            torch.tensor([False, False]),
+            torch.tensor([True, False]),
+            retry_mask=torch.tensor([False, True]),
+        )
+    with pytest.raises(ValueError, match="conjunction"):
+        _effect_result(
+            0,
+            torch.tensor([False, False]),
+            torch.tensor([False, True]),
+            expectation_results=(
+                EffectExpectationResult(
+                    expectation_id="destination",
+                    satisfied_mask=torch.tensor([True, False]),
+                    contradicted_mask=torch.tensor([False, True]),
+                    inverse_satisfied_mask=torch.tensor([False, False]),
+                ),
+            ),
         )
 
     session, waiting = _effect_session(batch_size=2)
@@ -2025,7 +2792,7 @@ def test_effect_result_masks_are_owned_disjoint_and_request_scoped() -> None:
 
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             preserved.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2040,7 +2807,7 @@ def test_effect_result_masks_are_owned_disjoint_and_request_scoped() -> None:
     with pytest.raises(ValueError, match="subsets"):
         session.tick(
             _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
-            effect_result=EffectVerificationResult(
+            effect_result=_effect_result(
                 current.verification_id,
                 success_mask=torch.tensor([True, False]),
                 failure_mask=torch.tensor([False, False]),
@@ -2048,14 +2815,13 @@ def test_effect_result_masks_are_owned_disjoint_and_request_scoped() -> None:
         )
 
 
-def test_state_delta_snapshot_owns_effect_data_and_preserves_live_entity() -> None:
-    entity = UncopyableEntity()
+def test_state_delta_snapshot_owns_effect_data_and_stable_identity() -> None:
     semantics = ObjectSemantics(
         affordance=Affordance(custom_config={"threshold": [1.0]}),
         geometry={"size": torch.ones(3)},
         properties={"mass": torch.tensor(1.0)},
         label="snapshot-object",
-        entity=entity,
+        entity_id="snapshot-object",
     )
     held = HeldObjectState(
         semantics=semantics,
@@ -2069,7 +2835,7 @@ def test_state_delta_snapshot_owns_effect_data_and_preserves_live_entity() -> No
     assert copied is not None
     assert copied is not held
     assert copied.semantics is not semantics
-    assert copied.semantics.entity is entity
+    assert copied.semantics.entity_id == "snapshot-object"
     assert copied.semantics.affordance is not semantics.affordance
     assert copied.object_to_eef.data_ptr() != held.object_to_eef.data_ptr()
     assert copied.grasp_xpos.data_ptr() != held.grasp_xpos.data_ptr()
@@ -2091,7 +2857,7 @@ def test_partial_effect_failure_waits_for_unresolved_rows_then_retries_failure()
 
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([False, False]),
             failure_mask=torch.tensor([True, False]),
@@ -2107,7 +2873,7 @@ def test_partial_effect_failure_waits_for_unresolved_rows_then_retries_failure()
     unresolved_request = partial.pending_effect
     resolved = session.tick(
         _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             unresolved_request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -2135,6 +2901,95 @@ def test_partial_effect_failure_waits_for_unresolved_rows_then_retries_failure()
     assert retry_command.command.active_mask.tolist() == [True, False]
 
 
+def test_effect_failure_applies_request_owned_invalidation_before_recovery() -> None:
+    initial = _with_held_object(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0)).task
+    session, waiting = _effect_session(
+        batch_size=2,
+        max_action_retries=1,
+        task_state=initial,
+    )
+    request = waiting.pending_effect
+    assert request is not None
+    assert request.failure_invalidation.held_object_updates == {"arm": None}
+
+    terminal = session.tick(
+        _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
+        effect_result=_effect_result(
+            request.verification_id,
+            success_mask=torch.tensor([False, True]),
+            failure_mask=torch.tensor([True, False]),
+            invalidation_mask=torch.tensor([True, False]),
+            retry_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    held = terminal.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None
+    assert held.env_mask.tolist() == [False, True]
+    assert terminal.eligible_mask.tolist() == [False, True]
+    assert any(
+        event.kind is ExecutionEventKind.RECOVERY_REQUIRED
+        and event.env_mask.tolist() == [True, False]
+        for event in terminal.events
+    )
+    assert not any(
+        event.kind is ExecutionEventKind.ACTION_RETRY for event in terminal.events
+    )
+
+
+def test_inverse_proof_can_preserve_state_while_failure_requires_recovery() -> None:
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0)).task
+    session, waiting = _effect_session(task_state=initial)
+    request = waiting.pending_effect
+    assert request is not None
+    failure = torch.tensor([True])
+
+    terminal = session.tick(
+        _context(0.21, 0.2, 0.2, 0),
+        effect_result=_effect_result(
+            request.verification_id,
+            success_mask=torch.tensor([False]),
+            failure_mask=failure,
+            invalidation_mask=torch.tensor([False]),
+            retry_mask=torch.tensor([False]),
+            expectation_results=(
+                EffectExpectationResult(
+                    expectation_id="source",
+                    satisfied_mask=torch.tensor([False]),
+                    contradicted_mask=failure,
+                    inverse_satisfied_mask=failure,
+                ),
+            ),
+        ),
+    )
+
+    held = terminal.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None and held.env_mask.all()
+    assert terminal.status is ExecutionStatus.FAILED
+    assert any(
+        event.kind is ExecutionEventKind.RECOVERY_REQUIRED for event in terminal.events
+    )
+
+
+def test_unresolved_effect_timeout_invalidates_active_state_fail_closed() -> None:
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0)).task
+    session, waiting = _effect_session(
+        action_timeout=0.25,
+        max_action_retries=1,
+        task_state=initial,
+    )
+    assert waiting.pending_effect is not None
+
+    terminal = session.tick(_context(0.26, 0.2, 0.2, 0))
+
+    assert terminal.status is ExecutionStatus.FAILED
+    assert terminal.task_state.get_held_object("arm") is None
+    kinds = {event.kind for event in terminal.events}
+    assert ExecutionEventKind.EFFECT_VERIFICATION_TIMEOUT in kinds
+    assert ExecutionEventKind.RECOVERY_REQUIRED in kinds
+    assert ExecutionEventKind.ACTION_RETRY not in kinds
+
+
 def test_effect_failure_exhaustion_advances_completed_rows_without_empty_request() -> (
     None
 ):
@@ -2144,7 +2999,7 @@ def test_effect_failure_exhaustion_advances_completed_rows_without_empty_request
 
     terminal = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, True]),
@@ -2174,7 +3029,7 @@ def test_deactivating_last_unresolved_effect_row_advances_barrier() -> None:
     assert request is not None
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2233,7 +3088,7 @@ def test_effect_request_deadline_is_stable_and_accepts_result_at_boundary() -> N
 
     completed = session.tick(
         _context(0.25, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True]),
             failure_mask=torch.tensor([False]),
@@ -2265,7 +3120,7 @@ def test_session_revision_cannot_abandon_pending_effect_verification() -> None:
     assert session.effect_verification_pending is True
     completed = session.tick(
         _context(0.3, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             waiting.pending_effect.verification_id,
             torch.tensor([True]),
             torch.tensor([False]),
@@ -2294,7 +3149,7 @@ def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
     assert waiting.pending_effect is not None
     failed = session.tick(
         _context(0.3, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             waiting.pending_effect.verification_id,
             torch.tensor([False]),
             torch.tensor([True]),
@@ -2331,7 +3186,7 @@ def test_pending_effect_timeout_exhausts_without_committing_late_result() -> Non
 
     timed_out = session.tick(
         _context(0.3, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             waiting.pending_effect.verification_id,
             torch.tensor([True]),
             torch.tensor([False]),
@@ -2356,7 +3211,7 @@ def test_effect_timeout_exhaustion_advances_rows_already_verified() -> None:
     assert request is not None
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2427,7 +3282,7 @@ def test_deferred_effect_failure_charges_concurrent_planning_failures() -> None:
     assert request is not None
     partial = session.tick(
         _context(0.21, (0.2, 0.2, 0.2), (0.2, 0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([False, False, False]),
             failure_mask=torch.tensor([True, False, False]),
@@ -2495,7 +3350,7 @@ def test_effect_retry_invalidates_previous_verification_id() -> None:
     with pytest.raises(ValueError, match="verification_id"):
         session.tick(
             _context(0.55, 0.2, 0.2, 0),
-            effect_result=EffectVerificationResult(
+            effect_result=_effect_result(
                 old_id,
                 torch.tensor([True]),
                 torch.tensor([False]),

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg

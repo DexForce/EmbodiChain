@@ -22,10 +22,12 @@ from .pose_generator import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
+    get_parallel_jaw_gripper_model,
 )
 
 __all__ = [
     "GraspPoseGenerator",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGripperModelCfg",
+    "get_parallel_jaw_gripper_model",
 ]

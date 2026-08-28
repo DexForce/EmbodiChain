@@ -27,6 +27,8 @@ import torch
 from embodichain.utils import configclass
 
 from .bindings import JointPositionTarget, RuntimeEndpointTarget
+from .control import ControlPartCommandProfile
+from .engine import AtomicActionEngine
 from .runner import (
     CommandAcknowledgement,
     CommandAckStatus,
@@ -40,10 +42,13 @@ from .state import (
     SceneSnapshot,
     TaskState,
 )
+from .tracking import TrackingRuntime
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import RigidObject, Robot
+    from embodichain.lab.sim.planners import MotionGenerator
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 
 @configclass
@@ -237,6 +242,63 @@ class RigidObjectSceneProvider:
             .detach()
             .to("cpu")
         )
+
+
+def create_simulation_atomic_action_engine(
+    motion_generator: MotionGenerator,
+    scene_entities: Sequence[RigidObject],
+    control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+    grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
+    *,
+    load_builtins: bool = True,
+    tracking_runtime: TrackingRuntime | None = None,
+) -> AtomicActionEngine:
+    """Create an engine whose initial context observes selected rigid objects.
+
+    This is the direct-simulation convenience path for offline planning. Entity
+    IDs are derived from each rigid object's stable ``uid``; only explicitly
+    supplied objects are observed. Advanced integrations that need aliases,
+    articulation/link state, collision roles, or an external perception source
+    should construct :class:`AtomicActionEngine` with their own
+    :class:`SceneProvider` instead.
+
+    Args:
+        motion_generator: Motion-generation backend owned by the engine.
+        scene_entities: Non-empty sequence of simulation rigid objects to expose
+            in automatically captured initial scene snapshots.
+        control_profiles: Semantic commands keyed by robot control-part name.
+        grasp_pose_generators: Grasp-pose services keyed by grasp endpoint target.
+        load_builtins: Whether to install all built-in atomic actions.
+        tracking_runtime: Optional typed tracking runtime shared by action plans.
+
+    Returns:
+        Engine configured with a rigid-object scene provider.
+
+    Raises:
+        TypeError: If ``scene_entities`` is not a sequence.
+        ValueError: If an entity lacks a stable UID or UIDs are duplicated.
+    """
+    if isinstance(scene_entities, (str, bytes)) or not isinstance(
+        scene_entities, Sequence
+    ):
+        raise TypeError("scene_entities must be a sequence of rigid objects.")
+    entities_by_id: dict[str, RigidObject] = {}
+    for entity in scene_entities:
+        entity_id = getattr(entity, "uid", None)
+        if not isinstance(entity_id, str) or not entity_id.strip():
+            raise ValueError("Every scene entity must have a non-empty string uid.")
+        if entity_id in entities_by_id:
+            raise ValueError(f"Duplicate scene entity uid {entity_id!r}.")
+        entities_by_id[entity_id] = entity
+
+    return AtomicActionEngine(
+        motion_generator,
+        control_profiles=control_profiles,
+        grasp_pose_generators=grasp_pose_generators,
+        load_builtins=load_builtins,
+        tracking_runtime=tracking_runtime,
+        scene_provider=RigidObjectSceneProvider(entities_by_id),
+    )
 
 
 SceneSnapshotSupplier = Callable[[float], SceneSnapshot]
@@ -617,6 +679,7 @@ class SimulationExecutionAdapter:
 
 
 __all__ = [
+    "create_simulation_atomic_action_engine",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
     "SceneSnapshotSupplier",

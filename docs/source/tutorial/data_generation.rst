@@ -13,10 +13,11 @@ Overview
 EmbodiChain provides a built-in data generation workflow for imitation-learning and manipulation tasks:
 
 - **Gym Configuration**: Describes the scene, robot, sensors, randomization events, observations, dataset recorder, and rollout settings.
-- **Action Configuration**: Describes the task-specific expert action graph for tasks that use the action bank.
+- **Expert Program**: Describes a declarative semantic workflow and selects its
+  configured scene, robot-skill profile, and runtime policy.
 - **Environment Rollout**: Builds the environment directly from configuration files and executes offline generation.
-- **Expert Policy**: Each task provides ``create_demo_segments()`` or the
-  legacy ``create_demo_action_list()`` entry to generate expert actions.
+- **Expert Policy**: A supported task loads and compiles its Expert Program;
+  custom environments may still provide ``create_demo_segments()`` directly.
 - **Dataset Manager**: Records observation-action pairs during ``env.step()``
   and transactionally commits selected successful or configured failed rows.
 - **LeRobotRecorder**: Converts completed episodes into LeRobot-compatible datasets, with optional video export.
@@ -27,17 +28,22 @@ What This Tutorial Records
 This page documents the full path from task configuration to saved dataset:
 
 1. Prepare a task gym config (e.g. ``gym_config.json`` or ``gym_config.yaml``).
-2. Prepare an action config if the task uses the action bank (same supported extensions).
+2. Reference a task-local Expert Program from the gym config when scripted
+   demonstrations are required.
 3. Launch the environment rollout with ``run-env``.
 4. Let the dataset manager automatically save completed episodes.
 
 Example Task
 ------------
 
-As a concrete example, this tutorial uses a real action-bank task shipped in the repository:
+As a concrete example, this tutorial uses a configuration-defined Expert
+Program task shipped in the repository:
 
-- ``embodichain_tasks/configs/gym/pour_water/gym_config.json`` defines the simulation scene and dataset recording behavior (YAML equivalents such as ``embodichain_tasks/configs/gym/cobotmagic.yaml`` are also supported).
-- ``embodichain_tasks/configs/gym/pour_water/action_config.json`` defines the action-bank graph used to solve the task.
+- ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json``
+  defines the simulation scene, configured Expert Program runtime, and dataset
+  recording behavior.
+- ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/expert/program.yaml``
+  declares the semantic pick, transport, pour, and place workflow.
 
 The Code
 ~~~~~~~~
@@ -64,13 +70,14 @@ The first input to the pipeline is the task gym config file. In the example belo
 
 The rollout settings include the episode count:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/gym_config.json
+.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json
    :language: json
-   :lines: 2-4
+   :start-at: "max_episodes":
+   :end-before: "env":
 
 The dataset-related part looks like this:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/gym_config.json
+.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json
    :language: json
    :start-at: "dataset": {
    :end-before: "control_parts":
@@ -115,59 +122,41 @@ is set (issue #424, Path A). Stereo-camera keys use the ``_right`` suffix. The
 ``use_videos`` option applies only to RGB images; see
 :doc:`/overview/gym/dataset_functors` for the depth sidecar configuration.
 
-Step 2: Prepare the Action Configuration
-----------------------------------------
+Step 2: Prepare the Expert Program
+----------------------------------
 
-For tasks that use the action bank, the second input is ``action_config.json``. This file defines the expert action graph consumed by ``create_demo_action_list()``. In the example below, the file is organized around ``scope``, ``node``, ``edge``, and ``sync``.
+The gym config selects ``expert/program.yaml`` through
+``expert_program_path`` and declares its callable-free runtime through
+``expert_program_runtime``. The program uses registered scene identities and
+robot resources instead of embedding simulation code:
 
-.. dropdown:: Action bank structure in the example task Pour_Water
+.. dropdown:: Expert Program for Pour Water
    :icon: code
 
-   **Scope Configuration**
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/expert/program.yaml
+      :language: yaml
+      :linenos:
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
-      :language: json
-      :lines: 2-57
-
-   **Node Configuration**
-
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
-      :language: json
-      :lines: 96-177
-
-   **Edge Configuration**
-
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
-      :language: json
-      :lines: 763-790
-
-   **Synchronization**
-
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
-      :language: json
-      :lines: 906-932
-
-This structure defines the expert rollout as follows:
-
-- **Scope**: Defines controllable sub-graphs such as ``right_arm``, ``left_arm``, ``right_eef``, and ``left_eef``.
-- **Node**: Defines key poses, targets computed from object affordances, and IK-generated joint targets.
-- **Edge**: Defines executable transitions between nodes, including duration and execution function.
-- **Sync**: Defines execution order rules between independently configured sub-actions.
-
-Note: Action bank is not the only way to generate demonstrations. Depending on the task design, trajectories can also be produced by other scripted generation methods.
+The workflow first picks ``bottle`` with ``right_manipulator``. It then invokes
+the registered held-object transport target, whose pose is resolved relative to
+the cup at planning time, performs a signed 75-degree pour, and places the
+bottle at its return target. The segment waits for the bottle and cup to settle
+and validates the final bottle position before committing the episode.
 
 Step 3: Launch the Environment Rollout
 --------------------------------------
 
-The rollout script parses command-line arguments, loads the gym and action config files, converts them into environment configuration objects, creates the environment instance, and then runs offline rollout for ``max_episodes`` episodes:
+The rollout script parses command-line arguments, loads the gym config and its
+task-local Expert Program, creates the environment instance, and then runs
+offline rollout for ``max_episodes`` episodes:
 
 .. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
    :language: python
    :start-at: def cli(
    :end-at:     main(args, env, gym_config)
 
-Each rollout asks the task for ``create_demo_segments()``. Legacy
-``create_demo_action_list()`` tasks are wrapped as one segment. The runner
+Each rollout obtains demonstration segments from the compiled Expert Program
+or a custom environment's ``create_demo_segments()`` implementation. The runner
 validates and executes every action with ``env.step(action)``. By default an
 invalid rollout is discarded with ``save_data=False`` and retried. If the
 dataset functor sets ``save_failed_episodes: true``, a failed or truncated
@@ -184,8 +173,7 @@ The recommended CLI entrypoint is:
 .. code-block:: bash
 
    embodichain run-env \
-       --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json \
-       --action_config embodichain_tasks/configs/gym/pour_water/action_config.json \
+       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json \
        --headless
 
 For interactive inspection, you can use preview mode: replace ``--headless`` with ``--preview``.
@@ -199,7 +187,6 @@ recording, trajectory recording, and the three replay modes, see
 Useful CLI arguments:
 
 - **--gym_config**: Path to the task config file (``.json``, ``.yaml``, or ``.yml``).
-- **--action_config**: Path to the action-bank config file (``.json``, ``.yaml``, or ``.yml``).
 - **--num_envs**: Number of environments to run in parallel. ``run-env`` uses
   as many vector batches as needed and trims the last commit so that the
   persisted episode count equals ``max_episodes``.
@@ -229,13 +216,14 @@ Dataset folders are automatically numbered, which makes it easy to run repeated 
 In a practical workflow, the output of this stage is the synthesized dataset itself. Later training scripts typically consume these saved LeRobot episodes instead of regenerating trajectories each time.
 
 
-Multi-Segment UR5 Example
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Repeated Pick-and-Place Expert Program Example
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The repository includes a complete repeated pick-and-place example at
-``embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json``. It uses
+``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json``. It uses
 the specified UR5 robot and parallel gripper to pick up the same cube and place
-it three times in one episode. No separate action-bank config is required.
+it three times in one episode. Its task-local Expert Program is selected by the
+gym config, so no second CLI config argument is required.
 
 Each pick/place cycle is one lazy demonstration segment. After placing the
 cube, the task waits for its free-fall motion to settle. Only then does it read
@@ -247,7 +235,7 @@ Generate one episode with:
 .. code-block:: bash
 
    embodichain run-env \
-       --gym_config embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json \
+       --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json \
        --headless \
        --device cuda \
        --max_episodes 1
@@ -257,8 +245,8 @@ execution. The config writes an auto-numbered dataset below:
 
 .. code-block:: text
 
-   outputs/lerobot/multi_segments/
-   `-- ur5_multi_segments_three_cycle_cube_pick_place_NNN/
+   outputs/lerobot/expert_program/
+   `-- ur5_expert_program_repeated_pick_place_NNN/
 
 The example has no configured camera sensor and sets ``use_videos`` to
 ``false``. Its dataset therefore contains robot state, action, task, subtask,
@@ -301,7 +289,7 @@ generated auto-numbered dataset:
 .. code-block:: bash
 
    embodichain preview_lerobot_data \
-       outputs/lerobot/multi_segments \
+       outputs/lerobot/expert_program \
        --latest \
        --episode 0 \
        --expect-segments 3
@@ -371,8 +359,8 @@ must be the exact auto-numbered dataset directory:
 .. code-block:: bash
 
    lerobot-dataset-viz \
-       --repo-id DexForce/ur5_multi_segments_three_cycle_cube_pick_place_000 \
-       --root outputs/lerobot/multi_segments/ur5_multi_segments_three_cycle_cube_pick_place_000 \
+       --repo-id DexForce/ur5_expert_program_repeated_pick_place_000 \
+       --root outputs/lerobot/expert_program/ur5_expert_program_repeated_pick_place_000 \
        --mode local \
        --episode-index 0 \
        --num-workers 0
@@ -391,14 +379,14 @@ To create a portable Rerun recording without opening a viewer, add
 .. code-block:: bash
 
    lerobot-dataset-viz \
-       --repo-id DexForce/ur5_multi_segments_three_cycle_cube_pick_place_000 \
-       --root outputs/lerobot/multi_segments/ur5_multi_segments_three_cycle_cube_pick_place_000 \
+       --repo-id DexForce/ur5_expert_program_repeated_pick_place_000 \
+       --root outputs/lerobot/expert_program/ur5_expert_program_repeated_pick_place_000 \
        --episode-index 0 \
        --num-workers 0 \
        --save 1 \
        --output-dir outputs/lerobot/previews
 
-   rerun outputs/lerobot/previews/DexForce_ur5_multi_segments_three_cycle_cube_pick_place_000_episode_0.rrd
+   rerun outputs/lerobot/previews/DexForce_ur5_expert_program_repeated_pick_place_000_episode_0.rrd
 
 ``--save 1`` disables automatic viewer spawning and writes the ``.rrd`` file;
 the second command opens that saved recording. You can validate the container
@@ -414,10 +402,11 @@ for the upstream workflow.
 Best Practices
 ~~~~~~~~~~~~~~
 
-- **Keep the config pair together**: Version gym and action configs together for action-bank tasks (either JSON or YAML).
-- **Use valid scripted policies**: Make sure ``create_demo_segments()`` (or
-  legacy ``create_demo_action_list()``) returns executable trajectories for
-  the current scene.
+- **Keep task-local files together**: Version ``env.json`` and
+  ``expert/program.yaml`` together so their scene, profile, and call IDs stay
+  aligned.
+- **Use valid scripted policies**: Preflight the Expert Program against its
+  configured scene and robot profile before long rollout runs.
 - **Use ``--headless`` for throughput**: Disable the GUI when generating large datasets.
 - **Use ``--preview`` and ``--filter_dataset_saving`` for debugging**: Inspect task logic without writing datasets.
 - **Discard invalid rollouts**: Keep the default validation logic so failed trajectories are not saved.

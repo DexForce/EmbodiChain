@@ -49,7 +49,7 @@ class StayStillSaveEnv(EmbodiedEnv):
 
     The camera sensor, robot, scene and LeRobot dataset are configured through
     the gym config JSON (see
-    ``embodichain_tasks/configs/gym/special/stay_still_save_ur10.json``).
+    ``embodichain_tasks/configs/tasks/special/stay_still_save/env_ur10.json``).
     """
 
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):

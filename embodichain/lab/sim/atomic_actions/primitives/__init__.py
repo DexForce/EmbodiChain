@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from ..core import AtomicAction
+from .axis_align import AxisAlign, AxisAlignGoal, AxisAlignOptions
 from .coordinated_pickment import (
     CoordinatedPickGoal,
     CoordinatedPickment,
@@ -29,7 +30,7 @@ from .coordinated_placement import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
 )
-from .hand_over import HandOver, HandOverOptions
+from .hand_over import HandOver, HandOverGoal, HandOverOptions
 from .move_end_effector import (
     EndEffectorPoseGoal,
     MoveEndEffector,
@@ -41,9 +42,17 @@ from .move_held_object import (
     MoveHeldObjectOptions,
 )
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
+from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import Press, PressGoal, PressOptions
+from .push_object import (
+    PushObject,
+    PushObjectGoal,
+    PushObjectOptions,
+    PushObjectToolCalibration,
+)
+from .pour import Pour, PourGoal, PourOptions
 from .slide import (
     Slide,
     SlideGoal,
@@ -55,10 +64,14 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
     MoveJoints,
     PickUp,
+    AxisAlign,
     MoveHeldObject,
     Place,
+    Pour,
+    PushObject,
     Press,
     Slide,
+    OpenDoor,
     Twist,
     CoordinatedPickment,
     CoordinatedPlacement,
@@ -68,6 +81,9 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
 
 __all__ = [
     "AssembleGoal",
+    "AxisAlign",
+    "AxisAlignGoal",
+    "AxisAlignOptions",
     "BUILTIN_ACTION_TYPES",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
@@ -78,6 +94,7 @@ __all__ = [
     "EndEffectorPoseGoal",
     "GraspGoal",
     "HandOver",
+    "HandOverGoal",
     "HandOverOptions",
     "HeldObjectPoseGoal",
     "JointPositionGoal",
@@ -87,14 +104,24 @@ __all__ = [
     "MoveHeldObjectOptions",
     "MoveJoints",
     "MoveJointsOptions",
+    "OpenDoor",
+    "OpenDoorGoal",
+    "OpenDoorOptions",
     "PickUp",
     "PickUpOptions",
     "Place",
     "PlaceGoal",
     "PlaceOptions",
+    "Pour",
+    "PourGoal",
+    "PourOptions",
     "Press",
     "PressGoal",
     "PressOptions",
+    "PushObject",
+    "PushObjectGoal",
+    "PushObjectOptions",
+    "PushObjectToolCalibration",
     "Slide",
     "SlideGoal",
     "SlideOptions",

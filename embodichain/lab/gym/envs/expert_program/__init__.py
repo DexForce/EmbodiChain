@@ -14,12 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Versioned declarative Expert Program schema, compiler, and runtime types."""
+"""Declarative Expert Program schema, compiler, and runtime types."""
 
 from __future__ import annotations
 
 from .cfg import (
-    EXPERT_PROGRAM_SCHEMA_VERSION,
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
     CyclicPoseTargetCfg,
@@ -75,6 +74,7 @@ from .compiler import (
     ExpertProgramCompiler,
 )
 from .environment import (
+    ExpertProgramAdapterFactory,
     ExpertProgramEnvironmentAdapter,
     ExpertProgramEnvironmentFactory,
     ExpertProgramRuntimeAssembly,
@@ -82,6 +82,7 @@ from .environment import (
 )
 from .simulation import (
     AntipodalGraspAffordanceBinding,
+    ContainerAffordanceBinding,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
@@ -90,12 +91,39 @@ from .simulation import (
     SimulationRigidObjectBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
+    SupportSurfaceAffordanceBinding,
+)
+from .catalog import (
+    ExpertProgramIntegrationCatalog,
+    IntegrationFingerprintMismatch,
+    SimulationExpertProgramRegistration,
+)
+from .extensions import (
+    ControlPartEvidenceProviderDeclaration,
+    ControlPartEvidenceProviderFactory,
+    EndpointAdapterDeclaration,
+    ParallelCommandSafetyValidatorFactory,
+    ParallelSafetyDeclaration,
+    RegisteredSemanticLowererDeclaration,
+    RegisteredSemanticLowererFactory,
+    RuntimeTransportDeclaration,
+    StandardExtensionDeclarations,
+    VersionedKey,
 )
 from .simulation_environment import (
+    SimulationExpertProgramAdapterFactory,
     SimulationExpertProgramFactory,
     create_simulation_expert_program_adapter,
 )
-from .simulation_policies import SimulationSegmentPolicyPort
+from .simulation_handover import ConfiguredHandOverPoseProvider
+from .simulation_parallel_safety import (
+    CuroboParallelCommandSafetyValidator,
+    CuroboParallelSafetyValidatorFactory,
+)
+from .simulation_policies import (
+    SimulationSegmentPolicyPort,
+    default_simulation_settle_presets,
+)
 
 __all__ = [
     "AntipodalGraspAffordanceBinding",
@@ -106,14 +134,21 @@ __all__ = [
     "ConfigPath",
     "ConfigPathPart",
     "CompiledProgram",
+    "ContainerAffordanceBinding",
     "ControlPartCommandPreset",
+    "ControlPartEvidenceProviderDeclaration",
+    "ControlPartEvidenceProviderFactory",
     "ControlPartEndpointBinding",
     "ControlPartResourceBinding",
+    "ConfiguredHandOverPoseProvider",
     "CyclicPoseTargetCfg",
+    "CuroboParallelCommandSafetyValidator",
+    "CuroboParallelSafetyValidatorFactory",
     "DemoBridgeError",
-    "EXPERT_PROGRAM_SCHEMA_VERSION",
     "EnvironmentStepClock",
     "EnvironmentStepTimingError",
+    "EndpointAdapterDeclaration",
+    "ExpertProgramAdapterFactory",
     "ExpertProgramCfg",
     "ExpertProgramCompileError",
     "ExpertProgramCompiler",
@@ -122,21 +157,28 @@ __all__ = [
     "ExpertProgramEnvironmentAdapter",
     "ExpertProgramEnvironmentFactory",
     "ExpertProgramIntegrationCfg",
+    "ExpertProgramIntegrationCatalog",
     "ExpertProgramRuntimeAssembly",
     "ExpertProgramValidationContext",
     "ExpertProgramValidationError",
     "HandOverCfg",
     "GymPlanningObservationProvider",
     "InvokeCfg",
+    "IntegrationFingerprintMismatch",
     "ObjectNearTargetValidatorCfg",
     "ParallelCfg",
+    "ParallelCommandSafetyValidatorFactory",
+    "ParallelSafetyDeclaration",
     "PickCfg",
     "PlaceCfg",
     "PlanningObservationPort",
     "PoseCfg",
     "RegisteredSemanticCallCfg",
+    "RegisteredSemanticLowererDeclaration",
+    "RegisteredSemanticLowererFactory",
     "RepeatCfg",
     "RuntimeCommandFrameEncoder",
+    "RuntimeTransportDeclaration",
     "RuntimeTransportActionEncoder",
     "SceneReferenceRole",
     "SegmentPostPolicyPort",
@@ -145,15 +187,21 @@ __all__ = [
     "SequenceCfg",
     "SimulationArticulationBinding",
     "SimulationArticulationLinkBinding",
+    "SimulationExpertProgramAdapterFactory",
     "SimulationExpertProgramFactory",
+    "SimulationExpertProgramRegistration",
     "SimulationRigidObjectBinding",
     "SimulationRobotSkillProfileBinding",
     "SimulationSceneBinding",
     "SimulationSegmentPolicyPort",
+    "StandardExtensionDeclarations",
+    "SupportSurfaceAffordanceBinding",
     "TargetRefCfg",
     "UnsupportedRuntimeTransportError",
+    "VersionedKey",
     "WaitStablePostCfg",
     "create_simulation_expert_program_adapter",
+    "default_simulation_settle_presets",
     "decode_expert_program",
     "load_expert_program",
     "loads_expert_program_json",

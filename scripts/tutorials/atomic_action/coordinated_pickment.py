@@ -162,6 +162,7 @@ PICKMENT_PRE_GRASP_DISTANCE = 0.11
 PICKMENT_LIFT_HEIGHT = 0.10
 PICKMENT_HAND_INTERP_STEPS = 10
 PICKMENT_HOLD_STEPS = 4
+ROBOTIQ_2F_140_CLOSE_QPOS = 0.7
 TRAJECTORY_SIM_STEPS = 4
 
 
@@ -192,7 +193,7 @@ def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
 ) -> Robot:
-    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
@@ -385,15 +386,18 @@ def run_coordinated_pickment_demo(
     left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
     motion_gen = create_toppra_motion_generator(robot)
 
+    hand_close_qpos = (
+        ROBOTIQ_2F_140_CLOSE_QPOS if args.robot == "ur10" else preset.hand_close_qpos
+    )
     left_open, left_close = get_hand_open_close_qpos(
         robot,
         hand_control_part="left_hand",
-        close_qpos=preset.hand_close_qpos,
+        close_qpos=hand_close_qpos,
     )
     right_open, right_close = get_hand_open_close_qpos(
         robot,
         hand_control_part="right_hand",
-        close_qpos=preset.hand_close_qpos,
+        close_qpos=hand_close_qpos,
     )
     pickment_options = CoordinatedPickmentOptions(
         pre_grasp_distance=PICKMENT_PRE_GRASP_DISTANCE,

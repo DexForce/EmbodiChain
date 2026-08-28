@@ -139,8 +139,8 @@ Example paths in the repository:
 
 | Use case | JSON example | YAML example |
 |---|---|---|
-| Gym environment | `embodichain_tasks/configs/gym/cobotmagic.json` | `embodichain_tasks/configs/gym/cobotmagic.yaml` |
-| RL training | `embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.json` | `embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml` |
+| Gym environment | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json` | `embodichain_tasks/configs/tasks/classic_control/cart_pole/env.yaml` |
+| RL training | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.json` | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml` |
 
 When a training config references a gym config (via `trainer.gym_config`), the nested path may also use any supported extension.
 
@@ -341,7 +341,7 @@ trainer:
   device: cuda:0
   iterations: 500
   buffer_size: 1024
-  gym_config: embodichain_tasks/configs/agents/rl/basic/cart_pole/gym_config.yaml
+  gym_config: embodichain_tasks/configs/tasks/classic_control/cart_pole/env.yaml
 policy:
   name: actor_critic
   actor:
@@ -385,11 +385,11 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 ## Tips
 
-1. **Start from an existing config.** Copy a config file from `embodichain_tasks/configs/gym/` or `embodichain_tasks/configs/agents/rl/` and modify it for your task.
+1. **Start from an existing config.** Copy a task config from `embodichain_tasks/configs/tasks/<domain>/<task>/`, then modify it for your task.
 2. **Use Python configs for development.** They provide IDE auto-completion and type checking.
 3. **Use JSON or YAML configs for experiments.** YAML is often easier to read for nested structures; JSON remains fully supported.
 4. **Validate configs early.** Run your environment with a short episode count to catch config errors before long training runs.
-5. **Keep config pairs together.** For action-bank tasks, version `gym_config` and `action_config` together (either format).
+5. **Keep task-local configs together.** Version `env.json` with its optional `expert/program.yaml` and `agents/` policy files.
 
 ---
 

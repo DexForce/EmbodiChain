@@ -14,12 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate a dual-arm handover with a single textured mesh object.
-
-The left arm picks the object up by its top part, hands it to the right arm at a
-middle handover pose, the right arm grasps the bottom part, the left arm
-releases, and the right arm carries the object to the other side.
-"""
+"""Demonstrate the unified dual-arm PickUp-to-HandOver atomic action."""
 
 from __future__ import annotations
 
@@ -35,11 +30,10 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    GraspGoal,
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
+    HandOverGoal,
     HandOverOptions,
-    PickUpOptions,
     MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
@@ -68,7 +62,12 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     serve_tutorial_scene,
 )
 
-OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
+VERTICAL_OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
+HORIZONTAL_OBJECT_MESH_PATH = get_data_path(
+    "CoordinatedPlacementAndPickment/pencil.glb"
+)
+VERTICAL_OBJECT_SCALE = (0.56, 0.56, 0.56)
+HORIZONTAL_OBJECT_SCALE = (2.0, 2.0, 2.0)
 GRIPPER_TCP_Z = 0.155
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
@@ -79,31 +78,23 @@ SUPPORT_SURFACE_CENTER = (
 )
 
 # --- Adjustable scene placeholders -----------------------------------------
-# The object starts on the left side, is handed over at a lifted middle pose,
-# and is delivered to the right side. Tweak these to match the mesh geometry
-# and the selected dual-arm robot's reach.
+# The object starts on one side and is delivered to the other. HandOver chooses
+# the nearer arm for pickup and computes the middle handover position itself.
 OBJECT_INIT_XY = (0.0, 0.02)
-MIDDLE_OBJECT_XYZ = (0.0, 0.02, 0.82)
-MIDDLE_OBJECT_YAW_DEG = 0.0
-FINAL_OBJECT_XYZ = (0.22, 0.02, 0.72)
-FINAL_OBJECT_YAW_DEG = 0.0
+OBJECT_ROT_VERTICAL = (90.0, 0.0, 0.0)
+OBJECT_ROT_HORIZONTAL = (90.0, 0.0, 0.0)
+FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
-HAND_CLOSE_QPOS = 0.026
-PICKUP_SAMPLE_INTERVAL = 80
-PICKUP_HAND_INTERP_STEPS = 5
-PICKUP_PRE_GRASP_DISTANCE = 0.08
-PICKUP_LIFT_HEIGHT = 0.1
-HANDOVER_SAMPLE_INTERVAL = 140
+HAND_CLOSE_QPOS = 0.04
+HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
-HANDOVER_HOLD_STEPS = 4
-HANDOVER_RETREAT_STEPS = 28
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
-HANDOVER_LIFT_HEIGHT = 0.08
+HANDOVER_LIFT_HEIGHT = 0.15
 TRAJECTORY_SIM_STEPS = 4
 HANDOVER_RECORD_LOOK_AT = (
-    (-0.25, 0.02, 2.5),
-    (0.0, 0.02, 0.75),
+    (-1.0, 0.2, 1.8),
+    (-0.4, 0.0, 0.7),
     (0.0, 0.0, 1.0),
 )
 
@@ -116,6 +107,11 @@ def parse_arguments() -> argparse.Namespace:
         default_device="cpu",
         default_renderer="hybrid",
     )
+    parser.add_argument(
+        "--is_horizontal",
+        action="store_true",
+        help="Use the horizontal WaterBasin object instead of the vertical soda can.",
+    )
     return parser.parse_args()
 
 
@@ -123,7 +119,7 @@ def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
 ) -> Robot:
-    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
@@ -131,9 +127,9 @@ def create_dual_robot(
         urdf_name=f"dual_{robot_type}_hand_over",
         tcp_z=GRIPPER_TCP_Z,
         ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
-        hand_stiffness=1e2,
-        hand_damping=1e1,
-        hand_max_effort=1e3,
+        hand_stiffness=1e3,
+        hand_damping=1e2,
+        hand_max_effort=1e4,
     )
 
 
@@ -146,12 +142,18 @@ def create_support_surface(sim: SimulationManager) -> RigidObject:
     )
 
 
-def create_handover_object(sim: SimulationManager) -> RigidObject:
-    """Create the textured mesh object on the support surface."""
+def create_handover_object(sim: SimulationManager, args) -> RigidObject:
+    """Create the mode-specific mesh object on the support surface."""
+    mesh_path = (
+        HORIZONTAL_OBJECT_MESH_PATH if args.is_horizontal else VERTICAL_OBJECT_MESH_PATH
+    )
+    body_scale = (
+        HORIZONTAL_OBJECT_SCALE if args.is_horizontal else VERTICAL_OBJECT_SCALE
+    )
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="handover_object",
-            shape=MeshCfg(fpath=OBJECT_MESH_PATH, compute_uv=False),
+            shape=MeshCfg(fpath=mesh_path, compute_uv=False),
             attrs=RigidBodyAttributesCfg(
                 mass=0.01,
                 dynamic_friction=0.97,
@@ -165,10 +167,12 @@ def create_handover_object(sim: SimulationManager) -> RigidObject:
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=1,
+            max_convex_hull_num=16,
             init_pos=[OBJECT_INIT_XY[0], OBJECT_INIT_XY[1], SUPPORT_SURFACE_Z + 0.12],
-            init_rot=[90.0, 0.0, 0.0],
-            body_scale=(0.56, 0.56, 0.56),
+            init_rot=(
+                OBJECT_ROT_VERTICAL if not args.is_horizontal else OBJECT_ROT_HORIZONTAL
+            ),
+            body_scale=body_scale,
         )
     )
 
@@ -178,9 +182,9 @@ def run_handover_demo(
     sim: SimulationManager,
     robot: Robot,
 ) -> None:
-    """Plan and optionally execute a pick-up followed by a handover."""
+    """Plan and optionally execute one unified pick-up and handover."""
     create_support_surface(sim)
-    obj = create_handover_object(sim)
+    obj = create_handover_object(sim, args)
     settle_object(sim, obj, step=0)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
@@ -195,53 +199,21 @@ def run_handover_demo(
         robot, hand_control_part="right_hand", close_qpos=HAND_CLOSE_QPOS
     )
 
-    middle_pose = torch.as_tensor(
-        [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, -1.0, 0.0],
-            [0.0, 1.0, 0.0, 0.7],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=torch.float32,
-    )
+    final_pose = torch.eye(4, dtype=torch.float32)
+    final_pose[:3, 3] = torch.as_tensor(FINAL_OBJECT_XYZ)
 
-    final_pose = torch.as_tensor(
-        [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, -1.0, -0.2],
-            [0.0, 1.0, 0.0, 0.7],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=torch.float32,
-    )
-
-    # Step 1 - the left arm picks the object up by its top part.
-    pick_up_options = PickUpOptions(
-        pick_object_part="top",
-        pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
-        lift_height=PICKUP_LIFT_HEIGHT,
-        hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
-    )
-    # Step 2 - hand the object from the left arm to the right arm.
     handover_options = HandOverOptions(
-        receive_pick_object_part="bottom",
-        middle_object_pose=middle_pose,
-        final_object_pose=final_pose,
         pre_grasp_distance=HANDOVER_PRE_GRASP_DISTANCE,
         lift_height=HANDOVER_LIFT_HEIGHT,
         hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
-        hold_steps=HANDOVER_HOLD_STEPS,
-        retreat_steps=HANDOVER_RETREAT_STEPS,
-        receive_approach_direction=torch.as_tensor(
-            [0.0, 707106781, -707106781], dtype=torch.float32
-        ),
     )
     grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
         n_sample=10_000,
         force_refresh=False,
     )
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,
@@ -261,25 +233,18 @@ def run_handover_demo(
         sim, args, "Inspect the scene, then press Enter to plan the handover..."
     )
     # wait for object to drop
-    for _ in range(20):
+    for _ in range(50):
         sim.update(step=10)
     compiled = engine.compile(
         (
             engine.make_invocation(
-                "pick_up",
-                GraspGoal(object_semantics),
-                control_parts={"primary": {"motion": "left_arm", "grasp": "left_hand"}},
-                motion_policy=MotionPolicy(
-                    strategy="motion_gen",
-                    sample_count=PICKUP_SAMPLE_INTERVAL,
-                ),
-                skill_options=pick_up_options,
-            ),
-            engine.make_invocation(
                 "hand_over",
-                GraspGoal(object_semantics),
+                HandOverGoal(object_semantics, target_pose=final_pose),
                 control_parts={
-                    "source": {"motion": "left_arm", "grasp": "left_hand"},
+                    "source": {
+                        "motion": "left_arm",
+                        "grasp": "left_hand",
+                    },
                     "destination": {
                         "motion": "right_arm",
                         "grasp": "right_hand",
@@ -298,7 +263,7 @@ def run_handover_demo(
     traj = compiled.trajectory.positions
 
     if not success.all():
-        logger.log_warning("Failed to plan the full pick-up + handover trajectory.")
+        logger.log_warning("Failed to plan the unified HandOver trajectory.")
         return
 
     if args.diagnose_plan:

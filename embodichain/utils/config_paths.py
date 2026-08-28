@@ -41,6 +41,7 @@ def resolve_config_path(path: str | Path) -> Path:
 
     Raises:
         TypeError: If ``path`` is not path-like.
+        ValueError: If a packaged config path escapes the config root.
     """
     resolved_path = Path(path).expanduser()
     if resolved_path.exists() or resolved_path.is_absolute():
@@ -50,7 +51,17 @@ def resolve_config_path(path: str | Path) -> Path:
     if resolved_path.parts[: len(task_prefix)] != task_prefix:
         return resolved_path
 
+    relative_path = Path(*resolved_path.parts[len(task_prefix) :])
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise ValueError(f"Config path must stay within the package: {relative_path}")
+
+    # Prefer configs co-located with the imported core package. This keeps a
+    # source worktree self-contained even when another checkout is installed
+    # in editable mode, and resolves to the same location in a wheel install.
+    colocated_path = Path(__file__).resolve().parents[2] / resolved_path
+    if colocated_path.exists():
+        return colocated_path
+
     from embodichain_tasks.configs import get_config_path
 
-    relative_path = Path(*resolved_path.parts[len(task_prefix) :])
     return get_config_path(relative_path)

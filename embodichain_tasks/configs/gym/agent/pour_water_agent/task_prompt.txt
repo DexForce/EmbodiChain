@@ -1,5 +1,0 @@
-Task:
-Use a single robotic arm to pour water from the bottle into the cup.
-Position the bottle at an offset of [0.05, −0.10, 0.125] relative to the cup’s position during pouring.
-After completing the pour, return the bottle to the location [0.7, −0.1].
-The cup should remain stationary throughout the task.
