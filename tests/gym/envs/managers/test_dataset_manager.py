@@ -210,6 +210,22 @@ def test_initialize_episode_saves_failed_reset_envs_when_enabled() -> None:
     assert torch.equal(manager.saved_env_ids, torch.tensor([1, 2]))
 
 
+def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
+    """An explicit commit subset persists only the requested final-batch rows."""
+    env, manager = make_env_for_episode_selection(
+        save_failed_episodes=False,
+        successful_env_ids=[],
+    )
+
+    EmbodiedEnv._initialize_episode(
+        env,
+        env_ids=[0, 1, 2],
+        commit_env_ids=[1],
+    )
+
+    assert torch.equal(manager.saved_env_ids, torch.tensor([1]))
+
+
 def test_discard_reset_does_not_auto_save_trajectory() -> None:
     """save_data=False clears trajectory state without writing a file."""
     env, _ = make_env_for_episode_selection(
