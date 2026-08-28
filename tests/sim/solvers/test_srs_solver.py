@@ -589,18 +589,10 @@ class TestSRSCUDASolver(BaseSolverTest):
                 rtol=1e-4,
             )
 
-            # Euler singularities have a free coupled joint, so backends may
-            # choose different nearby parameterizations after full sample-space
-            # completion. Both choices must remain close to the seed.
-            for solution in (cuda_solution, cpu_solution):
-                seed_delta = torch.atan2(
-                    torch.sin(solution[singular] - sample_qpos[singular]),
-                    torch.cos(solution[singular] - sample_qpos[singular]),
-                )
-                assert torch.all(
-                    seed_delta.abs() <= cuda_solver.cfg.redundancy_step + 1e-4
-                )
-
+            # At an Euler singularity, coupled joints can have substantially
+            # different parameterizations for the same pose. The redundancy
+            # step bounds arm-angle sampling, not individual joint deltas, so
+            # singular solutions are compared through FK below.
             cuda_reconstructed = cuda_solver.get_fk(cuda_qpos[:, 0]).cpu()
             cpu_reconstructed = cpu_solver.get_fk(cpu_qpos[:, 0]).cpu()
             assert torch.allclose(
