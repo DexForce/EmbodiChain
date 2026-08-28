@@ -76,8 +76,6 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 class AxisAlignGoal(ObjectActionGoal):
     """Object whose local axis should be aligned after an antipodal grasp."""
 
-    goal_kind: ClassVar[str] = "axis_align"
-
     grasp_xpos: PoseGoalValue | None = None
     """Optional explicit end-effector grasp pose; omitted poses are sampled."""
 
@@ -114,8 +112,6 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
     skill_id: ClassVar[str] = "axis_align"
     GoalType: ClassVar[type] = AxisAlignGoal
     OptionsType: ClassVar[type] = AxisAlignOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     open_loop: ClassVar[bool] = True
     _UPRIGHT_HORIZONTAL_MAX_ABS_Z: ClassVar[float] = 0.5
     _UPRIGHT_TARGET_MIN_Z: ClassVar[float] = math.cos(math.pi / 6.0)
@@ -137,9 +133,6 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             ),
         ),
     )
-
-    def __init__(self, default_options: AxisAlignOptions | None = None) -> None:
-        super().__init__(default_options)
 
     def _scene_dependencies(
         self,
