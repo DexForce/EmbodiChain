@@ -554,7 +554,7 @@ class EmbodiedEnv(BaseEnv):
             seed: Optional random seed forwarded to :class:`BaseEnv`.
             options: Reset options. ``reset_ids`` may select only some vector
                 environment rows. ``commit_env_ids`` may select a subset of
-                the reset rows whose pending recordings are persisted.
+                the reset rows whose pending dataset episodes are persisted.
 
         Returns:
             The reset observation and info dictionary.
@@ -934,23 +934,16 @@ class EmbodiedEnv(BaseEnv):
             from embodichain.lab.gym.envs.managers.record import record_camera_data
 
             with self._profiler.section("record_camera_save"):
-                commit_mask = torch.zeros(
-                    self.num_envs, device=status_device, dtype=torch.bool
-                )
-                commit_mask[env_ids_to_commit] = True
-                env_ids_to_discard = env_ids_to_process[
-                    ~commit_mask[env_ids_to_process]
-                ]
                 for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
                     for functor_cfg in mode_cfgs:
                         if isinstance(functor_cfg.func, record_camera_data):
-                            if env_ids_to_commit.numel() > 0:
+                            if save_data:
                                 functor_cfg.func.save_and_clear(
-                                    env_ids=env_ids_to_commit
+                                    env_ids=env_ids_to_process
                                 )
-                            if env_ids_to_discard.numel() > 0:
+                            else:
                                 functor_cfg.func.discard_and_clear(
-                                    env_ids=env_ids_to_discard
+                                    env_ids=env_ids_to_process
                                 )
 
         # Auto-save + reset the per-env trajectory buffer for environments being
@@ -958,12 +951,12 @@ class EmbodiedEnv(BaseEnv):
         # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
         _traj_buffer = getattr(self, "_traj_buffer", None)
         if (
-            env_ids_to_commit.numel() > 0
+            save_data
             and _traj_buffer is not None
             and getattr(self.cfg, "trajectory_auto_save", False)
         ):
             with self._profiler.section("trajectory_save"):
-                for env_id in env_ids_to_commit.tolist():
+                for env_id in env_ids_to_process.tolist():
                     self._save_trajectory_for_env(env_id)
 
         _traj_steps = getattr(self, "_traj_steps", None)

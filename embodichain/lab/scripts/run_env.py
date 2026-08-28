@@ -132,7 +132,7 @@ def _commit_pending_episode(
     env: Any,
     save_env_ids: Sequence[int] | torch.Tensor | None,
 ) -> None:
-    """Commit selected rows through one reset of the full vector batch."""
+    """Commit selected dataset rows through one reset of the full vector batch."""
     selected = _normalize_save_env_ids(env, save_env_ids)
     target = _env_target(env)
     all_env_ids = tuple(range(int(getattr(target, "num_envs", 1))))
@@ -145,7 +145,7 @@ def _commit_pending_episode(
         dtype=torch.int32,
         device=getattr(target, "device", None),
     )
-    env.reset(options={"commit_env_ids": commit_env_ids})
+    env.reset(options={"save_data": False, "commit_env_ids": commit_env_ids})
 
 
 def _save_failed_episodes_enabled(env: Any) -> bool:

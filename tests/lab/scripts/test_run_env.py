@@ -429,6 +429,7 @@ def test_generate_function_commits_only_selected_vector_rows(monkeypatch) -> Non
     assert generated
     assert len(env.reset_options) == 1
     assert env.reset_options[0]["commit_env_ids"].tolist() == [0, 1]
+    assert env.reset_options[0]["save_data"] is False
     assert "reset_ids" not in env.reset_options[0]
 
 

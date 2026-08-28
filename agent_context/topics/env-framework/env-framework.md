@@ -236,7 +236,8 @@ reset(options)
   ├── sim.reset_objects_state(env_ids, excluded_uids)
   ├── _initialize_episode(env_ids)
   │     ├── dataset_manager.apply("save") for successful episodes (or an
-  │     │   explicit ``commit_env_ids`` subset during a final vector batch)
+  │     │   explicit dataset-only ``commit_env_ids`` subset during a final
+  │     │   vector batch)
   │     ├── event_manager.apply("reset", env_ids)
   │     ├── observation_manager.reset(env_ids)
   │     └── reward_manager.reset(env_ids)
