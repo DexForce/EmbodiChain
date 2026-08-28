@@ -479,7 +479,7 @@ def _program_with_later_segment_hooks(
                 values=(
                     PoseCfg(
                         position=(0.4, 0.1, 0.2),
-                        quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                        quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
                     ),
                 )
             )
@@ -629,7 +629,7 @@ def test_preflight_preserves_pick_target_lookahead_across_explicit_segments(
                 values=(
                     PoseCfg(
                         position=(0.4, 0.1, 0.2),
-                        quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                        quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
                     ),
                 )
             )

@@ -1675,7 +1675,7 @@ class ExpertProgramCompiler:
                         (*path, "values", index),
                         "Target values must be exact PoseCfg values.",
                     )
-                poses.append(SemanticPose(pose.position, pose.quaternion_wxyz))
+                poses.append(SemanticPose(pose.position, pose.quaternion_xyzw))
             compiled[target_id] = tuple(poses)
         return MappingProxyType(compiled)
 

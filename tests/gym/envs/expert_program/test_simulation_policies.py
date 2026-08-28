@@ -151,7 +151,7 @@ def _compiled_segment(*, settle_preset: str = "fast"):
                 "values": [
                     {
                         "position": [0.0, 0.0, 0.0],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     }
                 ],
             }

@@ -131,10 +131,10 @@ def _integration() -> ExpertProgramIntegrationCfg:
 
 
 def _pose(x: float, y: float = 0.0, z: float = 0.2) -> PoseCfg:
-    """Build one target pose with an identity WXYZ quaternion."""
+    """Build one target pose with an identity XYZW quaternion."""
     return PoseCfg(
         position=(x, y, z),
-        quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+        quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
     )
 
 
@@ -156,7 +156,7 @@ def _program(
 def _assert_pose_equal(actual: SemanticPose, expected: SemanticPose) -> None:
     """Compare owned pose tensor values."""
     assert torch.allclose(actual.position, expected.position)
-    assert torch.allclose(actual.quaternion_wxyz, expected.quaternion_wxyz)
+    assert torch.allclose(actual.quaternion_xyzw, expected.quaternion_xyzw)
 
 
 def _assert_semantic_call_equal(
@@ -241,7 +241,7 @@ def test_compiler_matches_direct_python_semantic_calls_and_sequence_order() -> N
         ),
         HandOver(
             object=SceneObjectRef("cube"),
-            final_target=SemanticPose(target.position, target.quaternion_wxyz),
+            final_target=SemanticPose(target.position, target.quaternion_xyzw),
             resources={"destination": "right_actor"},
         ),
         RegisteredSemanticCall(
@@ -312,7 +312,7 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
         assert place.call.at is not None
         _assert_pose_equal(
             place.call.at,
-            SemanticPose(pose.position, pose.quaternion_wxyz),
+            SemanticPose(pose.position, pose.quaternion_xyzw),
         )
         assert place.target_selections[0].value_index == index
         validator = segment.validators[0]

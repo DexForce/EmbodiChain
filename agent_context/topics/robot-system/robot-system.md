@@ -23,6 +23,10 @@
 
 A `Robot` is instantiated with a `RobotCfg` and a list of DexSim `Articulation` entities.
 
+Robot FK/IK and end-effector pose APIs use the EmbodiChain convention:
+quaternions are `xyzw`, and 7D poses are `xyz + xyzw`. Solver or planner
+adapters convert only when their external library uses another order.
+
 ## RobotCfg Pattern
 
 Inheritance chain:

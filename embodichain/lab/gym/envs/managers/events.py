@@ -609,7 +609,7 @@ def drop_rigid_object_group_sequentially(
         .repeat(num_instance, 1)
     )
     drop_pose = torch.zeros((num_instance, 7), device=env.device)
-    drop_pose[:, 3] = 1.0  # w component of quaternion
+    drop_pose[:, 6] = 1.0  # w component of xyzw quaternion
     drop_pose[:, :3] = drop_pos
     for i in range(num_objects):
         random_offset = sample_uniform(

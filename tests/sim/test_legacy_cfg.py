@@ -49,6 +49,7 @@ def test_legacy_cfg_projects_default_backend_physical_attr() -> None:
         dynamic_friction=0.4,
         inertia=[1.0, 2.0, 3.0],
         com_position=[0.1, 0.2, 0.3],
+        com_quaternion=[1.0, 2.0, 3.0, 4.0],
     )
 
     attr = cfg.attr()
@@ -57,6 +58,7 @@ def test_legacy_cfg_projects_default_backend_physical_attr() -> None:
     assert attr.dynamic_friction == pytest.approx(0.4)
     np.testing.assert_array_equal(attr.inertia, [1.0, 2.0, 3.0])
     np.testing.assert_allclose(attr.com_position, [0.1, 0.2, 0.3])
+    np.testing.assert_allclose(attr.com_quaternion, [4.0, 1.0, 2.0, 3.0])
 
 
 def test_legacy_override_merges_only_configured_values() -> None:

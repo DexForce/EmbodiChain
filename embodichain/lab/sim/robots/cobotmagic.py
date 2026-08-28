@@ -148,7 +148,7 @@ class CobotMagicCfg(RobotCfg):
             },
         )
         self.attrs = RigidBodyPhysicsCfg(
-            collision_props=DexsimCollisionPropertiesCfg(contact_offset=0.001),
+            collision_props=DexsimCollisionPropertiesCfg(contact_offset=0.001, rest_offset=0),
             material_props=RigidBodyMaterialCfg(
                 static_friction=0.95,
                 dynamic_friction=0.9,

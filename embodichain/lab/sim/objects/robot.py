@@ -809,7 +809,9 @@ class Robot(Articulation):
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
 
         Returns:
-            torch.Tensor: The forward kinematics result with shape (num_envs, 7) or (num_envs, 4, 4) if `to_matrix` is True.
+            torch.Tensor: The forward-kinematics result with shape
+                ``(num_envs, 7)`` in ``(x, y, z, qx, qy, qz, qw)`` order, or
+                ``(num_envs, 4, 4)`` if ``to_matrix`` is True.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -873,7 +875,8 @@ class Robot(Articulation):
         The input pose should be in the local arena frame.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (num_envs, 7) or (num_envs, 4, 4).
+            pose (torch.Tensor): The end-effector pose as ``(num_envs, 7)`` in
+                ``(x, y, z, qx, qy, qz, qw)`` order or ``(num_envs, 4, 4)``.
             joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, dof).
                 If None, the zero joint positions will be used as the seed.
             name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
@@ -957,7 +960,9 @@ class Robot(Articulation):
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
 
         Returns:
-            torch.Tensor: The forward kinematics result with shape (num_envs, batch, 7) or (num_envs, batch, 4, 4) if `to_matrix` is True.
+            torch.Tensor: The forward-kinematics result with shape
+                ``(num_envs, batch, 7)`` in ``xyz + xyzw`` order, or
+                ``(num_envs, batch, 4, 4)`` if ``to_matrix`` is True.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         if not self._solvers:
@@ -1017,7 +1022,8 @@ class Robot(Articulation):
         The input pose should be in the local arena frame.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (num_envs, n_batch, 7) or (num_envs, n_batch, 4, 4).
+            pose (torch.Tensor): End-effector poses as ``(num_envs, n_batch, 7)``
+                in ``xyz + xyzw`` order or ``(num_envs, n_batch, 4, 4)``.
             joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
             name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
             env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.

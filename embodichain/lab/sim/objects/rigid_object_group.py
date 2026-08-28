@@ -27,7 +27,6 @@ from embodichain.lab.sim.cfg import RigidObjectGroupCfg
 from embodichain.lab.sim.material import VisualMaterial
 from embodichain.lab.sim.objects.backends.spawn import SpawnRigidBodyView
 from embodichain.utils.math import (
-    convert_quat,
     matrix_from_euler,
     matrix_from_quat,
     quat_from_matrix,
@@ -84,10 +83,9 @@ class RigidBodyGroupData:
 
     @property
     def pose(self) -> torch.Tensor:
-        """Local poses in the legacy Group layout ``xyz + wxyz``."""
+        """Local poses in EmbodiChain ``xyz + xyzw`` order."""
         flat = self._pose.reshape(-1, 7)
         self.body_view.fetch_pose(flat)
-        flat[:, 3:7] = convert_quat(flat[:, 3:7], to="wxyz")
         return self._pose
 
     @property
@@ -119,10 +117,9 @@ class RigidBodyGroupData:
 
     @property
     def com_pose(self) -> torch.Tensor:
-        """Current local COM poses in Group ``xyz + wxyz`` convention."""
+        """Current local COM poses in Group ``xyz + xyzw`` convention."""
         flat = self._com_pose.reshape(-1, 7)
         self.body_view.fetch_com_local_pose(flat)
-        flat[:, 3:7] = convert_quat(flat[:, 3:7], to="wxyz")
         return self._com_pose
 
     @property
@@ -150,7 +147,7 @@ class RigidBodyGroupData:
 
     @property
     def default_com_pose(self) -> torch.Tensor:
-        """Initialization-time local COM poses in ``xyz + wxyz`` order."""
+        """Initialization-time local COM poses in ``xyz + xyzw`` order."""
         if self._default_com_pose is None:
             raise RuntimeError("Default rigid-object Group COM poses are unavailable.")
         return self._default_com_pose
@@ -471,7 +468,7 @@ class RigidObjectGroup(BatchEntity):
         env_ids: Sequence[int] | torch.Tensor | None = None,
         obj_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Return selected local COM poses in Group ``xyz + wxyz`` order."""
+        """Return selected local COM poses in Group ``xyz + xyzw`` order."""
         env, objects, _ = self._selected_indices(env_ids, obj_ids)
         env_index = torch.as_tensor(env, dtype=torch.long, device=self.device)
         obj_index = torch.as_tensor(objects, dtype=torch.long, device=self.device)
@@ -483,7 +480,7 @@ class RigidObjectGroup(BatchEntity):
         env_ids: Sequence[int] | torch.Tensor | None = None,
         obj_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set selected local COM poses in Group ``xyz + wxyz`` order."""
+        """Set selected local COM poses in Group ``xyz + xyzw`` order."""
         env, objects, rows = self._selected_indices(env_ids, obj_ids)
         com_pose = torch.as_tensor(com_pose, dtype=torch.float32, device=self.device)
         expected_shape = (len(env), len(objects), 7)
@@ -492,12 +489,7 @@ class RigidObjectGroup(BatchEntity):
                 f"Expected COM pose shape {expected_shape}, "
                 f"got {tuple(com_pose.shape)}."
             )
-        flat = com_pose.reshape(-1, 7)
-        target = torch.cat(
-            (flat[:, :3], convert_quat(flat[:, 3:7], to="xyzw")),
-            dim=-1,
-        )
-        self.body_data.body_view.apply_com_local_pose(target, rows)
+        self.body_data.body_view.apply_com_local_pose(com_pose.reshape(-1, 7), rows)
 
     def set_collision_filter(
         self,
@@ -520,21 +512,18 @@ class RigidObjectGroup(BatchEntity):
         env_ids: Sequence[int] | None = None,
         obj_ids: Sequence[int] | None = None,
     ) -> None:
-        """Set Group poses in ``xyz+wxyz`` or homogeneous-matrix form."""
+        """Set Group poses in ``xyz+xyzw`` or homogeneous-matrix form."""
         env, objects, rows = self._selected_indices(env_ids, obj_ids)
         expected_prefix = (len(env), len(objects))
         pose = pose.to(device=self.device, dtype=torch.float32)
         if tuple(pose.shape) == (*expected_prefix, 7):
-            flat = pose.reshape(-1, 7)
-            target = torch.cat(
-                (flat[:, :3], convert_quat(flat[:, 3:7], to="xyzw")), dim=-1
-            )
+            target = pose.reshape(-1, 7)
         elif tuple(pose.shape) == (*expected_prefix, 4, 4):
             flat = pose.reshape(-1, 4, 4)
             target = torch.cat(
                 (
                     flat[:, :3, 3],
-                    convert_quat(quat_from_matrix(flat[:, :3, :3]), to="xyzw"),
+                    quat_from_matrix(flat[:, :3, :3]),
                 ),
                 dim=-1,
             )
@@ -546,7 +535,7 @@ class RigidObjectGroup(BatchEntity):
         self.body_data.body_view.apply_pose(target, rows)
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
-        """Return all Group poses as ``xyz+wxyz`` or homogeneous matrices."""
+        """Return all Group poses as ``xyz+xyzw`` or homogeneous matrices."""
         pose = self.body_data.pose
         if not to_matrix:
             return pose

@@ -173,7 +173,7 @@ You can set the global pose of a cloth object (which transforms all its vertices
 
 ```python
 # Reset or Move the Cloth Object
-target_pose = torch.tensor([[0, 0, 1.0, 1, 0, 0, 0]], device=device) # (x, y, z, qw, qx, qy, qz)
+target_pose = torch.tensor([[0, 0, 1.0, 0, 0, 0, 1]], device=device) # (x, y, z, qx, qy, qz, qw)
 cloth_object.set_local_pose(target_pose)
 
 # Important: Step simulation to apply changes

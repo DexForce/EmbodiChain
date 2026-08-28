@@ -185,12 +185,15 @@ frames.
 
 Mesh geometry is identified by a SHA-256 hash of local vertices and faces.
 Static nodes sharing geometry are sent through one Viser batched-mesh handle.
-Normal frames update only positions, `wxyz` quaternions, and visibility.
+Normal frames update only positions, Viser-native `wxyz` quaternions, and visibility.
 Identifiers are URL-escaped before becoming Viser path components.
 
-EmbodiChain pose vectors use `(x, y, z, qw, qx, qy, qz)`. The protocol uses
-normalized `wxyz` quaternions. `pose_to_position_wxyz()` is the conversion
-boundary and also accepts homogeneous `(..., 4, 4)` matrices.
+EmbodiChain pose vectors use `(x, y, z, qx, qy, qz, qw)`. The visualization
+protocol follows Viser and stores normalized `wxyz` quaternions.
+`pose_to_position_wxyz()` converts EmbodiChain `xyz + xyzw` pose vectors at
+that boundary and also accepts homogeneous `(..., 4, 4)` matrices. Protocol
+dataclass fields already named `wxyz` remain protocol-native and must not be
+interpreted as EmbodiChain pose vectors.
 
 Arena offsets are added to rigid, robot, articulation, and camera poses.
 Deformable vertices are stored relative to the corresponding arena node.

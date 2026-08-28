@@ -107,18 +107,18 @@ Rigid objects are observed and controlled via single poses and linear/angular ve
 
 | Method / Property | Return / Args | Description |
 | :--- | :--- | :--- |
-| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Get object local pose as (x, y, z, qw, qx, qy, qz) or 4x4 matrix per environment. |
+| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Get object local pose as (x, y, z, qx, qy, qz, qw) or 4x4 matrix per environment. |
 | `set_local_pose(pose, env_ids=None)` | `pose: (N, 7)` or `(N, 4, 4)` | Teleport object to given pose (requires calling `sim.update()` to apply). |
-| `body_data.pose` | `(N, 7)` | Access object pose directly (for dynamic/kinematic bodies). |
+| `body_data.pose` | `(N, 7)` | Access object pose as `[x, y, z, qx, qy, qz, qw]` (for dynamic/kinematic bodies). |
 | `body_data.lin_vel` | `(N, 3)` | Access linear velocity of object root (for dynamic bodies). |
 | `body_data.ang_vel` | `(N, 3)` | Access angular velocity of object root (for dynamic bodies). |
 | `body_data.vel` | `(N, 6)` | Concatenated linear and angular velocities. |
 | `body_data.lin_acc` | `(N, 3)` | Access linear acceleration of object root (for dynamic bodies). |
 | `body_data.ang_acc` | `(N, 3)` | Access angular acceleration of object root (for dynamic bodies). |
 | `body_data.acc` | `(N, 6)` | Concatenated linear and angular accelerations. |
-| `body_data.com_pose` | `(N, 7)` | Get center of mass pose of rigid bodies. |
-| `body_data.default_com_pose` | `(N, 7)` | Default center of mass pose. |
-| `body_state` | `(N, 13)` | Get full body state: [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
+| `body_data.com_pose` | `(N, 7)` | Get center of mass pose as `[x, y, z, qx, qy, qz, qw]`. |
+| `body_data.default_com_pose` | `(N, 7)` | Default center of mass pose as `[x, y, z, qx, qy, qz, qw]`. |
+| `body_state` | `(N, 13)` | Get full body state: [x, y, z, qx, qy, qz, qw, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
 
 ### Dynamics Control
 
@@ -185,7 +185,7 @@ When a rigid object is loaded, its material assignment is captured without repla
 
 ### Observation Shapes
 
-- Pose: `(N, 7)` per-object pose (position + quaternion).
+- Pose: `(N, 7)` per-object pose `[x, y, z, qx, qy, qz, qw]`.
 - Velocities: `(N, 3)` for linear and angular velocities respectively.
 
 N denotes the number of parallel environments when using vectorized simulation (`SimulationManagerCfg.num_envs`).

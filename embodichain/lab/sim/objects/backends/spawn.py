@@ -87,21 +87,13 @@ def _embodichain_pose(data: torch.Tensor) -> torch.Tensor:
 
 
 def _spawn_articulation_pose(data: torch.Tensor) -> torch.Tensor:
-    """Convert articulation ``xyz+wxyz`` poses to Spawn ``xyzw+xyz``."""
-    result = torch.empty_like(data, dtype=torch.float32)
-    result[..., 0:3] = data[..., 4:7]
-    result[..., 3] = data[..., 3]
-    result[..., 4:7] = data[..., 0:3]
-    return result
+    """Convert articulation ``xyz+xyzw`` poses to Spawn ``xyzw+xyz``."""
+    return _spawn_pose(data)
 
 
 def _embodichain_articulation_pose(data: torch.Tensor) -> torch.Tensor:
-    """Convert Spawn ``xyzw+xyz`` poses to articulation ``xyz+wxyz``."""
-    result = torch.empty_like(data, dtype=torch.float32)
-    result[..., 0:3] = data[..., 4:7]
-    result[..., 3] = data[..., 3]
-    result[..., 4:7] = data[..., 0:3]
-    return result
+    """Convert Spawn ``xyzw+xyz`` poses to articulation ``xyz+xyzw``."""
+    return _embodichain_pose(data)
 
 
 class _SpawnSelectionAdapter:

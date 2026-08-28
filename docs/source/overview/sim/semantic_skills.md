@@ -68,7 +68,7 @@ three curated call values:
 | {class}`HandOver` | Transfer a held object to another robot resource. | Uses a robot-profile-selected provider for the middle and default final pose; an explicit `final_target` overrides the latter. |
 
 {class}`SemanticPose` expresses an absolute object-space pose with a position
-and normalized WXYZ quaternion. Scene objects and affordances use typed
+and normalized XYZW quaternion. Scene objects and affordances use typed
 {class}`SceneObjectRef` and {class}`SceneAffordanceRef` values, so aliases are
 resolved at the registry boundary instead of being propagated into execution.
 
@@ -203,7 +203,7 @@ calls = (
         object=workpiece,
         at=SemanticPose(
             position=(-0.40, 0.48, 0.025),
-            quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+            quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
         ),
     ),
 )

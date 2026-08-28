@@ -51,7 +51,7 @@ Defines the sensor pose relative to its parent frame:
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `pos` | `Tuple[float, float, float]` | `(0, 0, 0)` | Position in parent frame |
-| `quat` | `Tuple[float, float, float, float]` | `(1, 0, 0, 0)` | Orientation as `(w, x, y, z)` quaternion |
+| `quat` | `Tuple[float, float, float, float]` | `(0, 0, 0, 1)` | Orientation as `(x, y, z, w)` quaternion |
 | `parent` | `str \| None` | `None` | Parent frame name (e.g. robot link); `None` = arena frame |
 
 The `transformation` property returns a `4×4 torch.Tensor` homogeneous matrix.

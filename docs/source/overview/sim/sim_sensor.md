@@ -33,7 +33,7 @@ The `ExtrinsicsCfg` class defines the position and orientation of the camera.
 | :--- | :--- | :--- | :--- |
 | `parent` | `str` | `None` | Name of the link to attach to (e.g., `"ee_link"`). If `None`, camera is fixed in world. |
 | `pos` | `list` | `[0.0, 0.0, 0.0]` | Position offset `[x, y, z]`. |
-| `quat` | `list` | `[1.0, 0.0, 0.0, 0.0]` | Orientation quaternion `[w, x, y, z]`. |
+| `quat` | `list` | `[0.0, 0.0, 0.0, 1.0]` | Orientation quaternion `[x, y, z, w]`. |
 | `eye` | `tuple` | `None` | (Optional) Camera eye position for look-at mode. |
 | `target` | `tuple` | `None` | (Optional) Target position for look-at mode. |
 | `up` | `tuple` | `None` | (Optional) Up vector for look-at mode. |
@@ -55,7 +55,7 @@ camera_cfg = CameraCfg(
     extrinsics=CameraCfg.ExtrinsicsCfg(
         parent="ee_link",        # Attach to robot end-effector
         pos=[0.09, 0.05, 0.04],  # Relative position
-        quat=[0, 1, 0, 0],       # Relative rotation [w, x, y, z]
+        quat=[1, 0, 0, 0],       # Relative rotation [x, y, z, w]
     ),
     enable_color=True,
     enable_depth=True,

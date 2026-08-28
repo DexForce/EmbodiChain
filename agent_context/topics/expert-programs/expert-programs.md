@@ -55,6 +55,12 @@ to its `ParallelCfg`; it is not a standalone program node. Nested parallel
 blocks are rejected. Built-in call configs are `PickCfg`, `PlaceCfg`, and
 `HandOverCfg`; `RegisteredSemanticCallCfg` is the explicit catalog extension.
 
+Expert Program poses follow the EmbodiChain quaternion contract. `PoseCfg` and
+serialized target poses require the key `quaternion_xyzw`; `SemanticPose`
+stores and reports the same order. The configured hand-over service uses
+`final_quaternion_xyzw`. Identity is `[0, 0, 0, 1]`; legacy `*_wxyz` keys are
+unknown fields and are rejected rather than silently reinterpreted.
+
 Both programmatic config construction and untrusted decoding enforce exact
 types, discriminators, references, finite numeric values, and bounded depth,
 node count, repeat count, and expanded call count. The loader additionally

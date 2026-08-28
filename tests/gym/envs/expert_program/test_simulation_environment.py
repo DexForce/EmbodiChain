@@ -149,7 +149,7 @@ _DUAL_ROBOT_DOF = 4
 _RELEASE_SEPARATION = 0.2
 _DIRECT_PLACE_TARGET = SemanticPose(
     position=(0.0, 0.0, 0.0),
-    quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+    quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
 )
 _QUICKSTART_MAX_LINES = 15
 
@@ -556,7 +556,7 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
         del call, context, bound
         pose = SemanticPose(
             position=(0.0, 0.0, 0.5),
-            quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+            quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
         )
         return HandOverPoseTargets(
             final=SemanticObjectTarget(pose=pose),
@@ -1254,8 +1254,8 @@ def _pick_place_program_data() -> dict[str, object]:
                 "values": [
                     {
                         "position": _DIRECT_PLACE_TARGET.position.tolist(),
-                        "quaternion_wxyz": (
-                            _DIRECT_PLACE_TARGET.quaternion_wxyz.tolist()
+                        "quaternion_xyzw": (
+                            _DIRECT_PLACE_TARGET.quaternion_xyzw.tolist()
                         ),
                     }
                 ],
@@ -1881,7 +1881,7 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
                 object=SceneObjectRef("cube"),
                 at=SemanticPose(
                     position=(0.0, 0.0, 0.0),
-                    quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                    quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
                 ),
             ),
         ),

@@ -8,7 +8,7 @@ targets:
     kind: cyclic_pose
     values:
       - position: [0.75, -0.1, 0.962]
-        quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
 program:
   kind: segment
   name: pour_and_return_bottle

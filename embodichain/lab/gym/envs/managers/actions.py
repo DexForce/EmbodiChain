@@ -232,7 +232,7 @@ class EefPoseTerm(ActionTerm):
 
     Supports two pose representations:
     - 6D: position (3) + Euler angles (3)
-    - 7D: position (3) + quaternion (4)
+    - 7D: position (3) + quaternion in ``xyzw`` order (4)
 
     On IK failure, falls back to current_qpos for that env.
     Returns ``ik_success`` in the TensorDict so reward/observation
@@ -248,7 +248,7 @@ class EefPoseTerm(ActionTerm):
         >>> # 7D: position (3) + quaternion (4)
         >>> action = torch.zeros(num_envs, 7)
         >>> action[:, :3] = 0.1  # target position
-        >>> action[:, 3] = 1.0   # quaternion w
+        >>> action[:, 6] = 1.0   # quaternion w (xyzw identity)
         >>> result = term.process_action(action)
         >>> # result["qpos"] = IK solution
         >>> # result["ik_success"] = bool tensor indicating IK success

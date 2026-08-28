@@ -139,7 +139,7 @@ class DefaultRigidBodyView(RigidBodyViewBase):
         pose_cpu = pose.cpu()
         mat = torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(len(indices), 1, 1)
         mat[:, :3, 3] = pose_cpu[:, :3]
-        mat[:, :3, :3] = matrix_from_quat(convert_quat(pose_cpu[:, 3:7], to="wxyz"))
+        mat[:, :3, :3] = matrix_from_quat(pose_cpu[:, 3:7])
         for i, idx in enumerate(indices):
             self.entities[idx].set_local_pose(mat[i])
 
@@ -442,7 +442,6 @@ class DefaultArticulationView(ArticulationViewBase):
                 gpu_indices=self._gpu_indices,
                 data_type=ArticulationGPUAPIReadType.ROOT_GLOBAL_POSE,
             )
-            data[:, :4] = convert_quat(data[:, :4], to="wxyz")
             return data[:, [4, 5, 6, 0, 1, 2, 3]]
 
         root_pose = torch.as_tensor(
@@ -513,8 +512,7 @@ class DefaultArticulationView(ArticulationViewBase):
                 gpu_indices=self._gpu_indices,
                 data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
             )
-            quat = convert_quat(data[..., :4], to="wxyz")
-            return torch.cat((data[..., 4:], quat), dim=-1)
+            return torch.cat((data[..., 4:], data[..., :4]), dim=-1)
 
         from embodichain.lab.sim.utility import get_dexsim_arenas
 
@@ -566,7 +564,7 @@ class DefaultArticulationView(ArticulationViewBase):
         pose = pose.to(dtype=torch.float32)
         if self._is_gpu:
             xyz = pose[:, :3]
-            quat = convert_quat(pose[:, 3:7], to="xyzw")
+            quat = pose[:, 3:7]
             data = torch.cat((quat, xyz), dim=-1)
             indices = self.select_articulation_ids(env_ids)
             self.ps.gpu_apply_root_data(

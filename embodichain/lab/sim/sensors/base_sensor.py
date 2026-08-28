@@ -54,8 +54,8 @@ class SensorCfg(ObjectBaseCfg):
 
         pos: Tuple[float, float, float] = (0.0, 0.0, 0.0)
         """Position of the sensor in the parent frame. Defaults to (0.0, 0.0, 0.0)."""
-        quat: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
-        """Orientation of the sensor in the parent frame as a quaternion (w, x, y, z). Defaults to (1.0, 0.0, 0.0, 0.0)."""
+        quat: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+        """Orientation in the parent frame as ``(x, y, z, w)``. Defaults to identity."""
 
         parent: str | None = None
         """Name of the parent frame. If not specified, the sensor will be placed in the arena frame.
@@ -224,7 +224,8 @@ class BaseSensor(BatchEntity):
         """Get the pose of the sensor in the arena frame.
 
         Args:
-            to_matrix: If True, return the pose as a 4x4 transformation matrix.
+            to_matrix: If True, return the pose as a 4x4 transformation matrix;
+                otherwise return ``(x, y, z, qx, qy, qz, qw)``.
 
         Returns:
             A tensor representing the pose of the sensor in the arena frame.

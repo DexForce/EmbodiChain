@@ -122,7 +122,7 @@ no robot control-part names:
                object=workpiece,
                at=SemanticPose(
                    position=(-0.40, 0.48, 0.025),
-                   quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                   quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
                ),
            ),
        )

@@ -84,6 +84,24 @@ environment rows are restored before dynamics are cleared and the configured
 pose is reapplied; reset-mode event functors then run from this clean physical
 baseline in the episode-initialization hook.
 
+## Quaternion and pose convention
+
+All EmbodiChain-owned public and runtime quaternion tensors use
+`(x, y, z, w)` (`xyzw`). A 7D pose or state therefore uses
+`(px, py, pz, qx, qy, qz, qw)` (`xyz + xyzw`), and the identity quaternion is
+`(0, 0, 0, 1)`. This includes object/root/link/COM state, robot FK and IK,
+sensor offsets, manager observations/actions, semantic poses, and task
+configuration. `embodichain.utils.math` follows the same convention.
+
+Backend and library adapters must preserve the external API's native order and
+convert exactly once at that boundary. DexSim/Spawn rigid and articulation pose
+buffers are native `xyzw + xyz`, so their adapters only permute pose layout.
+DexSim mass-property and COM descriptors are native `wxyz`, so those adapters
+use `convert_quat()` explicitly. Newton/Warp transforms expose position plus an
+`xyzw` quaternion and therefore need no component-order conversion. Use a
+non-symmetric rotation when testing an adapter; an identity or 180-degree
+single-axis rotation can hide an incorrect order.
+
 Deformables use the same public hierarchy for both topologies:
 `DeformableObjectCfg` is specialized by `VolumeDeformableObjectCfg` and
 `SurfaceDeformableObjectCfg`; `SoftObjectCfg` and `ClothObjectCfg` remain

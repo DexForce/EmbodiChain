@@ -179,8 +179,8 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 
 | Method | Shape / Return Type | Description |
 | :--- | :--- | :--- |
-| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
-| `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
+| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qx, qy, qz, qw]` or a 4x4 matrix. |
+| `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qx, qy, qz, qw]` or a 4x4 matrix. |
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
 | `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
@@ -244,8 +244,8 @@ sim.update()
 ### Pose Control
 ```python
 # Teleport the articulation root to a new pose
-# shape: (N, 7) formatted as [x, y, z, qw, qx, qy, qz]
-new_root_pose = torch.tensor([[0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0]], device=device).repeat(sim.num_envs, 1)
+# shape: (N, 7) formatted as [x, y, z, qx, qy, qz, qw]
+new_root_pose = torch.tensor([[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]], device=device).repeat(sim.num_envs, 1)
 articulation.set_local_pose(new_root_pose)
 ```
 

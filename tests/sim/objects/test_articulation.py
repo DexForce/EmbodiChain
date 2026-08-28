@@ -181,20 +181,30 @@ class BaseArticulationTest:
         """
 
         # Set initial poses
-        pose = torch.eye(4, device=self.sim.device)
-        pose[2, 3] = 1.0
-        pose = pose.unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        distinct_xyzw = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.sim.device
+        ) / torch.sqrt(torch.tensor(30.0, device=self.sim.device))
+        pose = torch.zeros(NUM_ARENAS, 7, device=self.sim.device)
+        pose[:, 2] = 1.0
+        pose[:, 3:7] = distinct_xyzw
 
         self.art.set_local_pose(pose, env_ids=None)
 
         # --- Check poses immediately after setting
-        xyz = self.art.get_local_pose()[0, :3]
+        actual_pose = self.art.get_local_pose()
+        xyz = actual_pose[0, :3]
         expected_pos = torch.tensor(
             [0.0, 0.0, 1.0], device=self.sim.device, dtype=torch.float32
         )
         assert torch.allclose(
             xyz, expected_pos, atol=1e-5
         ), f"FAIL: Drawer pose not set correctly: {xyz.tolist()}"
+        torch.testing.assert_close(
+            actual_pose[:, 3:7],
+            distinct_xyzw.unsqueeze(0).expand(NUM_ARENAS, -1),
+            atol=1e-5,
+            rtol=1e-5,
+        )
 
     def test_replicated_link_shapes_are_isolated_by_environment(self):
         """Every articulation link shape should use its environment group."""
@@ -252,6 +262,9 @@ class BaseArticulationTest:
         changed_inertia = default_inertia * 1.25
         changed_com_pose = default_com_pose.clone()
         changed_com_pose[..., 0] += 0.02
+        changed_com_pose[..., 3:7] = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.sim.device
+        ) / torch.sqrt(torch.tensor(30.0, device=self.sim.device))
 
         self.art.set_mass(changed_mass, link_names=[link_name], env_ids=env_ids)
         self.art.set_inertia(

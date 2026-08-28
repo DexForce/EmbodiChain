@@ -105,7 +105,7 @@ OBJECT_ID = "workpiece"
 OBJECT_SIMULATION_UID = "handover_object"
 HANDOVER_SAMPLE_COUNT = 140
 FINAL_OBJECT_POSITION = (0.0, -0.20, 0.70)
-OBJECT_QUATERNION_WXYZ = (0.70710678, 0.70710678, 0.0, 0.0)
+OBJECT_QUATERNION_XYZW = (0.70710678, 0.0, 0.0, 0.70710678)
 HANDOVER_CALL_ID = "tutorial.hand_over"
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
 HANDOVER_LIFT_HEIGHT = 0.08
@@ -156,7 +156,7 @@ class TutorialHandOverLowerer(RegisteredSemanticLowerer):
         final_pose = (
             SemanticPose(
                 FINAL_OBJECT_POSITION,
-                OBJECT_QUATERNION_WXYZ,
+                OBJECT_QUATERNION_XYZW,
             )
             .to_matrix()
             .to(device)

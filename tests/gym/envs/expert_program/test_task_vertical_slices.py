@@ -408,11 +408,11 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
         (
             {
                 "position": [-0.25, -0.20, 0.10],
-                "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
             },
             {
                 "position": [-0.25, 0.20, 0.10],
-                "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
             },
         )
     )

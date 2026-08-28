@@ -59,7 +59,7 @@ This page lists all available action terms that can be used with the Action Mana
 * - Action Term
   - Description
 * - {class}`~actions.EefPoseTerm`
-  - End-effector pose (6D or 7D) -> IK -> qpos. The policy outputs target end-effector poses which are converted to joint positions via inverse kinematics. Returns ``ik_success`` in the output so reward/observation can penalize or condition on IK failures. Supports both 6D (euler angles) and 7D (quaternion) pose representations.
+  - End-effector pose (6D or 7D) -> IK -> qpos. The policy outputs target end-effector poses which are converted to joint positions via inverse kinematics. Returns ``ik_success`` in the output so reward/observation can penalize or condition on IK failures. Supports both 6D (euler angles) and 7D (``x, y, z, qx, qy, qz, qw``) pose representations.
 
     ```json
     {"func": "EefPoseTerm", "params": {"scale": 0.1, "pose_dim": 7}}
@@ -129,7 +129,7 @@ actions = {
         func="EefPoseTerm",
         params={
             "scale": 0.1,
-            "pose_dim": 7,  # 7D (position + quaternion)
+            "pose_dim": 7,  # 7D (x, y, z, qx, qy, qz, qw)
         },
     ),
 }

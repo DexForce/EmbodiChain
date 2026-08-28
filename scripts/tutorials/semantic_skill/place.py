@@ -89,7 +89,7 @@ from scripts.tutorials.semantic_skill.tutorial_utils import (
 OBJECT_ID = "workpiece"
 OBJECT_SIMULATION_UID = "cube"
 TARGET_OBJECT_POSITION = (-0.40, 0.48, 0.025)
-TARGET_OBJECT_QUATERNION_WXYZ = (1.0, 0.0, 0.0, 0.0)
+TARGET_OBJECT_QUATERNION_XYZW = (0.0, 0.0, 0.0, 1.0)
 PICK_SAMPLE_COUNT = 120
 PLACE_SAMPLE_COUNT = 120
 TRAJECTORY_SIM_STEPS = 4
@@ -189,7 +189,7 @@ def create_place_task() -> tuple[Pick, Place]:
             object=object_ref,
             at=SemanticPose(
                 TARGET_OBJECT_POSITION,
-                TARGET_OBJECT_QUATERNION_WXYZ,
+                TARGET_OBJECT_QUATERNION_XYZW,
             ),
         ),
     )

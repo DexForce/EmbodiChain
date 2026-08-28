@@ -71,7 +71,7 @@ class MockRigidObject:
         self.body_data.default_mass = self._mass.clone()
         self.body_data.default_inertia = self._inertia.clone()
         self.body_data.default_com_pose = torch.zeros(num_envs, 7)
-        self.body_data.default_com_pose[:, 3] = 1.0  # quaternion w
+        self.body_data.default_com_pose[:, 6] = 1.0  # xyzw quaternion w
         self.body_data.lin_vel = torch.zeros(num_envs, 3)
         self.body_data.ang_vel = torch.zeros(num_envs, 3)
 
@@ -235,7 +235,7 @@ class MockArticulation:
         # Default pose at origin (position + quaternion)
         # Format: (N, 7) - position (3) + quaternion (4)
         self._pose = torch.zeros(num_envs, 7)
-        self._pose[:, 3] = 1.0  # quaternion w = 1 (identity rotation)
+        self._pose[:, 6] = 1.0  # xyzw quaternion w = 1 (identity rotation)
 
         self._inertia = torch.ones(
             (self.num_envs, len(self.link_names), 3), device=self.device

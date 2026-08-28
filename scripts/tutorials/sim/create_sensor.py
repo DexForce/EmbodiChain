@@ -159,7 +159,6 @@ def create_sensor(sim: SimulationManager, args):
         parent = None
         pos = [1.2, -0.2, 1.5]
         quat = R.from_euler("xyz", [0, 180, 0], degrees=True).as_quat().tolist()
-        quat = [quat[3], quat[0], quat[1], quat[2]]  # Convert to (w, x, y, z)
 
     # create camera sensor and attach to robot end-effector
     camera: Camera = sim.add_sensor(
@@ -229,7 +228,8 @@ def create_robot(sim):
         drive_pros=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"joint[1-6]": 1e4, "LEFT_.*": 1e3},
-            damping={"joint[1-6]": 1e3, "LEFT_.*": 1e2},
+            damping={"joint[1-6]": 1.5e3, "LEFT_.*": 1e2},
+            max_effort={"joint[1-6]": 1e4, "LEFT_.*": 1e4},
         ),
     )
 

@@ -50,7 +50,7 @@ from embodichain.lab.sim.skills.scene import (
 
 
 def _identity_pose() -> SemanticPose:
-    return SemanticPose((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0))
+    return SemanticPose((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
 
 
 def _call_descriptor(
@@ -71,35 +71,35 @@ def _call_descriptor(
 
 def test_semantic_pose_owns_inputs_and_returns_independent_tensors() -> None:
     position = torch.tensor([1.0, 2.0, 3.0])
-    quaternion = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    quaternion = torch.tensor([0.0, 0.0, 0.0, 1.0])
     pose = SemanticPose(position, quaternion)
 
     position.zero_()
     quaternion.zero_()
     returned_position = pose.position
-    returned_quaternion = pose.quaternion_wxyz
+    returned_quaternion = pose.quaternion_xyzw
     returned_position.fill_(9.0)
     returned_quaternion.fill_(9.0)
 
     torch.testing.assert_close(pose.position, torch.tensor([1.0, 2.0, 3.0]))
     torch.testing.assert_close(
-        pose.quaternion_wxyz,
-        torch.tensor([1.0, 0.0, 0.0, 0.0]),
+        pose.quaternion_xyzw,
+        torch.tensor([0.0, 0.0, 0.0, 1.0]),
     )
 
 
-def test_semantic_pose_normalizes_wxyz_quaternion() -> None:
-    pose = SemanticPose((0.0, 0.0, 0.0), (2.0, 0.0, 0.0, 2.0))
+def test_semantic_pose_normalizes_xyzw_quaternion() -> None:
+    pose = SemanticPose((0.0, 0.0, 0.0), (0.0, 0.0, 2.0, 2.0))
 
     expected = torch.tensor(
-        [math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)],
+        [0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5)],
         dtype=torch.float32,
     )
-    torch.testing.assert_close(pose.quaternion_wxyz, expected)
+    torch.testing.assert_close(pose.quaternion_xyzw, expected)
 
 
 def test_semantic_pose_converts_to_homogeneous_matrix() -> None:
-    pose = SemanticPose((1.0, 2.0, 3.0), (2.0, 0.0, 0.0, 2.0))
+    pose = SemanticPose((1.0, 2.0, 3.0), (0.0, 0.0, 2.0, 2.0))
 
     expected = torch.tensor(
         [
@@ -115,7 +115,7 @@ def test_semantic_pose_converts_to_homogeneous_matrix() -> None:
 def test_semantic_call_metadata_is_deterministic_and_json_safe() -> None:
     call = Place(
         object=SceneObjectRef("cube"),
-        at=SemanticPose((1.0, 2.0, 3.0), (1.0, 0.0, 0.0, 0.0)),
+        at=SemanticPose((1.0, 2.0, 3.0), (0.0, 0.0, 0.0, 1.0)),
         resources={"primary": "left_arm"},
     )
 

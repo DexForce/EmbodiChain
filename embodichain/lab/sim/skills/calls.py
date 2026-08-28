@@ -184,52 +184,52 @@ def _validate_static_skill_descriptor(
 
 @dataclass(frozen=True, slots=True, init=False, eq=False)
 class SemanticPose:
-    """Object-space pose expressed as position and a WXYZ quaternion.
+    """Object-space pose expressed as position and an XYZW quaternion.
 
     The value owns normalized tensor snapshots and never exposes its internal
     tensors directly. A single pose or an environment batch is accepted.
 
     Args:
         position: Shape ``(3,)`` or ``(B, 3)``.
-        quaternion_wxyz: Shape ``(4,)`` or ``(B, 4)``. Finite, non-zero
+        quaternion_xyzw: Shape ``(4,)`` or ``(B, 4)``. Finite, non-zero
             quaternions are normalized at construction.
     """
 
     _position: torch.Tensor = field(repr=False)
-    _quaternion_wxyz: torch.Tensor = field(repr=False)
+    _quaternion_xyzw: torch.Tensor = field(repr=False)
 
     def __init__(
         self,
         position: torch.Tensor | tuple[float, float, float] | list[float],
-        quaternion_wxyz: torch.Tensor | tuple[float, float, float, float] | list[float],
+        quaternion_xyzw: torch.Tensor | tuple[float, float, float, float] | list[float],
     ) -> None:
         position_tensor = torch.as_tensor(position, dtype=torch.float32)
-        quaternion_tensor = torch.as_tensor(quaternion_wxyz, dtype=torch.float32)
+        quaternion_tensor = torch.as_tensor(quaternion_xyzw, dtype=torch.float32)
         if position_tensor.dim() not in (1, 2) or position_tensor.shape[-1] != 3:
             raise ValueError("position must have shape (3,) or (B, 3).")
         if quaternion_tensor.dim() not in (1, 2) or quaternion_tensor.shape[-1] != 4:
-            raise ValueError("quaternion_wxyz must have shape (4,) or (B, 4).")
+            raise ValueError("quaternion_xyzw must have shape (4,) or (B, 4).")
         if position_tensor.dim() != quaternion_tensor.dim():
             raise ValueError(
-                "position and quaternion_wxyz must both be unbatched or batched."
+                "position and quaternion_xyzw must both be unbatched or batched."
             )
         if position_tensor.dim() == 2 and (
             position_tensor.shape[0] != quaternion_tensor.shape[0]
         ):
-            raise ValueError("position and quaternion_wxyz batch sizes must match.")
+            raise ValueError("position and quaternion_xyzw batch sizes must match.")
         if position_tensor.dim() == 2 and position_tensor.shape[0] == 0:
             raise ValueError("SemanticPose batches must contain at least one pose.")
         if not torch.isfinite(position_tensor).all():
             raise ValueError("position must contain only finite values.")
         if not torch.isfinite(quaternion_tensor).all():
-            raise ValueError("quaternion_wxyz must contain only finite values.")
+            raise ValueError("quaternion_xyzw must contain only finite values.")
         norms = torch.linalg.vector_norm(quaternion_tensor, dim=-1, keepdim=True)
         if torch.any(norms <= torch.finfo(torch.float32).eps):
-            raise ValueError("quaternion_wxyz must be non-zero.")
+            raise ValueError("quaternion_xyzw must be non-zero.")
         object.__setattr__(self, "_position", position_tensor.clone())
         object.__setattr__(
             self,
-            "_quaternion_wxyz",
+            "_quaternion_xyzw",
             (quaternion_tensor / norms).clone(),
         )
 
@@ -239,9 +239,9 @@ class SemanticPose:
         return self._position.clone()
 
     @property
-    def quaternion_wxyz(self) -> torch.Tensor:
+    def quaternion_xyzw(self) -> torch.Tensor:
         """Return an independent normalized quaternion tensor."""
-        return self._quaternion_wxyz.clone()
+        return self._quaternion_xyzw.clone()
 
     @property
     def batch_size(self) -> int | None:
@@ -250,7 +250,7 @@ class SemanticPose:
 
     def snapshot(self) -> SemanticPose:
         """Return an independently owned pose value."""
-        return SemanticPose(self._position, self._quaternion_wxyz)
+        return SemanticPose(self._position, self._quaternion_xyzw)
 
     def to_matrix(self) -> torch.Tensor:
         """Convert the semantic pose to a homogeneous transform.
@@ -259,14 +259,14 @@ class SemanticPose:
             Shape ``(4, 4)`` for an unbatched pose or ``(B, 4, 4)`` for a
             batched pose.
         """
-        quaternion = self._quaternion_wxyz
+        quaternion = self._quaternion_xyzw
         was_unbatched = quaternion.dim() == 1
         if was_unbatched:
             quaternion = quaternion.unsqueeze(0)
             position = self._position.unsqueeze(0)
         else:
             position = self._position
-        w, x, y, z = quaternion.unbind(dim=-1)
+        x, y, z, w = quaternion.unbind(dim=-1)
         output = torch.zeros(
             quaternion.shape[0],
             4,
@@ -291,7 +291,7 @@ class SemanticPose:
         """Return the pose as deterministic JSON-safe semantic data."""
         return {
             "position": self._position.detach().cpu().tolist(),
-            "quaternion_wxyz": self._quaternion_wxyz.detach().cpu().tolist(),
+            "quaternion_xyzw": self._quaternion_xyzw.detach().cpu().tolist(),
         }
 
 

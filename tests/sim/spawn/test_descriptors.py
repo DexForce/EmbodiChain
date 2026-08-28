@@ -216,11 +216,13 @@ def test_rigid_descriptor_forwards_explicit_mass_properties() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
-        attrs=RigidBodyAttributesCfg(
-            mass=2.0,
-            inertia=[1.0, 2.0, 3.0],
-            com_position=[0.1, 0.2, 0.3],
-            com_quaternion=[2.0, 0.0, 0.0, 0.0],
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(
+                mass=2.0,
+                inertia=[1.0, 2.0, 3.0],
+                com_position=[0.1, 0.2, 0.3],
+                com_quaternion=[1.0, 2.0, 3.0, 4.0],
+            ),
         ),
     )
 
@@ -231,9 +233,9 @@ def test_rigid_descriptor_forwards_explicit_mass_properties() -> None:
         descriptor.physics.com_position,
         [0.1, 0.2, 0.3],
     )
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         descriptor.physics.com_quaternion,
-        [1.0, 0.0, 0.0, 0.0],
+        np.array([4.0, 1.0, 2.0, 3.0]) / np.sqrt(30.0),
     )
 
 

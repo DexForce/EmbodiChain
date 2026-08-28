@@ -139,7 +139,7 @@ class DifferentialSolver(BaseSolver):
         elif self.cfg.command_type == "pose" and self.cfg.use_relative_mode:
             return 6  # (dx, dy, dz, droll, dpitch, dyaw)
         else:
-            return 7  # (x, y, z, qw, qx, qy, qz)
+            return 7  # (x, y, z, qx, qy, qz, qw)
 
     def reset(self, env_ids: torch.Tensor | None = None):
         """Reset the internal buffers for the specified environments.
@@ -151,7 +151,7 @@ class DifferentialSolver(BaseSolver):
             env_ids = torch.arange(self.num_envs, device=self.device)
 
         self.ee_pos_des[env_ids] = 0
-        self.ee_quat_des[env_ids] = torch.tensor([1.0, 0, 0, 0], device=self.device)
+        self.ee_quat_des[env_ids] = torch.tensor([0.0, 0, 0, 1.0], device=self.device)
         self._command[env_ids] = 0
 
     def set_command(
@@ -412,9 +412,8 @@ class DifferentialSolver(BaseSolver):
         rot_matrices = mat[:, :3, :3].cpu().numpy()  # Convert to NumPy for scipy
         quats = Rotation.from_matrix(rot_matrices).as_quat()  # (N, 4), [x, y, z, w]
 
-        # Convert quaternion back to torch.Tensor and reorder to [w, x, y, z]
+        # SciPy's xyzw convention matches EmbodiChain's quaternion contract.
         quats = torch.tensor(quats, device=mat.device, dtype=mat.dtype)  # (N, 4)
-        quats = quats[:, [3, 0, 1, 2]]  # Reorder to [w, x, y, z]
 
         # Concatenate position and quaternion
         return torch.cat([pos, quats], dim=1)

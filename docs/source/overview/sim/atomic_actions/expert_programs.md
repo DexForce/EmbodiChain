@@ -116,7 +116,7 @@ targets:
     kind: cyclic_pose
     values:
       - position: [-0.40, 0.48, 0.10]
-        quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
 program:
   kind: repeat
   count: 3

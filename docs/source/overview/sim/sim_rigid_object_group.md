@@ -83,9 +83,9 @@ A group provides batch operations on multiple rigid objects. Key APIs include:
 | :--- | :--- | :--- |
 | `num_objects` | `int` | Number of objects in each group instance. |
 | `body_data` | `RigidBodyGroupData` | Data manager providing `pose`, `lin_vel`, `ang_vel` properties. |
-| `body_state` | `(N, M, 13)` | Full body state of all members: [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
-| `get_local_pose(to_matrix=False)` | `(N, M, 7)` or `(N, M, 4, 4)` | Poses of all members across N envs; M = number of members. |
-| `set_local_pose(pose, env_ids=None, obj_ids=None)` | `pose: (N, M, 7)` or `(N, M, 4, 4)` | Set poses for specific environments and/or objects; requires `sim.update()` to apply. |
+| `body_state` | `(N, M, 13)` | Full body state of all members: [x, y, z, qx, qy, qz, qw, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
+| `get_local_pose(to_matrix=False)` | `(N, M, 7)` or `(N, M, 4, 4)` | Poses of all members as `[x, y, z, qx, qy, qz, qw]` or matrices; M = number of members. |
+| `set_local_pose(pose, env_ids=None, obj_ids=None)` | `pose: (N, M, 7)` or `(N, M, 4, 4)` | Set poses in `[x, y, z, qx, qy, qz, qw]` or matrix form; requires `sim.update()` to apply. |
 | `get_user_ids()` | `(N, M)` | Get user IDs tensor for all members in the group. |
 | `clear_dynamics(env_ids=None)` | - | Reset velocities and clear all forces/torques for the group. |
 | `set_visual_material(mat, env_ids=None)` | `mat: VisualMaterial` | Change visual appearance for all members. |

@@ -46,7 +46,7 @@ import torch
 import yaml
 
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import pose_inv, quat_from_matrix
+from embodichain.utils.math import convert_quat, pose_inv, quat_from_matrix
 
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
@@ -520,7 +520,9 @@ def _matrix_to_position_quaternion(
     # so materialize them at the adapter boundary rather than relying on a
     # caller-specific layout.
     position = matrix[:, :3, 3].contiguous()
-    quaternion = quat_from_matrix(matrix[:, :3, :3]).contiguous()  # wxyz
+    quaternion = convert_quat(
+        quat_from_matrix(matrix[:, :3, :3]), to="wxyz"
+    ).contiguous()
     return position, quaternion
 
 

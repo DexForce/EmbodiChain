@@ -65,6 +65,7 @@ from embodichain.lab.sim.objects.backends import (
 )
 from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
 from embodichain.utils.math import (
+    convert_quat,
     matrix_from_quat,
     quat_from_matrix,
     matrix_from_euler,
@@ -296,7 +297,8 @@ class ArticulationData:
         """Get the root pose of the articulation.
 
         Returns:
-            torch.Tensor: The root pose of the articulation with shape of (num_instances, 7).
+            torch.Tensor: Root poses with shape ``(num_instances, 7)`` in
+            ``(x, y, z, qx, qy, qz, qw)`` order.
         """
         return self.articulation_view.fetch_root_pose(self._root_pose)
 
@@ -385,7 +387,8 @@ class ArticulationData:
         """Get the pose of all links in the articulation.
 
         Returns:
-            torch.Tensor: The poses of the links in the articulation with shape (N, num_links, 7).
+            torch.Tensor: Link poses with shape ``(N, num_links, 7)`` in
+            ``(x, y, z, qx, qy, qz, qw)`` order.
         """
         return self.articulation_view.fetch_link_pose(self._body_link_pose)
 
@@ -432,8 +435,9 @@ class ArticulationData:
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Refresh current mass, inertia diagonal, and local COM pose buffers.
 
-        COM poses use the articulation convention ``xyz + wxyz`` and all
-        tensors use the public link ordering.
+        COM poses use the EmbodiChain convention ``xyz + xyzw`` and all
+        tensors use the public link ordering. DexSim physical-property
+        descriptors use ``wxyz`` and are converted at this boundary.
         """
         masses: list[list[float]] = []
         inertias: list[list[np.ndarray]] = []
@@ -451,7 +455,10 @@ class ArticulationData:
                     np.concatenate(
                         (
                             np.asarray(attr.com_position, dtype=np.float32),
-                            np.asarray(attr.com_quaternion, dtype=np.float32),
+                            convert_quat(
+                                np.asarray(attr.com_quaternion, dtype=np.float32),
+                                to="xyzw",
+                            ),
                         )
                     )
                 )
@@ -494,7 +501,7 @@ class ArticulationData:
 
     @property
     def com_pose(self) -> torch.Tensor:
-        """Current local link COM poses with shape ``(N, num_links, 7)``."""
+        """Current local link COM poses as ``xyz + xyzw`` tensors."""
         return self.read_physical_properties()[2]
 
     @property
@@ -522,7 +529,7 @@ class ArticulationData:
 
     @property
     def default_com_pose(self) -> torch.Tensor:
-        """Initialization-time local link COM poses in ``xyz + wxyz`` order."""
+        """Initialization-time local link COM poses in ``xyz + xyzw`` order."""
         if self._default_com_pose is None:
             raise RuntimeError("Default articulation link COM poses are unavailable.")
         return self._default_com_pose
@@ -1392,7 +1399,7 @@ class Articulation(BatchEntity):
         """Get local pose (root link pose) of the articulation.
 
         Args:
-            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
+            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qx, qy, qz, qw). Defaults to False.
 
         Returns:
             torch.Tensor: The local pose of the articulation with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
@@ -1437,7 +1444,7 @@ class Articulation(BatchEntity):
         Args:
             link_name (str): The name of the link.
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
-            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
+            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qx, qy, qz, qw). Defaults to False.
 
         Returns:
             torch.Tensor: The pose of the specified link with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
@@ -1967,7 +1974,7 @@ class Articulation(BatchEntity):
         link_names: str | Sequence[str] | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set local COM poses in articulation ``xyz + wxyz`` convention."""
+        """Set local COM poses in EmbodiChain ``xyz + xyzw`` convention."""
         env_index = self._resolve_env_ids(env_ids)
         env_list = env_index.detach().cpu().tolist()
         names, _ = self._resolve_link_names(link_names)
@@ -1985,7 +1992,10 @@ class Articulation(BatchEntity):
             for j, name in enumerate(names):
                 local_name = self._entity_link_name(env_idx, name)
                 position = np.asarray(values[i, j, :3], dtype=np.float32)
-                quaternion = np.asarray(values[i, j, 3:7], dtype=np.float32)
+                quaternion = np.asarray(
+                    convert_quat(values[i, j, 3:7], to="wxyz"),
+                    dtype=np.float32,
+                )
                 if self.is_spawn_bound and self._data.is_newton_backend:
                     entity.set_newton_link_properties(
                         local_name,
@@ -2014,7 +2024,7 @@ class Articulation(BatchEntity):
         link_names: str | Sequence[str] | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Get local COM poses in articulation ``xyz + wxyz`` convention."""
+        """Get local COM poses in EmbodiChain ``xyz + xyzw`` convention."""
         env_index = self._resolve_env_ids(env_ids)
         _, link_index = self._resolve_link_names(link_names)
         return self.body_data.com_pose[

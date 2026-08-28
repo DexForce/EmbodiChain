@@ -79,7 +79,7 @@ print(f"EE Pose: {ee_pose}")
 Compute the required joint positions to reach a target pose.
 ```python 
 # Compute IK
-# pose: Target pose (N, 7) or (N, 4, 4)
+# pose: Target pose (N, 7) as [x, y, z, qx, qy, qz, qw], or (N, 4, 4)
 target_pose = ee_pose.clone() # Example target
 target_pose[:, 2] += 0.1      # Move up 10cm
 

@@ -24,9 +24,23 @@ import torch
 from embodichain.lab.sim.objects.backends.spawn import (
     SpawnArticulationView,
     SpawnRigidBodyView,
+    _embodichain_articulation_pose,
+    _embodichain_pose,
+    _spawn_articulation_pose,
+    _spawn_pose,
 )
 
 pytestmark = pytest.mark.no_sim
+
+
+def test_spawn_pose_adapters_preserve_embodichain_xyzw_order() -> None:
+    pose = torch.tensor([[1.0, 2.0, 3.0, 0.1, 0.2, 0.3, 0.9]])
+    expected_spawn = torch.tensor([[0.1, 0.2, 0.3, 0.9, 1.0, 2.0, 3.0]])
+
+    torch.testing.assert_close(_spawn_pose(pose), expected_spawn)
+    torch.testing.assert_close(_spawn_articulation_pose(pose), expected_spawn)
+    torch.testing.assert_close(_embodichain_pose(expected_spawn), pose)
+    torch.testing.assert_close(_embodichain_articulation_pose(expected_spawn), pose)
 
 
 class _SelectedRigidBatch:

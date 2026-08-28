@@ -273,7 +273,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
             n, device=d
         ) * (TARGET_POS_RANGE["z"][1] - TARGET_POS_RANGE["z"][0])
         # Identity orientation: the smoke task uses position-only reward.
-        self.target_quat[env_ids] = torch.tensor([1.0, 0.0, 0.0, 0.0], device=d).expand(
+        self.target_quat[env_ids] = torch.tensor([0.0, 0.0, 0.0, 1.0], device=d).expand(
             n, -1
         )
 

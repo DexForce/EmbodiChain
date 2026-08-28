@@ -54,7 +54,6 @@ from ._mesh_utils import (
     get_combined_triangles,
     get_combined_vertices,
 )
-from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
 
@@ -170,7 +169,7 @@ class RigidBodyData:
 
     @property
     def default_com_pose(self) -> torch.Tensor:
-        """Initialization-time local center-of-mass pose with shape ``(N, 7)``."""
+        """Initialization-time local COM pose as an ``xyz + xyzw`` tensor."""
         if self._default_com_pose is None:
             raise RuntimeError("Default rigid-body COM pose has not been captured yet.")
         return self._default_com_pose
@@ -303,7 +302,8 @@ class RigidBodyData:
         """Get the center of mass pose of the rigid bodies.
 
         Returns:
-            torch.Tensor: The center of mass pose with shape (N, 7).
+            torch.Tensor: The center-of-mass pose with shape ``(N, 7)`` in
+            ``(x, y, z, qx, qy, qz, qw)`` order.
         """
         self.body_view.fetch_com_local_pose(self._com_pose)
         return self._com_pose
@@ -781,7 +781,7 @@ class RigidObject(BatchEntity):
             target_pose = pose.to(device=self.device, dtype=torch.float32)
         elif pose.dim() == 3 and pose.shape[1:] == (4, 4):
             xyz = pose[:, :3, 3]
-            quat = convert_quat(quat_from_matrix(pose[:, :3, :3]), to="xyzw")
+            quat = quat_from_matrix(pose[:, :3, :3])
             target_pose = torch.cat((xyz, quat), dim=-1).to(
                 device=self.device, dtype=torch.float32
             )
@@ -806,9 +806,7 @@ class RigidObject(BatchEntity):
         target_pose = target_pose.cpu()
         pose_matrix = torch.eye(4).unsqueeze(0).repeat(len(local_env_ids), 1, 1)
         pose_matrix[:, :3, 3] = target_pose[:, :3]
-        pose_matrix[:, :3, :3] = matrix_from_quat(
-            convert_quat(target_pose[:, 3:7], to="wxyz")
-        )
+        pose_matrix[:, :3, :3] = matrix_from_quat(target_pose[:, 3:7])
         for i, env_idx in enumerate(local_env_ids):
             self._entities[env_idx].set_local_pose(pose_matrix[i])
 
@@ -850,7 +848,7 @@ class RigidObject(BatchEntity):
         pose = self.body_data.pose.clone()
         if to_matrix:
             xyz = pose[:, :3]
-            mat = matrix_from_quat(convert_quat(pose[:, 3:7], to="wxyz"))
+            mat = matrix_from_quat(pose[:, 3:7])
             pose = (
                 torch.eye(4, dtype=torch.float32, device=self.device)
                 .unsqueeze(0)

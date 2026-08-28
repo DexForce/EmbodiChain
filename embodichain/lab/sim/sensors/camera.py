@@ -316,7 +316,8 @@ class Camera(BaseSensor):
         Note: The pose should be in the OpenGL coordinate system, which means the Y is up and Z is forward.
 
         Args:
-            pose (torch.Tensor): The local pose to set, should be a 4x4 transformation matrix.
+            pose (torch.Tensor): The local pose as ``(N, 4, 4)`` matrices or
+                ``(N, 7)`` vectors in ``(x, y, z, qx, qy, qz, qw)`` order.
             env_ids (Sequence[int] | None): The environment IDs to set the pose for. If None, set for all environments.
         """
         if env_ids is None:
@@ -343,7 +344,8 @@ class Camera(BaseSensor):
         """Get the local pose of the camera.
 
         Args:
-            to_matrix (bool): If True, return the pose as a 4x4 matrix. If False, return as a quaternion.
+            to_matrix (bool): If True, return the pose as a 4x4 matrix. If
+                False, return ``(x, y, z, qx, qy, qz, qw)``.
 
         Returns:
             torch.Tensor: The local pose of the camera.
@@ -364,7 +366,8 @@ class Camera(BaseSensor):
         """Get the pose of the sensor in the arena frame.
 
         Args:
-            to_matrix (bool): If True, return the pose as a 4x4 transformation matrix.
+            to_matrix (bool): If True, return the pose as a 4x4 transformation
+                matrix. If False, return ``(x, y, z, qx, qy, qz, qw)``.
 
         Returns:
             A tensor representing the pose of the sensor in the arena frame.

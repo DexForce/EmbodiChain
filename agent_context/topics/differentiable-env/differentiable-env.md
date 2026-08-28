@@ -21,6 +21,12 @@ tensors get a gradient from `tape.backward()`.
 The default backend and any other Newton solver are rejected at
 construction time by `DifferentiableEmbodiedEnv._validate_diff_cfg`.
 
+Newton/Warp `body_q` transforms contain position followed by a native `xyzw`
+quaternion. This already matches EmbodiChain's quaternion convention, so the
+differentiable bridge and FK reward path must not reorder those four
+components. The Franka target pose likewise uses `xyz + xyzw`, with identity
+orientation `(0, 0, 0, 1)`.
+
 ## Subclass contract
 
 Task authors implement two methods on `DifferentiableEmbodiedEnv`:

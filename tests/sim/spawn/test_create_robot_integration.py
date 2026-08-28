@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Regression coverage for the robot configured by create_robot.py."""
+"""Regression coverage for robots configured by simulation tutorials."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from embodichain.lab.sim.spawn.descriptors import (
     configure_articulation_desc,
 )
 from embodichain.lab.sim.spawn.scene import SpawnScene
+from scripts.tutorials.sim.create_sensor import create_robot as create_sensor_robot
 from scripts.tutorials.sim.create_robot import create_robot
 
 pytestmark = pytest.mark.requires_sim
@@ -105,3 +106,50 @@ def test_create_robot_preserves_source_inertia_and_arm_drive() -> None:
     assert newton_ke == pytest.approx(ARM_STIFFNESS)
     assert newton_kd == pytest.approx(ARM_DAMPING)
     assert common_max_effort == pytest.approx(ARM_MAX_EFFORT)
+
+
+def test_create_sensor_uses_the_matched_arm_drive() -> None:
+    """Keep the sensor tutorial's arm controller aligned across backends."""
+    cfg = create_sensor_robot(_ConfigCapture())
+
+    assert cfg.drive_pros is not None
+    assert cfg.drive_pros.max_effort == {
+        "joint[1-6]": ARM_MAX_EFFORT,
+        "LEFT_.*": ARM_MAX_EFFORT,
+    }
+    cfg.fpath = cfg.urdf_cfg.assemble_urdf()
+
+    config = dexsim.WorldConfig()
+    config.open_windows = False
+    config.renderer = dexsim.types.Renderer.HYBRID
+    config.backend = dexsim.types.Backend.VULKAN
+    world = dexsim.World(config)
+
+    (
+        _,
+        _,
+        stiffness,
+        damping,
+        max_effort,
+        newton_ke,
+        newton_kd,
+        common_max_effort,
+    ) = _resolve_tutorial_properties(world, cfg)
+
+    assert (
+        stiffness,
+        damping,
+        max_effort,
+        newton_ke,
+        newton_kd,
+        common_max_effort,
+    ) == pytest.approx(
+        (
+            ARM_STIFFNESS,
+            ARM_DAMPING,
+            ARM_MAX_EFFORT,
+            ARM_STIFFNESS,
+            ARM_DAMPING,
+            ARM_MAX_EFFORT,
+        )
+    )

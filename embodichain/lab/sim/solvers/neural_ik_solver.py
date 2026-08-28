@@ -19,11 +19,7 @@ import torch
 import torch.nn as nn
 
 from embodichain.utils import configclass
-from embodichain.utils.math import (
-    convert_quat,
-    quat_error_magnitude,
-    quat_from_matrix,
-)
+from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.solvers.qpos_seed_sampler import QposSeedSampler
 
@@ -194,7 +190,7 @@ class NeuralIKSolver(BaseSolver):
             for _ in range(self._max_steps):
                 ee_xpos = self.get_fk(qpos)
                 ee_pos = ee_xpos[:, :3, 3]
-                ee_quat = convert_quat(quat_from_matrix(ee_xpos[:, :3, :3]), to="xyzw")
+                ee_quat = quat_from_matrix(ee_xpos[:, :3, :3])
 
                 obs = self._build_obs(
                     qpos, ee_pos, ee_quat, target_pos, target_quat, last_action
@@ -212,9 +208,9 @@ class NeuralIKSolver(BaseSolver):
         # Convergence check
         ik_xpos = self.get_fk(qpos)
         pos_err = (ik_xpos[:, :3, 3] - target_pos).norm(dim=-1)
-        ik_quat_wxyz = quat_from_matrix(ik_xpos[:, :3, :3])
-        target_quat_wxyz = quat_from_matrix(target_xpos[:, :3, :3])
-        rot_err = quat_error_magnitude(target_quat_wxyz, ik_quat_wxyz)
+        ik_quat_xyzw = quat_from_matrix(ik_xpos[:, :3, :3])
+        target_quat_xyzw = quat_from_matrix(target_xpos[:, :3, :3])
+        rot_err = quat_error_magnitude(target_quat_xyzw, ik_quat_xyzw)
         success = (pos_err < self._pos_eps) & (rot_err < self._rot_eps)
 
         return success, qpos
@@ -253,7 +249,7 @@ class NeuralIKSolver(BaseSolver):
         B = target_xpos.shape[0]
 
         target_pos = target_xpos[:, :3, 3]
-        target_quat = convert_quat(quat_from_matrix(target_xpos[:, :3, :3]), to="xyzw")
+        target_quat = quat_from_matrix(target_xpos[:, :3, :3])
 
         if qpos_seed is None:
             qpos_seed = torch.zeros(B, self.dof, device=self.device)
@@ -279,9 +275,7 @@ class NeuralIKSolver(BaseSolver):
         )
         target_xpos_repeated = sampler.repeat_target_xpos(target_xpos, n)
         target_pos_rep = target_xpos_repeated[:, :3, 3]
-        target_quat_rep = convert_quat(
-            quat_from_matrix(target_xpos_repeated[:, :3, :3]), to="xyzw"
-        )
+        target_quat_rep = quat_from_matrix(target_xpos_repeated[:, :3, :3])
 
         success_flat, ik_qpos_flat = self._run_policy(
             all_seeds, target_xpos_repeated, target_pos_rep, target_quat_rep

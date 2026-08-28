@@ -34,6 +34,7 @@ import torch
 import yaml
 
 from embodichain.lab.sim.planners import CuroboPlannerCfg
+from embodichain.utils.math import matrix_from_quat
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlanOptions,
     CuroboPlanner,
@@ -127,9 +128,14 @@ def test_public_config_imports_without_curobo():
 
 def test_matrix_to_position_quaternion_uses_wxyz():
     matrix = torch.eye(4).unsqueeze(0)
+    xyzw = torch.tensor([[1.0, 2.0, 3.0, 4.0]]) / math.sqrt(30.0)
+    matrix[:, :3, :3] = matrix_from_quat(xyzw)
     position, quaternion = _matrix_to_position_quaternion(matrix)
     assert torch.equal(position, torch.zeros(1, 3))
-    assert torch.equal(quaternion, torch.tensor([[1.0, 0.0, 0.0, 0.0]]))
+    torch.testing.assert_close(
+        quaternion,
+        torch.tensor([[4.0, 1.0, 2.0, 3.0]]) / math.sqrt(30.0),
+    )
     assert position.is_contiguous()
     assert quaternion.is_contiguous()
 
@@ -468,7 +474,7 @@ def _identity_pose(
     translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
 ) -> torch.Tensor:
     return torch.tensor(
-        [*translation, 1.0, 0.0, 0.0, 0.0],
+        [*translation, 0.0, 0.0, 0.0, 1.0],
         dtype=torch.float32,
     )
 
@@ -530,7 +536,7 @@ def test_cuboid_entry_off_origin_mesh_offsets_center():
 
 def test_cuboid_entry_rotated_pose_preserves_center():
     quaternion = torch.tensor(
-        [math.cos(math.pi / 4), 0.0, 0.0, math.sin(math.pi / 4)],
+        [0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4)],
         dtype=torch.float32,
     )
     pose = torch.cat([torch.tensor([0.45, 0.0, 0.18]), quaternion])
@@ -543,7 +549,9 @@ def test_cuboid_entry_rotated_pose_preserves_center():
     )[0]
 
     assert fields["pose"][:3] == pytest.approx([0.45, 0.0, 0.18])
-    assert fields["pose"][3:] == pytest.approx(quaternion.tolist())
+    assert fields["pose"][3:] == pytest.approx(
+        [math.cos(math.pi / 4), 0.0, 0.0, math.sin(math.pi / 4)]
+    )
 
 
 def test_cuboid_entry_accepts_homogeneous_pose():
@@ -572,7 +580,7 @@ def test_mesh_entry_serializes_flat_face_buffer():
     assert (top_key, name) == ("mesh", "demo_block")
     assert len(fields["vertices"]) == 8
     assert len(fields["faces"]) == 36
-    assert fields["pose"] == pytest.approx(_identity_pose().tolist())
+    assert fields["pose"] == pytest.approx([0.45, 0.0, 0.18, 1.0, 0.0, 0.0, 0.0])
 
 
 def test_invalid_obstacle_representation_raises():

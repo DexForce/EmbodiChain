@@ -29,6 +29,7 @@ Run from the repository root::
     python examples/sim/planners/curobo_planner.py --headless
     python examples/sim/planners/curobo_planner.py --headless --num_envs 4
     python examples/sim/planners/curobo_planner.py --headless --device cuda:1
+    python examples/sim/planners/curobo_planner.py --headless --physics newton
 
 Requirements: an NVIDIA CUDA device and the CUDA-matched cuRobo V2 source
 package installed in the active environment. Installation instructions:
@@ -65,7 +66,11 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
 )
 from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RenderCfg, RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import (
+    RenderCfg,
+    RigidBodyPhysicsCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
@@ -243,6 +248,7 @@ def _build_scene(
     arena_space: float = 2.0,
     gpu_id: int = 0,
     visualization: VisualizationCfg | None = None,
+    physics: str = "default",
 ) -> tuple[SimulationManager, Robot, RigidObject, torch.Tensor, str]:
     """Create the batched robot scene with an identical cuboid in each arena."""
     sim = SimulationManager(
@@ -253,6 +259,7 @@ def _build_scene(
             arena_space=arena_space,
             gpu_id=gpu_id,
             render_cfg=RenderCfg(renderer=renderer),
+            physics_cfg=physics_cfg_for_backend(physics),
             visualization=visualization or VisualizationCfg(),
         )
     )
@@ -465,7 +472,9 @@ def _build_scene(
         cfg=RigidObjectCfg(
             uid="demo_block",
             shape=CubeCfg(size=demo_block_size),
-            attrs=RigidBodyAttributesCfg(),
+            # The grouped form is backend-neutral; the deprecated flat attrs
+            # configuration cannot be spawned by Newton.
+            attrs=RigidBodyPhysicsCfg(),
             body_type="kinematic",
             init_pos=demo_block_position,
             init_rot=(0.0, 0.0, 0.0),
@@ -699,6 +708,7 @@ def main() -> None:
             args.arena_space,
             effective_gpu_id,
             visualization_cfg_from_args(args),
+            physics=args.physics,
         )
 
         obstacles = [demo_block]

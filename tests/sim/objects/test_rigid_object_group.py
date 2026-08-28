@@ -134,6 +134,27 @@ class BaseRigidObjectGroupTest:
             atol=1e-5,
         ), "FAIL: Local poses do not match after setting."
 
+        distinct_xyzw = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.sim.device
+        ) / torch.sqrt(torch.tensor(30.0, device=self.sim.device))
+        vector_pose = torch.zeros(
+            NUM_ARENAS,
+            self.obj_group.num_objects,
+            7,
+            device=self.sim.device,
+        )
+        vector_pose[..., :3] = combined_pose[..., :3, 3]
+        vector_pose[..., 3:7] = distinct_xyzw
+
+        self.obj_group.set_local_pose(vector_pose)
+
+        torch.testing.assert_close(
+            self.obj_group.get_local_pose(),
+            vector_pose,
+            atol=1e-5,
+            rtol=1e-5,
+        )
+
     def test_body_data_exposes_mass_properties(self):
         """Current and initialization-time properties use [env, object] layout."""
         data = self.obj_group.body_data
@@ -158,6 +179,9 @@ class BaseRigidObjectGroupTest:
         changed_inertia = default_inertia * 1.25
         changed_com_pose = default_com_pose.clone()
         changed_com_pose[..., 0] += 0.02
+        changed_com_pose[..., 3:7] = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.sim.device
+        ) / torch.sqrt(torch.tensor(30.0, device=self.sim.device))
 
         self.obj_group.set_mass(changed_mass, env_ids=env_ids, obj_ids=obj_ids)
         self.obj_group.set_inertia(

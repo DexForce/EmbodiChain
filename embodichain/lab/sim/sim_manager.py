@@ -119,7 +119,12 @@ from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import look_at_to_pose, matrix_from_quat, pose_inv
+from embodichain.utils.math import (
+    convert_quat,
+    look_at_to_pose,
+    matrix_from_quat,
+    pose_inv,
+)
 
 if TYPE_CHECKING:
     from dexsim.engine import PhysicsScene
@@ -2750,17 +2755,20 @@ class SimulationManager:
                 device=self.device,
             )
             position = position - self.arena_offsets[0]
-            wxyz = torch.as_tensor(
-                command.wxyz,
-                dtype=torch.float32,
-                device=self.device,
+            xyzw = convert_quat(
+                torch.as_tensor(
+                    command.wxyz,
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                to="xyzw",
             ).unsqueeze(0)
             pose = torch.eye(
                 4,
                 dtype=torch.float32,
                 device=self.device,
             ).unsqueeze(0)
-            pose[0, :3, :3] = matrix_from_quat(wxyz)[0]
+            pose[0, :3, :3] = matrix_from_quat(xyzw)[0]
             pose[0, :3, 3] = position
             if not gizmo.request_local_pose(pose, source_id=source_id):
                 continue

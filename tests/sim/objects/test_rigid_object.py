@@ -38,6 +38,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.utils.math import matrix_from_quat
 
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
@@ -948,6 +949,10 @@ class BaseRigidObjectTest:
         pose_7[0, 3] = 1.0
         pose_7[1, 3] = 2.0
         pose_7[2, 3] = 3.0
+        expected_xyzw = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.sim.device
+        ) / torch.sqrt(torch.tensor(30.0, device=self.sim.device))
+        pose_7[:3, :3] = matrix_from_quat(expected_xyzw.unsqueeze(0))[0]
         pose_mat_input = pose_7.unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
         self.duck.set_local_pose(pose_mat_input)
 
@@ -957,6 +962,12 @@ class BaseRigidObjectTest:
             NUM_ARENAS,
             7,
         ), f"7-vec pose shape should be ({NUM_ARENAS}, 7), got {pose_vec.shape}"
+        torch.testing.assert_close(
+            pose_vec[:, 3:7],
+            expected_xyzw.unsqueeze(0).expand(NUM_ARENAS, -1),
+            atol=1e-5,
+            rtol=1e-5,
+        )
 
         # Matrix form
         pose_mat = self.duck.get_local_pose(to_matrix=True)

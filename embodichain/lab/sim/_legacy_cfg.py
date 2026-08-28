@@ -29,6 +29,7 @@ import numpy as np
 from dexsim.types import PhysicalAttr
 
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import convert_quat
 
 __all__ = ["RigidBodyAttributesCfg", "RigidBodyAttributesOverrideCfg"]
 
@@ -55,7 +56,7 @@ class RigidBodyAttributesCfg:
     """Optional center-of-mass position in the body frame."""
 
     com_quaternion: Sequence[float] | np.ndarray | None = None
-    """Optional center-of-mass orientation quaternion in ``wxyz`` order."""
+    """Optional center-of-mass orientation quaternion in ``xyzw`` order."""
 
     angular_damping: float = 0.7
     linear_damping: float = 0.7
@@ -98,7 +99,10 @@ class RigidBodyAttributesCfg:
         for field_name in ("inertia", "com_position", "com_quaternion"):
             value = getattr(self, field_name)
             if value is not None:
-                setattr(attr, field_name, np.asarray(value, dtype=np.float32))
+                array = np.asarray(value, dtype=np.float32)
+                if field_name == "com_quaternion":
+                    array = convert_quat(array, to="wxyz")
+                setattr(attr, field_name, array)
         return attr
 
     @classmethod

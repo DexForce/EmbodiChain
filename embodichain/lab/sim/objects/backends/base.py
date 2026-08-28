@@ -88,12 +88,12 @@ class RigidBodyViewBase(ABC):
     def fetch_com_local_pose(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
-        """Fetch center-of-mass local poses into ``data`` as ``(N, 7)``."""
+        """Fetch COM-local poses as ``(x, y, z, qx, qy, qz, qw)``."""
         ...
 
     @abstractmethod
     def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
-        """Apply center-of-mass local poses from ``(N, 7)`` tensor."""
+        """Apply COM-local poses from ``(x, y, z, qx, qy, qz, qw)``."""
         ...
 
     # -- Velocity -----------------------------------------------------------
@@ -338,7 +338,7 @@ class ArticulationViewBase(ABC):
     def apply_root_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
     ) -> None:
-        """Apply root poses from ``(N, 7)`` or equivalent backend convention."""
+        """Apply root poses from EmbodiChain ``xyz + xyzw`` tensors."""
         ...
 
     @abstractmethod

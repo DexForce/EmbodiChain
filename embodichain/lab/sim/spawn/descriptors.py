@@ -83,6 +83,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, SphereCfg
 from embodichain.utils import logger
+from embodichain.utils.math import convert_quat
 from embodichain.utils.string import (
     resolve_matching_names,
     resolve_matching_names_values,
@@ -914,6 +915,8 @@ def _compile_rigid_physics(
         if quaternion_norm <= 1.0e-8:
             raise ValueError("Rigid-body com_quaternion cannot be zero.")
         com_quaternion = com_quaternion / quaternion_norm
+        # DexSim descriptors use wxyz; EmbodiChain configuration uses xyzw.
+        com_quaternion = convert_quat(com_quaternion, to="wxyz")
 
     if body_type != "static":
         mass = (
