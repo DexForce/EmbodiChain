@@ -29,7 +29,11 @@ import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.demo import execute_demo_episode
-from embodichain.lab.gym.envs.expert_program import ConfiguredHandOverPoseProvider
+from embodichain.lab.gym.envs.expert_program import (
+    ConfiguredHandOverPoseProvider,
+    ObjectNearTargetValidatorCfg,
+    SegmentCfg,
+)
 from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
     _JointPositionConstraintObserver,
 )
@@ -64,6 +68,7 @@ _PROFILE_ID = "dual_ur5_handover_v1"
 _OPEN_QPOS = 0.0
 _GRASP_QPOS = 0.04
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
+_PRODUCTION_POSITION_TOLERANCE = 0.12
 _REPOSITORY_ROOT = Path(__file__).parents[4]
 _SUBPROCESS_TIMEOUT_SECONDS = 180
 _RUN_REAL_SIM_EPISODE = (
@@ -410,6 +415,13 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
     cfg.init_rollout_buffer = False
     cfg.record_trajectory = False
     cfg.filter_dataset_saving = True
+    assert cfg.expert_program is not None
+    program = cfg.expert_program.program
+    assert type(program) is SegmentCfg
+    assert len(program.validators) == 1
+    validator = program.validators[0]
+    assert type(validator) is ObjectNearTargetValidatorCfg
+    assert validator.position_tolerance == pytest.approx(_PRODUCTION_POSITION_TOLERANCE)
 
     env: EmbodiedEnv | None = None
     try:
@@ -424,6 +436,7 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
 
 @pytest.mark.requires_sim
 @pytest.mark.subprocess_sim
+@pytest.mark.gpu
 @pytest.mark.slow
 def test_real_sim_expert_episode_reports_configured_runtime_and_validation(
     tmp_path: Path,
@@ -449,7 +462,6 @@ def test_real_sim_expert_episode_reports_configured_runtime_and_validation(
         timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         check=False,
     )
-
     assert completed.returncode == 0, completed.stdout + completed.stderr
     episode = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert type(episode) is dict
@@ -514,7 +526,7 @@ def test_real_sim_expert_episode_reports_configured_runtime_and_validation(
     tolerance = result["position_tolerance"]
     assert result["accepted_mask"] in ([True], [False])
     accepted = result["accepted_mask"] == [True]
-    assert tolerance == pytest.approx(0.12)
+    assert tolerance == pytest.approx(_PRODUCTION_POSITION_TOLERANCE)
     assert validator["result_mask"] == [accepted]
     assert validation["accepted_mask"] == [accepted]
     assert episode["completed"] is accepted

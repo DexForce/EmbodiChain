@@ -76,8 +76,6 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 class OpenDoorGoal(ObjectActionGoal):
     """Door handle and desired absolute opening state."""
 
-    goal_kind: ClassVar[str] = "open_door"
-
     target_pose: PoseGoalValue
     """Handle-link pose snapshot or late-bound scene-entity reference."""
 
@@ -161,9 +159,6 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             ),
         ),
     )
-
-    def __init__(self, default_options: OpenDoorOptions | None = None) -> None:
-        super().__init__(default_options)
 
     def _on_bind(self) -> None:
         """Resolve dimensions owned by the engine's robot."""

@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     require_shared_task_state_key,
     resolve_object_target,
+    split_joint_trajectory_at_pose,
 )
 from embodichain.lab.sim.atomic_actions.affordance import AssembleAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
@@ -282,59 +283,50 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
         down_xpos = self._translation_keyframes(start_xpos, down_xpos, options)
 
-        down_result = self.motion_generator.generate(
-            build_pose_plan_states(down_xpos),
-            options=request.motion_policy.to_motion_gen_options(
-                start_qpos=start_arm_qpos,
-                control_part=control_part,
-                sample_count=n_down,
-                interpolation_dt=context.control_dt,
-            ),
-        )
-        assert isinstance(down_result.success, torch.Tensor)
-        assert down_result.positions is not None
-        down_success = down_result.success
-        down_arm = down_result.positions
-        reach_arm_qpos = down_arm[:, -1, :]
-
         back_xpos = self._translation_keyframes(
             place_xpos[:, -1], retract_xpos.unsqueeze(1), options
         )
-        back_result = self.motion_generator.generate(
-            build_pose_plan_states(back_xpos),
-            options=request.motion_policy.to_motion_gen_options(
-                start_qpos=reach_arm_qpos,
-                control_part=control_part,
-                sample_count=n_back,
-                interpolation_dt=context.control_dt,
-            ),
+        motion_options = request.motion_policy.to_motion_gen_options(
+            start_qpos=start_arm_qpos,
+            control_part=control_part,
+            sample_count=n_down + n_back,
+            interpolation_dt=context.control_dt,
         )
-        assert isinstance(back_result.success, torch.Tensor)
-        assert back_result.positions is not None
-        back_success = back_result.success
-        back_arm = back_result.positions
-        success = down_success & back_success & eligible
+        if request.motion_policy.strategy == "motion_gen":
+            motion_options.sample_count = None
+        motion_result = self.motion_generator.generate(
+            build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1)),
+            options=motion_options,
+        )
+        assert isinstance(motion_result.success, torch.Tensor)
+        assert motion_result.positions is not None
+        down_arm, back_arm = split_joint_trajectory_at_pose(
+            motion_result.positions,
+            place_xpos[:, -1],
+            robot=self.robot,
+            control_part=control_part,
+            first_sample_count=n_down,
+            second_sample_count=n_back,
+        )
+        reach_arm_qpos = down_arm[:, -1, :]
+        success = motion_result.success & eligible
 
         hand_open_path = interpolate_hand_qpos(
             hand_grasp_qpos, hand_open_qpos, n_waypoints=n_open
         )
 
-        # Allocate from the actually returned segment lengths so collision-aware
-        # planners (which preserve their own sample count) are accommodated.
-        n_down_actual = down_arm.shape[1]
-        n_back_actual = back_arm.shape[1]
         n_settle = options.release_settle_steps
-        open_start = n_down_actual
+        open_start = n_down
         settle_start = open_start + n_open
         back_start = settle_start + n_settle
         full = torch.empty(
-            (self.num_envs, back_start + n_back_actual, self.robot_dof),
+            (self.num_envs, back_start + n_back, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :n_down_actual, arm_joint_ids] = down_arm
-        full[:, :n_down_actual, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+        full[:, :n_down, arm_joint_ids] = down_arm
+        full[:, :n_down, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
         full[:, open_start:settle_start, arm_joint_ids] = reach_arm_qpos.unsqueeze(1)
         full[:, open_start:settle_start, hand_joint_ids] = hand_open_path
         if n_settle:
@@ -364,9 +356,9 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 coordinated_held_object_updates=coordinated_updates,
             ),
             segment_lengths={
-                "approach": n_down_actual,
+                "approach": n_down,
                 "release": n_open + n_settle,
-                "retract": n_back_actual,
+                "retract": n_back,
             },
         )
 

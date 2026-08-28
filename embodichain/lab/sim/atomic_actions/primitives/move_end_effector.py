@@ -21,8 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
 
-import torch
-
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.core import AtomicAction
 from embodichain.lab.sim.atomic_actions.goals import (

@@ -83,8 +83,6 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 class HandOverGoal(ObjectActionGoal):
     """Object to pick and hand over, plus its final object pose."""
 
-    goal_kind: ClassVar[str] = "hand_over"
-
     target_pose: PoseGoalValue
     """Final object pose after the receiving arm lowers and releases it."""
 
@@ -171,8 +169,6 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
     skill_id: ClassVar[str] = "hand_over"
     GoalType: ClassVar[type] = HandOverGoal
     OptionsType: ClassVar[type] = HandOverOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
     open_loop: ClassVar[bool] = True
     _SURFACE_POINT_COUNT: ClassVar[int] = 1000
     _VERTICAL_MODE_MIN_ABS_Z: ClassVar[float] = math.sqrt(0.5)

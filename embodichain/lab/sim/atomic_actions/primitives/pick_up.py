@@ -35,6 +35,7 @@ from embodichain.utils.math import (
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     require_shared_task_state_key,
+    split_joint_trajectory_at_pose,
 )
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
@@ -303,53 +304,48 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             third_segment_name="lift",
         )
 
-        approach_result = self.motion_generator.generate(
-            build_pose_plan_states(torch.stack([pre_grasp_xpos, grasp_xpos], dim=1)),
-            options=motion_policy.to_motion_gen_options(
-                start_qpos=start_arm_qpos,
-                control_part=manipulator.control_part,
-                sample_count=n_approach,
-                interpolation_dt=interpolation_dt,
-            ),
-        )
-        assert isinstance(approach_result.success, torch.Tensor)
-        assert approach_result.positions is not None
-        approach_success = approach_result.success
-        approach_arm = approach_result.positions
-
-        grasp_arm_qpos = approach_arm[:, -1, :]
         lift_xpos = translate_pose_world(
             grasp_xpos,
             torch.tensor([0, 0, 1], device=self.device) * options.lift_height,
         )
-        lift_result = self.motion_generator.generate(
-            build_pose_plan_states(lift_xpos),
-            options=motion_policy.to_motion_gen_options(
-                start_qpos=grasp_arm_qpos,
-                control_part=manipulator.control_part,
-                sample_count=n_lift,
-                interpolation_dt=interpolation_dt,
-            ),
+        motion_options = motion_policy.to_motion_gen_options(
+            start_qpos=start_arm_qpos,
+            control_part=manipulator.control_part,
+            sample_count=n_approach + n_lift,
+            interpolation_dt=interpolation_dt,
         )
-        assert isinstance(lift_result.success, torch.Tensor)
-        assert lift_result.positions is not None
-        lift_success = lift_result.success
-        lift_arm = lift_result.positions
-        is_success = approach_success & lift_success
+        if motion_policy.strategy == "motion_gen":
+            motion_options.sample_count = None
+        motion_result = self.motion_generator.generate(
+            build_pose_plan_states(
+                torch.stack([pre_grasp_xpos, grasp_xpos, lift_xpos], dim=1)
+            ),
+            options=motion_options,
+        )
+        assert isinstance(motion_result.success, torch.Tensor)
+        assert motion_result.positions is not None
+        approach_arm, lift_arm = split_joint_trajectory_at_pose(
+            motion_result.positions,
+            grasp_xpos,
+            robot=self.robot,
+            control_part=manipulator.control_part,
+            first_sample_count=n_approach,
+            second_sample_count=n_lift,
+        )
+        grasp_arm_qpos = approach_arm[:, -1, :]
+        is_success = motion_result.success
 
         hand_close_path = interpolate_hand_qpos(
             hand_open_qpos, hand_grasp_qpos, n_waypoints=n_close
         )
-        n_approach_actual = approach_arm.shape[1]
-        n_lift_actual = lift_arm.shape[1]
         n_settle = options.grasp_settle_steps
-        close_start = n_approach_actual
+        close_start = n_approach
         settle_start = close_start + n_close
         lift_start = settle_start + n_settle
         full = torch.empty(
             (
                 self.num_envs,
-                lift_start + n_lift_actual,
+                lift_start + n_lift,
                 self.robot_dof,
             ),
             dtype=torch.float32,
@@ -358,8 +354,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         full[:, :, :] = last_qpos.unsqueeze(1)
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
-        full[:, :n_approach_actual, arm_joint_ids] = approach_arm
-        full[:, :n_approach_actual, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+        full[:, :n_approach, arm_joint_ids] = approach_arm
+        full[:, :n_approach, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
         full[:, close_start:settle_start, arm_joint_ids] = grasp_arm_qpos.unsqueeze(1)
         full[:, close_start:settle_start, hand_joint_ids] = hand_close_path
         if n_settle:
@@ -375,9 +371,9 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             is_success,
             full,
             {
-                "approach": n_approach_actual,
+                "approach": n_approach,
                 "close": n_close + n_settle,
-                "lift": n_lift_actual,
+                "lift": n_lift,
             },
         )
 

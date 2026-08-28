@@ -99,8 +99,6 @@ def _validate_transform(value: torch.Tensor, name: str) -> torch.Tensor:
 class PushObjectGoal(ObjectActionGoal):
     """Push one rigid object toward a target pose on the target support plane."""
 
-    goal_kind: ClassVar[str] = "push_object"
-
     target_pose: PoseGoalValue
     """Desired object pose or a late-bound scene-entity target reference."""
 
@@ -291,9 +289,6 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
             ),
         ),
     )
-
-    def __init__(self, default_options: PushObjectOptions | None = None) -> None:
-        super().__init__(default_options)
 
     def _on_bind(self) -> None:
         """Resolve dimensions owned by the engine's robot."""

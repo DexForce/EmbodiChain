@@ -72,8 +72,6 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 class TwistGoal(ObjectActionGoal):
     """Target object described by a twist affordance."""
 
-    goal_kind: ClassVar[str] = "twist"
-
     target_pose: PoseGoalValue
     """Target pose snapshot or late-bound stable scene-entity reference."""
 
@@ -135,9 +133,6 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             ),
         ),
     )
-
-    def __init__(self, default_options: TwistOptions | None = None) -> None:
-        super().__init__(default_options)
 
     def _on_bind(self) -> None:
         """Resolve dimensions owned by the engine's robot."""

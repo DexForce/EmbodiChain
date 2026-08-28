@@ -161,7 +161,14 @@ def main() -> None:
         engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
-        logger.log_warning("Failed to plan PickUp followed by Pour.")
+        failed = [
+            f"{plan.skill_id}: {plan.diagnostics.messages or ('planning failed',)}"
+            for plan in compiled.action_plans
+            if not plan.plan_success.all()
+        ]
+        logger.log_warning(
+            "Failed to plan PickUp followed by Pour: " + "; ".join(failed)
+        )
         return
 
     if wait_for_user:

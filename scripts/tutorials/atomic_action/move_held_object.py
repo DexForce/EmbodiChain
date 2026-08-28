@@ -35,8 +35,8 @@ from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
     GraspGoal,
     HeldObjectPoseGoal,
-    PickUpOptions,
     MotionPolicy,
+    PickUpOptions,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject

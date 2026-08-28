@@ -56,14 +56,17 @@ from embodichain.lab.sim.atomic_actions.plans import (
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    require_shared_task_state_key,
+)
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     SkillBindingContract,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     interpolate_hand_qpos,
@@ -75,8 +78,6 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 @dataclass(frozen=True, slots=True, eq=False)
 class AxisAlignGoal(ObjectActionGoal):
     """Object whose local axis should be aligned after an antipodal grasp."""
-
-    goal_kind: ClassVar[str] = "axis_align"
 
     grasp_xpos: PoseGoalValue | None = None
     """Optional explicit end-effector grasp pose; omitted poses are sampled."""
@@ -114,8 +115,6 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
     skill_id: ClassVar[str] = "axis_align"
     GoalType: ClassVar[type] = AxisAlignGoal
     OptionsType: ClassVar[type] = AxisAlignOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     open_loop: ClassVar[bool] = True
     _UPRIGHT_HORIZONTAL_MAX_ABS_Z: ClassVar[float] = 0.5
     _UPRIGHT_TARGET_MIN_Z: ClassVar[float] = math.cos(math.pi / 6.0)
@@ -137,9 +136,6 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             ),
         ),
     )
-
-    def __init__(self, default_options: AxisAlignOptions | None = None) -> None:
-        super().__init__(default_options)
 
     def _scene_dependencies(
         self,
@@ -182,6 +178,11 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         grasp_endpoint = request.binding.endpoint("primary", "grasp")
         manipulator = motion_endpoint.require_target(JointPositionTarget)
         end_effector = grasp_endpoint.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion_endpoint,
+            grasp_endpoint,
+            participant="AxisAlign primary participant",
+        )
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
@@ -292,7 +293,15 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             ),
         )
         object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
-        lifted_object_pose = torch.bmm(lift_xpos, pose_inv(object_to_eef))
+        held_state = HeldObjectState(
+            semantics=target.semantics,
+            object_to_eef=object_to_eef,
+            grasp_xpos=grasp_xpos,
+        )
+        lifted_object_pose = torch.bmm(
+            lift_xpos,
+            pose_inv(held_state.object_to_eef),
+        )
 
         n_approach, n_reach, n_lift, n_align = self._motion_segment_lengths(
             request.motion_policy.sample_count,
@@ -305,7 +314,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         # for the continuous post-close phase.
         align_xpos = self._axis_alignment_eef_keyframes(
             lifted_object_pose,
-            object_to_eef,
+            held_state.object_to_eef,
             affordance.internal_axis,
             options.target_axis,
             waypoint_count=1,
@@ -373,6 +382,17 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         full[:, offset:stop, arm_joint_ids] = post_close_arm
         full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
 
+        held_object = HeldObjectState(
+            semantics=held_state.semantics,
+            object_to_eef=held_state.object_to_eef,
+            grasp_xpos=align_xpos[:, -1],
+        )
+        coordinated_updates = {
+            key: None
+            for key in context.task.coordinated_held_objects
+            if task_state_key in key
+        }
+
         return self.build_plan(
             request,
             context,
@@ -382,7 +402,10 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                 env_ids=context.env_ids,
                 step_dt=interpolation_dt,
             ),
-            expected_effects=StateDelta(),
+            expected_effects=StateDelta(
+                held_object_updates={task_state_key: held_object},
+                coordinated_held_object_updates=coordinated_updates,
+            ),
             segment_lengths=segment_lengths,
         )
 

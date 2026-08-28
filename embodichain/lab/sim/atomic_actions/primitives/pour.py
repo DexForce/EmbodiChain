@@ -58,8 +58,6 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_st
 class PourGoal:
     """Rotate the object currently held by the bound manipulator."""
 
-    goal_kind: ClassVar[str] = "pour"
-
 
 @dataclass(frozen=True, slots=True, eq=False)
 class PourOptions(ActionOptions):
@@ -79,8 +77,6 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
     skill_id: ClassVar[str] = "pour"
     GoalType: ClassVar[type] = PourGoal
     OptionsType: ClassVar[type] = PourOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -96,9 +92,6 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
             ),
         ),
     )
-
-    def __init__(self, default_options: PourOptions | None = None) -> None:
-        super().__init__(default_options)
 
     def _plan(
         self,
