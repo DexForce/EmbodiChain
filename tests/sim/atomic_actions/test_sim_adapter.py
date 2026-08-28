@@ -18,13 +18,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
     CommandAckStatus,
+    create_simulation_atomic_action_engine,
     EndpointCommand,
     EndpointCommandTransport,
     JointPositionPayload,
@@ -432,6 +433,49 @@ def test_rigid_object_scene_provider_tracks_per_environment_collision_revision()
     assert changed.collision_world_revisions(BATCH_SIZE) == (0, 1)
     assert changed.collision_entity_ids == ("obstacle",)
     assert torch.equal(changed.entities["obstacle"].pose, moved_pose)
+
+
+def test_simulation_engine_factory_registers_selected_entity_uids() -> None:
+    cube = Mock(uid="cube")
+    cube_pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    cube.get_local_pose.return_value = cube_pose
+    motion_generator = Mock()
+    control_profiles = {"hand": Mock()}
+    grasp_pose_generators = {"hand": Mock()}
+    tracking_runtime = Mock()
+
+    with patch(
+        "embodichain.lab.sim.atomic_actions.sim_adapter.AtomicActionEngine"
+    ) as engine_type:
+        engine = create_simulation_atomic_action_engine(
+            motion_generator,
+            (cube,),
+            control_profiles,
+            grasp_pose_generators,
+            load_builtins=False,
+            tracking_runtime=tracking_runtime,
+        )
+
+    assert engine is engine_type.return_value
+    kwargs = engine_type.call_args.kwargs
+    assert kwargs["control_profiles"] is control_profiles
+    assert kwargs["grasp_pose_generators"] is grasp_pose_generators
+    assert kwargs["load_builtins"] is False
+    assert kwargs["tracking_runtime"] is tracking_runtime
+    scene = kwargs["scene_provider"].snapshot(
+        timestamp=0.0,
+        env_ids=torch.arange(BATCH_SIZE),
+    )
+    assert tuple(scene.entities) == ("cube",)
+    assert torch.equal(scene.entities["cube"].pose, cube_pose)
+
+
+def test_simulation_engine_factory_rejects_duplicate_entity_uids() -> None:
+    with pytest.raises(ValueError, match="Duplicate scene entity uid 'cube'"):
+        create_simulation_atomic_action_engine(
+            Mock(),
+            (Mock(uid="cube"), Mock(uid="cube")),
+        )
 
 
 @pytest.mark.parametrize(

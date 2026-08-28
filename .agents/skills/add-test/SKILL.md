@@ -21,7 +21,7 @@ Tests mirror the source tree under `tests/`:
 embodichain/lab/sim/solvers/pytorch_solver.py  →  tests/sim/solvers/test_pytorch_solver.py
 embodichain/lab/gym/envs/managers/rewards.py    →  tests/gym/envs/managers/test_reward_functors.py
 embodichain/toolkits/graspkit/pg_grasp/foo.py   →  tests/toolkits/test_pg_grasp.py
-embodichain_tasks/embodichain_tasks/rl/push_cube.py → tests/gym/envs/tasks/test_push_cube.py
+embodichain_tasks/embodichain_tasks/manipulation/push_cube.py → tests/gym/envs/tasks/test_push_cube.py
 ```
 
 Rules:

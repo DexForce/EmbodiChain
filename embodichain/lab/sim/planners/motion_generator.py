@@ -201,6 +201,18 @@ class MotionGenerator:
         return info is not None and info.supports_updates
 
     @property
+    def supports_joint_trajectory_validation(self) -> bool:
+        """Whether the backend checks exact joint samples for collisions."""
+        return (
+            getattr(
+                self.planner,
+                "supports_joint_trajectory_validation",
+                False,
+            )
+            is True
+        )
+
+    @property
     def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
         """Return canonical dynamic-obstacle IDs declared by the planner."""
         info = self.collision_world_info
@@ -324,6 +336,56 @@ class MotionGenerator:
                     f"configuration; missing={bound_missing}, extra={bound_extra}."
                 )
         return bound
+
+    def validate_joint_trajectory(
+        self,
+        trajectory: torch.Tensor,
+        *,
+        control_part: str,
+        obstacle_poses: Mapping[str, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Check exact joint samples through the selected planner backend.
+
+        Args:
+            trajectory: Simulator-order joint samples with shape ``(B, T, D)``.
+            control_part: Robot control part whose ordered joints form ``D``.
+            obstacle_poses: Optional live dynamic-obstacle poses.
+
+        Returns:
+            Boolean validity mask with shape ``(B, T)`` on the trajectory device.
+        """
+        if not self.supports_joint_trajectory_validation:
+            raise ValueError(
+                f"Planner {type(self.planner).__name__} does not support exact "
+                "joint-trajectory collision validation."
+            )
+        if not isinstance(trajectory, torch.Tensor):
+            raise TypeError("trajectory must be a torch.Tensor.")
+        if (
+            not trajectory.is_floating_point()
+            or trajectory.dim() != 3
+            or 0 in trajectory.shape
+            or not bool(torch.isfinite(trajectory).all().item())
+        ):
+            raise ValueError(
+                "trajectory must be finite floating shape (B, T, D) with "
+                "non-zero dimensions."
+            )
+        if type(control_part) is not str or not control_part:
+            raise ValueError("control_part must be a non-empty string.")
+        validity = self.planner.validate_joint_trajectory(
+            trajectory,
+            control_part=control_part,
+            obstacle_poses=obstacle_poses,
+        )
+        if not isinstance(validity, torch.Tensor):
+            raise TypeError("Planner.validate_joint_trajectory() must return a tensor.")
+        if validity.dtype != torch.bool or validity.shape != trajectory.shape[:2]:
+            raise ValueError(
+                "Planner.validate_joint_trajectory() must return bool shape "
+                f"{tuple(trajectory.shape[:2])}."
+            )
+        return validity.to(trajectory.device).clone()
 
     def resolve_plan_options(
         self,

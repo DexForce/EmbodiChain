@@ -31,7 +31,6 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
     GymPlanningObservationProvider,
 )
 from embodichain.lab.gym.envs.expert_program.cfg import (
-    EXPERT_PROGRAM_SCHEMA_VERSION,
     BarrierCfg,
     CyclicPoseTargetCfg,
     ExpertProgramCfg,
@@ -63,7 +62,10 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     JOINT_POSITION_CAPABILITY,
+    HandOverOptions,
     MotionPolicy,
+    PickUpOptions,
+    PlaceOptions,
     PlanningContext,
     RobotObservation,
     TaskState,
@@ -79,6 +81,7 @@ from embodichain.lab.sim.skills import (
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
+    EffectMonitorRef,
     SkillPolicyPreset,
 )
 from embodichain.lab.sim.skills.compiler import SemanticSkillCompiler
@@ -159,6 +162,7 @@ def _robot_profile(
     profile_id: str = "fake_robot",
     *,
     safe_motion_policy: MotionPolicy | None = None,
+    effect_monitors: dict[str, EffectMonitorRef] | None = None,
 ) -> RobotSkillProfile:
     """Build the declarative resource graph used by the fake backend."""
     return RobotSkillProfile(
@@ -194,7 +198,13 @@ def _robot_profile(
         presets={
             "safe": SkillPolicyPreset(
                 "safe",
+                action_option_templates={
+                    "pick": PickUpOptions(),
+                    "place": PlaceOptions(),
+                    "hand_over": HandOverOptions(),
+                },
                 motion_policy=safe_motion_policy,
+                effect_monitors=effect_monitors,
             )
         },
         default_preset="safe",
@@ -215,7 +225,10 @@ def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "fake_planner"
-    return AtomicActionEngine(generator, skill_profile=profile)
+    return AtomicActionEngine(
+        generator,
+        control_profiles=profile.action_control_profiles(),
+    )
 
 
 class _FakeEnvironmentFactory:
@@ -224,8 +237,14 @@ class _FakeEnvironmentFactory:
     scene_registry_id = "fake_scene"
     robot_profile_id = "fake_robot"
 
-    def __init__(self, *, returned_profile_id: str = "fake_robot") -> None:
+    def __init__(
+        self,
+        *,
+        returned_profile_id: str = "fake_robot",
+        effect_monitors: dict[str, EffectMonitorRef] | None = None,
+    ) -> None:
         self.returned_profile_id = returned_profile_id
+        self.effect_monitors = effect_monitors
         self.calls: Counter[str] = Counter()
         self.observation_samples = 0
 
@@ -237,7 +256,10 @@ class _FakeEnvironmentFactory:
     def create_robot_skill_profile(self) -> RobotSkillProfile:
         """Create the configured robot profile."""
         self.calls["profile"] += 1
-        return _robot_profile(self.returned_profile_id)
+        return _robot_profile(
+            self.returned_profile_id,
+            effect_monitors=self.effect_monitors,
+        )
 
     def create_atomic_action_engine(
         self,
@@ -392,13 +414,11 @@ def _program(
     robot_profile: str = "fake_robot",
     scene_registry: str = "fake_scene",
     runtime_preset: str = "safe",
-    schema_version: int = EXPERT_PROGRAM_SCHEMA_VERSION,
     node: ProgramNodeCfg | None = None,
     targets: dict[str, CyclicPoseTargetCfg] | None = None,
 ) -> ExpertProgramCfg:
     """Build one minimal declarative pick program."""
     return ExpertProgramCfg(
-        schema_version=schema_version,
         program_id="fake_pick",
         integration=ExpertProgramIntegrationCfg(
             robot_profile=robot_profile,
@@ -686,6 +706,17 @@ def test_runtime_assembly_shares_exact_bound_components() -> None:
     assert assembly.runtime.clock is assembly.clock
     assert assembly.command_sink.clock is assembly.clock
     assert assembly.clock.step_dt == pytest.approx(_STEP_DT)
+    assert assembly.evidence_collector.registry.providers == {}
+
+
+def test_open_loop_runtime_does_not_construct_effect_evidence_providers() -> None:
+    """Trajectory-only presets skip the physical-evidence assembly boundary."""
+    factory = _FakeEnvironmentFactory(effect_monitors={})
+    adapter = ExpertProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+
+    assembly = adapter.assemble_runtime(_program().integration)
+
+    assert factory.calls["evidence"] == 0
     assert assembly.evidence_collector.registry.providers == {}
 
 

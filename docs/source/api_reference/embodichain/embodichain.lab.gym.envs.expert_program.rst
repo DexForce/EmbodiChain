@@ -13,14 +13,21 @@ embodichain.lab.gym.envs.expert_program
       ConfigPath
       ConfigPathPart
       CompiledProgram
+      ConfiguredHandOverPoseProvider
+      ContainerAffordanceBinding
       ControlPartCommandPreset
+      ControlPartEvidenceProviderDeclaration
+      ControlPartEvidenceProviderFactory
       ControlPartEndpointBinding
       ControlPartResourceBinding
       CyclicPoseTargetCfg
+      CuroboParallelCommandSafetyValidator
+      CuroboParallelSafetyValidatorFactory
       DemoBridgeError
-      EXPERT_PROGRAM_SCHEMA_VERSION
       EnvironmentStepClock
       EnvironmentStepTimingError
+      EndpointAdapterDeclaration
+      ExpertProgramAdapterFactory
       ExpertProgramCfg
       ExpertProgramCompileError
       ExpertProgramCompiler
@@ -29,21 +36,28 @@ embodichain.lab.gym.envs.expert_program
       ExpertProgramEnvironmentAdapter
       ExpertProgramEnvironmentFactory
       ExpertProgramIntegrationCfg
+      ExpertProgramIntegrationCatalog
       ExpertProgramRuntimeAssembly
       ExpertProgramValidationContext
       ExpertProgramValidationError
       GymPlanningObservationProvider
       HandOverCfg
       InvokeCfg
+      IntegrationFingerprintMismatch
       ObjectNearTargetValidatorCfg
       ParallelCfg
+      ParallelCommandSafetyValidatorFactory
+      ParallelSafetyDeclaration
       PickCfg
       PlaceCfg
       PlanningObservationPort
       PoseCfg
       RegisteredSemanticCallCfg
+      RegisteredSemanticLowererDeclaration
+      RegisteredSemanticLowererFactory
       RepeatCfg
       RuntimeCommandFrameEncoder
+      RuntimeTransportDeclaration
       RuntimeTransportActionEncoder
       SceneReferenceRole
       SegmentCfg
@@ -52,15 +66,21 @@ embodichain.lab.gym.envs.expert_program
       SequenceCfg
       SimulationArticulationBinding
       SimulationArticulationLinkBinding
+      SimulationExpertProgramAdapterFactory
       SimulationExpertProgramFactory
+      SimulationExpertProgramRegistration
       SimulationRigidObjectBinding
       SimulationRobotSkillProfileBinding
       SimulationSceneBinding
       SimulationSegmentPolicyPort
+      StandardExtensionDeclarations
+      SupportSurfaceAffordanceBinding
       TargetRefCfg
       UnsupportedRuntimeTransportError
+      VersionedKey
       WaitStablePostCfg
       create_simulation_expert_program_adapter
+      default_simulation_settle_presets
       decode_expert_program
       load_expert_program
       loads_expert_program_json
@@ -73,11 +93,9 @@ embodichain.lab.gym.envs.expert_program
 Schema and loading
 ------------------
 
-Expert Program schema version 2 is the only accepted top-level schema. It
-contains bounded sequential nodes and deterministic parallel blocks whose
-barrier is owned by the enclosing parallel node.
-
-.. autodata:: EXPERT_PROGRAM_SCHEMA_VERSION
+The current Expert Program schema contains bounded sequential nodes and
+deterministic parallel blocks whose barrier is owned by the enclosing parallel
+node. Serialized programs do not carry a top-level schema-version field.
 
 .. autoclass:: ExpertProgramCfg
    :members:
@@ -163,7 +181,7 @@ MLLM frontend
 -------------
 
 The MLLM frontend intentionally accepts only the constrained sequential subset
-of schema version 2. Trusted host code remains responsible for authoring
+of the current schema. Trusted host code remains responsible for authoring
 parallel structure and selecting the integration.
 
 .. autofunction:: embodichain.agents.mllm.decode_mllm_expert_program
@@ -189,12 +207,60 @@ bridge.
 .. autoclass:: ExpertProgramEnvironmentAdapter
    :members:
 
+.. autoclass:: ExpertProgramAdapterFactory
+   :members:
+
 .. autoclass:: ExpertProgramEnvironmentFactory
 
 .. autoclass:: ExpertProgramRuntimeAssembly
    :members:
 
 .. autoclass:: PlanningObservationPort
+
+Registration catalogs and standard extensions
+---------------------------------------------
+
+The standard simulation path snapshots one task-owned registration before a
+live environment is created. Its fingerprint covers the scene/profile
+manifests and the exact endpoint, transport, evidence, parallel-safety, and
+registered-semantic-lowerer factory declarations used again during runtime
+assembly.
+
+.. autoclass:: ExpertProgramIntegrationCatalog
+   :members:
+
+.. autoclass:: SimulationExpertProgramRegistration
+   :members:
+
+.. autoclass:: IntegrationFingerprintMismatch
+
+.. autoclass:: ControlPartEvidenceProviderDeclaration
+   :members:
+
+.. autoclass:: ControlPartEvidenceProviderFactory
+
+.. autoclass:: RegisteredSemanticLowererDeclaration
+   :members:
+
+.. autoclass:: RegisteredSemanticLowererFactory
+
+.. autoclass:: EndpointAdapterDeclaration
+   :members:
+
+.. autoclass:: RuntimeTransportDeclaration
+   :members:
+
+.. autoclass:: ParallelSafetyDeclaration
+   :members:
+
+.. autoclass:: ParallelCommandSafetyValidatorFactory
+
+.. autoclass:: StandardExtensionDeclarations
+   :members:
+
+.. autodata:: VersionedKey
+
+.. autofunction:: default_simulation_settle_presets
 
 Gym bridge ports
 ----------------
@@ -266,7 +332,111 @@ use the core ``RobotResource`` type directly.
 .. autoclass:: SimulationExpertProgramFactory
    :members:
 
+.. autoclass:: SimulationExpertProgramAdapterFactory
+   :members:
+
+.. autoclass:: ConfiguredHandOverPoseProvider
+   :members:
+
+.. autoclass:: CuroboParallelCommandSafetyValidator
+   :members:
+
+.. autoclass:: CuroboParallelSafetyValidatorFactory
+   :members:
+
+.. autoclass:: ContainerAffordanceBinding
+   :members:
+
+.. autoclass:: SupportSurfaceAffordanceBinding
+   :members:
+
 .. autoclass:: SimulationSegmentPolicyPort
    :members:
 
 .. autofunction:: create_simulation_expert_program_adapter
+
+Parallel-safety implementation module
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_parallel_safety
+
+.. autosummary::
+
+   CuroboParallelCommandSafetyValidator
+   CuroboParallelSafetyValidatorFactory
+
+Catalog implementation module
+-----------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.catalog
+
+.. autosummary::
+
+   ExpertProgramIntegrationCatalog
+   IntegrationFingerprintMismatch
+   SimulationExpertProgramRegistration
+
+Extension declaration implementation module
+-------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.extensions
+
+.. autosummary::
+
+   ControlPartEvidenceProviderDeclaration
+   ControlPartEvidenceProviderFactory
+   EndpointAdapterDeclaration
+   ParallelCommandSafetyValidatorFactory
+   ParallelSafetyDeclaration
+   RegisteredSemanticLowererDeclaration
+   RegisteredSemanticLowererFactory
+   RuntimeTransportDeclaration
+   StandardExtensionDeclarations
+   VersionedKey
+   build_standard_extension_declarations
+   declare_control_part_evidence_factory
+   declare_endpoint_adapter
+   declare_parallel_safety_factory
+   declare_registered_semantic_lowerer_factory
+   declare_runtime_transport
+   validate_immutable_extension_declaration
+
+.. autoclass:: ControlPartEvidenceProviderDeclaration
+   :members:
+
+.. autoclass:: ControlPartEvidenceProviderFactory
+
+.. autoclass:: EndpointAdapterDeclaration
+   :members:
+
+.. autoclass:: ParallelCommandSafetyValidatorFactory
+
+.. autoclass:: ParallelSafetyDeclaration
+   :members:
+
+.. autoclass:: RegisteredSemanticLowererDeclaration
+   :members:
+
+.. autoclass:: RegisteredSemanticLowererFactory
+
+.. autoclass:: RuntimeTransportDeclaration
+   :members:
+
+.. autoclass:: StandardExtensionDeclarations
+   :members:
+
+.. autodata:: VersionedKey
+
+.. autofunction:: build_standard_extension_declarations
+
+.. autofunction:: declare_control_part_evidence_factory
+
+.. autofunction:: declare_endpoint_adapter
+
+.. autofunction:: declare_parallel_safety_factory
+
+.. autofunction:: declare_registered_semantic_lowerer_factory
+
+.. autofunction:: declare_runtime_transport
+
+.. autofunction:: validate_immutable_extension_declaration

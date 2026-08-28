@@ -90,7 +90,7 @@ class CoordinatedPickGoal(ObjectActionGoal):
     """Optional initial object pose.
 
     When omitted, the pose is grounded through the semantic object's stable
-    scene identity, with its live entity retained only as a legacy fallback.
+    scene identity.
     """
 
     def __post_init__(self) -> None:

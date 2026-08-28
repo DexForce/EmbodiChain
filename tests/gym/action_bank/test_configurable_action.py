@@ -16,24 +16,25 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+from typing import Callable, Dict, List
+import unittest
+
+import numpy as np
+
 from embodichain.lab.gym.envs.action_bank.configurable_action import (
     ActionBank,
-    tag_node,
-    tag_edge,
     get_func_tag,
+    tag_edge,
+    tag_node,
 )
-import numpy as np
-import os
-from typing import Dict, Tuple, Union, List, Callable
-import unittest
 from embodichain.utils.utility import load_json
-import inspect
-
-import sys
-from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from common import UnittestMetaclass, OrderedTestLoader
+
+_CONFIG_PATH = str(Path(__file__).with_name("conf.json"))
 
 
 class FakePourwaterEnv:
@@ -157,11 +158,7 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
                 return {name: self.dummy_function for name in names}
 
         funcs = FakeFunctions()
-        conf = load_json(
-            os.path.join(
-                "embodichain_tasks", "configs", "gym", "action_bank", "conf.json"
-            )
-        )
+        conf = load_json(_CONFIG_PATH)
         action_bank = ActionBank(conf)
         action_bank.parse_network(
             funcs.get_functions(
@@ -185,11 +182,7 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
         )
 
     def test_hook_and_gantt(self):
-        conf = load_json(
-            os.path.join(
-                "embodichain_tasks", "configs", "gym", "action_bank", "conf.json"
-            )
-        )
+        conf = load_json(_CONFIG_PATH)
         action_bank = FakePourwaterActionBank(conf)
         print(get_func_tag("node").functions[action_bank.__class__.__name__])
         _, jobs_data, jobkey2index = action_bank.parse_network(
@@ -202,11 +195,7 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
 
     def test_create_action_list(self):
         np.random.seed(0)
-        conf = load_json(
-            os.path.join(
-                "embodichain_tasks", "configs", "gym", "action_bank", "conf.json"
-            )
-        )
+        conf = load_json(_CONFIG_PATH)
         action_bank = FakePourwaterActionBank(conf)
         graph_compose, jobs_data, jobkey2index = action_bank.parse_network(
             get_func_tag("node").functions[action_bank.__class__.__name__],
@@ -226,11 +215,7 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
 
     def test_bad_conf(self):
         np.random.seed(0)
-        conf = load_json(
-            os.path.join(
-                "embodichain_tasks", "configs", "gym", "action_bank", "conf.json"
-            )
-        )
+        conf = load_json(_CONFIG_PATH)
         conf["node"]["right_arm"] = [
             {
                 "init_to_pre1": {
