@@ -28,15 +28,13 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
     DEFAULT_NEEDED_LAYOUT,
-    LYING_NEEDED_LAYOUT,
-    STANDING_NEEDED_LAYOUT,
     compute_uniform_xy_scale_for_target,
     query_vlm_pose_switch_candidate,
     query_vlm_object_pose_and_target_size,
 )
 
 
-def test_simready_pose_layout_uses_graph_orientation_states(
+def test_simready_pose_layout_uses_graph_pose_descriptions(
     tmp_path: Path,
 ) -> None:
     class VLM:
@@ -49,20 +47,23 @@ def test_simready_pose_layout_uses_graph_orientation_states(
         coarse_geometry_root=tmp_path / "coarse",
         simready_geometry_root=tmp_path / "simready",
         config=SimReadyProcessorConfig(
-            orientation_states_by_id={
-                "bottle_001": "standing",
-                "fork_001": "lying",
+            pose_descriptions_by_id={
+                "bottle_001": "Stand upright on its base.",
+                "fork_001": "Lie flat on the support surface.",
                 "knife_001": None,
             },
         ),
         vlm_client=VLM(),  # type: ignore[arg-type]
     )
 
-    assert processor._orientation_state_for_object("bottle_001") == "standing"
-    assert processor._orientation_state_for_object("fork_001") == "lying"
-    assert processor._orientation_state_for_object("knife_001") is None
-    assert processor._needed_layout_for_object("bottle_001") == STANDING_NEEDED_LAYOUT
-    assert processor._needed_layout_for_object("fork_001") == LYING_NEEDED_LAYOUT
+    assert (
+        processor._needed_layout_for_object("bottle_001")
+        == "Stand upright on its base."
+    )
+    assert (
+        processor._needed_layout_for_object("fork_001")
+        == "Lie flat on the support surface."
+    )
     assert processor._needed_layout_for_object("knife_001") == DEFAULT_NEEDED_LAYOUT
 
 
@@ -81,7 +82,7 @@ def test_vlm_transform_query_retries_an_empty_response(tmp_path: Path) -> None:
     vlm_client = VLM()
     decision = query_vlm_object_pose_and_target_size(
         scene_object_description="small blue bottle",
-        needed_layout=STANDING_NEEDED_LAYOUT,
+        needed_layout="Stand upright on its base.",
         rendered_views_path=tmp_path / "views.png",
         vlm_client=vlm_client,  # type: ignore[arg-type]
     )
@@ -101,7 +102,7 @@ def test_vlm_pose_candidate_query_returns_selected_rotation(tmp_path: Path) -> N
 
     selected_rotation_degrees, reason = query_vlm_pose_switch_candidate(
         scene_object_description="small saucepan",
-        needed_layout=LYING_NEEDED_LAYOUT,
+        needed_layout="Rest stably with the cooking surface facing upward.",
         rendered_candidates_path=tmp_path / "candidates.png",
         vlm_client=VLM(),  # type: ignore[arg-type]
     )
@@ -126,7 +127,11 @@ def test_simready_pose_switch_uses_the_vlm_selected_candidate(
         coarse_layout_by_id={"pan_001": {}},
         coarse_geometry_root=tmp_path / "coarse",
         simready_geometry_root=tmp_path / "simready",
-        config=SimReadyProcessorConfig(orientation_states_by_id={"pan_001": "lying"}),
+        config=SimReadyProcessorConfig(
+            pose_descriptions_by_id={
+                "pan_001": "Rest stably with the cooking surface facing upward."
+            }
+        ),
         vlm_client=object(),  # type: ignore[arg-type]
     )
     calls: dict[str, object] = {}
@@ -175,7 +180,7 @@ def test_simready_pose_switch_uses_the_vlm_selected_candidate(
     }
     assert calls["candidate_query"] == {
         "scene_object_description": "small saucepan",
-        "needed_layout": LYING_NEEDED_LAYOUT,
+        "needed_layout": "Rest stably with the cooking surface facing upward.",
         "rendered_candidates_path": tmp_path / "candidates.png",
         "vlm_client": processor.vlm_client,
         "debug_output_path": tmp_path
@@ -190,7 +195,7 @@ def test_simready_pose_switch_uses_the_vlm_selected_candidate(
     }
 
 
-def test_simready_null_orientation_checks_the_default_stable_pose(
+def test_simready_null_pose_description_checks_the_default_stable_pose(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -206,7 +211,7 @@ def test_simready_null_orientation_checks_the_default_stable_pose(
         coarse_layout_by_id={"book_001": {}},
         coarse_geometry_root=tmp_path / "coarse",
         simready_geometry_root=tmp_path / "simready",
-        config=SimReadyProcessorConfig(orientation_states_by_id={"book_001": None}),
+        config=SimReadyProcessorConfig(pose_descriptions_by_id={"book_001": None}),
         vlm_client=object(),  # type: ignore[arg-type]
     )
     requested_layouts: list[str] = []
