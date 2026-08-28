@@ -408,7 +408,7 @@ def test_generate_function_retries_empty_failure_even_when_saving_failures(
 
 
 def test_generate_function_commits_only_selected_vector_rows(monkeypatch) -> None:
-    """The final partial batch commits selected rows and discards its remainder."""
+    """The final partial batch commits selected rows in one full-batch reset."""
     num_envs = 3
     env = _ResetTrackingEnv(num_envs=num_envs)
     monkeypatch.setattr(
@@ -427,10 +427,10 @@ def test_generate_function_commits_only_selected_vector_rows(monkeypatch) -> Non
     )
 
     assert generated
-    assert env.reset_options[0]["reset_ids"].tolist() == [0, 1]
-    assert "save_data" not in env.reset_options[0]
-    assert env.reset_options[1]["reset_ids"].tolist() == [2]
-    assert env.reset_options[1]["save_data"] is False
+    assert len(env.reset_options) == 1
+    assert env.reset_options[0]["commit_env_ids"].tolist() == [0, 1]
+    assert env.reset_options[0]["save_data"] is False
+    assert "reset_ids" not in env.reset_options[0]
 
 
 def test_main_counts_max_episodes_as_persisted_env_rows(monkeypatch) -> None:
