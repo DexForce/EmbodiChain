@@ -255,6 +255,8 @@ def _add_articulations(
                 init_rot=tuple(init_rot),
                 body_scale=tuple(body_scale),
                 fix_base=True,
+                # Generated USDC is not URDF, so it cannot build a PK chain.
+                build_pk_chain=False,
             )
         )
         print(f"[articulation] {uid}: pos={init_pos} rot={init_rot} scale={body_scale}")
