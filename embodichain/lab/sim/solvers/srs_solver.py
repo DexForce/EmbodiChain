@@ -216,7 +216,7 @@ class _BaseSRSSolverImpl:
             k_max = int(np.floor((upper - value) / two_pi))
             if k_min > k_max:
                 return None
-            nearest_k = int(np.rint((seed[index] - value) / two_pi))
+            nearest_k = int(np.floor((seed[index] - value) / two_pi + 0.5))
             nearest_k = min(max(nearest_k, k_min), k_max)
             wrapped[index] = value + nearest_k * two_pi
         return wrapped
@@ -555,8 +555,9 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             for index in range(ik_qpos_tensor.shape[0])
         ]
         max_solutions = max(solution.shape[0] for solution in valid_qpos)
-        compact_qpos = torch.zeros(
+        compact_qpos = torch.full(
             (ik_qpos_tensor.shape[0], max_solutions, 7),
+            float("nan"),
             dtype=ik_qpos_tensor.dtype,
             device=self.device,
         )
@@ -812,7 +813,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
                     )
                     if success:
                         fk_xpos = self._get_fk(qpos)
-                        if np.linalg.norm(fk_xpos - target_np) <= 1e-4:
+                        if np.allclose(fk_xpos, target_np, atol=1e-4, rtol=0.0):
                             all_solutions[target_idx, sol_idx, :] = qpos
                             sol_idx += 1
             solution_counts[target_idx] = sol_idx
@@ -1048,8 +1049,9 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
             for i in range(num_targets)
         ]
         max_solutions = max(q.shape[0] for q in valid_qpos_list)
-        valid_qpos_tensor = torch.zeros(
+        valid_qpos_tensor = torch.full(
             (num_targets, max_solutions, 7),
+            float("nan"),
             dtype=torch.float32,
             device=self.device,
         )

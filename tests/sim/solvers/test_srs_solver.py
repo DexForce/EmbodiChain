@@ -319,6 +319,18 @@ class BaseSolverTest:
         assert np.all(wrapped >= limits[:, 0])
         assert np.all(wrapped <= limits[:, 1])
 
+    def test_periodic_joint_half_turn_tie_matches_cuda_rounding(self):
+        """Test exact half-turn ties use the same half-up rule as Warp."""
+        solver = self.solver[next(iter(self.solver))]
+        joints = np.zeros(7)
+        limits = np.array([[-0.1, 2.0 * np.pi + 0.1]] + [[-1.0, 1.0]] * 6)
+        seed = np.array([np.pi, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        wrapped = solver.impl._wrap_to_limits(joints, limits, seed)
+
+        assert wrapped is not None
+        assert np.isclose(wrapped[0], 2.0 * np.pi)
+
     def test_all_solution_deduplication_is_periodic_and_order_preserving(self):
         """Test deduplication retains the first periodic representative."""
         solver = self.solver[next(iter(self.solver))]

@@ -481,24 +481,6 @@ def compute_arm_angle_kernel(
 
 
 @wp.func
-def frobenius_norm(mat: wp.mat44) -> float:
-    """
-    Compute the Frobenius norm of a 4x4 matrix.
-
-    Args:
-        mat (wp.mat44): Input matrix.
-
-    Returns:
-        float: Frobenius norm of the matrix.
-    """
-    norm = 0.0
-    for i in range(4):
-        for j in range(4):
-            norm += wp.pow(mat[i, j], 2.0)
-    return wp.sqrt(norm)
-
-
-@wp.func
 def validate_fk_with_target(
     q1: float,
     q2: float,
@@ -556,12 +538,14 @@ def validate_fk_with_target(
         T = dh_transform(d, alpha, a, theta)
         pose = pose @ T
 
-    # Compute the Frobenius norm of the difference
-    pose_diff = pose - target_xpos
-    pose_error = frobenius_norm(pose_diff)
-
-    # Validate against tolerance
-    return 1 if pose_error <= tolerance else 0
+    # Match NumPy's element-wise ``allclose(..., rtol=0)`` semantics used by
+    # the CPU backend. A Frobenius threshold would become stricter as the
+    # number of matrix elements grows.
+    for row in range(4):
+        for column in range(4):
+            if wp.abs(pose[row, column] - target_xpos[row, column]) > tolerance:
+                return 0
+    return 1
 
 
 # TODO: automatic gradient support
