@@ -117,19 +117,10 @@ _VISUAL_FLOOR_SCALE = 1.3  # Preserve a small border around the asset footprint.
 _VISUAL_MIN_FLOOR_SIZE = 0.45  # Keep a contact cue for compact upright objects.
 
 DEFAULT_NEEDED_LAYOUT = (
-    "Place this asset on the table in its natural, physically stable resting "
-    "orientation. For example, a fork should lie flat on the table rather "
-    "than stand on an edge."
-)
-STANDING_NEEDED_LAYOUT = (
-    "The scene graph requires this asset to stand vertically on the table, "
-    "even when its natural stable pose would be lying down. For example, a "
-    "bottle should stand on its base and a fork should stand upright."
-)
-LYING_NEEDED_LAYOUT = (
-    "The scene graph requires this asset to lie flat on the table, even when "
-    "its natural stable pose would be standing. For example, a bottle should "
-    "lie on its side and a fork should lie flat."
+    "Rest this asset naturally, physically stably, and functionally correctly "
+    "on its direct support. Preserve obvious up/down semantics: a pan, bowl, "
+    "plate, or cup opening faces upward; a bottle rests on its base; and a "
+    "long tool lies flat unless its requested pose says otherwise."
 )
 
 

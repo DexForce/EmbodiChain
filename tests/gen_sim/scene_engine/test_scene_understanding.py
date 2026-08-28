@@ -248,7 +248,7 @@ def test_initial_scene_graph_places_an_asset_on_the_table(tmp_path: Path) -> Non
                             "object_id": "cup_001",
                             "parent_id": "table",
                             "parent_relation": "on",
-                            "orientation_state": None,
+                            "pose_description": None,
                         },
                     ]
                 }
@@ -288,14 +288,14 @@ def test_initial_scene_graph_places_an_asset_on_the_table(tmp_path: Path) -> Non
                 "parent_id": None,
                 "parent_relation": None,
                 "table_region": None,
-                "orientation_state": None,
+                "pose_description": None,
             },
             {
                 "object_id": "cup_001",
                 "parent_id": "table",
                 "parent_relation": "on",
                 "table_region": None,
-                "orientation_state": None,
+                "pose_description": None,
             },
         ],
         "relations": [],
@@ -318,13 +318,13 @@ def test_scene_graph_initialization_uses_image_support_and_orientation(
                             "object_id": "bottle_001",
                             "parent_id": "table",
                             "parent_relation": "on",
-                            "orientation_state": "standing",
+                            "pose_description": "Stand upright on its base.",
                         },
                         {
                             "object_id": "book_001",
                             "parent_id": "table",
                             "parent_relation": "on",
-                            "orientation_state": "lying",
+                            "pose_description": "Lie flat on the support surface.",
                         },
                     ]
                 }
@@ -381,8 +381,14 @@ def test_scene_graph_initialization_uses_image_support_and_orientation(
             },
         ],
     }
-    assert scene_graph.node_by_id()["bottle_001"].orientation_state == "standing"
-    assert scene_graph.node_by_id()["book_001"].orientation_state == "lying"
+    assert (
+        scene_graph.node_by_id()["bottle_001"].pose_description
+        == "Stand upright on its base."
+    )
+    assert (
+        scene_graph.node_by_id()["book_001"].pose_description
+        == "Lie flat on the support surface."
+    )
 
 
 def test_scene_graph_initialization_retries_a_response_containing_table(
@@ -398,13 +404,13 @@ def test_scene_graph_initialization_retries_a_response_containing_table(
                                 "object_id": "table",
                                 "parent_id": "table",
                                 "parent_relation": "on",
-                                "orientation_state": None,
+                                "pose_description": None,
                             },
                             {
                                 "object_id": "bottle_001",
                                 "parent_id": "table",
                                 "parent_relation": "on",
-                                "orientation_state": "standing",
+                                "pose_description": "Stand upright on its base.",
                             },
                         ]
                     }
@@ -416,7 +422,7 @@ def test_scene_graph_initialization_retries_a_response_containing_table(
                                 "object_id": "bottle_001",
                                 "parent_id": "table",
                                 "parent_relation": "on",
-                                "orientation_state": "standing",
+                                "pose_description": "Stand upright on its base.",
                             },
                         ]
                     }
@@ -454,7 +460,10 @@ def test_scene_graph_initialization_retries_a_response_containing_table(
         json_max_attempts=2,
     )
 
-    assert scene_graph.node_by_id()["bottle_001"].orientation_state == "standing"
+    assert (
+        scene_graph.node_by_id()["bottle_001"].pose_description
+        == "Stand upright on its base."
+    )
 
 
 def test_scene_graph_initialization_retries_a_response_with_a_parent_cycle(
@@ -470,13 +479,13 @@ def test_scene_graph_initialization_retries_a_response_with_a_parent_cycle(
                                 "object_id": "book_001",
                                 "parent_id": "pen_001",
                                 "parent_relation": "on",
-                                "orientation_state": None,
+                                "pose_description": None,
                             },
                             {
                                 "object_id": "pen_001",
                                 "parent_id": "book_001",
                                 "parent_relation": "on",
-                                "orientation_state": "lying",
+                                "pose_description": "Lie flat on the support surface.",
                             },
                         ]
                     }
@@ -488,13 +497,13 @@ def test_scene_graph_initialization_retries_a_response_with_a_parent_cycle(
                                 "object_id": "book_001",
                                 "parent_id": "table",
                                 "parent_relation": "on",
-                                "orientation_state": None,
+                                "pose_description": None,
                             },
                             {
                                 "object_id": "pen_001",
                                 "parent_id": "book_001",
                                 "parent_relation": "on",
-                                "orientation_state": "lying",
+                                "pose_description": "Lie flat on the support surface.",
                             },
                         ]
                     }
@@ -626,13 +635,13 @@ def test_initial_scene_graph_places_a_lying_asset_on_an_asset(tmp_path: Path) ->
                             "object_id": "book_001",
                             "parent_id": "table",
                             "parent_relation": "on",
-                            "orientation_state": None,
+                            "pose_description": None,
                         },
                         {
                             "object_id": "pen_001",
                             "parent_id": "book_001",
                             "parent_relation": "on",
-                            "orientation_state": "lying",
+                            "pose_description": "Lie flat on the support surface.",
                         },
                     ]
                 }
@@ -675,4 +684,4 @@ def test_initial_scene_graph_places_a_lying_asset_on_an_asset(tmp_path: Path) ->
     pen = scene_graph.node_by_id()["pen_001"]
     assert pen.parent_id == "book_001"
     assert pen.parent_relation == "on"
-    assert pen.orientation_state == "lying"
+    assert pen.pose_description == "Lie flat on the support surface."

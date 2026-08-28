@@ -192,14 +192,14 @@ class SceneExportImporter:
             "parent_id",
             "parent_relation",
             "table_region",
-            "orientation_state",
+            "pose_description",
         }:
             raise ValueError("Scene graph nodes must use the serialized node schema.")
         object_id = value["object_id"]
         parent_id = value["parent_id"]
         parent_relation = value["parent_relation"]
         table_region = value["table_region"]
-        orientation_state = value["orientation_state"]
+        pose_description = value["pose_description"]
         if not isinstance(object_id, str) or not isinstance(
             parent_id, (str, type(None))
         ):
@@ -208,14 +208,18 @@ class SceneExportImporter:
             raise ValueError("Scene graph parent_relation must be 'on' or null.")
         if table_region is not None and table_region not in TABLE_REGIONS:
             raise ValueError("Scene graph table_region is invalid.")
-        if orientation_state not in {None, "standing", "lying"}:
-            raise ValueError("Scene graph orientation_state is invalid.")
+        if pose_description is not None and (
+            not isinstance(pose_description, str)
+            or not pose_description.strip()
+            or len(pose_description) > 240
+        ):
+            raise ValueError("Scene graph pose_description is invalid.")
         return SceneGraphNode(
             object_id=object_id,
             parent_id=parent_id,
             parent_relation=parent_relation,
             table_region=table_region,
-            orientation_state=orientation_state,
+            pose_description=pose_description,
         )
 
     @staticmethod

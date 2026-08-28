@@ -162,7 +162,7 @@ array of asset_id and mask_index objects. Do not include Markdown or any other
 text."""
 _INITIAL_SCENE_GRAPH_SYSTEM_PROMPT = """You inspect an outlined tabletop-scene image.
 Each visible asset has an outline and an ID label. Build a support graph for the
-listed assets and determine each asset's image-observed orientation state.
+listed assets and determine each asset's image-observed self-pose description.
 
 Every asset must have exactly one direct support parent with relation "on".
 Use "table" when the asset directly rests on the table. Use another supplied
@@ -171,20 +171,21 @@ asset's top surface. Do not infer an on relationship from 2D overlap alone.
 When the direct support parent is uncertain, use "table". The table is a fixed
 support ID, not an output node: never include it in nodes.
 
-Use a non-null orientation_state only for an elongated object with a clear
-primary long axis. Use "standing" when that axis is approximately vertical to
-the tabletop, and "lying" when it is approximately parallel to the tabletop.
-Use null for every object without a clear primary long axis or when uncertain.
-The orientation state describes the asset itself and is independent of its
-support parent.
+pose_description must be one short English sentence describing only the asset's
+pose relative to its direct support. Do not describe left/right/front/back or
+relations to other objects. Use null when the image does not provide a reliable
+pose requirement. For a bottle, pen, or long tool, describe whether it stands
+on its base or lies flat. For a pan, bowl, plate, or cup, describe functional
+up/down semantics such as an opening or cooking surface facing upward. Do not
+force every object into standing or lying.
 
 Examples:
 - A bottle directly on the table is upright:
-  {"nodes": [{"object_id": "bottle_001", "parent_id": "table", "parent_relation": "on", "orientation_state": "standing"}]}
+  {"nodes": [{"object_id": "bottle_001", "parent_id": "table", "parent_relation": "on", "pose_description": "Stand upright on its base."}]}
 - A pen lies flat on a book, and the book is on the table:
-  {"nodes": [{"object_id": "book_001", "parent_id": "table", "parent_relation": "on", "orientation_state": null}, {"object_id": "pen_001", "parent_id": "book_001", "parent_relation": "on", "orientation_state": "lying"}]}
-- A round cup directly on the table has no reliable long axis:
-  {"nodes": [{"object_id": "cup_001", "parent_id": "table", "parent_relation": "on", "orientation_state": null}]}
+  {"nodes": [{"object_id": "book_001", "parent_id": "table", "parent_relation": "on", "pose_description": null}, {"object_id": "pen_001", "parent_id": "book_001", "parent_relation": "on", "pose_description": "Lie flat on the support surface."}]}
+- A frying pan rests normally on the table:
+  {"nodes": [{"object_id": "frying_pan_001", "parent_id": "table", "parent_relation": "on", "pose_description": "Rest stably with the cooking surface facing upward."}]}
 
 Return JSON only, with exactly one key: nodes. Include every supplied asset ID
 exactly once and no unknown IDs. Do not include Markdown or any other text."""
@@ -349,32 +350,36 @@ def _parse_initial_scene_graph_response(
             "object_id",
             "parent_id",
             "parent_relation",
-            "orientation_state",
+            "pose_description",
         }:
             raise ValueError(
                 "VLM JSON nodes["
                 f"{index}] must contain exactly object_id, parent_id, "
-                "parent_relation, and orientation_state."
+                "parent_relation, and pose_description."
             )
         object_id = node_value["object_id"]
         parent_id = node_value["parent_id"]
         parent_relation = node_value["parent_relation"]
-        orientation_state = node_value["orientation_state"]
+        pose_description = node_value["pose_description"]
         if not isinstance(object_id, str) or not object_id:
             raise ValueError(f"VLM JSON nodes[{index}].object_id is invalid.")
         if not isinstance(parent_id, str) or not parent_id:
             raise ValueError(f"VLM JSON nodes[{index}].parent_id is invalid.")
         if parent_relation != "on":
             raise ValueError(f"VLM JSON nodes[{index}].parent_relation is invalid.")
-        if orientation_state not in {None, "standing", "lying"}:
-            raise ValueError(f"VLM JSON nodes[{index}].orientation_state is invalid.")
+        if pose_description is not None and (
+            not isinstance(pose_description, str)
+            or not pose_description.strip()
+            or len(pose_description) > 240
+        ):
+            raise ValueError(f"VLM JSON nodes[{index}].pose_description is invalid.")
         if object_id in nodes_by_id:
             raise ValueError(f"VLM JSON repeats scene graph node for {object_id!r}.")
         nodes_by_id[object_id] = SceneGraphNode(
             object_id=object_id,
             parent_id=parent_id,
             parent_relation=parent_relation,
-            orientation_state=orientation_state,
+            pose_description=pose_description,
         )
 
     if set(nodes_by_id) != set(asset_ids):
