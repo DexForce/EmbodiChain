@@ -1427,7 +1427,12 @@ class SRSSolver(BaseSolver):
         if isinstance(self.impl, _CPUSRSSolverImpl):
             self.impl.ik_nearest_weight_tensor = weights
         else:
-            self.impl.ik_nearest_weight_wp = wp.from_torch(weights.contiguous())
+            # ``wp.from_torch`` creates a non-owning view, so retain the Torch
+            # storage for as long as the CUDA backend may launch kernels with it.
+            self.impl.ik_nearest_weight_tensor = weights.contiguous()
+            self.impl.ik_nearest_weight_wp = wp.from_torch(
+                self.impl.ik_nearest_weight_tensor
+            )
         return True
 
     def update_with_robot_limit(self, robot_qpos_limits):

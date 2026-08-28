@@ -23,6 +23,7 @@ import torch
 torch._dynamo.config.cache_size_limit = 128  # recompile_limit
 import numpy as np
 import pytest
+import warp as wp
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -382,6 +383,15 @@ class BaseSolverTest:
             assert torch.allclose(
                 solver.impl.ik_nearest_weight_tensor.cpu(),
                 torch.from_numpy(weights).float(),
+            )
+        else:
+            assert torch.allclose(
+                solver.impl.ik_nearest_weight_tensor.cpu(),
+                torch.from_numpy(weights).float(),
+            )
+            assert torch.allclose(
+                wp.to_torch(solver.impl.ik_nearest_weight_wp).cpu(),
+                solver.impl.ik_nearest_weight_tensor.cpu(),
             )
 
 
