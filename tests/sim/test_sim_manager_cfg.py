@@ -212,6 +212,17 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
     assert dexsim_cfg.solver_cfg.use_mujoco_contacts is False
 
 
+def test_newton_physics_cfg_accepts_mjvbd_solver_alias() -> None:
+    from dexsim.engine.newton_physics import MJVBDSolverCfg
+
+    cfg = NewtonPhysicsCfg(solver_cfg={"class_type": "MJVBDSolverCfg"})
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert isinstance(dexsim_cfg.solver_cfg, MJVBDSolverCfg)
+    assert dexsim_cfg.solver_cfg.solver_type == "mjvbd"
+
+
 def test_newton_physics_cfg_directly_accepts_dexsim_solver_cfg_object() -> None:
     from dexsim.engine.newton_physics import XPBDSolverCfg
 

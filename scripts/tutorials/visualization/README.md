@@ -67,8 +67,8 @@ The matching object tutorials can be launched directly:
 
 ```bash
 python scripts/tutorials/sim/create_rigid_object_group.py --viser
-python scripts/tutorials/sim/create_softbody.py --viser
-python scripts/tutorials/sim/create_cloth.py --viser
+python scripts/tutorials/sim/create_softbody.py --physics newton --viser
+python scripts/tutorials/sim/create_cloth.py --physics newton --viser
 ```
 
 The atomic-action tutorials receive the same options through
@@ -81,10 +81,10 @@ Application launchers only need to check `--headless` before calling
 Viser is configured. It also rejects Viser startup while the native window is
 already open.
 
-Cloth uses its welded physical surface topology. DexSim does not currently
-expose the DexSim soft-body collision topology, so the soft-body preview uses
-a convex-hull surface over the live collision vertices. It follows deformation
-but intentionally omits concave render-mesh details.
+Soft bodies and cloth use the live render surface exposed by their DexSim 0.5
+typed Newton particle-set handles. Volume deformables also retain their
+tetrahedral collision-surface topology for physics consumers, while Viser
+intentionally publishes the render topology.
 
 ## Remote access
 

@@ -30,6 +30,10 @@ topics:
       - asset registry
       - manual update
       - GPU physics
+      - deformable
+      - particle set
+      - Newton soft body
+      - Newton cloth
       - simulation lifecycle
       - collision_policy
       - collision isolation
@@ -342,6 +346,9 @@ topics:
       - deformable
       - soft body
       - cloth
+      - Newton deformable
+      - particle set
+      - render topology
       - quaternion
       - xyzw
     paths:

@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import ClothPhysicalAttributesCfg
+from embodichain.lab.sim.cfg import ClothPhysicalAttributesCfg, NewtonPhysicsCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import (
     ClothObject,
@@ -31,6 +31,7 @@ import open3d as o3d
 import pytest
 import torch
 import tempfile
+import warp as wp
 
 
 def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
@@ -49,7 +50,7 @@ def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
     # Vectorized vertex positions using PyTorch
     x_lin = torch.linspace(-w / 2.0, w / 2.0, steps=nx + 1, dtype=torch.float64)
     y_lin = torch.linspace(-h / 2.0, h / 2.0, steps=ny + 1, dtype=torch.float64)
-    yy, xx = torch.meshgrid(y_lin, x_lin)  # shapes: (ny+1, nx+1)
+    yy, xx = torch.meshgrid(y_lin, x_lin, indexing="ij")
     xx_flat = xx.reshape(-1)
     yy_flat = yy.reshape(-1)
     zz_flat = torch.full_like(xx_flat, 0, dtype=torch.float64)
@@ -77,6 +78,9 @@ class BaseSoftObjectTest:
             device="cuda",
             num_envs=4,
             arena_space=3.0,
+            physics_cfg=NewtonPhysicsCfg(
+                solver_cfg={"solver_type": "vbd"},
+            ),
         )
 
         # Create the simulation instance
@@ -102,14 +106,12 @@ class BaseSoftObjectTest:
                 init_pos=[0.5, 0.0, 0.3],
                 init_rot=[0, 0, 0],
                 physical_attr=ClothPhysicalAttributesCfg(
-                    mass=0.01,
-                    youngs=1e10,
-                    poissons=0.4,
-                    thickness=0.04,
-                    bending_stiffness=0.01,
-                    bending_damping=0.1,
-                    dynamic_friction=0.95,
-                    min_position_iters=30,
+                    density=1.0,
+                    tri_ke=1.0e4,
+                    tri_ka=1.0e4,
+                    tri_kd=10.0,
+                    edge_ke=100.0,
+                    edge_kd=1.0,
                 ),
             )
         )
@@ -164,15 +166,23 @@ class BaseSoftObjectTest:
         assert default_state.shape == state.shape
         native_velocities = torch.stack(
             [
-                body.get_velocity_buffer()[:, :3].clone()
-                for body in self.cloth.body_data.cloth_bodies
+                wp.to_torch(particle_set.get_particle_velocities()).clone()
+                for particle_set in self.cloth.body_data.particle_sets
             ]
         )
         assert torch.count_nonzero(native_velocities) > 0
         torch.testing.assert_close(velocities, native_velocities)
+        render_vertices = self.cloth.get_surface_vertices()
+        assert render_vertices.shape[0] == self.sim.num_envs
+        arena_offsets = torch.as_tensor(
+            self.sim.arena_offsets,
+            dtype=render_vertices.dtype,
+            device=render_vertices.device,
+        )
+        arena_local_vertices = render_vertices - arena_offsets[:, None, :]
         torch.testing.assert_close(
-            self.cloth.get_surface_vertices(),
-            self.cloth.get_current_vertex_position(),
+            arena_local_vertices,
+            arena_local_vertices[0].expand_as(arena_local_vertices),
         )
         torch.testing.assert_close(
             self.cloth.get_surface_triangles(env_ids=[0]),

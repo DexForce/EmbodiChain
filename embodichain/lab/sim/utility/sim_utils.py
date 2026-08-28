@@ -741,58 +741,20 @@ def load_mesh_objects_from_cfg(
 def load_soft_object_from_cfg(
     cfg: SoftObjectCfg, env_list: List[Arena]
 ) -> List[MeshObject]:
-    obj_list = []
-
-    option = LoadOption()
-    option.rebuild_normals = cfg.shape.load_option.rebuild_normals
-    option.rebuild_tangent = cfg.shape.load_option.rebuild_tangent
-    option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
-    option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
-    option.smooth = cfg.shape.load_option.smooth
-    option.share_mesh = False
-
-    for i, env in enumerate(env_list):
-        obj = env.load_actor(
-            fpath=cfg.shape.fpath, duplicate=True, attach_scene=True, option=option
-        )
-        obj.add_softbody(cfg.voxel_attr.attr(), cfg.physical_attr.attr())
-        if cfg.shape.compute_uv:
-            vertices = obj.get_vertices()
-            triangles = obj.get_triangles()
-
-            o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
-            _, uvs = get_mesh_auto_uv(o3d_mesh, cfg.shape.project_direction)
-            obj.set_uv_mapping(uvs)
-        obj.set_name(f"{cfg.uid}_{i}")
-        obj_list.append(obj)
-    return obj_list
+    """Reject the removed direct-native soft-body construction path."""
+    del cfg, env_list
+    raise NotImplementedError(
+        "Direct soft-body loading was removed. Configure Newton and call "
+        "SimulationManager.add_soft_object() before prepare()."
+    )
 
 
 def load_cloth_object_from_cfg(
     cfg: ClothObjectCfg, env_list: List[Arena]
 ) -> List[MeshObject]:
-    obj_list = []
-
-    option = LoadOption()
-    option.rebuild_normals = cfg.shape.load_option.rebuild_normals
-    option.rebuild_tangent = cfg.shape.load_option.rebuild_tangent
-    option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
-    option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
-    option.smooth = cfg.shape.load_option.smooth
-    option.share_mesh = False
-
-    for i, env in enumerate(env_list):
-        obj = env.load_actor(
-            fpath=cfg.shape.fpath, duplicate=True, attach_scene=True, option=option
-        )
-        obj.add_clothbody(cfg.physical_attr.attr())
-        if cfg.shape.compute_uv:
-            vertices = obj.get_vertices()
-            triangles = obj.get_triangles()
-
-            o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
-            _, uvs = get_mesh_auto_uv(o3d_mesh, cfg.shape.project_direction)
-            obj.set_uv_mapping(uvs)
-        obj.set_name(f"{cfg.uid}_{i}")
-        obj_list.append(obj)
-    return obj_list
+    """Reject the removed direct-native cloth construction path."""
+    del cfg, env_list
+    raise NotImplementedError(
+        "Direct cloth loading was removed. Configure Newton and call "
+        "SimulationManager.add_cloth_object() before prepare()."
+    )
