@@ -30,6 +30,7 @@ from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
+from .scene import SceneProvider
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 from .tracking import TrackingPolicy, TrackingRuntime
 
@@ -52,6 +53,7 @@ class AtomicActionEngine:
         *,
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
+        scene_provider: SceneProvider | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -66,13 +68,19 @@ class AtomicActionEngine:
             tracking_runtime: Optional exact-version feedback, projector, and
                 metric registries. Built-in joint tracking is installed when
                 omitted.
+            scene_provider: Optional default scene-observation source used by
+                :meth:`initial_context` when the caller does not supply an
+                explicit scene snapshot. The provider is borrowed by reference.
         """
+        if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
+            raise TypeError("scene_provider must implement SceneProvider.")
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
             tracking_runtime=tracking_runtime,
             grasp_pose_generators=grasp_pose_generators,
         )
+        self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}
         self._skill_catalog_revision = 0
         if load_builtins:
@@ -212,7 +220,7 @@ class AtomicActionEngine:
             goal: Action-specific typed goal.
             control_parts: Direct ``slot -> endpoint -> control_part`` mapping.
             motion_policy: Optional invocation motion policy.
-            tracking_policy: Optional invocation tracking policy.
+            tracking_policy: Optional typed tracking and terminal-acceptance policy.
             recovery_policy: Optional invocation recovery policy.
             skill_options: Optional action-specific invocation options.
             control_overrides: Optional endpoint-scoped command overrides.
@@ -401,7 +409,9 @@ class AtomicActionEngine:
 
         Args:
             task: Optional symbolic task state; an empty state is used otherwise.
-            scene: Optional scene snapshot; an empty snapshot is used otherwise.
+            scene: Optional explicit scene snapshot. It overrides the engine's
+                configured scene provider; an empty snapshot is used when both
+                are absent.
             timestamp: Timestamp assigned to the captured robot observation.
             control_dt: Explicit command period for action-owned interpolation.
 
@@ -417,15 +427,24 @@ class AtomicActionEngine:
                 qvel_value = candidate.to(self.device)
         qvel = torch.zeros_like(qpos) if qvel_value is None else qvel_value
         batch_size = int(qpos.shape[0])
+        env_ids = torch.arange(batch_size, dtype=torch.long, device=self.device)
         if task is None:
             task = TaskState.empty(batch_size=batch_size, device=self.device)
         if scene is None:
-            scene = SceneSnapshot.empty()
+            if self._scene_provider is None:
+                scene = SceneSnapshot.empty()
+            else:
+                scene = self._scene_provider.snapshot(
+                    timestamp=timestamp,
+                    env_ids=env_ids.clone(),
+                )
+                if not isinstance(scene, SceneSnapshot):
+                    raise TypeError("scene_provider must return a SceneSnapshot.")
         return PlanningContext(
             robot=RobotObservation(timestamp=timestamp, qpos=qpos, qvel=qvel),
             task=task,
             scene=scene,
-            env_ids=torch.arange(batch_size, dtype=torch.long, device=self.device),
+            env_ids=env_ids,
             control_dt=control_dt,
         )
 

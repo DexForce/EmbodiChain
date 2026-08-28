@@ -30,15 +30,13 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     EndEffectorPoseGoal,
-    EntityState,
     GraspGoal,
     HeldObjectPoseGoal,
     MotionPolicy,
     PickUpOptions,
-    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -123,8 +121,9 @@ def main() -> None:
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
@@ -190,14 +189,7 @@ def main() -> None:
                 ),
             ),
         ),
-        engine.initial_context(
-            scene=SceneSnapshot(
-                timestamp=0.0,
-                version=0,
-                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
-            ),
-            control_dt=sim.sim_config.physics_dt,
-        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveHeldObject demo trajectory.")

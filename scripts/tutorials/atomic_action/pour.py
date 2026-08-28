@@ -30,15 +30,13 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
-    EntityState,
+    create_simulation_atomic_action_engine,
     GraspGoal,
     MotionPolicy,
     PickUpOptions,
     PourGoal,
     PourOptions,
-    SceneSnapshot,
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.axis_align import (
@@ -102,8 +100,9 @@ def main() -> None:
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
     motion_gen = create_curobo_motion_generator(robot)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
@@ -159,14 +158,7 @@ def main() -> None:
                 skill_options=PourOptions(rotate_angle=args.rotate_angle),
             ),
         ),
-        engine.initial_context(
-            scene=SceneSnapshot(
-                timestamp=0.0,
-                version=0,
-                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
-            ),
-            control_dt=sim.sim_config.physics_dt,
-        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         failed = [
