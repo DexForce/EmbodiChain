@@ -18,6 +18,7 @@ embodichain.lab.sim.atomic_actions
       ControlPartCommandProfile
       ActionControlOverrides
       ActionInvocation
+      PhaseEffectGateRequirement
       ResolvedActionRequest
       ActionOptions
       MotionPolicy
@@ -36,6 +37,7 @@ embodichain.lab.sim.atomic_actions
       TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
+      PlanningFailure
       ActionPlan
       CompiledTrajectory
 
@@ -70,11 +72,16 @@ embodichain.lab.sim.atomic_actions
       CommandDispatch
       CommandOperation
       ExecutionClock
+      create_simulation_atomic_action_engine
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
       EffectVerificationRequirement
       EffectVerificationResult
+      PhaseEffectGateRequest
+      PhaseEffectGateResult
+      HeldObjectGuardRequest
+      HeldObjectGuardResult
       ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind
@@ -94,6 +101,9 @@ embodichain.lab.sim.atomic_actions
       HeldObjectPoseGoal
       PourGoal
       PourOptions
+      PushObjectGoal
+      PushObjectOptions
+      PushObjectToolCalibration
       PlaceGoal
       AssembleGoal
       PressGoal
@@ -102,6 +112,9 @@ embodichain.lab.sim.atomic_actions
       SlideGoal
       SlideOptions
       SlideAffordance
+      OpenDoorGoal
+      OpenDoorOptions
+      OpenDoorAffordance
       TwistGoal
       TwistOptions
       TwistAffordance
@@ -113,9 +126,11 @@ embodichain.lab.sim.atomic_actions
       AxisAlign
       MoveHeldObject
       Pour
+      PushObject
       Place
       Press
       Slide
+      OpenDoor
       Twist
       CoordinatedPickment
       CoordinatedPlacement
@@ -231,6 +246,9 @@ Planning and state
 .. autoclass:: TimedTrajectory
    :members:
 
+.. autoclass:: PlanningFailure
+   :members:
+
 .. autoclass:: RuntimeCommandPayload
    :members:
 
@@ -285,6 +303,8 @@ Engine and execution
 
 .. autoclass:: MonotonicExecutionClock
    :members:
+
+.. autofunction:: create_simulation_atomic_action_engine
 
 .. autoclass:: SimulationExecutionAdapter
    :members:

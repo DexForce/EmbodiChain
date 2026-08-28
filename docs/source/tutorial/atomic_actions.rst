@@ -508,6 +508,8 @@ correlated per-environment verification result:
 
 .. code-block:: python
 
+   import torch
+
    from embodichain.lab.sim.atomic_actions import EffectVerificationResult
 
    def verify_effect(context, request):
@@ -516,6 +518,8 @@ correlated per-environment verification result:
            verification_id=request.verification_id,
            success_mask=success_mask,
            failure_mask=failure_mask,
+           invalidation_mask=failure_mask,
+           retry_mask=torch.zeros_like(failure_mask),
        )
 
    result = runner.run_until_blocked(effect_verifier=verify_effect)
@@ -537,6 +541,8 @@ can later resume from the *current* pending request:
        verification_id=request.verification_id,
        success_mask=success_mask,
        failure_mask=failure_mask,
+       invalidation_mask=failure_mask,
+       retry_mask=torch.zeros_like(failure_mask),
    )
    resumed = runner.step(effect_result=verified)
    if resumed.is_waiting:
@@ -555,7 +561,41 @@ terminal effect wait. A result submitted after timeout cannot satisfy the new
 retry attempt because its old ID is invalid. The runner remembers the pending
 boundary even though the session emits its event only once. The durable state is
 ``tick.pending_effect`` (an ``EffectVerificationRequest``), not the presence of
-that one-time event.
+that one-time event. ``invalidation_mask`` and ``retry_mask`` must both be
+subsets of ``failure_mask``. Invalidation selects rows for the request's
+core-owned, removal-only ``failure_invalidation`` delta; a verifier cannot
+publish arbitrary replacement state. Set a retry row only when replaying the
+same invocation remains physically valid. Other failed rows enter external
+recovery after selected invalidation. Unresolved evidence at the action
+deadline is reconciled fail-closed when covered verified state is still active.
+
+Trajectory-segment effect gates
+-------------------------------
+
+An invocation may declare a
+:class:`~embodichain.lab.sim.atomic_actions.PhaseEffectGateRequirement` for a
+named, non-initial trajectory segment. The execution session then exposes a
+:class:`~embodichain.lab.sim.atomic_actions.PhaseEffectGateRequest` immediately
+before the first frame of that segment. Curated semantic calls install these
+automatically: Pick gates ``lift`` on destination attachment, Place gates
+``retract`` on source detachment, and HandOver gates source ``release`` on
+destination attachment.
+
+Supply ``phase_effect_gate_verifier(context, request)`` to ``runner.step()`` or
+``runner.run_until_blocked()``. It runs on a fresh due-cycle observation and
+returns a correlated
+:class:`~embodichain.lab.sim.atomic_actions.PhaseEffectGateResult`. If neither
+the success nor failure mask selects every remaining active row, the session
+keeps the whole cohort at the boundary and resends the command immediately
+before the gated segment. This preserves a close/open command and its physical
+preload; it is not an observed-position hold.
+
+Gate success only permits the next command and does not update ``TaskState``.
+The terminal effect verifier still owns the semantic commit. A contradictory
+row may consume the enclosing action's retry budget; a row outside the result's
+``retry_mask`` requires external recovery. The gate shares the action timeout,
+and each consumed observation replaces its request ID. Without a gate verifier,
+``run_until_blocked()`` returns the pending boundary for asynchronous handling.
 
 Adding an action
 ----------------

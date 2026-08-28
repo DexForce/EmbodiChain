@@ -275,7 +275,6 @@ def main() -> None:
         affordance=Affordance(),
         geometry={},
         label="cube",
-        entity=target,
         entity_id=TARGET_ENTITY_ID,
     )
     engine = AtomicActionEngine(
@@ -432,6 +431,8 @@ def main() -> None:
             verification_id=request.verification_id,
             success_mask=verified_success,
             failure_mask=request.env_mask & ~success,
+            invalidation_mask=request.env_mask & ~success,
+            retry_mask=request.env_mask & ~success,
         )
 
     recording_started = start_auto_play_recording(

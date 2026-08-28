@@ -14,21 +14,33 @@ Scaffold a new task environment following EmbodiChain's conventions and patterns
 
 ## Steps
 
-### 1. Determine Task Category
+### 1. Determine Task Identity
 
 Ask the user:
 
-- **Category**: `tableware`, `rl`, or `special` (maps to `embodichain_tasks/embodichain_tasks/<category>/`)
+- **Top-level task family**: `manipulation`, `classic_control`, or `special`
+- **Optional subdomain**: a narrower category such as `tableware` under
+  `manipulation`
 - **Task name** (snake_case, e.g. `pick_place`)
 - **Gym ID** (e.g. `PickPlace-v1`)
-- **Task type**: RL task (needs reward functors) or expert demonstration task (needs `create_demo_action_list`)
+- **Optional solutions**: scripted expert, Expert Program, or RL policy configs
+- **Config format**: JSON or YAML
 
-### 2. Create the Task File
+Combine the task family and optional subdomain into `<category_path>`. Do not
+use a solution method such as `rl` or `expert_program` as a category.
 
-Place at `embodichain_tasks/embodichain_tasks/<category>/<name>.py`.
-Lightweight pure-PyTorch RL tasks (e.g. PointMass) also live under
-`embodichain_tasks/embodichain_tasks/rl/basic/` and register through
-`@register_learning_env` when they are not `EmbodiedEnv` subclasses.
+### 2. Create the Task Module
+
+Place the environment and its registration at:
+
+```text
+embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
+```
+
+Do not add a same-named task directory or `__init__.py` for a single Python
+entry point. Lightweight pure-PyTorch tasks use the same flat
+category/task-module layout and register through `@register_learning_env` when
+they are not `EmbodiedEnv` subclasses.
 
 Template:
 
@@ -51,12 +63,10 @@ Template:
 
 from __future__ import annotations
 
-import torch
-from typing import Dict, Any, Tuple
+from typing import Any
 
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
-from embodichain.lab.sim.types import EnvObs
 
 __all__ = ["<CamelCaseName>Env"]
 
@@ -68,36 +78,65 @@ class <CamelCaseName>Env(EmbodiedEnv):
     <Longer description of what the task involves and its reward structure.>
     """
 
-    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
-        if cfg is None:
-            cfg = EmbodiedEnvCfg()
+    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs: Any) -> None:
+        """Initialize the task from its decoded environment config.
+
+        Args:
+            cfg: Environment configuration loaded from task-local JSON/YAML.
+            **kwargs: Additional arguments forwarded to :class:`EmbodiedEnv`.
+        """
         super().__init__(cfg, **kwargs)
 
-    # Expert demo tasks: implement `create_demo_action_list`.
-    # RL tasks: implement `check_truncated`, `get_reward`, `compute_task_state`.
+    # Keep only task behavior that cannot be expressed by env config here.
 ```
 
-### 3. Update Exports
+Keep `@register_env` in the task-named module; do not create a separate
+registration module.
 
-Task packages under `embodichain_tasks` are auto-imported via
-`import_packages()`. Prefer an explicit export in the category
-`__init__.py`:
+### 3. Add the Environment Config
+
+Create the scene and MDP configuration at:
+
+```text
+embodichain_tasks/configs/tasks/<category_path>/<task_name>/env.json
+```
+
+Use `env.yaml` when YAML was selected. Robot, scene, sensors, observations,
+events, rewards, actions, randomization, and dataset settings belong in this
+config. Add Python functors only when the existing registries cannot express
+the required behavior.
+
+Optional solution artifacts stay below the same task:
+
+```text
+<task config>/expert/program.yaml           # declarative Expert Program
+<task config>/agents/<algorithm>.yaml       # RL training configuration
+```
+
+Prefer the declarative Expert Program runtime for expert behavior. Do not
+scaffold a task-local Action Bank, `BaseAgentEnv`, or expert Python package.
+Recorded trajectories are data assets, not Python integration modules.
+
+### 4. Update Exports
+
+Task modules under `embodichain_tasks` are auto-imported via
+`import_packages()`. Define exports directly in the task module:
 
 ```python
-from .<name> import <CamelCaseName>Env
-
-__all__ = [..., "<CamelCaseName>Env"]
+__all__ = ["<CamelCaseName>Env"]
 ```
 
-### 4. Create Test Stub
+The domain `__init__.py` does not need to re-export each task.
+
+### 5. Create Test Stub
 
 Place at `tests/gym/envs/tasks/test_<name>.py` (or `tests/learning/` for
 lightweight learning environments).
 
-### 5. Format
+### 6. Format
 
 ```bash
-black embodichain_tasks/embodichain_tasks/<category>/<name>.py
+black embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
 black tests/gym/envs/tasks/test_<name>.py
 ```
 
@@ -105,9 +144,12 @@ black tests/gym/envs/tasks/test_<name>.py
 
 - [ ] File has Apache 2.0 header
 - [ ] Uses `from __future__ import annotations`
-- [ ] `@register_env` or `@register_learning_env` with a unique ID
+- [ ] Registration lives in `<task_name>.py` with a unique ID
 - [ ] `__all__` defined in the task module
-- [ ] Default `cfg = EmbodiedEnvCfg()` in `__init__` for EmbodiedEnv tasks
-- [ ] Category `__init__.py` export updated
+- [ ] No same-named per-task package was created for a single module
+- [ ] Python and config paths use the same category hierarchy
+- [ ] Scene and MDP are declared in task-local JSON/YAML
+- [ ] Expert/RL artifacts exist only when the task provides that solution
+- [ ] No task-local Action Bank or `BaseAgentEnv` was introduced
 - [ ] Test stub created
-- [ ] `black` run on both files
+- [ ] `black` run on changed Python files

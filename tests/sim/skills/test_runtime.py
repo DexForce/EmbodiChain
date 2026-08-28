@@ -29,9 +29,11 @@ import torch
 
 import embodichain.lab.sim.skills.runtime as runtime_module
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
     ActionInvocation,
     ActionOptions,
     ActionPlan,
+    Affordance,
     ArticulationJointState,
     AtomicAction,
     AtomicActionEngine,
@@ -41,15 +43,24 @@ from embodichain.lab.sim.atomic_actions import (
     EndpointBinding,
     EndpointTrackingChannelBinding,
     EndpointTrackingFeedbackAddress,
+    EntityState,
+    ExecutionEventKind,
     ExecutionRunnerCfg,
+    FORWARD_KINEMATICS_CAPABILITY,
+    HeldObjectGuardRequest,
+    HeldObjectState,
     JointPositionTarget,
     MotionPolicy,
+    ObjectSemantics,
+    PhaseEffectGateRequest,
     PlanningContext,
     RecoveryPolicy,
     ResolvedActionRequest,
     RobotObservation,
     SceneSnapshot,
     SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
     StateDelta,
     TaskState,
     TimedCommandSequence,
@@ -57,15 +68,33 @@ from embodichain.lab.sim.atomic_actions import (
     TrackingProjectorRef,
 )
 from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
-from embodichain.lab.sim.skills.calls import RegisteredSemanticCall
-from embodichain.lab.sim.skills.compiler import SemanticSkillCompiler
+from embodichain.lab.sim.skills.calls import (
+    HandOver,
+    Pick,
+    Place,
+    RegisteredSemanticCall,
+    SemanticCallSpec,
+)
+from embodichain.lab.sim.skills.compiler import (
+    GroundedHeldObjectGuard,
+    GroundedPhaseEffectGate,
+    HeldObjectGuardBaseline,
+    SemanticSkillCompiler,
+)
 from embodichain.lab.sim.skills.effects import (
     ArticulationJointStateExpectation,
+    BinaryEffectClause,
+    BinaryEvidenceKind,
+    CONSTRAINT_EFFECT_CHANNEL,
     ControlPartEvidenceAddress,
     EffectEvidenceBatch,
     EffectEvidenceSourceRef,
+    EffectExpectationDecision,
     EffectMonitor,
     EffectMonitorDecision,
+    EffectMonitorParam,
+    HeldObjectRelation,
+    HeldObjectStateExpectation,
     JOINT_STATE_EFFECT_CHANNEL,
     JointStateEffectClause,
     SemanticEffectKind,
@@ -80,11 +109,15 @@ from embodichain.lab.sim.skills.runtime import (
     SkillEndpointBindingTrace,
     SkillRuntime,
     SkillStatus,
+    SkillWorkflowRecoveryRole,
 )
 from embodichain.lab.sim.skills.parallel import ParallelTimingPolicy
 from embodichain.lab.sim.skills.parallel_runtime import ParallelSkillRuntime
-from embodichain.lab.sim.skills.profiles import ResourceClaim
-from embodichain.lab.sim.skills.scene import SceneRegistry
+from embodichain.lab.sim.skills.profiles import (
+    ResourceClaim,
+    WorkflowRecoveryPolicy,
+)
+from embodichain.lab.sim.skills.scene import SceneObjectRef, SceneRegistry
 
 BATCH_SIZE = 2
 
@@ -110,6 +143,7 @@ class _ObservationProvider:
     def __init__(self) -> None:
         self.calls = 0
         self.task_states: list[TaskState] = []
+        self.entities: dict[str, EntityState] = {}
 
     def observe(self, task_state: TaskState) -> PlanningContext:
         self.calls += 1
@@ -122,7 +156,11 @@ class _ObservationProvider:
                 qvel=torch.zeros(BATCH_SIZE, 1),
             ),
             task=task_state,
-            scene=SceneSnapshot(timestamp=timestamp, version=self.calls),
+            scene=SceneSnapshot(
+                timestamp=timestamp,
+                version=self.calls,
+                entities=self.entities,
+            ),
             env_ids=torch.arange(BATCH_SIZE, dtype=torch.long),
         )
 
@@ -186,6 +224,8 @@ class _DecisionMonitor(EffectMonitor):
     """Return one deterministic row-local physical-effect decision."""
 
     def __init__(self, spec: SemanticEffectSpec, decision: EffectMonitorDecision):
+        if not decision.expectation_decisions:
+            raise ValueError("Test monitors require explicit expectation decisions.")
         self._spec = spec
         self._decision = decision
         self.calls = 0
@@ -194,6 +234,10 @@ class _DecisionMonitor(EffectMonitor):
     @property
     def spec(self) -> SemanticEffectSpec:
         return self._spec.snapshot()
+
+    @property
+    def resolved_params(self) -> dict[str, EffectMonitorParam]:
+        return {}
 
     def observe(
         self,
@@ -206,6 +250,7 @@ class _DecisionMonitor(EffectMonitor):
         return EffectMonitorDecision(
             self._decision.success_mask,
             self._decision.failure_mask,
+            self._decision.expectation_decisions,
         )
 
 
@@ -267,24 +312,152 @@ class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
 
 
 @dataclass(frozen=True, slots=True)
+class _WorkflowEffectGoal:
+    """Test-only held-object effect for workflow recovery."""
+
+    goal_kind: ClassVar[str] = "runtime_test_workflow_effect"
+
+    object_id: str
+    attach: bool
+
+    def __post_init__(self) -> None:
+        if type(self.object_id) is not str or not self.object_id:
+            raise ValueError("object_id must be a non-empty string.")
+        if type(self.attach) is not bool:
+            raise TypeError("attach must be exactly bool.")
+
+
+class _WorkflowEffectAction(AtomicAction[_WorkflowEffectGoal, ActionOptions]):
+    """Zero-frame action that commits only a verified held-object effect."""
+
+    skill_id: ClassVar[str] = "runtime_test_workflow_primary"
+    GoalType: ClassVar[type] = _WorkflowEffectGoal
+    source_slot: ClassVar[str] = "primary"
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(SkillEndpointRequirement(endpoint_id="motion"),),
+            ),
+        )
+    )
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[_WorkflowEffectGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        endpoint = request.binding.endpoint(self.source_slot, "motion")
+        task_state_key = endpoint.task_state_key
+        assert task_state_key is not None
+        if goal.attach:
+            poses = (
+                torch.eye(
+                    4,
+                    dtype=context.robot.qpos.dtype,
+                    device=context.robot.qpos.device,
+                )
+                .unsqueeze(0)
+                .repeat(context.batch_size, 1, 1)
+            )
+            effect: HeldObjectState | None = HeldObjectState(
+                semantics=ObjectSemantics(
+                    affordance=Affordance(),
+                    geometry={},
+                    label=goal.object_id,
+                    entity_id=goal.object_id,
+                ),
+                object_to_eef=poses,
+                grasp_xpos=poses,
+                env_mask=torch.ones(
+                    context.batch_size,
+                    dtype=torch.bool,
+                    device=context.robot.qpos.device,
+                ),
+            )
+        else:
+            effect = None
+        return self.build_command_plan(
+            request,
+            context,
+            success=torch.ones(
+                context.batch_size,
+                dtype=torch.bool,
+                device=context.robot.qpos.device,
+            ),
+            commands=TimedCommandSequence((), context.env_ids),
+            expected_effects=StateDelta(
+                held_object_updates={task_state_key: effect},
+            ),
+            effect_verification=EffectVerificationRequirement("semantic_effect"),
+            replannable=False,
+        )
+
+
+class _WorkflowSourceEffectAction(_WorkflowEffectAction):
+    """Held-object effect addressed through a hand-over source slot."""
+
+    skill_id: ClassVar[str] = "runtime_test_workflow_source"
+    source_slot: ClassVar[str] = "source"
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="source",
+                endpoints=(SkillEndpointRequirement(endpoint_id="motion"),),
+            ),
+        )
+    )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _WorkflowEffectDecision:
+    """One queued physical-effect result for a grounded recovery call."""
+
+    success_mask: torch.Tensor
+    failure_mask: torch.Tensor
+    inverse_satisfied_mask: torch.Tensor
+
+    def __post_init__(self) -> None:
+        for name in (
+            "success_mask",
+            "failure_mask",
+            "inverse_satisfied_mask",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.shape != (BATCH_SIZE,):
+                raise ValueError(f"{name} must be bool with shape ({BATCH_SIZE},).")
+            object.__setattr__(self, name, value.clone())
+
+
+@dataclass(frozen=True, slots=True)
 class _Workflow:
     workflow_id: str
-    calls: tuple[RegisteredSemanticCall, ...]
+    calls: tuple[SemanticCallSpec, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class _Grounded:
     analyzed: object
     invocation: ActionInvocation
-    effect_spec: SemanticEffectSpec
-    effect_monitor: EffectMonitor
+    effect_spec: SemanticEffectSpec | None
+    effect_monitor: EffectMonitor | None
     eligible_mask: torch.Tensor
+    effect_guards: tuple[GroundedHeldObjectGuard, ...] = ()
+    effect_gates: tuple[GroundedPhaseEffectGate, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class _Integration:
     engine: AtomicActionEngine
     scene_registry: SceneRegistry
+
+    @property
+    def robot_profile(self) -> object:
+        """Expose the production capability surface used by the facade."""
+        return SimpleNamespace(skills=self.engine.skills)
 
 
 class _Compiler(SemanticSkillCompiler):
@@ -296,11 +469,29 @@ class _Compiler(SemanticSkillCompiler):
         decisions: tuple[EffectMonitorDecision, ...],
         plan_success: tuple[torch.Tensor, ...],
         runner_cfg: ExecutionRunnerCfg,
+        *,
+        install_effect_monitor: bool,
     ) -> None:
         self._test_integration = _Integration(engine, SceneRegistry())
-        self._decisions = decisions
+        self._decisions = tuple(
+            EffectMonitorDecision(
+                decision.success_mask,
+                decision.failure_mask,
+                decision.expectation_decisions
+                or (
+                    EffectExpectationDecision(
+                        expectation_id="joint_target",
+                        satisfied_mask=decision.success_mask,
+                        contradicted_mask=decision.failure_mask,
+                        inverse_satisfied_mask=torch.zeros_like(decision.failure_mask),
+                    ),
+                ),
+            )
+            for decision in decisions
+        )
         self._plan_success = plan_success
         self._runner_cfg = runner_cfg
+        self._install_effect_monitor = install_effect_monitor
         self.analyze_count = 0
         self.ground_count = 0
         self.ground_timestamps: list[float] = []
@@ -314,7 +505,7 @@ class _Compiler(SemanticSkillCompiler):
 
     def analyze(
         self,
-        calls: tuple[RegisteredSemanticCall, ...],
+        calls: tuple[SemanticCallSpec, ...],
         *,
         workflow_id: str = "semantic_workflow",
         path: tuple[object, ...] = ("workflow",),
@@ -391,11 +582,14 @@ class _Compiler(SemanticSkillCompiler):
                 ),
             ),
         )
-        monitor = _DecisionMonitor(spec, self._decisions[call_index])
         self.invocations.append(invocation)
-        self.monitors.append(monitor)
+        monitor: _DecisionMonitor | None = None
+        if self._install_effect_monitor:
+            monitor = _DecisionMonitor(spec, self._decisions[call_index])
+            self.monitors.append(monitor)
         analyzed = SimpleNamespace(
             call=call,
+            effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
                 binding=SimpleNamespace(action_binding=invocation.binding),
@@ -404,7 +598,6 @@ class _Compiler(SemanticSkillCompiler):
                 ),
                 preset=SimpleNamespace(
                     preset_id="runtime_test_preset",
-                    schema_version=1,
                     motion_policy=invocation.motion_policy,
                     recovery_policy=invocation.recovery_policy,
                     runner_cfg=self._runner_cfg,
@@ -414,9 +607,203 @@ class _Compiler(SemanticSkillCompiler):
         return _Grounded(
             analyzed,
             invocation,
-            spec,
+            spec if monitor is not None else None,
             monitor,
             eligible_mask.clone(),
+        )
+
+
+class _WorkflowRecoveryCompiler(SemanticSkillCompiler):
+    """Ground queued physical outcomes through real execution sessions."""
+
+    def __init__(
+        self,
+        engine: AtomicActionEngine,
+        decisions: tuple[_WorkflowEffectDecision, ...],
+        *,
+        max_recovery_attempts: int,
+    ) -> None:
+        self._test_integration = _Integration(engine, SceneRegistry())
+        self._decisions = decisions
+        self._workflow_policy = WorkflowRecoveryPolicy(max_recovery_attempts)
+        self.analysis_windows: list[tuple[str, ...]] = []
+        self.grounded_calls: list[SemanticCallSpec] = []
+        self.grounded_masks: list[torch.Tensor] = []
+        self.invocations: list[ActionInvocation] = []
+
+    @property
+    def integration(self) -> _Integration:
+        return self._test_integration
+
+    def analyze(
+        self,
+        calls: tuple[SemanticCallSpec, ...],
+        *,
+        workflow_id: str = "semantic_workflow",
+        path: tuple[object, ...] = ("workflow",),
+    ) -> _Workflow:
+        del path
+        self.analysis_windows.append(tuple(call.semantic_id for call in calls))
+        return _Workflow(workflow_id, tuple(calls))
+
+    def ground(
+        self,
+        workflow: _Workflow,
+        call_index: int,
+        context: PlanningContext,
+        *,
+        eligible_mask: torch.Tensor | None = None,
+        revision: int = 0,
+        path: tuple[object, ...] = ("workflow",),
+    ) -> _Grounded:
+        del path
+        if eligible_mask is None:
+            raise ValueError("eligible_mask is required by this compiler.")
+        decision_index = len(self.grounded_calls)
+        if decision_index >= len(self._decisions):
+            raise RuntimeError("No queued workflow-effect decision remains.")
+        decision = self._decisions[decision_index]
+        call = workflow.calls[call_index]
+        if type(call) is Pick:
+            action_type = _WorkflowEffectAction
+            source_slot = "primary"
+            expectation_id = "destination"
+            relation = HeldObjectRelation.ATTACHED
+            effect_kind = SemanticEffectKind.ATTACH
+            attach = True
+            expected_binary = True
+        elif type(call) is Place:
+            action_type = _WorkflowEffectAction
+            source_slot = "primary"
+            expectation_id = "source"
+            relation = HeldObjectRelation.DETACHED
+            effect_kind = SemanticEffectKind.RELEASE
+            attach = False
+            expected_binary = False
+        elif type(call) is HandOver:
+            action_type = _WorkflowSourceEffectAction
+            source_slot = "source"
+            expectation_id = "source"
+            relation = HeldObjectRelation.DETACHED
+            effect_kind = SemanticEffectKind.RELEASE
+            attach = False
+            expected_binary = False
+        else:
+            raise TypeError(
+                "Workflow-recovery test compiler accepts Pick, Place, or HandOver."
+            )
+        object_id = call.object.entity_id
+        binding = ActionBinding(
+            owner_id=self.integration.engine.binding_owner_id,
+            endpoints=(
+                EndpointBinding(
+                    slot_id=source_slot,
+                    endpoint_id="motion",
+                    resource_id="left_actor",
+                    adapter_id="test",
+                    target=JointPositionTarget("virtual", (0,)),
+                    task_state_key="left_gripper",
+                    capabilities=frozenset({FORWARD_KINEMATICS_CAPABILITY}),
+                    joint_ids=(0,),
+                ),
+            ),
+        )
+        motion_policy = MotionPolicy(sample_count=7)
+        tracking_policy = TrackingPolicy.timed()
+        recovery_policy = RecoveryPolicy(
+            max_replans=0,
+            max_action_retries=0,
+            action_timeout=100.0,
+        )
+        invocation = ActionInvocation(
+            skill_id=action_type.skill_id,
+            goal=_WorkflowEffectGoal(object_id=object_id, attach=attach),
+            binding=binding,
+            motion_policy=motion_policy,
+            tracking_policy=tracking_policy,
+            recovery_policy=recovery_policy,
+            invocation_id=f"{workflow.workflow_id}:{decision_index}",
+            revision=revision,
+        )
+        expectation = HeldObjectStateExpectation(
+            expectation_id=expectation_id,
+            relation=relation,
+            object_id=object_id,
+            slot_id=source_slot,
+            resource_id="left_actor",
+            task_state_key="left_gripper",
+        )
+        spec = SemanticEffectSpec(
+            semantic_id=call.semantic_id,
+            effect_kind=effect_kind,
+            skill_id=invocation.skill_id,
+            invocation_id=invocation.invocation_id,
+            invocation_revision=invocation.revision,
+            env_ids=context.env_ids,
+            state_expectations=(expectation,),
+            clauses=(
+                BinaryEffectClause(
+                    clause_id=f"{expectation_id}.constraint",
+                    expectation_id=expectation_id,
+                    source=EffectEvidenceSourceRef(
+                        "test.provider",
+                        "1",
+                        ControlPartEvidenceAddress(
+                            "virtual",
+                            CONSTRAINT_EFFECT_CHANNEL,
+                        ),
+                    ),
+                    evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+                    expected=expected_binary,
+                ),
+            ),
+        )
+        monitor = _DecisionMonitor(
+            spec,
+            EffectMonitorDecision(
+                success_mask=decision.success_mask,
+                failure_mask=decision.failure_mask,
+                expectation_decisions=(
+                    EffectExpectationDecision(
+                        expectation_id=expectation_id,
+                        satisfied_mask=decision.success_mask,
+                        contradicted_mask=decision.failure_mask,
+                        inverse_satisfied_mask=decision.inverse_satisfied_mask,
+                    ),
+                ),
+            ),
+        )
+        analyzed = SimpleNamespace(
+            call=call,
+            effect_monitor_ref=None,
+            bound=SimpleNamespace(
+                robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
+                binding=SimpleNamespace(action_binding=binding),
+                linked=SimpleNamespace(
+                    descriptor=SimpleNamespace(skill_id=invocation.skill_id)
+                ),
+                preset=SimpleNamespace(
+                    preset_id="runtime_test_recovery_preset",
+                    motion_policy=motion_policy,
+                    tracking_policy=tracking_policy,
+                    recovery_policy=recovery_policy,
+                    workflow_recovery_policy=self._workflow_policy,
+                    runner_cfg=ExecutionRunnerCfg(
+                        minimum_cycle_time=0.0,
+                        hold_on_completion=False,
+                    ),
+                ),
+            ),
+        )
+        self.grounded_calls.append(call)
+        self.grounded_masks.append(eligible_mask.clone())
+        self.invocations.append(invocation)
+        return _Grounded(
+            analyzed=analyzed,
+            invocation=invocation,
+            effect_spec=spec,
+            effect_monitor=monitor,
+            eligible_mask=eligible_mask.clone(),
         )
 
 
@@ -432,8 +819,36 @@ class _System:
     clock: _Clock
 
 
+@dataclass(slots=True)
+class _WorkflowRecoverySystem:
+    runtime: SkillRuntime
+    compiler: _WorkflowRecoveryCompiler
+    engine: AtomicActionEngine
+    observation: _ObservationProvider
+    sink: _CommandSink
+    collector: _Collector
+    clock: _Clock
+
+
 def _mask(*values: bool) -> torch.Tensor:
     return torch.tensor(values, dtype=torch.bool)
+
+
+def _workflow_decision(
+    success_mask: torch.Tensor,
+    failure_mask: torch.Tensor,
+    *,
+    inverse_satisfied_mask: torch.Tensor | None = None,
+) -> _WorkflowEffectDecision:
+    return _WorkflowEffectDecision(
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+        inverse_satisfied_mask=(
+            torch.zeros_like(failure_mask)
+            if inverse_satisfied_mask is None
+            else inverse_satisfied_mask
+        ),
+    )
 
 
 def _call(name: str) -> RegisteredSemanticCall:
@@ -446,6 +861,7 @@ def _system(
     plan_success: tuple[torch.Tensor, ...] | None = None,
     preset_runner_cfg: ExecutionRunnerCfg | None = None,
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
+    install_effect_monitor: bool = True,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -469,6 +885,7 @@ def _system(
         decisions,
         selected_plan_success,
         selected_runner_cfg,
+        install_effect_monitor=install_effect_monitor,
     )
     observation = _ObservationProvider()
     sink = _CommandSink()
@@ -492,6 +909,55 @@ def _system(
         sink,
         collector,
         clock,
+    )
+
+
+def _workflow_recovery_system(
+    decisions: tuple[_WorkflowEffectDecision, ...],
+    *,
+    max_recovery_attempts: int = 2,
+    task_state: TaskState | None = None,
+) -> _WorkflowRecoverySystem:
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 1
+    robot.control_parts = {}
+    robot.get_qpos.return_value = torch.zeros(BATCH_SIZE, 1)
+    robot.get_qvel.return_value = torch.zeros(BATCH_SIZE, 1)
+    generator = Mock()
+    generator.robot = robot
+    generator.device = torch.device("cpu")
+    generator.planner.cfg.planner_type = "runtime_test"
+    engine = AtomicActionEngine(generator, load_builtins=False)
+    engine.register(_WorkflowEffectAction())
+    engine.register(_WorkflowSourceEffectAction())
+    compiler = _WorkflowRecoveryCompiler(
+        engine,
+        decisions,
+        max_recovery_attempts=max_recovery_attempts,
+    )
+    observation = _ObservationProvider()
+    sink = _CommandSink()
+    collector = _Collector()
+    clock = _Clock()
+    runtime = SkillRuntime.from_components(
+        compiler,
+        observation,
+        sink,
+        collector,
+        task_state=(
+            TaskState.empty(BATCH_SIZE, "cpu") if task_state is None else task_state
+        ),
+        clock=clock,
+    )
+    return _WorkflowRecoverySystem(
+        runtime=runtime,
+        compiler=compiler,
+        engine=engine,
+        observation=observation,
+        sink=sink,
+        collector=collector,
+        clock=clock,
     )
 
 
@@ -535,6 +1001,23 @@ def test_runtime_analyzes_once_and_uses_one_fresh_session_per_call(
     assert len(system.collector.calls) == 2
     assert system.compiler.ground_timestamps[1] > system.compiler.ground_timestamps[0]
     assert system.observation.calls == 4
+
+
+def test_runtime_projects_planned_effect_when_grounded_call_has_no_monitor() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+
+    result = system.runtime.run(_call("trajectory_only"))
+
+    assert result.status is SkillStatus.COMPLETED
+    assert result.effects == ()
+    assert system.collector.calls == []
+    joint = result.task_state.get_articulation_joint_state("fixture", "joint")
+    assert joint is not None
+    assert torch.equal(joint.env_mask, _mask(True, True))
+    assert torch.allclose(joint.position, torch.ones(BATCH_SIZE, 1))
 
 
 def test_runtime_uses_selected_preset_runner_cfg_without_override(
@@ -652,6 +1135,376 @@ def test_runtime_keeps_partial_rows_at_the_shared_call_barrier() -> None:
     assert len(result.failures) == 1
 
 
+def test_runtime_reacquires_a_lost_source_with_a_real_pick_then_retries() -> None:
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+            _workflow_decision(_mask(True, False), _mask(False, True)),
+            _workflow_decision(_mask(False, True), _mask(False, False)),
+            _workflow_decision(_mask(False, True), _mask(False, False)),
+        )
+    )
+    cube = SceneObjectRef("cube")
+
+    result = system.runtime.run(
+        Pick(object=cube),
+        Place(object=cube, inside=SceneObjectRef("bin")),
+    )
+
+    assert result.status is SkillStatus.COMPLETED
+    assert torch.equal(result.success_mask, _mask(True, True))
+    assert torch.equal(result.failure_mask, _mask(False, False))
+    assert len(result.calls) == 2
+    assert [call.semantic_id for call in system.compiler.grounded_calls] == [
+        "pick",
+        "place",
+        "pick",
+        "place",
+    ]
+    assert [mask.tolist() for mask in system.compiler.grounded_masks] == [
+        [True, True],
+        [True, True],
+        [False, True],
+        [False, True],
+    ]
+    assert system.compiler.analysis_windows == [
+        ("pick", "place"),
+        ("pick", "place"),
+        ("place",),
+    ]
+    assert [trace.role for trace in result.workflow_recoveries] == [
+        SkillWorkflowRecoveryRole.REACQUIRE,
+        SkillWorkflowRecoveryRole.RETRY_REACQUIRED,
+    ]
+    assert all(
+        torch.equal(trace.entered_mask, _mask(False, True))
+        for trace in result.workflow_recoveries
+    )
+    assert result.workflow_recoveries[0].call is not None
+    assert result.workflow_recoveries[0].call.semantic_id == "pick"
+    assert result.workflow_recoveries[1].call is not None
+    assert result.workflow_recoveries[1].call.semantic_id == "place"
+    assert any(
+        event.kind is ExecutionEventKind.RECOVERY_REQUIRED
+        and torch.equal(event.env_mask, _mask(False, True))
+        for event in result.events
+    )
+    metadata = result.to_metadata()
+    json.dumps(metadata, allow_nan=False, sort_keys=True)
+    assert [entry["role"] for entry in metadata["workflow_recoveries"]] == [
+        "reacquire",
+        "retry_reacquired",
+    ]
+    assert metadata["workflow_recoveries"][0]["source_resource_id"] == "left_actor"
+    assert metadata["workflow_recoveries"][0]["source_task_state_key"] == (
+        "left_gripper"
+    )
+    assert result.task_state.get_held_object("left_gripper") is None
+
+
+def test_runtime_reconciles_completed_pick_with_observed_attachment_pose() -> None:
+    """The next semantic call receives the physical, not projected, grasp frame."""
+    system = _workflow_recovery_system(
+        (_workflow_decision(_mask(True, True), _mask(False, False)),)
+    )
+    object_poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
+    object_poses[0, :3, 3] = torch.tensor([0.5, 0.1, 0.2])
+    object_poses[1, :3, 3] = torch.tensor([-0.2, 0.3, 0.4])
+    observed_relations = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
+    observed_relations[0, :3, 3] = torch.tensor([0.1, 0.02, 0.3])
+    observed_relations[1, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    observed_relations[1, :3, 3] = torch.tensor([0.0, -0.1, 0.2])
+    endpoint_poses = torch.bmm(object_poses, observed_relations)
+    system.observation.entities["cube"] = EntityState(object_poses)
+    system.engine.robot.compute_fk.return_value = endpoint_poses
+
+    result = system.runtime.run(Pick(object=SceneObjectRef("cube")))
+
+    assert result.status is SkillStatus.COMPLETED
+    held = result.task_state.get_held_object("left_gripper")
+    assert held is not None
+    torch.testing.assert_close(held.object_to_eef, observed_relations)
+    torch.testing.assert_close(held.grasp_xpos, endpoint_poses)
+    system.engine.robot.compute_fk.assert_called_once()
+    call = system.engine.robot.compute_fk.call_args
+    assert call.kwargs["name"] == "virtual"
+    assert call.kwargs["env_ids"] == [0, 1]
+    assert call.kwargs["to_matrix"] is True
+    torch.testing.assert_close(call.kwargs["qpos"], torch.zeros(BATCH_SIZE, 1))
+
+
+def test_runtime_retries_directly_when_verified_source_relation_remains() -> None:
+    poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
+    initial_state = TaskState(
+        batch_size=BATCH_SIZE,
+        device="cpu",
+        held_objects={
+            "left_gripper": HeldObjectState(
+                semantics=ObjectSemantics(
+                    affordance=Affordance(),
+                    geometry={},
+                    label="cube",
+                    entity_id="cube",
+                ),
+                object_to_eef=poses,
+                grasp_xpos=poses,
+                env_mask=_mask(True, True),
+            )
+        },
+    )
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(
+                _mask(True, False),
+                _mask(False, True),
+                inverse_satisfied_mask=_mask(False, True),
+            ),
+            _workflow_decision(_mask(False, True), _mask(False, False)),
+        ),
+        task_state=initial_state,
+    )
+
+    result = system.runtime.run(
+        HandOver(
+            object=SceneObjectRef("cube"),
+            resources={"source": "left_actor", "destination": "right_actor"},
+        )
+    )
+
+    assert result.status is SkillStatus.COMPLETED
+    assert torch.equal(result.success_mask, _mask(True, True))
+    assert [call.semantic_id for call in system.compiler.grounded_calls] == [
+        "hand_over",
+        "hand_over",
+    ]
+    assert [mask.tolist() for mask in system.compiler.grounded_masks] == [
+        [True, True],
+        [False, True],
+    ]
+    assert len(result.workflow_recoveries) == 1
+    recovery = result.workflow_recoveries[0]
+    assert recovery.role is SkillWorkflowRecoveryRole.RETRY_RETAINED
+    assert recovery.attempt_index == 1
+    assert torch.equal(recovery.entered_mask, _mask(False, True))
+    assert result.task_state.get_held_object("left_gripper") is None
+
+
+def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> None:
+    poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
+    initial_state = TaskState(
+        batch_size=BATCH_SIZE,
+        device="cpu",
+        held_objects={
+            "left_gripper": HeldObjectState(
+                semantics=ObjectSemantics(
+                    affordance=Affordance(),
+                    geometry={},
+                    label="cube",
+                    entity_id="cube",
+                ),
+                object_to_eef=poses,
+                grasp_xpos=poses,
+                env_mask=_mask(True, True),
+            )
+        },
+    )
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(
+                _mask(False, False),
+                _mask(True, True),
+                inverse_satisfied_mask=_mask(True, False),
+            ),
+            _workflow_decision(_mask(True, False), _mask(False, False)),
+            _workflow_decision(_mask(False, True), _mask(False, False)),
+            _workflow_decision(_mask(False, True), _mask(False, False)),
+        ),
+        task_state=initial_state,
+    )
+
+    result = system.runtime.run(
+        HandOver(
+            object=SceneObjectRef("cube"),
+            resources={"source": "left_actor", "destination": "right_actor"},
+        )
+    )
+
+    assert result.status is SkillStatus.COMPLETED
+    assert torch.equal(result.success_mask, _mask(True, True))
+    assert [call.semantic_id for call in system.compiler.grounded_calls] == [
+        "hand_over",
+        "hand_over",
+        "pick",
+        "hand_over",
+    ]
+    assert [mask.tolist() for mask in system.compiler.grounded_masks] == [
+        [True, True],
+        [True, False],
+        [False, True],
+        [False, True],
+    ]
+    assert [trace.role for trace in result.workflow_recoveries] == [
+        SkillWorkflowRecoveryRole.RETRY_RETAINED,
+        SkillWorkflowRecoveryRole.REACQUIRE,
+        SkillWorkflowRecoveryRole.RETRY_REACQUIRED,
+    ]
+    assert [trace.attempt_index for trace in result.workflow_recoveries] == [1, 1, 1]
+    assert result.task_state.get_held_object("left_gripper") is None
+
+
+def test_runtime_bounds_reacquisition_attempts_per_failed_row() -> None:
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+            _workflow_decision(_mask(True, False), _mask(False, True)),
+            _workflow_decision(_mask(False, False), _mask(False, True)),
+            _workflow_decision(_mask(False, False), _mask(False, True)),
+        ),
+        max_recovery_attempts=2,
+    )
+    cube = SceneObjectRef("cube")
+
+    result = system.runtime.run(
+        Pick(object=cube),
+        Place(object=cube, inside=SceneObjectRef("bin")),
+    )
+
+    assert result.status is SkillStatus.COMPLETED
+    assert torch.equal(result.success_mask, _mask(True, False))
+    assert torch.equal(result.failure_mask, _mask(False, True))
+    assert [call.semantic_id for call in system.compiler.grounded_calls] == [
+        "pick",
+        "place",
+        "pick",
+        "pick",
+    ]
+    assert [trace.role for trace in result.workflow_recoveries] == [
+        SkillWorkflowRecoveryRole.REACQUIRE,
+        SkillWorkflowRecoveryRole.REACQUIRE,
+    ]
+    assert [trace.attempt_index for trace in result.workflow_recoveries] == [1, 2]
+    assert len(result.failures) == 1
+    assert "exhausted" in result.failures[0].message
+
+
+def test_runtime_leaves_external_recovery_disabled_at_zero_budget() -> None:
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+            _workflow_decision(_mask(True, False), _mask(False, True)),
+        ),
+        max_recovery_attempts=0,
+    )
+    cube = SceneObjectRef("cube")
+
+    result = system.runtime.run(
+        Pick(object=cube),
+        Place(object=cube, inside=SceneObjectRef("bin")),
+    )
+
+    assert result.status is SkillStatus.COMPLETED
+    assert torch.equal(result.success_mask, _mask(True, False))
+    assert torch.equal(result.failure_mask, _mask(False, True))
+    assert result.workflow_recoveries == ()
+    assert [call.semantic_id for call in system.compiler.grounded_calls] == [
+        "pick",
+        "place",
+    ]
+
+
+def test_runtime_resolves_workflow_policy_only_after_typed_core_handoff() -> None:
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+        )
+    )
+    system.compiler._workflow_policy = object()  # type: ignore[assignment]
+    cube = SceneObjectRef("cube")
+
+    result = system.runtime.run(
+        Pick(object=cube),
+        Place(object=cube, inside=SceneObjectRef("bin")),
+    )
+
+    assert result.status is SkillStatus.COMPLETED
+    assert result.workflow_recoveries == ()
+
+
+def test_cancel_during_reacquisition_safe_stops_every_barrier_row() -> None:
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+            _workflow_decision(_mask(True, False), _mask(False, True)),
+            _workflow_decision(_mask(False, True), _mask(False, False)),
+        )
+    )
+    cube = SceneObjectRef("cube")
+    result = system.runtime.start(
+        Pick(object=cube),
+        Place(object=cube, inside=SceneObjectRef("bin")),
+    )
+    while len(system.compiler.grounded_calls) < 3:
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+
+    held_before_cancel = system.sink.held
+    result = system.runtime.cancel("caller stopped recovery")
+
+    assert result.status is SkillStatus.CANCELLED
+    assert torch.equal(result.cancelled_mask, _mask(True, True))
+    assert len(result.workflow_recoveries) == 1
+    assert result.workflow_recoveries[0].role is SkillWorkflowRecoveryRole.REACQUIRE
+    assert result.workflow_recoveries[0].call is not None
+    assert (
+        result.workflow_recoveries[0].call.status
+        is runtime_module.RunnerStatus.CANCELLED
+    )
+    assert system.sink.cancelled == 1
+    assert system.sink.held == held_before_cancel + 1
+
+
+def test_deactivating_a_waiting_row_does_not_cancel_active_reacquisition() -> None:
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+            _workflow_decision(_mask(True, False), _mask(False, True)),
+            _workflow_decision(_mask(False, True), _mask(False, False)),
+            _workflow_decision(_mask(False, True), _mask(False, False)),
+        )
+    )
+    cube = SceneObjectRef("cube")
+    result = system.runtime.start(
+        Pick(object=cube),
+        Place(object=cube, inside=SceneObjectRef("bin")),
+    )
+    while len(system.compiler.grounded_calls) < 3:
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+
+    result = system.runtime.deactivate_rows(
+        _mask(True, False),
+        reason="parallel peer failed",
+    )
+    while not result.terminal:
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+
+    assert result.status is SkillStatus.COMPLETED
+    assert torch.equal(result.cancelled_mask, _mask(True, False))
+    assert torch.equal(result.success_mask, _mask(False, True))
+    assert torch.equal(result.failure_mask, _mask(False, False))
+    assert [trace.role for trace in result.workflow_recoveries] == [
+        SkillWorkflowRecoveryRole.REACQUIRE,
+        SkillWorkflowRecoveryRole.RETRY_REACQUIRED,
+    ]
+
+
 def test_nonblocking_step_routes_effect_feedback_through_collector() -> None:
     system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
     result = system.runtime.start(_call("stepwise"))
@@ -668,6 +1521,339 @@ def test_nonblocking_step_routes_effect_feedback_through_collector() -> None:
     assert system.collector.calls[0][0] == 0
     assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
     assert system.compiler.monitors[0].requests[0].verification_id == 0
+
+
+def test_runtime_preserves_per_expectation_effect_outcomes_in_trace() -> None:
+    expectation = EffectExpectationDecision(
+        expectation_id="joint_target",
+        satisfied_mask=_mask(True, True),
+        contradicted_mask=_mask(False, False),
+        inverse_satisfied_mask=_mask(False, False),
+    )
+    system = _system(
+        (
+            EffectMonitorDecision(
+                _mask(True, True),
+                _mask(False, False),
+                (expectation,),
+            ),
+        )
+    )
+
+    result = system.runtime.run(_call("expectation_trace"))
+
+    assert result.status is SkillStatus.COMPLETED
+    assert len(result.effects) == 1
+    recorded = result.effects[0].expectation_decisions
+    assert len(recorded) == 1
+    assert recorded[0].expectation_id == "joint_target"
+    assert result.to_metadata()["effects"][0]["decision"]["expectations"] == [
+        {
+            "expectation_id": "joint_target",
+            "satisfied_mask": [True, True],
+            "contradicted_mask": [False, False],
+            "inverse_satisfied_mask": [False, False],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("call", "expected_invalidation", "expected_retry"),
+    (
+        (
+            Place(
+                object=SceneObjectRef("cube"),
+                inside=SceneObjectRef("bin"),
+            ),
+            _mask(False, True),
+            _mask(True, False),
+        ),
+        (
+            HandOver(object=SceneObjectRef("cube")),
+            _mask(False, True),
+            _mask(False, False),
+        ),
+    ),
+)
+def test_terminal_failure_policy_only_retains_strongly_proven_source_attachment(
+    call: Place | HandOver,
+    expected_invalidation: torch.Tensor,
+    expected_retry: torch.Tensor,
+) -> None:
+    failure = _mask(True, True)
+    source = EffectExpectationDecision(
+        expectation_id="source",
+        satisfied_mask=_mask(False, False),
+        contradicted_mask=failure,
+        inverse_satisfied_mask=_mask(True, False),
+    )
+    destination = EffectExpectationDecision(
+        expectation_id="destination",
+        satisfied_mask=_mask(False, False),
+        contradicted_mask=failure,
+        inverse_satisfied_mask=_mask(False, False),
+    )
+    grounded = SimpleNamespace(analyzed=SimpleNamespace(call=call))
+
+    invalidation, retry = SkillRuntime._terminal_failure_policy(
+        grounded,
+        failure,
+        (source, destination),
+    )
+
+    assert torch.equal(invalidation, expected_invalidation)
+    assert torch.equal(retry, expected_retry)
+
+
+def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation() -> (
+    None
+):
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="object",
+        entity_id="cube",
+    )
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    held = HeldObjectState(
+        semantics=semantics,
+        object_to_eef=poses,
+        grasp_xpos=poses,
+        env_mask=_mask(True, True),
+    )
+    task_state = TaskState(
+        batch_size=BATCH_SIZE,
+        device="cpu",
+        held_objects={"arm": held},
+    )
+    expectation = HeldObjectStateExpectation(
+        expectation_id="source",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id="cube",
+        slot_id="primary",
+        resource_id="arm",
+        task_state_key="arm",
+    )
+    spec = SemanticEffectSpec(
+        semantic_id="carry",
+        effect_kind=SemanticEffectKind.ATTACH,
+        skill_id="carry",
+        invocation_id="workflow:0",
+        invocation_revision=0,
+        env_ids=torch.arange(BATCH_SIZE, dtype=torch.long),
+        state_expectations=(expectation,),
+        clauses=(
+            BinaryEffectClause(
+                clause_id="source.constraint",
+                expectation_id="source",
+                source=EffectEvidenceSourceRef(
+                    "test.provider",
+                    "1",
+                    ControlPartEvidenceAddress("hand", "constraint"),
+                ),
+                evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+                expected=True,
+            ),
+        ),
+    )
+    monitor = _DecisionMonitor(
+        spec,
+        EffectMonitorDecision(
+            _mask(False, True),
+            _mask(True, False),
+            (
+                EffectExpectationDecision(
+                    "source",
+                    _mask(False, True),
+                    _mask(True, False),
+                    _mask(False, False),
+                ),
+            ),
+        ),
+    )
+    guard = GroundedHeldObjectGuard(
+        guard_id="source_attached",
+        active_segments=("carry",),
+        baseline=HeldObjectGuardBaseline.VERIFIED_TASK_STATE,
+        effect_spec=spec,
+        effect_monitor=monitor,
+        invalidation_task_state_keys=("arm",),
+        retry_action=False,
+    )
+    system.runtime._grounded = SimpleNamespace(
+        analyzed=SimpleNamespace(effect_monitor_ref=None),
+        effect_guards=(guard,),
+    )
+    system.runtime._runner = SimpleNamespace(
+        session=SimpleNamespace(task_state=task_state)
+    )
+    system.runtime._current_call_index = 0
+    context = system.observation.observe(task_state)
+    request = HeldObjectGuardRequest(
+        verification_id=0,
+        skill_id="carry",
+        invocation_id="workflow:0",
+        invocation_revision=0,
+        invocation_index=0,
+        attempt_generation=0,
+        next_waypoint_index=1,
+        segment_name="carry",
+        env_mask=_mask(True, True),
+        allowed_held_object_relations=(("arm", "cube"),),
+        allowed_coordinated_held_object_relations=(),
+        deadline=10.0,
+    )
+
+    result = system.runtime._held_object_guard_verifier(context, request)
+
+    assert result is not None
+    assert torch.equal(result.failure_mask, _mask(True, False))
+    assert torch.equal(result.retry_mask, _mask(False, False))
+    assert result.state_invalidation.held_object_updates == {"arm": None}
+    assert len(system.runtime._effect_traces) == 1
+    trace = system.runtime._effect_traces[0]
+    assert trace.boundary_kind == "in_flight_guard"
+    assert trace.guard_id == "source_attached"
+    assert trace.segment_name == "carry"
+    assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
+
+
+def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace() -> (
+    None
+):
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="object",
+        entity_id="cube",
+    )
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    held = HeldObjectState(
+        semantics=semantics,
+        object_to_eef=poses,
+        grasp_xpos=poses,
+        env_mask=_mask(True, True),
+    )
+    expectation = HeldObjectStateExpectation(
+        expectation_id="destination",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id="cube",
+        slot_id="primary",
+        resource_id="arm",
+        task_state_key="arm",
+    )
+    spec = SemanticEffectSpec(
+        semantic_id="pick",
+        effect_kind=SemanticEffectKind.ATTACH,
+        skill_id="pick_up",
+        invocation_id="workflow:0",
+        invocation_revision=0,
+        env_ids=torch.arange(BATCH_SIZE, dtype=torch.long),
+        state_expectations=(expectation,),
+        clauses=(
+            BinaryEffectClause(
+                clause_id="destination.constraint",
+                expectation_id="destination",
+                source=EffectEvidenceSourceRef(
+                    "test.provider",
+                    "1",
+                    ControlPartEvidenceAddress("hand", "constraint"),
+                ),
+                evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+                expected=True,
+            ),
+        ),
+    )
+    terminal_monitor = _DecisionMonitor(
+        spec,
+        EffectMonitorDecision(
+            _mask(True, True),
+            _mask(False, False),
+            (
+                EffectExpectationDecision(
+                    "destination",
+                    _mask(True, True),
+                    _mask(False, False),
+                    _mask(False, False),
+                ),
+            ),
+        ),
+    )
+    gate_monitor = _DecisionMonitor(
+        spec,
+        EffectMonitorDecision(
+            _mask(False, True),
+            _mask(True, False),
+            (
+                EffectExpectationDecision(
+                    "destination",
+                    _mask(False, True),
+                    _mask(True, False),
+                    _mask(False, False),
+                ),
+            ),
+        ),
+    )
+    gate = GroundedPhaseEffectGate(
+        gate_id="destination_acquired",
+        segment_name="lift",
+        effect_spec=spec,
+        effect_monitor=gate_monitor,
+        retry_action=True,
+    )
+    system.runtime._grounded = SimpleNamespace(
+        analyzed=SimpleNamespace(effect_monitor_ref=None),
+        effect_monitor=terminal_monitor,
+        effect_gates=(gate,),
+    )
+    system.runtime._runner = SimpleNamespace(
+        session=SimpleNamespace(
+            active_plan=SimpleNamespace(
+                expected_effects=StateDelta(held_object_updates={"arm": None}),
+                effect_candidates=StateDelta(held_object_updates={"arm": held}),
+            )
+        )
+    )
+    system.runtime._current_call_index = 0
+    context = system.observation.observe(TaskState.empty(BATCH_SIZE, "cpu"))
+    request = PhaseEffectGateRequest(
+        verification_id=7,
+        gate_id="destination_acquired",
+        skill_id="pick_up",
+        invocation_id="workflow:0",
+        invocation_revision=0,
+        invocation_index=0,
+        attempt_generation=3,
+        next_waypoint_index=4,
+        segment_name="lift",
+        requested_at=0.0,
+        deadline=10.0,
+        env_mask=_mask(True, True),
+    )
+
+    result = system.runtime._phase_effect_gate_verifier(context, request)
+
+    assert result.verification_id == 7
+    assert result.gate_id == "destination_acquired"
+    assert result.attempt_generation == 3
+    assert result.next_waypoint_index == 4
+    assert torch.equal(result.success_mask, _mask(False, True))
+    assert torch.equal(result.failure_mask, _mask(True, False))
+    assert torch.equal(result.retry_mask, _mask(True, False))
+    assert terminal_monitor.calls == 0
+    assert gate_monitor.calls == 1
+    assert gate_monitor.requests[0].terminal_segment == "lift"
+    candidate = gate_monitor.requests[0].expected_effects.held_object_updates["arm"]
+    assert isinstance(candidate, HeldObjectState)
+    assert candidate.semantics.entity_id == "cube"
+    trace = system.runtime._effect_traces[0]
+    assert trace.boundary_kind == "phase_effect_gate"
+    assert trace.guard_id is None
+    assert trace.gate_id == "destination_acquired"
+    assert trace.segment_name == "lift"
+    assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
 
 
 def test_runtime_combines_application_effect_verifier_and_step_observer() -> None:
@@ -712,7 +1898,7 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     metadata = result.to_metadata()
 
     json.dumps(metadata, allow_nan=False, sort_keys=True)
-    assert metadata["schema_version"] == 1
+    assert metadata["schema_version"] == 2
     assert metadata["kind"] == "skill_result"
     call = metadata["calls"][0]
     assert call["semantic_id"] == "test.metadata"
@@ -730,10 +1916,7 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     assert typed_attempt.snapshot().scene_dependency_monitor_until == {"fixture": 0}
     resolved = call["resolved_core_policy"]
     assert resolved["profile_id"] == "runtime_test_profile"
-    assert resolved["preset"] == {
-        "preset_id": "runtime_test_preset",
-        "schema_version": 1,
-    }
+    assert resolved["preset"] == {"preset_id": "runtime_test_preset"}
     assert resolved["motion_policy"]["strategy"] == "ik_interp"
     assert resolved["motion_policy"]["sample_count"] == 7
     assert resolved["tracking_policy"] == {
@@ -748,9 +1931,11 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     assert "feedback_mode" not in attempt
     assert result.calls[0].resolved_core_policy.preset_id == "runtime_test_preset"
     effect = call["effects"][0]
+    assert effect["boundary"] == {"kind": "terminal"}
     assert effect["effect_spec"]["semantic_id"] == "test.metadata"
     assert effect["monitor"]["monitor_id"].endswith("._DecisionMonitor")
     assert effect["evidence"] == {}
+    assert metadata["workflow_recoveries"] == []
 
     metadata["masks"]["success"][0] = False
     assert system.runtime.result.to_metadata()["masks"]["success"] == [True, True]
@@ -955,6 +2140,77 @@ def test_facade_varargs_and_programmatic_iterable_share_runtime_path() -> None:
     assert [item.skill_id for item in iterable_system.compiler.invocations] == [
         item.skill_id for item in facade_system.compiler.invocations
     ]
+
+
+def test_facade_reports_bound_robot_skills_and_call_availability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    facade = AtomicSkills(system.runtime)
+
+    available = facade.availability(_call("available"))
+
+    assert available.available
+    assert available.semantic_id == "test.available"
+    assert available.diagnostic is None
+    assert facade.available_skills == system.engine.skills
+
+    diagnostic = SemanticDiagnostic(
+        "unknown_entity",
+        ("workflow", 0, "call", "object"),
+        "The referenced object is unavailable.",
+        ("cube",),
+    )
+    monkeypatch.setattr(
+        system.compiler,
+        "analyze",
+        Mock(side_effect=SemanticValidationError(diagnostic)),
+    )
+
+    unavailable = facade.availability(_call("unavailable"))
+
+    assert not unavailable.available
+    assert unavailable.diagnostic == diagnostic
+
+
+def test_facade_from_simulation_delegates_to_canonical_runtime_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    factory = Mock(return_value=system.runtime)
+    monkeypatch.setattr(SkillRuntime, "from_simulation", factory)
+    registry = SceneRegistry()
+    verifier = Mock()
+
+    facade = AtomicSkills.from_simulation(
+        simulation="simulation",
+        robot="robot",
+        motion_generator="motion_generator",
+        scene_registry=registry,
+        robot_profile="robot_profile",
+        effect_verifier=verifier,
+        control_dt=0.01,
+    )
+
+    assert facade.runtime is system.runtime
+    factory.assert_called_once_with(
+        simulation="simulation",
+        robot="robot",
+        motion_generator="motion_generator",
+        scene_registry=registry,
+        robot_profile="robot_profile",
+        grasp_pose_generators=None,
+        call_catalog=None,
+        effect_verifier=verifier,
+        registered_lowerers=(),
+        relation_grounders=(),
+        handover_pose_providers=(),
+        endpoint_adapters=None,
+        runner_cfg=None,
+        control_dt=0.01,
+        scene_translation_threshold=1.0e-4,
+        scene_rotation_threshold=1.0e-3,
+    )
 
 
 def test_from_env_requires_an_explicit_runtime_provider() -> None:

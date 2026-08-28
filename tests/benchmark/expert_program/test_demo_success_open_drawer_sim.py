@@ -32,8 +32,10 @@ from scripts.benchmark.expert_program.demo_success import (
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
-_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "gym/expert_program/open_drawer.json"
-_OPEN_DRAWER_EXPERT_PROGRAM = _TASK_CONFIG_ROOT / "expert_program/open_drawer.yaml"
+_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/env.json"
+_OPEN_DRAWER_EXPERT_PROGRAM = (
+    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/expert/program.yaml"
+)
 _CASE_ID = "open_drawer_live"
 _SEED = 0
 _NUM_ENVS = 1
@@ -138,19 +140,14 @@ def test_live_open_drawer_benchmark_writes_successful_decodable_artifacts(
     assert isinstance(calls, list)
     assert len(calls) == 1
     call = calls[0]
-    assert call["semantic_id"] == "embodichain_tasks.open_drawer"
+    assert call["semantic_id"] == "simulation.articulation_link_slide"
     assert call["skill_id"] == "slide"
     assert call["status"] == "completed"
     assert call["effects"] == []
+    assert segment["metadata"]["post_policies"] == []
     validation = segment["metadata"]["validation"]
     assert validation["accepted_mask"] == [True]
-    validators = validation["validators"]
-    assert len(validators) == 1
-    assert validators[0]["kind"] == "articulation_joint_position"
-    assert validators[0]["result_mask"] == [True]
-    assert validators[0]["result"]["joint"] == "cabinet_to_drawer"
-    assert validators[0]["result"]["minimum_position"] == pytest.approx(0.10)
-    assert validators[0]["result"]["accepted_mask"] == [True]
+    assert validation["validators"] == []
 
     aggregates = aggregate_demo_success_trials(decoded_trials)
     assert len(aggregates.success_and_metrics) == 1

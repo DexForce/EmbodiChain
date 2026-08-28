@@ -358,12 +358,39 @@ class TimedTrajectory:
 
 
 @dataclass(frozen=True, slots=True)
+class PlanningFailure:
+    """Stable planning-failure classification used by recovery policy.
+
+    Args:
+        code: Exact machine-readable failure code.
+        retryable: Whether action-level recovery may replan failed rows.
+    """
+
+    code: str
+    retryable: bool = True
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.code) is not str
+            or not self.code
+            or self.code != self.code.strip()
+        ):
+            raise ValueError(
+                "PlanningFailure.code must be a non-empty string without outer "
+                "whitespace."
+            )
+        if type(self.retryable) is not bool:
+            raise TypeError("PlanningFailure.retryable must be a bool.")
+
+
+@dataclass(frozen=True, slots=True)
 class PlannerDiagnostics:
     """Planner metadata retained for debugging and recovery decisions."""
 
     backend: str
     messages: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    failure: PlanningFailure | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.backend, str) or not self.backend:
@@ -373,12 +400,22 @@ class PlannerDiagnostics:
         messages = tuple(self.messages)
         if not all(type(message) is str for message in messages):
             raise TypeError("PlannerDiagnostics.messages must contain strings.")
+        if self.failure is not None and type(self.failure) is not PlanningFailure:
+            raise TypeError(
+                "PlannerDiagnostics.failure must be PlanningFailure or None."
+            )
         object.__setattr__(self, "messages", messages)
         object.__setattr__(
             self,
             "metadata",
             MappingProxyType(deepcopy(dict(self.metadata))),
         )
+        if self.failure is not None:
+            object.__setattr__(
+                self,
+                "failure",
+                PlanningFailure(self.failure.code, self.failure.retryable),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,6 +492,10 @@ class ActionPlan:
     sequence without implying independent planning or recovery boundaries.
 
     Attributes:
+        expected_effects: Terminal symbolic state changes committed only after
+            physical-effect verification succeeds.
+        effect_candidates: Nonterminal attachment baselines available to phase
+            gates and in-flight guards without being committed to task state.
         scene_dependency_monitor_until: Optional exclusive waypoint-index upper
             bounds for individual ``scene_dependencies``. An entity is monitored
             while the current waypoint index is smaller than its bound; ``0``
@@ -483,6 +524,7 @@ class ActionPlan:
     collision_world_sensitive: bool = False
     replannable: bool = True
     expected_effects: StateDelta = field(default_factory=StateDelta)
+    effect_candidates: StateDelta = field(default_factory=StateDelta)
     effect_verification: EffectVerificationRequirement | None = None
     invocation_id: str | None = None
     invocation_revision: int = 0
@@ -670,6 +712,18 @@ class ActionPlan:
             )
         if not isinstance(self.diagnostics, PlannerDiagnostics):
             raise TypeError("diagnostics must be PlannerDiagnostics.")
+        planning_failed = bool((~self.plan_success).any().item())
+        diagnostics = self.diagnostics
+        if planning_failed and diagnostics.failure is None:
+            raise ValueError(
+                "PlannerDiagnostics.failure is required when any planning row "
+                "failed."
+            )
+        elif not planning_failed and diagnostics.failure is not None:
+            raise ValueError(
+                "PlannerDiagnostics.failure requires at least one failed planning "
+                "row."
+            )
         dependencies = tuple(self.scene_dependencies)
         if len(set(dependencies)) != len(dependencies) or not all(
             isinstance(entity_id, str) and entity_id for entity_id in dependencies
@@ -700,6 +754,19 @@ class ActionPlan:
             raise TypeError("replannable must be a bool.")
         if not isinstance(self.expected_effects, StateDelta):
             raise TypeError("expected_effects must be a StateDelta.")
+        if not isinstance(self.effect_candidates, StateDelta):
+            raise TypeError("effect_candidates must be a StateDelta.")
+        if (
+            self.effect_candidates.coordinated_held_object_updates
+            or self.effect_candidates.articulation_joint_updates
+            or any(
+                candidate is None
+                for candidate in self.effect_candidates.held_object_updates.values()
+            )
+        ):
+            raise ValueError(
+                "effect_candidates may contain only attached held-object states."
+            )
         if (
             self.effect_verification is not None
             and type(self.effect_verification) is not EffectVerificationRequirement
@@ -773,9 +840,10 @@ class ActionPlan:
             self,
             "diagnostics",
             PlannerDiagnostics(
-                backend=self.diagnostics.backend,
-                messages=self.diagnostics.messages,
-                metadata=self.diagnostics.metadata,
+                backend=diagnostics.backend,
+                messages=diagnostics.messages,
+                metadata=diagnostics.metadata,
+                failure=diagnostics.failure,
             ),
         )
         object.__setattr__(self, "scene_dependencies", dependencies)
@@ -785,6 +853,11 @@ class ActionPlan:
             MappingProxyType(monitor_until),
         )
         object.__setattr__(self, "segments", segments)
+        object.__setattr__(
+            self,
+            "effect_candidates",
+            self.effect_candidates.snapshot(),
+        )
         object.__setattr__(
             self,
             "effect_verification",
@@ -830,6 +903,7 @@ class ActionPlan:
             collision_world_sensitive=self.collision_world_sensitive,
             replannable=self.replannable,
             expected_effects=self.expected_effects,
+            effect_candidates=self.effect_candidates,
             effect_verification=self.effect_verification,
             invocation_id=self.invocation_id,
             invocation_revision=self.invocation_revision,
@@ -924,6 +998,7 @@ __all__ = [
     "CompiledTrajectory",
     "EffectVerificationRequirement",
     "PlannerDiagnostics",
+    "PlanningFailure",
     "TimedTrajectory",
     "TrajectorySegment",
     "normalize_success_mask",

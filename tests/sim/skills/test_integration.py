@@ -60,6 +60,7 @@ from embodichain.lab.sim.skills.profiles import (
     RobotResource,
     RobotSkillProfile,
     SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
 )
 from embodichain.lab.sim.skills.scene import (
     AmbiguousSceneAffordanceError,
@@ -68,6 +69,7 @@ from embodichain.lab.sim.skills.scene import (
     SceneAffordanceRef,
     SceneCollisionRole,
     SceneCollisionWorldMode,
+    SceneEntityMetadata,
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
@@ -93,7 +95,7 @@ def _action_option_templates() -> dict[str, object]:
 
 
 def _preset(preset_id: str, **kwargs: object) -> SkillPolicyPreset:
-    """Build one complete schema-v2 test preset."""
+    """Build one complete test preset."""
     kwargs.setdefault("action_option_templates", _action_option_templates())
     return SkillPolicyPreset(preset_id, **kwargs)
 
@@ -268,7 +270,7 @@ def _engine_for_integration(
     generator.supports_dynamic_collision_world = supports_dynamic_collision_world
     return AtomicActionEngine(
         generator,
-        skill_profile=integration.robot_profile,
+        control_profiles=integration.robot_profile.action_control_profiles(),
     )
 
 
@@ -373,6 +375,30 @@ def test_scene_manifest_projection_does_not_copy_affordance_payload() -> None:
 
     assert _CopyTrackedAffordance.copies == 0
     assert provider.calls == 0
+
+
+def test_scene_entity_manifest_uses_canonical_metadata_normalization() -> None:
+    """Static manifests should not redefine registry metadata normalization."""
+    metadata = SceneEntityMetadata(
+        ref=SceneObjectRef("cube"),
+        aliases=("visible_cube", "cube_alias", "visible_cube"),
+    )
+
+    manifest = SceneEntityManifest.from_metadata(metadata)
+
+    assert isinstance(manifest, SceneEntityMetadata)
+    assert manifest.aliases == metadata.aliases
+
+
+def test_scene_manifest_rejects_alias_colliding_with_its_canonical_id() -> None:
+    """Static and live catalogs should enforce the same alias collision rule."""
+    entry = SceneEntityManifest(
+        ref=SceneObjectRef("cube"),
+        aliases=("cube",),
+    )
+
+    with pytest.raises(ValueError, match="collides with canonical entity ID"):
+        SceneManifest((entry,))
 
 
 def test_scene_manifest_detects_grounding_metadata_drift() -> None:
@@ -655,8 +681,6 @@ def test_registered_payload_scene_refs_are_statically_resolved() -> None:
     extension = SemanticCallDescriptor(
         call_id="vendor.inspect",
         spec_type=RegisteredSemanticCall,
-        skill_id=pick.skill_id,
-        binding_contract=pick.binding_contract,
         target_descriptor=pick.target_descriptor,
     )
     integration = SemanticIntegrationManifest(
@@ -717,6 +741,9 @@ def test_safe_preset_requires_dynamic_collision_for_dynamic_scene(
                 strategy="motion_gen",
                 dynamic_collision_mode=source_mode,
             ),
+            workflow_recovery_policy=WorkflowRecoveryPolicy(
+                max_recovery_attempts=2,
+            ),
         ),
     )
     engine = _engine_for_integration(
@@ -736,10 +763,13 @@ def test_safe_preset_requires_dynamic_collision_for_dynamic_scene(
         integration.robot_profile.presets["safe"].motion_policy.dynamic_collision_mode
         is source_mode
     )
+    assert bound.preset.workflow_recovery_policy.max_recovery_attempts == 2
     assert provider.calls == 0
 
 
-def test_safe_preset_rejects_unsupported_dynamic_planner_before_observation() -> None:
+def test_safe_preset_rejects_unsupported_dynamic_planner_before_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     registry, provider = _scene_registry(
         with_default=True,
         dynamic_collision=True,
@@ -752,8 +782,14 @@ def test_safe_preset_rejects_unsupported_dynamic_planner_before_observation() ->
         ),
     )
     engine = _engine_for_integration(integration)
-    bind_skill_profile = Mock(wraps=engine.bind_skill_profile)
-    engine.bind_skill_profile = bind_skill_profile  # type: ignore[method-assign]
+    bind_called = False
+
+    def record_bind(*args: object, **kwargs: object) -> None:
+        nonlocal bind_called
+        del args, kwargs
+        bind_called = True
+
+    monkeypatch.setattr(RobotSkillProfile, "bind", record_bind)
 
     with pytest.raises(SemanticValidationError) as error:
         integration.bind(registry, engine)
@@ -770,7 +806,7 @@ def test_safe_preset_rejects_unsupported_dynamic_planner_before_observation() ->
     )
     assert diagnostic.candidates == ()
     assert "('cube',)" in diagnostic.message
-    bind_skill_profile.assert_not_called()
+    assert bind_called is False
     assert provider.calls == 0
 
 
@@ -864,7 +900,7 @@ def test_bound_integration_cannot_bypass_safe_dynamic_planner_preflight() -> Non
         ),
     )
     engine = _engine_for_integration(integration)
-    bound_profile = engine.bind_skill_profile(integration.robot_profile)
+    bound_profile = integration.robot_profile.bind(engine)
 
     with pytest.raises(SemanticValidationError) as error:
         BoundSemanticIntegration(
@@ -977,18 +1013,17 @@ def test_safe_preset_preserves_policy_without_dynamic_collision(
     assert provider.calls == 0
 
 
-def test_bound_semantic_integration_rejects_engine_profile_rebind() -> None:
+def test_bound_semantic_integration_survives_independent_profile_binding() -> None:
     registry, _ = _scene_registry(with_default=True)
     integration = _semantic_integration(registry)
     engine = _engine_for_integration(integration)
-    stale = integration.bind(registry, engine)
+    first = integration.bind(registry, engine)
 
-    engine.bind_skill_profile(integration.robot_profile)
+    second = integration.robot_profile.bind(engine)
+    linked = first.link_call(Pick(object=SceneObjectRef("cube")))
 
-    with pytest.raises(SemanticValidationError) as error:
-        stale.link_call(Pick(object=SceneObjectRef("cube")))
-
-    assert error.value.diagnostic.code == "semantic_profile_stale"
+    assert second is not first.robot_profile
+    assert linked.robot_profile is first.robot_profile
 
 
 def test_bound_semantic_integration_rejects_manifest_subclass_behavior() -> None:
@@ -998,8 +1033,7 @@ def test_bound_semantic_integration_rejects_manifest_subclass_behavior() -> None
     registry, _ = _scene_registry(with_default=True)
     integration = _semantic_integration(registry)
     engine = _engine_for_integration(integration)
-    bound_profile = engine.skill_profile
-    assert bound_profile is not None
+    bound_profile = integration.robot_profile.bind(engine)
     live_manifest = LiveManifest(
         scene=integration.scene,
         robot_profile=integration.robot_profile,

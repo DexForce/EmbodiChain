@@ -45,9 +45,9 @@ def _validate_identifier(value: str, *, field_name: str) -> None:
 class ParallelTimingPolicy:
     """Strict environment-grid policy for one parallel barrier.
 
-    Version 2 deliberately rejects fractional frame durations. Padding repeats
-    the last controller target, which is a deterministic position/tool hold;
-    no interpolation is hidden inside the scheduler.
+    Fractional frame durations are rejected. Padding repeats the last
+    controller target, which is a deterministic position/tool hold; no
+    interpolation is hidden inside the scheduler.
     """
 
     step_dt: float

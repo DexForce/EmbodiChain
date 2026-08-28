@@ -67,9 +67,11 @@ from embodichain.lab.sim.skills.calls import (
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.skills.compiler import (
+    ContainerRelationTargetGrounder,
     GroundedSemanticCall,
     HandOverPoseProvider,
     HandOverPoseTargets,
+    HeldObjectGuardBaseline,
     RegisteredSemanticLowerer,
     RelationTargetGrounder,
     SemanticLowering,
@@ -77,6 +79,7 @@ from embodichain.lab.sim.skills.compiler import (
     SemanticRelationTarget,
     SemanticSkillCompiler,
     SemanticWorkflow,
+    SupportSurfaceRelationTargetGrounder,
 )
 from embodichain.lab.sim.skills.effects import (
     BinaryEffectClause,
@@ -110,7 +113,10 @@ from embodichain.lab.sim.skills.profiles import (
     SkillPolicyPreset,
 )
 from embodichain.lab.sim.skills.scene import (
+    ContainerAffordance,
     GRASP_AFFORDANCE_CAPABILITY,
+    PLACEMENT_TARGET_AFFORDANCE_REVISION,
+    PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneCollisionRole,
@@ -118,6 +124,7 @@ from embodichain.lab.sim.skills.scene import (
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
+    SupportSurfaceAffordance,
 )
 
 _MOTION_CAPABILITIES = frozenset(
@@ -148,7 +155,7 @@ def _preset(
     registered: bool = False,
     **kwargs: object,
 ) -> SkillPolicyPreset:
-    """Build one complete schema-v2 test preset."""
+    """Build one complete test preset."""
     kwargs.setdefault(
         "action_option_templates",
         _action_option_templates(registered=registered),
@@ -203,7 +210,6 @@ class _InspectLowerer(RegisteredSemanticLowerer):
     """Test extension proving a lowerer cannot replace compiler ownership."""
 
     call_id: ClassVar[str] = "vendor.inspect"
-    schema_version: ClassVar[int] = 1
     target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def __init__(self) -> None:
@@ -230,6 +236,25 @@ class _InspectLowerer(RegisteredSemanticLowerer):
         )
 
 
+class _RetainingInspectLowerer(_InspectLowerer):
+    """Test extension that safely exposes retained-object look-ahead."""
+
+    def __init__(self, target: SemanticPose) -> None:
+        super().__init__()
+        self.target = target.snapshot()
+
+    def pick_lookahead_targets(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        picked_object: SceneObjectRef,
+        bound: BoundSemanticCall,
+        previous_target: SemanticObjectTarget | None,
+    ) -> tuple[SemanticObjectTarget, ...] | None:
+        del call, picked_object, bound, previous_target
+        return (SemanticObjectTarget(pose=self.target),)
+
+
 class _DerivedGraspGoal(GraspGoal):
     """Executable subclass that an extension must not smuggle into the core."""
 
@@ -238,7 +263,6 @@ class _SubclassOutputLowerer(RegisteredSemanticLowerer):
     """Try to bypass exact target contracts with executable subclasses."""
 
     call_id: ClassVar[str] = "vendor.inspect"
-    schema_version: ClassVar[int] = 1
     target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def __init__(self, output: str) -> None:
@@ -284,12 +308,6 @@ class _DualCenterHandOverProvider(HandOverPoseProvider):
         del call, context, bound
         self.calls += 1
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(
-                pose=SemanticPose(
-                    (0.5, 0.0, 0.4),
-                    (1.0, 0.0, 0.0, 0.0),
-                )
-            ),
             final=SemanticObjectTarget(pose=SceneEntityPose("table_top")),
         )
 
@@ -486,7 +504,10 @@ def _engine(
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
     generator.supports_dynamic_collision_world = supports_dynamic_collision_world
-    return AtomicActionEngine(generator, skill_profile=profile)
+    return AtomicActionEngine(
+        generator,
+        control_profiles=profile.action_control_profiles(),
+    )
 
 
 def _integration(
@@ -504,8 +525,6 @@ def _integration(
             SemanticCallDescriptor(
                 call_id="vendor.inspect",
                 spec_type=RegisteredSemanticCall,
-                skill_id=_PICK_TARGET.skill_id,
-                binding_contract=_PICK_TARGET.binding_contract,
                 target_descriptor=_PICK_TARGET,
             )
         )
@@ -602,6 +621,47 @@ def _held_context(
     )
 
 
+@pytest.mark.parametrize(
+    ("grounder", "capability", "affordance_type"),
+    (
+        (
+            SupportSurfaceRelationTargetGrounder(),
+            PLACE_ON_AFFORDANCE_CAPABILITY,
+            SupportSurfaceAffordance,
+        ),
+        (
+            ContainerRelationTargetGrounder(),
+            PLACE_IN_AFFORDANCE_CAPABILITY,
+            ContainerAffordance,
+        ),
+    ),
+)
+def test_builtin_relation_grounders_preserve_late_pose_and_confidence(
+    grounder: RelationTargetGrounder,
+    capability: str,
+    affordance_type: type[Affordance],
+) -> None:
+    """Production relation grounders keep target frames live and typed."""
+    registry, _ = _scene_registry()
+    relation = SemanticRelationTarget(
+        capability=capability,
+        affordance=SceneAffordanceRef("declared_target"),
+        payload_type=affordance_type,
+        payload_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
+    )
+
+    target = grounder.ground(
+        relation,
+        affordance=affordance_type(minimum_confidence=0.65),
+        context=_context(registry),
+    )
+
+    assert type(target) is SceneEntityPose
+    assert target.entity_id == "declared_target"
+    assert target.relative_pose is None
+    assert target.minimum_confidence == pytest.approx(0.65)
+
+
 def test_curated_analysis_selects_exact_preset_monitor_without_creating_it() -> None:
     registry, providers = _scene_registry()
     factory = _CountingRelationMonitorFactory()
@@ -624,17 +684,64 @@ def test_curated_analysis_selects_exact_preset_monitor_without_creating_it() -> 
     assert [provider.calls for provider in providers] == [0, 0]
 
 
-def test_curated_analysis_rejects_explicitly_missing_monitor() -> None:
+def test_curated_analysis_selects_monitors_per_semantic_call() -> None:
+    registry, _ = _scene_registry()
+    profile = _profile(
+        preset=_preset(
+            "safe",
+            effect_monitors={
+                "pick": EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                )
+            },
+        )
+    )
+    compiler, _ = _compiler(registry, profile=profile)
+
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            Place(
+                object=SceneObjectRef("cube"),
+                at=SemanticPose((0.5, 0.0, 0.3), (1.0, 0.0, 0.0, 0.0)),
+            ),
+        )
+    )
+
+    assert workflow.calls[0].effect_monitor_ref is not None
+    assert workflow.calls[1].effect_monitor_ref is None
+
+
+def test_curated_analysis_omits_explicitly_unconfigured_monitor() -> None:
     registry, _ = _scene_registry()
     profile = _profile(
         preset=_preset("safe", effect_monitors={}),
     )
     compiler, _ = _compiler(registry, profile=profile)
 
-    with pytest.raises(SemanticValidationError) as error:
-        compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
 
-    assert error.value.diagnostic.code == "missing_effect_monitor"
+    assert workflow.calls[0].effect_monitor_ref is None
+
+
+def test_trajectory_only_analysis_omits_effect_contracts_gates_and_guards() -> None:
+    """Open-loop presets lower Pick without installing physical verification."""
+    registry, _ = _scene_registry()
+    profile = _profile(
+        preset=_preset("safe", effect_monitors={}),
+    )
+    compiler, _ = _compiler(registry, profile=profile)
+
+    workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    grounded = compiler.ground(workflow, 0, _context(registry))
+
+    assert workflow.calls[0].effect_monitor_ref is None
+    assert grounded.effect_spec is None
+    assert grounded.effect_monitor is None
+    assert grounded.effect_gates == ()
+    assert grounded.effect_guards == ()
+    assert grounded.invocation.phase_effect_gates == ()
 
 
 def test_uninstalled_effect_monitor_fails_analysis_without_factory_creation() -> None:
@@ -748,6 +855,28 @@ def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding() ->
     assert revised.effect_spec is not None
     assert revised.effect_spec.invocation_revision == 1
     assert revised.effect_monitor.spec.invocation_revision == 1
+    assert len(first.effect_guards) == 1
+    guard = first.effect_guards[0]
+    assert guard.guard_id == "destination_attached"
+    assert guard.active_segments == ("lift",)
+    assert guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert guard.task_state_key == "manipulator"
+    assert guard.invalidation_task_state_keys == ("manipulator",)
+    assert guard.retry_action is True
+    assert guard.effect_monitor is not first.effect_monitor
+    assert guard.effect_spec.effect_kind is SemanticEffectKind.ATTACH
+    assert repeated.effect_guards[0].effect_monitor is not guard.effect_monitor
+    assert len(first.effect_gates) == 1
+    gate = first.effect_gates[0]
+    assert gate.gate_id == "destination_acquired"
+    assert gate.segment_name == "lift"
+    assert gate.retry_action is True
+    assert gate.effect_monitor is not first.effect_monitor
+    assert gate.effect_monitor is not guard.effect_monitor
+    assert gate.effect_spec.state_expectations[0].expectation_id == "destination"
+    assert gate.effect_spec.effect_kind is SemanticEffectKind.ATTACH
+    assert first.invocation.phase_effect_gates == (gate.requirement,)
+    assert repeated.effect_gates[0].effect_monitor is not gate.effect_monitor
 
 
 def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
@@ -799,6 +928,31 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     )
     assert isinstance(constraint, BinaryEffectClause)
     assert constraint.expected is False
+    assert len(grounded.effect_guards) == 1
+    guard = grounded.effect_guards[0]
+    assert guard.guard_id == "source_attached"
+    assert guard.active_segments == ("approach",)
+    assert guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+    assert guard.task_state_key == "manipulator"
+    assert guard.invalidation_task_state_keys == ("manipulator",)
+    assert guard.retry_action is False
+    guard_pose, guard_constraint = guard.effect_spec.clauses
+    assert isinstance(guard_pose, PoseRelationClause)
+    assert guard_pose.expectation is PoseRelationExpectation.MATCHED
+    assert guard_pose.baseline_object_to_endpoint is None
+    assert isinstance(guard_constraint, BinaryEffectClause)
+    assert guard_constraint.expected is True
+    assert len(grounded.effect_gates) == 1
+    gate = grounded.effect_gates[0]
+    assert gate.gate_id == "source_released"
+    assert gate.segment_name == "retract"
+    assert gate.retry_action is True
+    assert gate.effect_spec.effect_kind is SemanticEffectKind.RELEASE
+    gate_relation = gate.effect_spec.state_expectations[0]
+    assert isinstance(gate_relation, HeldObjectStateExpectation)
+    assert gate_relation.expectation_id == "source"
+    assert gate_relation.relation is HeldObjectRelation.DETACHED
+    assert grounded.invocation.phase_effect_gates == (gate.requirement,)
 
 
 def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
@@ -847,6 +1001,51 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
     assert destination_constraint.expected is False
     assert type(grounded.invocation.goal) is HandOverGoal
     assert type(grounded.invocation.skill_options) is HandOverOptions
+    assert tuple(guard.guard_id for guard in grounded.effect_guards) == (
+        "source_attached",
+        "destination_attached",
+    )
+    source_guard, destination_guard = grounded.effect_guards
+    assert source_guard.active_segments == (
+        "pickup_transport",
+        "receive_approach",
+        "receive_close",
+    )
+    assert source_guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert source_guard.task_state_key == "left"
+    assert source_guard.invalidation_task_state_keys == ("left",)
+    assert source_guard.retry_action is True
+    assert destination_guard.active_segments == ("handover_release", "place")
+    assert destination_guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert destination_guard.task_state_key == "right"
+    assert destination_guard.invalidation_task_state_keys == ("left", "right")
+    assert destination_guard.retry_action is True
+    assert tuple(gate.gate_id for gate in grounded.effect_gates) == (
+        "source_acquired",
+        "destination_acquired",
+        "source_released",
+    )
+    source_acquired, destination_acquired, source_released = grounded.effect_gates
+    assert source_acquired.segment_name == "pickup_transport"
+    assert destination_acquired.segment_name == "handover_release"
+    assert source_released.segment_name == "place"
+    assert all(gate.retry_action for gate in grounded.effect_gates)
+    assert source_acquired.effect_monitor is not source_guard.effect_monitor
+    assert destination_acquired.effect_monitor is not destination_guard.effect_monitor
+    source_acquired_relation = source_acquired.effect_spec.state_expectations[0]
+    destination_acquired_relation = destination_acquired.effect_spec.state_expectations[
+        0
+    ]
+    source_released_relation = source_released.effect_spec.state_expectations[0]
+    assert isinstance(source_acquired_relation, HeldObjectStateExpectation)
+    assert isinstance(destination_acquired_relation, HeldObjectStateExpectation)
+    assert isinstance(source_released_relation, HeldObjectStateExpectation)
+    assert source_acquired_relation.relation is HeldObjectRelation.ATTACHED
+    assert destination_acquired_relation.relation is HeldObjectRelation.ATTACHED
+    assert source_released_relation.relation is HeldObjectRelation.DETACHED
+    assert grounded.invocation.phase_effect_gates == tuple(
+        gate.requirement for gate in grounded.effect_gates
+    )
 
 
 def test_registered_call_without_monitor_has_no_effect_contract() -> None:
@@ -878,6 +1077,8 @@ def test_registered_call_without_monitor_has_no_effect_contract() -> None:
     assert workflow.calls[0].effect_monitor_ref is None
     assert grounded.effect_spec is None
     assert grounded.effect_monitor is None
+    assert grounded.effect_gates == ()
+    assert grounded.invocation.phase_effect_gates == ()
     options = grounded.invocation.skill_options
     assert type(options) is PickUpOptions
     assert options.pre_grasp_distance == 0.07
@@ -970,6 +1171,48 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
         drop.to_matrix(),
     )
     engine.resolve(grounded.invocation)
+
+
+def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
+    """Pickup feasibility must screen the object pose that Place will use."""
+    registry, providers = _scene_registry()
+    object_pose = torch.eye(4).repeat(2, 1, 1)
+    object_pose[:, :3, :3] = torch.tensor(
+        (
+            (0.0, -1.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+    )
+    providers[0].pose = object_pose
+    templates = _action_option_templates()
+    templates["place"] = PlaceOptions(preserve_current_object_orientation=True)
+    compiler, _ = _compiler(
+        registry,
+        profile=_profile(
+            preset=_preset("safe", action_option_templates=templates),
+        ),
+    )
+    drop = SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0))
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            Place(object=SceneObjectRef("cube"), at=drop),
+        )
+    )
+
+    analyzed_target = workflow.calls[0].downstream_object_targets[0]
+    grounded = compiler.ground(workflow, 0, _context(registry))
+    options = grounded.invocation.skill_options
+
+    assert analyzed_target.preserve_current_object_orientation is True
+    assert type(options) is PickUpOptions
+    downstream = options.downstream_object_target_poses[0]
+    assert isinstance(downstream, torch.Tensor)
+    torch.testing.assert_close(
+        downstream[:, :3, 3], drop.to_matrix()[:3, 3].repeat(2, 1)
+    )
+    torch.testing.assert_close(downstream[:, :3, :3], object_pose[:, :3, :3])
 
 
 def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> None:
@@ -1210,6 +1453,43 @@ def test_place_uses_verified_object_to_eef_transform() -> None:
     engine.resolve(grounded.invocation)
 
 
+def test_place_can_keep_observed_object_orientation_at_target() -> None:
+    registry, (cube_provider, _) = _scene_registry()
+    cube_pose = torch.eye(4).repeat(2, 1, 1)
+    cube_pose[:, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    cube_provider.pose = cube_pose
+    templates = _action_option_templates()
+    templates["place"] = PlaceOptions(preserve_current_object_orientation=True)
+    compiler, _ = _compiler(
+        registry,
+        profile=_profile(
+            preset=_preset("safe", action_option_templates=templates),
+        ),
+    )
+    pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    semantics = compiler.ground(
+        pick_workflow,
+        0,
+        _context(registry),
+    ).invocation.goal.semantics
+    object_to_eef = torch.eye(4).repeat(2, 1, 1)
+    object_to_eef[:, 2, 3] = 0.12
+    context = _held_context(registry, semantics, object_to_eef)
+    drop = SemanticPose((0.5, -0.2, 0.4), (1.0, 0.0, 0.0, 0.0))
+    workflow = compiler.analyze((Place(object=SceneObjectRef("cube"), at=drop),))
+
+    grounded = compiler.ground(workflow, 0, context)
+
+    goal = grounded.invocation.goal
+    assert type(goal) is PlaceGoal
+    assert isinstance(goal.xpos, torch.Tensor)
+    target = drop.to_matrix().repeat(2, 1, 1)
+    target[:, :3, :3] = cube_pose[:, :3, :3]
+    torch.testing.assert_close(goal.xpos, torch.bmm(target, object_to_eef))
+
+
 def test_relation_place_composes_late_target_with_verified_transform() -> None:
     registry, _ = _scene_registry()
     compiler, _ = _compiler(registry)
@@ -1327,6 +1607,39 @@ def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
     grounded = compiler.ground(workflow, 1, _context(registry))
     assert grounded.invocation.skill_id == "pick_up"
     engine.resolve(grounded.invocation)
+
+
+def test_registered_lowerer_can_certify_retained_object_lookahead() -> None:
+    """A safe registered bridge contributes targets without executable code."""
+    registry, _ = _scene_registry()
+    registered_target = SemanticPose(
+        (0.25, 0.1, 0.4),
+        (1.0, 0.0, 0.0, 0.0),
+    )
+    place_target = SemanticPose(
+        (0.3, 0.0, 0.2),
+        (1.0, 0.0, 0.0, 0.0),
+    )
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(_RetainingInspectLowerer(registered_target),),
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            RegisteredSemanticCall(call_id="vendor.inspect"),
+            Place(object=SceneObjectRef("cube"), at=place_target),
+        )
+    )
+
+    targets = workflow.calls[0].downstream_object_targets
+
+    assert len(targets) == 2
+    torch.testing.assert_close(
+        targets[0].pose.to_matrix(), registered_target.to_matrix()
+    )
+    torch.testing.assert_close(targets[1].pose.to_matrix(), place_target.to_matrix())
 
 
 @pytest.mark.parametrize(

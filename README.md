@@ -43,7 +43,8 @@ To get started with EmbodiChain, follow these steps:
 ## Task Environments
 
 EmbodiChain's task environments are decoupled from the core framework at the
-import-package level. The official tableware, RL, and special tasks live in the
+import-package level. The official classic-control, manipulation, and special
+task families live in the
 [embodichain_tasks source tree](https://github.com/DexForce/EmbodiChain/tree/main/embodichain_tasks)
 and are included in the main `embodichain` wheel. Both `pip install embodichain`
 and editable `pip install -e .` therefore install

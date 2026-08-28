@@ -915,17 +915,46 @@ class ResourceBinding:
         object.__setattr__(self, "resources", MappingProxyType(normalized))
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowRecoveryPolicy:
+    """Bound workflow-level recovery for curated semantic effect failures.
+
+    The atomic action remains the owner of replans and whole-action retries.
+    This policy applies only after that action emits ``RECOVERY_REQUIRED`` and
+    returns control to :class:`~embodichain.lab.sim.skills.SkillRuntime`.
+
+    Args:
+        max_recovery_attempts: Maximum recovery cycles for each environment row
+            at one semantic-call boundary.  Zero disables workflow recovery.
+    """
+
+    max_recovery_attempts: int = 0
+
+    def __post_init__(self) -> None:
+        """Validate a finite, non-negative per-row recovery budget."""
+        if type(self.max_recovery_attempts) is not int:
+            raise TypeError("max_recovery_attempts must be an integer.")
+        if not 0 <= self.max_recovery_attempts <= 100:
+            raise ValueError("max_recovery_attempts must be in [0, 100].")
+
+    def snapshot(self) -> WorkflowRecoveryPolicy:
+        """Return an independently owned immutable policy."""
+        return WorkflowRecoveryPolicy(
+            max_recovery_attempts=self.max_recovery_attempts,
+        )
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class SkillPolicyPreset:
-    """Versioned policies and typed semantic-call option templates."""
+    """Policies and typed semantic-call option templates."""
 
     preset_id: str
-    schema_version: int
     required_planner: str | None
     """Optional planner backend required by this preset."""
     _motion_policy: MotionPolicy
     _tracking_policy: TrackingPolicy
     _recovery_policy: RecoveryPolicy
+    _workflow_recovery_policy: WorkflowRecoveryPolicy
     _runner_cfg: ExecutionRunnerCfg
     _effect_monitors: Mapping[str, EffectMonitorRef]
     _action_option_templates: Mapping[str, ActionOptions]
@@ -935,23 +964,16 @@ class SkillPolicyPreset:
         preset_id: str,
         *,
         action_option_templates: Mapping[str, ActionOptions],
-        schema_version: int = 2,
         motion_policy: MotionPolicy | None = None,
         tracking_policy: TrackingPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
+        workflow_recovery_policy: WorkflowRecoveryPolicy | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         effect_monitors: Mapping[str, EffectMonitorRef] | None = None,
         required_planner: str | None = None,
     ) -> None:
         """Own one policy bundle without exposing mutable nested configuration."""
         _validate_identifier(preset_id, field_name="SkillPolicyPreset.preset_id")
-        if not isinstance(schema_version, int) or isinstance(schema_version, bool):
-            raise TypeError("SkillPolicyPreset.schema_version must be an integer.")
-        if schema_version != 2:
-            raise ValueError(
-                "Unsupported SkillPolicyPreset.schema_version "
-                f"{schema_version}; supported versions are [2]."
-            )
         if required_planner is not None:
             _validate_identifier(
                 required_planner,
@@ -966,6 +988,11 @@ class SkillPolicyPreset:
         selected_recovery = (
             RecoveryPolicy() if recovery_policy is None else recovery_policy
         )
+        selected_workflow_recovery = (
+            WorkflowRecoveryPolicy()
+            if workflow_recovery_policy is None
+            else workflow_recovery_policy
+        )
         selected_runner = ExecutionRunnerCfg() if runner_cfg is None else runner_cfg
         if not isinstance(selected_motion, MotionPolicy):
             raise TypeError("motion_policy must be a MotionPolicy.")
@@ -973,6 +1000,10 @@ class SkillPolicyPreset:
             raise TypeError("tracking_policy must be a TrackingPolicy.")
         if not isinstance(selected_recovery, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
+        if type(selected_workflow_recovery) is not WorkflowRecoveryPolicy:
+            raise TypeError(
+                "workflow_recovery_policy must be a WorkflowRecoveryPolicy."
+            )
         if not isinstance(selected_runner, ExecutionRunnerCfg):
             raise TypeError("runner_cfg must be an ExecutionRunnerCfg.")
         selected_effect_monitors = (
@@ -1015,11 +1046,15 @@ class SkillPolicyPreset:
                 options
             )
         object.__setattr__(self, "preset_id", preset_id)
-        object.__setattr__(self, "schema_version", schema_version)
         object.__setattr__(self, "required_planner", required_planner)
         object.__setattr__(self, "_motion_policy", deepcopy(selected_motion))
         object.__setattr__(self, "_tracking_policy", deepcopy(selected_tracking))
         object.__setattr__(self, "_recovery_policy", deepcopy(selected_recovery))
+        object.__setattr__(
+            self,
+            "_workflow_recovery_policy",
+            selected_workflow_recovery.snapshot(),
+        )
         object.__setattr__(self, "_runner_cfg", deepcopy(selected_runner))
         object.__setattr__(
             self,
@@ -1043,6 +1078,11 @@ class SkillPolicyPreset:
         return deepcopy(self._recovery_policy)
 
     @property
+    def workflow_recovery_policy(self) -> WorkflowRecoveryPolicy:
+        """Return the bounded semantic-workflow recovery policy."""
+        return self._workflow_recovery_policy.snapshot()
+
+    @property
     def tracking_policy(self) -> TrackingPolicy:
         """Return independently owned endpoint-tracking settings."""
         return deepcopy(self._tracking_policy)
@@ -1054,7 +1094,13 @@ class SkillPolicyPreset:
 
     @property
     def effect_monitors(self) -> Mapping[str, EffectMonitorRef]:
-        """Return effect-monitor selections keyed by exact semantic call ID."""
+        """Return effect-monitor selections keyed by exact semantic call ID.
+
+        Monitor presence enables physical verification for that semantic call.
+        Omitting ``effect_monitors`` at construction installs the built-in
+        curated monitors; passing an explicit empty mapping selects open-loop
+        planned-effect projection.
+        """
         return MappingProxyType(
             {
                 semantic_id: monitor_ref.snapshot()
@@ -1095,10 +1141,10 @@ class SkillPolicyPreset:
         """Return an independently owned preset value."""
         return SkillPolicyPreset(
             preset_id=self.preset_id,
-            schema_version=self.schema_version,
             motion_policy=self.motion_policy,
             tracking_policy=self.tracking_policy,
             recovery_policy=self.recovery_policy,
+            workflow_recovery_policy=self.workflow_recovery_policy,
             runner_cfg=self.runner_cfg,
             effect_monitors=self.effect_monitors,
             required_planner=self.required_planner,
@@ -1650,7 +1696,7 @@ class BoundRobotSkillProfile:
 
     @property
     def engine(self) -> AtomicActionEngine:
-        """Return the exact action engine that owns this bound profile."""
+        """Return the exact action engine used to validate this profile."""
         return self._engine
 
     @property
@@ -1668,6 +1714,14 @@ class BoundRobotSkillProfile:
         """Return installed semantic skills fully supported by this profile."""
         self._assert_catalog_current()
         return self._skills
+
+    def assert_current(self) -> None:
+        """Reject this binding after the engine's skill catalog changes.
+
+        Raises:
+            RuntimeError: If actions were registered or replaced after binding.
+        """
+        self._assert_catalog_current()
 
     def preset(
         self,
@@ -2389,4 +2443,5 @@ __all__ = [
     "RobotSkillProfile",
     "SkillPolicyPreset",
     "UnsupportedSkillError",
+    "WorkflowRecoveryPolicy",
 ]
