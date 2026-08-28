@@ -161,10 +161,6 @@ def generate_scene_and_refine(
         vlm_client=vlm_client,
         debug_output_root=debug_output_root / "visual_yaw",
     )
-    simready_assets_layout = _apply_visual_yaws_to_simready_asset_layouts(
-        simready_assets_layout=simready_assets_layout,
-        z_up_yaws_degrees_by_id=visual_yaws_by_id,
-    )
     simready_table_layout = simready_processor.process_table()
     # Concat then save the table info and the assets info in one JSON file.
     simready_layout = [simready_table_layout, *simready_assets_layout]
@@ -179,6 +175,7 @@ def generate_scene_and_refine(
         scene_graph=scene_graph,
         simready_geometry_output_root=simready_geometry_output_root,  # Contains simready assets and their current coarse layout JSON.
         debug_output_root=debug_output_root,  # Keep the table support surface info + optimized layout info (render with matplotlib) for debugging.
+        z_up_yaws_degrees_by_id=visual_yaws_by_id,
     )
 
     # Write the Updated scene JSON for debugging.
@@ -233,7 +230,7 @@ def _apply_visual_yaws_to_simready_asset_layouts(
     simready_assets_layout: list[dict[str, object]],
     z_up_yaws_degrees_by_id: dict[str, float],
 ) -> list[dict[str, object]]:
-    """Keep SimReady positions but replace each coarse rotation with canonical yaw."""
+    """Keep table-frame positions but replace each coarse rotation with canonical yaw."""
     layout_ids = [layout.get("id") for layout in simready_assets_layout]
     if not all(isinstance(layout_id, str) and layout_id for layout_id in layout_ids):
         raise ValueError("Every SimReady asset layout must contain a non-empty id.")
@@ -418,6 +415,7 @@ def _layout_refinement(
     scene_graph: SceneGraph,
     simready_geometry_output_root: str | Path,
     debug_output_root: str | Path,
+    z_up_yaws_degrees_by_id: dict[str, float],
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
 
     # 1. All layouts and geometries below are SimReady outputs. Do not mix a
@@ -481,6 +479,14 @@ def _layout_refinement(
                 simready_asset_to_table_matrix,
             )
         )
+
+    # Table-frame conversion retains the coarse relative positions but can also
+    # transfer an inverted coarse-table orientation; replace only that rotation
+    # with the canonical SimReady pose and its observed z-up yaw.
+    refined_assets_layout = _apply_visual_yaws_to_simready_asset_layouts(
+        simready_assets_layout=refined_assets_layout,
+        z_up_yaws_degrees_by_id=z_up_yaws_degrees_by_id,
+    )
 
     # 4. Only direct on-table children participate in the table-level layout
     # stages. Their descendants follow each solved root transform until their
