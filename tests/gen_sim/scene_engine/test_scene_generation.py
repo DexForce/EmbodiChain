@@ -30,6 +30,7 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 from embodichain.gen_sim.scene_engine.core.scene import Scene, SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation import (
     _align_table_roots_individually,
+    _generate_articulated_usdcs,
     _apply_visual_yaws_to_simready_asset_layouts,
     _apply_root_layout_updates_to_descendant_subtrees,
     _optimize_simready_asset_visual_yaws,
@@ -216,6 +217,81 @@ def test_visual_yaws_replace_coarse_rotations_but_preserve_positions() -> None:
     expected_z_up_yaw = Rotation.from_euler("z", 45.0, degrees=True).as_matrix()
     assert np.allclose(_z_up_rotation_from_y_up_layout(yawed_layout), expected_z_up_yaw)
     assert np.allclose(yawed_layout["pos"], [0.1, 0.2, 0.3])
+
+
+def test_articulated_usdcs_use_visible_rgba_in_scene_order(tmp_path: Path) -> None:
+    class FakeArticulatedGenerationClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str | Path, str | Path]] = []
+
+        def generate_articulated_usdc(
+            self,
+            *,
+            prompt: str,
+            image_path: str | Path,
+            output_path: str | Path,
+        ) -> Path:
+            self.calls.append((prompt, image_path, output_path))
+            resolved_output_path = Path(output_path)
+            resolved_output_path.write_bytes(b"USDC")
+            return resolved_output_path
+
+    drawer_rgba_path = tmp_path / "drawer_rgba.png"
+    microwave_rgba_path = tmp_path / "microwave_rgba.png"
+    drawer_rgba_path.write_bytes(b"PNG")
+    microwave_rgba_path.write_bytes(b"PNG")
+    drawer = SceneObject(
+        id="drawer_001",
+        kind="asset",
+        category="drawer",
+        name="drawer",
+        description="white drawer with a pull handle",
+        is_articulated=True,
+        visible_rgba_path=str(drawer_rgba_path),
+    )
+    microwave = SceneObject(
+        id="microwave_001",
+        kind="asset",
+        category="microwave",
+        name="microwave",
+        description="black microwave with a hinged door",
+        is_articulated=True,
+        visible_rgba_path=str(microwave_rgba_path),
+    )
+    static_mug = SceneObject(
+        id="mug_001",
+        kind="asset",
+        category="mug",
+        name="mug",
+        description="blue ceramic mug",
+        visible_rgba_path=str(tmp_path / "mug_rgba.png"),
+    )
+    client = FakeArticulatedGenerationClient()
+
+    _generate_articulated_usdcs(
+        scene=Scene(objects=[drawer, static_mug, microwave]),
+        output_root=tmp_path / "articulated_geometry",
+        coarse_scales_y_up_by_id={
+            "drawer_001": [1.0, 2.0, 3.0],
+            "microwave_001": [4.0, 5.0, 6.0],
+        },
+        articulated_generation_client=client,  # type: ignore[arg-type]
+    )
+
+    assert [call[0] for call in client.calls] == [
+        "white drawer with a pull handle",
+        "black microwave with a hinged door",
+    ]
+    assert drawer.articulated_usdc_path == str(
+        tmp_path / "articulated_geometry" / "drawer_001.usdc"
+    )
+    assert microwave.articulated_usdc_path == str(
+        tmp_path / "articulated_geometry" / "microwave_001.usdc"
+    )
+    assert drawer.to_dict()["articulated_usdc_path"] == drawer.articulated_usdc_path
+    assert drawer.articulated_usdc_scale == [1.0, 2.0, 3.0]
+    assert microwave.articulated_usdc_scale == [4.0, 5.0, 6.0]
+    assert static_mug.articulated_usdc_path is None
 
 
 def test_table_root_update_propagates_its_pose_delta_to_descendants() -> None:

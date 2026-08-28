@@ -32,6 +32,7 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
 )
+from embodichain.gen_sim.scene_engine.cli.preview import _add_articulations
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
     SceneExportImporter,
@@ -146,7 +147,6 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
         physics=_physics("dynamic"),
     )
     asset.center_xy = [0.25, -0.5]
-    asset.is_articulated = True
 
     scene = Scene(objects=[table, asset])
     export_path = SceneExporter(
@@ -164,7 +164,7 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert entry["uid"] == "cup"
     assert entry["category"] == "asset"
     assert entry["name"] == "cup"
-    assert entry["is_articulated"] is True
+    assert entry["is_articulated"] is False
     assert entry["body_type"] == "dynamic"
     assert entry["init_pos"] == [1.0, -3.0, 2.0]
     assert entry["body_scale"] == [1.0, 2.0, 3.0]
@@ -196,8 +196,97 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert [asset.id for asset in imported_scene.assets] == ["cup"]
     assert imported_scene.assets[0].category == "asset"
     assert imported_scene.assets[0].name == "cup"
-    assert imported_scene.assets[0].is_articulated is True
+    assert imported_scene.assets[0].is_articulated is False
     assert imported_graph.to_dict() == _scene_graph(scene).to_dict()
+
+
+def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
+    tmp_path: Path,
+) -> None:
+    table_glb = tmp_path / "table.glb"
+    drawer_glb = tmp_path / "drawer.glb"
+    drawer_usdc = tmp_path / "drawer.usdc"
+    table_glb.write_bytes(b"glTF-table")
+    drawer_glb.write_bytes(b"glTF-drawer")
+    drawer_usdc.write_bytes(b"USDC-drawer")
+    table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=table_glb,
+        physics=_physics("kinematic"),
+    )
+    drawer = _scene_object(
+        object_id="drawer",
+        kind="asset",
+        glb_path=drawer_glb,
+        physics=_physics("dynamic"),
+    )
+    drawer.is_articulated = True
+    drawer.articulated_usdc_path = str(drawer_usdc)
+    drawer.articulated_usdc_scale = [1.25, 2.5, 3.75]
+    scene = Scene(objects=[table, drawer])
+
+    export_path = SceneExporter(
+        scene=scene,
+        scene_graph=_scene_graph(scene),
+        output_root=tmp_path / "output",
+    ).export()
+    exported = json.loads(export_path.read_text(encoding="utf-8"))
+
+    assert exported["rigid_object"] == []
+    articulation = exported["articulation"][0]
+    assert articulation["fpath"] == "articulated_assets/drawer/drawer.usdc"
+    assert articulation["proxy_glb_fpath"] == "mesh_assets/drawer/drawer.glb"
+    assert articulation["body_scale"] == [1.25, 2.5, 3.75]
+    assert articulation["proxy_body_scale"] == [1.0, 2.0, 3.0]
+    assert (export_path.parent / articulation["fpath"]).read_bytes() == b"USDC-drawer"
+    assert (
+        export_path.parent / articulation["proxy_glb_fpath"]
+    ).read_bytes() == b"glTF-drawer"
+
+    imported_scene = SceneExportImporter(output_root=tmp_path / "output").import_scene()
+    imported_drawer = imported_scene.assets[0]
+    assert imported_drawer.simready_glb_path == str(
+        export_path.parent / "mesh_assets" / "drawer" / "drawer.glb"
+    )
+    assert imported_drawer.articulated_usdc_path == str(
+        export_path.parent / "articulated_assets" / "drawer" / "drawer.usdc"
+    )
+    assert imported_drawer.articulated_usdc_scale == [1.25, 2.5, 3.75]
+
+
+def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:
+    class FakeSimulationManager:
+        def __init__(self) -> None:
+            self.articulation_cfgs: list[object] = []
+
+        def add_articulation(self, cfg: object) -> None:
+            self.articulation_cfgs.append(cfg)
+
+    usdc_path = tmp_path / "articulated_assets" / "drawer" / "drawer.usdc"
+    usdc_path.parent.mkdir(parents=True)
+    usdc_path.write_bytes(b"USDC-drawer")
+    sim = FakeSimulationManager()
+
+    _add_articulations(
+        sim=sim,  # type: ignore[arg-type]
+        entries=[
+            {
+                "uid": "drawer",
+                "fpath": "articulated_assets/drawer/drawer.usdc",
+                "init_pos": [1.0, 2.0, 3.0],
+                "init_rot": [10.0, 20.0, 30.0],
+                "body_scale": [1.25, 2.5, 3.75],
+                "fix_base": True,
+            }
+        ],
+        config_dir=tmp_path,
+    )
+
+    articulation_cfg = sim.articulation_cfgs[0]
+    assert articulation_cfg.uid == "drawer"  # type: ignore[attr-defined]
+    assert articulation_cfg.fpath == str(usdc_path)  # type: ignore[attr-defined]
+    assert articulation_cfg.body_scale == (1.25, 2.5, 3.75)  # type: ignore[attr-defined]
 
 
 def test_scene_graph_importer_restores_node_pose_description() -> None:
