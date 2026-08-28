@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
 import pytest
 import torch
 
@@ -126,6 +127,26 @@ class BaseRigidObjectTest:
         assert (
             not self.chair.is_static
         ), "Chair should be kinematic but is marked static"
+
+    def test_replicated_collision_shapes_are_isolated_by_environment(self):
+        """Every rigid shape should use its replicated environment group."""
+        for env_index in range(NUM_ARENAS):
+            for rigid_object in (self.duck, self.table, self.chair):
+                entity = rigid_object._entities[env_index]
+                if self.physics == "newton":
+                    shape_ids = entity.physics_body.shape_ids
+                    assert shape_ids
+                    groups = (
+                        entity.physics_body.runtime.model.shape_collision_group.numpy()
+                    )
+                    assert {int(groups[shape_id]) for shape_id in shape_ids} == {
+                        env_index + 1
+                    }
+                else:
+                    np.testing.assert_array_equal(
+                        entity.object_desc.physics.collision_filter_data,
+                        np.asarray([env_index, 1, 0, 0], dtype=np.uint32),
+                    )
 
     def test_spawn_clones_distinct_entities(self):
         """Multi-env rigid objects are spawned via prototype + clone_actor_to."""

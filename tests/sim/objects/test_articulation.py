@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -188,13 +189,43 @@ class BaseArticulationTest:
 
         # --- Check poses immediately after setting
         xyz = self.art.get_local_pose()[0, :3]
-
         expected_pos = torch.tensor(
             [0.0, 0.0, 1.0], device=self.sim.device, dtype=torch.float32
         )
         assert torch.allclose(
             xyz, expected_pos, atol=1e-5
         ), f"FAIL: Drawer pose not set correctly: {xyz.tolist()}"
+
+    def test_replicated_link_shapes_are_isolated_by_environment(self):
+        """Every articulation link shape should use its environment group."""
+        for env_index, entity in enumerate(self.art._entities):
+            if self.physics == "newton":
+                shape_ids = [
+                    shape_id
+                    for link in entity.physics_articulation.links
+                    for shape_id in link.shape_ids
+                ]
+                assert shape_ids
+                groups = (
+                    entity.physics_articulation.runtime.model.shape_collision_group.numpy()
+                )
+                assert {int(groups[shape_id]) for shape_id in shape_ids} == {
+                    env_index + 1
+                }
+                continue
+
+            expected = np.asarray([env_index, 1, 0, 0], dtype=np.uint32)
+            physical_links = [
+                link
+                for link in entity.articulation_desc.links
+                if link.rigid_body is not None
+            ]
+            assert physical_links
+            for link in physical_links:
+                np.testing.assert_array_equal(
+                    link.rigid_body.collision_filter_data,
+                    expected,
+                )
 
     def test_body_data_exposes_link_mass_properties(self):
         """Current and initialization-time link mass properties share one layout."""

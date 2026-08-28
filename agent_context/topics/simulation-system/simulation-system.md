@@ -116,6 +116,15 @@ render-only skeleton, applies the source-name overlays, and then builds the
 immutable Newton model once. A Viser backend forces `headless=True`; Viser and
 the native DexSim window are mutually exclusive.
 
+`SpawnScene` always requests DexSim replication with
+`collision_policy="isolated"`. Consequently, when `num_envs > 1`, all
+per-environment dynamic, kinematic, and static rigid shapes and every
+articulation link shape collide only with entities in the same Arena. Global
+`per_env=False` physics resources still collide with every Arena. EmbodiChain
+owns this policy choice; DexSim's `ReplicatePlan` and backend adapters own the
+effective Default filter data and Newton collision groups. Do not duplicate
+the backend-specific group calculation in object facades or task configs.
+
 The default ground plane authors its repeated texture coordinates in the Spawn
 render descriptor before materialization, so native and offscreen render paths
 receive identical UV data on their first GPU upload.

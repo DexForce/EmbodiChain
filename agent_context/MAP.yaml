@@ -31,6 +31,9 @@ topics:
       - manual update
       - GPU physics
       - simulation lifecycle
+      - collision_policy
+      - collision isolation
+      - arena isolation
       - ArticulationJointKinematics
       - get_parent_joint_chain
     paths:
@@ -43,6 +46,7 @@ topics:
       - embodichain/lab/sim/common.py
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
+      - embodichain/lab/sim/spawn/scene.py
       - embodichain/lab/sim/objects/__init__.py
       - embodichain/lab/sim/objects/articulation.py
       - embodichain/lab/sim/objects/deformable/

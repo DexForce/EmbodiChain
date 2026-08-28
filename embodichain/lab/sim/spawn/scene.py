@@ -62,6 +62,7 @@ class SpawnScene:
             count=num_envs,
             spacing=spacing,
             name_format="arena_{i}",
+            collision_policy="isolated",
         )
         self._assets: dict[str, _AssetDeclaration] = {}
 
