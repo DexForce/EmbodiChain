@@ -32,7 +32,10 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
 )
-from embodichain.gen_sim.scene_engine.cli.preview import _add_articulations
+from embodichain.gen_sim.scene_engine.cli.preview import (
+    _add_articulations,
+    _setup_viser_joint_control,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
     SceneExportImporter,
@@ -287,6 +290,49 @@ def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:
     assert articulation_cfg.uid == "drawer"  # type: ignore[attr-defined]
     assert articulation_cfg.fpath == str(usdc_path)  # type: ignore[attr-defined]
     assert articulation_cfg.body_scale == (1.25, 2.5, 3.75)  # type: ignore[attr-defined]
+
+
+def test_preview_registers_exported_articulation_joint_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.provider: object | None = None
+
+        def set_joint_control_provider(self, provider: object) -> None:
+            self.provider = provider
+
+    class FakeSimulationManager:
+        def __init__(self) -> None:
+            self.visualization_runtime = FakeRuntime()
+
+    class FakeController:
+        def __init__(self, articulations: list[object], runtime: FakeRuntime) -> None:
+            self.articulations = articulations
+            self.runtime = runtime
+            self.has_controls = True
+            self.update_count = 0
+
+        def update(self) -> None:
+            self.update_count += 1
+
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.preview_joint_control.ArticulationPreviewController",
+        FakeController,
+    )
+    articulation = object()
+    sim = FakeSimulationManager()
+
+    controller = _setup_viser_joint_control(
+        sim=sim,  # type: ignore[arg-type]
+        articulations=[articulation],  # type: ignore[list-item]
+        enabled=True,
+    )
+
+    assert controller is sim.visualization_runtime.provider
+    assert controller is not None
+    assert controller.articulations == [articulation]  # type: ignore[attr-defined]
+    assert controller.update_count == 1  # type: ignore[attr-defined]
 
 
 def test_scene_graph_importer_restores_node_pose_description() -> None:

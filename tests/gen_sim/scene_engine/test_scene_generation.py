@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PIL import Image
+from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
@@ -40,6 +41,9 @@ from embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation impor
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import (
     VisualYawOptimizer,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+    _canonicalize_articulated_usdc_bottom_center,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
@@ -219,7 +223,10 @@ def test_visual_yaws_replace_coarse_rotations_but_preserve_positions() -> None:
     assert np.allclose(yawed_layout["pos"], [0.1, 0.2, 0.3])
 
 
-def test_articulated_usdcs_use_visible_rgba_in_scene_order(tmp_path: Path) -> None:
+def test_articulated_usdcs_use_visible_rgba_in_scene_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     class FakeArticulatedGenerationClient:
         def __init__(self) -> None:
             self.calls: list[tuple[str, str | Path, str | Path]] = []
@@ -268,6 +275,14 @@ def test_articulated_usdcs_use_visible_rgba_in_scene_order(tmp_path: Path) -> No
     )
     client = FakeArticulatedGenerationClient()
 
+    def fake_canonicalize(usdc_path: str | Path) -> Path:
+        return Path(usdc_path)
+
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation._canonicalize_articulated_usdc_bottom_center",
+        fake_canonicalize,
+    )
+
     _generate_articulated_usdcs(
         scene=Scene(objects=[drawer, static_mug, microwave]),
         output_root=tmp_path / "articulated_geometry",
@@ -292,6 +307,38 @@ def test_articulated_usdcs_use_visible_rgba_in_scene_order(tmp_path: Path) -> No
     assert drawer.articulated_usdc_scale == [1.0, 2.0, 3.0]
     assert microwave.articulated_usdc_scale == [4.0, 5.0, 6.0]
     assert static_mug.articulated_usdc_path is None
+
+
+def test_articulated_usdc_canonicalization_moves_bottom_center_to_origin(
+    tmp_path: Path,
+) -> None:
+    """A root-level translation preserves the hierarchy while normalizing its origin."""
+    usdc_path = tmp_path / "offset_drawer.usdc"
+    stage = Usd.Stage.CreateNew(str(usdc_path))
+    UsdGeom.Xform.Define(stage, "/World")
+    root = UsdGeom.Xform.Define(stage, "/World/drawer")
+    UsdPhysics.ArticulationRootAPI.Apply(root.GetPrim())
+    cube = UsdGeom.Cube.Define(stage, "/World/drawer/housing")
+    cube.CreateSizeAttr(2.0)
+    UsdGeom.Xformable(cube).AddTranslateOp().Set(Gf.Vec3d(2.0, 3.0, 4.0))
+    stage.SetDefaultPrim(root.GetPrim())
+    stage.GetRootLayer().Save()
+
+    _canonicalize_articulated_usdc_bottom_center(usdc_path)
+
+    reopened_stage = Usd.Stage.Open(str(usdc_path))
+    bounds = (
+        UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy],
+        )
+        .ComputeLocalBound(reopened_stage.GetDefaultPrim())
+        .ComputeAlignedBox()
+    )
+    minimum, maximum = bounds.GetMin(), bounds.GetMax()
+    assert minimum[1] == pytest.approx(0.0)
+    assert (minimum[0] + maximum[0]) / 2.0 == pytest.approx(0.0)
+    assert (minimum[2] + maximum[2]) / 2.0 == pytest.approx(0.0)
 
 
 def test_table_root_update_propagates_its_pose_delta_to_descendants() -> None:
