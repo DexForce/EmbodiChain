@@ -132,17 +132,20 @@ def _commit_pending_episode(
     env: Any,
     save_env_ids: Sequence[int] | torch.Tensor | None,
 ) -> None:
-    """Commit selected rows and discard unused rows from the same vector batch."""
+    """Commit selected dataset rows through one reset of the full vector batch."""
     selected = _normalize_save_env_ids(env, save_env_ids)
-    num_envs = int(getattr(_env_target(env), "num_envs", 1))
-    _reset_episode_rows(env, selected, save_data=True)
+    target = _env_target(env)
+    all_env_ids = tuple(range(int(getattr(target, "num_envs", 1))))
+    if selected == all_env_ids:
+        _reset_episode_rows(env, selected, save_data=True)
+        return
 
-    selected_set = set(selected)
-    discarded = tuple(
-        env_id for env_id in range(num_envs) if env_id not in selected_set
+    commit_env_ids = torch.tensor(
+        selected,
+        dtype=torch.int32,
+        device=getattr(target, "device", None),
     )
-    if discarded:
-        _reset_episode_rows(env, discarded, save_data=False)
+    env.reset(options={"save_data": False, "commit_env_ids": commit_env_ids})
 
 
 def _save_failed_episodes_enabled(env: Any) -> bool:
