@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""DexSim default physics backend."""
+"""Default physics backend implementation integrated through DexSim."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ __all__ = ["DefaultPhysicsBackend"]
 
 
 class DefaultPhysicsBackend(PhysicsBackend):
-    """DexSim's default backend (GPU or CPU)."""
+    """Default backend using DexSim's native GPU or CPU physics path."""
 
     name = "default"
 

@@ -5,10 +5,13 @@
 | What | Path |
 |---|---|
 | Robot runtime class | `embodichain/lab/sim/objects/robot.py` → `Robot` |
-| RobotCfg base config | `embodichain/lab/sim/cfg.py` → `RobotCfg` (line ~1455) |
-| ArticulationCfg parent | `embodichain/lab/sim/cfg.py` → `ArticulationCfg` (line ~1345) |
-| JointDrivePropertiesCfg | `embodichain/lab/sim/cfg.py` → `JointDrivePropertiesCfg` (line ~654) |
+| RobotCfg base config | `embodichain/lab/sim/cfg.py` → `RobotCfg` (line ~2860) |
+| Replace-only backend preset | `embodichain/lab/sim/cfg.py` → `RobotPresetCfg` |
+| Environment robot declaration | `embodichain/lab/gym/envs/embodied_env.py` → `EmbodiedEnvCfg.robot` |
+| ArticulationCfg parent | `embodichain/lab/sim/cfg.py` → `ArticulationCfg` (line ~2690) |
+| JointDrivePropertiesCfg | `embodichain/lab/sim/cfg.py` → `JointDrivePropertiesCfg` (line ~1690) |
 | Robot registry (all robots) | `embodichain/lab/sim/robots/__init__.py` |
+| Robot executable smoke entry points | Each specified robot module's ``__main__`` block |
 | DexforceW1 config package | `embodichain/lab/sim/robots/dexforce_w1/` |
 | CobotMagic config | `embodichain/lab/sim/robots/cobotmagic.py` |
 | Add-robot tutorial | `docs/source/tutorial/add_robot.rst` |
@@ -83,6 +86,28 @@ W1 revision offset. Its `to_dict` removes that derived offset and `from_dict`
 restores it. Every config, including this exception, must satisfy
 `type(cfg).from_dict(cfg.to_dict())` without changing the selected components or
 applying a derived transform twice.
+
+### Physics backend portability
+
+Keep backend-neutral intent in one ordinary `RobotCfg`. In particular,
+`CollisionPropertiesCfg.contact_offset/rest_offset` compile directly to
+Default and to Newton's `margin=rest_offset`,
+`gap=contact_offset-rest_offset`. Use `DefaultCollisionPropertiesCfg` only as a
+Default-native extension point; those two inherited fields are portable.
+Default-only body solver iterations belong in
+`DefaultRigidBodyPropertiesCfg` under `attrs.rigid_props`, not only in the legacy
+top-level articulation aliases.
+
+When a backend truly needs a different asset or complete actuator/physics
+definition, subclass `RobotPresetCfg` and declare complete alternatives. The
+required `default` field selects the Default backend and is the Newton fallback;
+optional names include `newton`, `newton_mujoco_warp`/`newton_mjwarp`, and other
+`newton_<solver>` profiles. `SimulationManager.add_robot()` selects from its
+existing `physics_cfg` and active Newton solver, returns a deep-copied complete
+`RobotCfg`, and never merges fields across alternatives. `EmbodiedEnvCfg.robot`
+accepts either form and delegates selection to that same boundary. Prefer a
+single portable `RobotCfg`; use a preset only for irreducible backend
+differences.
 
 W1 robot and hand releases use separate types and registries:
 
@@ -176,7 +201,16 @@ custom-transform, component-version, and public-builder round-trips.
 | Robot | Config Class | Module | Structure | Notes |
 |---|---|---|---|---|
 | DexForce W1 | `DexforceW1Cfg` | `embodichain/lab/sim/robots/dexforce_w1/` | Package (`cfg.py`, `types.py`, `specs.py`, `hand_specs.py`, `params.py`, `utils.py`) | Humanoid; robot and hand versions are independently registered |
-| CobotMagic | `CobotMagicCfg` | `embodichain/lab/sim/robots/cobotmagic.py` | Single file | Dual-arm; 6-DOF arms + 2-DOF grippers; uses OPW solver |
+| CobotMagic | `CobotMagicCfg` | `embodichain/lab/sim/robots/cobotmagic.py` | Single file | Dual-arm; 6-DOF arms + 2-DOF grippers; portable collision envelope, Default-native body iterations, OPW solver |
+
+## Executable smoke programs
+
+Every specified robot module accepts ``--physics {default,newton}`` in its
+``__main__`` smoke program and resolves the selection through
+``physics_cfg_for_backend()``. CobotMagic, Franka, UR, and DualArm retain the
+Default backend as their command-line default; DexforceW1 retains Newton as its
+default. These entry points exercise the same ordinary ``RobotCfg`` definitions
+on either backend rather than maintaining backend-specific demo configs.
 
 ## Common Failure Modes
 

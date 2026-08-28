@@ -156,14 +156,14 @@ def create_obj(sim: SimulationManager):
         uid="table",
         shape=MeshCfg(
             fpath=get_resources_data_path("Model", "BakeTexture", "hdr_color_mesh.ply"),
+            max_convex_hull_num=16,
+            acd_method="vhacd",
         ),
         attrs=RigidBodyAttributesCfg(
             mass=0.01,
             dynamic_friction=0.97,
             static_friction=0.99,
         ),
-        max_convex_hull_num=16,
-        acd_method="vhacd",
         init_pos=[0.55, 0.0, 0.08],
         init_rot=[0.0, 0.0, 0.0],
     )

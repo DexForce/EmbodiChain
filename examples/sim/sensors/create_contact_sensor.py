@@ -28,7 +28,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
-    DexsimRigidBodyPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
     MassPropertiesCfg,
     RenderCfg,
     physics_cfg_for_backend,
@@ -66,7 +66,7 @@ def create_cube(
             body_type="dynamic",
             attrs=RigidBodyPhysicsCfg(
                 mass_props=MassPropertiesCfg(mass=0.1),
-                rigid_props=DexsimRigidBodyPropertiesCfg(sleep_threshold=0.0),
+                rigid_props=DefaultRigidBodyPropertiesCfg(sleep_threshold=0.0),
                 material_props=RigidBodyMaterialCfg(
                     dynamic_friction=0.9,
                     static_friction=0.95,

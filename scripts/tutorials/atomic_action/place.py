@@ -91,7 +91,6 @@ def create_pick_object(sim) -> RigidObject:
                 static_friction=0.99,
                 enable_ccd=True,
             ),
-            max_convex_hull_num=16,
             init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2]],
         )
     )

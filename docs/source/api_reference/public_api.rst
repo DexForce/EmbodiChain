@@ -945,7 +945,7 @@ embodichain.lab.sim.physics
 ---------------------------
 
 Manager-level physics backend selection and lifecycle contracts for the
-default DexSim and Warp-based Newton implementations.
+Default and Newton implementations integrated through DexSim.
 
 .. currentmodule:: embodichain.lab.sim.physics
 

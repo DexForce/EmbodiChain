@@ -21,7 +21,10 @@ import numpy as np
 import pytest
 
 from embodichain.lab.sim.cfg import (
+    CollisionPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
+    RigidBodyPhysicsCfg,
     RobotCfg,
 )
 from embodichain.lab.sim.workspace import RobotWorkspaceCfg
@@ -444,6 +447,13 @@ def test_cobotmagic_from_dict_and_roundtrip():
     }
     assert isinstance(cfg.solver_cfg["left_arm"], OPWSolverCfg)
     assert isinstance(cfg.solver_cfg["right_arm"], OPWSolverCfg)
+    assert isinstance(cfg.attrs, RigidBodyPhysicsCfg)
+    assert type(cfg.attrs.collision_props) is CollisionPropertiesCfg
+    assert cfg.attrs.collision_props.contact_offset == pytest.approx(0.001)
+    assert cfg.attrs.collision_props.rest_offset == pytest.approx(0.0)
+    assert isinstance(cfg.attrs.rigid_props, DefaultRigidBodyPropertiesCfg)
+    assert cfg.attrs.rigid_props.min_position_iters == 8
+    assert cfg.attrs.rigid_props.min_velocity_iters == 2
 
     d = cfg.to_dict()
     assert d["uid"] == "CobotMagic"

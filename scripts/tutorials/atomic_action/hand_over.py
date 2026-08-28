@@ -158,7 +158,11 @@ def create_handover_object(
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="handover_object",
-            shape=MeshCfg(fpath=mesh_path, compute_uv=False),
+            shape=MeshCfg(
+                fpath=mesh_path,
+                compute_uv=False,
+                max_convex_hull_num=16,
+            ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
@@ -172,7 +176,6 @@ def create_handover_object(
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=16,
             init_pos=[OBJECT_INIT_XY[0], OBJECT_INIT_XY[1], SUPPORT_SURFACE_Z + 0.12],
             init_rot=(OBJECT_ROT_HORIZONTAL if is_horizontal else OBJECT_ROT_VERTICAL),
             body_scale=body_scale,

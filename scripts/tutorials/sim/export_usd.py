@@ -182,11 +182,11 @@ def create_table(sim: SimulationManager) -> RigidObject:
         uid="table",
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/table_a.obj"),
+            max_convex_hull_num=8,
         ),
         attrs=RigidBodyAttributesCfg(
             mass=0.5,
         ),
-        max_convex_hull_num=8,
         body_type="kinematic",
         init_pos=[1.1, -0.5, 0.08],
         init_rot=[0.0, 0.0, 0.0],
@@ -237,11 +237,11 @@ def create_cup(sim: SimulationManager) -> RigidObject:
         uid="cup",
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/paper_cup_2.obj"),
+            max_convex_hull_num=1,
         ),
         attrs=RigidBodyAttributesCfg(
             mass=0.3,
         ),
-        max_convex_hull_num=1,
         body_type="dynamic",
         init_pos=[0.86, -0.76, 0.841],
         init_rot=[0.0, 0.0, 0.0],

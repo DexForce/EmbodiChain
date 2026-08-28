@@ -38,8 +38,8 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.cfg import (
-    DexsimCollisionPropertiesCfg,
-    DexsimRigidBodyPropertiesCfg,
+    CollisionPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
     LightCfg,
     MassPropertiesCfg,
     MarkerCfg,
@@ -419,7 +419,7 @@ def create_tutorial_rigid_body_physics(
     return RigidBodyPhysicsCfg(
         mass_props=MassPropertiesCfg(mass=mass) if mass is not None else None,
         rigid_props=(
-            DexsimRigidBodyPropertiesCfg(
+            DefaultRigidBodyPropertiesCfg(
                 linear_damping=linear_damping,
                 angular_damping=angular_damping,
                 max_depenetration_velocity=max_depenetration_velocity,
@@ -431,7 +431,7 @@ def create_tutorial_rigid_body_physics(
             else None
         ),
         collision_props=(
-            DexsimCollisionPropertiesCfg(
+            CollisionPropertiesCfg(
                 contact_offset=contact_offset,
                 rest_offset=rest_offset,
             )

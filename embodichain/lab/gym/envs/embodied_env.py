@@ -42,6 +42,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
+    RobotPresetCfg,
     RigidObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
@@ -109,8 +110,9 @@ class EmbodiedEnvCfg(EnvCfg):
     instance as attributes during initialization.
 
     Key fields
-    - **robot**: `RobotCfg` (required) — the agent definition (URDF/MJCF, initial
-        state, control mode, etc.).
+    - **robot**: `RobotCfg | RobotPresetCfg` (required) — one portable robot
+        definition or replace-only complete alternatives selected by the active
+        physics backend.
     - **control_parts**: Optional[List[str]] — named robot parts to control. If
         `None`, all controllable joints are used.
     - **active_joint_ids**: List[int] — explicit joint indices to use for
@@ -148,7 +150,7 @@ class EmbodiedEnvCfg(EnvCfg):
         # TODO: support more types of indirect light in the future.
         indirect: dict[str, Any] | None = None
 
-    robot: RobotCfg = MISSING
+    robot: RobotCfg | RobotPresetCfg = MISSING
 
     control_parts: list[str] | None = None
     """List of robot parts to control. If None, all controllable joints will be used. 

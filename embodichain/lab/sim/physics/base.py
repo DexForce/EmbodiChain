@@ -15,8 +15,8 @@
 # ----------------------------------------------------------------------------
 """Spawn-aware physics-backend abstraction for :class:`SimulationManager`.
 
-This module defines the contract that every physics backend (DexSim default,
-Newton/Warp, ...) satisfies. The owning :class:`SimulationManager`
+This module defines the contract that every physics backend (Default, Newton,
+...) satisfies. The owning :class:`SimulationManager`
 holds a single :class:`PhysicsBackend` instance as ``self.physics`` and
 delegates backend-specific world configuration, compatibility scene access,
 and capability queries to it. Scene topology and runtime readiness are owned

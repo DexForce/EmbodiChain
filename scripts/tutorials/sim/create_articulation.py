@@ -29,7 +29,7 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
-    DexsimRigidBodyPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
     RenderCfg,
     RigidBodyPhysicsCfg,
@@ -73,7 +73,7 @@ def create_articulation(sim: SimulationManager) -> Articulation:
         # Newton currently has no body-level damping setting. Remove the
         # Default backend's damping so both passive models use zero damping.
         attrs=RigidBodyPhysicsCfg(
-            rigid_props=DexsimRigidBodyPropertiesCfg(
+            rigid_props=DefaultRigidBodyPropertiesCfg(
                 linear_damping=0.0,
                 angular_damping=0.0,
             )

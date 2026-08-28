@@ -22,7 +22,6 @@ import warnings as _warnings
 import dexsim
 import open3d as o3d
 
-from dataclasses import MISSING
 from typing import TYPE_CHECKING, List, Union
 
 from dexsim.types import (
@@ -97,32 +96,12 @@ def get_dexsim_arena_num() -> int:
 def _resolve_mesh_collision_params(
     cfg: RigidObjectCfg,
 ) -> tuple[int, str, int]:
-    """Resolve legacy and shape-level mesh collision parameters."""
-
-    def is_missing(value) -> bool:
-        # deepcopy() can produce a distinct instance of dataclasses.MISSING.
-        return value is MISSING or isinstance(value, type(MISSING))
-
-    max_convex_hull_num = next(
-        value
-        for value in (
-            cfg.max_convex_hull_num,
-            cfg.shape.max_convex_hull_num,
-            1,
-        )
-        if not is_missing(value)
+    """Resolve mesh collision parameters from the shape configuration."""
+    return (
+        cfg.shape.max_convex_hull_num,
+        cfg.shape.acd_method,
+        cfg.shape.sdf_resolution,
     )
-    acd_method = next(
-        value
-        for value in (cfg.acd_method, cfg.shape.acd_method, "coacd")
-        if not is_missing(value)
-    )
-    sdf_resolution = next(
-        value
-        for value in (cfg.sdf_resolution, cfg.shape.sdf_resolution, 0)
-        if not is_missing(value)
-    )
-    return max_convex_hull_num, acd_method, sdf_resolution
 
 
 def get_dexsim_drive_type(drive_type: str) -> DriveType:

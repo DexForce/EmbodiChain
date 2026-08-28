@@ -21,7 +21,7 @@ import dexsim
 import numpy as np
 
 from copy import deepcopy
-from dataclasses import dataclass, MISSING
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Sequence, Union
 from functools import cached_property
 
@@ -505,12 +505,11 @@ class RigidObject(BatchEntity):
             )
         else:
             parent_str = super().__str__()
-        max_hull = self.cfg.max_convex_hull_num
-        if max_hull is MISSING:
-            if isinstance(self.cfg.shape, MeshCfg):
-                max_hull = self.cfg.shape.max_convex_hull_num
-            else:
-                max_hull = 1
+        max_hull = (
+            self.cfg.shape.max_convex_hull_num
+            if isinstance(self.cfg.shape, MeshCfg)
+            else 1
+        )
         return (
             parent_str
             + f" | body type: {self.body_type} | max_convex_hull_num: {max_hull}"
@@ -1977,7 +1976,7 @@ class RigidObject(BatchEntity):
     def _apply_initial_state(self) -> None:
         """Apply cfg initial pose after construction.
 
-        The Default (DexSim) backend runs a full reset. Newton applies init pose in
+        The Default backend runs a full reset. Newton applies init pose in
         ``BUILDER`` via the scene batch API; velocities are cleared after
         preparation through :meth:`SimulationManager.prepare`.
         """

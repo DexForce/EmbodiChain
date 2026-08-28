@@ -51,7 +51,7 @@ EnvCfg.sim_cfg
   → SimulationManager(SimulationManagerCfg)
   → create World and a replicated Spawn scene declaration
   → EmbodiedEnv declares robot, objects, lights, and physical sensors
-       → Default/PhysX may materialize native handles eagerly
+       → Default may materialize native handles eagerly
        → Newton keeps physical descriptors deferred
   → SimulationManager.prepare()
        → for Newton, resolve source metadata and configure exact-name overlays
@@ -110,10 +110,14 @@ compatibility subclasses. `objects/deformable/` owns the common
 surface implementations. Consumers should use `data.nodal_pos_w`,
 `data.nodal_vel_w`, `data.nodal_state_w`, `get_surface_vertices()`, and
 `get_surface_triangles()`. Legacy soft/cloth methods delegate to that contract.
+At the Spawn boundary, volume and surface configs translate to DexSim's typed
+`SoftBodyDesc` and `ClothDesc` particle-set descriptors. Their Default-native
+attributes are carried by `DexsimSoftBodyPhysicsDesc` and
+`DexsimClothPhysicsDesc`; volume voxel settings use `SoftBodyMeshingDesc`.
 
 `SimulationManager` stores both topologies once in `_deformable_objects` and
 exposes `add/get_deformable_object()` plus filtered legacy soft/cloth APIs.
-Only the Default DexSim backend is registered today and still requires CUDA.
+Only the Default backend is registered today and still requires CUDA.
 Backend capability flags and `_DEFORMABLE_BACKEND_IMPLEMENTATIONS` reserve the
 Newton integration boundary; Newton volume/surface support must remain disabled
 until native object and data adapters are implemented and validated.
@@ -210,7 +214,14 @@ It does not suppress DexSim native startup output or genuine Warp/Newton
 warnings and errors.
 
 EmbodiChain-authored Newton collision shapes use a default margin and gap of
-`0.001 m` each unless an object-specific Newton collision config overrides them.
+`0.001 m` each only when no portable or Newton-native envelope is authored.
+`CollisionPropertiesCfg.contact_offset/rest_offset` are portable: Default uses
+them directly, while the Spawn compiler maps `rest_offset → margin` and
+`contact_offset - rest_offset → gap`. Both values must be present to derive a
+Newton gap; an active Newton configuration rejects an ambiguous standalone
+`contact_offset` unless a native margin or gap completes the intent. Explicit
+`NewtonCollisionPropertiesCfg.margin/gap` values take precedence over this
+translation.
 
 `EnvCfg` embeds `SimulationManagerCfg` and supplies the control-to-physics
 step ratio. CLI and task config loaders may override runtime fields before
@@ -233,8 +244,10 @@ concept:
 
 - `mass_props`: `MassPropertiesCfg` (`mass`, `density`, inertia, and COM);
 - `rigid_props`: the common `RigidBodyPropertiesCfg` root or a
-  `DexsimRigidBodyPropertiesCfg` / `NewtonRigidBodyPropertiesCfg` subclass;
-- `collision_props`: the common collision-enable root or a backend subclass;
+  `DefaultRigidBodyPropertiesCfg` / `NewtonRigidBodyPropertiesCfg` subclass;
+- `collision_props`: common collision enablement and the portable
+  `contact_offset/rest_offset` envelope, optionally extended by a backend
+  subclass;
 - `material_props`: common friction/restitution or a backend material subclass.
 
 This follows the IsaacLab property-group/base-subclass pattern while matching
@@ -247,10 +260,19 @@ kinematic mass priority is explicit inertia with positive mass, then mass,
 then density; static descriptors omit mass properties.
 
 Python callers select a backend by constructing its subclass. Dict/YAML input
-uses a local `backend: common|dexsim|newton` discriminator inside the property
+uses a local `backend: common|default|newton` discriminator inside the property
 group (the unique native fields can also infer it). `to_dict()` emits this
 discriminator so typed configs round-trip. Do not mix the deprecated flat
 `RigidBodyAttributesCfg` fields with grouped fields in one config or override.
+
+Robot configs normally keep these portable values on one ordinary `RobotCfg`.
+For a genuine backend-specific asset or actuator difference, subclass
+`RobotPresetCfg` and declare complete `default`, `newton`, or
+`newton_<solver>` alternatives.
+`SimulationManager.add_robot()` derives the
+selection from its existing `physics_cfg`, deep-copies the selected complete
+robot config, and never merges alternatives. This is the only robot preset
+selection boundary; do not add a second backend selector to robot configs.
 
 File-backed rigid objects and articulations share one source-independent
 physics policy: `asset_physics_mode="preserve"` keeps properties resolved from

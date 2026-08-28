@@ -235,7 +235,7 @@ slow rendering or clients cannot accumulate an image backlog.
 
 ## Deformables
 
-Volume and surface deformables currently require Default/DexSim GPU physics.
+Volume and surface deformables currently require Default-backend GPU physics.
 Their live vertices are sampled at `soft_body_fps`, independently from
 `scene_fps`. `SceneExporter` enumerates the manager's single deformable
 registry and reads both topologies through `get_surface_vertices()` and

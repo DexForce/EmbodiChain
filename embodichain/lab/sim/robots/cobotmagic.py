@@ -22,7 +22,8 @@ import numpy as np
 from typing import TYPE_CHECKING, Dict, List, Union
 
 from embodichain.lab.sim.cfg import (
-    DexsimCollisionPropertiesCfg,
+    CollisionPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
     RobotCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -124,6 +125,8 @@ class CobotMagicCfg(RobotCfg):
                 ),
             ),
         }
+        # Retain the legacy articulation aliases while Spawn consumes the
+        # grouped Default-native rigid properties below.
         self.min_position_iters = 8
         self.min_velocity_iters = 2
         self.drive_pros = JointDrivePropertiesCfg(
@@ -148,7 +151,14 @@ class CobotMagicCfg(RobotCfg):
             },
         )
         self.attrs = RigidBodyPhysicsCfg(
-            collision_props=DexsimCollisionPropertiesCfg(contact_offset=0.001, rest_offset=0),
+            rigid_props=DefaultRigidBodyPropertiesCfg(
+                min_position_iters=8,
+                min_velocity_iters=2,
+            ),
+            collision_props=CollisionPropertiesCfg(
+                contact_offset=0.001,
+                rest_offset=0.0,
+            ),
             material_props=RigidBodyMaterialCfg(
                 static_friction=0.95,
                 dynamic_friction=0.9,
@@ -190,9 +200,20 @@ class CobotMagicCfg(RobotCfg):
 
 
 if __name__ == "__main__":
+    import argparse
+
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
     from embodichain.lab.sim.robots import CobotMagicCfg
+
+    parser = argparse.ArgumentParser(description="Launch the CobotMagic robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="default",
+        help="Physics backend to launch (default: default).",
+    )
+    args = parser.parse_args()
 
     torch.set_printoptions(precision=5, sci_mode=False)
 
@@ -200,6 +221,7 @@ if __name__ == "__main__":
         headless=True,
         device="cpu",
         num_envs=2,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)

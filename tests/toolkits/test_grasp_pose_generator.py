@@ -136,13 +136,13 @@ def create_mug(sim: SimulationManager):
         uid="table",
         shape=MeshCfg(
             fpath=get_data_path("CoffeeCup/cup.ply"),
+            max_convex_hull_num=16,
         ),
         attrs=RigidBodyAttributesCfg(
             mass=0.01,
             dynamic_friction=0.97,
             static_friction=0.99,
         ),
-        max_convex_hull_num=16,
         init_pos=[0.55, 0.0, 0.01],
         init_rot=[0.0, 0.0, -90],
         body_scale=(4, 4, 4),

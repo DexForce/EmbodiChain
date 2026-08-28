@@ -173,7 +173,11 @@ def create_assemble_object(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="assemble_object",
-            shape=MeshCfg(fpath=OBJECT_MESH_PATH, compute_uv=False),
+            shape=MeshCfg(
+                fpath=OBJECT_MESH_PATH,
+                compute_uv=False,
+                max_convex_hull_num=1,
+            ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
@@ -187,7 +191,6 @@ def create_assemble_object(sim: SimulationManager) -> RigidObject:
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=1,
             init_pos=[
                 OBJECT_A_XY[0],
                 OBJECT_A_XY[1],

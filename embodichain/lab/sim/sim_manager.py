@@ -100,6 +100,7 @@ from embodichain.lab.sim.cfg import (
     RigidObjectGroupCfg,
     ArticulationCfg,
     RobotCfg,
+    RobotPresetCfg,
     RigidConstraintCfg,
 )
 from embodichain.lab.sim.physics import NewtonPhysicsBackend, make_physics_backend
@@ -710,12 +711,12 @@ class SimulationManager:
 
     @property
     def is_default_backend(self) -> bool:
-        """Whether the existing DexSim default physics backend is active."""
+        """Whether the Default physics backend is active."""
         return self.physics.name == "default"
 
     @property
     def is_newton_backend(self) -> bool:
-        """Whether the DexSim Newton physics backend is active."""
+        """Whether the Newton physics backend is active."""
         return self.physics.name == "newton"
 
     @property
@@ -2433,11 +2434,13 @@ class SimulationManager:
         """
         return list(self._articulations.keys())
 
-    def add_robot(self, cfg: RobotCfg) -> Robot | None:
+    def add_robot(self, cfg: RobotCfg | RobotPresetCfg) -> Robot | None:
         """Add a Robot to the scene.
 
         Args:
-            cfg (RobotCfg): Configuration for the robot.
+            cfg: A concrete robot configuration or a replace-only backend
+                preset. Presets are resolved from ``physics_cfg`` before the
+                robot is declared.
 
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
@@ -2447,6 +2450,12 @@ class SimulationManager:
                 f"Robot support is not enabled for the "
                 f"{self.physics.name} backend yet.",
                 error_type=NotImplementedError,
+            )
+
+        if isinstance(cfg, RobotPresetCfg):
+            cfg = cfg.resolve(
+                self.sim_config.physics_cfg,
+                newton_solver_type=self._active_newton_solver_type,
             )
 
         uid = cfg.uid

@@ -49,6 +49,7 @@ topics:
       - embodichain/lab/sim/common.py
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
+      - embodichain/lab/sim/spawn/descriptors.py
       - embodichain/lab/sim/spawn/scene.py
       - embodichain/lab/sim/objects/__init__.py
       - embodichain/lab/sim/objects/articulation.py
@@ -246,6 +247,7 @@ topics:
     keywords:
       - robot
       - RobotCfg
+      - RobotPresetCfg
       - Robot
       - control
       - drive
@@ -260,7 +262,9 @@ topics:
     paths:
       - topics/robot-system/robot-system.md
     source_of_truth:
+      - embodichain/lab/gym/envs/embodied_env.py
       - embodichain/lab/sim/objects/robot.py
+      - embodichain/lab/sim/sim_manager.py
       - embodichain/lab/sim/robots/
       - embodichain/lab/sim/cfg.py
       - embodichain/lab/sim/_legacy_cfg.py

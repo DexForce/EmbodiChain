@@ -27,7 +27,11 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
-from embodichain.lab.sim.cfg import DefaultPhysicsCfg
+from embodichain.lab.sim.cfg import (
+    DefaultPhysicsCfg,
+    RobotCfg,
+    RobotPresetCfg,
+)
 from embodichain.lab.sim.profiler import Profiler
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
@@ -40,6 +44,7 @@ from embodichain.lab.visualization import (
     SceneOverlays,
     VisualizationCfg,
 )
+from embodichain.utils import configclass
 
 DEFAULT_LOOK_AT = (
     (2.6, -2.2, 1.6),
@@ -550,6 +555,25 @@ def test_constructor_only_declares_spawn_scene(monkeypatch) -> None:
     ]
     assert sim._spawn_scene is spawn_scene
     assert sim._arenas == []
+
+
+def test_add_robot_resolves_backend_preset_before_declaration() -> None:
+    @configclass
+    class TestRobotPresetCfg(RobotPresetCfg):
+        default: RobotCfg = RobotCfg(uid="selected", fpath="selected.urdf")
+
+    sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(name="default", supports_robot=True)
+    sim.sim_config = SimpleNamespace(physics_cfg=DefaultPhysicsCfg())
+    sim._robots = {}
+    sim._declare_spawn_articulation = MagicMock(return_value="robot-handle")
+
+    robot = sim.add_robot(TestRobotPresetCfg())
+
+    assert robot == "robot-handle"
+    resolved_cfg = sim._declare_spawn_articulation.call_args.args[0]
+    assert isinstance(resolved_cfg, RobotCfg)
+    assert resolved_cfg.uid == "selected"
 
 
 def test_default_plane_authors_repeated_uv_before_spawn() -> None:

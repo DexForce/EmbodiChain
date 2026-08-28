@@ -33,7 +33,7 @@ from dexsim.types import ActorType
 
 from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
 from embodichain.lab.sim.spawn.descriptors import (
-    _compile_dexsim_collision,
+    _compile_default_collision,
     _compile_newton_collision,
     _compile_rigid_physics,
     _compile_visual_material,
@@ -139,7 +139,7 @@ def rigid_desc_from_usd(
             collision,
             CollisionDesc(
                 enable_collision=physics.collision_enabled,
-                dexsim=_compile_dexsim_collision(physics),
+                dexsim=_compile_default_collision(physics),
                 newton=_compile_newton_collision(
                     physics,
                     newton_solver_type=newton_solver_type,

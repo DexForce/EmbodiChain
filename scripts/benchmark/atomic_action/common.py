@@ -522,7 +522,10 @@ def create_benchmark_object(
     from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 
     if preset.shape_type == "mesh":
-        shape = MeshCfg(fpath=get_data_path(preset.mesh_path))
+        shape = MeshCfg(
+            fpath=get_data_path(preset.mesh_path),
+            max_convex_hull_num=preset.max_convex_hull_num,
+        )
     elif preset.shape_type == "cube":
         if preset.cube_size is None:
             raise ValueError(f"Cube preset {preset.object_type!r} misses cube_size.")
@@ -551,7 +554,6 @@ def create_benchmark_object(
             max_angular_velocity=preset.max_angular_velocity,
             enable_ccd=preset.enable_ccd,
         ),
-        max_convex_hull_num=preset.max_convex_hull_num,
         init_pos=[position_case.xy[0], position_case.xy[1], preset.initial_z],
         init_rot=preset.init_rot,
         body_scale=preset.body_scale,

@@ -180,17 +180,27 @@ class URRobotCfg(RobotCfg):
 
 
 if __name__ == "__main__":
-    import numpy as np
+    import argparse
 
     np.set_printoptions(precision=5, suppress=True)
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+
+    parser = argparse.ArgumentParser(description="Launch a Universal Robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="default",
+        help="Physics backend to launch (default: default).",
+    )
+    args = parser.parse_args()
 
     config = SimulationManagerCfg(
         headless=False,
         device="cpu",
         num_envs=1,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)

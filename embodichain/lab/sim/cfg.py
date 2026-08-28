@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 import enum
 import json
 import os
@@ -182,22 +183,24 @@ class RenderCfg:
 class GPUMemoryCfg:
     """GPU buffer capacities for the Default backend's GPU dynamics pipeline.
 
-    PhysX GPU buffers cannot all grow dynamically.  Values that are too small
-    may therefore produce overflow warnings, dropped contacts, or an invalid
-    simulation.  These settings are applied only when the Default backend runs
-    on CUDA; they have no effect on Default CPU or Newton.
+    Default-backend GPU buffers cannot all grow dynamically. Values that are
+    too small may therefore produce overflow warnings, dropped contacts, or an
+    invalid simulation. These settings are applied only when the Default
+    backend runs on CUDA; they have no effect on Default CPU or Newton.
     """
 
     temp_buffer_capacity: int = 2**24
     """Temporary pinned-host buffer capacity in bytes.
 
-    Increase this when PhysX reports a pinned-host linear allocator overflow.
+    Increase this when the Default backend reports a pinned-host linear
+    allocator overflow.
     """
 
     max_rigid_contact_count: int = 2**19
     """Maximum number of rigid-contact records in the GPU contact stream.
 
-    Increase this when PhysX reports ``Contact buffer overflow detected``.
+    Increase this when the Default backend reports
+    ``Contact buffer overflow detected``.
     """
 
     max_rigid_patch_count: int = (
@@ -206,7 +209,7 @@ class GPUMemoryCfg:
     """Maximum number of rigid-contact patches in the GPU patch stream.
 
     A patch groups nearby contact points that share a contact normal. Increase
-    this when PhysX reports ``Patch buffer overflow detected``.
+    this when the Default backend reports ``Patch buffer overflow detected``.
     """
 
     heap_capacity: int = 2**26
@@ -260,7 +263,7 @@ class PhysicsBackendCfg:
 
 @configclass
 class PhysicsCfg(PhysicsBackendCfg):
-    """Configuration for the DexSim default physics backend.
+    """Configuration for the Default physics backend.
 
     ``DefaultPhysicsCfg`` is the explicit backend-selecting subclass used by
     new code. This base name remains concrete for compatibility with existing
@@ -273,7 +276,7 @@ class PhysicsCfg(PhysicsBackendCfg):
     enable_ccd: bool = False
     """Whether to enable scene-level continuous collision detection (CCD).
 
-    A rigid body must also set :attr:`DexsimRigidBodyPropertiesCfg.enable_ccd`
+    A rigid body must also set :attr:`DefaultRigidBodyPropertiesCfg.enable_ccd`
     for CCD to be used on that body.
     """
 
@@ -390,11 +393,12 @@ class NewtonCollisionPipelineCfg:
 
 @configclass
 class NewtonPhysicsCfg(PhysicsBackendCfg):
-    """Configuration selector for the DexSim Newton physics backend.
+    """Configuration selector for the Newton physics backend.
 
-    The selected solver and collision pipeline are scene-wide.  Shape, contact,
-    material, and joint values are configured separately on object and
-    articulation configs and compiled into DexSim Spawn descriptors.
+    DexSim wraps and extends Newton for EmbodiChain. The selected solver and
+    collision pipeline are scene-wide. Shape, contact, material, and joint
+    values are configured separately on object and articulation configs and
+    compiled into DexSim Spawn descriptors.
     """
 
     device: str | torch.device = "cuda:0"
@@ -655,7 +659,11 @@ def physics_cfg_for_backend(
     """Return a default physics configuration instance for the given backend."""
     if backend == "newton":
         return NewtonPhysicsCfg()
-    return DefaultPhysicsCfg()
+    if backend == "default":
+        return DefaultPhysicsCfg()
+    raise ValueError(
+        f"Unsupported physics backend {backend!r}; expected 'default' or 'newton'."
+    )
 
 
 def physics_backend_from_cfg(
@@ -747,8 +755,8 @@ class RigidBodyPropertiesCfg:
 
 
 @configclass
-class DexsimRigidBodyPropertiesCfg(RigidBodyPropertiesCfg):
-    """Rigid-body properties consumed only by the Default (PhysX) backend.
+class DefaultRigidBodyPropertiesCfg(RigidBodyPropertiesCfg):
+    """Rigid-body properties consumed only by the Default backend.
 
     Every field defaults to ``None`` so a partial overlay preserves an authored
     USD/URDF value or the backend default.
@@ -805,8 +813,10 @@ class NewtonRigidBodyPropertiesCfg(RigidBodyPropertiesCfg):
 class CollisionPropertiesCfg:
     """Collision-shape properties with identical intent across both backends.
 
-    ``None`` leaves collision enablement source/backend-owned.  Backend-native
-    contact envelopes, filtering, and SDF settings live on the subclasses.
+    ``None`` leaves the corresponding source/backend value unchanged.  The
+    contact envelope is expressed once with Default-backend terminology and is
+    compiled to Newton's ``margin``/``gap`` representation at the Spawn
+    boundary.  Backend-native filtering and SDF settings live on subclasses.
     """
 
     collision_enabled: bool | None = None
@@ -817,16 +827,13 @@ class CollisionPropertiesCfg:
     independent flag.  ``None`` preserves the source/backend value.
     """
 
-
-@configclass
-class DexsimCollisionPropertiesCfg(CollisionPropertiesCfg):
-    """Contact-envelope properties for the Default (PhysX) backend."""
-
     contact_offset: float | None = None
     """Per-shape distance at which contact generation starts [m].
 
     The pair threshold is the sum of both shapes' contact offsets.  This value
-    must be non-negative and no smaller than :attr:`rest_offset`.
+    must be non-negative and no smaller than :attr:`rest_offset`.  Default
+    consumes it directly; Newton compiles it together with :attr:`rest_offset`
+    to ``gap = contact_offset - rest_offset``.
     """
 
     rest_offset: float | None = None
@@ -834,7 +841,17 @@ class DexsimCollisionPropertiesCfg(CollisionPropertiesCfg):
 
     Pairwise rest separation is the sum of both shapes' values.  Positive
     values leave an air gap, zero targets touching surfaces, and negative
-    values permit limited penetration.
+    values permit limited penetration.  Default consumes it directly; Newton
+    maps it to ``margin``.
+    """
+
+
+@configclass
+class DefaultCollisionPropertiesCfg(CollisionPropertiesCfg):
+    """Default-native collision-property extension point.
+
+    ``contact_offset`` and ``rest_offset`` now live on
+    :class:`CollisionPropertiesCfg` because both backends consume their intent.
     """
 
 
@@ -966,7 +983,7 @@ class RigidBodyMaterialCfg:
 
 
 @configclass
-class DexsimRigidBodyMaterialCfg(RigidBodyMaterialCfg):
+class DefaultRigidBodyMaterialCfg(RigidBodyMaterialCfg):
     """Contact-material extensions consumed only by the Default backend."""
 
     torsional_patch_radius: float | None = None
@@ -979,7 +996,7 @@ class DexsimRigidBodyMaterialCfg(RigidBodyMaterialCfg):
     """Minimum contact-patch radius used for torsional friction [m]."""
 
     disable_strong_friction: bool | None = None
-    """Whether to disable PhysX strong-friction contact anchoring."""
+    """Whether to disable Default-backend strong-friction contact anchoring."""
 
 
 @configclass
@@ -1047,7 +1064,7 @@ def _physics_property_cfg_from_dict(
     value: Mapping[str, Any] | object | None,
     *,
     common_type: type,
-    dexsim_type: type,
+    default_type: type,
     newton_type: type,
     field_name: str,
 ) -> object | None:
@@ -1062,32 +1079,30 @@ def _physics_property_cfg_from_dict(
     configured_backend = data.pop("backend", None)
     if configured_backend is None:
         common_fields = {item.name for item in fields(common_type)}
-        dexsim_fields = {item.name for item in fields(dexsim_type)} - common_fields
+        default_fields = {item.name for item in fields(default_type)} - common_fields
         newton_fields = {item.name for item in fields(newton_type)} - common_fields
-        has_dexsim_fields = bool(dexsim_fields.intersection(data))
+        has_default_fields = bool(default_fields.intersection(data))
         has_newton_fields = bool(newton_fields.intersection(data))
-        if has_dexsim_fields and has_newton_fields:
+        if has_default_fields and has_newton_fields:
             raise ValueError(
-                f"{field_name} mixes DexSim and Newton-only fields; select one "
+                f"{field_name} mixes Default and Newton-only fields; select one "
                 "backend-specific property config."
             )
         backend = (
-            "dexsim"
-            if has_dexsim_fields
+            "default"
+            if has_default_fields
             else "newton" if has_newton_fields else "common"
         )
     else:
         backend = str(configured_backend).replace("-", "_").lower()
     config_type = {
         "common": common_type,
-        "default": dexsim_type,
-        "dexsim": dexsim_type,
-        "physx": dexsim_type,
+        "default": default_type,
         "newton": newton_type,
     }.get(backend)
     if config_type is None:
         raise ValueError(
-            f"{field_name}.backend must be 'common', 'dexsim', or 'newton', "
+            f"{field_name}.backend must be 'common', 'default', or 'newton', "
             f"got {backend!r}."
         )
     try:
@@ -1100,7 +1115,7 @@ def _physics_property_cfg_to_dict(
     value: object | None,
     *,
     common_type: type,
-    dexsim_type: type,
+    default_type: type,
     newton_type: type,
     field_name: str,
 ) -> dict[str, Any] | None:
@@ -1109,8 +1124,8 @@ def _physics_property_cfg_to_dict(
         return None
     if isinstance(value, newton_type):
         backend = "newton"
-    elif isinstance(value, dexsim_type):
-        backend = "dexsim"
+    elif isinstance(value, default_type):
+        backend = "default"
     elif type(value) is common_type:
         backend = None
     else:
@@ -1137,7 +1152,7 @@ class RigidBodyPhysicsCfg:
     ``asset_physics_mode="overlay"``, Spawn therefore changes only explicitly
     configured values and preserves all other USD/URDF or backend defaults.
     Dict/YAML input selects a subclass with a local
-    ``backend: common|dexsim|newton`` discriminator; a unique native field may
+    ``backend: common|default|newton`` discriminator; a unique native field may
     also infer the subclass.
 
     .. attention::
@@ -1152,12 +1167,12 @@ class RigidBodyPhysicsCfg:
     rigid_props: RigidBodyPropertiesCfg | None = None
     """Optional body-level backend properties.
 
-    Use :class:`DexsimRigidBodyPropertiesCfg` for Default-backend fields or the
+    Use :class:`DefaultRigidBodyPropertiesCfg` for Default-backend fields or the
     currently empty :class:`NewtonRigidBodyPropertiesCfg` extension point.
     """
 
     collision_props: CollisionPropertiesCfg | None = None
-    """Collision enablement plus optional backend-native shape properties."""
+    """Portable collision envelope plus optional backend-native shape properties."""
 
     material_props: RigidBodyMaterialCfg | None = None
     """Portable contact material values plus optional backend-native coefficients."""
@@ -1185,7 +1200,7 @@ class RigidBodyPhysicsCfg:
             cfg.rigid_props = _physics_property_cfg_from_dict(
                 init_dict["rigid_props"],
                 common_type=RigidBodyPropertiesCfg,
-                dexsim_type=DexsimRigidBodyPropertiesCfg,
+                default_type=DefaultRigidBodyPropertiesCfg,
                 newton_type=NewtonRigidBodyPropertiesCfg,
                 field_name="rigid_props",
             )
@@ -1193,7 +1208,7 @@ class RigidBodyPhysicsCfg:
             cfg.collision_props = _physics_property_cfg_from_dict(
                 init_dict["collision_props"],
                 common_type=CollisionPropertiesCfg,
-                dexsim_type=DexsimCollisionPropertiesCfg,
+                default_type=DefaultCollisionPropertiesCfg,
                 newton_type=NewtonCollisionPropertiesCfg,
                 field_name="collision_props",
             )
@@ -1201,7 +1216,7 @@ class RigidBodyPhysicsCfg:
             cfg.material_props = _physics_property_cfg_from_dict(
                 init_dict["material_props"],
                 common_type=RigidBodyMaterialCfg,
-                dexsim_type=DexsimRigidBodyMaterialCfg,
+                default_type=DefaultRigidBodyMaterialCfg,
                 newton_type=NewtonRigidBodyMaterialCfg,
                 field_name="material_props",
             )
@@ -1216,21 +1231,21 @@ class RigidBodyPhysicsCfg:
             "rigid_props": _physics_property_cfg_to_dict(
                 self.rigid_props,
                 common_type=RigidBodyPropertiesCfg,
-                dexsim_type=DexsimRigidBodyPropertiesCfg,
+                default_type=DefaultRigidBodyPropertiesCfg,
                 newton_type=NewtonRigidBodyPropertiesCfg,
                 field_name="rigid_props",
             ),
             "collision_props": _physics_property_cfg_to_dict(
                 self.collision_props,
                 common_type=CollisionPropertiesCfg,
-                dexsim_type=DexsimCollisionPropertiesCfg,
+                default_type=DefaultCollisionPropertiesCfg,
                 newton_type=NewtonCollisionPropertiesCfg,
                 field_name="collision_props",
             ),
             "material_props": _physics_property_cfg_to_dict(
                 self.material_props,
                 common_type=RigidBodyMaterialCfg,
-                dexsim_type=DexsimRigidBodyMaterialCfg,
+                default_type=DefaultRigidBodyMaterialCfg,
                 newton_type=NewtonRigidBodyMaterialCfg,
                 field_name="material_props",
             ),
@@ -1258,12 +1273,12 @@ class RigidBodyPhysicsCfg:
             self.mass_props,
             (
                 self.rigid_props
-                if isinstance(self.rigid_props, DexsimRigidBodyPropertiesCfg)
+                if isinstance(self.rigid_props, DefaultRigidBodyPropertiesCfg)
                 else None
             ),
             (
                 self.collision_props
-                if isinstance(self.collision_props, DexsimCollisionPropertiesCfg)
+                if isinstance(self.collision_props, CollisionPropertiesCfg)
                 else None
             ),
             self.material_props,
@@ -1333,19 +1348,17 @@ class ArticulationRootPropertiesCfg:
         cls,
         init_dict: Mapping[str, Any],
     ) -> ArticulationRootPropertiesCfg:
-        """Parse a common, DexSim, or Newton articulation-root config."""
+        """Parse a common, Default, or Newton articulation-root config."""
         data = dict(init_dict)
         backend = str(data.pop("backend", "common")).replace("-", "_").lower()
         config_type = {
             "common": cls,
-            "default": DexsimArticulationRootPropertiesCfg,
-            "dexsim": DexsimArticulationRootPropertiesCfg,
-            "physx": DexsimArticulationRootPropertiesCfg,
+            "default": DefaultArticulationRootPropertiesCfg,
             "newton": NewtonArticulationRootPropertiesCfg,
         }.get(backend)
         if config_type is None:
             raise ValueError(
-                "articulation_props.backend must be 'common', 'dexsim', or "
+                "articulation_props.backend must be 'common', 'default', or "
                 f"'newton', got {backend!r}."
             )
         return config_type(**data)
@@ -1358,13 +1371,13 @@ class ArticulationRootPropertiesCfg:
         }
         if isinstance(self, NewtonArticulationRootPropertiesCfg):
             data["backend"] = "newton"
-        elif isinstance(self, DexsimArticulationRootPropertiesCfg):
-            data["backend"] = "dexsim"
+        elif isinstance(self, DefaultArticulationRootPropertiesCfg):
+            data["backend"] = "default"
         return data
 
 
 @configclass
-class DexsimArticulationRootPropertiesCfg(ArticulationRootPropertiesCfg):
+class DefaultArticulationRootPropertiesCfg(ArticulationRootPropertiesCfg):
     """Default-backend articulation-root extension point.
 
     No Default-only field is currently exposed through Spawn.
@@ -1778,9 +1791,9 @@ class JointDrivePropertiesCfg:
         data = dict(init_dict)
         backend = str(data.pop("backend", "common")).replace("-", "_").lower()
         wants_newton = backend == "newton" or "target_mode" in data
-        if backend not in {"common", "default", "dexsim", "physx", "newton"}:
+        if backend not in {"common", "default", "newton"}:
             raise ValueError(
-                "drive_pros.backend must be 'common', 'dexsim', or 'newton', "
+                "drive_pros.backend must be 'common', 'default', or 'newton', "
                 f"got {backend!r}."
             )
         if wants_newton and not isinstance(defaults, NewtonJointDrivePropertiesCfg):
@@ -2024,42 +2037,6 @@ class RigidObjectCfg(ObjectBaseCfg):
     """
 
     body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
-
-    max_convex_hull_num: int = MISSING
-    """The maximum number of convex hulls that will be created for the rigid body.
-
-    .. deprecated::
-        Use :attr:`MeshCfg.max_convex_hull_num` instead. This field is kept for
-        backward compatibility and overrides the shape-level value when explicitly set.
-
-    If set to larger than 1, the rigid body will be decomposed into multiple convex hulls
-    using the approximate convex decomposition method specified by :attr:`acd_method`.
-    Reference: https://github.com/SarahWeiii/CoACD
-    """
-
-    acd_method: str = MISSING
-    """The method used for approximate convex decomposition (ACD) of the mesh.
-
-    .. deprecated::
-        Use :attr:`MeshCfg.acd_method` instead. This field is kept for
-        backward compatibility and overrides the shape-level value when explicitly set.
-
-    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
-    :attr:`max_convex_hull_num` is set to larger than 1.
-    """
-
-    sdf_resolution: int = MISSING
-    """Resolution for the signed distance field (SDF) of the rigid body.
-
-    .. deprecated::
-        Use :attr:`MeshCfg.sdf_resolution` instead. This field is kept for
-        backward compatibility and overrides the shape-level value when explicitly set.
-
-    The spacing of the uniformly sampled SDF is equal to the largest AABB extent
-    of the mesh, divided by the resolution. If ``sdf_resolution`` is set to larger
-    than 0, an SDF will be generated for collision detection. SDF will increase the
-    accuracy of collision, but also takes more time to initialize and simulate.
-    """
 
     body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
@@ -2756,10 +2733,18 @@ class ArticulationCfg(ObjectBaseCfg):
     """Energy below which the articulation may go to sleep. Range: [0, max_float32]"""
 
     min_position_iters: int = 4
-    """Number of position iterations the solver should perform for this articulation. Range: [1,255]."""
+    """Legacy Default-backend position-iteration alias. Range: [1, 255].
+
+    Spawn-based configs should set
+    :attr:`DefaultRigidBodyPropertiesCfg.min_position_iters` in :attr:`attrs`.
+    """
 
     min_velocity_iters: int = 1
-    """Number of velocity iterations the solver should perform for this articulation. Range: [0,255]."""
+    """Legacy Default-backend velocity-iteration alias. Range: [0, 255].
+
+    Spawn-based configs should set
+    :attr:`DefaultRigidBodyPropertiesCfg.min_velocity_iters` in :attr:`attrs`.
+    """
 
     build_pk_chain: bool = True
     """Whether to build pytorch-kinematics chain for forward kinematics and jacobian computation."""
@@ -3062,3 +3047,105 @@ class RobotCfg(ArticulationCfg):
             Dict[str, pk.SerialChain]: The serial chain of the robot for specified control part.
         """
         return {}
+
+
+@configclass
+class RobotPresetCfg:
+    """Base class for replace-only robot configurations across physics backends.
+
+    Subclasses declare complete :class:`RobotCfg` alternatives as fields.  A
+    ``default`` field is required; optional fields use Newton backend or solver
+    profile names such as ``newton``, ``newton_mujoco_warp``, or
+    ``newton_mjwarp``. The active :class:`PhysicsBackendCfg` selects one
+    complete alternative at
+    :meth:`SimulationManager.add_robot`; alternatives are never field-merged.
+
+    Portable robot properties should remain on one ordinary :class:`RobotCfg`.
+    Use this wrapper only when an asset, actuator model, or native physics value
+    genuinely requires a different complete robot definition.
+
+    Example::
+
+        @configclass
+        class MyRobotPresetCfg(RobotPresetCfg):
+            default: RobotCfg = MyRobotCfg()
+            newton_mujoco_warp: RobotCfg = MyNewtonRobotCfg()
+    """
+
+    def resolve(
+        self,
+        physics_cfg: PhysicsBackendCfg,
+        *,
+        newton_solver_type: str | None = None,
+    ) -> RobotCfg:
+        """Return an isolated complete robot config for the active backend.
+
+        Args:
+            physics_cfg: The scene's backend-selecting physics configuration.
+            newton_solver_type: Resolved Newton solver name when it is already
+                available from the runtime. If omitted, it is inferred from
+                ``physics_cfg``.
+
+        Returns:
+            A deep copy of the highest-priority complete robot alternative.
+
+        Raises:
+            TypeError: If a preset name is unsupported, ``default`` is
+                undeclared, or a selected alternative is not a
+                :class:`RobotCfg`.
+            ValueError: If no declared alternative can satisfy the backend.
+        """
+        options = {item.name: getattr(self, item.name) for item in fields(self)}
+        invalid_names = {
+            name
+            for name in options
+            if name != "default" and name != "newton" and not name.startswith("newton_")
+        }
+        if invalid_names:
+            raise TypeError(
+                f"{type(self).__name__} uses unsupported preset name(s) "
+                f"{sorted(invalid_names)}; use 'default' or 'newton[_<solver>]'."
+            )
+        if "default" not in options:
+            raise TypeError(
+                f"{type(self).__name__} must declare a 'default' RobotCfg preset."
+            )
+
+        backend = physics_backend_from_cfg(physics_cfg)
+        if backend == "default":
+            candidates = ("default",)
+        else:
+            solver_type = newton_solver_type
+            if solver_type is None:
+                solver_cfg = physics_cfg.solver_cfg
+                if solver_cfg is None:
+                    solver_type = "mujoco_warp"
+                elif isinstance(solver_cfg, Mapping):
+                    solver_type = str(
+                        solver_cfg.get("solver_type")
+                        or solver_cfg.get("class_type")
+                        or "mujoco_warp"
+                    )
+                else:
+                    solver_type = str(getattr(solver_cfg, "solver_type"))
+            solver_type = _normalize_newton_solver_type(solver_type)
+            solver_candidates = [f"newton_{solver_type}"]
+            if solver_type == "mujoco_warp":
+                solver_candidates.append("newton_mjwarp")
+            candidates = (*solver_candidates, "newton", "default")
+
+        for candidate in candidates:
+            selected = options.get(candidate)
+            if selected is None or selected is MISSING:
+                continue
+            if not isinstance(selected, RobotCfg):
+                raise TypeError(
+                    f"{type(self).__name__}.{candidate} must be a RobotCfg, "
+                    f"got {type(selected).__name__}."
+                )
+            return deepcopy(selected)
+
+        raise ValueError(
+            f"{type(self).__name__} has no usable preset for {candidates!r}; "
+            f"declared options are {sorted(options)}."
+        )

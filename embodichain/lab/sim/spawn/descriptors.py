@@ -18,7 +18,7 @@
 This module translates one EmbodiChain configuration into a canonical
 descriptor carrying both the common physics values and the optional backend
 extension blocks. The selected :mod:`dexsim.spawn` adapter remains the only
-component that chooses between DexSim and Newton. When supplied, the active
+component that chooses between the Default and Newton backends. When supplied, the active
 Newton solver type only prevents common contact values from being authored to
 a solver that cannot consume them.
 
@@ -40,12 +40,15 @@ from typing import TYPE_CHECKING
 import numpy as np
 from dexsim.spawn import (
     ArticulationDesc,
-    ClothObjectDesc,
+    ClothDesc,
+    ClothPhysicsDesc,
     CollisionApproximation,
     CollisionDesc,
+    DexsimClothPhysicsDesc,
     DexsimCollisionDesc,
     DexsimJointDesc,
     DexsimPhysicsDesc,
+    DexsimSoftBodyPhysicsDesc,
     GeometryDesc,
     MaterialDesc,
     NewtonCollisionDesc,
@@ -54,7 +57,9 @@ from dexsim.spawn import (
     ObjectDesc,
     RenderDesc,
     RigidBodyPhysicsDesc,
-    SoftObjectDesc,
+    SoftBodyDesc,
+    SoftBodyMeshingDesc,
+    SoftBodyPhysicsDesc,
 )
 from dexsim.spawn.descs import NEWTON_CONTACT_SOLVER_FIELDS
 from dexsim.types import ActorType, DriveType, LoadOption as DexsimLoadOption
@@ -63,9 +68,9 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     ClothObjectCfg,
     CollisionPropertiesCfg,
-    DexsimCollisionPropertiesCfg,
-    DexsimRigidBodyMaterialCfg,
-    DexsimRigidBodyPropertiesCfg,
+    DefaultCollisionPropertiesCfg,
+    DefaultRigidBodyMaterialCfg,
+    DefaultRigidBodyPropertiesCfg,
     MassPropertiesCfg,
     NewtonCollisionPropertiesCfg,
     NewtonJointDrivePropertiesCfg,
@@ -108,36 +113,40 @@ class _RigidPhysicsSpec:
     """Canonical, backend-partitioned rigid-physics values."""
 
     mass_props: dict[str, object] = field(default_factory=dict)
-    dexsim_rigid_props: dict[str, object] = field(default_factory=dict)
+    default_rigid_props: dict[str, object] = field(default_factory=dict)
     newton_rigid_props: dict[str, object] = field(default_factory=dict)
     collision_enabled: bool | None = None
-    dexsim_collision_props: dict[str, object] = field(default_factory=dict)
+    contact_offset: float | None = None
+    rest_offset: float | None = None
+    default_collision_props: dict[str, object] = field(default_factory=dict)
     newton_collision_props: dict[str, object] = field(default_factory=dict)
     material_props: dict[str, object] = field(default_factory=dict)
-    dexsim_material_props: dict[str, object] = field(default_factory=dict)
+    default_material_props: dict[str, object] = field(default_factory=dict)
     newton_material_props: dict[str, object] = field(default_factory=dict)
 
     def merged(self, override: _RigidPhysicsSpec) -> _RigidPhysicsSpec:
         """Return ``override`` layered onto this spec using non-None values."""
         result = _RigidPhysicsSpec(
             mass_props=dict(self.mass_props),
-            dexsim_rigid_props=dict(self.dexsim_rigid_props),
+            default_rigid_props=dict(self.default_rigid_props),
             newton_rigid_props=dict(self.newton_rigid_props),
             collision_enabled=self.collision_enabled,
-            dexsim_collision_props=dict(self.dexsim_collision_props),
+            contact_offset=self.contact_offset,
+            rest_offset=self.rest_offset,
+            default_collision_props=dict(self.default_collision_props),
             newton_collision_props=dict(self.newton_collision_props),
             material_props=dict(self.material_props),
-            dexsim_material_props=dict(self.dexsim_material_props),
+            default_material_props=dict(self.default_material_props),
             newton_material_props=dict(self.newton_material_props),
         )
         for name in (
             "mass_props",
-            "dexsim_rigid_props",
+            "default_rigid_props",
             "newton_rigid_props",
-            "dexsim_collision_props",
+            "default_collision_props",
             "newton_collision_props",
             "material_props",
-            "dexsim_material_props",
+            "default_material_props",
             "newton_material_props",
         ):
             getattr(result, name).update(getattr(override, name))
@@ -151,6 +160,10 @@ class _RigidPhysicsSpec:
             result.mass_props.pop("mass", None)
         if override.collision_enabled is not None:
             result.collision_enabled = override.collision_enabled
+        if override.contact_offset is not None:
+            result.contact_offset = override.contact_offset
+        if override.rest_offset is not None:
+            result.rest_offset = override.rest_offset
         return result
 
 
@@ -179,6 +192,14 @@ def _resolve_rigid_physics(
                 if cfg.collision_props is None
                 else cfg.collision_props.collision_enabled
             ),
+            contact_offset=(
+                None
+                if cfg.collision_props is None
+                else cfg.collision_props.contact_offset
+            ),
+            rest_offset=(
+                None if cfg.collision_props is None else cfg.collision_props.rest_offset
+            ),
             material_props={
                 name: getattr(cfg.material_props, name)
                 for name in ("static_friction", "dynamic_friction", "restitution")
@@ -188,8 +209,8 @@ def _resolve_rigid_physics(
         )
 
         rigid_props = cfg.rigid_props
-        if isinstance(rigid_props, DexsimRigidBodyPropertiesCfg):
-            spec.dexsim_rigid_props = _configured_values(rigid_props)
+        if isinstance(rigid_props, DefaultRigidBodyPropertiesCfg):
+            spec.default_rigid_props = _configured_values(rigid_props)
         elif isinstance(rigid_props, NewtonRigidBodyPropertiesCfg):
             spec.newton_rigid_props = _configured_values(rigid_props)
         elif (
@@ -200,12 +221,14 @@ def _resolve_rigid_physics(
             )
 
         collision_props = cfg.collision_props
-        if isinstance(collision_props, DexsimCollisionPropertiesCfg):
-            spec.dexsim_collision_props = _configured_values(collision_props)
-            spec.dexsim_collision_props.pop("collision_enabled", None)
+        if isinstance(collision_props, DefaultCollisionPropertiesCfg):
+            spec.default_collision_props = _configured_values(collision_props)
+            for name in ("collision_enabled", "contact_offset", "rest_offset"):
+                spec.default_collision_props.pop(name, None)
         elif isinstance(collision_props, NewtonCollisionPropertiesCfg):
             spec.newton_collision_props = _configured_values(collision_props)
-            spec.newton_collision_props.pop("collision_enabled", None)
+            for name in ("collision_enabled", "contact_offset", "rest_offset"):
+                spec.newton_collision_props.pop(name, None)
         elif (
             collision_props is not None
             and type(collision_props) is not CollisionPropertiesCfg
@@ -215,10 +238,10 @@ def _resolve_rigid_physics(
             )
 
         material_props = cfg.material_props
-        if isinstance(material_props, DexsimRigidBodyMaterialCfg):
-            spec.dexsim_material_props = _configured_values(material_props)
+        if isinstance(material_props, DefaultRigidBodyMaterialCfg):
+            spec.default_material_props = _configured_values(material_props)
             for name in ("static_friction", "dynamic_friction", "restitution"):
-                spec.dexsim_material_props.pop(name, None)
+                spec.default_material_props.pop(name, None)
         elif isinstance(material_props, NewtonRigidBodyMaterialCfg):
             values = _configured_values(material_props)
             for name in ("static_friction", "dynamic_friction", "restitution"):
@@ -257,7 +280,7 @@ def _resolve_rigid_physics(
         "com_position",
         "com_quaternion",
     }
-    dexsim_rigid_names = {
+    default_rigid_names = {
         "angular_damping",
         "linear_damping",
         "max_depenetration_velocity",
@@ -268,21 +291,21 @@ def _resolve_rigid_physics(
         "max_angular_velocity",
         "enable_ccd",
     }
-    dexsim_collision_names = {"contact_offset", "rest_offset"}
+    default_collision_names = {"contact_offset", "rest_offset"}
     material_names = {"restitution", "dynamic_friction", "static_friction"}
     spec = _RigidPhysicsSpec(
         mass_props={
             name: legacy_values[name] for name in mass_names if name in legacy_values
         },
-        dexsim_rigid_props={
+        default_rigid_props={
             name: legacy_values[name]
-            for name in dexsim_rigid_names
+            for name in default_rigid_names
             if name in legacy_values
         },
         collision_enabled=legacy_values.get("enable_collision"),
-        dexsim_collision_props={
+        default_collision_props={
             name: legacy_values[name]
-            for name in dexsim_collision_names
+            for name in default_collision_names
             if name in legacy_values
         },
         material_props={
@@ -322,7 +345,7 @@ def rigid_desc_from_cfg(
     )
     collision.enable_collision = physics.collision_enabled
     collision.decomp_max_hulls = max_hulls
-    collision.dexsim = _compile_dexsim_collision(physics)
+    collision.dexsim = _compile_default_collision(physics)
     collision.newton = _compile_newton_collision(
         physics,
         newton_solver_type=newton_solver_type,
@@ -358,7 +381,7 @@ def volume_deformable_desc_from_cfg(
     cfg: VolumeDeformableObjectCfg,
     *,
     per_env: bool = True,
-) -> tuple[SoftObjectDesc, dict[str, MaterialDesc]]:
+) -> tuple[SoftBodyDesc, dict[str, MaterialDesc]]:
     """Translate a volume-deformable config into a DexSim descriptor."""
     uid = _required_uid(cfg.uid, "Volume deformable")
     if _is_missing(cfg.shape.fpath) or not str(cfg.shape.fpath).strip():
@@ -369,18 +392,30 @@ def volume_deformable_desc_from_cfg(
     material_ref, material_entry = _compile_visual_material(
         uid, cfg.shape.visual_material
     )
-    descriptor = SoftObjectDesc(
+    physical_attr = cfg.physical_attr
+    youngs = float(physical_attr.youngs)
+    poissons = float(physical_attr.poissons)
+    descriptor = SoftBodyDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
-        renders=[
-            RenderDesc.from_geometry(
-                geometry,
-                load_option=_compile_load_option(cfg.shape),
-                material_ref=material_ref,
-            )
-        ],
-        voxel_config=cfg.voxel_attr.attr(),
-        body_attr=cfg.physical_attr.attr(),
+        mesh=RenderDesc.from_geometry(
+            geometry,
+            load_option=_compile_load_option(cfg.shape),
+            material_ref=material_ref,
+        ),
+        physics=SoftBodyPhysicsDesc(
+            volume_density=float(physical_attr.density),
+            k_mu=youngs / (2.0 * (1.0 + poissons)),
+            k_lambda=(youngs * poissons / ((1.0 + poissons) * (1.0 - 2.0 * poissons))),
+            dexsim=DexsimSoftBodyPhysicsDesc(**_configured_values(physical_attr)),
+        ),
+        # DexSim's typed meshing contract currently exposes these three
+        # source-mesh controls; maximal_edge_length has no Spawn equivalent.
+        meshing=SoftBodyMeshingDesc(
+            proxy_simplify_target=cfg.voxel_attr.triangle_simplify_target,
+            proxy_remesh_resolution=cfg.voxel_attr.triangle_remesh_resolution,
+            voxel_resolution=cfg.voxel_attr.simulation_mesh_resolution,
+        ),
         per_env=per_env,
     )
     materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
@@ -391,7 +426,7 @@ def surface_deformable_desc_from_cfg(
     cfg: SurfaceDeformableObjectCfg,
     *,
     per_env: bool = True,
-) -> tuple[ClothObjectDesc, dict[str, MaterialDesc]]:
+) -> tuple[ClothDesc, dict[str, MaterialDesc]]:
     """Translate a surface-deformable config into a DexSim descriptor."""
     uid = _required_uid(cfg.uid, "Surface deformable")
     if _is_missing(cfg.shape.fpath) or not str(cfg.shape.fpath).strip():
@@ -402,17 +437,18 @@ def surface_deformable_desc_from_cfg(
     material_ref, material_entry = _compile_visual_material(
         uid, cfg.shape.visual_material
     )
-    descriptor = ClothObjectDesc(
+    descriptor = ClothDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
-        renders=[
-            RenderDesc.from_geometry(
-                geometry,
-                load_option=_compile_load_option(cfg.shape),
-                material_ref=material_ref,
-            )
-        ],
-        body_attr=cfg.physical_attr.attr(),
+        mesh=RenderDesc.from_geometry(
+            geometry,
+            load_option=_compile_load_option(cfg.shape),
+            material_ref=material_ref,
+        ),
+        physics=ClothPhysicsDesc(
+            surface_density=float(cfg.physical_attr.density),
+            dexsim=DexsimClothPhysicsDesc(**_configured_values(cfg.physical_attr)),
+        ),
         per_env=per_env,
     )
     materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
@@ -423,7 +459,7 @@ def soft_desc_from_cfg(
     cfg: SoftObjectCfg,
     *,
     per_env: bool = True,
-) -> tuple[SoftObjectDesc, dict[str, MaterialDesc]]:
+) -> tuple[SoftBodyDesc, dict[str, MaterialDesc]]:
     """Compatibility wrapper for :func:`volume_deformable_desc_from_cfg`."""
     return volume_deformable_desc_from_cfg(cfg, per_env=per_env)
 
@@ -432,7 +468,7 @@ def cloth_desc_from_cfg(
     cfg: ClothObjectCfg,
     *,
     per_env: bool = True,
-) -> tuple[ClothObjectDesc, dict[str, MaterialDesc]]:
+) -> tuple[ClothDesc, dict[str, MaterialDesc]]:
     """Compatibility wrapper for :func:`surface_deformable_desc_from_cfg`."""
     return surface_deformable_desc_from_cfg(cfg, per_env=per_env)
 
@@ -518,7 +554,7 @@ def _compile_link_properties(
 ) -> tuple[RigidBodyPhysicsDesc, CollisionDesc]:
     collision = CollisionDesc(
         enable_collision=physics.collision_enabled,
-        dexsim=_compile_dexsim_collision(physics),
+        dexsim=_compile_default_collision(physics),
         newton=_compile_newton_collision(
             physics,
             newton_solver_type=newton_solver_type,
@@ -625,7 +661,7 @@ def configure_articulation_desc(
             ),
             replace_inertial=replace_inertial,
         )
-    for joint_name, (dexsim, newton) in joint_properties.items():
+    for joint_name, (default_desc, newton_desc) in joint_properties.items():
         lower_limit, upper_limit = joint_limits.get(joint_name, (None, None))
         common = joint_common[joint_name]
         desc.set_joint_properties(
@@ -635,8 +671,8 @@ def configure_articulation_desc(
             effort_limit=common.get("effort_limit"),
             velocity_limit=common.get("velocity_limit"),
             armature=common.get("armature"),
-            dexsim=dexsim,
-            newton=newton,
+            dexsim=default_desc,
+            newton=newton_desc,
             newton_target_mode=joint_target_modes.get(joint_name),
         )
     return desc
@@ -654,11 +690,11 @@ def _compile_joint_properties(
     joint_names = [joint.name for joint in desc.joints]
     drive_type = None if cfg.drive_pros is None else cfg.drive_pros.drive_type
     if drive_type is None:
-        dexsim_mode = None
+        default_mode = None
         newton_mode = None
     else:
         try:
-            dexsim_mode = {
+            default_mode = {
                 "force": DriveType.FORCE,
                 "acceleration": DriveType.ACCELERATION,
                 "none": DriveType.NONE,
@@ -668,7 +704,7 @@ def _compile_joint_properties(
         newton_mode = {"force": 3, "none": 0}.get(drive_type)
     joint_properties = {
         joint_name: (
-            DexsimJointDesc(drive_mode=dexsim_mode),
+            DexsimJointDesc(drive_mode=default_mode),
             NewtonJointDesc(),
         )
         for joint_name in joint_names
@@ -714,19 +750,19 @@ def _compile_joint_properties(
                     f"{property_name!r} must contain a numeric value."
                 )
             scalar = float(value)
-            dexsim, newton = joint_properties[joint_name]
+            default_desc, newton_desc = joint_properties[joint_name]
             if property_name == "armature":
                 joint_common[joint_name]["armature"] = scalar
             elif property_name == "max_effort":
-                dexsim.max_force = scalar
+                default_desc.max_force = scalar
                 joint_common[joint_name]["effort_limit"] = scalar
             elif property_name == "max_velocity":
-                dexsim.max_velocity = scalar
+                default_desc.max_velocity = scalar
                 joint_common[joint_name]["velocity_limit"] = scalar
             else:
-                dexsim_field, newton_field = property_fields[property_name]
-                setattr(dexsim, dexsim_field, scalar)
-                setattr(newton, newton_field, scalar)
+                default_field, newton_field = property_fields[property_name]
+                setattr(default_desc, default_field, scalar)
+                setattr(newton_desc, newton_field, scalar)
 
     if isinstance(cfg.drive_pros, NewtonJointDrivePropertiesCfg):
         if cfg.drive_pros.target_mode is not None:
@@ -938,12 +974,12 @@ def _compile_rigid_physics(
         com_position = None
         com_quaternion = None
 
-    if physics.dexsim_rigid_props:
-        dexsim_values = {item.name: None for item in fields(DexsimPhysicsDesc)}
-        dexsim_values.update(physics.dexsim_rigid_props)
-        dexsim = DexsimPhysicsDesc(**dexsim_values)
+    if physics.default_rigid_props:
+        default_values = {item.name: None for item in fields(DexsimPhysicsDesc)}
+        default_values.update(physics.default_rigid_props)
+        default_desc = DexsimPhysicsDesc(**default_values)
     else:
-        dexsim = None
+        default_desc = None
     newton = (
         NewtonPhysicsDesc(**physics.newton_rigid_props)
         if physics.newton_rigid_props
@@ -956,7 +992,7 @@ def _compile_rigid_physics(
         inertia=inertia,
         com_position=com_position,
         com_quaternion=com_quaternion,
-        dexsim=dexsim,
+        dexsim=default_desc,
         newton=newton,
     )
 
@@ -979,12 +1015,46 @@ def _rigid_array(
     return result.copy()
 
 
-def _compile_dexsim_collision(
+def _common_collision_envelope(
+    physics: _RigidPhysicsSpec,
+) -> tuple[float | None, float | None]:
+    """Validate and return the portable contact/rest envelope."""
+
+    def optional_float(value: object | None, field_name: str) -> float | None:
+        if value is None:
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(f"{field_name} must be a finite number.") from exc
+        if not math.isfinite(result):
+            raise ValueError(f"{field_name} must be finite.")
+        return result
+
+    contact_offset = optional_float(physics.contact_offset, "contact_offset")
+    rest_offset = optional_float(physics.rest_offset, "rest_offset")
+    if contact_offset is not None and contact_offset < 0.0:
+        raise ValueError("contact_offset must be non-negative.")
+    if (
+        contact_offset is not None
+        and rest_offset is not None
+        and contact_offset < rest_offset
+    ):
+        raise ValueError("contact_offset must be no smaller than rest_offset.")
+    return contact_offset, rest_offset
+
+
+def _compile_default_collision(
     physics: _RigidPhysicsSpec,
 ) -> DexsimCollisionDesc | None:
     values = dict(physics.material_props)
-    values.update(physics.dexsim_collision_props)
-    values.update(physics.dexsim_material_props)
+    contact_offset, rest_offset = _common_collision_envelope(physics)
+    if contact_offset is not None:
+        values["contact_offset"] = contact_offset
+    if rest_offset is not None:
+        values["rest_offset"] = rest_offset
+    values.update(physics.default_collision_props)
+    values.update(physics.default_material_props)
     if not values:
         return None
     configured = {item.name: None for item in fields(DexsimCollisionDesc)}
@@ -1003,6 +1073,33 @@ def _compile_newton_collision(
     # shape has a Newton override, fill the Spawn margin/gap defaults because a
     # non-None descriptor suppresses DexSim's descriptor factory defaults.
     values = {field.name: None for field in fields(NewtonCollisionDesc)}
+    contact_offset, rest_offset = _common_collision_envelope(physics)
+    native_margin = physics.newton_collision_props.get("margin")
+    native_gap = physics.newton_collision_props.get("gap")
+    if rest_offset is not None:
+        values["margin"] = rest_offset
+    if contact_offset is not None and native_gap is None:
+        effective_margin = native_margin if native_margin is not None else rest_offset
+        if effective_margin is None:
+            if newton_solver_type is not None:
+                raise ValueError(
+                    "Newton requires rest_offset (or a native margin) when a "
+                    "portable contact_offset is configured."
+                )
+        else:
+            try:
+                gap = contact_offset - float(effective_margin)
+            except (TypeError, ValueError) as exc:
+                raise TypeError(
+                    "Newton collision margin must be a finite number."
+                ) from exc
+            if not math.isfinite(gap):
+                raise ValueError("Newton collision margin must be finite.")
+            if gap < 0.0:
+                raise ValueError(
+                    "Newton collision margin must be no larger than contact_offset."
+                )
+            values["gap"] = gap
     values.update(physics.newton_collision_props)
     values.update(physics.newton_material_props)
     dynamic_friction = physics.material_props.get("dynamic_friction")
@@ -1141,17 +1238,9 @@ def _resolved_mesh_collision_settings(
     if not isinstance(cfg.shape, MeshCfg):
         return 1, "coacd", 0
 
-    def first_value(values: Sequence[object], default: object) -> object:
-        for value in values:
-            if not _is_missing(value):
-                return value
-        return default
-
-    max_hulls = int(
-        first_value((cfg.max_convex_hull_num, cfg.shape.max_convex_hull_num), 1)
-    )
-    acd_method = str(first_value((cfg.acd_method, cfg.shape.acd_method), "coacd"))
-    sdf_resolution = int(first_value((cfg.sdf_resolution, cfg.shape.sdf_resolution), 0))
+    max_hulls = int(cfg.shape.max_convex_hull_num)
+    acd_method = str(cfg.shape.acd_method)
+    sdf_resolution = int(cfg.shape.sdf_resolution)
     if max_hulls < 1:
         raise ValueError("max_convex_hull_num must be at least 1.")
     if sdf_resolution < 0:

@@ -30,22 +30,28 @@ import dexsim
 from dexsim.types import DriveType
 from dexsim.spawn import (
     ArticulationDesc,
+    ClothDesc,
     CollisionDesc,
     DexsimCollisionDesc,
+    DexsimClothPhysicsDesc,
     DexsimJointDesc,
     DexsimPhysicsDesc,
+    DexsimSoftBodyPhysicsDesc,
     JointDesc,
     LinkDesc,
     NewtonCollisionDesc,
     NewtonJointDesc,
     ObjectDesc,
     RigidBodyPhysicsDesc,
+    SoftBodyDesc,
 )
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ClothObjectCfg,
+    ClothPhysicalAttributesCfg,
     CollisionPropertiesCfg,
-    DexsimRigidBodyPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
@@ -59,13 +65,18 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
     RobotCfg,
+    SoftbodyPhysicalAttributesCfg,
+    SoftbodyVoxelAttributesCfg,
+    SoftObjectCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
+    cloth_desc_from_cfg,
     configure_articulation_desc,
     rigid_desc_from_cfg,
+    soft_desc_from_cfg,
 )
 from embodichain.lab.sim.spawn.usd import (
     articulation_desc_from_usd,
@@ -75,6 +86,82 @@ from embodichain.lab.sim.spawn.usd import (
 pytestmark = pytest.mark.no_sim
 
 RESTITUTION = 0.25
+DEFORMABLE_MESH_PATH = "/assets/deformable.obj"
+
+
+def test_soft_descriptor_projects_current_dexsim_particle_schema() -> None:
+    youngs = 1.0e5
+    poissons = 0.4
+    density = 75.0
+    dynamic_friction = 0.2
+    min_position_iters = 8
+    simplify_target = 40
+    remesh_resolution = 12
+    voxel_resolution = 16
+    cfg = SoftObjectCfg(
+        uid="soft",
+        shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
+        voxel_attr=SoftbodyVoxelAttributesCfg(
+            triangle_remesh_resolution=remesh_resolution,
+            triangle_simplify_target=simplify_target,
+            simulation_mesh_resolution=voxel_resolution,
+        ),
+        physical_attr=SoftbodyPhysicalAttributesCfg(
+            youngs=youngs,
+            poissons=poissons,
+            density=density,
+            dynamic_friction=dynamic_friction,
+            min_position_iters=min_position_iters,
+        ),
+    )
+
+    descriptor, materials = soft_desc_from_cfg(cfg, per_env=False)
+
+    assert isinstance(descriptor, SoftBodyDesc)
+    assert descriptor.mesh.file_path == DEFORMABLE_MESH_PATH
+    assert descriptor.per_env is False
+    assert descriptor.meshing is not None
+    assert descriptor.meshing.proxy_simplify_target == simplify_target
+    assert descriptor.meshing.proxy_remesh_resolution == remesh_resolution
+    assert descriptor.meshing.voxel_resolution == voxel_resolution
+    assert descriptor.physics.volume_density == density
+    assert descriptor.physics.k_mu == pytest.approx(youngs / (2.0 * (1.0 + poissons)))
+    assert descriptor.physics.k_lambda == pytest.approx(
+        youngs * poissons / ((1.0 + poissons) * (1.0 - 2.0 * poissons))
+    )
+    assert isinstance(descriptor.physics.dexsim, DexsimSoftBodyPhysicsDesc)
+    assert descriptor.physics.dexsim.dynamic_friction == dynamic_friction
+    assert descriptor.physics.dexsim.min_position_iters == min_position_iters
+    assert materials == {}
+
+
+def test_cloth_descriptor_projects_current_dexsim_particle_schema() -> None:
+    density = 2.5
+    mass = 0.05
+    thickness = 0.02
+    bending_stiffness = 0.1
+    cfg = ClothObjectCfg(
+        uid="cloth",
+        shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
+        physical_attr=ClothPhysicalAttributesCfg(
+            density=density,
+            mass=mass,
+            thickness=thickness,
+            bending_stiffness=bending_stiffness,
+        ),
+    )
+
+    descriptor, materials = cloth_desc_from_cfg(cfg, per_env=False)
+
+    assert isinstance(descriptor, ClothDesc)
+    assert descriptor.mesh.file_path == DEFORMABLE_MESH_PATH
+    assert descriptor.per_env is False
+    assert descriptor.physics.surface_density == density
+    assert isinstance(descriptor.physics.dexsim, DexsimClothPhysicsDesc)
+    assert descriptor.physics.dexsim.mass == mass
+    assert descriptor.physics.dexsim.thickness == thickness
+    assert descriptor.physics.dexsim.bending_stiffness == bending_stiffness
+    assert materials == {}
 
 
 def _resolved_articulation_desc() -> ArticulationDesc:
@@ -315,7 +402,7 @@ def test_grouped_rigid_physics_routes_common_and_backend_properties() -> None:
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
         attrs=RigidBodyPhysicsCfg(
             mass_props=MassPropertiesCfg(mass=2.0),
-            rigid_props=DexsimRigidBodyPropertiesCfg(linear_damping=0.2),
+            rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.2),
             collision_props=NewtonCollisionPropertiesCfg(
                 collision_enabled=False,
                 margin=0.01,
@@ -344,6 +431,85 @@ def test_grouped_rigid_physics_routes_common_and_backend_properties() -> None:
     assert collision.newton.mu == 0.4
     assert collision.newton.ke == 1000.0
     assert collision.newton.mu_torsional == 0.02
+
+
+def test_portable_collision_envelope_compiles_to_both_backends() -> None:
+    cfg = RigidObjectCfg(
+        uid="cube",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=CollisionPropertiesCfg(
+                contact_offset=0.015,
+                rest_offset=0.005,
+            )
+        ),
+    )
+
+    descriptor, _ = rigid_desc_from_cfg(
+        cfg,
+        newton_solver_type="mujoco_warp",
+    )
+
+    collision = descriptor.collisions[0]
+    assert collision.dexsim.contact_offset == pytest.approx(0.015)
+    assert collision.dexsim.rest_offset == pytest.approx(0.005)
+    assert collision.newton.margin == pytest.approx(0.005)
+    assert collision.newton.gap == pytest.approx(0.01)
+
+
+def test_newton_native_collision_envelope_overrides_portable_translation() -> None:
+    cfg = RigidObjectCfg(
+        uid="cube",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=NewtonCollisionPropertiesCfg(
+                contact_offset=0.015,
+                rest_offset=0.005,
+                margin=0.007,
+                gap=0.004,
+            )
+        ),
+    )
+
+    descriptor, _ = rigid_desc_from_cfg(
+        cfg,
+        newton_solver_type="mujoco_warp",
+    )
+
+    collision = descriptor.collisions[0]
+    assert collision.dexsim.contact_offset == pytest.approx(0.015)
+    assert collision.dexsim.rest_offset == pytest.approx(0.005)
+    assert collision.newton.margin == pytest.approx(0.007)
+    assert collision.newton.gap == pytest.approx(0.004)
+
+
+def test_portable_collision_envelope_rejects_invalid_ordering() -> None:
+    cfg = RigidObjectCfg(
+        uid="cube",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=CollisionPropertiesCfg(
+                contact_offset=0.001,
+                rest_offset=0.002,
+            )
+        ),
+    )
+
+    with pytest.raises(ValueError, match="no smaller than rest_offset"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+
+
+def test_newton_rejects_ambiguous_portable_contact_offset() -> None:
+    cfg = RigidObjectCfg(
+        uid="cube",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=CollisionPropertiesCfg(contact_offset=0.001)
+        ),
+    )
+
+    with pytest.raises(ValueError, match="requires rest_offset"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
 
 
 def test_grouped_rigid_physics_keeps_unset_backend_blocks_absent() -> None:
@@ -401,7 +567,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
         shape=MeshCfg(fpath="cube.usd"),
         asset_physics_mode="overlay",
         attrs=RigidBodyPhysicsCfg(
-            rigid_props=DexsimRigidBodyPropertiesCfg(linear_damping=0.2),
+            rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.2),
             collision_props=NewtonCollisionPropertiesCfg(margin=0.01),
             material_props=RigidBodyMaterialCfg(dynamic_friction=0.4),
         ),

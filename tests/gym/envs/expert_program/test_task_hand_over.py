@@ -174,7 +174,7 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     )
     assert [item.uid for item in cfg.background] == [_SUPPORT_SURFACE_UID]
     assert [item.uid for item in cfg.rigid_object] == [_CAN_SIMULATION_UID]
-    assert cfg.rigid_object[0].max_convex_hull_num == 16
+    assert cfg.rigid_object[0].shape.max_convex_hull_num == 16
     assert cfg.expert_program is not None
     assert cfg.expert_program.program_id == "dual_ur5_hand_over"
 

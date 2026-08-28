@@ -188,15 +188,17 @@ def _add_objects(
         sim.add_rigid_object(
             RigidObjectCfg(
                 uid=uid,
-                shape=MeshCfg(fpath=str(mesh_path)),
+                shape=MeshCfg(
+                    fpath=str(mesh_path),
+                    max_convex_hull_num=max_convex_hull_num,
+                    acd_method="vhacd",  # Use VHACD by default.
+                ),
                 # Keep every preview body static: exported poses are already the
                 # final gravity-settled poses and should not be simulated again.
                 body_type="static",
                 init_pos=tuple(init_pos),
                 init_rot=tuple(init_rot),
                 body_scale=tuple(body_scale),
-                max_convex_hull_num=max_convex_hull_num,
-                acd_method="vhacd",  # Use vhacd by default.
             )
         )
         print(f"[{label}] {uid}: pos={init_pos} rot={init_rot} scale={body_scale}")

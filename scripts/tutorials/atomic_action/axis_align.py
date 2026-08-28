@@ -112,7 +112,6 @@ def create_align_object(
                 dynamic_friction=0.97,
                 static_friction=0.99,
             ),
-            max_convex_hull_num=16,
             init_pos=init_pos,
         )
     )

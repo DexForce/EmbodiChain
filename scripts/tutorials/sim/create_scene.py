@@ -110,7 +110,7 @@ def main() -> None:
     chair: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="chair",
-            shape=MeshCfg(fpath=path),
+            shape=MeshCfg(fpath=path, max_convex_hull_num=32),
             body_type="dynamic",
             attrs=RigidBodyPhysicsCfg(
                 mass_props=MassPropertiesCfg(mass=10.0),
@@ -118,7 +118,6 @@ def main() -> None:
             body_scale=[0.5, 0.5, 0.5],
             init_pos=[0.0, 0.0, 0.5],
             init_rot=[0.0, 0.0, 0.0],
-            max_convex_hull_num=32,
         )
     )
 

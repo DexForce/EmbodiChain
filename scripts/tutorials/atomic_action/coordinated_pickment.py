@@ -222,7 +222,9 @@ def create_pickment_object(
         cfg=RigidObjectCfg(
             uid=preset.label,
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(preset.mesh_path), compute_uv=False
+                fpath=resolve_cached_data_path(preset.mesh_path),
+                compute_uv=False,
+                max_convex_hull_num=16,
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
@@ -237,7 +239,6 @@ def create_pickment_object(
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=16,
             init_pos=[preset.init_xy[0], preset.init_xy[1], SUPPORT_SURFACE_Z],
             init_rot=list(preset.init_rot),
             body_scale=preset.body_scale,

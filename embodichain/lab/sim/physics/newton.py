@@ -45,7 +45,7 @@ def is_newton_gradient_mode(result) -> bool:
 
 
 class NewtonPhysicsBackend(PhysicsBackend):
-    """The DexSim Newton physics backend (Warp-based)."""
+    """The Warp-based Newton physics backend integrated through DexSim."""
 
     name = "newton"
 
