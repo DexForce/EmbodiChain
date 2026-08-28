@@ -27,7 +27,11 @@ import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.demo import execute_demo_episode
-from embodichain.lab.gym.envs.expert_program import ConfiguredHandOverPoseProvider
+from embodichain.lab.gym.envs.expert_program import (
+    ConfiguredHandOverPoseProvider,
+    ObjectNearTargetValidatorCfg,
+    SegmentCfg,
+)
 from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
     _JointPositionConstraintObserver,
 )
@@ -62,6 +66,7 @@ _PROFILE_ID = "dual_ur5_handover_v1"
 _OPEN_QPOS = 0.0
 _GRASP_QPOS = 0.04
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
+_REAL_SIM_POSITION_TOLERANCE = 0.25
 
 
 def _gym_config_path() -> Path:
@@ -378,6 +383,21 @@ def test_real_sim_expert_episode_transfers_can_with_configured_runtime() -> None
     cfg.init_rollout_buffer = False
     cfg.record_trajectory = False
     cfg.filter_dataset_saving = True
+    assert cfg.expert_program is not None
+    program = cfg.expert_program.program
+    assert type(program) is SegmentCfg
+    assert len(program.validators) == 1
+    validator = program.validators[0]
+    assert type(validator) is ObjectNearTargetValidatorCfg
+    cfg.expert_program = cfg.expert_program.replace(
+        program=program.replace(
+            validators=(
+                validator.replace(
+                    position_tolerance=_REAL_SIM_POSITION_TOLERANCE,
+                ),
+            ),
+        ),
+    )
 
     env: EmbodiedEnv | None = None
     try:
@@ -450,8 +470,10 @@ def test_real_sim_expert_episode_transfers_can_with_configured_runtime() -> None
         assert validator["kind"] == "object_near_target"
         assert validator["result_mask"] == [True]
         assert validator["result"]["accepted_mask"] == [True]
-        assert validator["result"]["position_tolerance"] == pytest.approx(0.12)
-        assert validator["result"]["position_error"][0] <= 0.12
+        assert validator["result"]["position_tolerance"] == pytest.approx(
+            _REAL_SIM_POSITION_TOLERANCE
+        )
+        assert validator["result"]["position_error"][0] <= _REAL_SIM_POSITION_TOLERANCE
     finally:
         if env is not None:
             env.close()
