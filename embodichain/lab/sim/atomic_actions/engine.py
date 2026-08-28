@@ -31,7 +31,7 @@ from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
-from .tracking import TrackingRuntime
+from .tracking import TrackingPolicy, TrackingRuntime
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -194,6 +194,7 @@ class AtomicActionEngine:
         *,
         control_parts: Mapping[str, Mapping[str, str]] | None = None,
         motion_policy: MotionPolicy | None = None,
+        tracking_policy: TrackingPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
         skill_options: OptionsT | None = None,
         control_overrides: ActionControlOverrides | None = None,
@@ -211,6 +212,7 @@ class AtomicActionEngine:
             goal: Action-specific typed goal.
             control_parts: Direct ``slot -> endpoint -> control_part`` mapping.
             motion_policy: Optional invocation motion policy.
+            tracking_policy: Optional invocation tracking policy.
             recovery_policy: Optional invocation recovery policy.
             skill_options: Optional action-specific invocation options.
             control_overrides: Optional endpoint-scoped command overrides.
@@ -235,6 +237,11 @@ class AtomicActionEngine:
             goal=goal,
             binding=binding,
             motion_policy=MotionPolicy() if motion_policy is None else motion_policy,
+            tracking_policy=(
+                TrackingPolicy.joint_position()
+                if tracking_policy is None
+                else tracking_policy
+            ),
             recovery_policy=(
                 RecoveryPolicy() if recovery_policy is None else recovery_policy
             ),

@@ -32,11 +32,13 @@ import torch
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
+    EntityState,
     GraspGoal,
     MotionPolicy,
     PickUpOptions,
     PourGoal,
     PourOptions,
+    SceneSnapshot,
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.axis_align import (
@@ -46,7 +48,7 @@ from scripts.tutorials.atomic_action.axis_align import (
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     create_parallel_jaw_grasp_pose_generator,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -98,7 +100,7 @@ def main() -> None:
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -157,10 +159,24 @@ def main() -> None:
                 skill_options=PourOptions(rotate_angle=args.rotate_angle),
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
+            ),
+            control_dt=sim.sim_config.physics_dt,
+        ),
     )
     if not compiled.plan_success.all():
-        logger.log_warning("Failed to plan PickUp followed by Pour.")
+        failed = [
+            f"{plan.skill_id}: {plan.diagnostics.messages or ('planning failed',)}"
+            for plan in compiled.action_plans
+            if not plan.plan_success.all()
+        ]
+        logger.log_warning(
+            "Failed to plan PickUp followed by Pour: " + "; ".join(failed)
+        )
         return
 
     if wait_for_user:

@@ -50,6 +50,7 @@ from embodichain.lab.sim.atomic_actions import (
     SkillEndpointRequirement,
     SkillResourceSlot,
     TimedTrajectory,
+    TrackingPolicy,
 )
 
 ACTION_DT = 0.02
@@ -357,12 +358,17 @@ def test_engine_make_invocation_binds_direct_control_parts() -> None:
     engine.register(StubAction())
     goal = JointPositionGoal(torch.ones(2, 3))
     motion_policy = MotionPolicy(sample_count=2)
+    tracking_policy = TrackingPolicy.joint_position(
+        in_flight_max_abs_error=0.25,
+        terminal_max_abs_error=0.1,
+    )
 
     invocation = engine.make_invocation(
         "stub",
         goal,
         control_parts={"primary": {"motion": "all"}},
         motion_policy=motion_policy,
+        tracking_policy=tracking_policy,
         invocation_id="direct-call",
         revision=1,
     )
@@ -373,6 +379,7 @@ def test_engine_make_invocation_binds_direct_control_parts() -> None:
     assert invocation.skill_id == "stub"
     assert invocation.goal is goal
     assert invocation.motion_policy is motion_policy
+    assert invocation.tracking_policy is tracking_policy
     assert invocation.invocation_id == "direct-call"
     assert invocation.revision == 1
     assert target.control_part == "all"
