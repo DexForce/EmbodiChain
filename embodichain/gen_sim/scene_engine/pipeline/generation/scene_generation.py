@@ -36,6 +36,9 @@ from matplotlib.patches import Rectangle
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
+from embodichain.gen_sim.scene_engine.clients.articulated_generation import (
+    ArticulatedGenerationClient,
+)
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
     TABLE_OBJECT_ID,
@@ -93,6 +96,7 @@ def generate_scene_and_refine(
     *,
     geometry_generation_client: GeometryGenerationClient,
     vlm_client: OpenAICompatibleVLM,
+    articulated_generation_client: ArticulatedGenerationClient | None = None,
 ) -> Scene:
 
     resolved_image_path = _validate_image_path(image_path)
@@ -118,12 +122,19 @@ def generate_scene_and_refine(
     simready_geometry_output_root.mkdir()
 
     # Coarse geometry generation and coarse layout generation.
-    _generate_coarse_results_from_masks(
+    coarse_scales_y_up_by_id = _generate_coarse_results_from_masks(
         image_path=resolved_image_path,
         debug_output_root=debug_output_root,
         coarse_geometry_output_root=coarse_geometry_output_root,
         scene=scene,  # Use the masks which are kept in the scene data structure.
         geometry_generation_client=geometry_generation_client,
+    )
+    # Generate articulated USDCs for every articulated object, if any.
+    _generate_articulated_usdcs(
+        scene=scene,
+        output_root=stage_output_root / "articulated_geometry",
+        coarse_scales_y_up_by_id=coarse_scales_y_up_by_id,
+        articulated_generation_client=articulated_generation_client,
     )
 
     # Simready all the assets(includes table).
@@ -273,7 +284,7 @@ def _generate_coarse_results_from_masks(
     scene: Scene,
     *,
     geometry_generation_client: GeometryGenerationClient,
-) -> None:
+) -> dict[str, list[float]]:
 
     # Parse whether the scene has each assets' binary masks.
     # The original image has already been validated.
@@ -326,8 +337,60 @@ def _generate_coarse_results_from_masks(
         json.dumps(coarse_layout, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    # Nothing to be returned.
-    return None
+    return {
+        str(layout_object["id"]): [float(value) for value in layout_object["scale"]]
+        for layout_object in coarse_layout
+    }
+
+
+def _generate_articulated_usdcs(
+    *,
+    scene: Scene,
+    output_root: str | Path,
+    coarse_scales_y_up_by_id: dict[str, list[float]],
+    articulated_generation_client: ArticulatedGenerationClient | None,
+) -> None:
+    """Generate and persist one articulation USDC for every articulated object."""
+    articulated_objects = [
+        scene_object for scene_object in scene.objects if scene_object.is_articulated
+    ]
+    if not articulated_objects:
+        return
+    if articulated_generation_client is None:
+        raise ValueError(
+            "Articulated scene objects require an articulated-generation client."
+        )
+
+    resolved_output_root = Path(output_root).expanduser().resolve()
+    resolved_output_root.mkdir(parents=True, exist_ok=True)
+    for scene_object in articulated_objects:
+        if scene_object.visible_rgba_path is None:
+            raise ValueError(
+                "Articulated scene object "
+                f"{scene_object.id!r} has no visible RGBA observation."
+            )
+        coarse_scale_y_up = coarse_scales_y_up_by_id.get(scene_object.id)
+        if (
+            not isinstance(coarse_scale_y_up, list)
+            or len(coarse_scale_y_up) != 3
+            or not np.all(np.isfinite(coarse_scale_y_up))
+            or any(scale <= 0.0 for scale in coarse_scale_y_up)
+        ):
+            raise ValueError(
+                "Articulated scene object "
+                f"{scene_object.id!r} has no valid coarse-layout scale."
+            )
+        # Run serially so the stage ends only after every required USDC is saved.
+        scene_object.articulated_usdc_path = str(
+            articulated_generation_client.generate_articulated_usdc(
+                prompt=scene_object.description,
+                image_path=scene_object.visible_rgba_path,
+                output_path=resolved_output_root / f"{scene_object.id}.usdc",
+            )
+        )
+        # USDC is y-up like GLB; SimulationManager performs the shared z-up conversion.
+        scene_object.articulated_usdc_scale = list(coarse_scale_y_up)
+        log_info(f"Created articulated USDC: {scene_object.id!r}.")
 
 
 def _update_scene_final_y_up_layout_and_z_up_centers(

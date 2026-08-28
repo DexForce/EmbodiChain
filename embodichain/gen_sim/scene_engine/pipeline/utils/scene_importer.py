@@ -154,6 +154,9 @@ class SceneExportImporter:
         rigid_object_entries = scene_config.get("rigid_object", [])
         if not isinstance(rigid_object_entries, list):
             raise ValueError("Scene config rigid_object must be a list.")
+        articulation_entries = scene_config.get("articulation", [])
+        if not isinstance(articulation_entries, list):
+            raise ValueError("Scene config articulation must be a list.")
 
         return Scene(
             objects=[
@@ -161,6 +164,10 @@ class SceneExportImporter:
                 *[
                     self._scene_object_from_export_entry(entry, kind="asset")
                     for entry in rigid_object_entries
+                ],
+                *[
+                    self._scene_object_from_articulation_entry(entry)
+                    for entry in articulation_entries
                 ],
             ]
         )
@@ -325,6 +332,43 @@ class SceneExportImporter:
             ),
         )
 
+    def _scene_object_from_articulation_entry(self, entry: object) -> SceneObject:
+        """Restore an editable GLB proxy and its runtime USDC articulation."""
+        if not isinstance(entry, dict):
+            raise ValueError("Articulation entries must be objects.")
+        uid = entry.get("uid")
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("Articulation entries must contain a valid uid.")
+        proxy_glb_fpath = entry.get("proxy_glb_fpath")
+        if not isinstance(proxy_glb_fpath, str):
+            raise ValueError(
+                f"Articulation entry {uid!r} must contain proxy_glb_fpath."
+            )
+        proxy_body_scale = self._vector3(
+            entry.get("proxy_body_scale"), field_name=f"{uid}.proxy_body_scale"
+        )
+        # Scene edit still measures and optimizes the canonical GLB proxy.
+        proxy_entry = {
+            **entry,
+            "shape": {"shape_type": "Mesh", "fpath": proxy_glb_fpath},
+            "body_scale": proxy_body_scale,
+        }
+        scene_object = self._scene_object_from_export_entry(proxy_entry, kind="asset")
+        if not scene_object.is_articulated:
+            raise ValueError(
+                f"Articulation entry {uid!r} must set is_articulated=true."
+            )
+        scene_object.articulated_usdc_path = str(
+            self._resolve_export_articulated_usdc_path(entry, uid=uid)
+        )
+        articulated_usdc_scale = self._vector3(
+            entry.get("body_scale"), field_name=f"{uid}.body_scale"
+        )
+        if any(value <= 0.0 for value in articulated_usdc_scale):
+            raise ValueError(f"Articulation entry {uid!r} body_scale must be positive.")
+        scene_object.articulated_usdc_scale = articulated_usdc_scale
+        return scene_object
+
     def _resolve_export_glb_path(
         self,
         entry: dict[str, Any],
@@ -354,6 +398,39 @@ class SceneExportImporter:
         if not glb_path.is_file():
             raise FileNotFoundError(f"Scene object {uid!r} GLB not found: {glb_path}")
         return glb_path
+
+    def _resolve_export_articulated_usdc_path(
+        self,
+        entry: dict[str, Any],
+        *,
+        uid: str,
+    ) -> Path:
+        """Validate one exported articulation reference and return its USDC path."""
+        raw_fpath = entry.get("fpath")
+        if not isinstance(raw_fpath, str):
+            raise ValueError(f"Articulation entry {uid!r} must contain fpath.")
+        fpath = Path(raw_fpath)
+        if fpath.is_absolute() or fpath.suffix.lower() != ".usdc":
+            raise ValueError(
+                f"Articulation entry {uid!r} fpath must be a relative USDC path."
+            )
+        expected_fpath = Path("articulated_assets") / uid / f"{uid}.usdc"
+        if fpath != expected_fpath:
+            raise ValueError(
+                f"Articulation entry {uid!r} fpath must be "
+                f"{expected_fpath.as_posix()!r}."
+            )
+        usdc_path = (self.scene_export_root / fpath).resolve()
+        if self.scene_export_root.resolve() not in usdc_path.parents:
+            raise ValueError(
+                f"Articulation entry {uid!r} fpath must stay within "
+                f"{self.scene_export_root.resolve()}."
+            )
+        if not usdc_path.is_file():
+            raise FileNotFoundError(
+                f"Articulation USDC for {uid!r} not found: {usdc_path}"
+            )
+        return usdc_path
 
     @staticmethod
     def _vector3(value: object, *, field_name: str) -> list[float]:

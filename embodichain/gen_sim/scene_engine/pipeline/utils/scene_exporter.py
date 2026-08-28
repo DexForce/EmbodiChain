@@ -59,7 +59,7 @@ class SceneExporter:
         self.scene_json_path: Path | None = None
 
     def export(self) -> Path:
-        """Write a scene-only config and copy SimReady GLBs into ``mesh_assets``.
+        """Write a scene-only config and copy runtime and proxy scene assets.
 
         Scene layouts are y-up. The simulator automatically converts each y-up
         GLB to z-up, so this exporter copies each GLB unchanged and converts
@@ -70,9 +70,13 @@ class SceneExporter:
         """
         if self.scene.table is None:
             raise ValueError("Cannot export a scene without a table.")
+        if self.scene.table.is_articulated:
+            raise ValueError("The exported table must remain a rigid support object.")
 
         mesh_assets_root = self.export_root / "mesh_assets"
+        articulated_assets_root = self.export_root / "articulated_assets"
         mesh_assets_root.mkdir(parents=True, exist_ok=True)
+        articulated_assets_root.mkdir(parents=True, exist_ok=True)
         scene_objects = self.scene.objects
         object_ids = [scene_object.id for scene_object in scene_objects]
         if len(set(object_ids)) != len(object_ids):
@@ -87,6 +91,14 @@ class SceneExporter:
                 mesh_assets_root=mesh_assets_root,
             )
             for scene_object in scene_objects
+        }
+        exported_articulated_entries = {
+            asset.id: self._copy_articulated_usdc_to_assets(
+                scene_object=asset,
+                articulated_assets_root=articulated_assets_root,
+            )
+            for asset in self.scene.assets
+            if asset.is_articulated
         }
         scene_config = {
             "format": "embodichain.scene-export/v1",
@@ -106,6 +118,16 @@ class SceneExporter:
                     asset_relative_path=exported_entries[asset.id],
                 )
                 for asset in self.scene.assets
+                if not asset.is_articulated
+            ],
+            "articulation": [
+                self._articulation_config(
+                    scene_object=asset,
+                    articulated_relative_path=exported_articulated_entries[asset.id],
+                    proxy_glb_relative_path=exported_entries[asset.id],
+                )
+                for asset in self.scene.assets
+                if asset.is_articulated
             ],
         }
         self.scene_config_path = self.export_root / "scene_config.json"
@@ -130,6 +152,10 @@ class SceneExporter:
         self._remove_stale_mesh_assets(
             mesh_assets_root=mesh_assets_root,
             object_ids=set(object_ids),
+        )
+        self._remove_stale_mesh_assets(
+            mesh_assets_root=articulated_assets_root,
+            object_ids=set(exported_articulated_entries),
         )
         return self.scene_config_path
 
@@ -166,6 +192,38 @@ class SceneExporter:
         ):
             shutil.copy2(source_glb_path, destination_glb_path)
         return destination_glb_path.relative_to(mesh_assets_root.parent).as_posix()
+
+    @staticmethod
+    def _copy_articulated_usdc_to_assets(
+        *,
+        scene_object: SceneObject,
+        articulated_assets_root: Path,
+    ) -> str:
+        """Copy one runtime USDC and return its config-relative path."""
+        object_id = scene_object.id
+        if scene_object.articulated_usdc_path is None:
+            raise ValueError(
+                f"Articulated scene object {object_id!r} has no USDC path."
+            )
+        source_usdc_path = (
+            Path(scene_object.articulated_usdc_path).expanduser().resolve()
+        )
+        if not source_usdc_path.is_file():
+            raise FileNotFoundError(
+                f"Articulated USDC for scene object {object_id!r} not found: "
+                f"{source_usdc_path}"
+            )
+        destination_usdc_path = (
+            articulated_assets_root / object_id / f"{object_id}.usdc"
+        )
+        destination_usdc_path.parent.mkdir(parents=True, exist_ok=True)
+        if not destination_usdc_path.is_file() or not source_usdc_path.samefile(
+            destination_usdc_path
+        ):
+            shutil.copy2(source_usdc_path, destination_usdc_path)
+        return destination_usdc_path.relative_to(
+            articulated_assets_root.parent
+        ).as_posix()
 
     @staticmethod
     def _remove_stale_mesh_assets(
@@ -232,6 +290,58 @@ class SceneExporter:
             "support_optimization_rect_xy": scene_object.support_optimization_rect_xy,
             "max_convex_hull_num": scene_object.physics.max_convex_hull_num,
         }
+
+    @staticmethod
+    def _articulation_config(
+        *,
+        scene_object: SceneObject,
+        articulated_relative_path: str,
+        proxy_glb_relative_path: str,
+    ) -> dict[str, object]:
+        """Build one y-up USDC articulation config from an optimized scene asset."""
+        pos_y_up = SceneExporter._scene_vector(scene_object, "pos")
+        rot_y_up = SceneExporter._scene_vector(scene_object, "rot")
+        proxy_scale_y_up = SceneExporter._scene_vector(scene_object, "scale")
+        articulated_scale_y_up = SceneExporter._articulated_usdc_scale(scene_object)
+        pos_z_up = _Y_UP_TO_Z_UP_ROTATION @ np.asarray(pos_y_up, dtype=float)
+        rotation_y_up = Rotation.from_euler("xyz", rot_y_up, degrees=True).as_matrix()
+        rotation_z_up = (
+            _Y_UP_TO_Z_UP_ROTATION @ rotation_y_up @ _Y_UP_TO_Z_UP_ROTATION.T
+        )
+        rot_z_up = Rotation.from_matrix(rotation_z_up).as_euler("XYZ", degrees=True)
+        return {
+            "uid": scene_object.id,
+            "category": scene_object.category,
+            "name": scene_object.name,
+            "description": scene_object.description,
+            "is_articulated": True,
+            "fpath": articulated_relative_path,
+            # The proxy stays in the export so scene edit can keep using GLB AABBs.
+            "proxy_glb_fpath": proxy_glb_relative_path,
+            # Both y-up assets load with their bottom on z-up's XY plane.
+            "init_pos": pos_z_up.tolist(),
+            "init_rot": rot_z_up.tolist(),
+            "body_scale": articulated_scale_y_up,
+            "proxy_body_scale": proxy_scale_y_up,
+            "fix_base": True,
+        }
+
+    @staticmethod
+    def _articulated_usdc_scale(scene_object: SceneObject) -> list[float]:
+        """Return the finite positive y-up scale for one USDC asset."""
+        scale = scene_object.articulated_usdc_scale
+        if not isinstance(scale, list) or len(scale) != 3:
+            raise ValueError(
+                f"Articulated scene object {scene_object.id!r} has no USDC scale."
+            )
+        typed_scale = [float(value) for value in scale]
+        if not np.all(np.isfinite(typed_scale)) or any(
+            value <= 0.0 for value in typed_scale
+        ):
+            raise ValueError(
+                f"Articulated scene object {scene_object.id!r} has invalid USDC scale."
+            )
+        return typed_scale
 
     @staticmethod
     def _scene_vector(scene_object: SceneObject, field_name: str) -> list[float]:

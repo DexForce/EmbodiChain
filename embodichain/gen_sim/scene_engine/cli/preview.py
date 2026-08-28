@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import LightCfg, MeshCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, LightCfg, MeshCfg, RigidObjectCfg
 from embodichain.lab.visualization import (
     VisualizationCfg,
     add_viser_args_to_parser,
@@ -93,6 +93,11 @@ def preview_scene_export(
             entries=_config_entries(scene_config, "rigid_object"),
             config_dir=config_path.parent,
             label="asset",
+        )
+        _add_articulations(
+            sim=sim,
+            entries=_config_entries(scene_config, "articulation"),
+            config_dir=config_path.parent,
         )
 
         is_viser = sim.sim_config.visualization.backend == "viser"
@@ -201,6 +206,58 @@ def _add_objects(
             )
         )
         print(f"[{label}] {uid}: pos={init_pos} rot={init_rot} scale={body_scale}")
+
+
+def _add_articulations(
+    *,
+    sim: SimulationManager,
+    entries: list[dict[str, Any]],
+    config_dir: Path,
+) -> None:
+    """Add exported USDC articulations without also loading their GLB proxies."""
+    resolved_config_dir = config_dir.resolve()
+    for entry in entries:
+        uid = entry.get("uid")
+        raw_fpath = entry.get("fpath")
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("Articulation entry has no valid uid.")
+        if not isinstance(raw_fpath, str):
+            raise ValueError(f"Articulation entry {uid!r} has no fpath.")
+        fpath = Path(raw_fpath)
+        if fpath.is_absolute() or fpath.suffix.lower() != ".usdc":
+            raise ValueError(
+                f"Articulation entry {uid!r} fpath must be a relative USDC path."
+            )
+        usdc_path = (resolved_config_dir / fpath).resolve()
+        if resolved_config_dir not in usdc_path.parents:
+            raise ValueError(
+                f"Articulation entry {uid!r} fpath must stay within "
+                f"{resolved_config_dir}."
+            )
+        if not usdc_path.is_file():
+            raise FileNotFoundError(
+                f"Articulation USDC for {uid!r} not found: {usdc_path}"
+            )
+        init_pos = _vector3(entry.get("init_pos"), field_name=f"{uid}.init_pos")
+        init_rot = _vector3(entry.get("init_rot"), field_name=f"{uid}.init_rot")
+        body_scale = _vector3(
+            entry.get("body_scale", [1.0, 1.0, 1.0]),
+            field_name=f"{uid}.body_scale",
+        )
+        if entry.get("fix_base", True) is not True:
+            raise ValueError(f"Articulation entry {uid!r} must set fix_base=true.")
+        # SimulationManager converts this y-up USDC to z-up with its bottom on XY.
+        sim.add_articulation(
+            ArticulationCfg(
+                uid=uid,
+                fpath=str(usdc_path),
+                init_pos=tuple(init_pos),
+                init_rot=tuple(init_rot),
+                body_scale=tuple(body_scale),
+                fix_base=True,
+            )
+        )
+        print(f"[articulation] {uid}: pos={init_pos} rot={init_rot} scale={body_scale}")
 
 
 def _vector3(value: object, *, field_name: str) -> list[float]:
