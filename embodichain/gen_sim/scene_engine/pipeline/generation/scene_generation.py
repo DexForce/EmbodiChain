@@ -57,6 +57,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_table_aligner 
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
     AssetsSupportLayoutOptimizer,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+    _canonicalize_articulated_usdc_bottom_center,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
     GravitySettleBody,
     GravitySettler,
@@ -381,12 +384,14 @@ def _generate_articulated_usdcs(
                 f"{scene_object.id!r} has no valid coarse-layout scale."
             )
         # Run serially so the stage ends only after every required USDC is saved.
+        generated_usdc_path = articulated_generation_client.generate_articulated_usdc(
+            prompt=scene_object.description,
+            image_path=scene_object.visible_rgba_path,
+            output_path=resolved_output_root / f"{scene_object.id}.usdc",
+        )
+        # Canonicalize the runtime USDC so it shares the SimReady GLB origin.
         scene_object.articulated_usdc_path = str(
-            articulated_generation_client.generate_articulated_usdc(
-                prompt=scene_object.description,
-                image_path=scene_object.visible_rgba_path,
-                output_path=resolved_output_root / f"{scene_object.id}.usdc",
-            )
+            _canonicalize_articulated_usdc_bottom_center(generated_usdc_path)
         )
         # USDC is y-up like GLB; SimulationManager performs the shared z-up conversion.
         scene_object.articulated_usdc_scale = list(coarse_scale_y_up)

@@ -25,7 +25,6 @@ from scipy.spatial.transform import Rotation
 import trimesh
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.core.scene_graph import OrientationState
 from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
