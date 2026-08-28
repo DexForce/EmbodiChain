@@ -125,7 +125,7 @@ def main() -> None:
     """Plan and replay PickUp followed by a multi-waypoint Place."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot)
+    robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)

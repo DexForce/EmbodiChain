@@ -326,6 +326,7 @@ def add_tutorial_robot(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> Robot:
     """Add a selected tutorial robot with the shared PGI gripper.
 
@@ -346,6 +347,7 @@ def add_tutorial_robot(
             robot_type,
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     )
 
@@ -915,6 +917,7 @@ def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
     tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
+    **kwargs,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
@@ -989,6 +992,7 @@ def create_ur5_gripper_robot_cfg(
 def create_franka_panda_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> RobotCfg:
     """Build a Franka arm + PGI gripper configuration for the tutorials.
 
@@ -1051,6 +1055,7 @@ def create_franka_panda_robot_cfg(
 def create_ur10_robotiq_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> RobotCfg:
     """Build a UR10 arm with a six-DOF Robotiq 2F-140 gripper.
 
@@ -1108,6 +1113,7 @@ def create_tutorial_robot_cfg(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> RobotCfg:
     """Build a selected tutorial arm with the common PGI gripper contract.
 
@@ -1127,16 +1133,19 @@ def create_tutorial_robot_cfg(
         return create_ur5_gripper_robot_cfg(
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     if robot_type == "franka":
         return create_franka_panda_robot_cfg(
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     if robot_type == "ur10":
         return create_ur10_robotiq_robot_cfg(
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     raise ValueError(
         f"Unsupported tutorial robot {robot_type!r}; expected one of {TUTORIAL_ROBOTS}."

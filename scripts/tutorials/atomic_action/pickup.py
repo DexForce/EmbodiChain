@@ -127,7 +127,7 @@ def main() -> None:
     """Plan and replay a sampled antipodal PickUp trajectory."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot)
+    robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
