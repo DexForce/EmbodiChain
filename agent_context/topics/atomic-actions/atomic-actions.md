@@ -968,6 +968,9 @@ registers the referenced entity as a recovery dependency, allowing an executing
 semantic object's pose once per planning attempt and declares the semantic
 `entity_id` because grasp sampling, upright adjustment, and the held
 `object_to_eef` relation all consume that same pose.
+`AxisAlign` likewise returns a single-manipulator `HeldObjectState`; it preserves
+the object-to-EEF relation established at grasp and records the final aligned
+EEF pose as the projected grasp pose.
 
 `AssembleGoal.base_pose=SceneEntityPose(...)` is the canonical assembly anchor
 and is required, so the base is always snapshot-grounded and registered as a

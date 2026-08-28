@@ -1781,7 +1781,12 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
     ]
     assert generator.generate.call_count == 2
     assert len(solved_poses) == 4
-    assert plan.expected_effects.is_empty
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+    held = projected.get_held_object("arm")
+    assert held is not None
+    assert held.semantics.entity_id == semantics.entity_id
+    torch.testing.assert_close(held.object_to_eef, object_pose)
+    torch.testing.assert_close(held.grasp_xpos, solved_poses[-1])
     assert context.task is original_task
     assert plan.scene_dependencies == ("target",)
     final_object_rotation = solved_poses[-1][:, :3, :3]
