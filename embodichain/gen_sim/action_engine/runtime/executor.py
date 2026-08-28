@@ -3017,13 +3017,16 @@ class ProgramExecutor:
                         from_planned_qpos=capability.state_effect == "preserve_hold",
                     )
                 self._step_states[(step.id, arm)] = committed_state
-                self._update_ownership(
-                    step,
-                    arm,
-                    action_class,
-                    committed_state,
-                    successful,
-                )
+                if bool(outcome.grounded.motion_policy.get("single_release", False)):
+                    self._release_ownership(step.object_uid, arm, successful)
+                else:
+                    self._update_ownership(
+                        step,
+                        arm,
+                        action_class,
+                        committed_state,
+                        successful,
+                    )
         edge_failed = (
             failed
             | (~failed & ~assigned)

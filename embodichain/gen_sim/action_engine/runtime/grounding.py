@@ -707,6 +707,8 @@ class ActionGrounder:
         if kind == "joint_state":
             joint_defaults = self.runtime_policy.grounding["joint_state"]
             source = binding.get("source")
+            if bool(binding.get("single_release", False)):
+                policy["single_release"] = True
             if source == "gripper_closed":
                 policy["sample_interval"] = int(
                     joint_defaults["hand_close_sample_interval"]
@@ -809,10 +811,7 @@ class ActionGrounder:
                     phase="final",
                     orientation_reference_pose=orientation_reference_pose,
                 )
-                target = AxisAlignGoal(
-                    semantics=semantics,
-                    object_target_pose=target_object_pose,
-                )
+                target = AxisAlignGoal(semantics=semantics)
             elif capability.target_materializer == "coordinated_pickment":
                 target_object_pose = self._semantic_target(
                     step,

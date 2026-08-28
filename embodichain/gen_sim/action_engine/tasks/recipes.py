@@ -435,12 +435,48 @@ def _recipe(
                 {"kind": "object", "object": object_uid},
                 dependencies,
                 role,
+                {},
+                motion_policy(),
+            )
+            descend = _node(
+                group_id,
+                2,
+                "MoveHeldObject",
+                task_type,
+                object_uid,
+                actor,
+                "arm",
+                {
+                    "kind": "semantic_goal",
+                    "semantic_step": group_id,
+                    "phase": "final",
+                },
+                [alignment["id"]],
+                role,
+                {},
+                motion_policy(),
+            )
+            release = _node(
+                group_id,
+                3,
+                "MoveJoints",
+                task_type,
+                object_uid,
+                actor,
+                "hand",
+                {
+                    "kind": "joint_state",
+                    "source": "gripper_open",
+                    "single_release": True,
+                },
+                [descend["id"]],
+                role,
                 success,
                 motion_policy(),
             )
             lift_clear = _node(
                 group_id,
-                2,
+                4,
                 "MoveEndEffector",
                 task_type,
                 object_uid,
@@ -451,14 +487,14 @@ def _recipe(
                     "source": "release",
                     "operation": "lift_clear",
                 },
-                [alignment["id"]],
+                [release["id"]],
                 "cleanup",
                 {},
                 motion_policy(),
             )
             reorient = _node(
                 group_id,
-                3,
+                5,
                 "MoveEndEffector",
                 task_type,
                 object_uid,
@@ -476,7 +512,7 @@ def _recipe(
             )
             post_reorient_lift = _node(
                 group_id,
-                4,
+                6,
                 "MoveEndEffector",
                 task_type,
                 object_uid,
@@ -495,7 +531,7 @@ def _recipe(
             )
             retreat = _node(
                 group_id,
-                5,
+                7,
                 "MoveEndEffector",
                 task_type,
                 object_uid,
@@ -513,7 +549,7 @@ def _recipe(
             )
             home = _node(
                 group_id,
-                6,
+                8,
                 "MoveJoints",
                 task_type,
                 object_uid,
@@ -533,6 +569,8 @@ def _recipe(
             return (
                 [
                     alignment,
+                    descend,
+                    release,
                     lift_clear,
                     reorient,
                     post_reorient_lift,

@@ -3905,6 +3905,18 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         if candidate.id in orient_step.edge_ids
         and candidate.actions[0]["atomic_action_class"] == "AxisAlign"
     )
+    orient_descend_edge = next(
+        candidate
+        for candidate in program.edges
+        if candidate.id in orient_step.edge_ids
+        and candidate.actions[0]["atomic_action_class"] == "MoveHeldObject"
+    )
+    orient_release_edge = next(
+        candidate
+        for candidate in program.edges
+        if candidate.id in orient_step.edge_ids
+        and candidate.actions[0]["target_binding"].get("single_release") is True
+    )
     orient_lift_edges = [
         candidate
         for candidate in program.edges
@@ -3952,6 +3964,18 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         arm="right_arm",
         state=ExecutionState(last_qpos=env.robot.get_qpos()),
     )
+    orient_descend = grounder.ground(
+        orient_descend_edge.actions[0],
+        orient_step,
+        arm="right_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+    )
+    orient_release = grounder.ground(
+        orient_release_edge.actions[0],
+        orient_step,
+        arm="right_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+    )
     release_pose = _pose(0.05, 0.2, 0.78)
     orient_lift = grounder.ground(
         orient_lift_edge.actions[0],
@@ -3992,6 +4016,19 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
     assert "approach_direction_mode" not in handover_pickup.cfg
     assert handover_pickup.cfg["pick_object_part"] == "top"
     assert isinstance(orient_alignment.target, AxisAlignGoal)
+    assert isinstance(orient_descend.target, HeldObjectPoseGoal)
+    assert torch.equal(
+        orient_descend.target.object_target_pose[:, :2, 3],
+        orient_alignment.target_object_pose[:, :2, 3],
+    )
+    assert orient_descend.motion_policy["surface_clearance"] == pytest.approx(0.005)
+    assert isinstance(orient_release.target, JointPositionGoal)
+    assert orient_release.control == "hand"
+    assert orient_release.cfg["single_release"] is True
+    assert torch.equal(
+        orient_release.target.target,
+        torch.as_tensor(env.open_state, dtype=torch.float32),
+    )
     assert isinstance(orient_lift.target, EndEffectorPoseGoal)
     assert torch.equal(
         orient_lift.target.xpos[:, :2, 3],
@@ -4044,10 +4081,7 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         ).any()
     )
     assert orient_alignment.target.grasp_xpos is None
-    assert torch.equal(
-        orient_alignment.target.object_target_pose,
-        orient_alignment.target_object_pose,
-    )
+    assert not hasattr(orient_alignment.target, "object_target_pose")
     assert orient_alignment.target_object_pose is not None
     assert isinstance(
         orient_alignment.target.semantics.affordance,
@@ -5585,7 +5619,8 @@ def test_continue_failure_policy_blocks_failed_safety_cleanup_chain(
     result = executor.run()
 
     assert active_by_edge[lift_edge.id] == [True]
-    for edge_id in program.semantic_steps[0].edge_ids[2:]:
+    lift_index = program.semantic_steps[0].edge_ids.index(lift_edge.id)
+    for edge_id in program.semantic_steps[0].edge_ids[lift_index + 1 :]:
         assert active_by_edge[edge_id] == [False]
     assert not bool(result.success[0])
 

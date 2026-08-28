@@ -25,7 +25,7 @@ planning:
   candidate_count: 3
   planning_mode: offline
   gripper_model: robotiq
-  ik_solver: pytorch
+  ik_solver: auto
   max_episodes: 1
   max_episode_steps: 6000
   planner:

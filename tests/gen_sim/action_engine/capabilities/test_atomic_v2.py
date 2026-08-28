@@ -128,41 +128,83 @@ def test_axis_align_uses_its_tutorial_motion_policy_base() -> None:
     assert capability.motion_base == "AxisAlign"
 
 
-def test_axis_align_verifies_the_live_semantic_postcondition() -> None:
+def test_axis_align_retains_ownership_until_explicit_release() -> None:
     capability = build_atomic_capability_registry().get("AxisAlign")
-    attempted = torch.tensor([True, False])
-    calls = []
+    contract = capability.resolve_contract(
+        {
+            "object_uid": "can",
+            "actor": {"mode": "required", "arm": "left_arm"},
+        }
+    )
 
-    def verify_step(step, failed):
-        calls.append((step, failed.clone()))
-        return failed.clone(), torch.tensor([True, False]), torch.zeros(2, 3)
+    assert capability.state_effect == "hold"
+    assert capability.verifier_hook is None
+    assert contract.requires == (
+        StateAtom("arm_free", arm="left_arm"),
+        StateAtom("object_free", object_uid="can"),
+    )
+    assert contract.effects[-1].atom == StateAtom(
+        "object_held",
+        object_uid="can",
+        arm="left_arm",
+    )
 
+
+def test_single_arm_release_contract_frees_the_object_and_arm() -> None:
+    capability = build_atomic_capability_registry().get("MoveJoints")
+    contract = capability.resolve_contract(
+        {
+            "object_uid": "can",
+            "actor": {"mode": "required", "arm": "left_arm"},
+            "control": "hand",
+            "target_binding": {
+                "kind": "joint_state",
+                "source": "gripper_open",
+                "single_release": True,
+            },
+        }
+    )
+
+    assert contract.requires == (
+        StateAtom("object_held", object_uid="can", arm="left_arm"),
+    )
+    assert [(effect.op, effect.atom.predicate) for effect in contract.effects] == [
+        ("delete", "object_held"),
+        ("add", "arm_free"),
+        ("add", "object_free"),
+    ]
+    assert contract.failure_policy == "task_required"
+
+
+def test_single_arm_release_verifies_the_selected_gripper_is_open() -> None:
+    capability = build_atomic_capability_registry().get("MoveJoints")
     executor = SimpleNamespace(
-        _verify_step=verify_step,
-        _action_execution_observation=lambda _uid: {
-            "linear_velocity": torch.zeros(2, 3),
-            "angular_velocity": torch.zeros(2, 3),
-        },
+        env=SimpleNamespace(
+            device=torch.device("cpu"),
+            num_envs=2,
+            open_state=(0.0, 0.0),
+            get_current_gripper_state_agent=lambda: (
+                torch.tensor([[0.0, 0.0], [0.1, 0.1]]),
+                torch.ones(2, 2),
+            ),
+        ),
         runtime_policy=SimpleNamespace(
-            execution={
-                "support_linear_velocity_tolerance": 0.02,
-                "support_angular_velocity_tolerance": 0.2,
-            }
+            predicate_fallbacks={"gripper_state_tolerance": 1.0e-3}
         ),
     )
-    step = SimpleNamespace(id="orient", object_uid="can")
+    outcome = SimpleNamespace(
+        grounded=SimpleNamespace(motion_policy={"single_release": True})
+    )
 
     verified = capability.verifier_hook(
         executor=executor,
-        step=step,
+        step=SimpleNamespace(),
         arm="left_arm",
-        outcome=SimpleNamespace(),
-        attempted=attempted,
+        outcome=outcome,
+        attempted=torch.tensor([True, True]),
     )
 
     assert verified.tolist() == [True, False]
-    assert calls[0][0] is step
-    assert calls[0][1].tolist() == [False, True]
 
 
 def test_explicit_required_home_is_safety_required_for_any_task_type() -> None:
