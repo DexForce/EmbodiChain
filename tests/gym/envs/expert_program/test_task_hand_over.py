@@ -406,7 +406,11 @@ def test_real_sim_expert_episode_transfers_can_with_configured_runtime() -> None
 
         result = execute_demo_episode(env)
 
-        assert result.completed
+        assert result.completed, json.dumps(
+            result.to_metadata(),
+            indent=2,
+            sort_keys=True,
+        )
         assert result.all_success
         assert result.terminal_reason == "success"
         assert len(result.segments) == 1

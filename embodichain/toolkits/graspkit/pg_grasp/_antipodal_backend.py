@@ -543,10 +543,10 @@ class _AntipodalMeshBackend:
             mesh_projection = torch.matmul(mesh_vert_transformed, axis)
             mesh_projection_range = mesh_projection.max() - mesh_projection.min()
             projection_posi_threshold = (
-                mesh_projection.min() + 0.62 * mesh_projection_range
+                mesh_projection.min() + 0.65 * mesh_projection_range
             )
             projection_nega_threshold = (
-                mesh_projection.min() + 0.38 * mesh_projection_range
+                mesh_projection.min() + 0.35 * mesh_projection_range
             )
             pair_centers = 0.5 * (origin_points_ + hit_points_)
             pair_projection = torch.matmul(pair_centers, axis)
