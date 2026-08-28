@@ -68,6 +68,7 @@ _PROFILE_ID = "dual_ur5_handover_v1"
 _OPEN_QPOS = 0.0
 _GRASP_QPOS = 0.04
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
+_REAL_SIM_POSITION_TOLERANCE = 0.12
 _REPOSITORY_ROOT = Path(__file__).parents[4]
 _SUBPROCESS_TIMEOUT_SECONDS = 180
 _RUN_REAL_SIM_EPISODE = (
@@ -443,6 +444,7 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
 
 @pytest.mark.requires_sim
 @pytest.mark.subprocess_sim
+@pytest.mark.gpu
 @pytest.mark.slow
 def test_real_sim_expert_episode_reports_configured_runtime_and_validation(
     tmp_path: Path,
@@ -468,7 +470,6 @@ def test_real_sim_expert_episode_reports_configured_runtime_and_validation(
         timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         check=False,
     )
-
     assert completed.returncode == 0, completed.stdout + completed.stderr
     episode = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert type(episode) is dict
