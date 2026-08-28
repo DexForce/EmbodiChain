@@ -801,7 +801,10 @@ checks are separate from per-plan `bind_collision_world()`.
 Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
 `tracking_error_recovery.py`, `moving_target_recovery.py`, and
 `dynamic_obstacle_recovery.py`. Each injects one disturbance, reports the
-structured invalidation/replan events, and requires terminal completion.
+structured invalidation/replan events, and requires terminal completion. The
+dynamic-obstacle example additionally uses dense `morphit` robot collision
+spheres, proves that the moved cuboid intersects the original TCP path, and
+requires the replanned TCP path to retain a positive minimum clearance.
 
 Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
 Both examples separate `create_*_application()` (scene/profile/runtime and

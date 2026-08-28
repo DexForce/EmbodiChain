@@ -53,6 +53,7 @@ from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
+    CuroboAutoGenCfg,
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
@@ -76,15 +77,20 @@ OBSTACLE_UID = "dynamic_obstacle"
 CONTROL_PART = "arm"
 SAMPLE_COUNT = 80
 COMMAND_CYCLE_TIME = 0.1
+COLLISION_SPHERE_FIT_TYPE = "morphit"
+COLLISION_SPHERE_FIT_DENSITY = 0.3
+ROBOT_COLLISION_BUFFER = 0.0
 MOVE_AFTER_COMMAND = 12
-OBSTACLE_SIZE = (0.10, 0.10, 0.12)
+OBSTACLE_SIZE = (0.08, 0.08, 0.10)
 OBSTACLE_START_POSITION = (0.59, -0.20, 0.455)
 BLOCKING_PATH_FRACTION = 0.50
 OBSTACLE_MOVE_DURATION = 0.6
 AUTO_PLAY_LEAD_IN_DURATION = 0.75
 POST_EXECUTION_HOLD_DURATION = 1.0
-TRACKING_ERROR_THRESHOLD = 1.0
+TRACKING_ERROR_THRESHOLD = 0.1
 MINIMUM_REPLAN_DETOUR = 0.04
+MAXIMUM_BLOCKED_PATH_CLEARANCE = 0.0
+MINIMUM_REPLAN_CLEARANCE = 0.01
 MAXIMUM_FINAL_EEF_ERROR = 0.04
 TRAJECTORY_MARKER_STRIDE = 8
 
@@ -425,6 +431,14 @@ def main() -> None:
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=robot.uid,
+                # The coarse default voxel fit under-covers the hand and
+                # fingertips. Keep the denser morphit fit, but no extra radius
+                # padding: 5 mm makes this tutorial's initial pose infeasible.
+                auto_gen=CuroboAutoGenCfg(
+                    fit_type=COLLISION_SPHERE_FIT_TYPE,
+                    sphere_density=COLLISION_SPHERE_FIT_DENSITY,
+                    collision_sphere_buffer=ROBOT_COLLISION_BUFFER,
+                ),
                 world=CuroboWorldCfg(
                     rigid_objects=[obstacle],
                     obstacle_representation="cuboid",
@@ -487,10 +501,22 @@ def main() -> None:
         initial_eef_path,
         path_fraction=BLOCKING_PATH_FRACTION,
     )
+    blocked_path_clearance = _minimum_cuboid_clearance(
+        initial_eef_path,
+        blocking_obstacle_pose,
+        size=OBSTACLE_SIZE,
+    )
+    if (blocked_path_clearance > MAXIMUM_BLOCKED_PATH_CLEARANCE).any().item():
+        raise RuntimeError(
+            "Moved obstacle does not intersect the initial TCP path: "
+            f"clearance={blocked_path_clearance.detach().cpu().tolist()} m."
+        )
     logger.log_info(
         "Initial path prepared: obstacle will move onto waypoint "
         f"{blocking_waypoint_index}/{initial_eef_path.shape[1] - 1} at XYZ="
-        f"{blocking_obstacle_pose[:, :3, 3].detach().cpu().tolist()}."
+        f"{blocking_obstacle_pose[:, :3, 3].detach().cpu().tolist()}; "
+        "initial TCP-to-cube clearance="
+        f"{blocked_path_clearance.detach().cpu().tolist()} m."
     )
     runner = ExecutionRunner(
         session,
@@ -591,6 +617,7 @@ def main() -> None:
                 )
             if (
                 event.kind is ExecutionEventKind.REPLANNED
+                and event.env_mask.any().item()
                 and replanned_eef_path is None
                 and ExecutionEventKind.COLLISION_WORLD_CHANGED in observed_events
             ):
@@ -666,6 +693,12 @@ def main() -> None:
             raise RuntimeError(
                 "Replanned trajectory did not detour around the moved obstacle: "
                 f"deviation={replan_detour.detach().cpu().tolist()} m."
+            )
+        if (replan_clearance < MINIMUM_REPLAN_CLEARANCE).any().item():
+            raise RuntimeError(
+                "Replanned trajectory did not keep sufficient TCP clearance from "
+                "the moved obstacle: "
+                f"clearance={replan_clearance.detach().cpu().tolist()} m."
             )
     final_eef_position = robot.compute_fk(
         qpos=robot.get_qpos(name=CONTROL_PART),

@@ -68,7 +68,7 @@ _PROFILE_ID = "dual_ur5_handover_v1"
 _OPEN_QPOS = 0.0
 _GRASP_QPOS = 0.04
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
-_REAL_SIM_POSITION_TOLERANCE = 0.12
+_PRODUCTION_POSITION_TOLERANCE = 0.12
 _REPOSITORY_ROOT = Path(__file__).parents[4]
 _SUBPROCESS_TIMEOUT_SECONDS = 180
 _RUN_REAL_SIM_EPISODE = (
@@ -421,15 +421,7 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
     assert len(program.validators) == 1
     validator = program.validators[0]
     assert type(validator) is ObjectNearTargetValidatorCfg
-    cfg.expert_program = cfg.expert_program.replace(
-        program=program.replace(
-            validators=(
-                validator.replace(
-                    position_tolerance=_REAL_SIM_POSITION_TOLERANCE,
-                ),
-            ),
-        ),
-    )
+    assert validator.position_tolerance == pytest.approx(_PRODUCTION_POSITION_TOLERANCE)
 
     env: EmbodiedEnv | None = None
     try:
@@ -534,7 +526,7 @@ def test_real_sim_expert_episode_reports_configured_runtime_and_validation(
     tolerance = result["position_tolerance"]
     assert result["accepted_mask"] in ([True], [False])
     accepted = result["accepted_mask"] == [True]
-    assert tolerance == pytest.approx(0.12)
+    assert tolerance == pytest.approx(_PRODUCTION_POSITION_TOLERANCE)
     assert validator["result_mask"] == [accepted]
     assert validation["accepted_mask"] == [accepted]
     assert episode["completed"] is accepted

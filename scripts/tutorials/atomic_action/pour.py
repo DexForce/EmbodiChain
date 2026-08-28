@@ -46,7 +46,7 @@ from scripts.tutorials.atomic_action.axis_align import (
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     create_parallel_jaw_grasp_pose_generator,
-    create_curobo_motion_generator,
+    create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -98,7 +98,7 @@ def main() -> None:
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(robot)
 
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,

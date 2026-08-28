@@ -69,6 +69,9 @@ MOVE_DURATION = 0.25
 Y_OFFSET = 0.18
 EXPECTED_STEP_COUNT = 3
 CUBOID_SIZE = (0.2, 0.2, 0.2)
+STRICT_RECOVERY_TRACKING_ERROR = 0.1
+STRICT_RECOVERY_SPHERE_DENSITY = 0.3
+STRICT_RECOVERY_MINIMUM_CLEARANCE = 0.01
 FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 DUAL_FRANKA_MOUNT_X_AXIS = torch.tensor([0.0, -1.0, 0.0])
 PGI_TUTORIAL_TCP = torch.tensor(
@@ -713,6 +716,26 @@ def test_blocking_pose_targets_the_selected_initial_path_waypoint() -> None:
     assert waypoint_index == 1
     assert torch.equal(target_pose[:, :3, 3], path[:, waypoint_index])
     assert torch.equal(start_pose, torch.eye(4).unsqueeze(0))
+
+
+def test_dynamic_obstacle_recovery_keeps_strict_collision_contract() -> None:
+    module = importlib.import_module(
+        "scripts.tutorials.atomic_action.dynamic_obstacle_recovery"
+    )
+    main_source = inspect.getsource(module.main)
+
+    assert module.TRACKING_ERROR_THRESHOLD == pytest.approx(
+        STRICT_RECOVERY_TRACKING_ERROR
+    )
+    assert module.COLLISION_SPHERE_FIT_TYPE == "morphit"
+    assert module.COLLISION_SPHERE_FIT_DENSITY == pytest.approx(
+        STRICT_RECOVERY_SPHERE_DENSITY
+    )
+    assert module.MINIMUM_REPLAN_CLEARANCE == pytest.approx(
+        STRICT_RECOVERY_MINIMUM_CLEARANCE
+    )
+    assert "blocked_path_clearance > MAXIMUM_BLOCKED_PATH_CLEARANCE" in main_source
+    assert "replan_clearance < MINIMUM_REPLAN_CLEARANCE" in main_source
 
 
 def test_maximum_path_deviation_measures_detour_from_reference_polyline() -> None:

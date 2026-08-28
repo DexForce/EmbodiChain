@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
