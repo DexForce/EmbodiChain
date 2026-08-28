@@ -36,38 +36,39 @@ from embodichain.lab.sim.atomic_actions.runner import (
     ExecutionRunnerCfg,
     ObservationProvider,
 )
-from embodichain.lab.sim.skills._assembly import (
-    assemble_semantic_runtime_components,
+from embodichain.lab.expert_program._semantic_assembly import (
+    SemanticExecutorComponents,
+    assemble_semantic_executor_components,
 )
-from embodichain.lab.sim.skills.calls import (
+from embodichain.lab.semantic_skills.calls import (
     SemanticCallCatalog,
     SemanticCallSpec,
     builtin_semantic_call_catalog,
 )
-from embodichain.lab.sim.skills.compiler import (
+from embodichain.lab.expert_program._semantic_compiler import (
     HandOverPoseProvider,
     RegisteredSemanticLowerer,
     RelationTargetGrounder,
-    SemanticSkillCompiler,
+    SemanticCallCompiler,
 )
-from embodichain.lab.sim.skills.effects import EffectMonitorRegistry
-from embodichain.lab.sim.skills.evidence import (
+from embodichain.lab.semantic_skills.effects import EffectMonitorRegistry
+from embodichain.lab.semantic_skills.evidence import (
     EffectEvidenceCollector,
     EffectEvidenceProvider,
     EffectEvidenceProviderRegistry,
 )
-from embodichain.lab.sim.skills.integration import SemanticIntegrationManifest
-from embodichain.lab.sim.skills.parallel_runtime import (
+from embodichain.lab.semantic_skills.integration import SemanticIntegrationManifest
+from embodichain.lab.expert_program._parallel_executor import (
     ParallelCommandSafetyValidator,
     analyze_parallel_branches,
 )
-from embodichain.lab.sim.skills.profiles import (
+from embodichain.lab.semantic_skills.profiles import (
     ResourceEndpoint,
     ResourceEndpointAdapter,
     RobotSkillProfile,
 )
-from embodichain.lab.sim.skills.runtime import SkillRuntime
-from embodichain.lab.sim.skills.scene import SceneRegistry
+from embodichain.lab.expert_program._semantic_executor import SemanticCallExecutor
+from embodichain.lab.semantic_skills.scene import SceneRegistry
 
 from .bridge import (
     AtomicDemoBridge,
@@ -86,8 +87,11 @@ from .catalog import (
     IntegrationFingerprintMismatch,
     SimulationExpertProgramRegistration,
 )
-from .cfg import ExpertProgramCfg, ExpertProgramIntegrationCfg
-from .compiler import (
+from embodichain.lab.expert_program.cfg import (
+    ExpertProgramCfg,
+    ExpertProgramIntegrationCfg,
+)
+from embodichain.lab.expert_program.compiler import (
     CompiledProgram,
     ExpertProgramCompiler,
 )
@@ -274,7 +278,7 @@ class ExpertProgramRuntimeAssembly:
     robot_profile: RobotSkillProfile
     manifest: SemanticIntegrationManifest
     engine: AtomicActionEngine
-    compiler: SemanticSkillCompiler
+    compiler: SemanticCallCompiler
     observation_provider: PlanningObservationPort
     evidence_collector: EffectEvidenceCollector
     clock: EnvironmentStepClock
@@ -282,19 +286,7 @@ class ExpertProgramRuntimeAssembly:
     command_sink: BufferedGymCommandSink
     runner_cfg: ExecutionRunnerCfg
     parallel_safety_validator: ParallelCommandSafetyValidator | None
-    runtime: SkillRuntime
-
-
-@dataclass(frozen=True, slots=True)
-class _ExpertProgramSemanticAssembly:
-    """Observation-free semantic components prepared for program preflight."""
-
-    integration: ExpertProgramIntegrationCfg
-    scene_registry: SceneRegistry
-    robot_profile: RobotSkillProfile
-    manifest: SemanticIntegrationManifest
-    engine: AtomicActionEngine
-    compiler: SemanticSkillCompiler
+    runtime: SemanticCallExecutor
 
 
 class ExpertProgramEnvironmentAdapter:
@@ -569,7 +561,7 @@ class ExpertProgramEnvironmentAdapter:
     def _assemble_semantic_components(
         self,
         integration: ExpertProgramIntegrationCfg,
-    ) -> _ExpertProgramSemanticAssembly:
+    ) -> SemanticExecutorComponents:
         """Bind compiler dependencies without observation or evidence ports."""
         self._validate_selection(integration)
         registry = self._create_scene_registry()
@@ -624,12 +616,12 @@ class ExpertProgramEnvironmentAdapter:
             )
             self._validate_registration_ownership()
 
-        semantic = assemble_semantic_runtime_components(
+        semantic = assemble_semantic_executor_components(
             registry,
             profile,
             engine,
+            integration,
             call_catalog=self._call_catalog,
-            runtime_preset=integration.runtime_preset,
             endpoint_adapters=self._endpoint_adapters,
             registered_lowerers=registered_lowerers,
             relation_grounders=self._relation_grounders,
@@ -645,27 +637,15 @@ class ExpertProgramEnvironmentAdapter:
                     "than the adapter validated."
                 )
             self._registration.validate_bound_profile(bound_profile)
-        selection = ExpertProgramIntegrationCfg(
-            robot_profile=integration.robot_profile,
-            scene_registry=integration.scene_registry,
-            runtime_preset=integration.runtime_preset,
-        )
-        return _ExpertProgramSemanticAssembly(
-            integration=selection,
-            scene_registry=registry,
-            robot_profile=profile,
-            manifest=semantic.manifest,
-            engine=engine,
-            compiler=semantic.compiler,
-        )
+        return semantic
 
     def _assemble_execution_runtime(
         self,
-        semantic: _ExpertProgramSemanticAssembly,
+        semantic: SemanticExecutorComponents,
     ) -> ExpertProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
-        if type(semantic) is not _ExpertProgramSemanticAssembly:
-            raise TypeError("semantic must be exactly _ExpertProgramSemanticAssembly.")
+        if type(semantic) is not SemanticExecutorComponents:
+            raise TypeError("semantic must be exactly SemanticExecutorComponents.")
         self._validate_registration_ownership()
 
         clock = EnvironmentStepClock(self._step_dt)
@@ -741,7 +721,7 @@ class ExpertProgramEnvironmentAdapter:
         selected_runner_cfg = selected_preset.runner_cfg
         if self._registration is None and self._runner_cfg is not None:
             selected_runner_cfg = deepcopy(self._runner_cfg)
-        runtime = SkillRuntime.from_components(
+        runtime = SemanticCallExecutor(
             semantic.compiler,
             observation_provider,
             command_sink,
@@ -854,7 +834,7 @@ class ExpertProgramEnvironmentAdapter:
     def _preflight_program(
         self,
         program: CompiledProgram,
-        compiler: SemanticSkillCompiler,
+        compiler: SemanticCallCompiler,
     ) -> None:
         """Analyze every program workflow before any physical action can run.
 
@@ -866,8 +846,8 @@ class ExpertProgramEnvironmentAdapter:
         """
         if type(program) is not CompiledProgram:
             raise TypeError("program must be exactly CompiledProgram.")
-        if not isinstance(compiler, SemanticSkillCompiler):
-            raise TypeError("compiler must be a SemanticSkillCompiler.")
+        if not isinstance(compiler, SemanticCallCompiler):
+            raise TypeError("compiler must be a SemanticCallCompiler.")
         analyses = program.preflight_analyses()
         if any(analysis.kind == "parallel_branch" for analysis in analyses) and (
             not self._parallel_safety_is_registered

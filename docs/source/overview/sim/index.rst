@@ -147,12 +147,10 @@ Choosing Where to Start
   time-ordered trajectory.
 - Use :doc:`scene_registry` when semantic calls, snapshots, and planner
   obstacles must share one authoritative entity namespace.
-- Use :doc:`atomic_actions/robot_skill_profiles` when semantic skills should
-  resolve robot resources and policy presets from reusable embodiment
-  configuration.
-- Use :doc:`semantic_skills` when an application or agent should issue
-  robot-independent object-centric calls and retain verified state across
-  dynamic task segments.
+- Use :doc:`atomic_actions/robot_skill_profiles` to declare reusable embodiment
+  resources, policy presets, and effect assurance.
+- Use :doc:`semantic_skills` for the declarative call, scene, robot-profile,
+  effect, and evidence contracts consumed by Expert Program.
 - Use :doc:`atomic_actions/expert_programs` when a task should declare semantic
   calls, settling, validation, or parallel barriers from JSON/YAML without
   implementing task-local motion generation.

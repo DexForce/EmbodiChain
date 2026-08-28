@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from embodichain.lab.gym.envs.expert_program.cfg import (
+from embodichain.lab.expert_program.cfg import (
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
     HandOverCfg,
@@ -33,8 +33,8 @@ from embodichain.lab.gym.envs.expert_program.cfg import (
     SemanticCallCfg,
     SequenceCfg,
 )
-from embodichain.lab.gym.envs.expert_program.compiler import CompiledProgram
-from embodichain.lab.gym.envs.expert_program.decoder import (
+from embodichain.lab.expert_program.compiler import CompiledProgram
+from embodichain.lab.expert_program.decoder import (
     ConfigPath,
     ExpertProgramDecodeError,
     ExpertProgramValidationContext,
@@ -44,7 +44,7 @@ from embodichain.lab.gym.envs.expert_program.decoder import (
 from embodichain.lab.gym.envs.expert_program.environment import (
     ExpertProgramEnvironmentAdapter,
 )
-from embodichain.lab.gym.envs.expert_program.loader import (
+from embodichain.lab.expert_program.loader import (
     MAX_EXPERT_PROGRAM_BYTES,
     parse_expert_program_json,
 )

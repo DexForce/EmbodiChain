@@ -21,16 +21,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
+    SemanticPose,
+)
+from embodichain.lab.expert_program._semantic_compiler import (
     HandOverPoseProvider,
     HandOverPoseTargets,
     SemanticObjectTarget,
-    SemanticPose,
 )
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.atomic_actions import PlanningContext
-    from embodichain.lab.sim.skills import BoundSemanticCall, HandOver
+    from embodichain.lab.semantic_skills import BoundSemanticCall, HandOver
 
 
 def _validated_pose(

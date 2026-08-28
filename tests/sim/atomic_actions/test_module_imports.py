@@ -103,7 +103,7 @@ def test_atomic_action_star_import_resolves_all_public_exports() -> None:
 def test_atomic_action_modules_do_not_depend_on_semantic_skills() -> None:
     """The atomic-action core must not import the higher semantic-skill layer."""
     forbidden_dependencies = (
-        "embodichain.lab.sim.skills",
+        "embodichain.lab.semantic_skills",
         "from ..skills",
         "from .skills",
         "RobotSkillProfile",

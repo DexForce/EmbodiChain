@@ -24,12 +24,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from embodichain.lab.expert_program import ExpertProgramCompiler, decode_expert_program
 from embodichain.lab.gym.envs.expert_program import (
-    ExpertProgramCompiler,
     SimulationArticulationBinding,
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
-    decode_expert_program,
 )
 from embodichain.lab.gym.envs.expert_program.bridge import (
     SegmentPostPolicyPort,
@@ -40,7 +39,7 @@ from embodichain.lab.gym.envs.expert_program.simulation_policies import (
 )
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import EntityState
-from embodichain.lab.sim.skills.scene import (
+from embodichain.lab.semantic_skills.scene import (
     SceneArticulationRef,
     SceneEntityRegistration,
     SceneObjectRef,

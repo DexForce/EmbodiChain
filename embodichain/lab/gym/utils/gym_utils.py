@@ -475,7 +475,7 @@ def config_to_cfg(
                 "expert_program_runtime requires expert_program_path or an "
                 "expert_program_path_override."
             )
-        from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+        from embodichain.lab.gym.envs.expert_program._configured_runtime_decoder import (
             _decode_configured_expert_program_runtime,
         )
 
@@ -505,7 +505,7 @@ def config_to_cfg(
                 "expert_program_path must be a non-empty string without outer "
                 "whitespace."
             )
-        from embodichain.lab.gym.envs.expert_program.loader import (
+        from embodichain.lab.expert_program.loader import (
             load_expert_program,
         )
 

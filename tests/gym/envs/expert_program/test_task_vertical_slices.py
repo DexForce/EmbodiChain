@@ -29,13 +29,12 @@ import pytest
 import torch
 import yaml
 
+from embodichain.lab.expert_program import ExpertProgramCompiler, decode_expert_program
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.expert_program import (
-    ExpertProgramCompiler,
     SimulationRobotSkillProfileBinding,
-    decode_expert_program,
 )
-from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+from embodichain.lab.gym.envs.expert_program._configured_runtime_decoder import (
     _decode_configured_expert_program_runtime,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -58,9 +57,16 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
     TimedTerminalAcceptance,
 )
-from embodichain.lab.sim.skills.calls import Pick, Place, RegisteredSemanticCall
-from embodichain.lab.sim.skills.runtime import SkillResult, SkillStatus
-from embodichain.lab.sim.skills.scene import (
+from embodichain.lab.semantic_skills.calls import (
+    Pick,
+    Place,
+    RegisteredSemanticCall,
+)
+from embodichain.lab.expert_program._semantic_results import (
+    SemanticExecutionResult,
+    SemanticExecutionStatus,
+)
+from embodichain.lab.semantic_skills.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRegistration,
@@ -135,9 +141,9 @@ class _CompletedSegmentRuntime:
     ) -> None:
         self._observation = observation
         self._lifecycle_events = lifecycle_events
-        self._status = SkillStatus.IDLE
+        self._status = SemanticExecutionStatus.IDLE
         self._result = self._make_result(
-            status=SkillStatus.IDLE,
+            status=SemanticExecutionStatus.IDLE,
             workflow_id=None,
             eligible_mask=torch.ones(_LIFECYCLE_BATCH_SIZE, dtype=torch.bool),
             generation=0,
@@ -149,13 +155,13 @@ class _CompletedSegmentRuntime:
     @staticmethod
     def _make_result(
         *,
-        status: SkillStatus,
+        status: SemanticExecutionStatus,
         workflow_id: str | None,
         eligible_mask: torch.Tensor,
         generation: int,
-    ) -> SkillResult:
-        terminal = status is SkillStatus.COMPLETED
-        return SkillResult(
+    ) -> SemanticExecutionResult:
+        terminal = status is SemanticExecutionStatus.COMPLETED
+        return SemanticExecutionResult(
             status=status,
             workflow_id=workflow_id,
             current_call_index=None,
@@ -171,11 +177,11 @@ class _CompletedSegmentRuntime:
         )
 
     @property
-    def result(self) -> SkillResult:
+    def result(self) -> SemanticExecutionResult:
         return self._result
 
     @property
-    def status(self) -> SkillStatus:
+    def status(self) -> SemanticExecutionStatus:
         return self._status
 
     def start(
@@ -184,7 +190,7 @@ class _CompletedSegmentRuntime:
         workflow_id: str = "semantic_workflow",
         eligible_mask: torch.Tensor | None = None,
         execution_prefix_length: int | None = None,
-    ) -> SkillResult:
+    ) -> SemanticExecutionResult:
         call_values = tuple(calls[0]) if len(calls) == 1 else tuple(calls)
         if execution_prefix_length is None:
             raise AssertionError("A packaged sequential segment requires a prefix.")
@@ -203,22 +209,24 @@ class _CompletedSegmentRuntime:
         self.eligible_masks.append(
             None if eligible_mask is None else eligible_mask.clone()
         )
-        self._status = SkillStatus.COMPLETED
+        self._status = SemanticExecutionStatus.COMPLETED
         self._result = self._make_result(
-            status=SkillStatus.COMPLETED,
+            status=SemanticExecutionStatus.COMPLETED,
             workflow_id=workflow_id,
             eligible_mask=selected,
             generation=generation,
         )
         return self._result
 
-    def step(self) -> SkillResult:
+    def step(self) -> SemanticExecutionResult:
         raise AssertionError("A terminal fake runtime must not be stepped.")
 
-    def cancel(self, reason: str) -> SkillResult:
+    def cancel(self, reason: str) -> SemanticExecutionResult:
         raise AssertionError(f"A completed fake runtime cannot be cancelled: {reason}")
 
-    def adopt_verified_task_state(self, task_state: TaskState) -> SkillResult:
+    def adopt_verified_task_state(
+        self, task_state: TaskState
+    ) -> SemanticExecutionResult:
         del task_state
         return self._result
 

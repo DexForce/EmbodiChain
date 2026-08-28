@@ -2,7 +2,7 @@
 
 # Scene registry
 
-```{currentmodule} embodichain.lab.sim.skills
+```{currentmodule} embodichain.lab.semantic_skills
 ```
 
 `SceneRegistry` is the canonical integration boundary between semantic scene
@@ -70,7 +70,7 @@ simulation UIDs. The UIDs are installed as legacy aliases; unlisted simulation
 entities are not scanned or imported.
 
 ```python
-from embodichain.lab.sim.skills import SceneObjectRef, SceneRegistry
+from embodichain.lab.semantic_skills import SceneObjectRef, SceneRegistry
 
 registry = SceneRegistry.from_simulation(
     sim,
@@ -112,7 +112,7 @@ from dataclasses import replace
 
 import torch
 
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     GRASP_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
     SceneEntityRegistration,
@@ -234,7 +234,7 @@ from embodichain.lab.sim.planners import (
     MotionGenCfg,
     MotionGenerator,
 )
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     SceneCollisionRole,
     SceneCollisionWorldMode,
     SceneRegistry,

@@ -47,7 +47,6 @@ topics:
       - embodichain/lab/sim/sensors/__init__.py
       - embodichain/lab/sim/solvers/__init__.py
       - embodichain/lab/sim/planners/__init__.py
-      - embodichain/lab/sim/skills/__init__.py
       - embodichain/lab/sim/workspace/__init__.py
       - embodichain/lab/gym/envs/base_env.py
       - embodichain/lab/gym/envs/embodied_env.py
@@ -396,8 +395,9 @@ topics:
       - embodichain/lab/sim/planners/motion_generator.py
       - embodichain/lab/sim/planners/neural_planner.py
       - embodichain/lab/sim/planners/utils.py
-      - embodichain/lab/sim/skills/scene.py
+      - embodichain/lab/semantic_skills/scene.py
       - embodichain/toolkits/graspkit/pose_generator.py
+      - embodichain/lab/gym/envs/expert_program/_configured_runtime_decoder.py
       - embodichain/lab/gym/envs/expert_program/configured_runtime.py
       - embodichain/lab/gym/envs/expert_program/_configured_runtime_services.py
       - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
@@ -564,7 +564,8 @@ topics:
       - resource graph
       - resource DAG
       - semantic skill catalog
-      - semantic skill compiler
+      - semantic skills
+      - semantic contracts
       - semantic call
       - semantic workflow
       - semantic integration manifest
@@ -682,21 +683,9 @@ topics:
       - SceneManifest
       - SemanticIntegrationManifest
       - BoundSemanticIntegration
-      - SemanticSkillCompiler
-      - SkillRuntime
-      - AtomicSkills
-      - SemanticCallAvailability
-      - SkillResult
-      - SkillFailure
-      - execution_prefix_length
       - EffectEvidenceCollector
-      - ParallelSkillRuntime
       - ParallelCommandSafetyValidator
-      - SemanticWorkflow
-      - SemanticLowering
-      - GroundedSemanticCall
-      - RelationTargetGrounder
-      - HandOverPoseProvider
+      - EffectAssurance
       - SemanticDiagnostic
       - SemanticValidationError
       - affordance_capabilities
@@ -797,6 +786,7 @@ topics:
       - embodichain/lab/sim/atomic_actions/state.py
       - embodichain/lab/sim/atomic_actions/plans.py
       - embodichain/lab/sim/atomic_actions/execution.py
+      - embodichain/lab/sim/atomic_actions/verification.py
       - embodichain/lab/sim/atomic_actions/runner.py
       - embodichain/lab/sim/atomic_actions/scene.py
       - embodichain/lab/sim/atomic_actions/sim_adapter.py
@@ -808,19 +798,13 @@ topics:
       - embodichain/toolkits/graspkit/pose_generator.py
       - embodichain/toolkits/graspkit/pg_grasp/pose_generator.py
       - embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py
-      - embodichain/lab/sim/skills/scene.py
-      - embodichain/lab/sim/skills/profiles.py
-      - embodichain/lab/sim/skills/calls.py
-      - embodichain/lab/sim/skills/integration.py
-      - embodichain/lab/sim/skills/compiler.py
-      - embodichain/lab/sim/skills/effects.py
-      - embodichain/lab/sim/skills/evidence.py
-      - embodichain/lab/sim/skills/parallel.py
-      - embodichain/lab/sim/skills/parallel_runtime.py
-      - embodichain/lab/sim/skills/runtime.py
-      - embodichain/lab/sim/skills/_assembly.py
-      - embodichain/lab/sim/skills/__init__.py
-      - scripts/tutorials/semantic_skill/
+      - embodichain/lab/semantic_skills/scene.py
+      - embodichain/lab/semantic_skills/profiles.py
+      - embodichain/lab/semantic_skills/calls.py
+      - embodichain/lab/semantic_skills/integration.py
+      - embodichain/lab/semantic_skills/effects.py
+      - embodichain/lab/semantic_skills/evidence.py
+      - embodichain/lab/semantic_skills/__init__.py
     related_topics:
       - simulation-system
       - motion-planning
@@ -892,12 +876,13 @@ topics:
       - topics/expert-programs/expert-programs.md
     source_of_truth:
       - embodichain/agents/mllm/expert_program.py
+      - embodichain/lab/expert_program/
       - embodichain/lab/gym/envs/expert_program/
       - embodichain/lab/gym/envs/embodied_env.py
       - embodichain/lab/gym/envs/demo.py
       - embodichain/lab/scripts/run_env.py
-      - embodichain/lab/sim/skills/calls.py
-      - embodichain/lab/sim/skills/compiler.py
+      - embodichain/lab/semantic_skills/calls.py
+      - embodichain/lab/semantic_skills/integration.py
       - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/
       - embodichain_tasks/configs/tasks/manipulation/open_drawer/
       - embodichain_tasks/configs/tasks/manipulation/hand_over/

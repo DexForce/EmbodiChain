@@ -37,14 +37,14 @@ from embodichain.lab.sim.atomic_actions.bindings import (
     RuntimeEndpointTarget,
 )
 from embodichain.lab.sim.atomic_actions.runtime_commands import RuntimeCommandPayload
-from embodichain.lab.sim.skills.effects import (
+from embodichain.lab.semantic_skills.effects import (
     CONTROL_PART_EVIDENCE_PROVIDER_ID,
     CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
 )
-from embodichain.lab.sim.skills.parallel_runtime import (
+from embodichain.lab.expert_program._parallel_executor import (
     ParallelCommandSafetyValidator,
 )
-from embodichain.lab.sim.skills.profiles import (
+from embodichain.lab.semantic_skills.profiles import (
     ControlPartEndpoint,
     ControlPartEndpointAdapter,
     ResourceEndpoint,
@@ -59,10 +59,12 @@ from .bridge import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.atomic_actions import AtomicActionEngine, SceneProvider
-    from embodichain.lab.sim.skills import (
+    from embodichain.lab.semantic_skills import (
         EffectEvidenceProvider,
-        RegisteredSemanticLowerer,
         SceneRegistry,
+    )
+    from embodichain.lab.expert_program._semantic_compiler import (
+        RegisteredSemanticLowerer,
     )
 
 VersionedKey = tuple[str, str]

@@ -14,47 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Declarative Expert Program schema, compiler, and runtime types."""
+"""Gym and simulation adapters for Expert Program execution."""
 
 from __future__ import annotations
 
-from .cfg import (
-    ArticulationJointPositionValidatorCfg,
-    BarrierCfg,
-    CyclicPoseTargetCfg,
-    ExpertProgramCfg,
-    ExpertProgramIntegrationCfg,
-    HandOverCfg,
-    InvokeCfg,
-    ObjectNearTargetValidatorCfg,
-    ParallelCfg,
-    PickCfg,
-    PlaceCfg,
-    PoseCfg,
-    RegisteredSemanticCallCfg,
-    RepeatCfg,
-    SegmentCfg,
-    SequenceCfg,
-    TargetRefCfg,
-    WaitStablePostCfg,
-)
-from .decoder import (
-    ConfigPath,
-    ConfigPathPart,
-    ExpertProgramConfigError,
-    ExpertProgramDecodeError,
-    ExpertProgramValidationContext,
-    ExpertProgramValidationError,
-    SceneReferenceRole,
-    decode_expert_program,
-    render_config_path,
-    validate_expert_program,
-)
-from .loader import (
-    load_expert_program,
-    loads_expert_program_json,
-    parse_expert_program_json,
-)
 from .bridge import (
     AtomicDemoBridge,
     BufferedGymCommandSink,
@@ -67,11 +30,6 @@ from .bridge import (
     SegmentPostPolicyPort,
     SegmentValidatorPort,
     UnsupportedRuntimeTransportError,
-)
-from .compiler import (
-    CompiledProgram,
-    ExpertProgramCompileError,
-    ExpertProgramCompiler,
 )
 from .environment import (
     ExpertProgramAdapterFactory,
@@ -127,13 +85,8 @@ from .simulation_policies import (
 
 __all__ = [
     "AntipodalGraspAffordanceBinding",
-    "ArticulationJointPositionValidatorCfg",
     "AtomicDemoBridge",
-    "BarrierCfg",
     "BufferedGymCommandSink",
-    "ConfigPath",
-    "ConfigPathPart",
-    "CompiledProgram",
     "ContainerAffordanceBinding",
     "ControlPartCommandPreset",
     "ControlPartEvidenceProviderDeclaration",
@@ -141,7 +94,6 @@ __all__ = [
     "ControlPartEndpointBinding",
     "ControlPartResourceBinding",
     "ConfiguredHandOverPoseProvider",
-    "CyclicPoseTargetCfg",
     "CuroboParallelCommandSafetyValidator",
     "CuroboParallelSafetyValidatorFactory",
     "DemoBridgeError",
@@ -149,42 +101,22 @@ __all__ = [
     "EnvironmentStepTimingError",
     "EndpointAdapterDeclaration",
     "ExpertProgramAdapterFactory",
-    "ExpertProgramCfg",
-    "ExpertProgramCompileError",
-    "ExpertProgramCompiler",
-    "ExpertProgramConfigError",
-    "ExpertProgramDecodeError",
     "ExpertProgramEnvironmentAdapter",
     "ExpertProgramEnvironmentFactory",
-    "ExpertProgramIntegrationCfg",
     "ExpertProgramIntegrationCatalog",
     "ExpertProgramRuntimeAssembly",
-    "ExpertProgramValidationContext",
-    "ExpertProgramValidationError",
-    "HandOverCfg",
     "GymPlanningObservationProvider",
-    "InvokeCfg",
     "IntegrationFingerprintMismatch",
-    "ObjectNearTargetValidatorCfg",
-    "ParallelCfg",
     "ParallelCommandSafetyValidatorFactory",
     "ParallelSafetyDeclaration",
-    "PickCfg",
-    "PlaceCfg",
     "PlanningObservationPort",
-    "PoseCfg",
-    "RegisteredSemanticCallCfg",
     "RegisteredSemanticLowererDeclaration",
     "RegisteredSemanticLowererFactory",
-    "RepeatCfg",
     "RuntimeCommandFrameEncoder",
     "RuntimeTransportDeclaration",
     "RuntimeTransportActionEncoder",
-    "SceneReferenceRole",
     "SegmentPostPolicyPort",
-    "SegmentCfg",
     "SegmentValidatorPort",
-    "SequenceCfg",
     "SimulationArticulationBinding",
     "SimulationArticulationLinkBinding",
     "SimulationExpertProgramAdapterFactory",
@@ -196,16 +128,8 @@ __all__ = [
     "SimulationSegmentPolicyPort",
     "StandardExtensionDeclarations",
     "SupportSurfaceAffordanceBinding",
-    "TargetRefCfg",
     "UnsupportedRuntimeTransportError",
     "VersionedKey",
-    "WaitStablePostCfg",
     "create_simulation_expert_program_adapter",
     "default_simulation_settle_presets",
-    "decode_expert_program",
-    "load_expert_program",
-    "loads_expert_program_json",
-    "parse_expert_program_json",
-    "render_config_path",
-    "validate_expert_program",
 ]

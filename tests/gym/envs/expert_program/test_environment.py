@@ -30,7 +30,7 @@ from embodichain.lab.gym.envs.expert_program.bridge import (
     EnvironmentStepClock,
     GymPlanningObservationProvider,
 )
-from embodichain.lab.gym.envs.expert_program.cfg import (
+from embodichain.lab.expert_program.cfg import (
     BarrierCfg,
     CyclicPoseTargetCfg,
     ExpertProgramCfg,
@@ -70,7 +70,9 @@ from embodichain.lab.sim.atomic_actions import (
     RobotObservation,
     TaskState,
 )
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
+    COMPOSITE_EFFECT_MONITOR_ID,
+    COMPOSITE_EFFECT_MONITOR_REVISION,
     GRASP_AFFORDANCE_CAPABILITY,
     ControlPartEndpoint,
     RobotResource,
@@ -82,11 +84,12 @@ from embodichain.lab.sim.skills import (
     SceneObjectRef,
     SceneRegistry,
     EffectMonitorRef,
+    EffectAssurance,
     SkillPolicyPreset,
 )
-from embodichain.lab.sim.skills.compiler import SemanticSkillCompiler
-from embodichain.lab.sim.skills.evidence import EffectEvidenceProvider
-from embodichain.lab.sim.skills.integration import SemanticValidationError
+from embodichain.lab.expert_program._semantic_compiler import SemanticCallCompiler
+from embodichain.lab.semantic_skills.evidence import EffectEvidenceProvider
+from embodichain.lab.semantic_skills.integration import SemanticValidationError
 
 _BATCH_SIZE = 2
 _ROBOT_DOF = 2
@@ -165,6 +168,17 @@ def _robot_profile(
     effect_monitors: dict[str, EffectMonitorRef] | None = None,
 ) -> RobotSkillProfile:
     """Build the declarative resource graph used by the fake backend."""
+    selected_effect_monitors = (
+        {
+            semantic_id: EffectMonitorRef(
+                COMPOSITE_EFFECT_MONITOR_ID,
+                COMPOSITE_EFFECT_MONITOR_REVISION,
+            )
+            for semantic_id in ("pick", "place", "hand_over")
+        }
+        if effect_monitors is None
+        else effect_monitors
+    )
     return RobotSkillProfile(
         profile_id=profile_id,
         resources={
@@ -204,7 +218,12 @@ def _robot_profile(
                     "hand_over": HandOverOptions(),
                 },
                 motion_policy=safe_motion_policy,
-                effect_monitors=effect_monitors,
+                effect_assurance=(
+                    EffectAssurance.PROJECTED
+                    if not selected_effect_monitors
+                    else EffectAssurance.VERIFIED
+                ),
+                effect_monitors=selected_effect_monitors,
             )
         },
         default_preset="safe",
@@ -636,10 +655,10 @@ def test_preflight_preserves_pick_target_lookahead_across_explicit_segments(
         },
     )
     workflows: list[object] = []
-    original_analyze = SemanticSkillCompiler.analyze
+    original_analyze = SemanticCallCompiler.analyze
 
     def record_analyze(
-        compiler: SemanticSkillCompiler,
+        compiler: SemanticCallCompiler,
         calls: object,
         **kwargs: object,
     ) -> object:
@@ -647,7 +666,7 @@ def test_preflight_preserves_pick_target_lookahead_across_explicit_segments(
         workflows.append(workflow)
         return workflow
 
-    monkeypatch.setattr(SemanticSkillCompiler, "analyze", record_analyze)
+    monkeypatch.setattr(SemanticCallCompiler, "analyze", record_analyze)
 
     adapter.create_bridge(adapter.compile(config))
 

@@ -359,3 +359,18 @@ Semantic objects and helpers
 
 .. autoclass:: HeldObjectState
    :members:
+
+Verification implementation module
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+
+.. autosummary::
+
+   EffectExpectationResult
+   EffectVerificationRequest
+   EffectVerificationResult
+   HeldObjectGuardRequest
+   HeldObjectGuardResult
+   PhaseEffectGateRequest
+   PhaseEffectGateResult

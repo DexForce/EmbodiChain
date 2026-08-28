@@ -32,11 +32,11 @@ from embodichain.lab.sim.atomic_actions import (
     RuntimeCommandFrame,
 )
 from embodichain.lab.sim.planners import CuroboPlanner, MotionGenerator
-from embodichain.lab.sim.skills import (
-    ParallelSafetyError,
+from embodichain.lab.semantic_skills import (
     RegistrySceneProvider,
     SceneRegistry,
 )
+from embodichain.lab.expert_program._parallel_executor import ParallelSafetyError
 
 
 def _identifier(value: object, *, field_name: str) -> str:

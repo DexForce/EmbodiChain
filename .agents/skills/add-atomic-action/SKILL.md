@@ -32,7 +32,7 @@ Inspect only the files relevant to the requested skill:
 | Endpoint command transports | `embodichain/lab/sim/atomic_actions/transports.py` |
 | Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory_ops.py` |
 | Engine-owned planning resources | `embodichain/lab/sim/atomic_actions/runtime.py` |
-| Declarative robot resources and adapters | `embodichain/lab/sim/skills/profiles.py` |
+| Declarative robot resources and adapters | `embodichain/lab/semantic_skills/profiles.py` |
 | Reference implementations | `embodichain/lab/sim/atomic_actions/primitives/` |
 | Static compiler and execution session | `engine.py`, `execution.py` |
 | Controller-facing execution ports | `runner.py`, `sim_adapter.py` |

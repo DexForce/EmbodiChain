@@ -43,7 +43,7 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     CONTROL_PART_EVIDENCE_PROVIDER_ID,
     CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
     ControlPartEndpoint,

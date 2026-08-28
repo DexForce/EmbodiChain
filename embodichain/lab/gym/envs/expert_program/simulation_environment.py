@@ -25,7 +25,8 @@ and segment-policy port without task-local motion code.
 The resulting runtime is intentionally Gym-only.  Its buffered command sink
 must remain attached to :class:`AtomicDemoBridge`, which advances the shared
 clock only after an ordinary ``env.step()`` consumes a yielded command.  It is
-therefore not a ``SkillRuntimeProvider`` for synchronous ``AtomicSkills`` use.
+therefore an internal Expert Program executor, not a third user-facing action
+entry point.
 """
 
 from __future__ import annotations
@@ -55,20 +56,23 @@ from embodichain.lab.sim.planners import (
     MotionGenerator,
     ToppraPlannerCfg,
 )
-from embodichain.lab.sim.skills.compiler import (
+from embodichain.lab.expert_program._semantic_compiler import (
     RegisteredSemanticLowerer,
 )
-from embodichain.lab.sim.skills.evidence import (
+from embodichain.lab.semantic_skills.evidence import (
     ControlPartRobotEvidenceSource,
     ControlPartSimulationEvidenceProvider,
     EffectEvidenceProvider,
     SceneArticulationEvidenceProvider,
 )
-from embodichain.lab.sim.skills.parallel_runtime import (
+from embodichain.lab.expert_program._parallel_executor import (
     ParallelCommandSafetyValidator,
 )
-from embodichain.lab.sim.skills.profiles import RobotSkillProfile
-from embodichain.lab.sim.skills.scene import RegistrySceneProvider, SceneRegistry
+from embodichain.lab.semantic_skills.profiles import RobotSkillProfile
+from embodichain.lab.semantic_skills.scene import (
+    RegistrySceneProvider,
+    SceneRegistry,
+)
 
 from .bridge import (
     EnvironmentStepClock,

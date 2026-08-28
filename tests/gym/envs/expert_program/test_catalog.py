@@ -28,9 +28,12 @@ from typing import ClassVar
 
 import pytest
 
+from embodichain.lab.expert_program import (
+    ExpertProgramValidationError,
+    decode_expert_program,
+)
 from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramIntegrationCatalog,
-    ExpertProgramValidationError,
     IntegrationFingerprintMismatch,
     SimulationArticulationLinkBinding,
     SimulationExpertProgramAdapterFactory,
@@ -38,9 +41,8 @@ from embodichain.lab.gym.envs.expert_program import (
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
     SupportSurfaceAffordanceBinding,
-    decode_expert_program,
 )
-from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+from embodichain.lab.gym.envs.expert_program._configured_runtime_decoder import (
     _decode_configured_expert_program_runtime,
 )
 from embodichain.lab.gym.utils.registration import EnvSpec
@@ -53,18 +55,16 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     SkillDescriptor,
 )
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     CONTROL_PART_EVIDENCE_PROVIDER_ID,
     CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
     PLACEMENT_TARGET_AFFORDANCE_REVISION,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     BoundSemanticCall,
     ControlPartEndpoint,
+    EffectAssurance,
     EffectEvidenceProvider,
     HandOver,
-    HandOverPoseProvider,
-    HandOverPoseTargets,
-    RelationTargetGrounder,
     SemanticCallCatalog,
     SceneAffordanceRef,
     SceneDynamics,
@@ -72,16 +72,21 @@ from embodichain.lab.sim.skills import (
     SceneManifest,
     SceneObjectRef,
     SceneRegistry,
-    SemanticRelationTarget,
     RegisteredSemanticCall,
-    RegisteredSemanticLowerer,
     SemanticCallDescriptor,
-    SemanticLowering,
     SkillPolicyPreset,
     SupportSurfaceAffordance,
-    SupportSurfaceRelationTargetGrounder,
     WorkflowRecoveryPolicy,
     builtin_semantic_call_catalog,
+)
+from embodichain.lab.expert_program._semantic_compiler import (
+    HandOverPoseProvider,
+    HandOverPoseTargets,
+    RegisteredSemanticLowerer,
+    RelationTargetGrounder,
+    SemanticLowering,
+    SemanticRelationTarget,
+    SupportSurfaceRelationTargetGrounder,
 )
 from embodichain.lab.sim.atomic_actions.tracking import (
     InFlightTrackingPolicy,
@@ -89,8 +94,8 @@ from embodichain.lab.sim.atomic_actions.tracking import (
     TrackingMetricCfg,
     TrackingPolicy,
 )
-from embodichain.lab.sim.skills.effects import EffectMonitorRef
-from embodichain.lab.sim.skills.parallel_runtime import (
+from embodichain.lab.semantic_skills.effects import EffectMonitorRef
+from embodichain.lab.expert_program._parallel_executor import (
     ParallelCommandSafetyValidator,
 )
 
@@ -839,6 +844,7 @@ def test_standard_registration_rejects_nonbuiltin_effect_monitor() -> None:
     preset = SkillPolicyPreset(
         base.preset_id,
         action_option_templates=base.action_option_templates,
+        effect_assurance=EffectAssurance.VERIFIED,
         motion_policy=base.motion_policy,
         tracking_policy=base.tracking_policy,
         recovery_policy=base.recovery_policy,
@@ -858,6 +864,7 @@ def test_standard_registration_rejects_tracking_metric_without_builtin_evaluator
     preset = SkillPolicyPreset(
         base.preset_id,
         action_option_templates=base.action_option_templates,
+        effect_assurance=base.effect_assurance,
         motion_policy=base.motion_policy,
         tracking_policy=TrackingPolicy(
             in_flight=InFlightTrackingPolicy(
@@ -1010,6 +1017,7 @@ def test_fingerprint_covers_workflow_recovery_policy() -> None:
     changed = SkillPolicyPreset(
         base.preset_id,
         action_option_templates=base.action_option_templates,
+        effect_assurance=base.effect_assurance,
         motion_policy=base.motion_policy,
         tracking_policy=base.tracking_policy,
         recovery_policy=base.recovery_policy,

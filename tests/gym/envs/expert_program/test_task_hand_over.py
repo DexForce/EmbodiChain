@@ -27,24 +27,21 @@ import sys
 import pytest
 import torch
 
+from embodichain.lab.expert_program import ObjectNearTargetValidatorCfg, SegmentCfg
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.demo import execute_demo_episode
-from embodichain.lab.gym.envs.expert_program import (
-    ConfiguredHandOverPoseProvider,
-    ObjectNearTargetValidatorCfg,
-    SegmentCfg,
-)
+from embodichain.lab.gym.envs.expert_program import ConfiguredHandOverPoseProvider
 from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
     _JointPositionConstraintObserver,
 )
-from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+from embodichain.lab.gym.envs.expert_program._configured_runtime_decoder import (
     _decode_configured_expert_program_runtime,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.sim.atomic_actions import HandOverOptions
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     BinaryEffectClause,
     BinaryEffectEvidenceQuery,
     BinaryEvidenceKind,

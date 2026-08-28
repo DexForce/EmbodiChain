@@ -43,8 +43,9 @@ from embodichain.lab.sim.atomic_actions import (
     GRASP_CAPABILITY,
     PickUpOptions,
 )
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     ContainerAffordance,
+    EffectAssurance,
     GRASP_AFFORDANCE_CAPABILITY,
     PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
@@ -57,8 +58,8 @@ from embodichain.lab.sim.skills import (
     SkillPolicyPreset,
     SupportSurfaceAffordance,
 )
-from embodichain.lab.sim.skills.integration import SceneManifest
-from embodichain.lab.sim.skills.profiles import ResourceEndpoint
+from embodichain.lab.semantic_skills.integration import SceneManifest
+from embodichain.lab.semantic_skills.profiles import ResourceEndpoint
 
 _BATCH_SIZE = 2
 
@@ -287,6 +288,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
             SkillPolicyPreset(
                 "safe",
                 action_option_templates={"pick": PickUpOptions()},
+                effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),
         default_preset="safe",

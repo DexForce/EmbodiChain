@@ -77,7 +77,7 @@ from embodichain.lab.sim.planners import (
     MotionGenCfg,
     MotionGenerator,
 )
-from embodichain.lab.sim.skills import SceneCollisionWorldMode
+from embodichain.lab.semantic_skills import SceneCollisionWorldMode
 
 collision_mode = registry.resolve_collision_world_mode(
     batch_size=robot.num_instances,

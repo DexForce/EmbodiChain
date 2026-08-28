@@ -57,16 +57,19 @@ from embodichain.lab.sim.atomic_actions.state import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.skills.calls import RegisteredSemanticCall
-from embodichain.lab.sim.skills.parallel import ParallelTimingPolicy
-from embodichain.lab.sim.skills.runtime import SkillResult, SkillStatus
-from embodichain.lab.sim.skills.parallel_runtime import (
-    ParallelLaneCommandSink,
-    ParallelRuntimeBranch,
-    ParallelSkillResult,
-    ParallelSkillRuntime,
+from embodichain.lab.semantic_skills.calls import RegisteredSemanticCall
+from embodichain.lab.expert_program._parallel import ParallelTimingPolicy
+from embodichain.lab.expert_program._semantic_results import (
+    SemanticExecutionResult,
+    SemanticExecutionStatus,
 )
-from embodichain.lab.sim.skills.profiles import ResourceClaim
+from embodichain.lab.expert_program._parallel_executor import (
+    ParallelLaneCommandSink,
+    ParallelExecutorBranch,
+    ParallelSemanticExecutionResult,
+    ParallelSemanticExecutor,
+)
+from embodichain.lab.semantic_skills.profiles import ResourceClaim
 
 STEP_DT = 0.02
 BATCH_SIZE = 2
@@ -287,29 +290,29 @@ class _FakeProgram:
 
 
 def _skill_result(
-    status: SkillStatus,
+    status: SemanticExecutionStatus,
     *,
     wait_duration: float = 0.0,
     workflow_id: str = "demo-program/segment-0",
-) -> SkillResult:
+) -> SemanticExecutionResult:
     env_ids = torch.tensor([7, 3], dtype=torch.long)
     eligible = torch.ones(BATCH_SIZE, dtype=torch.bool)
     success = (
         torch.ones(BATCH_SIZE, dtype=torch.bool)
-        if status is SkillStatus.COMPLETED
+        if status is SemanticExecutionStatus.COMPLETED
         else torch.zeros(BATCH_SIZE, dtype=torch.bool)
     )
     failure = (
         torch.ones(BATCH_SIZE, dtype=torch.bool)
-        if status is SkillStatus.FAILED
+        if status is SemanticExecutionStatus.FAILED
         else torch.zeros(BATCH_SIZE, dtype=torch.bool)
     )
-    if status is SkillStatus.FAILED:
+    if status is SemanticExecutionStatus.FAILED:
         eligible = torch.zeros_like(eligible)
-    return SkillResult(
+    return SemanticExecutionResult(
         status=status,
         workflow_id=workflow_id,
-        current_call_index=0 if status is SkillStatus.RUNNING else None,
+        current_call_index=0 if status is SemanticExecutionStatus.RUNNING else None,
         env_ids=env_ids,
         success_mask=success,
         failure_mask=failure,
@@ -332,8 +335,8 @@ class _FakeRuntime:
         self.sink = sink
         self.clock = clock
         self.frame = frame
-        self._status = SkillStatus.IDLE
-        self._result = _skill_result(SkillStatus.IDLE)
+        self._status = SemanticExecutionStatus.IDLE
+        self._result = _skill_result(SemanticExecutionStatus.IDLE)
         self._due_at = 0.0
         self._sent = False
         self.start_count = 0
@@ -345,11 +348,11 @@ class _FakeRuntime:
         self.adopted_states: list[TaskState] = []
 
     @property
-    def result(self) -> SkillResult:
+    def result(self) -> SemanticExecutionResult:
         return self._result
 
     @property
-    def status(self) -> SkillStatus:
+    def status(self) -> SemanticExecutionStatus:
         return self._status
 
     def start(
@@ -358,7 +361,7 @@ class _FakeRuntime:
         workflow_id: str = "semantic_workflow",
         eligible_mask: torch.Tensor | None = None,
         execution_prefix_length: int | None = None,
-    ) -> SkillResult:
+    ) -> SemanticExecutionResult:
         self.start_count += 1
         self.calls = tuple(calls[0]) if len(calls) == 1 else calls
         self.execution_prefix_lengths.append(execution_prefix_length)
@@ -367,18 +370,20 @@ class _FakeRuntime:
         )
         self._sent = False
         self._due_at = 0.0
-        self._status = SkillStatus.RUNNING
+        self._status = SemanticExecutionStatus.RUNNING
         self._result = _skill_result(
-            SkillStatus.RUNNING,
+            SemanticExecutionStatus.RUNNING,
             workflow_id=workflow_id,
         )
         return self._result
 
-    def adopt_verified_task_state(self, task_state: TaskState) -> SkillResult:
+    def adopt_verified_task_state(
+        self, task_state: TaskState
+    ) -> SemanticExecutionResult:
         self.adopted_states.append(task_state)
         return self._result
 
-    def step(self) -> SkillResult:
+    def step(self) -> SemanticExecutionResult:
         self.step_count += 1
         if not self._sent:
             self.sink.send(self.frame, timeout=1.0)
@@ -389,26 +394,26 @@ class _FakeRuntime:
         remaining = max(self._due_at - self.clock.now(), 0.0)
         if remaining > 1.0e-9:
             self._result = _skill_result(
-                SkillStatus.RUNNING,
+                SemanticExecutionStatus.RUNNING,
                 wait_duration=remaining,
                 workflow_id=self._result.workflow_id or "semantic_workflow",
             )
             return self._result
-        self._status = SkillStatus.COMPLETED
+        self._status = SemanticExecutionStatus.COMPLETED
         self._result = _skill_result(
-            SkillStatus.COMPLETED,
+            SemanticExecutionStatus.COMPLETED,
             workflow_id=self._result.workflow_id or "semantic_workflow",
         )
         return self._result
 
-    def cancel(self, reason: str) -> SkillResult:
+    def cancel(self, reason: str) -> SemanticExecutionResult:
         del reason
         self.cancel_count += 1
         self.sink.cancel(self.frame.targets, timeout=1.0)
         self.sink.hold(self.frame.targets, _context(), timeout=1.0)
-        self._status = SkillStatus.CANCELLED
-        self._result = SkillResult(
-            status=SkillStatus.CANCELLED,
+        self._status = SemanticExecutionStatus.CANCELLED
+        self._result = SemanticExecutionResult(
+            status=SemanticExecutionStatus.CANCELLED,
             workflow_id=self._result.workflow_id,
             current_call_index=None,
             env_ids=torch.tensor([7, 3], dtype=torch.long),
@@ -430,7 +435,7 @@ class _StartFailingRuntime(_FakeRuntime):
         workflow_id: str = "semantic_workflow",
         eligible_mask: torch.Tensor | None = None,
         execution_prefix_length: int | None = None,
-    ) -> SkillResult:
+    ) -> SemanticExecutionResult:
         del calls, workflow_id, eligible_mask, execution_prefix_length
         self.start_count += 1
         raise RuntimeError("semantic runtime preflight failed")
@@ -439,21 +444,21 @@ class _StartFailingRuntime(_FakeRuntime):
 class _TerminalHoldRuntime(_FakeRuntime):
     """Emit a terminal safe hold after one consumed command."""
 
-    def step(self) -> SkillResult:
+    def step(self) -> SemanticExecutionResult:
         self.step_count += 1
         if not self._sent:
             self.sink.send(self.frame, timeout=1.0)
             self._sent = True
-            self._status = SkillStatus.RUNNING
+            self._status = SemanticExecutionStatus.RUNNING
             self._result = _skill_result(
-                SkillStatus.RUNNING,
+                SemanticExecutionStatus.RUNNING,
                 workflow_id=self._result.workflow_id or "semantic_workflow",
             )
             return self._result
         self.sink.hold(self.frame.targets, _context(), timeout=1.0)
-        self._status = SkillStatus.COMPLETED
+        self._status = SemanticExecutionStatus.COMPLETED
         self._result = _skill_result(
-            SkillStatus.COMPLETED,
+            SemanticExecutionStatus.COMPLETED,
             workflow_id=self._result.workflow_id or "semantic_workflow",
         )
         return self._result
@@ -468,7 +473,7 @@ class _TerminalFailedRuntime(_FakeRuntime):
         workflow_id: str = "semantic_workflow",
         eligible_mask: torch.Tensor | None = None,
         execution_prefix_length: int | None = None,
-    ) -> SkillResult:
+    ) -> SemanticExecutionResult:
         running = super().start(
             *calls,
             workflow_id=workflow_id,
@@ -476,9 +481,9 @@ class _TerminalFailedRuntime(_FakeRuntime):
             execution_prefix_length=execution_prefix_length,
         )
         failed_mask = torch.ones(BATCH_SIZE, dtype=torch.bool)
-        self._status = SkillStatus.FAILED
-        self._result = SkillResult(
-            status=SkillStatus.FAILED,
+        self._status = SemanticExecutionStatus.FAILED
+        self._result = SemanticExecutionResult(
+            status=SemanticExecutionStatus.FAILED,
             workflow_id=running.workflow_id,
             current_call_index=None,
             env_ids=running.env_ids,
@@ -507,12 +512,12 @@ class _TerminalFailedRuntime(_FakeRuntime):
 class _PartialSuccessRuntime(_FakeRuntime):
     """Complete the workflow while retaining one failed environment row."""
 
-    def step(self) -> SkillResult:
+    def step(self) -> SemanticExecutionResult:
         result = super().step()
-        if result.status is SkillStatus.COMPLETED:
+        if result.status is SemanticExecutionStatus.COMPLETED:
             active_mask = torch.tensor([True, False])
-            self._result = SkillResult(
-                status=SkillStatus.COMPLETED,
+            self._result = SemanticExecutionResult(
+                status=SemanticExecutionStatus.COMPLETED,
                 workflow_id=result.workflow_id,
                 current_call_index=None,
                 env_ids=result.env_ids,
@@ -526,32 +531,32 @@ class _PartialSuccessRuntime(_FakeRuntime):
 
 
 def _parallel_result(
-    status: SkillStatus,
+    status: SemanticExecutionStatus,
     *,
     wait_duration: float = 0.0,
-) -> ParallelSkillResult:
+) -> ParallelSemanticExecutionResult:
     env_ids = torch.tensor([7, 3], dtype=torch.long)
     terminal = status in {
-        SkillStatus.COMPLETED,
-        SkillStatus.FAILED,
-        SkillStatus.CANCELLED,
+        SemanticExecutionStatus.COMPLETED,
+        SemanticExecutionStatus.FAILED,
+        SemanticExecutionStatus.CANCELLED,
     }
-    return ParallelSkillResult(
+    return ParallelSemanticExecutionResult(
         status=status,
         env_ids=env_ids,
         success_mask=(
             torch.ones(BATCH_SIZE, dtype=torch.bool)
-            if status is SkillStatus.COMPLETED
+            if status is SemanticExecutionStatus.COMPLETED
             else torch.zeros(BATCH_SIZE, dtype=torch.bool)
         ),
         failure_mask=(
             torch.ones(BATCH_SIZE, dtype=torch.bool)
-            if status is SkillStatus.FAILED
+            if status is SemanticExecutionStatus.FAILED
             else torch.zeros(BATCH_SIZE, dtype=torch.bool)
         ),
         cancelled_mask=(
             torch.ones(BATCH_SIZE, dtype=torch.bool)
-            if status is SkillStatus.CANCELLED
+            if status is SemanticExecutionStatus.CANCELLED
             else torch.zeros(BATCH_SIZE, dtype=torch.bool)
         ),
         pending_mask=(
@@ -577,13 +582,13 @@ class _FakeParallelRuntime:
     ) -> None:
         self.sink = sink
         self.clock = clock
-        self._result = _parallel_result(SkillStatus.IDLE)
+        self._result = _parallel_result(SemanticExecutionStatus.IDLE)
         self._sent = False
         self._due_at = 0.0
         self.eligible_mask: torch.Tensor | None = None
 
     @property
-    def result(self) -> ParallelSkillResult:
+    def result(self) -> ParallelSemanticExecutionResult:
         return self._result
 
     def start(
@@ -591,28 +596,28 @@ class _FakeParallelRuntime:
         *,
         workflow_id: str = "parallel_workflow",
         eligible_mask: torch.Tensor | None = None,
-    ) -> ParallelSkillResult:
+    ) -> ParallelSemanticExecutionResult:
         del workflow_id
         self.eligible_mask = None if eligible_mask is None else eligible_mask.clone()
-        self._result = _parallel_result(SkillStatus.RUNNING)
+        self._result = _parallel_result(SemanticExecutionStatus.RUNNING)
         return self._result
 
-    def step(self) -> ParallelSkillResult:
+    def step(self) -> ParallelSemanticExecutionResult:
         if not self._sent:
             self.sink.send(_joint_frame(duration=STEP_DT), timeout=1.0)
             self._sent = True
             self._due_at = self.clock.now() + STEP_DT
         remaining = max(self._due_at - self.clock.now(), 0.0)
         self._result = (
-            _parallel_result(SkillStatus.RUNNING, wait_duration=remaining)
+            _parallel_result(SemanticExecutionStatus.RUNNING, wait_duration=remaining)
             if remaining > 1.0e-9
-            else _parallel_result(SkillStatus.COMPLETED)
+            else _parallel_result(SemanticExecutionStatus.COMPLETED)
         )
         return self._result
 
-    def cancel(self, reason: str) -> ParallelSkillResult:
+    def cancel(self, reason: str) -> ParallelSemanticExecutionResult:
         del reason
-        self._result = _parallel_result(SkillStatus.CANCELLED)
+        self._result = _parallel_result(SemanticExecutionStatus.CANCELLED)
         return self._result
 
 
@@ -622,15 +627,15 @@ class _GridLaneRuntime:
     def __init__(
         self,
         sink: ParallelLaneCommandSink,
-        script: tuple[tuple[SkillStatus, RuntimeCommandFrame | None], ...],
+        script: tuple[tuple[SemanticExecutionStatus, RuntimeCommandFrame | None], ...],
     ) -> None:
         self.sink = sink
         self.script = script
         self.step_count = 0
-        self._result = _skill_result(SkillStatus.IDLE)
+        self._result = _skill_result(SemanticExecutionStatus.IDLE)
 
     @property
-    def result(self) -> SkillResult:
+    def result(self) -> SemanticExecutionResult:
         return self._result
 
     def start(
@@ -638,17 +643,19 @@ class _GridLaneRuntime:
         *calls: object,
         workflow_id: str,
         eligible_mask: torch.Tensor | None = None,
-    ) -> SkillResult:
+    ) -> SemanticExecutionResult:
         del calls, eligible_mask
-        self._result = _skill_result(SkillStatus.RUNNING, workflow_id=workflow_id)
+        self._result = _skill_result(
+            SemanticExecutionStatus.RUNNING, workflow_id=workflow_id
+        )
         return self._result
 
-    def step(self) -> SkillResult:
+    def step(self) -> SemanticExecutionResult:
         status, frame = self.script[min(self.step_count, len(self.script) - 1)]
         self.step_count += 1
         if frame is not None:
             self.sink.send(frame, timeout=1.0)
-        if status is not SkillStatus.RUNNING:
+        if status is not SemanticExecutionStatus.RUNNING:
             last_frame = frame or self.sink.last_frame
             assert last_frame is not None
             self.sink.hold(last_frame.targets, _context(), timeout=1.0)
@@ -662,18 +669,18 @@ class _GridLaneRuntime:
         env_mask: torch.Tensor,
         *,
         reason: str,
-    ) -> SkillResult:
+    ) -> SemanticExecutionResult:
         del env_mask, reason
         return self._result
 
-    def cancel(self, reason: str) -> SkillResult:
+    def cancel(self, reason: str) -> SemanticExecutionResult:
         del reason
         last_frame = self.sink.last_frame
         if last_frame is not None:
             self.sink.cancel(last_frame.targets, timeout=1.0)
             self.sink.hold(last_frame.targets, _context(), timeout=1.0)
-        self._result = SkillResult(
-            status=SkillStatus.CANCELLED,
+        self._result = SemanticExecutionResult(
+            status=SemanticExecutionStatus.CANCELLED,
             workflow_id=self._result.workflow_id,
             current_call_index=None,
             env_ids=torch.tensor([7, 3], dtype=torch.long),
@@ -1153,7 +1160,7 @@ def test_atomic_demo_bridge_is_lazy_and_waits_with_hold_actions() -> None:
     with pytest.raises(StopIteration):
         next(actions)
     assert clock.step_index == 2
-    assert runtime.status is SkillStatus.COMPLETED
+    assert runtime.status is SemanticExecutionStatus.COMPLETED
     assert runtime.cancel_count == 0
     assert demo_segment.validator().tolist() == [True, True]
 
@@ -1260,7 +1267,7 @@ def test_abort_replays_unconsumed_terminal_safe_hold_without_recancelling() -> N
     assert command.metadata["bridge_action_kind"] == "runtime_command"
     terminal_hold = next(actions)
     assert terminal_hold.metadata["bridge_action_kind"] == "runtime_safe_hold"
-    assert runtime.status is SkillStatus.COMPLETED
+    assert runtime.status is SemanticExecutionStatus.COMPLETED
     assert clock.step_index == 1
 
     assert segment.abort_actions is not None
@@ -1499,9 +1506,9 @@ def test_parallel_construction_failure_before_first_command_preserves_cause(
         del args, kwargs
         raise RuntimeError("parallel runtime construction failed")
 
-    monkeypatch.setattr(bridge_module, "SkillRuntime", _FakeRuntime)
+    monkeypatch.setattr(bridge_module, "SemanticCallExecutor", _FakeRuntime)
     monkeypatch.setattr(
-        ParallelSkillRuntime,
+        ParallelSemanticExecutor,
         "from_template",
         classmethod(fail_construction),
     )
@@ -1960,7 +1967,7 @@ def test_parallel_segment_preserves_branches_barrier_and_adopts_state(
     fake_parallel = _FakeParallelRuntime(runtime.sink, clock)
 
     def from_template(
-        cls: type[ParallelSkillRuntime],
+        cls: type[ParallelSemanticExecutor],
         template_runtime: object,
         branch_calls: dict[str, tuple[object, ...]],
         command_sink: object,
@@ -1990,9 +1997,9 @@ def test_parallel_segment_preserves_branches_barrier_and_adopts_state(
         )
         return fake_parallel
 
-    monkeypatch.setattr(bridge_module, "SkillRuntime", _FakeRuntime)
+    monkeypatch.setattr(bridge_module, "SemanticCallExecutor", _FakeRuntime)
     monkeypatch.setattr(
-        ParallelSkillRuntime,
+        ParallelSemanticExecutor,
         "from_template",
         classmethod(from_template),
     )
@@ -2036,28 +2043,28 @@ def test_real_parallel_coordinator_buffers_one_ordered_gym_action_per_step() -> 
     left_runtime = _GridLaneRuntime(
         left_sink,
         (
-            (SkillStatus.RUNNING, _grid_frame("left_arm", 0, 1.0)),
-            (SkillStatus.COMPLETED, None),
+            (SemanticExecutionStatus.RUNNING, _grid_frame("left_arm", 0, 1.0)),
+            (SemanticExecutionStatus.COMPLETED, None),
         ),
     )
     right_runtime = _GridLaneRuntime(
         right_sink,
         (
-            (SkillStatus.RUNNING, _grid_frame("right_arm", 1, 2.0)),
-            (SkillStatus.RUNNING, _grid_frame("right_arm", 1, 3.0)),
-            (SkillStatus.COMPLETED, None),
+            (SemanticExecutionStatus.RUNNING, _grid_frame("right_arm", 1, 2.0)),
+            (SemanticExecutionStatus.RUNNING, _grid_frame("right_arm", 1, 3.0)),
+            (SemanticExecutionStatus.COMPLETED, None),
         ),
     )
-    runtime = ParallelSkillRuntime(
+    runtime = ParallelSemanticExecutor(
         (
-            ParallelRuntimeBranch(
+            ParallelExecutorBranch(
                 "left",
                 (RegisteredSemanticCall("test.left"),),
                 ResourceClaim(frozenset({"left_arm"}), (0,)),
                 left_runtime,
                 left_sink,
             ),
-            ParallelRuntimeBranch(
+            ParallelExecutorBranch(
                 "right",
                 (RegisteredSemanticCall("test.right"),),
                 ResourceClaim(frozenset({"right_arm"}), (1,)),
@@ -2074,7 +2081,7 @@ def test_real_parallel_coordinator_buffers_one_ordered_gym_action_per_step() -> 
 
     runtime.start()
     first = runtime.step()
-    assert first.status is SkillStatus.RUNNING
+    assert first.status is SemanticExecutionStatus.RUNNING
     assert sink.pending_count == 1
     first_action = sink.pop()
     assert first_action.metadata["bridge_action_kind"] == "runtime_command"
@@ -2083,7 +2090,7 @@ def test_real_parallel_coordinator_buffers_one_ordered_gym_action_per_step() -> 
     clock.advance_after_env_step()
 
     padded = runtime.step()
-    assert padded.status is SkillStatus.RUNNING
+    assert padded.status is SemanticExecutionStatus.RUNNING
     assert sink.pending_count == 1
     padding_action = sink.pop()
     assert padding_action.metadata["bridge_action_kind"] == "runtime_safe_hold"
@@ -2092,7 +2099,7 @@ def test_real_parallel_coordinator_buffers_one_ordered_gym_action_per_step() -> 
     clock.advance_after_env_step()
 
     deferred = runtime.step()
-    assert deferred.status is SkillStatus.RUNNING
+    assert deferred.status is SemanticExecutionStatus.RUNNING
     assert sink.pending_count == 1
     deferred_action = sink.pop()
     assert deferred_action.metadata["bridge_action_kind"] == "runtime_command"
@@ -2105,7 +2112,7 @@ def test_real_parallel_coordinator_buffers_one_ordered_gym_action_per_step() -> 
     clock.advance_after_env_step()
 
     completed = runtime.step()
-    assert completed.status is SkillStatus.COMPLETED
+    assert completed.status is SemanticExecutionStatus.COMPLETED
     assert sink.pending_count == 1
     terminal_hold = sink.pop()
     assert terminal_hold.metadata["bridge_action_kind"] == "runtime_safe_hold"

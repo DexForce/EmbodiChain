@@ -2,7 +2,7 @@
 
 # Robot skill profiles
 
-```{currentmodule} embodichain.lab.sim.skills
+```{currentmodule} embodichain.lab.semantic_skills
 ```
 
 A {class}`RobotSkillProfile` describes how robot-independent atomic-skill
@@ -81,8 +81,9 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     PickUpOptions,
 )
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     ControlPartEndpoint,
+    EffectAssurance,
     ResourceBinding,
     RobotResource,
     RobotSkillProfile,
@@ -140,6 +141,7 @@ profile = RobotSkillProfile(
         "default": SkillPolicyPreset(
             preset_id="default",
             action_option_templates={"pick": PickUpOptions()},
+            effect_assurance=EffectAssurance.PROJECTED,
             motion_policy=MotionPolicy(strategy="ik_interp"),
             runner_cfg=ExecutionRunnerCfg(command_timeout=2.0),
         ),
@@ -153,14 +155,14 @@ planner backend, typically because it carries backend-specific typed planning
 options. Profile binding checks that requirement against the engine's configured
 backend and fails early on a mismatch. Leave it as `None` for portable presets.
 
-A {class}`SkillPolicyPreset` owns three independently snapshotted policy layers:
-`motion_policy`, `recovery_policy`, and `runner_cfg`. Semantic integration
-selects a preset in this order: an integration-wide `runtime_preset`, the
-profile's `skill_presets[atomic_skill_id]`, then `default_preset`. At execution
-time, an explicit `runner_cfg` supplied when constructing a `SkillRuntime` or
-`SkillRuntime` overrides the selected preset's runner configuration for
-every call; otherwise each call keeps its selected preset's transport timeouts,
-minimum cycle time, and completion-hold behavior.
+A {class}`SkillPolicyPreset` owns independently snapshotted motion, tracking,
+recovery, workflow-recovery, runner, action-option, and effect contracts. Expert
+Program integration selects a preset in this order: an integration-wide
+`runtime_preset`, the profile's `skill_presets[atomic_skill_id]`, then
+`default_preset`. At execution time, the environment adapter uses the selected
+preset's transport timeouts, minimum cycle time, and completion-hold behavior.
+Standard immutable registrations do not accept an unrelated task-side runner
+override.
 
 ## Configure semantic action behavior with the preset
 
@@ -197,22 +199,14 @@ profile = RobotSkillProfile(
     grounding_providers={"hand_over": "center_workspace_handover"},
 )
 
-runtime = SkillRuntime.from_simulation(
-    simulation=sim,
-    robot=robot,
-    motion_generator=motion_generator,
-    scene_registry=scene_registry,
-    robot_profile=profile,
-    handover_pose_providers=(CenterWorkspaceHandOverProvider(),),
-)
 ```
 
 `grounding_providers` maps a **semantic call ID** to a provider ID. The selected
-ID must match one explicitly installed {class}`HandOverPoseProvider`; missing or
-unknown providers fail during workflow analysis, before observation, planning,
-or controller work. The provider is executable integration code and therefore
-is passed to the runtime/compiler rather than stored inside the declarative
-profile.
+ID must match one provider declared by the immutable Expert Program simulation
+registration; missing or unknown providers fail during program analysis, before
+observation, planning, or controller work. The provider is executable
+integration code and therefore is owned by that registration rather than stored
+inside the declarative profile.
 
 Every `ControlPartEndpoint.control_part` must be a key in
 `robot.control_parts`. A composite endpoint may reuse a member's control part,
@@ -242,24 +236,25 @@ A linked call receives an effective immutable preset snapshot with
 Other presets, and scenes without dynamic collision entities, retain their
 configured collision mode.
 
-## Select semantic effect monitors with the preset
+## Select effect assurance and monitors with the preset
 
-A {class}`SkillPolicyPreset` owns one coherent runtime choice: planning and
-recovery policy, runner cadence, and the exact semantic-effect monitors used to
-confirm physical postconditions. `effect_monitors` maps a semantic call ID to a
-versioned {class}`EffectMonitorRef`. Its parameters are bounded declarative
-values; executable objects, tensors, cyclic containers, and non-finite numbers
-are rejected.
+A {class}`SkillPolicyPreset` must select one {class}`EffectAssurance`. There is
+no default:
 
-When `effect_monitors` is omitted, the preset selects the built-in
-pose-relation hysteresis monitor for `pick`, `place`, and `hand_over`. Passing an
-explicit empty mapping disables that default; static analysis then reports
-`missing_effect_monitor` if a curated effectful call selects that preset. A
-manifest also rejects monitor entries whose semantic ID is absent from its call
-catalog, and the compiler requires the exact monitor ID/revision and validates
-its parameters before grounding.
+- {attr}`EffectAssurance.VERIFIED` advances semantic state from measured
+  evidence. `effect_monitors` maps semantic call IDs to versioned
+  {class}`EffectMonitorRef` values. Every curated Pick, Place, or HandOver call
+  used by the preset requires a monitor.
+- {attr}`EffectAssurance.PROJECTED` advances the action plan's expected symbolic
+  effect after command completion and forbids monitor entries. It is intended
+  for trajectory demonstrations, not physical task acceptance.
 
-The semantic compiler creates a fresh monitor for every grounded call. Pick
+Monitor parameters are bounded declarative values; executable objects, tensors,
+cyclic containers, and non-finite numbers are rejected. A manifest also rejects
+entries whose semantic ID is absent from its call catalog, and Expert Program
+validates the exact monitor ID/revision before live grounding.
+
+Expert Program creates a fresh monitor for every verified grounded call. Pick
 expects one attached destination relation, place one detached source relation,
 and handover both source-detached and destination-attached relations in the
 same observation. The monitor compares fresh backend evidence with owned
@@ -271,9 +266,9 @@ installs a new attempt.
 
 ```{note}
 The monitor contract is backend-neutral. Simulation, hardware perception, or
-controller feedback supplies typed pose-relation evidence. The semantic
-runtime adapter that connects that evidence to `ExecutionRunner` is separate
-from the profile and monitor configuration.
+controller feedback supplies typed pose-relation evidence. The Expert Program
+adapter that connects that evidence to `ExecutionRunner` is separate from the
+profile and monitor configuration.
 ```
 
 ## Bind, discover, and resolve
@@ -307,7 +302,7 @@ the engine's catalog revision whenever it performs discovery or resolution.
 containing the selected logical resources, their adapter-resolved endpoints,
 their combined {class}`ResourceClaim`, and an engine-owned generic
 {class}`~embodichain.lab.sim.atomic_actions.ActionBinding`. A
-semantic compiler uses that binding and the selected preset when constructing
+Expert Program lowering uses that binding and the selected preset when constructing
 an invocation; profile resolution does not plan or execute the action itself.
 
 If exactly one assignment is valid, resolution selects it. If several remain,
@@ -431,5 +426,6 @@ runtime dispatch is scoped to the endpoints in each command frame.
 ```
 
 See {doc}`index` for the direct atomic-action core,
-{doc}`../semantic_skills` for compiler/runtime integration, and
+{doc}`../semantic_skills` for declarative semantic contracts,
+{doc}`expert_programs` for semantic task execution, and
 {doc}`../scene_registry` for canonical scene identity and snapshots.

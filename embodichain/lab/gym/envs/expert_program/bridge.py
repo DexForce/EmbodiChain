@@ -53,13 +53,17 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
     RuntimeCommandPayload,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext, TaskState
-from embodichain.lab.sim.skills.parallel import ParallelTimingPolicy
-from embodichain.lab.sim.skills.parallel_runtime import (
+from embodichain.lab.expert_program._parallel import ParallelTimingPolicy
+from embodichain.lab.expert_program._parallel_executor import (
     ParallelCommandSafetyValidator,
-    ParallelSkillResult,
-    ParallelSkillRuntime,
+    ParallelSemanticExecutionResult,
+    ParallelSemanticExecutor,
 )
-from embodichain.lab.sim.skills.runtime import SkillResult, SkillRuntime, SkillStatus
+from embodichain.lab.expert_program._semantic_executor import SemanticCallExecutor
+from embodichain.lab.expert_program._semantic_results import (
+    SemanticExecutionResult,
+    SemanticExecutionStatus,
+)
 from embodichain.lab.sim.types import EnvAction
 
 _SAFE_HOLD_ACTION_KINDS = frozenset(
@@ -161,15 +165,15 @@ class CompiledProgramPort(Protocol):
 
 
 @runtime_checkable
-class SequentialSkillRuntimePort(Protocol):
+class SequentialSemanticCallExecutorPort(Protocol):
     """Nonblocking semantic runtime surface used by sequential segments."""
 
     @property
-    def result(self) -> SkillResult:
+    def result(self) -> SemanticExecutionResult:
         """Return the current immutable runtime result."""
 
     @property
-    def status(self) -> SkillStatus:
+    def status(self) -> SemanticExecutionStatus:
         """Return the current runtime status."""
 
     def start(
@@ -178,16 +182,18 @@ class SequentialSkillRuntimePort(Protocol):
         workflow_id: str = "semantic_workflow",
         eligible_mask: torch.Tensor | None = None,
         execution_prefix_length: int | None = None,
-    ) -> SkillResult:
+    ) -> SemanticExecutionResult:
         """Start one semantic workflow without blocking on motion."""
 
-    def step(self) -> SkillResult:
+    def step(self) -> SemanticExecutionResult:
         """Advance the workflow by at most one due runner cycle."""
 
-    def cancel(self, reason: str) -> SkillResult:
+    def cancel(self, reason: str) -> SemanticExecutionResult:
         """Cancel one running workflow through the runner's safe-stop path."""
 
-    def adopt_verified_task_state(self, task_state: TaskState) -> SkillResult:
+    def adopt_verified_task_state(
+        self, task_state: TaskState
+    ) -> SemanticExecutionResult:
         """Install state merged at an independent parallel barrier."""
 
 
@@ -312,7 +318,7 @@ class GymPlanningObservationProvider:
 class EnvironmentStepClock(ExecutionClock):
     """Monotonic execution clock advanced only by explicit Gym steps.
 
-    ``sleep`` intentionally raises.  Calling synchronous ``SkillRuntime.run``
+    ``sleep`` intentionally raises.  Calling synchronous ``SemanticCallExecutor.run``
     with this clock would otherwise advance execution without an environment
     transition.  Demo integrations must use the nonblocking ``start``/``step``
     path and call :meth:`advance_after_env_step` only after a yielded action was
@@ -822,9 +828,9 @@ class _SegmentLifecycle:
     """Mutable state shared by one lazy action generator and validator."""
 
     complete: bool = False
-    result: SkillResult | ParallelSkillResult | None = None
+    result: SemanticExecutionResult | ParallelSemanticExecutionResult | None = None
     validation: torch.Tensor | None = None
-    runtime: SequentialSkillRuntimePort | ParallelSkillRuntime | None = None
+    runtime: SequentialSemanticCallExecutorPort | ParallelSemanticExecutor | None = None
     pending_action: ControllerAction | None = None
     actions_started: bool = False
     sink_acceptance_baseline: int | None = None
@@ -836,12 +842,14 @@ class _SegmentLifecycle:
 
 
 def _validate_runtime_result(
-    result: SkillResult | ParallelSkillResult,
-) -> SkillResult | ParallelSkillResult:
+    result: SemanticExecutionResult | ParallelSemanticExecutionResult,
+) -> SemanticExecutionResult | ParallelSemanticExecutionResult:
     """Validate one exact sequential or parallel runtime boundary."""
-    if not isinstance(result, (SkillResult, ParallelSkillResult)):
+    if not isinstance(
+        result, (SemanticExecutionResult, ParallelSemanticExecutionResult)
+    ):
         raise TypeError(
-            "Runtime methods must return SkillResult or ParallelSkillResult values."
+            "Runtime methods must return SemanticExecutionResult or ParallelSemanticExecutionResult values."
         )
     return result
 
@@ -865,7 +873,7 @@ def _normalize_validation(
 
 
 def _runtime_result_metadata(
-    result: SkillResult | ParallelSkillResult,
+    result: SemanticExecutionResult | ParallelSemanticExecutionResult,
 ) -> dict[str, Any]:
     """Snapshot one core runtime result through its canonical serializer."""
     serializer = getattr(result, "to_metadata", None)
@@ -884,7 +892,7 @@ class AtomicDemoBridge:
 
     Args:
         program: Provider-free compiled Expert Program.
-        runtime: Nonblocking semantic :class:`SkillRuntime` surface.
+        runtime: Nonblocking semantic :class:`SemanticCallExecutor` surface.
         command_sink: The same buffered sink installed in ``runtime``.
         clock: The same environment-step clock installed in ``runtime``.
         post_policy_port: Optional environment-aware post-policy executor.
@@ -894,14 +902,14 @@ class AtomicDemoBridge:
             required before any parallel branch can start.
 
     Parallel blocks retain their branch lanes and explicit barrier.
-    They are lowered through :class:`ParallelSkillRuntime`; they are never
+    They are lowered through :class:`ParallelSemanticExecutor`; they are never
     flattened into a sequential semantic-call list.
     """
 
     def __init__(
         self,
         program: CompiledProgramPort,
-        runtime: SequentialSkillRuntimePort,
+        runtime: SequentialSemanticCallExecutorPort,
         command_sink: BufferedGymCommandSink,
         clock: EnvironmentStepClock,
         *,
@@ -913,8 +921,10 @@ class AtomicDemoBridge:
         if not isinstance(program, CompiledProgramPort):
             raise TypeError("program must implement CompiledProgramPort.")
         _validate_identifier(program.program_id, field_name="program.program_id")
-        if not isinstance(runtime, SequentialSkillRuntimePort):
-            raise TypeError("runtime must implement SequentialSkillRuntimePort.")
+        if not isinstance(runtime, SequentialSemanticCallExecutorPort):
+            raise TypeError(
+                "runtime must implement SequentialSemanticCallExecutorPort."
+            )
         if not isinstance(command_sink, BufferedGymCommandSink):
             raise TypeError("command_sink must be a BufferedGymCommandSink.")
         if not isinstance(clock, EnvironmentStepClock):
@@ -1047,7 +1057,7 @@ class AtomicDemoBridge:
     @staticmethod
     def _record_runtime_result(
         lifecycle: _SegmentLifecycle,
-        result: SkillResult | ParallelSkillResult,
+        result: SemanticExecutionResult | ParallelSemanticExecutionResult,
     ) -> None:
         """Snapshot one runtime boundary into its owning segment metadata."""
         lifecycle.result = result
@@ -1058,7 +1068,7 @@ class AtomicDemoBridge:
         action: Any,
         *,
         segment: Any,
-        result: SkillResult | ParallelSkillResult,
+        result: SemanticExecutionResult | ParallelSemanticExecutionResult,
         action_kind: str | None = None,
     ) -> ControllerAction:
         """Own one action and attach stable program/runtime provenance."""
@@ -1112,10 +1122,10 @@ class AtomicDemoBridge:
                 "close it before starting another lazy segment."
             )
         self._active_segment_id = segment_id
-        result: SkillResult | ParallelSkillResult | None = None
-        segment_runtime: SequentialSkillRuntimePort | ParallelSkillRuntime = (
-            self._runtime
-        )
+        result: SemanticExecutionResult | ParallelSemanticExecutionResult | None = None
+        segment_runtime: (
+            SequentialSemanticCallExecutorPort | ParallelSemanticExecutor
+        ) = self._runtime
         is_parallel = getattr(segment, "parallel_block", None) is not None
         try:
             if is_parallel:
@@ -1176,7 +1186,7 @@ class AtomicDemoBridge:
                 if result.wait_duration > 0.0:
                     self._clock.steps_for_duration(
                         result.wait_duration,
-                        field_name="SkillResult.wait_duration",
+                        field_name="SemanticExecutionResult.wait_duration",
                     )
                     hold = self._decorate_action(
                         self._sink.wait_hold(result.env_ids),
@@ -1192,7 +1202,7 @@ class AtomicDemoBridge:
             self._retain_eligible_rows(result.success_mask)
             if is_parallel:
                 self._runtime.adopt_verified_task_state(result.task_state)
-            if result.status is SkillStatus.COMPLETED:
+            if result.status is SemanticExecutionStatus.COMPLETED:
                 yield from self._post_policy_actions(segment, result, lifecycle)
             lifecycle.complete = True
         finally:
@@ -1319,7 +1329,7 @@ class AtomicDemoBridge:
         self._clock.advance_after_env_step()
         lifecycle.abort_complete = True
 
-    def _parallel_runtime(self, segment: Any) -> ParallelSkillRuntime:
+    def _parallel_runtime(self, segment: Any) -> ParallelSemanticExecutor:
         """Build one one-shot coordinator from a compiled explicit barrier."""
         if self._parallel_safety_validator is None:
             raise DemoBridgeError(
@@ -1327,13 +1337,13 @@ class AtomicDemoBridge:
                 "ParallelCommandSafetyValidator; resource claims alone do not "
                 "establish physical collision safety."
             )
-        if not isinstance(self._runtime, SkillRuntime):
-            # Production integration always supplies SkillRuntime.  Keeping the
+        if not isinstance(self._runtime, SemanticCallExecutor):
+            # Production integration always supplies SemanticCallExecutor.  Keeping the
             # sequential protocol permits lightweight tests and alternate
             # frontends, but the canonical parallel factory requires forkable
             # runtime internals by design.
             raise TypeError(
-                "Parallel compiled segments require a concrete SkillRuntime "
+                "Parallel compiled segments require a concrete SemanticCallExecutor "
                 "template."
             )
         block = segment.parallel_block
@@ -1360,7 +1370,7 @@ class AtomicDemoBridge:
                 f"Parallel segment {segment.segment_id!r} contains an empty branch."
             )
         barrier = block.barrier
-        return ParallelSkillRuntime.from_template(
+        return ParallelSemanticExecutor.from_template(
             self._runtime,
             branch_calls,
             self._sink,
@@ -1393,7 +1403,7 @@ class AtomicDemoBridge:
     def _post_policy_actions(
         self,
         segment: Any,
-        result: SkillResult | ParallelSkillResult,
+        result: SemanticExecutionResult | ParallelSemanticExecutionResult,
         lifecycle: _SegmentLifecycle,
     ) -> Iterator[ControllerAction]:
         """Route environment-aware post-policy actions through the same generator."""

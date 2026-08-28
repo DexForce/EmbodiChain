@@ -646,7 +646,7 @@ class TestConfigToCfgFromFile:
         monkeypatch,
     ) -> None:
         """The CLI override replaces the Gym path at the single loader boundary."""
-        from embodichain.lab.gym.envs.expert_program import loader
+        from embodichain.lab.expert_program import loader
 
         gym_path = tmp_path / "gym_config.json"
         override_path = tmp_path / "override.yaml"
@@ -689,7 +689,7 @@ class TestConfigToCfgFromFile:
         monkeypatch,
     ) -> None:
         """A repeated config load rejects drift in its registered integration."""
-        from embodichain.lab.gym.envs.expert_program import loader
+        from embodichain.lab.expert_program import loader
 
         program_path = tmp_path / "program.yaml"
         save_config(program_path, self._expert_program_payload())

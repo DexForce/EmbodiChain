@@ -43,7 +43,7 @@ from embodichain.lab.gym.envs.settling import (
     DynamicSettleState,
 )
 
-from .compiler import (
+from embodichain.lab.expert_program.compiler import (
     CompiledArticulationJointPositionValidator,
     CompiledObjectNearTargetValidator,
     CompiledPostPolicy,

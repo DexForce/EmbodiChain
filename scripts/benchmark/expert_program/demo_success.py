@@ -56,7 +56,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
     execute_demo_episode,
 )
-from embodichain.lab.gym.envs.expert_program import load_expert_program
+from embodichain.lab.expert_program import load_expert_program
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,

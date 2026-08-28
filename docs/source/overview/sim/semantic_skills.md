@@ -2,89 +2,103 @@
 
 # Semantic skills
 
-```{currentmodule} embodichain.lab.sim.skills
+```{currentmodule} embodichain.lab.semantic_skills
 ```
 
-Semantic skills are the application-facing layer above
-{doc}`atomic actions <atomic_actions/index>`. A semantic call names an object,
-relation, and optional robot participant without exposing joint groups, planner
-instances, raw controller commands, or an `ActionBinding`. The semantic layer
-validates that declaration against one scene and robot embodiment, then lowers
-it to the same typed atomic-action runtime used by direct Python callers.
+Semantic skills are EmbodiChain's **declarative vocabulary** for describing
+robot-independent manipulation intent and the integration data needed to make
+that intent meaningful. The package contains no public compiler, executor, or
+action-generation facade.
 
-This boundary is useful for MLLM agents, task planners, configuration-driven
-applications, and users who want robot-independent task code. It is not an
-agent loop: the application still owns task selection, perception policy,
-physical-effect verification, and any task-level fallback strategy.
+There are exactly two supported action-generation entry points:
+
+| Entry point | Use it for |
+|---|---|
+| {doc}`Atomic Actions <atomic_actions/index>` | Python code that already owns typed goals, bindings, policies, and execution ports. |
+| {doc}`Expert Program <atomic_actions/expert_programs>` | Task-level JSON/YAML or programmatic sequences of semantic calls, including repeats, segments, validation, and parallel barriers. |
+
+`semantic_skills` supplies contracts to Expert Program; it is not a third
+execution path. In particular, semantic calls do not expose `run()`, `start()`,
+or `step()` methods.
 
 ```text
-SemanticCallSpec values
-        |
-        v
-SemanticIntegrationManifest
-  +-- SceneManifest          canonical IDs and affordance metadata
-  +-- RobotSkillProfile      resources, commands, presets, providers
-  `-- SemanticCallCatalog    discoverable call schemas
-        |
-        v bind live registry + action engine
-BoundSemanticIntegration
-        |
-        v
-SemanticSkillCompiler
-  analyze() -> SemanticWorkflow       provider-free validation and look-ahead
-  ground()  -> GroundedSemanticCall   latest observation -> ActionInvocation
-        |
-        v
-SkillRuntime / AtomicSkills
-        |
-        v
-ExecutionRunner -> controller transports -> verified effects
+embodichain.lab.semantic_skills
+  calls + catalog
+  scene + affordances
+  robot resources + policy presets
+  effects + evidence declarations
+             |
+             v
+embodichain.lab.expert_program
+  schema -> decode -> validate -> compile
+             |
+             v
+Gym/simulation adapter -> AtomicActionEngine -> controller transports
 ```
 
-## Semantic skills or direct atomic actions?
+## Package responsibilities
 
-Both paths use `AtomicActionEngine` and therefore share planning, controller
-authorization, recovery, and effect semantics.
-
-| Choose | When it is the better boundary |
-|---|---|
-| Semantic skills | Task code should be robot-independent; an agent or planner emits object-centric calls; scene and resource validation should happen before controller work; dynamic task segments must retain verified state. |
-| Direct atomic actions | A scripted application already knows exact goals, bindings, policies, and options; low-level tuning or a custom controller contract is part of the application. |
-
-For a user writing a small fixed robot script, direct atomic actions usually
-have fewer integration objects. For an MLLM agent or an application targeting
-multiple robot profiles, semantic skills provide the safer and more stable
-interface.
-
-## Public semantic calls
-
-The built-in catalog returned by {func}`builtin_semantic_call_catalog` exposes
-three curated call values:
-
-| Call | Intent | Main lowering behavior |
+| Contract family | Main types | Responsibility |
 |---|---|---|
-| {class}`Pick` | Acquire a registered object, optionally through an explicit grasp affordance. | Selects a capability-compatible grasp affordance and lowers to atomic `pick_up`. |
-| {class}`Place` | Release a held object at an absolute pose, on a support, or inside a container. | Requires exactly one of `at`, `on`, or `inside`; relation targets use an explicitly installed typed grounder. |
-| {class}`HandOver` | Transfer a held object to another robot resource. | Uses a robot-profile-selected provider for the middle and default final pose; an explicit `final_target` overrides the latter. |
+| Semantic calls | {class}`Pick`, {class}`Place`, {class}`HandOver`, {class}`RegisteredSemanticCall`, {class}`SemanticCallCatalog` | Immutable object-centric intent and discoverable schemas. |
+| Scene semantics | {class}`SceneRegistry`, {class}`SceneObjectRef`, {class}`SceneAffordanceRef`, {class}`SceneManifest` | Canonical identity, topology, affordances, collision roles, and provider-free snapshots. |
+| Robot semantics | {class}`RobotSkillProfile`, {class}`RobotResource`, {class}`ResourceEndpoint`, {class}`SkillPolicyPreset` | Embodiment resources, default bindings, command templates, and policy selection. |
+| Effect contracts | {class}`SemanticEffectSpec`, {class}`EffectMonitorRef`, {class}`EffectEvidenceCollector` | Typed postconditions and measured evidence routing. |
+| Integration | {class}`SemanticIntegrationManifest`, {class}`BoundSemanticIntegration` | Static compatibility checks between the catalog, scene, profile, and atomic-action catalog. |
 
-{class}`SemanticPose` expresses an absolute object-space pose with a position
-and normalized WXYZ quaternion. Scene objects and affordances use typed
-{class}`SceneObjectRef` and {class}`SceneAffordanceRef` values, so aliases are
-resolved at the registry boundary instead of being propagated into execution.
+Executable lowerers, schedulers, and semantic-call execution state are internal
+to Expert Program. Applications should not import underscore-prefixed modules
+from `embodichain.lab.expert_program`.
 
-Extensions use {class}`RegisteredSemanticCall`. Its argument tree accepts only
-declarative values; tensors, callables, classes, modules, and live simulator
-objects are rejected. A registered descriptor must identify one exact
-agent-visible atomic target, and the compiler must install a matching
-{class}`RegisteredSemanticLowerer` with the same call ID and schema version.
-Curated calls cannot be remapped through this extension mechanism.
+## Built-in calls
 
-## Static integration
+The catalog returned by {func}`builtin_semantic_call_catalog` contains three
+curated calls:
 
-Create the static declaration before execution:
+| Call | Intent |
+|---|---|
+| {class}`Pick` | Acquire a registered object, optionally through an explicit grasp affordance. |
+| {class}`Place` | Release a held object at an absolute pose, on a support, or inside a container. Exactly one target form is allowed. |
+| {class}`HandOver` | Transfer a held object between two robot resources, with an optional explicit final target. |
+
+{class}`SemanticPose` is an immutable absolute pose. Typed references such as
+{class}`SceneObjectRef` and {class}`SceneAffordanceRef` keep aliases and native
+simulator names out of task declarations.
+
+Extensions use {class}`RegisteredSemanticCall`. Its payload must contain only
+declarative values. Live simulator objects, tensors, callables, classes, and
+modules are rejected. The surrounding Expert Program registration must provide
+the matching allowlisted lowerer; a payload cannot choose executable code.
+
+## Scene and integration snapshots
+
+Register canonical scene entities once:
 
 ```python
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
+    SceneEntityRegistration,
+    SceneObjectRef,
+    SceneRegistry,
+)
+
+scene_registry = SceneRegistry(
+    (
+        SceneEntityRegistration(
+            ref=SceneObjectRef("cube"),
+            state_provider=cube_state_provider,
+            semantic_type="cube",
+        ),
+    )
+)
+```
+
+The registry owns identity and live providers. A {class}`SceneManifest` is its
+provider-free snapshot: creating one does not read simulation state. An
+integration manifest combines that snapshot with one robot profile and call
+catalog:
+
+```python
+from embodichain.lab.semantic_skills import (
     SceneManifest,
     SemanticIntegrationManifest,
     builtin_semantic_call_catalog,
@@ -97,213 +111,85 @@ manifest = SemanticIntegrationManifest(
 )
 ```
 
-`SceneManifest` is provider-free: creating it does not observe simulation or
-perception. It snapshots canonical identity, aliases, topology, affordance
-capabilities and revisions, and collision-world mode. `manifest.bind(...)`
-requires the live {class}`SceneRegistry` to match that snapshot and binds the
-profile to the exact action engine. The returned bound profile snapshots the
-engine's skill-catalog revision. Replacing an installed agent-visible action or
-changing scene metadata invalidates the old integration rather than silently
-reusing stale contracts; creating another bound view does not mutate the engine
-or invalidate an existing integration.
+Expert Program uses this data for provider-free validation and then binds the
+same declarations to a live atomic-action engine. Changed scene metadata,
+robot resources, or action-catalog revisions invalidate the snapshot instead
+of being accepted silently.
 
-Policy preset selection is deterministic:
+See {doc}`scene_registry` for registration and collision-world rules, and
+{doc}`atomic_actions/robot_skill_profiles` for resource binding.
 
-1. `SemanticIntegrationManifest.runtime_preset`, when configured;
-2. `RobotSkillProfile.skill_presets[atomic_skill_id]`;
-3. `RobotSkillProfile.default_preset`.
+## Explicit effect assurance
 
-A missing or unknown preset is a validation error. The selected
-{class}`SkillPolicyPreset` owns the motion policy, recovery policy, and
-`ExecutionRunnerCfg` used by that call.
+Every {class}`SkillPolicyPreset` must select one {class}`EffectAssurance`:
 
-## Analyze first, ground from fresh state
+| Value | Meaning |
+|---|---|
+| {attr}`EffectAssurance.VERIFIED` | Semantic state advances from an installed physical-effect monitor and measured evidence. Curated Pick, Place, and HandOver calls must each have a monitor. |
+| {attr}`EffectAssurance.PROJECTED` | After command completion, the expected symbolic effect from the action plan is projected. Effect monitors are forbidden. |
 
-{meth}`SemanticSkillCompiler.analyze` performs provider-free work:
-
-- catalog and schema discovery;
-- canonical scene and affordance resolution;
-- robot-resource and preset selection;
-- verified-held-object flow analysis;
-- first-release look-ahead for Pick grasp selection;
-- validation that required lowerers and grounders are installed.
-
-It returns an immutable {class}`SemanticWorkflow`. No scene provider is read and
-no planner is run at this stage.
-
-{meth}`SemanticSkillCompiler.ground` lowers exactly one analyzed call from the
-latest {class}`~embodichain.lab.sim.atomic_actions.PlanningContext`. It resolves
-late-bound relation or handover targets and returns a
-{class}`GroundedSemanticCall` containing an `ActionInvocation` and an owned
-per-environment `eligible_mask`:
+There is no implicit default and no implicit built-in monitor installation.
+This makes an integration's authority visible in configuration and review.
 
 ```python
-workflow = compiler.analyze(calls, workflow_id="sort_workpiece")
-grounded = compiler.ground(
-    workflow,
-    call_index=0,
-    context=latest_context,
-    eligible_mask=active_rows,
+from embodichain.lab.semantic_skills import (
+    EffectAssurance,
+    EffectMonitorRef,
+    SkillPolicyPreset,
 )
-session = engine.start(
-    (grounded.invocation,),
-    latest_context,
-    eligible_mask=grounded.eligible_mask,
+
+verified = SkillPolicyPreset(
+    preset_id="safe",
+    action_option_templates=action_options,
+    effect_assurance=EffectAssurance.VERIFIED,
+    effect_monitors={
+        "pick": EffectMonitorRef("composite", "1"),
+        "place": EffectMonitorRef("composite", "1"),
+        "hand_over": EffectMonitorRef("composite", "1"),
+    },
+)
+
+projected = SkillPolicyPreset(
+    preset_id="trajectory_demo",
+    action_option_templates=action_options,
+    effect_assurance=EffectAssurance.PROJECTED,
 )
 ```
 
-The runtime performs this JIT grounding automatically before every call. Known
-calls should be submitted together when possible: a `Pick -> Place` or
-`Pick -> HandOver` segment lets analysis pass the first downstream object target
-into grasp selection. A registered lowerer can retain that chain by returning
-typed object poses from `pick_lookahead_targets()`; its default `None` is a
-conservative barrier. Splitting calls into separate dynamic segments is valid,
-but removes that look-ahead information from the earlier Pick.
+Projected assurance is useful for trajectory demonstrations, but command
+completion is not proof of physical task success. Dataset acceptance should
+use verified assurance or explicit Expert Program segment validators when the
+physical result matters.
 
-## Construct a runtime
+## Effects and evidence
 
-Use {meth}`SkillRuntime.from_simulation` for the standard simulation
-path. This canonical factory creates a registry-backed planning scene provider,
-a `SimulationExecutionAdapter`, an `AtomicActionEngine` with
-built-ins, the semantic manifest/compiler, and typed effect-evidence
-collectors:
+Effect monitors evaluate typed clauses over evidence batches. Evidence comes
+from registered providers such as control-part state, articulation joint state,
+pose relations, contacts, constraints, or force channels. A command
+acknowledgement is never physical evidence.
 
-```python
-runtime = SkillRuntime.from_simulation(
-    simulation=sim,
-    robot=robot,
-    motion_generator=motion_generator,
-    scene_registry=scene_registry,
-    robot_profile=robot_profile,
-    effect_verifier=verify_effect,
-    control_dt=4 * sim.sim_config.physics_dt,
-)
-```
+Held-object guards and phase-effect gates may stop an atomic plan at named
+boundaries when measured state is missing or contradicted. They can remove an
+action-authorized symbolic relation, but they never create simulator
+constraints, freeze bodies, or overwrite object poses.
 
-For custom observation, command, clock, endpoint-adapter, or hardware ports,
-construct {class}`SkillRuntime` with {meth}`SkillRuntime.from_components` and
-an explicit {class}`EffectEvidenceCollector`. {class}`AtomicSkills` provides a
-small application-facing facade over the same runtime. A runtime executes one
-workflow at a time; application-level scheduling and resource leasing remain
-outside this layer. `control_dt` is the command cadence and is independent of
-the simulation physics period.
+## Where to make changes
 
-## Execute a fixed workflow
+| Change | Owning location |
+|---|---|
+| Call values and public catalog | `embodichain/lab/semantic_skills/calls.py` |
+| Scene references, registry, and affordances | `embodichain/lab/semantic_skills/scene.py` |
+| Robot resources and policy presets | `embodichain/lab/semantic_skills/profiles.py` |
+| Semantic effect declarations | `embodichain/lab/semantic_skills/effects.py` |
+| Evidence contracts and collection | `embodichain/lab/semantic_skills/evidence.py` |
+| Integration snapshots and diagnostics | `embodichain/lab/semantic_skills/integration.py` |
+| Program schema, decoder, and compiler | `embodichain/lab/expert_program/` |
+| Live Gym/simulation assembly | `embodichain/lab/gym/envs/expert_program/` |
 
-The minimal robot-independent program names only the registered object and its
-desired final pose:
+## Further reading
 
-```python
-from embodichain.lab.sim.skills import Pick, Place, SceneObjectRef, SemanticPose
-
-workpiece = SceneObjectRef("workpiece")
-calls = (
-    Pick(object=workpiece),
-    Place(
-        object=workpiece,
-        at=SemanticPose(
-            position=(-0.40, 0.48, 0.025),
-            quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
-        ),
-    ),
-)
-
-result = runtime.run(
-    calls,
-    task_id="pick_and_place",
-    effect_verifier=verify_effect,
-)
-result.require_all_succeeded()
-```
-
-{meth}`SkillRuntime.run` is the synchronous entry point over the
-step-wise {class}`SkillRuntime`. The canonical runtime obtains typed evidence
-from its {class}`EffectEvidenceCollector` and lets the selected effect monitor
-decide whether the physical effect is verified. A legacy
-{class}`SemanticEffectVerifier`, when supplied, is an additional application
-gate rather than a replacement for evidence collection.
-
-For a non-blocking integration, call {meth}`SkillRuntime.start` and advance it
-with {meth}`SkillRuntime.step`. If `result.wait_duration` is positive, wait on
-the runtime clock before the next step. `SkillResult.terminal` identifies the
-completion boundary.
-
-## Dynamic tasks
-
-Dynamic task construction is supported between completed workflows. The
-runtime retains verified `TaskState` and the active eligibility cohort, so an
-application can choose its next semantic calls after inspecting a completed
-{class}`SkillResult`:
-
-```python
-first = runtime.run(
-    (Pick(object=workpiece),),
-    task_id="clear_table.acquire",
-)
-if first.status is SkillStatus.COMPLETED:
-    next_calls = decide_next_calls(first.task_state)
-    result = runtime.run(next_calls, task_id="clear_table.agent_decision_1")
-```
-
-The following boundaries are intentional:
-
-- only one workflow executes at a time;
-- a terminal result is the safe boundary for choosing a later workflow;
-- failed or cancelled workflows do not implicitly retry at the semantic layer;
-- environment rows that become ineligible remain excluded in later calls until
-  the application explicitly replaces verified state.
-
-The runtime does not automatically choose a replacement skill, re-run an agent,
-or reconcile symbolic state after an uncertain physical effect. Implement those
-task-level policies in the application at a safe segment boundary.
-
-## Recovery and physical success
-
-Each grounded call runs through the existing closed-loop `ExecutionRunner`.
-Depending on its `RecoveryPolicy`, it can detect and recover from tracking
-errors, supported scene-target motion, collision-world revisions, timeouts, and
-per-environment planning failure. Recovery is bounded and emits structured
-atomic-action events retained in {class}`SkillCallTrace` and
-{class}`SkillResult`.
-
-Dynamic target recovery follows the atomic primitive's dependency contract.
-For example, Pick monitors its object/grasp dependency only through the
-`approach` segment; contact-, close-, and lift-induced object movement is not
-treated as an external target update. Atomic HandOver can monitor
-`SceneEntityPose` values supplied for its middle and final option poses.
-
-Planning success is not physical success. Attachment, release, ownership
-transfer, and articulation state are committed only after the selected effect
-monitor verifies collected evidence for each environment. A failed verification
-follows the configured atomic recovery budget; if the runner terminates
-unsuccessfully, the workflow fails. There is no implicit success assumption.
-
-Final workflow status is {attr}`SkillStatus.COMPLETED`,
-{attr}`SkillStatus.FAILED`, or {attr}`SkillStatus.CANCELLED`. A completed
-vectorized run may still have a smaller `success_mask` than its original cohort;
-call {meth}`SkillResult.require_all_succeeded` when partial batch success is not
-acceptable.
-
-## Diagnostics and extension points
-
-{meth}`SkillRuntime.validate` (or
-{meth}`SemanticSkillCompiler.analyze`) exposes static analysis without
-observing, planning, or executing. Static integration and grounding errors use
-{class}`SemanticValidationError`, whose {class}`SemanticDiagnostic` contains a
-stable code, a complete path, a human-readable message, and sorted candidates.
-Agents should consume the structured fields rather than parse the exception
-string.
-
-Three explicit extension points keep executable objects outside semantic calls:
-
-- {class}`RegisteredSemanticLowerer` lowers a catalog-registered call and may
-  explicitly expose retained-object pickup look-ahead targets;
-- {class}`RelationTargetGrounder` converts a capability-, payload-type-, and
-  revision-matched relation into an object pose;
-- {class}`HandOverPoseProvider` supplies embodiment-appropriate middle and
-  default final object targets and is selected through
-  `RobotSkillProfile.grounding_providers["hand_over"]`.
-
-See {doc}`/tutorial/semantic_skills` for complete runnable Place and dual-arm
-HandOver examples, {doc}`scene_registry` for affordance registration, and
-{doc}`atomic_actions/robot_skill_profiles` for embodiment resource binding.
+- {doc}`atomic_actions/expert_programs` — the semantic task execution entry point
+- {doc}`atomic_actions/index` — direct typed atomic-action execution
+- {doc}`scene_registry` — canonical scene identity and affordances
+- {doc}`atomic_actions/robot_skill_profiles` — embodiment resources and presets
+- {doc}`/tutorial/semantic_skills` — configuring semantic contracts through Expert Program

@@ -57,10 +57,12 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
     TimedCommandSequence,
 )
-from embodichain.lab.sim.skills.calls import RegisteredSemanticCall
-from embodichain.lab.sim.skills.compiler import SemanticSkillCompiler
-from embodichain.lab.sim.skills.runtime import SkillRuntime, SkillStatus
-from embodichain.lab.sim.skills.scene import SceneRegistry
+from embodichain.lab.semantic_skills.calls import RegisteredSemanticCall
+from embodichain.lab.semantic_skills.profiles import EffectAssurance
+from embodichain.lab.expert_program._semantic_compiler import SemanticCallCompiler
+from embodichain.lab.expert_program._semantic_executor import SemanticCallExecutor
+from embodichain.lab.expert_program._semantic_results import SemanticExecutionStatus
+from embodichain.lab.semantic_skills.scene import SceneRegistry
 
 STEP_DT = 0.02
 BATCH_SIZE = 2
@@ -261,7 +263,7 @@ class _TraceGroundedCall:
     effect_gates: tuple[()] = ()
 
 
-class _TraceCompiler(SemanticSkillCompiler):
+class _TraceCompiler(SemanticCallCompiler):
     """Keep semantic boundaries real while making lowering deterministic."""
 
     def __init__(self, engine: AtomicActionEngine) -> None:
@@ -315,6 +317,7 @@ class _TraceCompiler(SemanticSkillCompiler):
         )
         analyzed = SimpleNamespace(
             call=workflow.calls[call_index],
+            effect_assurance=EffectAssurance.PROJECTED,
             effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="completion_trace_robot"),
@@ -405,7 +408,7 @@ def _runtime_and_bridge() -> tuple[AtomicDemoBridge, _TraceAction]:
         RuntimeCommandFrameEncoder(_StaticQposProvider()),
         clock,
     )
-    runtime = SkillRuntime.from_components(
+    runtime = SemanticCallExecutor(
         _TraceCompiler(engine),
         _TraceObservationProvider(clock),
         sink,
@@ -420,7 +423,7 @@ def _runtime_and_bridge() -> tuple[AtomicDemoBridge, _TraceAction]:
 
 
 def test_completion_trace_preserves_every_plan_generation_as_json_metadata() -> None:
-    """A real scene replan remains complete after SkillResult and bridge snapshots."""
+    """A real scene replan remains complete after SemanticExecutionResult and bridge snapshots."""
     bridge, action = _runtime_and_bridge()
     demo_segment = next(bridge.iter_segments())
 
@@ -447,7 +450,7 @@ def test_completion_trace_preserves_every_plan_generation_as_json_metadata() -> 
 
     runtime_trace = metadata["runtime"]
     assert runtime_trace["kind"] == "skill_result"
-    assert runtime_trace["status"] == SkillStatus.COMPLETED.value
+    assert runtime_trace["status"] == SemanticExecutionStatus.COMPLETED.value
     call_trace = runtime_trace["calls"][0]
     assert call_trace["active_plan_attempt_generation"] == 1
     attempts = call_trace["plan_attempts"]

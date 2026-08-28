@@ -54,7 +54,7 @@ from embodichain.lab.sim.atomic_actions import (
     SlideGoal,
     SlideOptions,
 )
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     BinaryEffectEvidenceQuery,
     BinaryEffectObservation,
     BinaryEvidenceKind,
@@ -69,11 +69,13 @@ from embodichain.lab.sim.skills import (
     GRASP_AFFORDANCE_CAPABILITY,
     HeldObjectStateExpectation,
     RegisteredSemanticCall,
-    RegisteredSemanticLowerer,
     SceneArticulationRef,
     SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
+)
+from embodichain.lab.expert_program._semantic_compiler import (
+    RegisteredSemanticLowerer,
     SemanticLowering,
     SemanticObjectTarget,
 )

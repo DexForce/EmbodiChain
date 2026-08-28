@@ -602,15 +602,23 @@ embodichain.lab.sim.atomic_actions.execution
 
 .. autosummary::
 
-   EffectExpectationResult
-   EffectVerificationRequest
-   EffectVerificationResult
    ExecutionEvent
    ExecutionEventKind
    ExecutionPlanAttempt
    ExecutionSession
    ExecutionStatus
    ExecutionTick
+
+embodichain.lab.sim.atomic_actions.verification
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+
+.. autosummary::
+
+   EffectExpectationResult
+   EffectVerificationRequest
+   EffectVerificationResult
    HeldObjectGuardRequest
    HeldObjectGuardResult
    PhaseEffectGateRequest
@@ -1099,10 +1107,10 @@ embodichain.lab.sim.sim_manager
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
-embodichain.lab.sim.skills.calls
---------------------------------
+embodichain.lab.semantic_skills.calls
+------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.calls
+.. currentmodule:: embodichain.lab.semantic_skills.calls
 
 .. autosummary::
 
@@ -1118,41 +1126,14 @@ embodichain.lab.sim.skills.calls
    SemanticPose
    builtin_semantic_call_catalog
 
-.. automodule:: embodichain.lab.sim.skills.calls
+.. automodule:: embodichain.lab.semantic_skills.calls
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.compiler
------------------------------------
+embodichain.lab.semantic_skills.integration
+------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.compiler
-
-.. autosummary::
-
-   AnalyzedSemanticCall
-   ContainerRelationTargetGrounder
-   GroundedHeldObjectGuard
-   GroundedPhaseEffectGate
-   GroundedSemanticCall
-   HandOverPoseProvider
-   HandOverPoseTargets
-   HeldObjectGuardBaseline
-   RelationTargetGrounder
-   RegisteredSemanticLowerer
-   SemanticEffectDependency
-   SemanticEffectKind
-   SemanticHandOverTarget
-   SemanticLowering
-   SemanticObjectTarget
-   SemanticRelationTarget
-   SemanticSkillCompiler
-   SemanticWorkflow
-   SupportSurfaceRelationTargetGrounder
-
-embodichain.lab.sim.skills.integration
---------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.integration
+.. currentmodule:: embodichain.lab.semantic_skills.integration
 
 .. autosummary::
 
@@ -1165,42 +1146,28 @@ embodichain.lab.sim.skills.integration
    SemanticIntegrationManifest
    SemanticValidationError
 
-.. automodule:: embodichain.lab.sim.skills.integration
+.. automodule:: embodichain.lab.semantic_skills.integration
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.effects
-----------------------------------
+embodichain.lab.semantic_skills.effects
+--------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.effects
+.. automodule:: embodichain.lab.semantic_skills.effects
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.evidence
------------------------------------
+embodichain.lab.semantic_skills.evidence
+---------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.evidence
+.. automodule:: embodichain.lab.semantic_skills.evidence
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.parallel
-------------------------------------
+embodichain.lab.semantic_skills.profiles
+---------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.parallel
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.parallel_runtime
---------------------------------------------
-
-.. automodule:: embodichain.lab.sim.skills.parallel_runtime
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.profiles
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.profiles
+.. currentmodule:: embodichain.lab.semantic_skills.profiles
 
 .. autosummary::
 
@@ -1208,6 +1175,7 @@ embodichain.lab.sim.skills.profiles
    BoundRobotSkillProfile
    ControlPartEndpoint
    ControlPartEndpointAdapter
+   EffectAssurance
    EndpointResolution
    ProfileValidationError
    ResourceEndpoint
@@ -1223,17 +1191,10 @@ embodichain.lab.sim.skills.profiles
    UnsupportedSkillError
    WorkflowRecoveryPolicy
 
-embodichain.lab.sim.skills.runtime
-----------------------------------
+embodichain.lab.semantic_skills.scene
+------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.runtime
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.scene
---------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.scene
+.. currentmodule:: embodichain.lab.semantic_skills.scene
 
 .. autosummary::
 
@@ -1257,7 +1218,7 @@ embodichain.lab.sim.skills.scene
    SceneRegistry
    UnsupportedSceneAffordanceError
 
-.. automodule:: embodichain.lab.sim.skills.scene
+.. automodule:: embodichain.lab.semantic_skills.scene
    :members:
    :no-index:
 

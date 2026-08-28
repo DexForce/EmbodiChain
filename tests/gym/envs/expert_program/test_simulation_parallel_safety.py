@@ -35,7 +35,8 @@ from embodichain.lab.sim.atomic_actions import (
     RuntimeCommandFrame,
 )
 from embodichain.lab.sim.planners import CuroboPlanner, MotionGenerator
-from embodichain.lab.sim.skills import ParallelSafetyError, SceneRegistry
+from embodichain.lab.semantic_skills import SceneRegistry
+from embodichain.lab.expert_program._parallel_executor import ParallelSafetyError
 
 
 class _Robot:

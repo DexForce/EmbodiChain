@@ -1,6 +1,14 @@
 # GenSim PR #532-#538 and Semantic Skill Integration Plan
 
-- Status: proposed
+> **Historical design note — superseded.** This proposal predates the semantic
+> skills cleanup and retains historical internal runtime names. The current
+> public architecture makes `embodichain.lab.semantic_skills` declarative
+> only. Atomic Actions and Expert Program are the two supported
+> action-generation entry points; see
+> `docs/source/overview/sim/semantic_skills.md` and
+> `docs/source/overview/sim/atomic_actions/expert_programs.md`.
+
+- Status: superseded
 - Last updated: 2026-08-21
 - Guiding principle: **Semantic Skill is the only unified lower-level execution architecture**
 - Related Semantic Skill PR: [#492](https://github.com/DexForce/EmbodiChain/pull/492)
@@ -91,7 +99,7 @@ interfaces instead of accumulating adapters around the current implementation.
 
 ### 2.3 Canonical runtime naming
 
-The runtime has been consolidated into the single public `SkillRuntime`.
+The runtime has been consolidated into the single public `SemanticCallExecutor`.
 Simulation construction, component construction, synchronous execution, and
 step-wise execution all use that implementation; GenSim adapters must not add
 another runtime wrapper or ownership boundary.
@@ -128,10 +136,10 @@ TaskGraphScheduler
    |
    | selected route and semantic look-ahead suffix
    v
-SkillRuntime / ParallelSkillRuntime
+SemanticCallExecutor / ParallelSemanticExecutor
    |
    v
-SemanticSkillCompiler
+SemanticCallCompiler
    |
    v
 ActionInvocation
@@ -146,12 +154,12 @@ The main runtime resolution path is:
 SemanticTaskGraph node
     -> canonical SemanticCallCfg decoder
     -> SemanticCallSpec
-    -> SemanticSkillCompiler.analyze()
+    -> SemanticCallCompiler.analyze()
     -> fresh observation
-    -> SemanticSkillCompiler.ground()
+    -> SemanticCallCompiler.ground()
     -> ActionInvocation
     -> AtomicActionEngine / ExecutionRunner
-    -> verified SkillResult and TaskState
+    -> verified SemanticExecutionResult and TaskState
     -> TaskGraphScheduler transition
 ```
 
@@ -166,12 +174,12 @@ SemanticTaskGraph node
 | Semantic call discovery | `SemanticCallCatalog` | Consume a JSON-safe planner projection |
 | Robot capabilities and resources | `RobotSkillProfile` | Express semantic participant constraints only |
 | Exact physical resource claims | Bound `RobotSkillProfile` | Use claims returned by canonical preflight/runtime |
-| Semantic grounding | `SemanticSkillCompiler` and registered grounders | Bind language roles to canonical scene references |
-| Motion and action lowering | `SemanticSkillCompiler` and Atomic Actions | Do not materialize goals, options, or invocations |
-| Physical execution | `SkillRuntime` and `ExecutionRunner` | Invoke a narrow semantic execution port |
+| Semantic grounding | `SemanticCallCompiler` and registered grounders | Bind language roles to canonical scene references |
+| Motion and action lowering | `SemanticCallCompiler` and Atomic Actions | Do not materialize goals, options, or invocations |
+| Physical execution | `SemanticCallExecutor` and `ExecutionRunner` | Invoke a narrow semantic execution port |
 | Effect verification | Semantic effect monitors and evidence collectors | Consume verified results and evidence summaries |
 | Tracking and transport recovery | `ExecutionSession` and `ExecutionRunner` | Observe terminal typed failures only |
-| Reacquisition and workflow recovery | `SkillRuntime` | Wait until workflow recovery is exhausted |
+| Reacquisition and workflow recovery | `SemanticCallExecutor` | Wait until workflow recovery is exhausted |
 | DAG scheduling and route selection | `TaskGraphScheduler` | Own node readiness, route selection, and graph revisions |
 | Task-level recovery | `TaskGraphScheduler` | Replace a TaskGroup or unfinished suffix at a safe boundary |
 | Task or scene regeneration | Task Engine orchestration | Start a new safe execution transaction |
@@ -187,7 +195,7 @@ dependencies, candidate routes, and task-level recovery, but contains no
 grounded execution data.
 
 Each node contains exactly one canonical semantic-call payload. A scheduler
-may give the selected future suffix to `SkillRuntime` for static look-ahead
+may give the selected future suffix to `SemanticCallExecutor` for static look-ahead
 while executing only the current node.
 
 ### 5.2 Conceptual schema
@@ -462,7 +470,7 @@ Exit criteria:
 
 Recommended title:
 
-> `feat(task-engine): bind semantic task graphs to SkillRuntime`
+> `feat(task-engine): bind semantic task graphs to SemanticCallExecutor`
 
 Remove:
 
@@ -480,15 +488,15 @@ Replace with a narrow semantic execution boundary:
 1. Decode one graph call through the canonical semantic-call decoder.
 2. Validate it against the exact semantic integration fingerprint.
 3. Build the selected route's semantic analysis window.
-4. Call `SkillRuntime` with an execution prefix.
-5. Return the canonical `SkillResult` without reconstructing physical truth.
+4. Call `SemanticCallExecutor` with an execution prefix.
+5. Return the canonical `SemanticExecutionResult` without reconstructing physical truth.
 
 Move remaining responsibilities:
 
 | Current responsibility | New owner |
 |---|---|
 | camera/depth target materialization | registered Semantic Skill target provider or lowerer |
-| live object and articulation goal grounding | `SemanticSkillCompiler` |
+| live object and articulation goal grounding | `SemanticCallCompiler` |
 | robot arm and endpoint selection | `RobotSkillProfile` |
 | grasp collision cache | Atomic Action/graspkit planning service |
 | action effect predicate | semantic effect monitor/evidence collector |
@@ -524,8 +532,8 @@ Replace `ProgramExecutor` with `TaskGraphScheduler`.
 - DAG readiness and deterministic tie-breaking;
 - selected-route and TaskGroup transitions;
 - a shared task-node barrier with row-local masks;
-- calls to `SkillRuntime` or `ParallelSkillRuntime`;
-- consumption of verified `SkillResult` and `TaskState` values;
+- calls to `SemanticCallExecutor` or `ParallelSemanticExecutor`;
+- consumption of verified `SemanticExecutionResult` and `TaskState` values;
 - task-level route substitution after runtime recovery is exhausted;
 - graph revision, transition, and task-recovery records.
 
@@ -541,7 +549,7 @@ Remove:
 
 Parallel behavior:
 
-- Delegate physical concurrency to the canonical `ParallelSkillRuntime` and its
+- Delegate physical concurrency to the canonical `ParallelSemanticExecutor` and its
   required safety validator.
 - If those contracts are unavailable, serialize independent ready nodes
   deterministically.
@@ -606,7 +614,7 @@ Atomic Action prerequisite before the adjusted task-planning stack.
 Exit criteria:
 
 - One end-to-end path runs from generated scene data through canonical scene
-  integration, SemanticTaskGraph, SkillRuntime, and final inspection.
+  integration, SemanticTaskGraph, SemanticCallExecutor, and final inspection.
 - No orchestration component sends controller commands directly.
 - Infeasible tasks publish structured failure artifacts without stale bundles.
 - Scene/task regeneration starts only after the active runtime reaches a safe
@@ -656,8 +664,8 @@ correct layer.
 | collision-world revision | `ExecutionSession` | invalidate and replan affected rows |
 | planner failure | Atomic Action runtime | retry within the action policy and emit typed failure |
 | controller rejection or timeout | `ExecutionRunner` | cancel addressed targets, then hold safely |
-| semantic effect not achieved | `SkillRuntime` | verify evidence and apply the semantic workflow policy |
-| held relation lost | `SkillRuntime` | perform bounded physical reacquisition where configured |
+| semantic effect not achieved | `SemanticCallExecutor` | verify evidence and apply the semantic workflow policy |
+| held relation lost | `SemanticCallExecutor` | perform bounded physical reacquisition where configured |
 | current TaskGroup route exhausted | `TaskGraphScheduler` | choose a different TaskGroup or unfinished suffix |
 | final task predicate failed | Task Engine | add a bounded repair route or regenerate the plan |
 | task or scene infeasible | Task Engine orchestration | publish failure or create a new transaction |
@@ -667,7 +675,7 @@ Important constraints:
 - The graph scheduler must not insert its own Pick merely because it infers
   that an object was dropped. Canonical workflow recovery owns real
   reacquisition.
-- Task-level recovery begins only after `SkillRuntime` exhausts its own action
+- Task-level recovery begins only after `SemanticCallExecutor` exhausts its own action
   and workflow budgets.
 - Original typed failures and evidence remain in reports. A task-level category
   may summarize them but must not replace them.
@@ -771,7 +779,7 @@ PR #534 task interpretation and scene binding
 PR #535 semantic graph planning and bundles
              |
              v
-PR #536 thin SkillRuntime binding
+PR #536 thin SemanticCallExecutor binding
              |
              v
 PR #537 graph scheduling and task-level recovery
@@ -821,7 +829,7 @@ execution architecture.
   recovery.
 - Workflow reacquisition completes or exhausts before TaskGraphScheduler route
   substitution.
-- Parallel nodes either use canonical `ParallelSkillRuntime` with a safety
+- Parallel nodes either use canonical `ParallelSemanticExecutor` with a safety
   validator or execute serially.
 
 ### 11.4 End-to-end tests
@@ -831,7 +839,7 @@ At minimum, cover:
 1. deterministic Pick -> Place through a generated scene;
 2. dual-resource HandOver through one SemanticTaskGraph;
 3. moving target recovery during one semantic call;
-4. real held-object loss followed by canonical SkillRuntime reacquisition;
+4. real held-object loss followed by canonical SemanticCallExecutor reacquisition;
 5. exhausted semantic recovery followed by TaskGroup route replacement;
 6. unsupported task capability producing a preparation failure artifact;
 7. offline/online A/B candidates starting from identical state and using the

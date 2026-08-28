@@ -29,15 +29,17 @@ from gymnasium.envs.registration import registry as gym_registry
 import pytest
 import torch
 
+from embodichain.lab.expert_program import load_expert_program
 from embodichain.lab.gym.envs import EmbodiedEnv
-from embodichain.lab.gym.envs.expert_program import load_expert_program
 from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
     _MoveHeldObjectLowerer,
     _PourLowerer,
 )
-from embodichain.lab.gym.envs.expert_program.configured_runtime import (
+from embodichain.lab.gym.envs.expert_program._configured_runtime_decoder import (
     _decode_configured_expert_program_runtime,
     _decode_grasp_generator,
+)
+from embodichain.lab.gym.envs.expert_program.configured_runtime import (
     _register_configured_expert_program_runtime,
 )
 from embodichain.lab.sim.atomic_actions import (
@@ -48,7 +50,7 @@ from embodichain.lab.sim.atomic_actions import (
     PourGoal,
     PourOptions,
 )
-from embodichain.lab.sim.skills import RegisteredSemanticCall, SceneObjectRef
+from embodichain.lab.semantic_skills import RegisteredSemanticCall, SceneObjectRef
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 

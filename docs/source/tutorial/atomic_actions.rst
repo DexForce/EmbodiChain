@@ -337,7 +337,7 @@ must be resolved from the latest scene snapshot:
        SimulationExecutionAdapter,
        TaskState,
    )
-   from embodichain.lab.sim.skills import SceneRegistry
+   from embodichain.lab.semantic_skills import SceneRegistry
 
    registry = SceneRegistry.from_simulation(
        sim,

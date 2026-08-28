@@ -161,7 +161,7 @@ from pathlib import Path
 import sys
 
 import embodichain_tasks.configs as config_package
-from embodichain.lab.gym.envs.expert_program import load_expert_program
+from embodichain.lab.expert_program import load_expert_program
 from embodichain_tasks.configs import get_config_path
 
 build_lib = Path(sys.argv[1]).resolve()

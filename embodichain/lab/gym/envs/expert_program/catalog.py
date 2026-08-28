@@ -44,7 +44,7 @@ from embodichain.lab.sim.atomic_actions.tracking import (
     FeedbackTerminalAcceptance,
     TrackingRuntime,
 )
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     CONTACT_EFFECT_CHANNEL,
     CONSTRAINT_EFFECT_CHANNEL,
     ControlPartEndpoint,
@@ -55,14 +55,10 @@ from embodichain.lab.sim.skills import (
     PLACE_ON_AFFORDANCE_CAPABILITY,
     POSE_RELATION_EFFECT_CHANNEL,
     BoundRobotSkillProfile,
-    ContainerRelationTargetGrounder,
     EffectEvidenceProvider,
-    HandOverPoseProvider,
     Place,
-    RelationTargetGrounder,
     RobotSkillProfile,
     RegisteredSemanticCall,
-    RegisteredSemanticLowerer,
     ResourceEndpoint,
     ResourceEndpointAdapter,
     SceneAffordanceRef,
@@ -73,20 +69,26 @@ from embodichain.lab.sim.skills import (
     SceneRegistry,
     SemanticCallCatalog,
     SemanticIntegrationManifest,
-    SupportSurfaceRelationTargetGrounder,
     builtin_semantic_call_catalog,
 )
-from embodichain.lab.sim.skills.effects import (
+from embodichain.lab.expert_program._semantic_compiler import (
+    ContainerRelationTargetGrounder,
+    HandOverPoseProvider,
+    RegisteredSemanticLowerer,
+    RelationTargetGrounder,
+    SupportSurfaceRelationTargetGrounder,
+)
+from embodichain.lab.semantic_skills.effects import (
     COMPOSITE_EFFECT_MONITOR_ID,
     COMPOSITE_EFFECT_MONITOR_REVISION,
     CompositeEffectMonitorFactory,
     EffectMonitorRegistry,
 )
-from embodichain.lab.sim.skills.parallel_runtime import (
+from embodichain.lab.expert_program._parallel_executor import (
     ParallelCommandSafetyValidator,
 )
 
-from .cfg import (
+from embodichain.lab.expert_program.cfg import (
     ExpertProgramCfg,
     ExpertProgramIntegrationCfg,
     PostPolicyCfg,
@@ -94,11 +96,11 @@ from .cfg import (
     SemanticCallCfg,
     ValidatorCfg,
 )
-from .compiler import (
+from embodichain.lab.expert_program.compiler import (
     CompiledProgram,
     ExpertProgramCompiler,
 )
-from .decoder import (
+from embodichain.lab.expert_program.decoder import (
     ConfigPath,
     ExpertProgramValidationError,
     SceneReferenceRole,

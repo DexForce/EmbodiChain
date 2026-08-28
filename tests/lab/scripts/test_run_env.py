@@ -24,7 +24,7 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult
-from embodichain.lab.gym.envs.expert_program.loader import (
+from embodichain.lab.expert_program.loader import (
     load_expert_program as _load_expert_program,
 )
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config

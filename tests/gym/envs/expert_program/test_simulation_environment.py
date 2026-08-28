@@ -18,12 +18,9 @@
 
 from __future__ import annotations
 
-import ast
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
-import inspect
 import json
-import textwrap
 from types import MethodType, SimpleNamespace
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
@@ -32,18 +29,21 @@ import pytest
 import torch
 
 from embodichain.agents.mllm import compile_mllm_expert_program
+from embodichain.lab.expert_program import (
+    CompiledProgram,
+    ExpertProgramCfg,
+    ExpertProgramIntegrationCfg,
+    HandOverCfg,
+    InvokeCfg,
+    decode_expert_program,
+)
 from embodichain.lab.gym.envs.expert_program import (
     AntipodalGraspAffordanceBinding,
-    CompiledProgram,
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
-    ExpertProgramCfg,
-    ExpertProgramIntegrationCfg,
     ExpertProgramEnvironmentAdapter,
     ExpertProgramRuntimeAssembly,
-    HandOverCfg,
-    InvokeCfg,
     SimulationExpertProgramAdapterFactory,
     SimulationExpertProgramRegistration,
     SimulationExpertProgramFactory,
@@ -51,7 +51,6 @@ from embodichain.lab.gym.envs.expert_program import (
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
     create_simulation_expert_program_adapter,
-    decode_expert_program,
 )
 from embodichain.lab.gym.envs.expert_program import (
     simulation_environment as simulation_environment_module,
@@ -67,7 +66,6 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
-    CommandAcknowledgement,
     EntityState,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
@@ -83,7 +81,6 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
     TimedTrajectory,
 )
-from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
 from embodichain.lab.sim.atomic_actions.bindings import RuntimeEndpointTarget
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
@@ -91,16 +88,16 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
     RuntimeCommandPayload,
 )
 from embodichain.lab.sim.planners import MotionGenerator
-from embodichain.lab.sim.skills import (
-    AtomicSkills,
+from embodichain.lab.semantic_skills import (
     BoundSemanticCall,
+    COMPOSITE_EFFECT_MONITOR_ID,
+    COMPOSITE_EFFECT_MONITOR_REVISION,
+    EffectAssurance,
+    EffectMonitorRef,
     EndpointResolution,
     HandOver,
-    HandOverPoseProvider,
-    HandOverPoseTargets,
     Pick,
     Place,
-    RelationTargetGrounder,
     ResourceEndpoint,
     ResourceEndpointAdapter,
     RobotResource,
@@ -108,12 +105,17 @@ from embodichain.lab.sim.skills import (
     SceneEntityRegistration,
     SceneRegistry,
     SemanticCallSpec,
-    SemanticObjectTarget,
     SemanticPose,
-    SemanticRelationTarget,
     SkillPolicyPreset,
 )
-from embodichain.lab.sim.skills.effects import (
+from embodichain.lab.expert_program._semantic_compiler import (
+    HandOverPoseProvider,
+    HandOverPoseTargets,
+    RelationTargetGrounder,
+    SemanticObjectTarget,
+    SemanticRelationTarget,
+)
+from embodichain.lab.semantic_skills.effects import (
     CONSTRAINT_EFFECT_CHANNEL,
     CONTROL_PART_EVIDENCE_PROVIDER_ID,
     CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
@@ -124,7 +126,7 @@ from embodichain.lab.sim.skills.effects import (
     HeldObjectRelation,
     HeldObjectStateExpectation,
 )
-from embodichain.lab.sim.skills.evidence import (
+from embodichain.lab.semantic_skills.evidence import (
     BinaryEffectEvidenceQuery,
     BinaryEffectEvidenceBatch,
     BinaryEffectObservation,
@@ -132,13 +134,12 @@ from embodichain.lab.sim.skills.evidence import (
     EffectEvidenceCollectionContext,
     PoseRelationEvidenceBatch,
 )
-from embodichain.lab.sim.skills.runtime import (
+from embodichain.lab.expert_program._semantic_results import (
     SkillEffectTrace,
-    SkillResult,
-    SkillRuntime,
-    SkillStatus,
+    SemanticExecutionResult,
+    SemanticExecutionStatus,
 )
-from embodichain.lab.sim.skills.scene import SceneObjectRef
+from embodichain.lab.semantic_skills.scene import SceneObjectRef
 
 _BATCH_SIZE = 3
 _ROBOT_DOF = 2
@@ -151,7 +152,17 @@ _DIRECT_PLACE_TARGET = SemanticPose(
     position=(0.0, 0.0, 0.0),
     quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
 )
-_QUICKSTART_MAX_LINES = 15
+
+
+def _verified_effect_monitors(*semantic_ids: str) -> dict[str, EffectMonitorRef]:
+    """Return exact built-in monitor declarations for test profiles."""
+    return {
+        semantic_id: EffectMonitorRef(
+            COMPOSITE_EFFECT_MONITOR_ID,
+            COMPOSITE_EFFECT_MONITOR_REVISION,
+        )
+        for semantic_id in semantic_ids
+    }
 
 
 class _CountingEntityProvider:
@@ -738,6 +749,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
             SkillPolicyPreset(
                 "safe",
                 action_option_templates={},
+                effect_assurance=EffectAssurance.PROJECTED,
                 motion_policy=MotionPolicy(),
             ),
         ),
@@ -794,6 +806,8 @@ def _handover_profile_binding() -> SimulationRobotSkillProfileBinding:
             SkillPolicyPreset(
                 "safe",
                 action_option_templates={"hand_over": HandOverOptions()},
+                effect_assurance=EffectAssurance.VERIFIED,
+                effect_monitors=_verified_effect_monitors("hand_over"),
             ),
         ),
         default_preset="safe",
@@ -935,6 +949,8 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                 },
+                effect_assurance=EffectAssurance.VERIFIED,
+                effect_monitors=_verified_effect_monitors("pick", "place"),
             ),
         ),
         default_preset="evidence",
@@ -1111,139 +1127,6 @@ def _sample_effect(
     )
 
 
-class _SynchronousEvidenceClock:
-    """Advance the fixture's simulation clock during standalone facade waits."""
-
-    def __init__(self, clock: EnvironmentStepClock) -> None:
-        self._clock = clock
-
-    def now(self) -> float:
-        """Return the simulation fixture's authoritative time."""
-        return self._clock.now()
-
-    def sleep(self, duration: float) -> None:
-        """Advance the exact number of fixture ticks requested by the runner."""
-        steps = self._clock.steps_for_duration(duration)
-        if steps:
-            self._clock.advance_after_env_step(steps)
-
-
-class _ImmediateEvidenceCommandSink:
-    """Apply accepted endpoint frames immediately for standalone CPU execution."""
-
-    def __init__(
-        self,
-        assembly: ExpertProgramRuntimeAssembly,
-        robot: _EvidenceRobot,
-        cube: _RigidObject,
-    ) -> None:
-        self._encoder = assembly.command_encoder
-        self._clock = assembly.clock
-        self._robot = robot
-        self._cube = cube
-
-    def send(
-        self,
-        command: RuntimeCommandFrame,
-        *,
-        timeout: float,
-    ) -> CommandAcknowledgement:
-        """Apply one command and update the fixture's physical sensor state."""
-        assert timeout > 0.0
-        action = self._encoder.encode(command)
-        if not isinstance(action, torch.Tensor):
-            raise TypeError("The CPU quickstart fixture requires tensor actions.")
-        self._robot.qpos = action.clone()
-        self._robot.constraint_state = torch.isclose(
-            action[:, 1],
-            torch.full_like(action[:, 1], _HAND_GRASP_POSITION),
-        )
-        if torch.allclose(
-            action[:, 1],
-            torch.full_like(action[:, 1], _HAND_OPEN_POSITION),
-        ):
-            self._cube.pose[:, 0, 3] = _RELEASE_SEPARATION
-        self._clock.advance_after_env_step()
-        return CommandAcknowledgement.accepted_ack()
-
-    def hold(
-        self,
-        targets: tuple[RuntimeEndpointTarget, ...],
-        context: PlanningContext,
-        *,
-        timeout: float,
-    ) -> CommandAcknowledgement:
-        """Apply the encoder's observed-position hold immediately."""
-        assert timeout > 0.0
-        action = self._encoder.encode_hold(targets, context)
-        if not isinstance(action, torch.Tensor):
-            raise TypeError("The CPU quickstart fixture requires tensor actions.")
-        self._robot.qpos = action.clone()
-        return CommandAcknowledgement.accepted_ack()
-
-    def cancel(
-        self,
-        targets: tuple[RuntimeEndpointTarget, ...],
-        *,
-        timeout: float,
-    ) -> CommandAcknowledgement:
-        """Accept cancellation without inventing physical evidence changes."""
-        assert timeout > 0.0
-        del targets
-        return CommandAcknowledgement.accepted_ack()
-
-
-class _QuickstartRuntimeProvider:
-    """Explicit provider used by the public ``AtomicSkills.from_env`` path."""
-
-    def __init__(self, runtime: SkillRuntime) -> None:
-        self._runtime = runtime
-        self.presets: list[str] = []
-
-    def create_skill_runtime(self, *, preset: str) -> SkillRuntime:
-        """Return the configured canonical runtime and record preset selection."""
-        self.presets.append(preset)
-        return self._runtime
-
-
-def _quickstart_runtime_provider() -> _QuickstartRuntimeProvider:
-    """Build a synchronous provider from the shared production CPU fixture."""
-    assembly, robot, cube = _evidence_runtime()
-    runtime = SkillRuntime.from_components(
-        assembly.compiler,
-        assembly.observation_provider,
-        _ImmediateEvidenceCommandSink(assembly, robot, cube),
-        assembly.evidence_collector,
-        clock=_SynchronousEvidenceClock(assembly.clock),
-        runner_cfg=ExecutionRunnerCfg(
-            minimum_cycle_time=0.0,
-            hold_on_completion=False,
-        ),
-    )
-    return _QuickstartRuntimeProvider(runtime)
-
-
-def _documented_pick_place_quickstart(
-    runtime_provider: _QuickstartRuntimeProvider,
-) -> SkillResult:
-    """Run the application-facing quickstart, excluding scene construction."""
-    skills = AtomicSkills.from_env(runtime_provider, preset="evidence")
-    cube = skills.scene.object("cube")
-    return skills.run(
-        Pick(object=cube),
-        Place(object=cube, at=_DIRECT_PLACE_TARGET),
-    )
-
-
-def _python_pick_place_calls() -> tuple[SemanticCallSpec, ...]:
-    """Return the application-facing calls used by both acceptance paths."""
-    cube = SceneObjectRef("cube")
-    return (
-        Pick(object=cube),
-        Place(object=cube, at=_DIRECT_PLACE_TARGET),
-    )
-
-
 def _pick_place_program_data() -> dict[str, object]:
     """Return the integration-free program shared with the MLLM frontend."""
     return {
@@ -1338,12 +1221,9 @@ def _run_evidence_pick_place(
     robot: _EvidenceRobot,
     cube: _RigidObject,
     calls: tuple[SemanticCallSpec, ...],
-    *,
-    skills: AtomicSkills | None = None,
-) -> tuple[SkillResult, HeldObjectState]:
+) -> tuple[SemanticExecutionResult, HeldObjectState]:
     """Drive one happy-path workflow through accepted commands and live evidence."""
-    entry = assembly.runtime if skills is None else skills
-    result = entry.start(calls, workflow_id="pick_place_equivalence")
+    result = assembly.runtime.start(calls, workflow_id="pick_place_equivalence")
     verified_pick: HeldObjectState | None = None
     for _ in range(32):
         while assembly.command_sink.pending_count:
@@ -1355,9 +1235,9 @@ def _run_evidence_pick_place(
                 verified_pick = result.task_state.get_held_object("manipulator")
             cube.pose[:, 0, 3] = _RELEASE_SEPARATION
         assembly.clock.advance_after_env_step()
-        result = entry.step()
+        result = assembly.runtime.step()
 
-    assert result.status is SkillStatus.COMPLETED
+    assert result.status is SemanticExecutionStatus.COMPLETED
     assert verified_pick is not None
     assert result.task_state.get_held_object("manipulator") is None
     assert {
@@ -1470,16 +1350,10 @@ def test_simulation_observation_owns_gym_control_cadence() -> None:
     assert context.control_dt == pytest.approx(_STEP_DT)
 
 
-def test_mllm_config_and_atomic_skills_share_invocations_and_verified_results(
+def test_mllm_and_config_share_invocations_and_verified_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """All public frontends reach equivalent invocations and verified state."""
-    (
-        _,
-        python_assembly,
-        python_robot,
-        python_cube,
-    ) = _evidence_adapter_runtime()
+    """Both Expert Program frontends reach equivalent verified execution."""
     (
         config_adapter,
         config_assembly,
@@ -1492,19 +1366,8 @@ def test_mllm_config_and_atomic_skills_share_invocations_and_verified_results(
         mllm_robot,
         mllm_cube,
     ) = _evidence_adapter_runtime()
-    python_invocations = _capture_grounded_invocations(monkeypatch, python_assembly)
     config_invocations = _capture_grounded_invocations(monkeypatch, config_assembly)
     mllm_invocations = _capture_grounded_invocations(monkeypatch, mllm_assembly)
-    runtime_provider = _QuickstartRuntimeProvider(python_assembly.runtime)
-    python_skills = AtomicSkills.from_env(runtime_provider, preset="evidence")
-
-    python_result, python_held = _run_evidence_pick_place(
-        python_assembly,
-        python_robot,
-        python_cube,
-        _python_pick_place_calls(),
-        skills=python_skills,
-    )
     config_result, config_held = _run_evidence_pick_place(
         config_assembly,
         config_robot,
@@ -1518,63 +1381,15 @@ def test_mllm_config_and_atomic_skills_share_invocations_and_verified_results(
         _mllm_pick_place_calls(mllm_adapter),
     )
 
-    assert runtime_provider.presets == ["evidence"]
-    assert (
-        len(python_invocations) == len(config_invocations) == len(mllm_invocations) == 2
-    )
-    for python_invocation, config_invocation, mllm_invocation in zip(
-        python_invocations,
+    assert len(config_invocations) == len(mllm_invocations) == 2
+    for config_invocation, mllm_invocation in zip(
         config_invocations,
         mllm_invocations,
         strict=True,
     ):
-        _assert_invocation_equivalent(python_invocation, config_invocation)
-        _assert_invocation_equivalent(python_invocation, mllm_invocation)
-    _assert_typed_equivalent(python_held, config_held)
-    _assert_typed_equivalent(python_held, mllm_held)
-    _assert_typed_equivalent(python_result, config_result)
-    _assert_typed_equivalent(python_result, mllm_result)
-
-
-def test_atomic_skills_from_env_runs_documented_pick_place_quickstart() -> None:
-    """The small public facade executes without exposing core motion plumbing."""
-    provider = _quickstart_runtime_provider()
-
-    result = _documented_pick_place_quickstart(provider)
-
-    source = textwrap.dedent(inspect.getsource(_documented_pick_place_quickstart))
-    function = ast.parse(source).body[0]
-    assert isinstance(function, ast.FunctionDef)
-    executable = function.body[1:]  # Exclude the helper's docstring.
-    assert executable[-1].end_lineno is not None
-    assert executable[-1].end_lineno - executable[0].lineno + 1 <= (
-        _QUICKSTART_MAX_LINES
-    )
-    identifiers = {
-        identifier
-        for node in ast.walk(function)
-        for identifier in (
-            node.id if isinstance(node, ast.Name) else None,
-            node.attr if isinstance(node, ast.Attribute) else None,
-        )
-        if identifier is not None
-    }
-    assert identifiers.isdisjoint(
-        {
-            "qpos",
-            "matrix",
-            "planner",
-            "session",
-            "MotionGenerator",
-            "PlanningContext",
-            "ExecutionSession",
-        }
-    )
-    assert provider.presets == ["evidence"]
-    assert result.status is SkillStatus.COMPLETED
-    assert result.success_mask.tolist() == [True] * _BATCH_SIZE
-    assert [call.semantic_id for call in result.calls] == ["pick", "place"]
-    assert result.task_state.get_held_object("manipulator") is None
+        _assert_invocation_equivalent(config_invocation, mllm_invocation)
+    _assert_typed_equivalent(config_held, mllm_held)
+    _assert_typed_equivalent(config_result, mllm_result)
 
 
 def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> None:
@@ -1804,7 +1619,13 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
                 },
             ),
         ),
-        presets=(SkillPolicyPreset("runtime", action_option_templates={}),),
+        presets=(
+            SkillPolicyPreset(
+                "runtime",
+                action_option_templates={},
+                effect_assurance=EffectAssurance.PROJECTED,
+            ),
+        ),
         default_preset="runtime",
     )
     environment = SimpleNamespace(
@@ -1887,7 +1708,7 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         ),
         workflow_id="production_evidence_chain",
     )
-    assert result.status is SkillStatus.RUNNING
+    assert result.status is SemanticExecutionStatus.RUNNING
 
     result = assembly.runtime.step()
     assert assembly.command_sink.pending_count == 1
@@ -1986,7 +1807,7 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
     )
     assert result.task_state.get_held_object("manipulator") is None
     assert all(len(call.effects) >= 3 for call in result.calls)
-    if result.status is SkillStatus.RUNNING:
+    if result.status is SemanticExecutionStatus.RUNNING:
         result = assembly.runtime.step()
-    assert result.status is SkillStatus.COMPLETED
+    assert result.status is SemanticExecutionStatus.COMPLETED
     assert assembly.command_sink.accepted_action_count >= 4

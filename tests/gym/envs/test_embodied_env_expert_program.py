@@ -25,7 +25,7 @@ import torch
 
 from embodichain.lab.gym.envs.demo import DemoSegment
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
-from embodichain.lab.gym.envs.expert_program import CompiledProgram
+from embodichain.lab.expert_program import CompiledProgram
 
 
 class _FakeBridge:

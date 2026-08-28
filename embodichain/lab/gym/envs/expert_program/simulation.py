@@ -41,7 +41,7 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     EntityState,
 )
-from embodichain.lab.sim.skills.profiles import (
+from embodichain.lab.semantic_skills.profiles import (
     ControlPartEndpoint,
     ResourceEndpoint,
     ResourceBinding,
@@ -49,8 +49,11 @@ from embodichain.lab.sim.skills.profiles import (
     RobotSkillProfile,
     SkillPolicyPreset,
 )
-from embodichain.lab.sim.skills.integration import SceneEntityManifest, SceneManifest
-from embodichain.lab.sim.skills.scene import (
+from embodichain.lab.semantic_skills.integration import (
+    SceneEntityManifest,
+    SceneManifest,
+)
+from embodichain.lab.semantic_skills.scene import (
     ContainerAffordance,
     GRASP_AFFORDANCE_CAPABILITY,
     PLACEMENT_TARGET_AFFORDANCE_REVISION,

@@ -32,13 +32,13 @@ payloads, and transports without adding fixed resource categories to the core.
 
 ```text
 +--------------------------------+    +--------------------------------+
-| Action Agent / semantic graph  |    | User-authored application      |
-| skill call + object references |    | typed goal + binding + policy  |
+| Expert Program                 |    | User-authored application      |
+| semantic calls + task sequence |    | typed goal + binding + policy  |
 +---------------+----------------+    +---------------+----------------+
                 |                                     |
                 v                                     |
- SemanticSkillCompiler / SkillRuntime:                 |
- schema validation, SceneRegistry grounding, binding  |
+ Expert Program adapter: validation, grounding,      |
+ and lowering to a typed ActionInvocation             |
                 |                                     |
                 +------------------+------------------+
                                    |
@@ -80,8 +80,8 @@ The boundary is deliberate:
 
 | Concern | Owner | Contract |
 |---|---|---|
-| Task intent and sequencing | Action Agent, task graph, or user-authored application | Selects skills, goals, and execution order |
-| Invocation construction | Agent adapter or user-authored code/config loader | Produces the same typed `ActionInvocation`; the engine has no agent-only interface |
+| Task intent and sequencing | Expert Program or user-authored application | Selects skills, goals, and execution order |
+| Invocation construction | Expert Program adapter or direct Python caller | Produces the same typed `ActionInvocation`; the engine has no agent-only interface |
 | Perception and grounding | `SceneRegistry` on the canonical path; adapter or user application on the advanced path | Normalizes aliases to canonical typed references and publishes snapshots, or supplies already-grounded values directly |
 | Deterministic motion planning | Atomic action module | Produces an `ActionPlan` from an invocation and context |
 | Motion-generation resources | `AtomicActionEngine` | Owns one robot, motion generator, planner backend, device, trajectory builder, and control-part command profiles |
@@ -103,13 +103,8 @@ state.
 
 ### Caller entry points
 
-The engine supports two first-class caller paths. An Action Agent or
-configuration-driven application can emit a semantic call for
-{class}`~embodichain.lab.sim.skills.SemanticSkillCompiler` and
-{class}`~embodichain.lab.sim.skills.SkillRuntime` to validate, ground, and
-convert into an `ActionInvocation`. A user can instead author the typed
-invocation directly in Python or load it from an application-owned
-configuration layer:
+Atomic Actions is the direct Python action-generation entry point. A caller
+constructs a typed invocation itself:
 
 ```python
 binding = engine.bind_control_parts(
@@ -130,9 +125,8 @@ static_program = engine.compile((manual_invocation,), latest_context)
 live_session = engine.start((manual_invocation,), latest_context)
 ```
 
-A manual caller may bypass the semantic-schema adapter only when its target and
-robot-resource endpoints are already grounded. Scene-relative goals still need
-a current `PlanningContext`, and object names or participant selections still
+A direct caller must already own grounded targets and robot-resource endpoints.
+Scene-relative goals still need a current `PlanningContext`, and object names or participant selections still
 need to be resolved by the user application (or by reusing the same grounding
 adapter as the Agent path).
 
@@ -853,7 +847,7 @@ its `effect_result`: schedule another call using `wait_duration`, re-read the
 current request, and submit a result for that current ID. Partial resolution and
 row deactivation can also replace the request before the delayed result arrives.
 
-The semantic compiler installs segment-scoped held-object guards and blocking
+Expert Program lowering installs segment-scoped held-object guards and blocking
 physical-effect gates for curated manipulation calls. A guard observes a
 negative invariant before a due command and, on proven attachment loss,
 applies an action-authorized removal-only `StateDelta` before retry or
@@ -871,24 +865,21 @@ segments that depend on those relations. Each boundary owns an independent
 monitor and correlated request ID. These checks are observational and never
 create simulator attachments, freeze objects, or override poses.
 
-## Action Agent integration
+## Agent and task integration
 
 An MLLM should not construct `ActionInvocation` by copying arbitrary JSON into
-runtime objects. The `embodichain.lab.sim.skills` package provides the semantic
-boundary: stable call descriptors, immutable call values, scene/profile
-manifests, a compiler, and a runtime facade. The agent selects from the semantic
-call catalog and supplies declarative object-centric values; the compiler
-performs validation and grounding before the atomic engine sees the request:
+runtime objects. It should emit the constrained Expert Program schema. The
+`embodichain.lab.semantic_skills` package supplies declarative call,
+scene, profile, and effect contracts; Expert Program owns validation,
+compilation, lowering, and execution:
 
 ```text
-MLLM / application SemanticCallSpec
-    -> SemanticCallCatalog discovery
-    -> SemanticIntegrationManifest validation
-    -> SemanticSkillCompiler.analyze()
-       object / affordance / resource / effect-flow validation
-    -> SemanticSkillCompiler.ground(latest_context)
-       participant binding + safe options + ActionInvocation
-    -> SkillRuntime / AtomicActionEngine
+MLLM / application Expert Program
+    -> strict decode and bounded validation
+    -> provider-free ExpertProgramCompiler
+    -> environment-owned semantic integration
+    -> live grounding + ActionInvocation
+    -> AtomicActionEngine
     -> verified task state + structured execution events
 ```
 
@@ -899,14 +890,10 @@ installed version-matched lowerer. Invocation IDs and monotonic revisions
 correlate compatible in-flight updates with planner diagnostics and execution
 events without mutating a request implicitly.
 
-The semantic runtime is also useful without an agent. `run()` executes one
-known workflow and preserves verified state for a later workflow submitted at a
-terminal result boundary. Call-local recovery remains owned by
-`ExecutionRunner`; `SkillRuntime` performs terminal symbolic reconciliation and
-may use a bounded `WorkflowRecoveryPolicy` to retry from verified state or run
-a real semantic Pick before retrying the failed call. See
-{doc}`../semantic_skills` for the complete compiler/runtime and dynamic-task
-contract.
+There is no public semantic execution facade. Applications choose either this
+direct Atomic Actions API or {doc}`Expert Program <expert_programs>`.
+Call-local recovery remains owned by `ExecutionRunner`; Expert Program may add
+bounded workflow recovery and segment acceptance around it.
 
 ## Extending the module
 
@@ -935,7 +922,8 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 ## Further reading
 
 - {doc}`../scene_registry` — canonical scene identity, snapshots, and collision integration
-- {doc}`../semantic_skills` — semantic calls, compilation, runtime execution, and dynamic task boundaries
+- {doc}`../semantic_skills` — declarative semantic calls, scenes, robot profiles, and effects
+- {doc}`expert_programs` — semantic task compilation and execution
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples

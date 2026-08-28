@@ -14,16 +14,26 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""EmbodiChain's simulation laboratory.
+"""EmbodiChain's robotics laboratory.
 
-Bundles the simulation core (``sim``), the Gymnasium environment framework (``gym``), real-device controllers (``devices``), and browser visualization (``visualization``).
+Bundles semantic declarations, Expert Programs, simulation and environment
+runtime components, real-device controllers, and browser visualization.
 """
 
 from __future__ import annotations
 
-from . import sim
-from . import gym
 from . import devices
+from . import expert_program
+from . import gym
+from . import semantic_skills
+from . import sim
 from . import visualization
 
-__all__ = ["devices", "gym", "sim", "visualization"]
+__all__ = [
+    "devices",
+    "expert_program",
+    "gym",
+    "semantic_skills",
+    "sim",
+    "visualization",
+]

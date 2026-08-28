@@ -27,18 +27,20 @@ from embodichain.agents.mllm import (
     compile_mllm_expert_program,
     decode_mllm_expert_program,
 )
-from embodichain.lab.gym.envs.expert_program import (
+from embodichain.lab.expert_program import (
     CompiledProgram,
-    EnvironmentStepClock,
     ExpertProgramCompileError,
     ExpertProgramDecodeError,
-    ExpertProgramEnvironmentAdapter,
     ExpertProgramIntegrationCfg,
-    PlanningObservationPort,
     decode_expert_program,
 )
+from embodichain.lab.gym.envs.expert_program import (
+    EnvironmentStepClock,
+    ExpertProgramEnvironmentAdapter,
+    PlanningObservationPort,
+)
 from embodichain.lab.sim.atomic_actions import AtomicActionEngine, EntityState
-from embodichain.lab.sim.skills import (
+from embodichain.lab.semantic_skills import (
     EffectEvidenceProvider,
     Pick,
     RobotSkillProfile,

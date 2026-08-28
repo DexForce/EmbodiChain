@@ -82,10 +82,9 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
+    from embodichain.lab.expert_program import CompiledProgram, ExpertProgramCfg
     from embodichain.lab.gym.envs.expert_program import (
-        CompiledProgram,
         ExpertProgramAdapterFactory,
-        ExpertProgramCfg,
         ExpertProgramEnvironmentAdapter,
     )
     from embodichain.lab.gym.envs.expert_program.bridge import AtomicDemoBridge
@@ -2144,7 +2143,7 @@ class EmbodiedEnv(BaseEnv):
                 None,
             )
         if selected_program is not None:
-            from embodichain.lab.gym.envs.expert_program import CompiledProgram
+            from embodichain.lab.expert_program import CompiledProgram
 
             compiled_program = (
                 selected_program

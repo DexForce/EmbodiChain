@@ -63,6 +63,8 @@ EmbodiChain/
 │   ├── learning/                 # Learning systems
 │   │   └── rl/                   # RL: PPO/GRPO/APG, buffers, collectors, policies
 │   ├── lab/                      # Simulation lab
+│   │   ├── expert_program/       # Provider-independent Expert Program schema and compiler
+│   │   ├── semantic_skills/      # Semantic scene, call, profile, and effect contracts
 │   │   ├── visualization/        # Browser visualization protocol, runtime, and Viser backend
 │   │   ├── gym/                  # OpenAI Gym-compatible environments
 │   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
@@ -78,7 +80,6 @@ EmbodiChain/
 │   │   │   ├── robots/           # Robot-specific configs and params (dexforce_w1, cobotmagic)
 │   │   │   ├── planners/         # Motion planners (TOPPRA, motion generator)
 │   │   │   ├── solvers/          # IK solvers (SRS, OPW, pink, pinocchio, pytorch)
-│   │   │   ├── skills/           # Semantic scene and robot-skill binding contracts
 │   │   │   └── workspace/        # Reachability analysis and runtime workspace queries
 │   │   ├── devices/              # Real-device controllers
 │   │   └── scripts/              # Environment, preview, and analysis entry points
