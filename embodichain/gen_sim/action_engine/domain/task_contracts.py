@@ -70,7 +70,7 @@ def normalize_placement_relation(value: Any) -> str:
 _CORE_ACTIONS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "E1": ("PickUp", "MoveHeldObject", "Place"),
-        "E2": ("AxisAlign",),
+        "E2": ("AxisAlign", "MoveHeldObject", "MoveJoints"),
         "E3": ("PickUp", "MoveHeldObject", "Pour", "Place"),
         "E4": ("PickUp", "MoveHeldObject", "HandOver", "Place"),
         "E5": ("CoordinatedPickment",),

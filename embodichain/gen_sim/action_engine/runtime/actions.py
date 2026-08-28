@@ -2293,6 +2293,7 @@ class AtomicActionAdapter:
             return ActionBinding(owner_id=engine.binding_owner_id)
 
         slot_parts: dict[str, tuple[str, str | None]] = {}
+        task_state_keys: dict[str, str] | None = None
         if capability.config_materializer == "handover":
             transfer_side = str(action.cfg.get("transfer_arm", "left_arm"))
             receive_side = "right_arm" if transfer_side == "left_arm" else "left_arm"
@@ -2330,6 +2331,10 @@ class AtomicActionAdapter:
                     f"{action.arm} has no configured {action.control} part."
                 )
             slot_parts = {"primary": (motion_part, hand_part)}
+            if action.control == "hand" and bool(
+                action.cfg.get("single_release", False)
+            ):
+                task_state_keys = {"primary": arm_part}
 
         endpoints: dict[str, dict[str, str]] = {}
         for slot in contract.slots:
@@ -2356,9 +2361,13 @@ class AtomicActionAdapter:
                         f"{requirement.endpoint_id}."
                     )
             endpoints[slot.slot_id] = selected
+        skill_id = str(capability.action_type.skill_id)
+        if task_state_keys is None:
+            return engine.bind_control_parts(skill_id, endpoints)
         return engine.bind_control_parts(
-            str(capability.action_type.skill_id),
+            skill_id,
             endpoints,
+            task_state_keys=task_state_keys,
         )
 
     def _build_config(
@@ -2419,6 +2428,10 @@ class AtomicActionAdapter:
             from .atomic_compat import ExactTargetMoveHeldObjectOptions
 
             config_type = ExactTargetMoveHeldObjectOptions
+        elif capability.target_materializer == "joint_state":
+            from .atomic_compat import ActionEngineMoveJointsOptions
+
+            config_type = ActionEngineMoveJointsOptions
         if capability.target_materializer == "press":
             press_depth = policy.pop("press_depth", None)
             if press_depth is not None and "press_distance" not in policy:
@@ -2732,7 +2745,7 @@ class AtomicActionAdapter:
     ) -> AtomicActionEngine:
         from embodichain.gen_sim.action_engine.capabilities import HeldObjectHandOver
 
-        from .atomic_compat import ExactTargetMoveHeldObject
+        from .atomic_compat import ActionEngineMoveJoints, ExactTargetMoveHeldObject
 
         engine = AtomicActionEngine(
             motion_generator,
@@ -2743,6 +2756,7 @@ class AtomicActionAdapter:
             ),
         )
         engine.register(ExactTargetMoveHeldObject(), replace=True)
+        engine.register(ActionEngineMoveJoints(), replace=True)
         engine.register(HeldObjectHandOver(), replace=True)
         return engine
 

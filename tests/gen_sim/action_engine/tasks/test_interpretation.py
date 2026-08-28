@@ -322,6 +322,8 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
     handover_nodes = [node for node in graph["nodes"] if node["task_type"] == "E4"]
     assert orient_actions == [
         "AxisAlign",
+        "MoveHeldObject",
+        "MoveJoints",
         "MoveEndEffector",
         "MoveEndEffector",
         "MoveEndEffector",

@@ -18,16 +18,26 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-import torch
+from dataclasses import dataclass, replace
 
 from embodichain.lab.sim.atomic_actions import (
+    ActionPlan,
+    JointPositionGoal,
     MoveHeldObject,
     MoveHeldObjectOptions,
+    MoveJoints,
+    MoveJointsOptions,
+    PlanningContext,
+    ResolvedActionRequest,
+    StateDelta,
 )
 
-__all__ = ["ExactTargetMoveHeldObject", "ExactTargetMoveHeldObjectOptions"]
+__all__ = [
+    "ActionEngineMoveJoints",
+    "ActionEngineMoveJointsOptions",
+    "ExactTargetMoveHeldObject",
+    "ExactTargetMoveHeldObjectOptions",
+]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -36,15 +46,61 @@ class ExactTargetMoveHeldObjectOptions(MoveHeldObjectOptions):
 
 
 class ExactTargetMoveHeldObject(MoveHeldObject):
-    """Preserve a selected semantic orientation when explicitly requested."""
+    """Action Engine marker for mainline exact-target transport."""
 
     OptionsType = ExactTargetMoveHeldObjectOptions
     binding_contract = MoveHeldObject.binding_contract
 
-    def _apply_automatic_transport_rotation(
+
+@dataclass(frozen=True, slots=True, eq=False)
+class ActionEngineMoveJointsOptions(MoveJointsOptions):
+    """Joint motion with an explicit optional single-arm release effect."""
+
+    single_release: bool = False
+    """Whether a successful gripper-open command releases the held object."""
+
+    def __post_init__(self) -> None:
+        if type(self.single_release) is not bool:
+            raise TypeError("single_release must be a boolean.")
+
+
+class ActionEngineMoveJoints(MoveJoints):
+    """Preserve ordinary joint motion and commit explicit release nodes."""
+
+    OptionsType = ActionEngineMoveJointsOptions
+    binding_contract = MoveJoints.binding_contract
+
+    def _plan(
         self,
-        move_eef_xpos: torch.Tensor,
-        end_arm_xpos: torch.Tensor,
-    ) -> None:
-        """Keep target shaping in GenSim grounding and free-yaw search."""
-        del move_eef_xpos, end_arm_xpos
+        request: ResolvedActionRequest[
+            JointPositionGoal,
+            ActionEngineMoveJointsOptions,
+        ],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        endpoint = request.binding.endpoint("primary", "motion")
+        task_state_key = endpoint.task_state_key
+        if request.skill_options.single_release:
+            if not isinstance(task_state_key, str) or not task_state_key:
+                raise ValueError(
+                    "Single-arm release requires a non-empty task-state key."
+                )
+            if context.task.get_held_object(task_state_key) is None:
+                return self.failed_plan(
+                    request,
+                    context,
+                    message=(
+                        "Single-arm release requires an object held by task-state "
+                        f"resource {task_state_key!r}."
+                    ),
+                )
+
+        plan = super()._plan(request, context)
+        if not request.skill_options.single_release:
+            return plan
+        return replace(
+            plan,
+            expected_effects=StateDelta(
+                held_object_updates={task_state_key: None},
+            ),
+        )

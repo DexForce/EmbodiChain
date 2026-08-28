@@ -382,11 +382,10 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
             frozenset({"object"}),
             frozenset({"arm"}),
             "single_arm_object",
-            "preserve",
+            "hold",
             "axis_align",
             motion_base="AxisAlign",
             verifier="postcondition",
-            verifier_hook=_verify_axis_alignment,
             failure_classifier="grasp",
             contract_resolver_hook=_resolve_axis_align_contract,
             allows_target_contact=True,
@@ -572,6 +571,10 @@ def capability_precondition(
     target_binding: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build the generic live precondition used to authorize a retry."""
+    if target_binding.get("single_release", False):
+        # Opening a gripper is idempotent. A retry remains safe when the first
+        # attempt physically released the object but failed terminal tracking.
+        return {}
     if target_binding.get("coordinated_release_role") is not None:
         # Opening a gripper is idempotent. A retry must remain legal when one
         # hand opened on the first attempt and the physical dual-hold predicate
@@ -820,7 +823,7 @@ def _resolve_end_effector_contract(
 
 
 def _resolve_axis_align_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
-    """Keep the object free while enforcing one verified E2 terminal barrier."""
+    """Acquire one object and retain it until an explicit release action."""
     object_uid = _required_string(node.get("object_uid"), "node.object_uid")
     actor = node.get("actor", {})
     if not isinstance(actor, Mapping):
@@ -832,30 +835,19 @@ def _resolve_axis_align_contract(node: Mapping[str, Any]) -> ResolvedActionContr
             StateAtom("object_free", object_uid=object_uid),
         ),
         effects=(
-            StateEffect("add", StateAtom("arm_free", arm=arm)),
-            StateEffect("add", StateAtom("object_free", object_uid=object_uid)),
+            StateEffect("delete", StateAtom("arm_free", arm=arm)),
+            StateEffect("delete", StateAtom("object_free", object_uid=object_uid)),
+            StateEffect(
+                "add",
+                StateAtom("object_held", object_uid=object_uid, arm=arm),
+            ),
         ),
         claims=(
-            ResourceClaim(f"arm:{arm}"),
-            ResourceClaim(f"object:{object_uid}"),
+            ResourceClaim(f"arm:{arm}", lifetime="until_release"),
+            ResourceClaim(f"object:{object_uid}", lifetime="until_release"),
         ),
-        completion="terminal_barrier",
         failure_policy="task_required",
     )
-
-
-def _verify_axis_alignment(
-    *,
-    executor: Any,
-    step: Any,
-    arm: str,
-    outcome: Any,
-    attempted: torch.Tensor,
-) -> torch.Tensor:
-    """Reuse the E2 live predicate before committing AxisAlign completion."""
-    del arm, outcome
-    verified_failed, success, _ = executor._verify_step(step, ~attempted)
-    return attempted & success & ~verified_failed
 
 
 def _resolve_pour_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
@@ -907,6 +899,35 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
     binding = node.get("target_binding", {})
     if not isinstance(binding, Mapping):
         raise ValueError("MoveJoints contract requires a target_binding mapping.")
+    single_release = binding.get("single_release", False)
+    if not isinstance(single_release, bool):
+        raise TypeError("joint_state single_release must be a boolean.")
+    if single_release:
+        if (
+            node.get("control") != "hand"
+            or binding.get("source") != "gripper_open"
+            or binding.get("coordinated_release_role") is not None
+        ):
+            raise ValueError(
+                "Single-arm MoveJoints release requires a hand action targeting "
+                "gripper_open without a coordinated release role."
+            )
+        return ResolvedActionContract(
+            requires=(StateAtom("object_held", object_uid=object_uid, arm=arm),),
+            effects=(
+                StateEffect(
+                    "delete",
+                    StateAtom("object_held", object_uid=object_uid, arm=arm),
+                ),
+                StateEffect("add", StateAtom("arm_free", arm=arm)),
+                StateEffect("add", StateAtom("object_free", object_uid=object_uid)),
+            ),
+            claims=(
+                ResourceClaim(f"arm:{arm}", lifetime="until_release"),
+                ResourceClaim(f"object:{object_uid}", lifetime="until_release"),
+            ),
+            failure_policy="task_required",
+        )
     release_role = binding.get("coordinated_release_role")
     if release_role is not None:
         if (
@@ -1060,9 +1081,42 @@ def _verify_required_home(
     outcome: Any,
     attempted: torch.Tensor,
 ) -> torch.Tensor:
-    """Verify required cleanup against the live arm joint state."""
+    """Verify explicit release or required cleanup against live joint state."""
     del step
     policy = outcome.grounded.motion_policy
+    if bool(policy.get("single_release", False)):
+        getter = getattr(executor.env, "get_current_gripper_state_agent", None)
+        if not callable(getter) or arm not in {"left_arm", "right_arm"}:
+            return torch.zeros_like(attempted)
+        values = getter()
+        index = 0 if arm == "left_arm" else 1
+        if not isinstance(values, (tuple, list)) or len(values) <= index:
+            return torch.zeros_like(attempted)
+        current = torch.as_tensor(
+            values[index],
+            dtype=torch.float32,
+            device=executor.env.device,
+        )
+        if current.ndim == 1:
+            current = current.unsqueeze(0).repeat(int(executor.env.num_envs), 1)
+        expected = torch.as_tensor(
+            executor.env.open_state,
+            dtype=current.dtype,
+            device=current.device,
+        ).flatten()
+        repeats = (current.shape[-1] + expected.numel() - 1) // expected.numel()
+        expected = expected.repeat(repeats)[: current.shape[-1]]
+        tolerance = float(
+            policy.get(
+                "release_gripper_tolerance",
+                executor.runtime_policy.predicate_fallbacks["gripper_state_tolerance"],
+            )
+        )
+        opened = (
+            torch.linalg.vector_norm(current - expected.unsqueeze(0), dim=1)
+            <= tolerance
+        )
+        return attempted & opened
     if not bool(policy.get("verify_required_home", False)):
         return attempted
     env = executor.env

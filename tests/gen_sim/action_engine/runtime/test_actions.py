@@ -29,6 +29,7 @@ import torch
 from embodichain.gen_sim.action_engine.capabilities import HeldObjectHandOver
 from embodichain.gen_sim.action_engine.runtime import actions
 from embodichain.gen_sim.action_engine.runtime.atomic_compat import (
+    ActionEngineMoveJoints,
     ExactTargetMoveHeldObject,
 )
 from embodichain.gen_sim.action_engine.runtime.actions import AtomicActionAdapter
@@ -223,6 +224,7 @@ def test_adapter_registers_gen_sim_compat_actions(
     assert isinstance(engine, Engine)
     assert registered == [
         (ExactTargetMoveHeldObject, True),
+        (ActionEngineMoveJoints, True),
         (HeldObjectHandOver, True),
     ]
 

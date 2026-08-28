@@ -141,6 +141,8 @@ def test_historical_task2_1_uses_axis_align_and_explicit_handover_arms() -> None
 
     expected_orient_actions = [
         "AxisAlign",
+        "MoveHeldObject",
+        "MoveJoints",
         "MoveEndEffector",
         "MoveEndEffector",
         "MoveEndEffector",
@@ -240,6 +242,8 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
 
     assert [node["atomic_action"] for node in orient_nodes] == [
         "AxisAlign",
+        "MoveHeldObject",
+        "MoveJoints",
         "MoveEndEffector",
         "MoveEndEffector",
         "MoveEndEffector",
@@ -247,9 +251,12 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
         "MoveJoints",
     ]
     assert orient["goal"]["upright_local_axis"] == "z"
-    assert orient_nodes[0]["postcondition"]["local_axis"] == "z"
+    assert orient_nodes[0]["postcondition"] == {}
+    assert orient_nodes[2]["postcondition"]["local_axis"] == "z"
     assert orient_nodes[0]["motion_policy"] == {"modifiers": []}
     assert [node["role"] for node in orient_nodes] == [
+        "primary",
+        "primary",
         "primary",
         "cleanup",
         "cleanup",
@@ -258,38 +265,47 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
         "cleanup",
     ]
     assert orient_nodes[1]["target_binding"] == {
+        "kind": "semantic_goal",
+        "semantic_step": "orient",
+        "phase": "final",
+    }
+    assert orient_nodes[1]["motion_policy"] == {"modifiers": []}
+    assert orient_nodes[2]["target_binding"] == {
+        "kind": "joint_state",
+        "source": "gripper_open",
+        "single_release": True,
+    }
+    assert orient_nodes[2]["control"] == "hand"
+    assert orient_nodes[3]["target_binding"] == {
         "kind": "policy_pose",
         "source": "release",
         "operation": "lift_clear",
     }
-    assert orient_nodes[1]["motion_policy"] == {"modifiers": []}
-    assert orient_nodes[2]["target_binding"] == {
+    assert orient_nodes[3]["motion_policy"] == {"modifiers": []}
+    assert orient_nodes[4]["target_binding"] == {
         "kind": "policy_pose",
         "source": "release",
         "operation": "reorient_tool_down",
     }
-    assert orient_nodes[3]["target_binding"] == {
+    assert orient_nodes[5]["target_binding"] == {
         "kind": "policy_pose",
         "source": "release",
         "operation": "lift_clear",
         "requires_arm_clear": True,
     }
-    assert orient_nodes[4]["target_binding"] == {
+    assert orient_nodes[6]["target_binding"] == {
         "kind": "policy_pose",
         "source": "release",
         "operation": "retreat_after_lift",
     }
-    assert orient_nodes[5]["target_binding"] == {
+    assert orient_nodes[7]["target_binding"] == {
         "kind": "joint_state",
         "source": "initial",
         "operation": "e2_home",
         "required_home": True,
     }
-    assert orient_nodes[1]["depends_on"] == [orient_nodes[0]["id"]]
-    assert orient_nodes[2]["depends_on"] == [orient_nodes[1]["id"]]
-    assert orient_nodes[3]["depends_on"] == [orient_nodes[2]["id"]]
-    assert orient_nodes[4]["depends_on"] == [orient_nodes[3]["id"]]
-    assert orient_nodes[5]["depends_on"] == [orient_nodes[4]["id"]]
+    for previous, current in zip(orient_nodes, orient_nodes[1:]):
+        assert current["depends_on"] == [previous["id"]]
     assert [node["atomic_action"] for node in handover_nodes] == [
         "PickUp",
         "MoveHeldObject",
@@ -306,21 +322,53 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     assert handover_nodes[0]["actor"] == {"mode": "required", "arm": "right_arm"}
     assert orient_nodes[-1]["contract"]["completion"] == "terminal_barrier"
     assert orient_nodes[0]["contract"]["failure_policy"] == "task_required"
-    assert orient_nodes[1]["contract"]["failure_policy"] == "safety_required"
-    assert orient_nodes[2]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[1]["contract"]["failure_policy"] == "task_required"
+    assert orient_nodes[2]["contract"]["failure_policy"] == "task_required"
     assert orient_nodes[3]["contract"]["failure_policy"] == "safety_required"
     assert orient_nodes[4]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[5]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[6]["contract"]["failure_policy"] == "safety_required"
     assert orient_nodes[-1]["contract"]["failure_policy"] == "safety_required"
     assert orient_nodes[1]["contract"]["requires"] == [
-        {"predicate": "arm_free", "arm": "left_arm"}
+        {
+            "predicate": "object_held",
+            "object_uid": "interact_can",
+            "arm": "left_arm",
+        }
     ]
     assert orient_nodes[2]["contract"]["requires"] == [
-        {"predicate": "arm_clear", "arm": "left_arm"}
+        {
+            "predicate": "object_held",
+            "object_uid": "interact_can",
+            "arm": "left_arm",
+        }
+    ]
+    assert [
+        (effect["op"], effect["atom"]["predicate"])
+        for effect in orient_nodes[0]["contract"]["effects"]
+    ] == [
+        ("delete", "arm_free"),
+        ("delete", "object_free"),
+        ("add", "object_held"),
+    ]
+    assert [
+        (effect["op"], effect["atom"]["predicate"])
+        for effect in orient_nodes[2]["contract"]["effects"]
+    ] == [
+        ("delete", "object_held"),
+        ("add", "arm_free"),
+        ("add", "object_free"),
     ]
     assert orient_nodes[3]["contract"]["requires"] == [
-        {"predicate": "arm_clear", "arm": "left_arm"}
+        {"predicate": "arm_free", "arm": "left_arm"}
     ]
     assert orient_nodes[4]["contract"]["requires"] == [
+        {"predicate": "arm_clear", "arm": "left_arm"}
+    ]
+    assert orient_nodes[5]["contract"]["requires"] == [
+        {"predicate": "arm_clear", "arm": "left_arm"}
+    ]
+    assert orient_nodes[6]["contract"]["requires"] == [
         {"predicate": "arm_clear", "arm": "left_arm"}
     ]
     assert any(
