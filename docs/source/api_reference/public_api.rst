@@ -1851,15 +1851,6 @@ embodichain.toolkits.urdf_assembly.urdf_assembly_manager
 
    URDFAssemblyManager
 
-embodichain.workspace_cache_cli
--------------------------------
-
-.. currentmodule:: embodichain.workspace_cache_cli
-
-.. autosummary::
-
-   main
-
 embodichain_tasks.classic_control.cart_pole
 --------------------------------------------
 

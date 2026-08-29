@@ -22,7 +22,9 @@ from pathlib import Path
 
 import pytest
 
-from embodichain import __main__ as cli
+import embodichain.cli.list_task as list_task
+import embodichain.cli.main as cli
+from embodichain import __main__ as entrypoint
 
 EXPECTED_COMMANDS = {
     "analyze-workspace",
@@ -45,6 +47,26 @@ EXPECTED_COMMANDS = {
 def test_all_public_commands_are_registered() -> None:
     """Every documented public CLI should have one unified command."""
     assert {command.name for command in cli.COMMANDS} == EXPECTED_COMMANDS
+    assert entrypoint.COMMANDS is cli.COMMANDS
+    assert entrypoint.Command is cli.Command
+    assert entrypoint.build_parser is cli.build_parser
+    assert entrypoint.main is cli.main
+
+
+def test_workspace_cache_command_uses_dedicated_cli_adapter() -> None:
+    """The workspace cache command resolves its dedicated CLI adapter."""
+    command = next(
+        command for command in cli.COMMANDS if command.name == "workspace-cache"
+    )
+
+    assert command.target == "embodichain.cli.workspace_cache:main"
+
+
+def test_list_task_command_uses_dedicated_cli_adapter() -> None:
+    """The task listing command resolves its dedicated CLI adapter."""
+    command = next(command for command in cli.COMMANDS if command.name == "list-task")
+
+    assert command.target == "embodichain.cli.list_task:main"
 
 
 def test_root_help_does_not_import_command_modules(
@@ -115,25 +137,25 @@ def test_list_task_discovers_and_prints_task_tree(
         lambda: discovery_calls.append(None),
     )
     monkeypatch.setattr(
-        cli,
+        list_task,
         "_collect_environment_entries",
         lambda: [
-            cli._EnvironmentListEntry(
+            list_task._EnvironmentListEntry(
                 "CartPoleRL",
                 ("classic_control", "cart_pole"),
-                {cli._RL},
+                {list_task._RL},
             ),
-            cli._EnvironmentListEntry(
+            list_task._EnvironmentListEntry(
                 "HandOver-v1",
                 ("manipulation", "hand_over"),
-                {cli._TASK_PROGRAM},
+                {list_task._TASK_PROGRAM},
             ),
-            cli._EnvironmentListEntry(
+            list_task._EnvironmentListEntry(
                 "BlocksRankingRGB-v1",
                 ("manipulation", "tableware", "blocks_ranking_rgb"),
-                {cli._HANDWRITTEN_DEMO},
+                {list_task._HANDWRITTEN_DEMO},
             ),
-            cli._EnvironmentListEntry(
+            list_task._EnvironmentListEntry(
                 "StackCups-v1",
                 ("manipulation", "tableware", "stack_cups"),
                 set(),
@@ -202,14 +224,14 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
         encoding="utf-8",
     )
 
-    entries = cli._config_environment_entries([tmp_path])
+    entries = list_task._config_environment_entries([tmp_path])
 
     expert = entries["pickplace-v1"]
     assert expert.task_path == ("manipulation", "pick_place")
-    assert expert.capabilities == {cli._TASK_PROGRAM}
+    assert expert.capabilities == {list_task._TASK_PROGRAM}
     learning = entries["pointmassrl"]
     assert learning.task_path == ("classic_control", "point_mass")
-    assert learning.capabilities == {cli._RL}
+    assert learning.capabilities == {list_task._RL}
 
 
 def test_handwritten_demo_detection_uses_environment_hooks() -> None:
@@ -219,8 +241,8 @@ def test_handwritten_demo_detection_uses_environment_hooks() -> None:
     )
     from embodichain_tasks.special.simple_task import SimpleTaskEnv
 
-    assert cli._implements_handwritten_demo(SimpleTaskEnv)
-    assert not cli._implements_handwritten_demo(BlocksRankingSizeEnv)
+    assert list_task._implements_handwritten_demo(SimpleTaskEnv)
+    assert not list_task._implements_handwritten_demo(BlocksRankingSizeEnv)
 
 
 def test_subcommand_help_uses_complete_command_parser(
