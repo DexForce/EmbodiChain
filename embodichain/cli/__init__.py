@@ -14,14 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Module entry point for the unified EmbodiChain command-line interface."""
+"""Command adapters used by the unified EmbodiChain CLI."""
 
 from __future__ import annotations
 
-from embodichain.cli.main import COMMANDS, Command, build_parser, main
-
-__all__ = ["COMMANDS", "Command", "build_parser", "main"]
-
-
-if __name__ == "__main__":
-    main()
+__all__: list[str] = []

@@ -226,7 +226,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         argv: Arguments excluding the command name. Uses ``sys.argv`` when
             omitted.
     """
-    from embodichain.workspace_cache_cli import main as cli_main
+    from embodichain.cli.workspace_cache import main as cli_main
 
     cli_main(argv)
 
