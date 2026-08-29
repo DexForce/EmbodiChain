@@ -790,6 +790,8 @@ topics:
       - Task Program directory
       - integration.yaml
       - configured Task Program integration
+      - nested affordances
+      - affordance ownership
       - config-driven environment
       - runtime environment ID
       - dynamic environment registration

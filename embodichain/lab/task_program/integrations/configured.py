@@ -305,6 +305,7 @@ def _decode_rigid_object(value: object, *, path: str) -> SimulationRigidObjectBi
                 "collision_role",
                 "semantic_type",
                 "default_grasp_affordance",
+                "affordances",
             }
         ),
     )
@@ -334,6 +335,7 @@ def _decode_articulation(
                 "dynamics",
                 "collision_role",
                 "semantic_type",
+                "affordances",
             }
         ),
     )
@@ -352,7 +354,7 @@ def _decode_link(
         value,
         path=path,
         required=frozenset({"entity_id", "articulation_id", "native_link_name"}),
-        optional=frozenset({"aliases", "dynamics", "semantic_type"}),
+        optional=frozenset({"aliases", "dynamics", "semantic_type", "affordances"}),
     )
     return SimulationArticulationLinkBinding(
         entity_id=_identifier(config["entity_id"], path=f"{path}.entity_id"),
@@ -380,13 +382,14 @@ def _decode_link(
 def _decode_antipodal_grasp(
     value: object,
     *,
+    object_id: str,
     path: str,
 ) -> AntipodalGraspAffordanceBinding:
     """Decode one configured antipodal grasp affordance."""
     config = _mapping(
         value,
         path=path,
-        required=frozenset({"entity_id", "object_id"}),
+        required=frozenset({"kind", "entity_id"}),
         optional=frozenset(
             {
                 "native_name",
@@ -419,7 +422,7 @@ def _decode_antipodal_grasp(
     )
     return AntipodalGraspAffordanceBinding(
         entity_id=entity_id,
-        object_id=_identifier(config["object_id"], path=f"{path}.object_id"),
+        object_id=object_id,
         native_name=_identifier(
             config.get("native_name", entity_id),
             path=f"{path}.native_name",
@@ -458,6 +461,8 @@ def _decode_antipodal_grasp(
 def _decode_placement_affordance(
     value: object,
     *,
+    parent_id: str,
+    expected_kind: str,
     path: str,
     binding_type: (
         type[SupportSurfaceAffordanceBinding] | type[ContainerAffordanceBinding]
@@ -467,14 +472,17 @@ def _decode_placement_affordance(
     config = _mapping(
         value,
         path=path,
-        required=frozenset({"entity_id", "parent_id", "native_name"}),
+        required=frozenset({"kind", "entity_id", "native_name"}),
         optional=frozenset(
             {"aliases", "object_target_pose", "minimum_confidence", "is_default"}
         ),
     )
+    kind = _identifier(config["kind"], path=f"{path}.kind")
+    if kind != expected_kind:
+        raise ValueError(f"{path}.kind must be {expected_kind!r}, got {kind!r}.")
     kwargs = {
         "entity_id": _identifier(config["entity_id"], path=f"{path}.entity_id"),
-        "parent_id": _identifier(config["parent_id"], path=f"{path}.parent_id"),
+        "parent_id": parent_id,
         "native_name": _identifier(
             config["native_name"],
             path=f"{path}.native_name",
@@ -503,6 +511,101 @@ def _decode_placement_affordance(
     return binding_type(**kwargs)
 
 
+def _decode_entity_affordance(
+    value: object,
+    *,
+    parent_id: str,
+    parent_category: str,
+    path: str,
+) -> (
+    AntipodalGraspAffordanceBinding
+    | SupportSurfaceAffordanceBinding
+    | ContainerAffordanceBinding
+):
+    """Decode one affordance nested under its owning scene entity."""
+    common = _mapping(
+        value,
+        path=path,
+        required=frozenset({"kind", "entity_id"}),
+        optional=frozenset(
+            {
+                "native_name",
+                "revision",
+                "aliases",
+                "relative_pose",
+                "mesh_env_id",
+                "internal_axis",
+                "object_target_pose",
+                "minimum_confidence",
+                "is_default",
+            }
+        ),
+    )
+    kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind == "antipodal_grasp":
+        if parent_category != "rigid_objects":
+            raise ValueError(
+                f"{path}.kind {kind!r} is supported only under a rigid object."
+            )
+        return _decode_antipodal_grasp(
+            value,
+            object_id=parent_id,
+            path=path,
+        )
+    if kind == "support_surface":
+        return _decode_placement_affordance(
+            value,
+            parent_id=parent_id,
+            expected_kind="support_surface",
+            path=path,
+            binding_type=SupportSurfaceAffordanceBinding,
+        )
+    if kind == "container":
+        return _decode_placement_affordance(
+            value,
+            parent_id=parent_id,
+            expected_kind="container",
+            path=path,
+            binding_type=ContainerAffordanceBinding,
+        )
+    raise ValueError(
+        f"{path}.kind must be one of "
+        "['antipodal_grasp', 'support_surface', 'container'], "
+        f"got {kind!r}."
+    )
+
+
+def _decode_entity_affordances(
+    value: object,
+    *,
+    parent_id: str,
+    parent_category: str,
+    path: str,
+) -> tuple[
+    AntipodalGraspAffordanceBinding
+    | SupportSurfaceAffordanceBinding
+    | ContainerAffordanceBinding,
+    ...,
+]:
+    """Decode all affordances nested under one validated scene entity."""
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{path} must be a mapping.")
+    return tuple(
+        _decode_entity_affordance(
+            affordance_value,
+            parent_id=parent_id,
+            parent_category=parent_category,
+            path=f"{path}.affordances[{index}]",
+        )
+        for index, affordance_value in enumerate(
+            _sequence(
+                value.get("affordances", ()),
+                path=f"{path}.affordances",
+            )
+        )
+    )
+
+
 def _decode_scene(value: object) -> SimulationSceneBinding:
     """Decode one complete provider-free simulation scene binding."""
     path = "integration.scene"
@@ -515,54 +618,54 @@ def _decode_scene(value: object) -> SimulationSceneBinding:
                 "rigid_objects",
                 "articulations",
                 "links",
-                "antipodal_grasps",
-                "support_surfaces",
-                "containers",
                 "collision_world_mode",
             }
         ),
     )
 
-    def decode_items(field_name: str, decoder):
-        return tuple(
-            decoder(item, path=f"{path}.{field_name}[{index}]")
-            for index, item in enumerate(
-                _sequence(config.get(field_name, ()), path=f"{path}.{field_name}")
-            )
-        )
+    antipodal_grasps: list[AntipodalGraspAffordanceBinding] = []
+    support_surfaces: list[SupportSurfaceAffordanceBinding] = []
+    containers: list[ContainerAffordanceBinding] = []
+
+    def decode_entities(field_name: str, decoder):
+        bindings = []
+        for index, item in enumerate(
+            _sequence(config.get(field_name, ()), path=f"{path}.{field_name}")
+        ):
+            entity_path = f"{path}.{field_name}[{index}]"
+            binding = decoder(item, path=entity_path)
+            bindings.append(binding)
+            for affordance in _decode_entity_affordances(
+                item,
+                parent_id=binding.entity_id,
+                parent_category=field_name,
+                path=entity_path,
+            ):
+                if isinstance(affordance, AntipodalGraspAffordanceBinding):
+                    antipodal_grasps.append(affordance)
+                elif isinstance(affordance, SupportSurfaceAffordanceBinding):
+                    support_surfaces.append(affordance)
+                elif isinstance(affordance, ContainerAffordanceBinding):
+                    containers.append(affordance)
+                else:
+                    raise TypeError(
+                        f"{entity_path}.affordances decoded an unsupported "
+                        f"binding type {type(affordance).__name__}."
+                    )
+        return tuple(bindings)
+
+    rigid_objects = decode_entities("rigid_objects", _decode_rigid_object)
+    articulations = decode_entities("articulations", _decode_articulation)
+    links = decode_entities("links", _decode_link)
 
     return SimulationSceneBinding(
         registry_id=_identifier(config["registry_id"], path=f"{path}.registry_id"),
-        rigid_objects=decode_items("rigid_objects", _decode_rigid_object),
-        articulations=decode_items("articulations", _decode_articulation),
-        links=decode_items("links", _decode_link),
-        antipodal_grasps=decode_items(
-            "antipodal_grasps",
-            _decode_antipodal_grasp,
-        ),
-        support_surfaces=tuple(
-            _decode_placement_affordance(
-                item,
-                path=f"{path}.support_surfaces[{index}]",
-                binding_type=SupportSurfaceAffordanceBinding,
-            )
-            for index, item in enumerate(
-                _sequence(
-                    config.get("support_surfaces", ()),
-                    path=f"{path}.support_surfaces",
-                )
-            )
-        ),
-        containers=tuple(
-            _decode_placement_affordance(
-                item,
-                path=f"{path}.containers[{index}]",
-                binding_type=ContainerAffordanceBinding,
-            )
-            for index, item in enumerate(
-                _sequence(config.get("containers", ()), path=f"{path}.containers")
-            )
-        ),
+        rigid_objects=rigid_objects,
+        articulations=articulations,
+        links=links,
+        antipodal_grasps=tuple(antipodal_grasps),
+        support_surfaces=tuple(support_surfaces),
+        containers=tuple(containers),
         collision_world_mode=(
             None
             if "collision_world_mode" not in config

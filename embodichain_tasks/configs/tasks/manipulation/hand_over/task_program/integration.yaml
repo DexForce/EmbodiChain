@@ -5,12 +5,12 @@ scene:
     simulation_uid: handover_object
     dynamics: dynamic
     semantic_type: soda_can
+    affordances:
+    - entity_id: can_antipodal_grasp
+      kind: antipodal_grasp
   - entity_id: support_surface
     dynamics: static
     semantic_type: support_surface
-  antipodal_grasps:
-  - entity_id: can_antipodal_grasp
-    object_id: can
 robot_profile:
   profile_id: dual_ur5_handover_v1
   resources:

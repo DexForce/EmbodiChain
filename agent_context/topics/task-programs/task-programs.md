@@ -114,6 +114,15 @@ its immutable catalog, parses the environment, and registers the common
 `EmbodiedEnv`. The integration file cannot select dotted imports or arbitrary
 callables. The CLI may override only the program.
 
+Within `integration.yaml`, every affordance is nested in an `affordances` list
+under its owning `rigid_objects`, `articulations`, or `links` entry. The child
+keeps a globally unique `entity_id` and a closed `kind` discriminator
+(`antipodal_grasp`, `support_surface`, or `container`); the YAML does not repeat
+ownership with `object_id` or `parent_id`. The configured decoder derives that
+relation and normalizes the authoring hierarchy into the flat
+`SimulationSceneBinding` / `SceneRegistry` index. Scene-level affordance
+collections are not accepted.
+
 ## Effect assurance and acceptance
 
 Every `SkillPolicyPreset` explicitly selects one authority:

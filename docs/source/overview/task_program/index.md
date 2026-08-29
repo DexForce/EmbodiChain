@@ -181,6 +181,9 @@ scene:
     - entity_id: cube
       dynamics: dynamic
       semantic_type: cube
+      affordances:
+        - entity_id: cube_grasp
+          kind: antipodal_grasp
 robot_profile:
   profile_id: task_program_ur5_pick_place
   resources: []
@@ -197,6 +200,16 @@ program. See the sibling `env.json` and
 `task_program/integration.yaml` under
 `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` for the
 complete pair.
+
+Scene affordances are authored as children of their owning entry in
+`rigid_objects`, `articulations`, or `links`. The parent's `entity_id` names the
+physical scene entity; the child's `entity_id` is a separate, globally unique
+semantic feature that can be selected explicitly by a program or parent
+default. Nesting is the only way to declare ownership: scene-level
+`antipodal_grasps`, `support_surfaces`, and `containers`, and child
+`object_id`/`parent_id` fields, are rejected. The loader derives that parent
+relation from the YAML structure and normalizes the declarations into the flat,
+globally indexed Scene Registry.
 
 The integration file accepts only allowlisted scene bindings, robot resources,
 policies, monitors, and runtime-service kinds. It does not accept dotted

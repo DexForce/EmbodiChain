@@ -7,13 +7,13 @@ scene:
   - entity_id: bottle
     dynamics: dynamic
     semantic_type: bottle
-  antipodal_grasps:
-  - entity_id: bottle_grasp
-    object_id: bottle
-    internal_axis:
-    - 1.0
-    - 0.0
-    - 0.0
+    affordances:
+    - entity_id: bottle_grasp
+      kind: antipodal_grasp
+      internal_axis:
+      - 1.0
+      - 0.0
+      - 0.0
 robot_profile:
   profile_id: task_program_cobotmagic_pour
   resources:

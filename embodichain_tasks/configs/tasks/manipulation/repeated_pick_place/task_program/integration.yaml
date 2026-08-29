@@ -4,9 +4,9 @@ scene:
   - entity_id: cube
     dynamics: dynamic
     semantic_type: cube
-  antipodal_grasps:
-  - entity_id: cube_grasp
-    object_id: cube
+    affordances:
+    - entity_id: cube_grasp
+      kind: antipodal_grasp
 robot_profile:
   profile_id: task_program_ur5_pick_place
   resources:

@@ -519,7 +519,7 @@ def test_scene_shorthand_derives_native_ids_and_affordance_metadata() -> None:
     scene = payload["scene"]
     assert type(scene) is dict
     rigid_object = scene["rigid_objects"][0]
-    grasp = scene["antipodal_grasps"][0]
+    grasp = rigid_object["affordances"][0]
     for field in ("simulation_uid", "default_grasp_affordance"):
         rigid_object.pop(field, None)
     for field in ("native_name", "revision"):
@@ -533,6 +533,137 @@ def test_scene_shorthand_derives_native_ids_and_affordance_metadata() -> None:
     assert binding.rigid_objects[0].default_grasp_affordance is None
     assert binding.antipodal_grasps[0].native_name == "cube_grasp"
     assert binding.antipodal_grasps[0].revision == "1"
+    assert binding.antipodal_grasps[0].object_id == "cube"
+
+
+def test_scene_entity_nesting_derives_all_affordance_parents() -> None:
+    """Affordance ownership comes only from the containing scene entity."""
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    scene = payload["scene"]
+    assert type(scene) is dict
+    rigid_object = scene["rigid_objects"][0]
+    affordances = rigid_object["affordances"]
+    affordances.extend(
+        (
+            {
+                "entity_id": "cube_top",
+                "kind": "support_surface",
+                "native_name": "top",
+            },
+            {
+                "entity_id": "cube_inside",
+                "kind": "container",
+                "native_name": "inside",
+            },
+        )
+    )
+
+    binding = _decode_configured_task_program_integration(
+        payload
+    ).registration.scene_binding
+
+    assert binding.antipodal_grasps[0].object_id == "cube"
+    assert binding.support_surfaces[0].parent_id == "cube"
+    assert binding.containers[0].parent_id == "cube"
+
+
+def test_placement_affordances_can_belong_to_articulations_and_links() -> None:
+    """Placement ownership supports every scene parent accepted by the registry."""
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    scene = payload["scene"]
+    assert type(scene) is dict
+    scene["articulations"] = [
+        {
+            "entity_id": "fixture",
+            "affordances": [
+                {
+                    "entity_id": "fixture_container",
+                    "kind": "container",
+                    "native_name": "interior",
+                }
+            ],
+        }
+    ]
+    scene["links"] = [
+        {
+            "entity_id": "fixture_shelf",
+            "articulation_id": "fixture",
+            "native_link_name": "shelf",
+            "affordances": [
+                {
+                    "entity_id": "shelf_surface",
+                    "kind": "support_surface",
+                    "native_name": "top",
+                }
+            ],
+        }
+    ]
+
+    binding = _decode_configured_task_program_integration(
+        payload
+    ).registration.scene_binding
+
+    assert binding.containers[0].parent_id == "fixture"
+    assert binding.support_surfaces[0].parent_id == "fixture_shelf"
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("antipodal_grasps", "support_surfaces", "containers"),
+)
+def test_scene_rejects_flat_affordance_collections(field_name: str) -> None:
+    """Configured scenes expose affordances only beneath their owner entity."""
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    scene = payload["scene"]
+    assert type(scene) is dict
+    scene[field_name] = []
+
+    with pytest.raises(ValueError, match=f"unsupported fields.*{field_name}"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize("field_name", ("object_id", "parent_id"))
+def test_nested_affordance_rejects_repeated_parent_fields(field_name: str) -> None:
+    """A nested affordance cannot restate or redirect its structural parent."""
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    scene = payload["scene"]
+    assert type(scene) is dict
+    rigid_object = scene["rigid_objects"][0]
+    grasp = rigid_object["affordances"][0]
+    grasp[field_name] = "cube"
+
+    with pytest.raises(ValueError, match=f"unsupported fields.*{field_name}"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_nested_affordance_rejects_unknown_kind() -> None:
+    """The configured affordance discriminator is a closed allowlist."""
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    scene = payload["scene"]
+    assert type(scene) is dict
+    rigid_object = scene["rigid_objects"][0]
+    rigid_object["affordances"][0]["kind"] = "suction_grasp"
+
+    with pytest.raises(ValueError, match="kind must be one of"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_antipodal_grasp_rejects_non_object_owner() -> None:
+    """Mesh-backed antipodal grasps belong only to rigid objects."""
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    scene = payload["scene"]
+    assert type(scene) is dict
+    rigid_object = scene["rigid_objects"][0]
+    affordances = rigid_object.pop("affordances")
+    scene["articulations"] = [
+        {
+            "entity_id": "drawer",
+            "affordances": affordances,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="only under a rigid object"):
+        _decode_configured_task_program_integration(payload)
 
 
 def test_official_generators_use_named_models_without_default_fields() -> None:

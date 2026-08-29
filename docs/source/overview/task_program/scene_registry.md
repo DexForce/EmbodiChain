@@ -66,6 +66,44 @@ assert cube.entity_id == "cube"
 An already typed reference is expected to contain a canonical ID. It cannot use
 an alias or silently change entity kind.
 
+## Author configured scene hierarchy
+
+In `task_program/integration.yaml`, declare an affordance directly beneath its
+owning scene entity:
+
+```yaml
+scene:
+  registry_id: task_program_repeated_pick_place
+  rigid_objects:
+    - entity_id: cube
+      dynamics: dynamic
+      semantic_type: cube
+      affordances:
+        - entity_id: cube_grasp
+          kind: antipodal_grasp
+```
+
+The two IDs have distinct roles. `cube` is the canonical physical object used
+by calls such as `Pick(object="cube")`; `cube_grasp` is the globally unique
+canonical ID of one semantic child that can be passed as an explicit grasp or
+named by `default_grasp_affordance`. The child ID remains necessary because one
+entity may expose multiple affordances and every affordance remains directly
+addressable in the flat Scene Registry.
+
+The configured affordance kinds are:
+
+| `kind` | Allowed owner | Kind-specific fields |
+|---|---|---|
+| `antipodal_grasp` | rigid object | optional `native_name`, `revision`, `relative_pose`, `mesh_env_id`, and `internal_axis` |
+| `support_surface` | rigid object, articulation, or link | required `native_name`; optional `object_target_pose`, `minimum_confidence`, and `is_default` |
+| `container` | rigid object, articulation, or link | required `native_name`; optional `object_target_pose`, `minimum_confidence`, and `is_default` |
+
+All kinds may also declare `aliases`. Ownership is structural: do not repeat it
+with `object_id` or `parent_id`, and do not declare scene-level affordance
+collections. The strict integration decoder rejects those forms and derives the
+internal parent reference from the containing entity before building the flat,
+globally indexed registry.
+
 ## Explicit simulation opt-in
 
 Use {meth}`SceneRegistry.from_simulation` to select simulator entities
