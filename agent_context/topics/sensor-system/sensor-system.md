@@ -62,6 +62,14 @@ The `transformation` property returns a `4×4 torch.Tensor` homogeneous matrix.
 
 ## Camera System
 
+`Camera` and `StereoCamera` are created through
+`SimulationManager.add_sensor()`. The owning manager is passed explicitly so
+each camera resolves its World and ordered per-environment Arenas through that
+manager even when multiple simulation managers are active. The manager also
+owns semantic parent resolution and deferred attachment; cameras only attach
+to concrete per-environment render nodes and report attachment after that
+operation succeeds.
+
 ### CameraCfg
 
 | Field | Type | Default | Notes |
@@ -117,7 +125,7 @@ Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. 
 
 - **`sensor_type` string mismatch** — `SensorCfg.from_dict()` looks up `sensor_type + "Cfg"` in the sensors module. A typo (e.g. `"camera"` instead of `"Camera"`) causes `AttributeError`.
 - **Depth not enabled** — `enable_depth` defaults to `False`. Accessing depth data without enabling it returns empty tensors.
-- **Parent frame not found** — `OffsetCfg.parent` must exactly match a link name in the scene. A wrong name silently places the sensor at the arena origin.
+- **Parent frame not found** — `OffsetCfg.parent` must match a link name in a Spawn-bound robot or articulation. Missing or ambiguous names raise during immediate attachment or `SimulationManager.prepare()`.
 - **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
 - **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
 - **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.

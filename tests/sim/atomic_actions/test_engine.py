@@ -35,6 +35,7 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     BUILTIN_ACTION_TYPES,
     ControlPartCommandProfile,
+    EntityState,
     JointPositionCommand,
     JointPositionGoal,
     JointPositionTarget,
@@ -46,10 +47,12 @@ from embodichain.lab.sim.atomic_actions import (
     PressGoal,
     PressOptions,
     ResolvedActionRequest,
+    SceneSnapshot,
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
     TimedTrajectory,
+    TrackingPolicy,
 )
 
 ACTION_DT = 0.02
@@ -107,6 +110,24 @@ class OtherStubAction(StubAction):
     """Second configured skill used to verify shared engine resources."""
 
     skill_id: ClassVar[str] = "other_stub"
+
+
+class StubSceneProvider:
+    """Record scene captures and return one configured snapshot."""
+
+    def __init__(self, scene: SceneSnapshot) -> None:
+        self.scene = scene
+        self.calls: list[tuple[float, torch.Tensor]] = []
+
+    def snapshot(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> SceneSnapshot:
+        """Return the configured scene and retain owned call arguments."""
+        self.calls.append((timestamp, env_ids.clone()))
+        return self.scene
 
 
 def _motion_generator(
@@ -193,6 +214,52 @@ def test_engine_loads_fresh_builtin_instances_by_default() -> None:
 
 def test_engine_can_disable_builtin_loading() -> None:
     assert _engine(load_builtins=False).actions == {}
+
+
+def test_initial_context_uses_configured_scene_provider() -> None:
+    scene = SceneSnapshot(
+        timestamp=1.5,
+        version=3,
+        entities={"target": EntityState(torch.eye(4))},
+    )
+    provider = StubSceneProvider(scene)
+    engine = AtomicActionEngine(
+        _motion_generator(),
+        load_builtins=False,
+        scene_provider=provider,
+    )
+
+    context = engine.initial_context(timestamp=1.5)
+
+    assert context.scene is scene
+    assert len(provider.calls) == 1
+    timestamp, env_ids = provider.calls[0]
+    assert timestamp == pytest.approx(1.5)
+    assert torch.equal(env_ids, torch.tensor([0, 1]))
+
+
+def test_initial_context_explicit_scene_overrides_configured_provider() -> None:
+    provider = StubSceneProvider(SceneSnapshot(timestamp=0.0, version=1))
+    explicit_scene = SceneSnapshot(timestamp=0.0, version=2)
+    engine = AtomicActionEngine(
+        _motion_generator(),
+        load_builtins=False,
+        scene_provider=provider,
+    )
+
+    context = engine.initial_context(scene=explicit_scene)
+
+    assert context.scene is explicit_scene
+    assert provider.calls == []
+
+
+def test_engine_rejects_invalid_scene_provider() -> None:
+    with pytest.raises(TypeError, match="scene_provider must implement SceneProvider"):
+        AtomicActionEngine(
+            _motion_generator(),
+            load_builtins=False,
+            scene_provider=object(),  # type: ignore[arg-type]
+        )
 
 
 def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
@@ -357,12 +424,14 @@ def test_engine_make_invocation_binds_direct_control_parts() -> None:
     engine.register(StubAction())
     goal = JointPositionGoal(torch.ones(2, 3))
     motion_policy = MotionPolicy(sample_count=2)
+    tracking_policy = TrackingPolicy.timed()
 
     invocation = engine.make_invocation(
         "stub",
         goal,
         control_parts={"primary": {"motion": "all"}},
         motion_policy=motion_policy,
+        tracking_policy=tracking_policy,
         invocation_id="direct-call",
         revision=1,
     )
@@ -373,6 +442,7 @@ def test_engine_make_invocation_binds_direct_control_parts() -> None:
     assert invocation.skill_id == "stub"
     assert invocation.goal is goal
     assert invocation.motion_policy is motion_policy
+    assert invocation.tracking_policy is tracking_policy
     assert invocation.invocation_id == "direct-call"
     assert invocation.revision == 1
     assert target.control_part == "all"

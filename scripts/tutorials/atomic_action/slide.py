@@ -35,14 +35,11 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
-    EntityState,
     MotionPolicy,
     ObjectSemantics,
     SlideAffordance,
     SlideGoal,
     SlideOptions,
-    SceneEntityPose,
-    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -138,6 +135,7 @@ def create_drawer_semantics(drawer: Articulation) -> ObjectSemantics:
 def create_invocation(
     engine: AtomicActionEngine,
     semantics: ObjectSemantics,
+    target_pose: torch.Tensor,
     *,
     direction: Literal["pull", "push"],
     approach_distance: float,
@@ -148,6 +146,7 @@ def create_invocation(
     Args:
         engine: Engine used to resolve the slide control-part binding.
         semantics: Drawer-handle semantics shared by both operations.
+        target_pose: Latest observed world pose of the drawer handle.
         direction: Whether this invocation pulls open or pushes closed.
         approach_distance: Pre-grasp offset opposite the approach axis.
         translation_distance: Drawer travel distance for this operation.
@@ -159,7 +158,7 @@ def create_invocation(
         "slide",
         SlideGoal(
             semantics,
-            SceneEntityPose(HANDLE_SCENE_ENTITY_ID),
+            target_pose,
         ),
         control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
         motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
@@ -221,7 +220,7 @@ def main() -> None:
         "Inspect the closed drawer, then press Enter to plan the pull...",
     )
 
-    for scene_version, direction in enumerate(("pull", "push")):
+    for direction in ("pull", "push"):
         if direction == "push" and wait_for_user:
             input(
                 "Pull replay finished. Press Enter to read the moved handle "
@@ -234,21 +233,13 @@ def main() -> None:
                 create_invocation(
                     engine,
                     semantics,
+                    handle_pose,
                     direction=direction,
                     approach_distance=args.approach_distance,
                     translation_distance=args.translation_distance,
                 ),
             ),
-            context=engine.initial_context(
-                scene=SceneSnapshot(
-                    timestamp=float(scene_version),
-                    version=scene_version,
-                    entities={
-                        HANDLE_SCENE_ENTITY_ID: EntityState(handle_pose),
-                    },
-                ),
-                control_dt=sim.sim_config.physics_dt,
-            ),
+            context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
         )
         if not compiled.plan_success.all():
             logger.log_warning(f"Failed to plan the Slide {direction} trajectory.")

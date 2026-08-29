@@ -562,6 +562,7 @@ class SimulationManager:
         )
         self._arenas = list(self._spawn_scene.builder.prepare_arenas())
         self._prepared_spawn_topology_revision = -1
+        self._synced_spawn_render_topology_revision = -1
 
         self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
@@ -1019,7 +1020,7 @@ class SimulationManager:
         self._default_resources = SimResources()
 
     def prepare(self) -> None:
-        """Materialize physical declarations, then resolve sensor parents."""
+        """Materialize declarations, bind state, and resolve sensor parents."""
         scene = self._spawn_scene
         result = scene.builder.result
         if (
@@ -1040,10 +1041,11 @@ class SimulationManager:
         # remains retryable without rematerializing the scene.
         self._prepare_spawn_runtime(result)
         scene.bind()
+        self._sync_spawn_render_state(result)
 
         while self._pending_sensor_attachments:
             sensor = self._pending_sensor_attachments[0]
-            sensor.attach_to_parent()
+            self._attach_camera_parent(sensor)
             self._pending_sensor_attachments.pop(0)
 
     def _prepare_spawn_runtime(self, result: dexsim.spawn.SpawnResult) -> None:
@@ -1054,6 +1056,17 @@ class SimulationManager:
         if self.is_default_backend and self.device.type == "cuda":
             self._world.init_gpu_physics()
         self._prepared_spawn_topology_revision = topology_revision
+
+    def _sync_spawn_render_state(self, result: dexsim.spawn.SpawnResult) -> None:
+        """Publish newly bound state once for each Spawn topology revision."""
+        topology_revision = int(result.topology_revision)
+        if (
+            getattr(self, "_synced_spawn_render_topology_revision", -1)
+            == topology_revision
+        ):
+            return
+        self.physics.sync_render_state(result)
+        self._synced_spawn_render_topology_revision = topology_revision
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -2858,15 +2871,12 @@ class SimulationManager:
             sensor = sensor_factory(
                 sensor_cfg,
                 self.device,
-                world=self._world,
-                arenas=self._arenas,
-                parent_node_resolver=self._resolve_spawn_sensor_parent_nodes,
-                defer_parent_attachment=True,
+                owner=self,
             )
             if sensor_cfg.extrinsics.parent is not None:
                 scene = self._spawn_scene
                 if scene.builder.result is not None:
-                    sensor.attach_to_parent()
+                    self._attach_camera_parent(sensor)
                 else:
                     self._pending_sensor_attachments.append(sensor)
         else:
@@ -2880,6 +2890,14 @@ class SimulationManager:
         self._sensors[uid] = sensor
         self.notify_visualization_topology_changed()
         return sensor
+
+    def _attach_camera_parent(self, sensor: Camera) -> None:
+        """Resolve and attach one camera to its configured parent nodes."""
+        parent = sensor.cfg.extrinsics.parent
+        if parent is None:
+            return
+        parent_nodes = self._resolve_spawn_sensor_parent_nodes(parent)
+        sensor.attach_to_parent_nodes(parent_nodes)
 
     def _resolve_spawn_sensor_parent_nodes(self, parent: str) -> list[object]:
         """Resolve one canonical articulation link to a render node per Arena.

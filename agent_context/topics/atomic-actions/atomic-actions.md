@@ -82,6 +82,23 @@ instance of every type in `BUILTIN_ACTION_TYPES`; use `load_builtins=False` only
 for isolated tests or a fully custom action set. A bound action cannot be
 reused by another engine.
 
+An engine may additionally borrow a default `SceneProvider`. In that case,
+`engine.initial_context()` captures a `SceneSnapshot` from the provider using
+the robot observation timestamp and generated environment IDs. An explicitly
+supplied `scene=` snapshot takes precedence, and engines without either source
+retain the empty-scene behavior. The provider is only an initial-context
+convenience for direct-core planning; execution observations and scene revision
+advancement remain owned by the runtime's `ObservationProvider`.
+
+Direct simulation callers that only need selected rigid-object poses should use
+`create_simulation_atomic_action_engine(..., scene_entities=(...))`. The factory
+derives canonical direct-core IDs from the supplied objects' `uid` values and
+installs the default provider; it never scans `SimulationManager`. Actions then
+select the entries they consume through their goal and semantic entity IDs.
+Articulation/link observations, aliases, collision roles, dynamic execution,
+and external perception remain explicit `SceneProvider` or `SceneRegistry`
+integration paths.
+
 ## Engine entry points
 
 Choose the public engine entry point by lifecycle, not by skill type:
@@ -784,7 +801,10 @@ checks are separate from per-plan `bind_collision_world()`.
 Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
 `tracking_error_recovery.py`, `moving_target_recovery.py`, and
 `dynamic_obstacle_recovery.py`. Each injects one disturbance, reports the
-structured invalidation/replan events, and requires terminal completion.
+structured invalidation/replan events, and requires terminal completion. The
+dynamic-obstacle example additionally uses dense `morphit` robot collision
+spheres, proves that the moved cuboid intersects the original TCP path, and
+requires the replanned TCP path to retain a positive minimum clearance.
 
 Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
 Both examples separate `create_*_application()` (scene/profile/runtime and
@@ -951,6 +971,9 @@ registers the referenced entity as a recovery dependency, allowing an executing
 semantic object's pose once per planning attempt and declares the semantic
 `entity_id` because grasp sampling, upright adjustment, and the held
 `object_to_eef` relation all consume that same pose.
+`AxisAlign` likewise returns a single-manipulator `HeldObjectState`; it preserves
+the object-to-EEF relation established at grasp and records the final aligned
+EEF pose as the projected grasp pose.
 
 `AssembleGoal.base_pose=SceneEntityPose(...)` is the canonical assembly anchor
 and is required, so the base is always snapshot-grounded and registered as a

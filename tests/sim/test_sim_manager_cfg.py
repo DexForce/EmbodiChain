@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -188,6 +189,26 @@ def test_newton_backend_exposes_resolved_solver_type() -> None:
 
     assert backend.solver_type == "xpbd"
     assert world_config.newton_cfg.solver_cfg.solver_type == "xpbd"
+
+
+def test_newton_backend_syncs_render_state_without_physics_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = object()
+    native_backend = SimpleNamespace(
+        sync_to_dexsim=MagicMock(),
+        sync_particle_fluids=MagicMock(),
+    )
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        lambda candidate: native_backend if candidate is world else None,
+    )
+    backend = NewtonPhysicsBackend(SimpleNamespace())
+
+    backend.sync_render_state(SimpleNamespace(world=world))
+
+    native_backend.sync_to_dexsim.assert_called_once_with(world)
+    native_backend.sync_particle_fluids.assert_called_once_with(world)
 
 
 def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:

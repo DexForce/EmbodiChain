@@ -205,7 +205,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config = SimulationManagerCfg(
-        headless=False,
+        headless=True,
         device="cpu",
         num_envs=1,
         physics_cfg=physics_cfg_for_backend(args.physics),

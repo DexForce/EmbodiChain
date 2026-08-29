@@ -30,8 +30,8 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     GraspGoal,
     MotionPolicy,
     PickUpOptions,
@@ -100,8 +100,9 @@ def main() -> None:
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
     motion_gen = create_toppra_motion_generator(robot)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
@@ -160,7 +161,14 @@ def main() -> None:
         engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
-        logger.log_warning("Failed to plan PickUp followed by Pour.")
+        failed = [
+            f"{plan.skill_id}: {plan.diagnostics.messages or ('planning failed',)}"
+            for plan in compiled.action_plans
+            if not plan.plan_success.all()
+        ]
+        logger.log_warning(
+            "Failed to plan PickUp followed by Pour: " + "; ".join(failed)
+        )
         return
 
     if wait_for_user:

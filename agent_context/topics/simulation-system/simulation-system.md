@@ -59,6 +59,7 @@ EnvCfg.sim_cfg
        → for Default, apply pending source overlays to materialized handles
        → prepare manager-owned runtime buffers for the committed revision
        → bind declared EmbodiChain facades in place
+       → publish bound state through the backend render-sync hook
        → attach sensors whose parents are now materialized
   → initialize metadata-dependent robot, action, and render-only resources
   → BaseEnv.step()
@@ -158,9 +159,12 @@ the first commit; Default source configuration follows native materialization.
 A failed resolver or configurator remains pending and retryable. Runtime
 preparation is recorded by committed topology revision: Default CUDA calls
 `World.init_gpu_physics()`, while Default CPU and Newton need no additional
-manager call after Spawn commit. Facade binding and sensor attachment are
-retried on every call; already completed declarations are not reconfigured or
-rebound. `init_gpu_physics()` and
+manager call after Spawn commit. After facade binding/reset, the active physics
+backend publishes current state to render resources once per committed topology
+revision. This is a no-op for Default and invokes Newton's render bridge without
+advancing simulation time. Facade binding, render publication, and sensor
+attachment remain retryable; already completed declarations are not
+reconfigured or rebound. `init_gpu_physics()` and
 `finalize_newton_physics()` remain compatibility aliases, but new code should
 call `prepare()`.
 
@@ -340,6 +344,8 @@ legacy layer can eventually be removed as one unit.
   handles, link/joint metadata, batched state, or physics results.
 - Keep `prepare()` convergent and retryable: do not mark a declaration bound
   until its full facade construction succeeds.
+- Keep backend render-state publication free of physics steps. Newton's initial
+  state sync must not advance its simulation step or time.
 - Treat resource UIDs as registry identities; retrieve and mutate resources
   through the manager instead of maintaining a parallel scene registry.
 - Keep batched object and sensor state aligned with the manager's arena count.

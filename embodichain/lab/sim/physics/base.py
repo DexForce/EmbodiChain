@@ -96,6 +96,17 @@ class PhysicsBackend(ABC):
         additional activation work.
         """
 
+    def sync_render_state(self, result: "dexsim.spawn.SpawnResult") -> None:
+        """Publish the current physics state to render resources without stepping.
+
+        Backends whose physics and render state share native storage require no
+        work. Backends with a separate render bridge override this hook.
+
+        Args:
+            result: The finalized Spawn result whose state should be published.
+        """
+        del result
+
     # ------------------------------------------------------------------ #
     # Scene access
     # ------------------------------------------------------------------ #

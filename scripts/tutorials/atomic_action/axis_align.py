@@ -29,15 +29,13 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 from typing import Sequence
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     AxisAlignAffordance,
     AxisAlignGoal,
     AxisAlignOptions,
     ControlPartCommandProfile,
-    EntityState,
+    create_simulation_atomic_action_engine,
     MotionPolicy,
     ObjectSemantics,
-    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -144,7 +142,7 @@ def create_axis_align_semantics(
 
 
 def main() -> None:
-    """Plan and replay a grasp, axis alignment, lowering, and release."""
+    """Plan and replay a grasp followed by axis alignment."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(sim, tcp_z=0.15)
@@ -153,8 +151,9 @@ def main() -> None:
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
     motion_gen = create_toppra_motion_generator(robot)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
@@ -210,19 +209,11 @@ def main() -> None:
                     ),
                     pre_grasp_distance=0.15,
                     lift_height=0.16,
-                    lower_distance=0.03,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
         ),
-        engine.initial_context(
-            scene=SceneSnapshot(
-                timestamp=0.0,
-                version=0,
-                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
-            ),
-            control_dt=sim.sim_config.physics_dt,
-        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan AxisAlign demo trajectory.")

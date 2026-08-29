@@ -70,8 +70,6 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 class SlideGoal(ObjectActionGoal):
     """Translating articulation link described by a slide affordance."""
 
-    goal_kind: ClassVar[str] = "slide"
-
     target_pose: PoseGoalValue
     """Link pose snapshot or late-bound stable scene-entity reference."""
 
@@ -130,12 +128,6 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             ),
         ),
     )
-
-    def __init__(
-        self,
-        default_options: SlideOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
 
     def _on_bind(self) -> None:
         """Resolve dimensions owned by the engine's robot."""

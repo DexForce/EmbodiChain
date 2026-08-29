@@ -112,16 +112,12 @@ def main():
 
     # Set initial joint positions for both arms
     left_arm_qpos = torch.tensor(
-        [
-            [0, 0, -np.pi / 4, np.pi / 4, -np.pi / 2, 0.0, np.pi / 4, 0.0]
-        ],  # WAIST + LEFT_J[1-7]
+        [[0, -np.pi / 4, np.pi / 4, -np.pi / 2, 0.0, np.pi / 4, 0.0]],
         dtype=torch.float32,
         device="cpu",
     )
     right_arm_qpos = torch.tensor(
-        [
-            [0, 0, np.pi / 4, -np.pi / 4, np.pi / 2, 0.0, -np.pi / 4, 0.0]
-        ],  # WAIST + RIGHT_J[1-7]
+        [[0, np.pi / 4, -np.pi / 4, np.pi / 2, 0.0, -np.pi / 4, 0.0]],
         dtype=torch.float32,
         device="cpu",
     )

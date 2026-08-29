@@ -21,12 +21,15 @@ import torch
 import numpy as np
 import dexsim.render as dr
 
-from typing import Callable, Dict, Tuple, List, Sequence
+from typing import TYPE_CHECKING, Dict, Tuple, List, Sequence
 
 from dexsim.utility import inv_transform
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.utils.math import matrix_from_euler
 from embodichain.utils import logger, configclass
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.sim_manager import SimulationManager
 
 
 @configclass
@@ -156,18 +159,12 @@ class StereoCamera(Camera):
         config: StereoCameraCfg,
         device: torch.device = torch.device("cpu"),
         *,
-        world: dexsim.World | None = None,
-        arenas: Sequence[dexsim.environment.Arena] | None = None,
-        parent_node_resolver: Callable[[str], Sequence[object]] | None = None,
-        defer_parent_attachment: bool = False,
+        owner: SimulationManager,
     ) -> None:
         super().__init__(
             config,
             device,
-            world=world,
-            arenas=arenas,
-            parent_node_resolver=parent_node_resolver,
-            defer_parent_attachment=defer_parent_attachment,
+            owner=owner,
         )
 
         # check valid config

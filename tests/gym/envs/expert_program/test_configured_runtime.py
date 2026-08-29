@@ -30,11 +30,10 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
-from embodichain.lab.gym.envs.expert_program import SequenceCfg, load_expert_program
+from embodichain.lab.gym.envs.expert_program import load_expert_program
 from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
     _MoveHeldObjectLowerer,
     _PourLowerer,
-    _PushObjectLowerer,
 )
 from embodichain.lab.gym.envs.expert_program.configured_runtime import (
     _decode_configured_expert_program_runtime,
@@ -42,16 +41,12 @@ from embodichain.lab.gym.envs.expert_program.configured_runtime import (
     _register_configured_expert_program_runtime,
 )
 from embodichain.lab.sim.atomic_actions import (
-    Affordance,
     HeldObjectPoseGoal,
     MoveHeldObjectOptions,
     PickUpOptions,
     PlaceOptions,
     PourGoal,
     PourOptions,
-    PushObjectGoal,
-    PushObjectOptions,
-    ObjectSemantics,
 )
 from embodichain.lab.sim.skills import RegisteredSemanticCall, SceneObjectRef
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -98,11 +93,6 @@ _TABLEWARE_TASKS = {
                 "simulation.pour",
             }
         ),
-    ),
-    "rearrangement": (
-        "expert_program_tableware_rearrangement",
-        "expert_program_cobotmagic_rearrangement",
-        frozenset({"pick", "place", "hand_over", "simulation.push_object"}),
     ),
 }
 
@@ -364,109 +354,6 @@ def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
 
     with pytest.raises(ValueError, match="exactly 16 values"):
         _decode_configured_expert_program_runtime(payload)
-
-
-def test_rearrangement_runs_two_arms_sequentially_until_parallel_is_safe() -> None:
-    """Planar pushing replaces unreliable thin-utensil pickup trajectories."""
-    config = _tableware_gym_config("rearrangement")
-    runtime = _decode_configured_expert_program_runtime(
-        config["expert_program_runtime"]
-    )
-    registration = runtime.registration
-    push_options = registration.robot_profile_binding.presets[
-        0
-    ].action_option_templates["simulation.push_object"]
-    program = load_expert_program(
-        config["expert_program_path"],
-        base_dir=_tableware_config_path("rearrangement").parent,
-        validation_context=registration.catalog,
-    )
-
-    assert type(program.program) is SequenceCfg
-    assert [segment.name for segment in program.program.items] == [
-        "push_fork_toward_plate_slot",
-        "refine_fork_at_plate_slot",
-        "push_spoon_toward_plate_slot",
-        "refine_spoon_at_plate_slot",
-    ]
-    assert type(push_options) is PushObjectOptions
-    assert push_options.hand_interp_steps == 7
-    assert push_options.approach_height == pytest.approx(0.1)
-    assert push_options.retract_height == pytest.approx(0.1)
-    assert push_options.contact_distance == pytest.approx(0.03)
-    assert push_options.push_overshoot == pytest.approx(0.02)
-    assert push_options.completion_tolerance == pytest.approx(0.075)
-    assert torch.equal(
-        push_options.object_contact_offset,
-        torch.tensor([-0.05, 0.0, 0.0]),
-    )
-    assert torch.equal(
-        push_options.support_frame_planar_contact_offset,
-        torch.tensor([-0.05, 0.0, 0.0]),
-    )
-    assert len(push_options.tool_calibrations) == 1
-    assert push_options.tool_calibrations[0].control_part == "right_arm"
-    assert push_options.tool_calibrations[0].contact_distance == pytest.approx(0.05)
-    assert registration.robot_profile_binding.presets[
-        0
-    ].recovery_policy.goal_rotation_threshold == pytest.approx(torch.pi)
-    assert registration.scene_binding.antipodal_grasps == ()
-    assert len(registration.registered_semantic_lowerer_factories) == 1
-    assert registration.registered_semantic_lowerer_factories[0].routes == (
-        ("fork", "plate_fork_slot"),
-        ("spoon", "plate_spoon_slot"),
-    )
-    assert (
-        "grasp_pose_generators"
-        not in config["expert_program_runtime"]["runtime_services"]
-    )
-
-
-def test_rearrangement_push_lowerer_builds_a_late_bound_typed_goal() -> None:
-    """Registered arguments choose only one predeclared object-target route."""
-    semantics = ObjectSemantics(
-        affordance=Affordance(),
-        geometry={},
-        entity_id="fork",
-        label="fork",
-    )
-    lowering = _PushObjectLowerer(
-        (("fork", "plate_fork_slot"),),
-        (semantics,),
-    ).lower(
-        RegisteredSemanticCall(
-            call_id="simulation.push_object",
-            arguments={"object": "fork", "target": "plate_fork_slot"},
-        ),
-        context=None,  # type: ignore[arg-type]
-        bound=None,  # type: ignore[arg-type]
-        option_template=PushObjectOptions(),
-    )
-
-    assert type(lowering.goal) is PushObjectGoal
-    assert lowering.goal.semantics is semantics
-    assert lowering.goal.target_pose.entity_id == "plate_fork_slot"
-
-
-def test_rearrangement_keeps_fixed_plate_out_of_interactive_objects() -> None:
-    """The kinematic placement reference belongs to the background scene."""
-    config = _tableware_gym_config("rearrangement")
-    background = {item["uid"]: item for item in config["background"]}
-    interactive_ids = {item["uid"] for item in config["rigid_object"]}
-
-    assert background["plate"]["body_type"] == "kinematic"
-    assert "plate" not in interactive_ids
-    assert interactive_ids == {"fork", "spoon"}
-
-
-def test_rearrangement_settles_thin_tableware_before_first_push() -> None:
-    """Thin resting utensils receive a full contact-settling window on reset."""
-    config = _tableware_gym_config("rearrangement")
-    settle = config["env"]["events"]["settle_tableware_on_reset"]
-
-    assert settle["mode"] == "reset"
-    assert settle["params"]["min_steps"] == 50
-    assert settle["params"]["timeout_behavior"] == "raise"
 
 
 @pytest.mark.parametrize("task_name", tuple(_TASKS))

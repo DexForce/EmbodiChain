@@ -24,6 +24,8 @@ import weakref
 from .base import PhysicsBackend
 
 if TYPE_CHECKING:
+    import dexsim
+
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
 
 __all__ = ["NewtonPhysicsBackend"]
@@ -72,6 +74,18 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # WorldConfig.newton_cfg registers the World-owned NewtonBackend.
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
+
+    def sync_render_state(self, result: "dexsim.spawn.SpawnResult") -> None:
+        """Publish Newton state through DexSim's render bridge without stepping."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(result.world)
+        if backend is None:
+            raise RuntimeError(
+                "Newton backend is unavailable for render-state synchronization."
+            )
+        backend.sync_to_dexsim(result.world)
+        backend.sync_particle_fluids(result.world)
 
     @property
     def newton_manager(self):

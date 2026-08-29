@@ -150,7 +150,8 @@ def create_sensor(sim: SimulationManager, args):
 
     # extrinsics params
     pos = [0.09, 0.05, 0.04]
-    quat = R.from_euler("xyz", [-35, 135, 0], degrees=True).as_quat().tolist()
+    # CameraCfg uses xyzw; this rotation preserves the intended wrist-camera view.
+    quat = R.from_euler("xyz", [180, -45, 35], degrees=True).as_quat().tolist()
 
     # If attach_sensor is True, attach to robot end-effector; otherwise, place it in the scene
     if args.attach_sensor:

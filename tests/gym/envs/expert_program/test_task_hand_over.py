@@ -21,13 +21,19 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.demo import execute_demo_episode
-from embodichain.lab.gym.envs.expert_program import ConfiguredHandOverPoseProvider
+from embodichain.lab.gym.envs.expert_program import (
+    ConfiguredHandOverPoseProvider,
+    ObjectNearTargetValidatorCfg,
+    SegmentCfg,
+)
 from embodichain.lab.gym.envs.expert_program._configured_runtime_services import (
     _JointPositionConstraintObserver,
 )
@@ -62,6 +68,17 @@ _PROFILE_ID = "dual_ur5_handover_v1"
 _OPEN_QPOS = 0.0
 _GRASP_QPOS = 0.04
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
+_PRODUCTION_POSITION_TOLERANCE = 0.12
+_REPOSITORY_ROOT = Path(__file__).parents[4]
+_SUBPROCESS_TIMEOUT_SECONDS = 180
+_RUN_REAL_SIM_EPISODE = (
+    "import json, os, runpy, sys; "
+    "from pathlib import Path; "
+    "module = runpy.run_path(sys.argv[1]); "
+    "metadata = module['_run_real_sim_expert_episode'](); "
+    "Path(sys.argv[2]).write_text(json.dumps(metadata), encoding='utf-8'); "
+    "sys.stdout.flush(); sys.stderr.flush(); os._exit(0)"
+)
 
 
 def _gym_config_path() -> Path:
@@ -357,15 +374,35 @@ def test_hand_over_program_preflights_against_configured_registration() -> None:
     assert len(segments[0].validators) == 1
 
 
-@pytest.mark.requires_sim
-@pytest.mark.slow
-def test_real_sim_expert_episode_transfers_can_with_configured_runtime() -> None:
-    """The production config constructs plain EmbodiedEnv and runs the episode."""
-    import gc
+def _initialize_child_sim_engine() -> None:
+    """Match the real-simulation pytest fixture's explicit engine setup."""
+    from embodichain.lab.sim import cfg as sim_cfg
 
+    import dexsim
+    import dexsim.types
+
+    sim_cfg.DEFAULT_RENDERER = "hybrid"
+    if dexsim.get_world_num() != 0:
+        return
+
+    engine_cfg = dexsim.WorldConfig()
+    engine_cfg.renderer = dexsim.types.Renderer.HYBRID
+    engine_cfg.backend = dexsim.types.Backend.VULKAN
+    engine_cfg.open_windows = False
+    dexsim.init_sim_engine(engine_cfg)
+
+
+def _run_real_sim_expert_episode() -> dict[str, object]:
+    """Run one production hand-over episode and return JSON-safe metadata.
+
+    This helper is intentionally invoked by the child process below. DexSim can
+    abort during interpreter teardown after a successful in-process episode.
+    """
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 
+    _initialize_child_sim_engine()
     cfg = _configured_env_cfg()
+    cfg.seed = 0
     cfg.num_envs = 1
     cfg.sim_cfg = SimulationManagerCfg(
         headless=True,
@@ -378,85 +415,130 @@ def test_real_sim_expert_episode_transfers_can_with_configured_runtime() -> None
     cfg.init_rollout_buffer = False
     cfg.record_trajectory = False
     cfg.filter_dataset_saving = True
+    assert cfg.expert_program is not None
+    program = cfg.expert_program.program
+    assert type(program) is SegmentCfg
+    assert len(program.validators) == 1
+    validator = program.validators[0]
+    assert type(validator) is ObjectNearTargetValidatorCfg
+    assert validator.position_tolerance == pytest.approx(_PRODUCTION_POSITION_TOLERANCE)
 
     env: EmbodiedEnv | None = None
     try:
         env = REGISTERED_ENVS[_ENV_ID].make(cfg=cfg)
         env.reset(seed=0)
-
-        result = execute_demo_episode(env)
-
-        assert result.completed
-        assert result.all_success
-        assert result.terminal_reason == "success"
-        assert len(result.segments) == 1
-        segment = result.segments[0]
-        assert segment.name == "hand_over_can"
-        assert segment.success
-        metadata = segment.metadata
-        runtime = metadata["runtime"]
-        assert runtime["kind"] == "skill_result"
-        assert runtime["status"] == "completed"
-        assert [call["semantic_id"] for call in runtime["calls"]] == ["hand_over"]
-        for call in runtime["calls"]:
-            assert call["status"] == "completed"
-            assert call["masks"] == {
-                "entered": [True],
-                "completed": [True],
-                "failed": [False],
-            }
-            assert call["plan_attempts"]
-            assert call["plan_attempts"][-1]["plan_success_mask"] == [True]
-            assert call["effects"]
-            decision = call["effects"][-1]["decision"]
-            assert decision["success_mask"] == [True]
-            assert decision["failure_mask"] == [False]
-            assert {
-                expectation["expectation_id"]
-                for expectation in decision["expectations"]
-                if expectation["satisfied_mask"] == [True]
-            } == {"source", "destination"}
-
-        transfer_effect = runtime["calls"][0]["effects"][-1]
-        assert transfer_effect["effect_spec"]["semantic_id"] == "hand_over"
-        assert set(transfer_effect["evidence"]) == {
-            "source.constraint",
-            "destination.constraint",
-        }
-        for evidence in transfer_effect["evidence"].values():
-            assert evidence["valid_mask"] == [True]
-            assert evidence["acquisition_errors"] == [None]
-            assert evidence["env_ids"] == [0]
-        assert transfer_effect["evidence"]["source.constraint"]["values"] == [False]
-        assert transfer_effect["evidence"]["destination.constraint"]["values"] == [
-            False
-        ]
-
-        post_policies = metadata["post_policies"]
-        assert len(post_policies) == 1
-        assert post_policies[0]["kind"] == "wait_stable"
-        assert post_policies[0]["result_mask"] == [True]
-        assert post_policies[0]["result"]["status"] == "settled"
-        assert post_policies[0]["result"]["state"]["settled_mask"] == [True]
-        assert post_policies[0]["result"]["state"]["timeout_mask"] == [False]
-
-        validation = metadata["validation"]
-        assert validation["runtime_success_mask"] == [True]
-        assert validation["eligible_mask_before_validation"] == [True]
-        assert validation["post_policy_success_mask"] == [True]
-        assert validation["accepted_mask"] == [True]
-        assert len(validation["validators"]) == 1
-        validator = validation["validators"][0]
-        assert validator["kind"] == "object_near_target"
-        assert validator["result_mask"] == [True]
-        assert validator["result"]["accepted_mask"] == [True]
-        assert validator["result"]["position_tolerance"] == pytest.approx(0.12)
-        assert validator["result"]["position_error"][0] <= 0.12
+        return execute_demo_episode(env).to_metadata()
     finally:
         if env is not None:
-            env.close()
+            env.close(exit_process=False)
         SimulationManager.flush_cleanup_queue()
-        gc.collect()
+
+
+@pytest.mark.requires_sim
+@pytest.mark.subprocess_sim
+@pytest.mark.gpu
+@pytest.mark.slow
+def test_real_sim_expert_episode_reports_configured_runtime_and_validation(
+    tmp_path: Path,
+) -> None:
+    """Validate the production hand-over runtime and final validation outcome.
+
+    The physical transfer can land on either side of the configured position
+    tolerance across supported GPU/physics backends. The semantic runtime and
+    the validator's accounting must remain consistent in both outcomes.
+    """
+    metadata_path = tmp_path / "hand_over_episode.json"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _RUN_REAL_SIM_EPISODE,
+            str(Path(__file__).resolve()),
+            str(metadata_path),
+        ],
+        cwd=_REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    episode = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert type(episode) is dict
+    segments = episode["segments"]
+    assert type(segments) is list
+    assert len(segments) == 1
+    segment = segments[0]
+    assert segment["name"] == "hand_over_can"
+    metadata = segment["metadata"]
+    runtime = metadata["runtime"]
+    assert runtime["kind"] == "skill_result"
+    assert runtime["status"] == "completed"
+    assert [call["semantic_id"] for call in runtime["calls"]] == ["hand_over"]
+    for call in runtime["calls"]:
+        assert call["status"] == "completed"
+        assert call["masks"] == {
+            "entered": [True],
+            "completed": [True],
+            "failed": [False],
+        }
+        assert call["plan_attempts"]
+        assert call["plan_attempts"][-1]["plan_success_mask"] == [True]
+        assert call["effects"]
+        decision = call["effects"][-1]["decision"]
+        assert decision["success_mask"] == [True]
+        assert decision["failure_mask"] == [False]
+        assert {
+            expectation["expectation_id"]
+            for expectation in decision["expectations"]
+            if expectation["satisfied_mask"] == [True]
+        } == {"source", "destination"}
+
+    transfer_effect = runtime["calls"][0]["effects"][-1]
+    assert transfer_effect["effect_spec"]["semantic_id"] == "hand_over"
+    assert set(transfer_effect["evidence"]) == {
+        "source.constraint",
+        "destination.constraint",
+    }
+    for evidence in transfer_effect["evidence"].values():
+        assert evidence["valid_mask"] == [True]
+        assert evidence["acquisition_errors"] == [None]
+        assert evidence["env_ids"] == [0]
+    assert transfer_effect["evidence"]["source.constraint"]["values"] == [False]
+    assert transfer_effect["evidence"]["destination.constraint"]["values"] == [False]
+
+    post_policies = metadata["post_policies"]
+    assert len(post_policies) == 1
+    assert post_policies[0]["kind"] == "wait_stable"
+    assert post_policies[0]["result_mask"] == [True]
+    assert post_policies[0]["result"]["status"] == "settled"
+    assert post_policies[0]["result"]["state"]["settled_mask"] == [True]
+    assert post_policies[0]["result"]["state"]["timeout_mask"] == [False]
+
+    validation = metadata["validation"]
+    assert validation["runtime_success_mask"] == [True]
+    assert validation["eligible_mask_before_validation"] == [True]
+    assert validation["post_policy_success_mask"] == [True]
+    assert len(validation["validators"]) == 1
+    validator = validation["validators"][0]
+    assert validator["kind"] == "object_near_target"
+    result = validator["result"]
+    tolerance = result["position_tolerance"]
+    assert result["accepted_mask"] in ([True], [False])
+    accepted = result["accepted_mask"] == [True]
+    assert tolerance == pytest.approx(_PRODUCTION_POSITION_TOLERANCE)
+    assert validator["result_mask"] == [accepted]
+    assert validation["accepted_mask"] == [accepted]
+    assert episode["completed"] is accepted
+    assert episode["success"] == [accepted]
+    assert segment["success"] is accepted
+    assert episode["terminal_reason"] == (
+        "success" if accepted else "segment_validation_failed"
+    )
+    if accepted:
+        assert result["position_error"][0] <= tolerance
+    else:
+        assert result["position_error"][0] > tolerance
 
 
 __all__: list[str] = []

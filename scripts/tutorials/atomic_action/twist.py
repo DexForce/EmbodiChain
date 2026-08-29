@@ -32,14 +32,11 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
-    EntityState,
     MotionPolicy,
     ObjectSemantics,
     TwistAffordance,
     TwistGoal,
     TwistOptions,
-    SceneEntityPose,
-    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -198,7 +195,7 @@ def main() -> None:
                 "twist",
                 TwistGoal(
                     semantics,
-                    SceneEntityPose(KNOB_SCENE_ENTITY_ID),
+                    target_pose,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
                 motion_policy=MotionPolicy(sample_count=TWIST_SAMPLE_INTERVAL),
@@ -209,14 +206,7 @@ def main() -> None:
                 ),
             ),
         ),
-        context=engine.initial_context(
-            scene=SceneSnapshot(
-                timestamp=0.0,
-                version=0,
-                entities={KNOB_SCENE_ENTITY_ID: EntityState(target_pose)},
-            ),
-            control_dt=sim.sim_config.physics_dt,
-        ),
+        context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the Twist demo trajectory.")

@@ -57,7 +57,6 @@ from embodichain.lab.sim.planners import (
     ToppraPlannerCfg,
 )
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
-from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -190,23 +189,6 @@ def create_tutorial_argument_parser(
     return parser
 
 
-def make_ur5_solver_cfg(tcp_z: float) -> URSolverCfg:
-    """Create the UR5 arm solver cfg used by atomic-action tutorials."""
-    cfg = URSolverCfg(
-        ur_type="ur5",
-        end_link_name="ee_link",
-        root_link_name="base_link",
-        tcp=[
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, tcp_z],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-    )
-    cfg.urdf_path = None
-    return cfg
-
-
 def create_tutorial_simulation(
     args: argparse.Namespace,
     *,
@@ -224,11 +206,10 @@ def create_tutorial_simulation(
     Returns:
         A simulation manager with the tutorial key light configured.
     """
-    width, height = get_tutorial_window_size(args)
     sim = SimulationManager(
         SimulationManagerCfg(
-            width=width,
-            height=height,
+            width=VIEWER_WIDTH,
+            height=VIEWER_HEIGHT,
             headless=True,
             num_envs=args.num_envs,
             device=args.device,
@@ -316,34 +297,12 @@ def add_ur5_gripper_robot(
     )
 
 
-def add_franka_panda_robot(
-    sim: SimulationManager,
-    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
-    init_qpos: Sequence[float] | None = None,
-) -> Robot:
-    """Add a Franka arm with the standard PGI tutorial gripper.
-
-    Args:
-        sim: Simulation manager that owns the robot.
-        init_pos: Root position of the robot in its arena.
-        init_qpos: Optional full robot joint configuration.
-
-    Returns:
-        The added robot instance.
-    """
-    return sim.add_robot(
-        cfg=create_franka_panda_robot_cfg(
-            init_pos=init_pos,
-            init_qpos=init_qpos,
-        )
-    )
-
-
 def add_tutorial_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> Robot:
     """Add a selected tutorial robot with the shared PGI gripper.
 
@@ -364,6 +323,7 @@ def add_tutorial_robot(
             robot_type,
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     )
 
@@ -858,30 +818,26 @@ def make_clear_dynamics_callback(
     return clear_dynamics
 
 
-def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
-    """Return the viewer window size used by atomic-action tutorials."""
-    return VIEWER_WIDTH, VIEWER_HEIGHT
+_NONINTERACTIVE_DISPLAY_FLAGS = (
+    "headless",
+    "viser",
+    "diagnose_plan",
+    "headless_play",
+)
+
+
+def _uses_noninteractive_display(args: argparse.Namespace) -> bool:
+    return any(getattr(args, flag, False) for flag in _NONINTERACTIVE_DISPLAY_FLAGS)
 
 
 def should_open_tutorial_window(args: argparse.Namespace) -> bool:
     """Return whether an interactive viewer window should be opened."""
-    return not (
-        getattr(args, "headless", False)
-        or getattr(args, "viser", False)
-        or getattr(args, "diagnose_plan", False)
-        or getattr(args, "headless_play", False)
-    )
+    return not _uses_noninteractive_display(args)
 
 
 def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
     """Return whether the tutorial should pause for terminal input."""
-    return not (
-        getattr(args, "auto_play", False)
-        or getattr(args, "headless", False)
-        or getattr(args, "viser", False)
-        or getattr(args, "diagnose_plan", False)
-        or getattr(args, "headless_play", False)
-    )
+    return not (getattr(args, "auto_play", False) or _uses_noninteractive_display(args))
 
 
 def start_auto_play_recording(
@@ -1013,6 +969,7 @@ def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
     tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
+    **kwargs,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
@@ -1087,6 +1044,7 @@ def create_ur5_gripper_robot_cfg(
 def create_franka_panda_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> RobotCfg:
     """Build a Franka arm + PGI gripper configuration for the tutorials.
 
@@ -1149,6 +1107,7 @@ def create_franka_panda_robot_cfg(
 def create_ur10_robotiq_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> RobotCfg:
     """Build a UR10 arm with a six-DOF Robotiq 2F-140 gripper.
 
@@ -1206,6 +1165,7 @@ def create_tutorial_robot_cfg(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> RobotCfg:
     """Build a selected tutorial arm with the common PGI gripper contract.
 
@@ -1225,16 +1185,19 @@ def create_tutorial_robot_cfg(
         return create_ur5_gripper_robot_cfg(
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     if robot_type == "franka":
         return create_franka_panda_robot_cfg(
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     if robot_type == "ur10":
         return create_ur10_robotiq_robot_cfg(
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     raise ValueError(
         f"Unsupported tutorial robot {robot_type!r}; expected one of {TUTORIAL_ROBOTS}."
@@ -1256,7 +1219,6 @@ __all__ = [
     "TutorialCliFeature",
     "TutorialRobot",
     "TUTORIAL_ROBOTS",
-    "add_franka_panda_robot",
     "add_tutorial_robot",
     "add_ur5_gripper_robot",
     "broadcast_pose_batch",
@@ -1275,11 +1237,9 @@ __all__ = [
     "format_tensor",
     "get_hand_open_close_qpos",
     "initialize_pre_pick_robot_pose",
-    "make_ur5_solver_cfg",
     "make_eef_pose_at",
     "make_clear_dynamics_callback",
     "make_top_down_eef_pose",
-    "get_tutorial_window_size",
     "prepare_tutorial_scene",
     "publish_tutorial_scene",
     "replay_trajectory",
