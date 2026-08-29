@@ -74,10 +74,24 @@ joint controls, the interactive terminal, and worked examples.
 
 ---
 
+(cli-list-tasks)=
+## List Tasks
+
+Discover installed tasks and show their environment IDs and supported expert
+demo or RL capabilities:
+
+```bash
+embodichain list-task
+```
+
+---
+
 (cli-run-environment)=
 ## Run Environment
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
+``embodichain run-task`` is an exact alias of ``embodichain run-env`` and accepts
+the same arguments.
 
 For an end-to-end explanation of mode selection, preview, the differences
 between dataset/video/trajectory recording, and all three replay modes, see
@@ -309,7 +323,7 @@ simulator:
 
 ```bash
 embodichain preview_lerobot_data \
-    outputs/lerobot/expert_program \
+    outputs/lerobot/task_program \
     --latest \
     --episode 0 \
     --expect-segments 3

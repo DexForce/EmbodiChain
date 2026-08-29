@@ -47,6 +47,7 @@ class Command:
     name: str
     target: str
     help: str
+    aliases: tuple[str, ...] = ()
 
 
 COMMANDS = (
@@ -79,11 +80,12 @@ COMMANDS = (
         name="run-env",
         target="embodichain.lab.scripts.run_env:cli",
         help="Run an environment for data generation or preview.",
+        aliases=("run-task",),
     ),
     Command(
-        name="list-env",
-        target="embodichain.__main__:_run_list_env",
-        help="List task environments by category and capability.",
+        name="list-task",
+        target="embodichain.__main__:_run_list_task",
+        help="List tasks by category and capability.",
     ),
     Command(
         name="preview_lerobot_data",
@@ -148,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
         # ``embodichain <command> --help`` reach that complete parser.
         subparsers.add_parser(
             command.name,
+            aliases=command.aliases,
             add_help=False,
             help=command.help,
             description=command.help,
@@ -162,10 +165,10 @@ def _load_handler(target: str) -> Callable[[Sequence[str] | None], None]:
     return getattr(module, attribute)
 
 
-_EXPERT_PROGRAM = "Expert Demo: Expert Program"
+_TASK_PROGRAM = "Expert Demo: Task Program"
 _HANDWRITTEN_DEMO = "Expert Demo: Handwritten Trajectory"
 _RL = "RL"
-_CAPABILITY_ORDER = (_EXPERT_PROGRAM, _HANDWRITTEN_DEMO, _RL)
+_CAPABILITY_ORDER = (_TASK_PROGRAM, _HANDWRITTEN_DEMO, _RL)
 
 
 @dataclass
@@ -271,7 +274,7 @@ def _iter_task_directories(
         yield relative_path, env_configs, agents
 
     for child in children:
-        if not child.is_dir() or child.name in {"agents", "expert"}:
+        if not child.is_dir() or child.name in {"agents", "task_program"}:
             continue
         yield from _iter_task_directories(child, (*relative_path, child.name))
 
@@ -307,11 +310,8 @@ def _config_environment_entries(
                 if not isinstance(env_id, str) or not env_id:
                     continue
                 capabilities = []
-                if (
-                    "expert_program_path" in config
-                    or "expert_program_runtime" in config
-                ):
-                    capabilities.append(_EXPERT_PROGRAM)
+                if "task_program_dir" in config:
+                    capabilities.append(_TASK_PROGRAM)
                 _merge_environment_entry(
                     entries,
                     env_id=env_id,
@@ -383,10 +383,10 @@ def _collect_environment_entries() -> list[_EnvironmentListEntry]:
             continue
         capabilities: list[str] = []
         if (
-            spec.expert_program_registration is not None
-            or spec.expert_program_adapter_factory is not None
+            spec.task_program_registration is not None
+            or spec.task_program_adapter_factory is not None
         ):
-            capabilities.append(_EXPERT_PROGRAM)
+            capabilities.append(_TASK_PROGRAM)
         elif _implements_handwritten_demo(spec.cls):
             capabilities.append(_HANDWRITTEN_DEMO)
         if spec.supports_rl:
@@ -423,7 +423,7 @@ def _print_environment_entries(entries: Sequence[_EnvironmentListEntry]) -> None
     from prettytable import PrettyTable
 
     table = PrettyTable()
-    table.title = f"Environments ({len(entries)})"
+    table.title = f"Tasks ({len(entries)})"
     table.field_names = ["Task", "Environment ID", "Capability"]
     table.align = "l"
     active_categories: tuple[str, ...] = ()
@@ -456,15 +456,15 @@ def _print_environment_entries(entries: Sequence[_EnvironmentListEntry]) -> None
     print(table)
 
 
-def _run_list_env(argv: Sequence[str] | None = None) -> None:
-    """List discovered EmbodiChain task environments.
+def _run_list_task(argv: Sequence[str] | None = None) -> None:
+    """List discovered EmbodiChain tasks.
 
     Args:
         argv: Arguments excluding the command name.
     """
     parser = argparse.ArgumentParser(
-        prog="embodichain list-env",
-        description="List task environments by category and capability.",
+        prog="embodichain list-task",
+        description="List tasks by category and capability.",
         epilog=(
             "Environment Only means the task currently exposes neither an "
             "Expert Demo entry point nor a supported RL configuration."
@@ -477,7 +477,7 @@ def _run_list_env(argv: Sequence[str] | None = None) -> None:
     discover_task_packages()
     entries = _collect_environment_entries()
     if not entries:
-        print("No registered environments found.")
+        print("No registered tasks found.")
         return
     _print_environment_entries(entries)
 
@@ -504,7 +504,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.parse_args(arguments)
         return
 
-    command_by_name = {command.name: command for command in COMMANDS}
+    command_by_name = {
+        name: command
+        for command in COMMANDS
+        for name in (command.name, *command.aliases)
+    }
     command = command_by_name.get(arguments[0])
     if command is None:
         parser.error(

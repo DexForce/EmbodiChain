@@ -68,7 +68,8 @@ the fingers in the planned control part. A mismatch means cuRobo validates a
 different collision geometry from the one replayed in DexSim.
 
 Assuming the scene has been registered as shown in
-{doc}`../scene_registry`, construct the planner world from that catalog:
+{doc}`../../task_program/scene_registry`, construct the planner world from
+that catalog:
 
 ~~~python
 from embodichain.lab.sim.planners import (
@@ -77,7 +78,7 @@ from embodichain.lab.sim.planners import (
     MotionGenCfg,
     MotionGenerator,
 )
-from embodichain.lab.semantic_skills import SceneCollisionWorldMode
+from embodichain.lab.task_program.semantics import SceneCollisionWorldMode
 
 collision_mode = registry.resolve_collision_world_mode(
     batch_size=robot.num_instances,
@@ -202,8 +203,9 @@ in `rigid_objects`. A sequence of objects is retained only as an advanced
 direct-core path; it derives names from each `uid` or an `obstacle_<index>`
 fallback. Do not use that form for a registry-backed world.
 
-The {doc}`../scene_registry` integration performs two higher-level checks before
-execution. First, all registry `STATIC ∪ DYNAMIC` IDs must exactly equal
+The {doc}`../../task_program/scene_registry` integration performs two
+higher-level checks before execution. First, all registry `STATIC ∪ DYNAMIC`
+IDs must exactly equal
 `MotionGenerator.collision_world_entity_ids`. Second, registry, derived scene
 provider, and planner dynamic-ID subsets must exactly agree. The planner must
 also support pose updates and its shared/per-environment batch mode must agree

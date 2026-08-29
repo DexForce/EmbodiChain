@@ -43,7 +43,7 @@ EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
     "StayStillSave-v1": "embodichain_tasks.special.stay_still_save",
 }
 REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
-CONFIG_DEFINED_EXPERT_TASKS = {"pour_water"}
+CONFIG_DEFINED_TASK_PROGRAM_TASKS = {"pour_water"}
 RL_SIMULATOR_ENV_IDS = {"CartPoleRL", "PushCubeRL"}
 TABLEWARE_CONFIG_TASKS = {
     "blocks_ranking_rgb",
@@ -114,12 +114,13 @@ def test_tableware_configs_are_nested_under_manipulation() -> None:
     assert not (TASK_CONFIG_ROOT / "tableware").exists()
 
 
-def test_config_defined_expert_tasks_do_not_need_python_task_modules() -> None:
-    """Pure Expert Programs keep their runtime and workflow in task-local config."""
-    for task_name in CONFIG_DEFINED_EXPERT_TASKS:
+def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
+    """Pure Task Programs keep their runtime and workflow in task-local config."""
+    for task_name in CONFIG_DEFINED_TASK_PROGRAM_TASKS:
         module_name = f"embodichain_tasks.manipulation.tableware.{task_name}"
         config_root = TASK_CONFIG_ROOT / "manipulation/tableware" / task_name
 
         assert find_spec(module_name) is None
         assert (config_root / "env.json").is_file()
-        assert (config_root / "expert/program.yaml").is_file()
+        assert (config_root / "task_program/program.yaml").is_file()
+        assert (config_root / "task_program/integration.yaml").is_file()

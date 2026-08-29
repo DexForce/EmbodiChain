@@ -6,20 +6,19 @@
 Overview
 --------
 
-The ``lab`` package is EmbodiChain's robotics laboratory. It owns declarative
-semantic skill contracts (``semantic_skills``), provider-independent Expert
-Programs (``expert_program``), the simulation core (``sim``), the
-Gymnasium-compatible environment framework (``gym``), real-device controllers
-(``devices``), and browser visualization (``visualization``).
+The ``lab`` package is EmbodiChain's robotics laboratory. It owns the
+provider-independent Task Program language (including its Semantic Call
+contracts), the simulation core (``sim``), the Gymnasium-compatible
+environment framework (``gym``), real-device controllers (``devices``), and
+browser visualization (``visualization``).
 
 .. rubric:: Submodules
 
 .. autosummary::
 
    devices
-   expert_program
+   task_program
    gym
-   semantic_skills
    sim
    visualization
 
@@ -31,21 +30,19 @@ Browser Visualization
 
    embodichain.lab.visualization
 
-Expert Programs
----------------
+Task Program
+------------
 
 .. toctree::
    :maxdepth: 1
 
-   embodichain.lab.expert_program
-
-Semantic Skills
----------------
-
-.. toctree::
-   :maxdepth: 1
-
-   embodichain.lab.semantic_skills
+   embodichain.lab.task_program
+   embodichain.lab.task_program.language
+   embodichain.lab.task_program.semantics
+   embodichain.lab.task_program.compiler
+   embodichain.lab.task_program.runtime
+   embodichain.lab.task_program.integrations
+   embodichain.lab.task_program.integrations.simulation
 
 Device Management
 -----------------

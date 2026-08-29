@@ -30,7 +30,7 @@ EXPECTED_COMMANDS = {
     "benchmark",
     "data",
     "decompose-urdf",
-    "list-env",
+    "list-task",
     "preview-asset",
     "preview_lerobot_data",
     "run-env",
@@ -79,11 +79,33 @@ def test_dispatch_forwards_subcommand_arguments(
     assert received == ["--asset_path", "robot.urdf", "--headless"]
 
 
-def test_list_env_discovers_and_prints_task_tree(
+def test_run_task_alias_dispatches_to_run_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run-task forwards to the canonical run-env handler unchanged."""
+    loaded_targets: list[str] = []
+    received: list[str] = []
+
+    def fake_handler(argv: Sequence[str] | None = None) -> None:
+        received.extend(argv or [])
+
+    def load_handler(target: str):
+        loaded_targets.append(target)
+        return fake_handler
+
+    monkeypatch.setattr(cli, "_load_handler", load_handler)
+
+    cli.main(["run-task", "--gym_config", "task.yaml", "--headless"])
+
+    assert loaded_targets == ["embodichain.lab.scripts.run_env:cli"]
+    assert received == ["--gym_config", "task.yaml", "--headless"]
+
+
+def test_list_task_discovers_and_prints_task_tree(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """List-env renders folder hierarchy and precise task capabilities."""
+    """List-task renders folder hierarchy and precise task capabilities."""
     from embodichain.lab.gym.utils import registration
 
     discovery_calls: list[None] = []
@@ -104,7 +126,7 @@ def test_list_env_discovers_and_prints_task_tree(
             cli._EnvironmentListEntry(
                 "HandOver-v1",
                 ("manipulation", "hand_over"),
-                {cli._EXPERT_PROGRAM},
+                {cli._TASK_PROGRAM},
             ),
             cli._EnvironmentListEntry(
                 "BlocksRankingRGB-v1",
@@ -119,19 +141,19 @@ def test_list_env_discovers_and_prints_task_tree(
         ],
     )
 
-    cli.main(["list-env"])
+    cli.main(["list-task"])
 
     assert discovery_calls == [None]
     assert capsys.readouterr().out == """\
 +------------------------------------------------------------------------------------+
-|                                  Environments (4)                                  |
+|                                     Tasks (4)                                      |
 +------------------------+---------------------+-------------------------------------+
 | Task                   | Environment ID      | Capability                          |
 +------------------------+---------------------+-------------------------------------+
 | classic_control/       |                     |                                     |
 |   cart_pole            | CartPoleRL          | RL                                  |
 | manipulation/          |                     |                                     |
-|   hand_over            | HandOver-v1         | Expert Demo: Expert Program         |
+|   hand_over            | HandOver-v1         | Expert Demo: Task Program           |
 |   tableware/           |                     |                                     |
 |     blocks_ranking_rgb | BlocksRankingRGB-v1 | Expert Demo: Handwritten Trajectory |
 |     stack_cups         | StackCups-v1        | Environment Only                    |
@@ -139,12 +161,12 @@ def test_list_env_discovers_and_prints_task_tree(
 """
 
 
-def test_list_env_help_explains_environment_only_label(
+def test_list_task_help_explains_environment_only_label(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """List-env help defines the fallback capability label."""
+    """List-task help defines the fallback capability label."""
     with pytest.raises(SystemExit) as exc_info:
-        cli.main(["list-env", "--help"])
+        cli.main(["list-task", "--help"])
 
     assert exc_info.value.code == 0
     assert "Environment Only" in capsys.readouterr().out
@@ -160,7 +182,7 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
         json.dumps(
             {
                 "id": "PickPlace-v1",
-                "expert_program_path": "expert/program.yaml",
+                "task_program_dir": "task_program",
             }
         ),
         encoding="utf-8",
@@ -184,7 +206,7 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
 
     expert = entries["pickplace-v1"]
     assert expert.task_path == ("manipulation", "pick_place")
-    assert expert.capabilities == {cli._EXPERT_PROGRAM}
+    assert expert.capabilities == {cli._TASK_PROGRAM}
     learning = entries["pointmassrl"]
     assert learning.task_path == ("classic_control", "point_mass")
     assert learning.capabilities == {cli._RL}

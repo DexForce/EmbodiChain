@@ -100,10 +100,10 @@ def test_atomic_action_star_import_resolves_all_public_exports() -> None:
     assert set(atomic_actions.__all__).issubset(namespace)
 
 
-def test_atomic_action_modules_do_not_depend_on_semantic_skills() -> None:
-    """The atomic-action core must not import the higher semantic-skill layer."""
+def test_atomic_action_modules_do_not_depend_on_semantics() -> None:
+    """The Atomic Skill core must not import the Task Program semantic layer."""
     forbidden_dependencies = (
-        "embodichain.lab.semantic_skills",
+        "embodichain.lab.task_program.semantics",
         "from ..skills",
         "from .skills",
         "RobotSkillProfile",

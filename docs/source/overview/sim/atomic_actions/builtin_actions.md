@@ -514,7 +514,7 @@ requested orientation with an implicit transport orientation. A caller that
 needs upright or tilted transport must encode that orientation in the object
 target itself.
 
-After a successfully accepted Expert Program call, the execution layer
+After a successfully accepted Task Program call, the execution layer
 reconciles an active held relation from the terminal object observation and
 forward kinematics when both are available. Consequently, later object-space
 calls use the measured attachment instead of indefinitely projecting the

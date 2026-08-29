@@ -6,8 +6,6 @@
 :hidden:
 
 builtin_actions
-robot_skill_profiles
-expert_programs
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions
@@ -32,12 +30,12 @@ payloads, and transports without adding fixed resource categories to the core.
 
 ```text
 +--------------------------------+    +--------------------------------+
-| Expert Program                 |    | User-authored application      |
+| Task Program                 |    | User-authored application      |
 | semantic calls + task sequence |    | typed goal + binding + policy  |
 +---------------+----------------+    +---------------+----------------+
                 |                                     |
                 v                                     |
- Expert Program adapter: validation, grounding,      |
+ Task Program adapter: validation, grounding,      |
  and lowering to a typed ActionInvocation             |
                 |                                     |
                 +------------------+------------------+
@@ -80,8 +78,8 @@ The boundary is deliberate:
 
 | Concern | Owner | Contract |
 |---|---|---|
-| Task intent and sequencing | Expert Program or user-authored application | Selects skills, goals, and execution order |
-| Invocation construction | Expert Program adapter or direct Python caller | Produces the same typed `ActionInvocation`; the engine has no agent-only interface |
+| Task intent and sequencing | Task Program or user-authored application | Selects skills, goals, and execution order |
+| Invocation construction | Task Program adapter or direct Python caller | Produces the same typed `ActionInvocation`; the engine has no agent-only interface |
 | Perception and grounding | `SceneRegistry` on the canonical path; adapter or user application on the advanced path | Normalizes aliases to canonical typed references and publishes snapshots, or supplies already-grounded values directly |
 | Deterministic motion planning | Atomic action module | Produces an `ActionPlan` from an invocation and context |
 | Motion-generation resources | `AtomicActionEngine` | Owns one robot, motion generator, planner backend, device, trajectory builder, and control-part command profiles |
@@ -214,11 +212,11 @@ added.
 ### Skill contracts and endpoint binding
 
 The canonical semantic path uses a
-{doc}`RobotSkillProfile <robot_skill_profiles>` to match skill-local slots and
-endpoint capabilities against a generic robot resource graph. It validates
-participant pairing, typed commands, physical claims, complete defaults, and
-policy presets before producing the engine-owned `ActionBinding` used by an
-invocation.
+{doc}`RobotSkillProfile <../../task_program/robot_profiles>` to match
+skill-local slots and endpoint capabilities against a generic robot resource
+graph. It validates participant pairing, typed commands, physical claims,
+complete defaults, and policy presets before producing the engine-owned
+`ActionBinding` used by an invocation.
 
 Each `AtomicAction` declares one explicit `SkillBindingContract`. A **slot** is
 an action-local participant such as `primary`, `source`, or `destination`. Each
@@ -288,10 +286,10 @@ by the motion endpoint's control-part target.
 ### Control-part semantic commands
 
 On the canonical semantic path, declare embodiment commands on the
-{doc}`RobotSkillProfile <robot_skill_profiles>`, lower its control-part command
-profiles into the engine constructor, and then bind the profile in the semantic
-layer. For a direct-core integration, register the same command profiles
-explicitly when constructing the engine. Profile command IDs are generic and
+{doc}`RobotSkillProfile <../../task_program/robot_profiles>`, lower
+its control-part command profiles into the engine constructor, and then bind
+the profile in the semantic layer. For a direct-core integration, register the
+same command profiles explicitly when constructing the engine. Profile command IDs are generic and
 selected by endpoint adapters; the built-in control-part adapter defaults them
 to concrete `robot.control_parts` names. Direct-core engine keys are always
 concrete control-part names. The command names remain semantic:
@@ -374,7 +372,8 @@ calls the skill-specific `_plan()` hook. Individual skills therefore do not
 own dynamic-obstacle parameters or mutate caller-owned motion policies.
 
 For a canonical integration, construct the snapshot provider and collision
-world from one {doc}`SceneRegistry <../scene_registry>`. Direct use of
+world from one {doc}`SceneRegistry <../../task_program/scene_registry>`.
+Direct use of
 `RigidObjectSceneProvider` remains an advanced-core path.
 
 Registration means that an implementation is installed, not that every robot
@@ -708,7 +707,7 @@ perception/hardware providers use
 `validate_collision_integration(..., scene_provider=...)` directly. Plain
 `make_scene_provider()` and `RigidObjectSceneProvider` are perception or
 advanced direct-core paths without eager planner agreement. See
-{doc}`../scene_registry` for setup.
+{doc}`../../task_program/scene_registry` for setup.
 
 `MotionPolicy.dynamic_collision_mode` controls this live-scene path. `AUTO`
 (the default) consumes collision entities when the selected motion strategy and
@@ -847,7 +846,7 @@ its `effect_result`: schedule another call using `wait_duration`, re-read the
 current request, and submit a result for that current ID. Partial resolution and
 row deactivation can also replace the request before the delayed result arrives.
 
-Expert Program lowering installs segment-scoped held-object guards and blocking
+Task Program lowering installs segment-scoped held-object guards and blocking
 physical-effect gates for curated manipulation calls. A guard observes a
 negative invariant before a due command and, on proven attachment loss,
 applies an action-authorized removal-only `StateDelta` before retry or
@@ -868,15 +867,15 @@ create simulator attachments, freeze objects, or override poses.
 ## Agent and task integration
 
 An MLLM should not construct `ActionInvocation` by copying arbitrary JSON into
-runtime objects. It should emit the constrained Expert Program schema. The
-`embodichain.lab.semantic_skills` package supplies declarative call,
-scene, profile, and effect contracts; Expert Program owns validation,
+runtime objects. It should emit the constrained Task Program schema. The
+`embodichain.lab.task_program.semantics` package supplies declarative call,
+scene, profile, and effect contracts; Task Program owns validation,
 compilation, lowering, and execution:
 
 ```text
-MLLM / application Expert Program
+MLLM / application Task Program
     -> strict decode and bounded validation
-    -> provider-free ExpertProgramCompiler
+    -> provider-free TaskProgramCompiler
     -> environment-owned semantic integration
     -> live grounding + ActionInvocation
     -> AtomicActionEngine
@@ -891,8 +890,8 @@ correlate compatible in-flight updates with planner diagnostics and execution
 events without mutating a request implicitly.
 
 There is no public semantic execution facade. Applications choose either this
-direct Atomic Actions API or {doc}`Expert Program <expert_programs>`.
-Call-local recovery remains owned by `ExecutionRunner`; Expert Program may add
+direct Atomic Actions API or {doc}`Task Program <../../task_program/index>`.
+Call-local recovery remains owned by `ExecutionRunner`; Task Program may add
 bounded workflow recovery and segment acceptance around it.
 
 ## Extending the module
@@ -921,9 +920,12 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 
 ## Further reading
 
-- {doc}`../scene_registry` — canonical scene identity, snapshots, and collision integration
-- {doc}`../semantic_skills` — declarative semantic calls, scenes, robot profiles, and effects
-- {doc}`expert_programs` — semantic task compilation and execution
+- {doc}`../../task_program/scene_registry` — canonical scene identity,
+  snapshots, and collision integration
+- {doc}`../../task_program/index` — declarative semantic calls, scenes,
+  robot profiles, and effects
+- {doc}`../../task_program/robot_profiles` — embodiment resources and presets
+- {doc}`../../task_program/index` — semantic task compilation and execution
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples

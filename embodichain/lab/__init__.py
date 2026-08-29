@@ -16,24 +16,22 @@
 
 """EmbodiChain's robotics laboratory.
 
-Bundles semantic declarations, Expert Programs, simulation and environment
-runtime components, real-device controllers, and browser visualization.
+Bundles Task Programs, simulation and environment runtime components,
+real-device controllers, and browser visualization.
 """
 
 from __future__ import annotations
 
 from . import devices
-from . import expert_program
+from . import task_program
 from . import gym
-from . import semantic_skills
 from . import sim
 from . import visualization
 
 __all__ = [
     "devices",
-    "expert_program",
+    "task_program",
     "gym",
-    "semantic_skills",
     "sim",
     "visualization",
 ]

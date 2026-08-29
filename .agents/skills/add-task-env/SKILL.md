@@ -23,11 +23,11 @@ Ask the user:
   `manipulation`
 - **Task name** (snake_case, e.g. `pick_place`)
 - **Gym ID** (e.g. `PickPlace-v1`)
-- **Optional solutions**: scripted expert, Expert Program, or RL policy configs
+- **Optional solutions**: scripted expert, Task Program, or RL policy configs
 - **Config format**: JSON or YAML
 
 Combine the task family and optional subdomain into `<category_path>`. Do not
-use a solution method such as `rl` or `expert_program` as a category.
+use a solution method such as `rl` or `task_program` as a category.
 
 ### 2. Create the Task Module
 
@@ -109,11 +109,14 @@ the required behavior.
 Optional solution artifacts stay below the same task:
 
 ```text
-<task config>/expert/program.yaml           # declarative Expert Program
+<task config>/task_program/program.yaml     # declarative Task Program
+<task config>/task_program/integration.yaml # trusted scene/profile assembly
 <task config>/agents/<algorithm>.yaml       # RL training configuration
 ```
 
-Prefer the declarative Expert Program runtime for expert behavior. Do not
+Reference the Task Program directory once from `env.json` with
+`task_program_dir: task_program`. Prefer Task Program plus its explicit
+integration for expert behavior. Do not
 scaffold a task-local Action Bank, `BaseAgentEnv`, or expert Python package.
 Recorded trajectories are data assets, not Python integration modules.
 

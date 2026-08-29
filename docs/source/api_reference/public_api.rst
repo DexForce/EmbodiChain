@@ -9,18 +9,18 @@ covered by a more focused API-reference page. Prefer curated pages for APIs
 that need deeper explanations or examples. Sphinx obtains signatures and
 summaries here from the canonical Python docstrings.
 
-embodichain.agents.mllm.expert_program
+embodichain.agents.mllm.task_program
 --------------------------------------
 
 Strict MLLM entry points that inject host-owned integration settings before
-decoding and compiling the constrained Expert Program schema surface.
+decoding and compiling the constrained Task Program schema surface.
 
-.. currentmodule:: embodichain.agents.mllm.expert_program
+.. currentmodule:: embodichain.agents.mllm.task_program
 
 .. autosummary::
 
-   compile_mllm_expert_program
-   decode_mllm_expert_program
+   compile_mllm_task_program
+   decode_mllm_task_program
 
 embodichain.data.assets.planner_assets
 --------------------------------------
@@ -292,10 +292,10 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
-embodichain.lab.gym.envs.expert_program.simulation_handover
+embodichain.lab.task_program.integrations.simulation.handover
 -----------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_handover
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.handover
 
 .. autosummary::
 
@@ -1107,10 +1107,10 @@ embodichain.lab.sim.sim_manager
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
-embodichain.lab.semantic_skills.calls
+embodichain.lab.task_program.semantics.calls
 ------------------------------------------------
 
-.. currentmodule:: embodichain.lab.semantic_skills.calls
+.. currentmodule:: embodichain.lab.task_program.semantics.calls
 
 .. autosummary::
 
@@ -1126,14 +1126,14 @@ embodichain.lab.semantic_skills.calls
    SemanticPose
    builtin_semantic_call_catalog
 
-.. automodule:: embodichain.lab.semantic_skills.calls
+.. automodule:: embodichain.lab.task_program.semantics.calls
    :members:
    :no-index:
 
-embodichain.lab.semantic_skills.integration
+embodichain.lab.task_program.semantics.integration
 ------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.semantic_skills.integration
+.. currentmodule:: embodichain.lab.task_program.semantics.integration
 
 .. autosummary::
 
@@ -1146,28 +1146,28 @@ embodichain.lab.semantic_skills.integration
    SemanticIntegrationManifest
    SemanticValidationError
 
-.. automodule:: embodichain.lab.semantic_skills.integration
+.. automodule:: embodichain.lab.task_program.semantics.integration
    :members:
    :no-index:
 
-embodichain.lab.semantic_skills.effects
+embodichain.lab.task_program.semantics.effects
 --------------------------------------------------
 
-.. automodule:: embodichain.lab.semantic_skills.effects
+.. automodule:: embodichain.lab.task_program.semantics.effects
    :members:
    :no-index:
 
-embodichain.lab.semantic_skills.evidence
+embodichain.lab.task_program.semantics.evidence
 ---------------------------------------------------
 
-.. automodule:: embodichain.lab.semantic_skills.evidence
+.. automodule:: embodichain.lab.task_program.semantics.evidence
    :members:
    :no-index:
 
-embodichain.lab.semantic_skills.profiles
+embodichain.lab.task_program.semantics.profiles
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.lab.semantic_skills.profiles
+.. currentmodule:: embodichain.lab.task_program.semantics.profiles
 
 .. autosummary::
 
@@ -1191,10 +1191,10 @@ embodichain.lab.semantic_skills.profiles
    UnsupportedSkillError
    WorkflowRecoveryPolicy
 
-embodichain.lab.semantic_skills.scene
+embodichain.lab.task_program.semantics.scene
 ------------------------------------------------
 
-.. currentmodule:: embodichain.lab.semantic_skills.scene
+.. currentmodule:: embodichain.lab.task_program.semantics.scene
 
 .. autosummary::
 
@@ -1218,7 +1218,7 @@ embodichain.lab.semantic_skills.scene
    SceneRegistry
    UnsupportedSceneAffordanceError
 
-.. automodule:: embodichain.lab.semantic_skills.scene
+.. automodule:: embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
 

@@ -1,19 +1,20 @@
-# Atomic Actions
+# Atomic Skills (`atomic_actions`)
 
 ## Scope
 
-Atomic Actions is the typed, direct Python planning and execution framework in
+Atomic Skill is the capability term; `AtomicAction` is its implementation
+base type. The typed planning and execution framework lives in
 `embodichain/lab/sim/atomic_actions/`. It owns action goals, resource binding,
 planning, transport-neutral commands, execution sessions, recovery, tracking,
 and effect-verification requests.
 
-There are two supported action-generation entry points:
+There are two supported caller paths:
 
-1. Atomic Actions: callers construct `ActionInvocation` values directly.
-2. Expert Program: task-level semantic programs are validated, grounded, and
-   lowered internally to Atomic Actions.
+1. Atomic Skills: direct callers construct `ActionInvocation` values.
+2. Task Program: task-level semantic programs are validated, grounded, and
+   lowered internally to Atomic Skills.
 
-`embodichain.lab.semantic_skills` is declarative only. It owns calls, scene
+`embodichain.lab.task_program.semantics` is declarative only. It owns calls, scene
 and robot-profile contracts, effects, and evidence declarations. It is not an
 execution facade.
 
@@ -22,7 +23,7 @@ ActionBank is a separate Gym subsystem and is outside this topic.
 ## Ownership graph
 
 ```text
-Direct Python caller                    Expert Program
+Direct Python caller                    Task Program
 ActionInvocation                       semantic program
           |                                  |
           |                       validate + ground + lower
@@ -60,8 +61,9 @@ a physical effect.
 | Runner and transports | `runner.py`, `transports.py`, `tracking.py` |
 | Engine and built-in registration | `engine.py`, `primitives/`, `__init__.py` |
 | Simulation ports | `sim_adapter.py` |
-| Semantic declarations | `embodichain/lab/semantic_skills/` |
-| Expert Program lowering/execution | `embodichain/lab/expert_program/` and `embodichain/lab/gym/envs/expert_program/` |
+| Task Program semantic declarations | `embodichain/lab/task_program/semantics/` |
+| Task Program lowering/execution | `embodichain/lab/task_program/compiler/`, `runtime/` |
+| Gym lifecycle bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 
 ## Direct resolution path
 
@@ -78,7 +80,7 @@ The standard simulation composition root is
 ### 2. Bind resources
 
 Each action publishes a `SkillBindingContract` with participant slots and
-endpoint requirements. Direct callers may use engine binding helpers. Expert
+endpoint requirements. Direct callers may use engine binding helpers. Task
 Program binds a declarative `RobotSkillProfile` to the same engine.
 
 Bindings are immutable endpoint snapshots keyed by `(slot_id, endpoint_id)`.
@@ -174,12 +176,12 @@ Tracking recovery is separate from task-level semantic recovery:
 
 - Atomic Actions owns planning failure, target/collision revision, transport
   acknowledgement, tracking error, timeout, retry, and safe stop.
-- Expert Program may perform bounded workflow recovery after the action reaches
+- Task Program may perform bounded workflow recovery after the action reaches
   a semantic effect boundary.
 
 ## Semantic integration boundary
 
-`semantic_skills` contains:
+`semantics` contains:
 
 - `calls.py`: Pick, Place, HandOver, registered declarative calls, and catalog;
 - `scene.py`: canonical refs, registry, affordances, collision roles;
@@ -188,7 +190,7 @@ Tracking recovery is separate from task-level semantic recovery:
 - `integration.py`: provider-free manifests, binding, diagnostics.
 
 It does not contain compiler, executor, parallel scheduler, or application
-facade modules. Expert Program owns the internal semantic lowering lifecycle.
+facade modules. Task Program owns the internal semantic lowering lifecycle.
 
 Every `SkillPolicyPreset` selects explicit effect authority:
 
@@ -225,16 +227,16 @@ an action implementation.
 | Scheduling, dispatch, and safe stop | `runner.py` |
 | Runtime payload/transport | `runtime_commands.py`, `transports.py` |
 | Scene observation | `scene.py`, `sim_adapter.py` |
-| Robot resources/presets | `semantic_skills/profiles.py` |
-| Semantic call/effect declarations | `semantic_skills/calls.py`, `effects.py`, `evidence.py` |
-| Task-level semantic sequencing | `embodichain/lab/expert_program/` |
+| Robot resources/presets | `semantics/profiles.py` |
+| Semantic call/effect declarations | `semantics/calls.py`, `effects.py`, `evidence.py` |
+| Task-level semantic sequencing | `embodichain/lab/task_program/` |
 
 ## Focused validation
 
 ```bash
 pytest -q tests/sim/atomic_actions
-pytest -q tests/lab/semantic_skills
-pytest -q tests/lab/expert_program
+pytest -q tests/lab/semantics
+pytest -q tests/lab/task_program
 python docs/scripts/check_api_docs.py
 ```
 

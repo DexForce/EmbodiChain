@@ -34,7 +34,7 @@ the agent should:
 
 Available topics: `simulation-system`, `env-framework`,
 `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`,
-`sim-visualization`, `motion-planning`, `atomic-actions`, `expert-programs`,
+`sim-visualization`, `motion-planning`, `atomic-actions`, `task-programs`,
 `rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
@@ -63,11 +63,15 @@ EmbodiChain/
 │   ├── learning/                 # Learning systems
 │   │   └── rl/                   # RL: PPO/GRPO/APG, buffers, collectors, policies
 │   ├── lab/                      # Simulation lab
-│   │   ├── expert_program/       # Provider-independent Expert Program schema and compiler
-│   │   ├── semantic_skills/      # Semantic scene, call, profile, and effect contracts
+│   │   ├── task_program/         # Embodied Task Program language, semantics, compiler, runtime, integrations
+│   │   │   ├── language/         # Schema/AST, strict decoder, validation, loader
+│   │   │   ├── semantics/        # Semantic Calls, scene/profile/effect/evidence contracts
+│   │   │   ├── compiler/         # AST compilation and Semantic Call lowering
+│   │   │   ├── runtime/          # Sequential/parallel Semantic Call execution
+│   │   │   └── integrations/     # Explicit environment and simulation assembly
 │   │   ├── visualization/        # Browser visualization protocol, runtime, and Viser backend
 │   │   ├── gym/                  # OpenAI Gym-compatible environments
-│   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
+│   │   │   ├── envs/             # BaseEnv, EmbodiedEnv, narrow Task Program Gym bridge
 │   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
 │   │   │   │   │   └── randomization/  # Physics, geometry, spatial, visual randomizers
 │   │   │   │   ├── action_bank/  # Configurable action primitives
@@ -106,7 +110,8 @@ Official tasks use a task-first layout:
 
 - Import-registered Python entry point: `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`
 - Scene and MDP config: `embodichain_tasks/configs/tasks/<category-path>/<task>/env.{json,yaml}`
-- Optional Expert Program: `<task config>/expert/program.yaml`
+- Optional Task Program bundle: `<task config>/task_program/`, containing
+  `program.yaml` and `integration.yaml`
 - Optional RL configuration: `<task config>/agents/<algorithm>.{json,yaml}`
 
 The category path starts with a top-level task family and may include a
@@ -118,11 +123,12 @@ Keep `@register_env` in the task-named module. Do not create a same-named
 per-task Python package for a single entry point, or Python `scenario` / `mdp`
 modules when the existing JSON/YAML config and manager functors express the
 task. Organize tasks by task family, optional subdomain, and task identity,
-not by solution method such as `expert_program` or `rl`.
+not by solution method such as `task_program` or `rl`.
 
-A supported configuration-defined Expert Program may omit `<task>.py`:
-declare `expert_program_runtime` in its task-local `env.json`, and let
-`config_to_cfg()` register the common `EmbodiedEnv` under the configured ID.
+A supported configuration-defined Task Program may omit `<task>.py`:
+set `task_program_dir` to the task-local `task_program/` directory in
+`env.json`, and let `config_to_cfg()` load its fixed `program.yaml` and
+`integration.yaml` files before registering the common `EmbodiedEnv`.
 
 ---
 

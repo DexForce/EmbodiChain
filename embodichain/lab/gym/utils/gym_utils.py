@@ -399,15 +399,15 @@ def config_to_cfg(
     manager_modules: list | None = None,
     *,
     source_path: str | os.PathLike[str] | None = None,
-    expert_program_path_override: str | os.PathLike[str] | None = None,
+    task_program_path_override: str | os.PathLike[str] | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
-    A config containing ``expert_program_runtime`` is decoded before the
-    serialized Expert Program is loaded. After the remaining environment
-    values parse successfully, the existing
+    A config containing ``task_program_dir`` loads ``integration.yaml`` before
+    ``program.yaml`` from that directory. After the remaining
+    environment values parse successfully, the existing
     :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class is registered under
-    the config's ``id`` with the decoded runtime factory.
+    the config's ``id`` with the decoded integration factory.
     Re-loading an identical declaration is idempotent; an ID collision with a
     different declaration fails closed.
 
@@ -416,10 +416,10 @@ def config_to_cfg(
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
         source_path: Optional path of the Gym configuration source file. A
-            relative top-level ``expert_program_path`` is resolved from this
+            relative top-level ``task_program_dir`` is resolved from this
             file's directory. Without it, relative paths use the current
             working directory.
-        expert_program_path_override: Optional explicit program path. This is
+        task_program_path_override: Optional explicit program path. This is
             selected instead of the Gym-config path and resolves from the
             process working directory.
 
@@ -468,63 +468,96 @@ def config_to_cfg(
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
-    configured_expert_program_runtime = None
-    if "expert_program_runtime" in config:
-        if expert_program_path_override is None and "expert_program_path" not in config:
-            raise ValueError(
-                "expert_program_runtime requires expert_program_path or an "
-                "expert_program_path_override."
-            )
-        from embodichain.lab.gym.envs.expert_program._configured_runtime_decoder import (
-            _decode_configured_expert_program_runtime,
+    removed_task_program_fields = sorted(
+        field
+        for field in ("task_program_path", "task_program_integration_path")
+        if field in config
+    )
+    if removed_task_program_fields:
+        raise ValueError(
+            f"Removed Task Program fields {removed_task_program_fields}; "
+            "use task_program_dir instead."
         )
 
-        configured_expert_program_runtime = _decode_configured_expert_program_runtime(
-            config["expert_program_runtime"]
-        )
-
-    configured_expert_program_path = config.get("expert_program_path")
-    if expert_program_path_override is not None or "expert_program_path" in config:
-        if expert_program_path_override is not None:
-            expert_program_path = expert_program_path_override
-            expert_program_base_dir = None
-            if not isinstance(expert_program_path, (str, os.PathLike)):
-                raise TypeError("expert_program_path must be a string or path.")
-        else:
-            expert_program_path = configured_expert_program_path
-            expert_program_base_dir = (
-                None if source_path is None else Path(source_path).expanduser().parent
-            )
-            if type(expert_program_path) is not str:
-                raise TypeError("expert_program_path must be an exact string.")
-        expert_program_path_text = os.fspath(expert_program_path)
-        if not expert_program_path_text or (
-            expert_program_path_text != expert_program_path_text.strip()
-        ):
+    configured_task_program_integration = None
+    configured_task_program_dir: Path | None = None
+    configured_task_program_path: Path | None = None
+    if "task_program_dir" in config:
+        task_program_dir = config["task_program_dir"]
+        if type(task_program_dir) is not str:
+            raise TypeError("task_program_dir must be an exact string.")
+        if not task_program_dir or task_program_dir != task_program_dir.strip():
             raise ValueError(
-                "expert_program_path must be a non-empty string without outer "
+                "task_program_dir must be a non-empty string without outer "
                 "whitespace."
             )
-        from embodichain.lab.expert_program.loader import (
-            load_expert_program,
+        configured_task_program_dir = Path(task_program_dir).expanduser()
+        if source_path is not None and not configured_task_program_dir.is_absolute():
+            configured_task_program_dir = (
+                Path(source_path).expanduser().parent / configured_task_program_dir
+            )
+        if not configured_task_program_dir.exists():
+            raise FileNotFoundError(
+                "Task Program directory does not exist: "
+                f"{configured_task_program_dir}."
+            )
+        if not configured_task_program_dir.is_dir():
+            raise NotADirectoryError(
+                "Task Program path is not a directory: "
+                f"{configured_task_program_dir}."
+            )
+        from embodichain.lab.task_program.integrations.configured import (
+            _load_configured_task_program_integration,
         )
 
-        if configured_expert_program_runtime is None:
+        configured_task_program_integration = _load_configured_task_program_integration(
+            configured_task_program_dir / "integration.yaml",
+        )
+        configured_task_program_path = configured_task_program_dir / "program.yaml"
+        if not configured_task_program_path.is_file():
+            raise FileNotFoundError(
+                "Task Program source path is not a file: "
+                f"{configured_task_program_path}."
+            )
+
+    if (
+        task_program_path_override is not None
+        or configured_task_program_dir is not None
+    ):
+        if task_program_path_override is not None:
+            task_program_path = task_program_path_override
+            if not isinstance(task_program_path, (str, os.PathLike)):
+                raise TypeError("task_program_path must be a string or path.")
+        else:
+            assert configured_task_program_path is not None
+            task_program_path = configured_task_program_path
+        task_program_path_text = os.fspath(task_program_path)
+        if not task_program_path_text or (
+            task_program_path_text != task_program_path_text.strip()
+        ):
+            raise ValueError(
+                "task_program_path must be a non-empty string without outer "
+                "whitespace."
+            )
+        from embodichain.lab.task_program.language.loader import (
+            load_task_program,
+        )
+
+        if configured_task_program_integration is None:
             from embodichain.lab.gym.utils.registration import get_env_spec
 
-            registration = get_env_spec(config["id"]).expert_program_registration
+            registration = get_env_spec(config["id"]).task_program_registration
         else:
-            registration = configured_expert_program_runtime.registration
+            registration = configured_task_program_integration.registration
         if registration is not None:
             registration.assert_unchanged()
-        expert_program = load_expert_program(
-            expert_program_path_text,
-            base_dir=expert_program_base_dir,
+        task_program = load_task_program(
+            task_program_path_text,
             validation_context=(None if registration is None else registration.catalog),
         )
         if registration is not None:
-            registration.catalog.preflight(expert_program)
-        env_cfg.expert_program = expert_program
+            registration.catalog.preflight(task_program)
+        env_cfg.task_program = task_program
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
@@ -795,14 +828,14 @@ def config_to_cfg(
             )
             setattr(env_cfg.actions, term_name, action_term)
 
-    if configured_expert_program_runtime is not None:
-        from embodichain.lab.gym.envs.expert_program.configured_runtime import (
-            _register_configured_expert_program_runtime,
+    if configured_task_program_integration is not None:
+        from embodichain.lab.gym.envs.task_program.registration import (
+            _register_configured_task_program_integration,
         )
 
-        _register_configured_expert_program_runtime(
+        _register_configured_task_program_integration(
             config["id"],
-            configured_expert_program_runtime,
+            configured_task_program_integration,
             max_episode_steps=env_cfg.max_episode_steps,
         )
 
@@ -1126,7 +1159,7 @@ def build_env_cfg_from_args(
         gym_config,
         manager_modules=get_manager_modules(),
         source_path=gym_config_source_path,
-        expert_program_path_override=getattr(args, "expert_program", None),
+        task_program_path_override=getattr(args, "task_program", None),
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving

@@ -18,8 +18,6 @@
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,7 +28,7 @@ import torch
 
 from tensordict import TensorDict
 
-from embodichain.lab.gym.envs.expert_program import IntegrationFingerprintMismatch
+from embodichain.lab.task_program.integrations import IntegrationFingerprintMismatch
 from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -50,8 +48,10 @@ _CUBE_GYM_CONFIG_PATH = (
     _REPOSITORY_ROOT
     / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json"
 )
-CUBE_ROBOT_PROFILE_ID = "expert_program_ur5_pick_place"
-CUBE_SCENE_REGISTRY_ID = "expert_program_repeated_pick_place"
+_CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
+_CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
+CUBE_ROBOT_PROFILE_ID = "task_program_ur5_pick_place"
+CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
 
 
 class TestInitRolloutBufferFromConfig:
@@ -525,15 +525,10 @@ class TestConfigToCfgFromFile:
     @staticmethod
     def _minimal_gym_config() -> dict[str, object]:
         """Return a minimal config that reaches the generic parser."""
-        production_config = json.loads(
-            _CUBE_GYM_CONFIG_PATH.read_text(encoding="utf-8")
-        )
         return {
-            "id": "ExpertProgramRepeatedPickPlace-v1",
+            "id": "TaskProgramRepeatedPickPlace-v1",
             "max_episode_steps": 1200,
-            "expert_program_runtime": deepcopy(
-                production_config["expert_program_runtime"]
-            ),
+            "task_program_dir": str(_CUBE_TASK_PROGRAM_DIR),
             "env": {},
             "robot": {
                 "class_type": "URRobot",
@@ -543,8 +538,8 @@ class TestConfigToCfgFromFile:
         }
 
     @staticmethod
-    def _expert_program_payload() -> dict[str, object]:
-        """Return one minimal strict Expert Program payload."""
+    def _task_program_payload() -> dict[str, object]:
+        """Return one minimal strict Task Program payload."""
         return {
             "program_id": "configured_pick",
             "integration": {
@@ -558,6 +553,25 @@ class TestConfigToCfgFromFile:
                 "call": {"kind": "pick", "object": "cube"},
             },
         }
+
+    @classmethod
+    def _write_task_program_dir(
+        cls,
+        directory: Path,
+        *,
+        include_program: bool = True,
+        include_integration: bool = True,
+    ) -> Path:
+        """Write one test-owned Task Program directory."""
+        directory.mkdir(parents=True)
+        if include_program:
+            save_config(directory / "program.yaml", cls._task_program_payload())
+        if include_integration:
+            save_config(
+                directory / "integration.yaml",
+                load_config(_CUBE_INTEGRATION_PATH),
+            )
+        return directory
 
     def test_robot_class_type_preserves_ur_variant(self):
         config = {
@@ -582,20 +596,17 @@ class TestConfigToCfgFromFile:
             "uid": "TestUR5",
         }
 
-    def test_expert_program_path_is_resolved_from_gym_config_source(
+    def test_task_program_dir_is_resolved_from_gym_config_source(
         self,
         tmp_path,
     ) -> None:
-        """A serialized program path is relative to its Gym config file."""
+        """The bundle directory is relative to its Gym config file."""
         gym_dir = tmp_path / "gym" / "task"
-        program_dir = tmp_path / "expert_program"
         gym_dir.mkdir(parents=True)
-        program_dir.mkdir()
+        self._write_task_program_dir(tmp_path / "task_program")
         gym_path = gym_dir / "gym_config.json"
-        program_path = program_dir / "program.yaml"
-        save_config(program_path, self._expert_program_payload())
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "../../expert_program/program.yaml"
+        config["task_program_dir"] = "../../task_program"
 
         cfg = config_to_cfg(
             config,
@@ -603,23 +614,21 @@ class TestConfigToCfgFromFile:
             source_path=gym_path,
         )
 
-        assert cfg.expert_program.program_id == "configured_pick"
-        assert cfg.expert_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+        assert cfg.task_program.program_id == "configured_pick"
+        assert cfg.task_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+        assert get_env_spec(str(config["id"])).task_program_registration is not None
 
-    def test_build_env_cfg_loads_source_relative_expert_program(
+    def test_build_env_cfg_loads_source_relative_task_program(
         self,
         tmp_path,
     ) -> None:
         """The normal file launcher attaches the decoded program before init."""
         gym_dir = tmp_path / "gym"
-        program_dir = tmp_path / "programs"
         gym_dir.mkdir()
-        program_dir.mkdir()
+        self._write_task_program_dir(tmp_path / "programs")
         gym_path = gym_dir / "gym_config.json"
-        program_path = program_dir / "program.json"
-        save_config(program_path, self._expert_program_payload())
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "../programs/program.json"
+        config["task_program_dir"] = "../programs"
         save_config(gym_path, config)
         args = argparse.Namespace(
             gym_config=str(gym_path),
@@ -638,7 +647,7 @@ class TestConfigToCfgFromFile:
 
         cfg, _, _ = build_env_cfg_from_args(args)
 
-        assert cfg.expert_program.program_id == "configured_pick"
+        assert cfg.task_program.program_id == "configured_pick"
 
     def test_cli_program_override_is_selected_and_loaded_once(
         self,
@@ -646,17 +655,25 @@ class TestConfigToCfgFromFile:
         monkeypatch,
     ) -> None:
         """The CLI override replaces the Gym path at the single loader boundary."""
-        from embodichain.lab.expert_program import loader
+        from embodichain.lab.task_program.language import loader
 
         gym_path = tmp_path / "gym_config.json"
         override_path = tmp_path / "override.yaml"
-        save_config(override_path, self._expert_program_payload())
+        save_config(override_path, self._task_program_payload())
+        task_program_dir = self._write_task_program_dir(
+            tmp_path / "task_program",
+            include_program=False,
+        )
+        (task_program_dir / "program.yaml").write_text(
+            "this configured program must not be loaded\n",
+            encoding="utf-8",
+        )
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "must_not_be_loaded.yaml"
+        config["task_program_dir"] = str(task_program_dir)
         save_config(gym_path, config)
         args = argparse.Namespace(
             gym_config=str(gym_path),
-            expert_program=str(override_path),
+            task_program=str(override_path),
             num_envs=1,
             device="cpu",
             headless=True,
@@ -670,17 +687,17 @@ class TestConfigToCfgFromFile:
             action_config=None,
         )
         calls: list[str] = []
-        original = loader.load_expert_program
+        original = loader.load_task_program
 
         def load_once(path, **kwargs):
             calls.append(str(path))
             return original(path, **kwargs)
 
-        monkeypatch.setattr(loader, "load_expert_program", load_once)
+        monkeypatch.setattr(loader, "load_task_program", load_once)
 
         cfg, _, _ = build_env_cfg_from_args(args)
 
-        assert cfg.expert_program.program_id == "configured_pick"
+        assert cfg.task_program.program_id == "configured_pick"
         assert calls == [str(override_path)]
 
     def test_registration_drift_fails_during_repeated_config_load(
@@ -689,26 +706,26 @@ class TestConfigToCfgFromFile:
         monkeypatch,
     ) -> None:
         """A repeated config load rejects drift in its registered integration."""
-        from embodichain.lab.expert_program import loader
+        from embodichain.lab.task_program.language import loader
 
-        program_path = tmp_path / "program.yaml"
-        save_config(program_path, self._expert_program_payload())
+        task_program_dir = self._write_task_program_dir(tmp_path / "task_program")
+        program_path = task_program_dir / "program.yaml"
         config = self._minimal_gym_config()
-        config["expert_program_path"] = str(program_path)
+        config["task_program_dir"] = str(task_program_dir)
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
-        registration = get_env_spec(str(config["id"])).expert_program_registration
+        registration = get_env_spec(str(config["id"])).task_program_registration
         assert registration is not None
         binding = registration.scene_binding.rigid_objects[0]
         original_semantic_type = binding.semantic_type
         object.__setattr__(binding, "semantic_type", "changed_cube")
         loader_calls: list[str] = []
-        original_load = loader.load_expert_program
+        original_load = loader.load_task_program
 
         def tracked_load(path, **kwargs):
             loader_calls.append(str(path))
             return original_load(path, **kwargs)
 
-        monkeypatch.setattr(loader, "load_expert_program", tracked_load)
+        monkeypatch.setattr(loader, "load_task_program", tracked_load)
 
         try:
             with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
@@ -724,42 +741,103 @@ class TestConfigToCfgFromFile:
         monkeypatch,
     ) -> None:
         """Dictionary-only callers retain explicit current-directory semantics."""
-        program_path = tmp_path / "program.yaml"
-        save_config(program_path, self._expert_program_payload())
+        self._write_task_program_dir(tmp_path / "task_program")
         monkeypatch.chdir(tmp_path)
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "program.yaml"
+        config["task_program_dir"] = "task_program"
 
         cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
-        assert cfg.expert_program.program_id == "configured_pick"
+        assert cfg.task_program.program_id == "configured_pick"
 
-    @pytest.mark.parametrize("value", [None, True, 1, {}, "", " program.yaml"])
-    def test_expert_program_path_rejects_ambiguous_values(
+    @pytest.mark.parametrize("value", [None, True, 1, {}, "", " task_program"])
+    def test_task_program_dir_rejects_ambiguous_values(
         self,
         value,
     ) -> None:
-        """The path field never accepts coercion, null, or outer whitespace."""
+        """The directory field rejects coercion, null, and outer whitespace."""
         config = self._minimal_gym_config()
-        config["expert_program_path"] = value
+        config["task_program_dir"] = value
 
-        with pytest.raises((TypeError, ValueError), match="expert_program_path"):
+        with pytest.raises((TypeError, ValueError), match="task_program_dir"):
             config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
-    def test_expert_program_path_missing_file_fails_before_environment_init(
+    @pytest.mark.parametrize(
+        "removed_field",
+        ["task_program_path", "task_program_integration_path"],
+    )
+    def test_removed_task_program_path_fields_fail_closed(
+        self,
+        removed_field: str,
+    ) -> None:
+        """The two-path format is rejected instead of silently ignored."""
+        config = self._minimal_gym_config()
+        config[removed_field] = "removed.yaml"
+
+        with pytest.raises(ValueError, match="use task_program_dir"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    def test_task_program_dir_missing_fails_before_environment_init(
         self,
         tmp_path,
     ) -> None:
-        """A configured program must exist when the Gym config is decoded."""
+        """A missing bundle directory fails before environment parsing."""
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "missing.yaml"
+        config["task_program_dir"] = "missing-task-program"
 
-        with pytest.raises(FileNotFoundError, match="missing.yaml"):
+        with pytest.raises(FileNotFoundError, match="missing-task-program"):
             config_to_cfg(
                 config,
                 manager_modules=DEFAULT_MANAGER_MODULES,
-                source_path=tmp_path / "gym_config.json",
+                source_path=tmp_path / "env.json",
             )
+
+    def test_task_program_dir_rejects_a_file_path(
+        self,
+        tmp_path,
+    ) -> None:
+        """The single entry must resolve to a directory."""
+        task_program_path = tmp_path / "task_program"
+        task_program_path.write_text("not a directory", encoding="utf-8")
+        config = self._minimal_gym_config()
+        config["task_program_dir"] = str(task_program_path)
+
+        with pytest.raises(NotADirectoryError, match="not a directory"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    def test_task_program_dir_requires_fixed_integration_yaml(
+        self,
+        tmp_path,
+    ) -> None:
+        """A differently named integration cannot replace integration.yaml."""
+        task_program_dir = self._write_task_program_dir(
+            tmp_path / "task_program",
+            include_integration=False,
+        )
+        save_config(
+            task_program_dir / "integration.json",
+            load_config(_CUBE_INTEGRATION_PATH),
+        )
+        config = self._minimal_gym_config()
+        config["task_program_dir"] = str(task_program_dir)
+
+        with pytest.raises(FileNotFoundError, match="integration.yaml"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    def test_task_program_dir_missing_program_fails_before_environment_init(
+        self,
+        tmp_path,
+    ) -> None:
+        """The fixed program.yaml must exist when the bundle is decoded."""
+        task_program_dir = self._write_task_program_dir(
+            tmp_path / "task_program",
+            include_program=False,
+        )
+        config = self._minimal_gym_config()
+        config["task_program_dir"] = str(task_program_dir)
+
+        with pytest.raises(FileNotFoundError, match="program.yaml"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
