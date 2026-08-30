@@ -376,7 +376,7 @@ class OPWSolver(BaseSolver):
         self,
         target_xpos: torch.Tensor,
         qpos_seed: torch.Tensor,
-        **kwargs,
+        **kwargs: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Solve and continuously select an entire Cartesian pose path.
 
@@ -398,7 +398,11 @@ class OPWSolver(BaseSolver):
         if qpos_seed.shape != (batch_size, 6):
             raise ValueError(f"qpos_seed must have shape ({batch_size}, 6).")
         kernel_device = standardize_device_string(self.device)
-        flat_targets = target_xpos.to(kernel_device).contiguous().reshape(-1, 4, 4)
+        flat_targets = (
+            target_xpos.to(device=kernel_device, dtype=torch.float32)
+            .contiguous()
+            .reshape(-1, 4, 4)
+        )
         candidate_qpos = wp.zeros(
             batch_size * sample_count * 8 * 6, dtype=float, device=kernel_device
         )
@@ -443,7 +447,9 @@ class OPWSolver(BaseSolver):
             inputs=[
                 candidate_qpos,
                 candidate_valid,
-                wp.from_torch(qpos_seed.to(kernel_device).contiguous()),
+                wp.from_torch(
+                    qpos_seed.to(device=kernel_device, dtype=torch.float32).contiguous()
+                ),
                 wp_vec6f(*joint_weight.detach().cpu().tolist()),
                 wp_vec6f(*lower_limits),
                 wp_vec6f(*upper_limits),

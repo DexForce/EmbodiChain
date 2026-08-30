@@ -547,6 +547,7 @@ def opw_ik_path_select_kernel(
             if full_ik_valid[batch, sample, candidate] == 0:
                 continue
             distance = float(0.0)
+            is_continuous = bool(True)
             for joint in range(6):
                 seed = initial_seed[batch, joint]
                 if sample > 0:
@@ -557,9 +558,11 @@ def opw_ik_path_select_kernel(
                 )
                 if nearest >= lower_limits[joint] and nearest <= upper_limits[joint]:
                     solution = nearest
+                else:
+                    is_continuous = False
                 error = (solution - seed) * joint_weights[joint]
                 distance += error * error
-            if distance < best_distance:
+            if is_continuous and distance < best_distance:
                 best_distance = distance
                 best_solution = candidate
         if best_solution >= 0:
@@ -572,9 +575,9 @@ def opw_ik_path_select_kernel(
                 nearest = solution + wp.round((seed - solution) / (2.0 * wp.pi)) * (
                     2.0 * wp.pi
                 )
-                if nearest >= lower_limits[joint] and nearest <= upper_limits[joint]:
-                    solution = nearest
-                path_result[batch, sample, joint] = solution
+                # Selection accepts this candidate only when every adjusted
+                # joint is within limits, so no raw-angle fallback is allowed.
+                path_result[batch, sample, joint] = nearest
         else:
             path_valid[batch, sample] = 0
             for joint in range(6):

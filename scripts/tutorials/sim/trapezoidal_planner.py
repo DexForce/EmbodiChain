@@ -325,6 +325,8 @@ def plan_cartesian_line(
         Joint trajectory, desired Cartesian pose samples, and the scalar
         Cartesian path-parameter trajectory carrying metric derivatives.
     """
+    if sample_count < 3:
+        raise ValueError("Cartesian planning requires sample_count >= 3.")
     start_pose, goal_pose = build_cartesian_line_poses(
         robot, control_part, start_qpos, distance
     )

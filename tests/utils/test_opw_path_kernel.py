@@ -55,3 +55,36 @@ def test_opw_path_selector_preserves_temporal_branch_continuity() -> None:
 
     assert torch.equal(success, torch.ones_like(success))
     assert torch.allclose(output[0, :, 0], torch.tensor((0.1, 0.2, 0.3)))
+
+
+def test_opw_path_selector_rejects_limit_blocked_full_turn() -> None:
+    """A raw fallback must not turn a blocked equivalent into a full-turn jump."""
+    wp.init()
+    candidates = torch.zeros(1, 1, 8, 6)
+    candidates[0, 0, 0, 0] = -3.0
+    validity = torch.zeros(1, 1, 8, dtype=torch.int32)
+    validity[0, 0, 0] = 1
+    initial_seed = torch.zeros(1, 6)
+    initial_seed[0, 0] = 3.0
+    output = torch.empty(1, 1, 6)
+    success = torch.empty(1, 1, dtype=torch.int32)
+    lower = wp_vec6f(-3.1, -3.1, -3.1, -3.1, -3.1, -3.1)
+    upper = wp_vec6f(3.1, 3.1, 3.1, 3.1, 3.1, 3.1)
+
+    wp.launch(
+        kernel=opw_ik_path_select_kernel,
+        dim=1,
+        inputs=[
+            wp.from_torch(candidates),
+            wp.from_torch(validity),
+            wp.from_torch(initial_seed),
+            wp_vec6f(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+            lower,
+            upper,
+        ],
+        outputs=[wp.from_torch(output), wp.from_torch(success)],
+        device="cpu",
+    )
+
+    assert success.item() == 0
+    assert torch.equal(output[:, 0], initial_seed)

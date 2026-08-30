@@ -23,6 +23,9 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import matplotlib
+
+matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
 from scripts.tutorials.sim.trapezoidal_planner import (
@@ -196,6 +199,24 @@ def test_cartesian_demo_rejects_nonpositive_distance() -> None:
 
     with pytest.raises(ValueError, match="greater than zero"):
         build_cartesian_line_poses(robot, "left_arm", robot.qpos, 0.0)
+
+
+def test_cartesian_demo_requires_three_samples_for_path_derivatives() -> None:
+    robot = _Robot()
+
+    with pytest.raises(ValueError, match="sample_count >= 3"):
+        plan_cartesian_line(
+            robot,
+            "left_arm",
+            robot.qpos,
+            distance=0.1,
+            profile="trapezoidal",
+            sample_count=2,
+            velocity_limit=0.15,
+            acceleration_limit=0.3,
+            jerk_limit=1.0,
+            backend="torch",
+        )
 
 
 def test_cartesian_time_law_is_applied_before_ik() -> None:
