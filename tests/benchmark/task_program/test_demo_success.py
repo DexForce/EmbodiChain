@@ -824,9 +824,10 @@ def test_gym_environment_builder_uses_standard_public_config_pipeline(
     launcher_args = argparse.Namespace(
         gym_config="gym.json",
         action_config=None,
+        task_program=Path("program.yaml"),
     )
-    env_cfg = argparse.Namespace(task_program=None)
     program = object()
+    env_cfg = argparse.Namespace(task_program=program)
     env = object()
 
     monkeypatch.setattr(
@@ -846,11 +847,6 @@ def test_gym_environment_builder_uses_standard_public_config_pipeline(
 
     monkeypatch.setattr(demo_success_module, "build_env_cfg_from_args", build)
     monkeypatch.setattr(
-        demo_success_module,
-        "load_task_program",
-        lambda path: calls.append(("load", path)) or program,
-    )
-    monkeypatch.setattr(
         demo_success_module.gymnasium,
         "make",
         lambda **kwargs: calls.append(("make", kwargs)) or env,
@@ -867,7 +863,6 @@ def test_gym_environment_builder_uses_standard_public_config_pipeline(
         "discover",
         "hooks",
         ("build", launcher_args),
-        ("load", "program.yaml"),
         ("make", {"id": "ExpertTask-v1", "cfg": env_cfg}),
     ]
 

@@ -56,7 +56,6 @@ from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
     execute_demo_episode,
 )
-from embodichain.lab.task_program import load_task_program
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -1078,7 +1077,6 @@ def _create_gym_demo_success_environment(
             "The Task Program benchmark environment builder produced an "
             "unexpected action configuration."
         )
-    env_cfg.task_program = load_task_program(task_program_path)
     return gymnasium.make(id=gym_config["id"], cfg=env_cfg)
 
 
