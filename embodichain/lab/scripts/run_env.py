@@ -756,10 +756,10 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.set_defaults(viser_image_fps=None)
 
     parser.add_argument(
-        "--expert-program",
+        "--task-program",
         type=str,
         default=None,
-        help="Path to a declarative Expert Program (.json, .yaml, or .yml).",
+        help="Path to a declarative Task Program (.json, .yaml, or .yml).",
     )
     parser.add_argument(
         "--debug-mode",

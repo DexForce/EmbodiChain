@@ -9,18 +9,18 @@ covered by a more focused API-reference page. Prefer curated pages for APIs
 that need deeper explanations or examples. Sphinx obtains signatures and
 summaries here from the canonical Python docstrings.
 
-embodichain.agents.mllm.expert_program
+embodichain.agents.mllm.task_program
 --------------------------------------
 
 Strict MLLM entry points that inject host-owned integration settings before
-decoding and compiling the constrained Expert Program schema surface.
+decoding and compiling the constrained Task Program schema surface.
 
-.. currentmodule:: embodichain.agents.mllm.expert_program
+.. currentmodule:: embodichain.agents.mllm.task_program
 
 .. autosummary::
 
-   compile_mllm_expert_program
-   decode_mllm_expert_program
+   compile_mllm_task_program
+   decode_mllm_task_program
 
 embodichain.data.assets.planner_assets
 --------------------------------------
@@ -292,10 +292,10 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
-embodichain.lab.gym.envs.expert_program.simulation_handover
+embodichain.lab.task_program.integrations.simulation.handover
 -----------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_handover
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.handover
 
 .. autosummary::
 
@@ -602,15 +602,23 @@ embodichain.lab.sim.atomic_actions.execution
 
 .. autosummary::
 
-   EffectExpectationResult
-   EffectVerificationRequest
-   EffectVerificationResult
    ExecutionEvent
    ExecutionEventKind
    ExecutionPlanAttempt
    ExecutionSession
    ExecutionStatus
    ExecutionTick
+
+embodichain.lab.sim.atomic_actions.verification
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+
+.. autosummary::
+
+   EffectExpectationResult
+   EffectVerificationRequest
+   EffectVerificationResult
    HeldObjectGuardRequest
    HeldObjectGuardResult
    PhaseEffectGateRequest
@@ -1099,10 +1107,10 @@ embodichain.lab.sim.sim_manager
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
-embodichain.lab.sim.skills.calls
---------------------------------
+embodichain.lab.task_program.semantics.calls
+------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.calls
+.. currentmodule:: embodichain.lab.task_program.semantics.calls
 
 .. autosummary::
 
@@ -1118,41 +1126,14 @@ embodichain.lab.sim.skills.calls
    SemanticPose
    builtin_semantic_call_catalog
 
-.. automodule:: embodichain.lab.sim.skills.calls
+.. automodule:: embodichain.lab.task_program.semantics.calls
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.compiler
------------------------------------
+embodichain.lab.task_program.semantics.integration
+------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.compiler
-
-.. autosummary::
-
-   AnalyzedSemanticCall
-   ContainerRelationTargetGrounder
-   GroundedHeldObjectGuard
-   GroundedPhaseEffectGate
-   GroundedSemanticCall
-   HandOverPoseProvider
-   HandOverPoseTargets
-   HeldObjectGuardBaseline
-   RelationTargetGrounder
-   RegisteredSemanticLowerer
-   SemanticEffectDependency
-   SemanticEffectKind
-   SemanticHandOverTarget
-   SemanticLowering
-   SemanticObjectTarget
-   SemanticRelationTarget
-   SemanticSkillCompiler
-   SemanticWorkflow
-   SupportSurfaceRelationTargetGrounder
-
-embodichain.lab.sim.skills.integration
---------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.integration
+.. currentmodule:: embodichain.lab.task_program.semantics.integration
 
 .. autosummary::
 
@@ -1165,42 +1146,28 @@ embodichain.lab.sim.skills.integration
    SemanticIntegrationManifest
    SemanticValidationError
 
-.. automodule:: embodichain.lab.sim.skills.integration
+.. automodule:: embodichain.lab.task_program.semantics.integration
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.effects
-----------------------------------
+embodichain.lab.task_program.semantics.effects
+--------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.effects
+.. automodule:: embodichain.lab.task_program.semantics.effects
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.evidence
------------------------------------
+embodichain.lab.task_program.semantics.evidence
+---------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.evidence
+.. automodule:: embodichain.lab.task_program.semantics.evidence
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.parallel
-------------------------------------
+embodichain.lab.task_program.semantics.profiles
+---------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.parallel
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.parallel_runtime
---------------------------------------------
-
-.. automodule:: embodichain.lab.sim.skills.parallel_runtime
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.profiles
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.profiles
+.. currentmodule:: embodichain.lab.task_program.semantics.profiles
 
 .. autosummary::
 
@@ -1208,6 +1175,7 @@ embodichain.lab.sim.skills.profiles
    BoundRobotSkillProfile
    ControlPartEndpoint
    ControlPartEndpointAdapter
+   EffectAssurance
    EndpointResolution
    ProfileValidationError
    ResourceEndpoint
@@ -1223,17 +1191,10 @@ embodichain.lab.sim.skills.profiles
    UnsupportedSkillError
    WorkflowRecoveryPolicy
 
-embodichain.lab.sim.skills.runtime
-----------------------------------
+embodichain.lab.task_program.semantics.scene
+------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.runtime
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.scene
---------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.scene
+.. currentmodule:: embodichain.lab.task_program.semantics.scene
 
 .. autosummary::
 
@@ -1257,7 +1218,7 @@ embodichain.lab.sim.skills.scene
    SceneRegistry
    UnsupportedSceneAffordanceError
 
-.. automodule:: embodichain.lab.sim.skills.scene
+.. automodule:: embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
 

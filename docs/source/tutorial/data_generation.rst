@@ -12,11 +12,14 @@ Overview
 
 EmbodiChain provides a built-in data generation workflow for imitation-learning and manipulation tasks:
 
-- **Gym Configuration**: Describes the scene, robot, sensors, randomization events, observations, dataset recorder, and rollout settings.
-- **Expert Program**: Describes a declarative semantic workflow and selects its
+- **Gym Configuration**: Describes the simulated environment, robot, sensors,
+  managers, dataset recorder, rollout settings, and Task Program resource paths.
+- **Task Program**: Describes a declarative semantic workflow and selects its
   configured scene, robot-skill profile, and runtime policy.
+- **Task Program Integration**: Declares trusted scene/profile bindings,
+  policies, and allowlisted live services in a sibling YAML file.
 - **Environment Rollout**: Builds the environment directly from configuration files and executes offline generation.
-- **Expert Policy**: A supported task loads and compiles its Expert Program;
+- **Expert Policy**: A supported task loads and compiles its Task Program;
   custom environments may still provide ``create_demo_segments()`` directly.
 - **Dataset Manager**: Records observation-action pairs during ``env.step()``
   and transactionally commits selected successful or configured failed rows.
@@ -28,22 +31,24 @@ What This Tutorial Records
 This page documents the full path from task configuration to saved dataset:
 
 1. Prepare a task gym config (e.g. ``gym_config.json`` or ``gym_config.yaml``).
-2. Reference a task-local Expert Program from the gym config when scripted
-   demonstrations are required.
+2. Reference a task-local Task Program and integration from the gym config
+   when scripted demonstrations are required.
 3. Launch the environment rollout with ``run-env``.
 4. Let the dataset manager automatically save completed episodes.
 
 Example Task
 ------------
 
-As a concrete example, this tutorial uses a configuration-defined Expert
-Program task shipped in the repository:
+As a concrete example, this tutorial uses a configuration-defined Task Program
+task shipped in the repository:
 
 - ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json``
-  defines the simulation scene, configured Expert Program runtime, and dataset
-  recording behavior.
-- ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/expert/program.yaml``
+  defines the simulation environment, dataset behavior, and Task Program
+  resource paths.
+- ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml``
   declares the semantic pick, transport, pour, and place workflow.
+- ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml``
+  declares the trusted scene/profile bindings and live services.
 
 The Code
 ~~~~~~~~
@@ -122,18 +127,29 @@ is set (issue #424, Path A). Stereo-camera keys use the ``_right`` suffix. The
 ``use_videos`` option applies only to RGB images; see
 :doc:`/overview/gym/dataset_functors` for the depth sidecar configuration.
 
-Step 2: Prepare the Expert Program
+Step 2: Prepare the Task Program
 ----------------------------------
 
-The gym config selects ``expert/program.yaml`` through
-``expert_program_path`` and declares its callable-free runtime through
-``expert_program_runtime``. The program uses registered scene identities and
-robot resources instead of embedding simulation code:
+The gym config references the ``task_program/`` directory once through
+``task_program_dir``. The loader reads its fixed ``integration.yaml`` first and
+then validates ``program.yaml`` against that trusted provider assembly. The
+program uses registered scene identities and robot resources instead of
+embedding simulation code:
 
-.. dropdown:: Expert Program for Pour Water
+.. dropdown:: Task Program for Pour Water
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/expert/program.yaml
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
+      :language: yaml
+      :linenos:
+
+The sibling integration file owns scene bindings, the robot profile, policy
+presets, and allowlisted live-service declarations:
+
+.. dropdown:: Task Program Integration for Pour Water
+   :icon: code
+
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
       :language: yaml
       :linenos:
 
@@ -147,7 +163,7 @@ Step 3: Launch the Environment Rollout
 --------------------------------------
 
 The rollout script parses command-line arguments, loads the gym config and its
-task-local Expert Program, creates the environment instance, and then runs
+task-local Task Program, creates the environment instance, and then runs
 offline rollout for ``max_episodes`` episodes:
 
 .. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
@@ -155,7 +171,7 @@ offline rollout for ``max_episodes`` episodes:
    :start-at: def cli(
    :end-at:     main(args, env, gym_config)
 
-Each rollout obtains demonstration segments from the compiled Expert Program
+Each rollout obtains demonstration segments from the compiled Task Program
 or a custom environment's ``create_demo_segments()`` implementation. The runner
 validates and executes every action with ``env.step(action)``. By default an
 invalid rollout is discarded with ``save_data=False`` and retried. If the
@@ -216,13 +232,13 @@ Dataset folders are automatically numbered, which makes it easy to run repeated 
 In a practical workflow, the output of this stage is the synthesized dataset itself. Later training scripts typically consume these saved LeRobot episodes instead of regenerating trajectories each time.
 
 
-Repeated Pick-and-Place Expert Program Example
+Repeated Pick-and-Place Task Program Example
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The repository includes a complete repeated pick-and-place example at
 ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json``. It uses
 the specified UR5 robot and parallel gripper to pick up the same cube and place
-it three times in one episode. Its task-local Expert Program is selected by the
+it three times in one episode. Its task-local Task Program is selected by the
 gym config, so no second CLI config argument is required.
 
 Each pick/place cycle is one lazy demonstration segment. After placing the
@@ -245,8 +261,8 @@ execution. The config writes an auto-numbered dataset below:
 
 .. code-block:: text
 
-   outputs/lerobot/expert_program/
-   `-- ur5_expert_program_repeated_pick_place_NNN/
+   outputs/lerobot/task_program/
+   `-- ur5_task_program_repeated_pick_place_NNN/
 
 The example has no configured camera sensor and sets ``use_videos`` to
 ``false``. Its dataset therefore contains robot state, action, task, subtask,
@@ -289,7 +305,7 @@ generated auto-numbered dataset:
 .. code-block:: bash
 
    embodichain preview_lerobot_data \
-       outputs/lerobot/expert_program \
+       outputs/lerobot/task_program \
        --latest \
        --episode 0 \
        --expect-segments 3
@@ -359,8 +375,8 @@ must be the exact auto-numbered dataset directory:
 .. code-block:: bash
 
    lerobot-dataset-viz \
-       --repo-id DexForce/ur5_expert_program_repeated_pick_place_000 \
-       --root outputs/lerobot/expert_program/ur5_expert_program_repeated_pick_place_000 \
+       --repo-id DexForce/ur5_task_program_repeated_pick_place_000 \
+       --root outputs/lerobot/task_program/ur5_task_program_repeated_pick_place_000 \
        --mode local \
        --episode-index 0 \
        --num-workers 0
@@ -379,14 +395,14 @@ To create a portable Rerun recording without opening a viewer, add
 .. code-block:: bash
 
    lerobot-dataset-viz \
-       --repo-id DexForce/ur5_expert_program_repeated_pick_place_000 \
-       --root outputs/lerobot/expert_program/ur5_expert_program_repeated_pick_place_000 \
+       --repo-id DexForce/ur5_task_program_repeated_pick_place_000 \
+       --root outputs/lerobot/task_program/ur5_task_program_repeated_pick_place_000 \
        --episode-index 0 \
        --num-workers 0 \
        --save 1 \
        --output-dir outputs/lerobot/previews
 
-   rerun outputs/lerobot/previews/DexForce_ur5_expert_program_repeated_pick_place_000_episode_0.rrd
+   rerun outputs/lerobot/previews/DexForce_ur5_task_program_repeated_pick_place_000_episode_0.rrd
 
 ``--save 1`` disables automatic viewer spawning and writes the ``.rrd`` file;
 the second command opens that saved recording. You can validate the container
@@ -402,10 +418,10 @@ for the upstream workflow.
 Best Practices
 ~~~~~~~~~~~~~~
 
-- **Keep task-local files together**: Version ``env.json`` and
-  ``expert/program.yaml`` together so their scene, profile, and call IDs stay
-  aligned.
-- **Use valid scripted policies**: Preflight the Expert Program against its
+- **Keep task-local files together**: Version ``env.json``,
+  ``task_program/program.yaml``, and ``task_program/integration.yaml`` together
+  so their scene, profile, and call IDs stay aligned.
+- **Use valid scripted policies**: Preflight the Task Program against its
   configured scene and robot profile before long rollout runs.
 - **Use ``--headless`` for throughput**: Disable the GUI when generating large datasets.
 - **Use ``--preview`` and ``--filter_dataset_saving`` for debugging**: Inspect task logic without writing datasets.

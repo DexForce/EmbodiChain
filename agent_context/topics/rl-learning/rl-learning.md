@@ -64,7 +64,7 @@ Select this path with `trainer.gym_config`.
 
 Simulator environments use standard rollouts. A differentiable algorithm on
 this path is rejected. Simulator tasks with a supported training configuration
-declare `supports_rl=True` in `@register_env`; `embodichain list-env` displays
+declare `supports_rl=True` in `@register_env`; `embodichain list-task` displays
 them with `[Simulator, RL]` instead of treating the simulator registry as a
 mutually exclusive capability group.
 

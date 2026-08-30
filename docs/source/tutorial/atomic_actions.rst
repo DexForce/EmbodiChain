@@ -12,7 +12,8 @@ For the complete architecture and ownership model, see
 :doc:`/overview/sim/atomic_actions/index`. For the capability matrix and visual
 demonstrations of every built-in skill, see
 :doc:`/overview/sim/atomic_actions/builtin_actions`. Canonical scene identity and
-snapshot/provider setup are documented in :doc:`/overview/sim/scene_registry`.
+snapshot/provider setup are documented in
+:doc:`/overview/task_program/scene_registry`.
 
 The contracts deliberately separate seven concerns:
 
@@ -337,7 +338,7 @@ must be resolved from the latest scene snapshot:
        SimulationExecutionAdapter,
        TaskState,
    )
-   from embodichain.lab.sim.skills import SceneRegistry
+   from embodichain.lab.task_program.semantics import SceneRegistry
 
    registry = SceneRegistry.from_simulation(
        sim,
@@ -432,7 +433,8 @@ checks that the registry, provider, and planner dynamic subsets exactly match.
 It also checks planner capability and shared/per-environment world mode. One
 environment may infer a shared world; a multi-environment dynamic registry must choose
 ``SceneCollisionWorldMode.SHARED`` or ``PER_ENV`` explicitly. See
-:doc:`/overview/sim/scene_registry` for the complete cuRobo mapping example.
+:doc:`/overview/task_program/scene_registry` for the complete cuRobo mapping
+example.
 
 The provider advances per-environment collision-world revisions when an
 obstacle moves; the session invalidates affected rows and the framework binds

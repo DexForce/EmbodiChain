@@ -83,7 +83,7 @@ class TestLoadConfig:
 
         loaded = load_config(
             "embodichain_tasks/configs/tasks/manipulation/tableware/"
-            "pour_water/env.json"
+            "pour_water/env.yaml"
         )
 
         assert loaded["id"] == "PourWater-v1"

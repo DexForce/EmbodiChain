@@ -57,15 +57,17 @@ from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
 from .engine import AtomicActionEngine
 from .execution import (
-    EffectExpectationResult,
-    EffectVerificationRequest,
-    EffectVerificationResult,
     ExecutionEvent,
     ExecutionEventKind,
     ExecutionPlanAttempt,
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
+)
+from .verification import (
+    EffectExpectationResult,
+    EffectVerificationRequest,
+    EffectVerificationResult,
     HeldObjectGuardRequest,
     HeldObjectGuardResult,
     PhaseEffectGateRequest,

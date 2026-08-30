@@ -160,7 +160,7 @@ class GraspPoseGenerator(ABC):
     """Standalone service that generates grasp poses from target geometry.
 
     The contract has no dependency on Gym, simulation, atomic actions, or
-    Expert Program. Application code may call it directly or install the same
+    Task Program. Application code may call it directly or install the same
     service instance alongside a motion generator in a higher-level runtime.
     """
 

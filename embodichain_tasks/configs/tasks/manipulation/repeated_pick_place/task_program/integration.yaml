@@ -1,0 +1,19 @@
+integration_id: repeated_pick_place_v1
+program_id: repeated_cube_pick_place
+
+requires:
+  scene_contract: repeated_pick_place_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+    place:
+      kind: place
+  effect_monitors: {}

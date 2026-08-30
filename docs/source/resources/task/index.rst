@@ -3,7 +3,7 @@ Supported Tasks
 
 The official task environments are bundled in the ``embodichain`` wheel under
 the ``embodichain_tasks`` import package. Import-backed tasks register during
-package discovery; configuration-defined Expert Program tasks register when
+package discovery; configuration-defined Task Program tasks register when
 their gym config is loaded. No second package installation is needed.
 
 Run a task by passing one of its gym configuration files to the unified CLI:
@@ -34,7 +34,7 @@ Environment catalog
      - ``PushCubeRL``
      - ``embodichain_tasks/configs/tasks/manipulation/push_cube/env.json``
    * - Manipulation
-     - ``ExpertProgramRepeatedPickPlace-v1``
+     - ``TaskProgramRepeatedPickPlace-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json``
    * - Special
      - ``SimpleTask-v1``
@@ -52,7 +52,7 @@ Environment catalog
      - ``MatchObjectContainer-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/tableware/match_object_container/env.json``
    * - Manipulation
-     - ``ExpertProgramOpenDrawer-v1``
+     - ``TaskProgramOpenDrawer-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/env.json``
    * - Manipulation
      - ``HandOver-v1``
@@ -77,6 +77,7 @@ Environment catalog
      - ``embodichain_tasks/configs/tasks/manipulation/tableware/rearrangement/env.json``
 
 The value of ``id`` inside a conventional gym config must match a registered
-environment ID. A supported ``expert_program_runtime`` config registers its own
-free ID while loading. When adding a task, update this catalog together with
-its runnable config.
+environment ID. A supported config with ``task_program_dir`` registers its own
+free ID while loading ``integration.yaml`` and ``program.yaml`` from that
+directory.
+When adding a task, update this catalog together with its runnable config.

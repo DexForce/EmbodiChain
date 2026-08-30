@@ -34,6 +34,7 @@ class Command:
     name: str
     target: str
     help: str
+    aliases: tuple[str, ...] = ()
 
 
 COMMANDS = (
@@ -66,11 +67,12 @@ COMMANDS = (
         name="run-env",
         target="embodichain.lab.scripts.run_env:cli",
         help="Run an environment for data generation or preview.",
+        aliases=("run-task",),
     ),
     Command(
-        name="list-env",
-        target="embodichain.cli.list_env:main",
-        help="List task environments by category and capability.",
+        name="list-task",
+        target="embodichain.cli.list_task:main",
+        help="List tasks by category and capability.",
     ),
     Command(
         name="preview_lerobot_data",
@@ -135,6 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
         # ``embodichain <command> --help`` reach that complete parser.
         subparsers.add_parser(
             command.name,
+            aliases=command.aliases,
             add_help=False,
             help=command.help,
             description=command.help,
@@ -171,7 +174,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.parse_args(arguments)
         return
 
-    command_by_name = {command.name: command for command in COMMANDS}
+    command_by_name = {
+        name: command
+        for command in COMMANDS
+        for name in (command.name, *command.aliases)
+    }
     command = command_by_name.get(arguments[0])
     if command is None:
         parser.error(

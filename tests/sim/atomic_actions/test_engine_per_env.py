@@ -86,6 +86,8 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 from embodichain.lab.sim.planners import PlanOptions
 
+CONTROL_DT = 0.02
+
 
 def _effect_result(
     verification_id: int,
@@ -621,6 +623,8 @@ def _context(
     qpos: float | tuple[float, ...],
     entity_x: float | tuple[float, ...],
     version: int,
+    *,
+    control_dt: float | None = None,
 ) -> PlanningContext:
     qpos_values = torch.as_tensor(qpos, dtype=torch.float32).reshape(-1)
     entity_x_values = torch.as_tensor(entity_x, dtype=torch.float32).reshape(-1)
@@ -643,6 +647,7 @@ def _context(
             entities={"target": EntityState(pose)},
         ),
         env_ids=torch.arange(batch_size, dtype=torch.long),
+        control_dt=control_dt,
     )
 
 
@@ -1097,7 +1102,15 @@ def test_stale_phase_effect_gate_result_is_rejected_after_unresolved_poll() -> N
 
 def test_held_object_loss_retries_only_failed_row_with_reconciled_state() -> None:
     engine, _ = _engine(batch_size=2)
-    initial = _with_held_object(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    initial = _with_held_object(
+        _context(
+            0.0,
+            (0.0, 0.0),
+            (0.2, 0.2),
+            0,
+            control_dt=CONTROL_DT,
+        )
+    )
     session = engine.start(
         (_invocation(engine, max_action_retries=1),),
         initial,
@@ -1140,6 +1153,7 @@ def test_held_object_loss_retries_only_failed_row_with_reconciled_state() -> Non
     assert lost.env_mask.tolist() == [True, False]
     assert retry.env_mask.tolist() == [True, False]
     assert session.plan_attempts[-1].action_retry_counts == (1, 0)
+    assert session.latest_context.control_dt == pytest.approx(CONTROL_DT)
 
 
 def test_held_object_loss_result_requires_state_invalidation() -> None:
@@ -2913,7 +2927,13 @@ def test_effect_failure_applies_request_owned_invalidation_before_recovery() -> 
     assert request.failure_invalidation.held_object_updates == {"arm": None}
 
     terminal = session.tick(
-        _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
+        _context(
+            0.21,
+            (0.2, 0.2),
+            (0.2, 0.2),
+            0,
+            control_dt=CONTROL_DT,
+        ),
         effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([False, True]),
@@ -2935,6 +2955,7 @@ def test_effect_failure_applies_request_owned_invalidation_before_recovery() -> 
     assert not any(
         event.kind is ExecutionEventKind.ACTION_RETRY for event in terminal.events
     )
+    assert session.latest_context.control_dt == pytest.approx(CONTROL_DT)
 
 
 def test_inverse_proof_can_preserve_state_while_failure_requires_recovery() -> None:

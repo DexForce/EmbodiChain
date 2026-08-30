@@ -1,0 +1,76 @@
+scene_id: pour_water_default
+
+simulation:
+  light:
+    direct:
+      - uid: light_1
+        light_type: point
+        color: [1.0, 1.0, 1.0]
+        intensity: 50.0
+        init_pos: [2, 0, 2]
+        radius: 10.0
+  background:
+    - uid: table
+      shape:
+        shape_type: Mesh
+        fpath: CircleTableSimple/circle_table_simple.ply
+        compute_uv: true
+      attrs:
+        mass: 10.0
+        static_friction: 0.95
+        dynamic_friction: 0.9
+        restitution: 0.01
+      body_scale: [1, 1, 1]
+      body_type: kinematic
+      init_pos: [0.725, 0.0, 0.825]
+      init_rot: [0, 90, 0]
+  rigid_object:
+    - uid: cup
+      shape:
+        shape_type: Mesh
+        fpath: PaperCup/paper_cup.ply
+        compute_uv: true
+      attrs:
+        mass: 0.01
+        contact_offset: 0.003
+        rest_offset: 0.001
+        restitution: 0.01
+        max_depenetration_velocity: 10.0
+        min_position_iters: 32
+        min_velocity_iters: 8
+      init_pos: [0.75, 0.1, 0.9]
+      body_scale: [0.75, 0.75, 1.0]
+      max_convex_hull_num: 8
+    - uid: bottle
+      shape:
+        shape_type: Mesh
+        fpath: ScannedBottle/kashijia_processed.ply
+        compute_uv: true
+      attrs:
+        mass: 0.01
+        contact_offset: 0.003
+        rest_offset: 0.001
+        restitution: 0.01
+        max_depenetration_velocity: 10.0
+        min_position_iters: 32
+        min_velocity_iters: 8
+      init_pos: [0.75, -0.1, 0.932]
+      body_scale: [1, 1, 1]
+      max_convex_hull_num: 8
+  rigid_object_group: []
+  articulation: []
+
+task_program:
+  contract_id: pour_water_scene_v1
+  registry_id: task_program_pour_water
+  rigid_objects:
+    - entity_id: cup
+      dynamics: dynamic
+      semantic_type: cup
+    - entity_id: bottle
+      dynamics: dynamic
+      semantic_type: bottle
+      affordances:
+        - entity_id: bottle_grasp
+          kind: antipodal_grasp
+          internal_axis: [1.0, 0.0, 0.0]

@@ -18,12 +18,12 @@
 
 from __future__ import annotations
 
-from .expert_program import (
-    compile_mllm_expert_program,
-    decode_mllm_expert_program,
+from .task_program import (
+    compile_mllm_task_program,
+    decode_mllm_task_program,
 )
 
 __all__ = [
-    "compile_mllm_expert_program",
-    "decode_mllm_expert_program",
+    "compile_mllm_task_program",
+    "decode_mllm_task_program",
 ]

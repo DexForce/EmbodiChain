@@ -1,0 +1,32 @@
+integration_id: dual_ur5_hand_over_v1
+program_id: dual_ur5_hand_over
+
+requires:
+  scene_contract: hand_over_scene_v1
+  embodiment_contract: dual_arm_parallel_gripper_handover
+
+profile:
+  defaults:
+    hand_over:
+      source: left
+      destination: right
+  action_options:
+    hand_over:
+      kind: hand_over
+      pre_grasp_distance: 0.08
+      lift_height: 0.08
+      hand_interp_steps: 10
+  effect_monitors:
+    hand_over:
+      monitor_id: builtin.composite_effect
+      revision: "1"
+      params:
+        consecutive_samples: 10
+  grounding_providers:
+    hand_over: simulation.configured_handover_pose
+
+runtime_services:
+  handover_pose_providers:
+    - kind: configured_pose
+      final_position: [0.0, -0.2, 0.6]
+      final_quaternion_wxyz: [0.7071067812, 0.7071067812, 0.0, 0.0]

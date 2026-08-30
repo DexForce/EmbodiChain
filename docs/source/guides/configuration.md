@@ -389,7 +389,10 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 2. **Use Python configs for development.** They provide IDE auto-completion and type checking.
 3. **Use JSON or YAML configs for experiments.** YAML is often easier to read for nested structures; JSON remains fully supported.
 4. **Validate configs early.** Run your environment with a short episode count to catch config errors before long training runs.
-5. **Keep task-local configs together.** Version `env.json` with its optional `expert/program.yaml` and `agents/` policy files.
+5. **Keep task-local configs together.** Point `task_program_dir` at the
+   optional `task_program/` directory containing `program.yaml` and
+   `integration.yaml`; version it with `env.json` and any `agents/` policy
+   files.
 
 ---
 

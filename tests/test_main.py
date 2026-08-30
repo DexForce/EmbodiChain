@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-import embodichain.cli.list_env as list_env
+import embodichain.cli.list_task as list_task
 import embodichain.cli.main as cli
 from embodichain import __main__ as entrypoint
 
@@ -32,7 +32,7 @@ EXPECTED_COMMANDS = {
     "benchmark",
     "data",
     "decompose-urdf",
-    "list-env",
+    "list-task",
     "preview-asset",
     "preview_lerobot_data",
     "run-env",
@@ -62,11 +62,11 @@ def test_workspace_cache_command_uses_dedicated_cli_adapter() -> None:
     assert command.target == "embodichain.cli.workspace_cache:main"
 
 
-def test_list_env_command_uses_dedicated_cli_adapter() -> None:
-    """The environment listing command resolves its dedicated CLI adapter."""
-    command = next(command for command in cli.COMMANDS if command.name == "list-env")
+def test_list_task_command_uses_dedicated_cli_adapter() -> None:
+    """The task listing command resolves its dedicated CLI adapter."""
+    command = next(command for command in cli.COMMANDS if command.name == "list-task")
 
-    assert command.target == "embodichain.cli.list_env:main"
+    assert command.target == "embodichain.cli.list_task:main"
 
 
 def test_root_help_does_not_import_command_modules(
@@ -101,11 +101,33 @@ def test_dispatch_forwards_subcommand_arguments(
     assert received == ["--asset_path", "robot.urdf", "--headless"]
 
 
-def test_list_env_discovers_and_prints_task_tree(
+def test_run_task_alias_dispatches_to_run_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run-task forwards to the canonical run-env handler unchanged."""
+    loaded_targets: list[str] = []
+    received: list[str] = []
+
+    def fake_handler(argv: Sequence[str] | None = None) -> None:
+        received.extend(argv or [])
+
+    def load_handler(target: str):
+        loaded_targets.append(target)
+        return fake_handler
+
+    monkeypatch.setattr(cli, "_load_handler", load_handler)
+
+    cli.main(["run-task", "--gym_config", "task.yaml", "--headless"])
+
+    assert loaded_targets == ["embodichain.lab.scripts.run_env:cli"]
+    assert received == ["--gym_config", "task.yaml", "--headless"]
+
+
+def test_list_task_discovers_and_prints_task_tree(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """List-env renders folder hierarchy and precise task capabilities."""
+    """List-task renders folder hierarchy and precise task capabilities."""
     from embodichain.lab.gym.utils import registration
 
     discovery_calls: list[None] = []
@@ -115,25 +137,25 @@ def test_list_env_discovers_and_prints_task_tree(
         lambda: discovery_calls.append(None),
     )
     monkeypatch.setattr(
-        list_env,
+        list_task,
         "_collect_environment_entries",
         lambda: [
-            list_env._EnvironmentListEntry(
+            list_task._EnvironmentListEntry(
                 "CartPoleRL",
                 ("classic_control", "cart_pole"),
-                {list_env._RL},
+                {list_task._RL},
             ),
-            list_env._EnvironmentListEntry(
+            list_task._EnvironmentListEntry(
                 "HandOver-v1",
                 ("manipulation", "hand_over"),
-                {list_env._EXPERT_PROGRAM},
+                {list_task._TASK_PROGRAM},
             ),
-            list_env._EnvironmentListEntry(
+            list_task._EnvironmentListEntry(
                 "BlocksRankingRGB-v1",
                 ("manipulation", "tableware", "blocks_ranking_rgb"),
-                {list_env._HANDWRITTEN_DEMO},
+                {list_task._HANDWRITTEN_DEMO},
             ),
-            list_env._EnvironmentListEntry(
+            list_task._EnvironmentListEntry(
                 "StackCups-v1",
                 ("manipulation", "tableware", "stack_cups"),
                 set(),
@@ -141,19 +163,19 @@ def test_list_env_discovers_and_prints_task_tree(
         ],
     )
 
-    cli.main(["list-env"])
+    cli.main(["list-task"])
 
     assert discovery_calls == [None]
     assert capsys.readouterr().out == """\
 +------------------------------------------------------------------------------------+
-|                                  Environments (4)                                  |
+|                                     Tasks (4)                                      |
 +------------------------+---------------------+-------------------------------------+
 | Task                   | Environment ID      | Capability                          |
 +------------------------+---------------------+-------------------------------------+
 | classic_control/       |                     |                                     |
 |   cart_pole            | CartPoleRL          | RL                                  |
 | manipulation/          |                     |                                     |
-|   hand_over            | HandOver-v1         | Expert Demo: Expert Program         |
+|   hand_over            | HandOver-v1         | Expert Demo: Task Program           |
 |   tableware/           |                     |                                     |
 |     blocks_ranking_rgb | BlocksRankingRGB-v1 | Expert Demo: Handwritten Trajectory |
 |     stack_cups         | StackCups-v1        | Environment Only                    |
@@ -161,12 +183,12 @@ def test_list_env_discovers_and_prints_task_tree(
 """
 
 
-def test_list_env_help_explains_environment_only_label(
+def test_list_task_help_explains_environment_only_label(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """List-env help defines the fallback capability label."""
+    """List-task help defines the fallback capability label."""
     with pytest.raises(SystemExit) as exc_info:
-        cli.main(["list-env", "--help"])
+        cli.main(["list-task", "--help"])
 
     assert exc_info.value.code == 0
     assert "Environment Only" in capsys.readouterr().out
@@ -182,7 +204,11 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
         json.dumps(
             {
                 "id": "PickPlace-v1",
-                "expert_program_path": "expert/program.yaml",
+                "task_program": {
+                    "program": "task_program/program.yaml",
+                    "integration": "task_program/integration.yaml",
+                    "execution_policy": "policies/trajectory.yaml",
+                },
             }
         ),
         encoding="utf-8",
@@ -202,14 +228,14 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
         encoding="utf-8",
     )
 
-    entries = list_env._config_environment_entries([tmp_path])
+    entries = list_task._config_environment_entries([tmp_path])
 
     expert = entries["pickplace-v1"]
     assert expert.task_path == ("manipulation", "pick_place")
-    assert expert.capabilities == {list_env._EXPERT_PROGRAM}
+    assert expert.capabilities == {list_task._TASK_PROGRAM}
     learning = entries["pointmassrl"]
     assert learning.task_path == ("classic_control", "point_mass")
-    assert learning.capabilities == {list_env._RL}
+    assert learning.capabilities == {list_task._RL}
 
 
 def test_handwritten_demo_detection_uses_environment_hooks() -> None:
@@ -219,8 +245,8 @@ def test_handwritten_demo_detection_uses_environment_hooks() -> None:
     )
     from embodichain_tasks.special.simple_task import SimpleTaskEnv
 
-    assert list_env._implements_handwritten_demo(SimpleTaskEnv)
-    assert not list_env._implements_handwritten_demo(BlocksRankingSizeEnv)
+    assert list_task._implements_handwritten_demo(SimpleTaskEnv)
+    assert not list_task._implements_handwritten_demo(BlocksRankingSizeEnv)
 
 
 def test_subcommand_help_uses_complete_command_parser(
