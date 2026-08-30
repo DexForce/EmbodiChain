@@ -45,6 +45,7 @@ from embodichain.lab.sim.planners import (
 )
 from embodichain.lab.sim.planners.trapezoidal_planner import _plan_linear_profiles
 from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.utils.math import euler_xyz_from_quat
 
 DEFAULT_SAMPLES = 200
@@ -704,6 +705,7 @@ def main() -> None:
             headless=args.headless,
             sim_device=args.device,
             num_envs=args.num_envs,
+            visualization=visualization_cfg_from_args(args),
         )
     )
     try:

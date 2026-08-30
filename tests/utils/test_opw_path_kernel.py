@@ -48,6 +48,7 @@ def test_opw_path_selector_preserves_temporal_branch_continuity() -> None:
             wp_vec6f(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
             lower,
             upper,
+            0.0,
         ],
         outputs=[wp.from_torch(output), wp.from_torch(success)],
         device="cpu",
@@ -81,6 +82,42 @@ def test_opw_path_selector_rejects_limit_blocked_full_turn() -> None:
             wp_vec6f(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
             lower,
             upper,
+            0.0,
+        ],
+        outputs=[wp.from_torch(output), wp.from_torch(success)],
+        device="cpu",
+    )
+
+    assert success.item() == 0
+    assert torch.equal(output[:, 0], initial_seed)
+
+
+def test_opw_path_selector_rejects_equivalent_inside_safety_margin() -> None:
+    """A seed-nearest equivalent must remain outside the excluded margin."""
+    wp.init()
+    candidates = torch.zeros(1, 1, 8, 6)
+    candidates[0, 0, 0, 0] = -6.0
+    validity = torch.zeros(1, 1, 8, dtype=torch.int32)
+    validity[0, 0, 0] = 1
+    initial_seed = torch.zeros(1, 6)
+    initial_seed[0, 0] = 0.3
+    output = torch.empty(1, 1, 6)
+    success = torch.empty(1, 1, dtype=torch.int32)
+    lower = wp_vec6f(-6.4, -6.4, -6.4, -6.4, -6.4, -6.4)
+    upper = wp_vec6f(0.4, 0.4, 0.4, 0.4, 0.4, 0.4)
+    safe_margin = 0.2
+
+    wp.launch(
+        kernel=opw_ik_path_select_kernel,
+        dim=1,
+        inputs=[
+            wp.from_torch(candidates),
+            wp.from_torch(validity),
+            wp.from_torch(initial_seed),
+            wp_vec6f(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+            lower,
+            upper,
+            safe_margin,
         ],
         outputs=[wp.from_torch(output), wp.from_torch(success)],
         device="cpu",

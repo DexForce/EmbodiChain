@@ -534,6 +534,7 @@ def opw_ik_path_select_kernel(
     joint_weights: wp_vec6f,
     lower_limits: wp_vec6f,
     upper_limits: wp_vec6f,
+    safe_margin: float,
     path_result: wp.array(dtype=float, ndim=3),  # [B, N, DOF]
     path_valid: wp.array(dtype=int, ndim=2),  # [B, N]
 ):
@@ -556,7 +557,12 @@ def opw_ik_path_select_kernel(
                 nearest = solution + wp.round((seed - solution) / (2.0 * wp.pi)) * (
                     2.0 * wp.pi
                 )
-                if nearest >= lower_limits[joint] and nearest <= upper_limits[joint]:
+                if is_within_limit(
+                    nearest,
+                    lower_limits[joint],
+                    upper_limits[joint],
+                    safe_margin,
+                ):
                     solution = nearest
                 else:
                     is_continuous = False

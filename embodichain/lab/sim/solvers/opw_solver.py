@@ -453,6 +453,7 @@ class OPWSolver(BaseSolver):
                 wp_vec6f(*joint_weight.detach().cpu().tolist()),
                 wp_vec6f(*lower_limits),
                 wp_vec6f(*upper_limits),
+                self.cfg.safe_margin,
             ],
             outputs=[path_qpos, path_valid],
             device=kernel_device,
