@@ -334,6 +334,19 @@ Add the stable skill ID, goal, binding slots/endpoints, and effect to
 new public classes. Do not create a compatibility re-export module or a closed
 built-in-goal union.
 
+### Task Program handoff
+
+An Atomic Skill is not automatically a Task Program Semantic Call. If the user
+also requests high-level declarative exposure, finish and test the Atomic Skill
+contract first, then invoke `$add-semantic-call`. Prefer a registered Semantic
+Call extension unless the concept is intentionally promoted to a stable
+built-in language primitive.
+
+If the new skill requires new logical resources, endpoints, capabilities, or
+commands on a reusable robot, update them through
+`$add-embodiment-component`; do not encode task or profile metadata in the
+Atomic Action.
+
 ## 7. Test behavior
 
 Add pure pytest tests under `tests/sim/atomic_actions/`. Cover:

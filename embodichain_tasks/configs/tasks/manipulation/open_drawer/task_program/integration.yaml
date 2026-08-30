@@ -5,6 +5,21 @@ requires:
   scene_contract: open_drawer_scene_v1
   embodiment_contract: single_arm_parallel_gripper
 
+scene_binding:
+  contract_id: open_drawer_scene_v1
+  registry_id: task_program_open_drawer
+  articulations:
+    - entity_id: drawer
+      simulation_uid: drawer
+      dynamics: dynamic
+      semantic_type: drawer
+  links:
+    - entity_id: drawer_handle
+      articulation_id: drawer
+      native_link_name: large_handle_bar
+      dynamics: dynamic
+      semantic_type: drawer_handle
+
 profile:
   defaults:
     slide:

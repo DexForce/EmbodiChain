@@ -27,6 +27,7 @@ from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
 )
 from embodichain.learning.rl.env import get_registered_learning_env_names
+from embodichain.utils.utility import load_config
 from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
 EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
@@ -121,7 +122,17 @@ def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
         config_root = TASK_CONFIG_ROOT / "manipulation/tableware" / task_name
 
         assert find_spec(module_name) is None
-        assert (config_root / "env.yaml").is_file()
+        environment_path = config_root / "env.yaml"
+        task_path = config_root / "task.cobotmagic.yaml"
+        assert environment_path.is_file()
+        assert task_path.is_file()
+        environment = load_config(environment_path)
+        task = load_config(task_path)
+        assert environment["environment_id"] == task_name
+        assert "task_program" not in environment
+        assert task["environment"] == {"component": "env.yaml"}
         assert (config_root / "task_program/program.yaml").is_file()
-        assert (config_root / "task_program/integration.yaml").is_file()
-        assert (config_root / "task_program/scene.yaml").is_file()
+        integration_path = config_root / "task_program/integration.yaml"
+        assert integration_path.is_file()
+        assert "scene_binding" in load_config(integration_path)
+        assert not (config_root / "task_program/scene_binding.yaml").exists()

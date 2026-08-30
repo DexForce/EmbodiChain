@@ -1,8 +1,7 @@
 id: TaskProgramRepeatedPickPlace-Franka-v1
-max_episodes: 1
-max_episode_steps: 1200
-num_envs: 1
-arena_space: 2.5
+
+environment:
+  component: env.yaml
 
 task_program:
   program: task_program/program.yaml
@@ -13,11 +12,3 @@ embodiment:
   component: ../../../components/embodiments/franka_panda.yaml
   overrides:
     init_rot: [0.0, 0.0, 180.0]
-
-scene:
-  component: task_program/scene.yaml
-
-env:
-  sim_steps_per_control: 4
-  events: {}
-  dataset: {}

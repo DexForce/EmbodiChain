@@ -200,7 +200,7 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
     """Task-local configs provide hierarchy and explicit capabilities."""
     expert_task = tmp_path / "manipulation" / "pick_place"
     expert_task.mkdir(parents=True)
-    (expert_task / "env.json").write_text(
+    (expert_task / "task.ur5.yaml").write_text(
         json.dumps(
             {
                 "id": "PickPlace-v1",
@@ -212,6 +212,13 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
             }
         ),
         encoding="utf-8",
+    )
+    (expert_task / "env.yaml").write_text(
+        "environment_id: pick_place\nsimulation: {}\nenv: {}\n",
+        encoding="utf-8",
+    )
+    (expert_task / "notes.yaml").write_text(
+        "- reusable\n- metadata\n", encoding="utf-8"
     )
 
     rl_task = tmp_path / "classic_control" / "point_mass"
@@ -233,6 +240,7 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
     expert = entries["pickplace-v1"]
     assert expert.task_path == ("manipulation", "pick_place")
     assert expert.capabilities == {list_task._TASK_PROGRAM}
+    assert "pick_place" not in entries
     learning = entries["pointmassrl"]
     assert learning.task_path == ("classic_control", "point_mass")
     assert learning.capabilities == {list_task._RL}

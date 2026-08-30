@@ -69,13 +69,15 @@ an alias or silently change entity kind.
 ## Author configured scene hierarchy
 
 In `task_program/integration.yaml`, declare an affordance directly beneath its
-owning scene entity:
+owning entity in the nested `scene_binding`:
 
 ```yaml
-scene:
+scene_binding:
+  contract_id: repeated_pick_place_scene_v1
   registry_id: task_program_repeated_pick_place
   rigid_objects:
     - entity_id: cube
+      simulation_uid: cube
       dynamics: dynamic
       semantic_type: cube
       affordances:
@@ -83,12 +85,15 @@ scene:
           kind: antipodal_grasp
 ```
 
-The two IDs have distinct roles. `cube` is the canonical physical object used
-by calls such as `Pick(object="cube")`; `cube_grasp` is the globally unique
-canonical ID of one semantic child that can be passed as an explicit grasp or
-named by `default_grasp_affordance`. The child ID remains necessary because one
-entity may expose multiple affordances and every affordance remains directly
-addressable in the flat Scene Registry.
+The three identities have distinct roles. The parent `entity_id` (`cube`) is
+the canonical semantic object used by calls such as `Pick(object="cube")`.
+`simulation_uid` selects the physical object declared in the reusable
+`env.yaml`. `cube_grasp` is the globally unique canonical ID of one semantic
+child that can be passed as an explicit grasp or named by
+`default_grasp_affordance`. The child ID remains necessary because one entity
+may expose multiple affordances and every affordance remains directly
+addressable in the flat Scene Registry. Deployment composition rejects a
+`simulation_uid` that is absent from the selected physical environment.
 
 The configured affordance kinds are:
 

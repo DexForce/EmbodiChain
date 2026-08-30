@@ -83,9 +83,9 @@ _REPEATED_CUBE_PROGRAM = Path(
 _REPEATED_CUBE_INTEGRATION = Path(
     "tasks/manipulation/repeated_pick_place/task_program/integration.yaml"
 )
-_REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/env.ur5.yaml")
+_REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml")
 _OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/task_program/program.yaml")
-_OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/env.ur5.yaml")
+_OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/task.ur5.yaml")
 _TRAJECTORY_POLICY = Path("components/execution_policies/trajectory_open_loop.yaml")
 _UR5_COMPONENT = Path("components/embodiments/ur5_dh_pgi_140_80.yaml")
 _OPEN_DRAWER_CALL_ID = "simulation.articulation_link_slide"
@@ -254,11 +254,9 @@ def _deployment(relative_path: Path):
     payload = _read_payload(relative_path)
     physical = _resolve_gym_components(payload, base_dir=path.parent)
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
     return _load_configured_task_program_deployment(
-        task_program=payload["task_program"],
+        task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
-        scene=physical.scene_task_program,
         base_dir=path.parent,
     )
 
@@ -696,7 +694,7 @@ def test_cube_config_registers_embodied_env_with_its_integration_factory() -> No
     assert payload["id"] == "TaskProgramRepeatedPickPlace-v1"
     assert cfg.task_program is not None
     assert spec.cls is EmbodiedEnv
-    assert spec.max_episode_steps == payload["max_episode_steps"]
+    assert spec.max_episode_steps == cfg.max_episode_steps
     assert spec.task_program_registration is not None
     assert (
         spec.task_program_registration.fingerprint == expected.registration.fingerprint
@@ -777,8 +775,8 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
 @pytest.mark.parametrize(
     "relative_path",
     (
-        Path("tasks/manipulation/repeated_pick_place/env.ur5.yaml"),
-        Path("tasks/manipulation/open_drawer/env.ur5.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"),
+        Path("tasks/manipulation/open_drawer/task.ur5.yaml"),
     ),
 )
 def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
@@ -786,21 +784,23 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
 ) -> None:
     """Runnable examples keep only deterministic simulation and motion inputs."""
     payload = _read_payload(relative_path)
+    environment = _read_payload(relative_path.parent / "env.yaml")
 
+    assert payload["environment"] == {"component": "env.yaml"}
     assert set(payload["task_program"]) == {
         "program",
         "integration",
         "execution_policy",
     }
     assert set(payload["embodiment"]) <= {"component", "overrides"}
-    assert payload["scene"] == {"component": "task_program/scene.yaml"}
+    assert "task_program" not in environment
     assert "version" not in payload
     assert "task_program_path" not in payload
     assert "task_program_integration_path" not in payload
     assert "task_program_runtime" not in payload
-    assert payload["env"]["events"] == {}
-    assert payload["env"]["dataset"] == {}
-    assert "physics_config" not in payload
+    assert environment["env"]["events"] == {}
+    assert environment["env"]["dataset"] == {}
+    assert "physics_config" not in environment
 
 
 def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:

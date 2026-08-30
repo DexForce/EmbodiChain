@@ -109,24 +109,28 @@ settling presets, grounders, endpoint transports, evidence and safety
 factories, and registered-call lowerers. Adapter creation calls
 `assert_unchanged()` and revalidates all live bindings.
 
-Configured environments are deployment roots with five typed selections:
-`task_program.program`, `task_program.integration`,
-`task_program.execution_policy`, `embodiment.component`, and `scene.component`.
-`config_to_cfg()` resolves every path from the deployment file, checks the
-task's required scene/embodiment contracts, composes the immutable integration
-catalog, injects its trusted profile/scene/preset selection into the unbound
-program, and registers the common `EmbodiedEnv`. The CLI may override only the
-program. Components have closed fields and intentionally omit compatibility
-`version` values.
+Configured environments use runnable `task.<embodiment>.yaml` deployments with
+three typed selections: `environment.component`,
+`task_program.{program,integration,execution_policy}`, and
+`embodiment.component`. The reusable `env.yaml` owns only
+embodiment-independent Gym values and physical simulation entities. All
+deployment component paths resolve from `task.<embodiment>.yaml`.
+`config_to_cfg()` checks that semantic binding targets exist in the physical
+scene, validates the task's required scene/embodiment contracts, composes the
+immutable integration catalog, injects its trusted profile/scene/preset
+selection into the unbound program, and registers the common `EmbodiedEnv`.
+The CLI may override only the program. Components have closed fields and
+intentionally omit compatibility `version` values.
 
 Ownership is explicit rather than a generic deep merge:
 
 - `program.yaml` owns task flow, targets, post-policies, and validators; it
   contains neither robot IDs nor an `integration` selection;
-- task-local `integration.yaml` owns required contracts, semantic defaults,
-  action options, effect monitors, and task-specific runtime services;
-- task-local `scene.yaml` owns simulation entities and their canonical semantic
-  registry, but not the selected sensors;
+- task-local `integration.yaml` owns required contracts, its nested semantic
+  `scene_binding`, semantic defaults, action options, effect monitors, and
+  task-specific runtime services;
+- task-local `env.yaml` owns only physical simulation entities and ordinary
+  Gym environment values, so it can also be reused by handwritten trajectories;
 - `configs/components/embodiments/*.yaml` owns simulation robot construction,
   the sensor suite, and an optional `skill_profile` containing logical
   resources/endpoints, command presets, and embodiment-specific services;
@@ -136,6 +140,10 @@ Ownership is explicit rather than a generic deep merge:
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
 separate identity domains and do not imply a skill-profile version.
+For `joint_position_constraint` evidence, `object_ids` is an optional explicit
+narrowing. When omitted, runtime assembly scopes the embodiment service to the
+selected scene's graspable rigid objects, so reusable embodiments do not name
+task-local objects.
 
 Deployment embodiment overrides affect only the robot simulation fields and
 are restricted to `uid`, `init_pos`, `init_rot`, and `init_qpos`. Sensor lists
@@ -145,23 +153,26 @@ task to many compatible embodiments without copying either declaration or
 admitting arbitrary merge semantics. `repeated_pick_place` and `open_drawer`
 each provide UR5 and Franka deployments as reference compositions.
 
-Physical embodiment/scene expansion is owned by
-`gym/utils/_component_composition.py` and runs for ordinary handwritten Gym
-tasks as well. In that case an embodiment component may omit `skill_profile`,
-and a scene component may omit `task_program`; selecting a component reuses
-physical configuration but does not by itself parameterize hard-coded Python
-control-part names or trajectory dimensions. A deployment that declares
-`task_program` must select an embodiment `skill_profile` and scene
-`task_program` metadata satisfying the integration and execution-policy
-contracts. The removed embodiment-level `task_program` key is not accepted.
+Physical environment, embodiment, and standalone scene expansion is owned by
+`gym/utils/_component_composition.py` and also runs for ordinary handwritten
+Gym tasks. Task Program integration and nested scene-binding composition is
+owned by `task_program/integrations/_configured_composition.py`. An embodiment
+component may omit `skill_profile`, while a scene component never owns Task
+Program metadata.
+Selecting a physical component does not by itself parameterize hard-coded
+Python control-part names or trajectory dimensions. A configured Task Program
+must select an embodiment `skill_profile`; its integration must declare a
+`scene_binding` satisfying the scene and execution-policy contracts. The
+removed embodiment-level and scene-level `task_program` metadata keys are not
+accepted.
 
-Within `integration.yaml`, every affordance is nested in an `affordances` list
-under its owning `rigid_objects`, `articulations`, or `links` entry. The child
-keeps a globally unique `entity_id` and a closed `kind` discriminator
-(`antipodal_grasp`, `support_surface`, or `container`); the YAML does not repeat
-ownership with `object_id` or `parent_id`. The configured decoder derives that
-relation and normalizes the authoring hierarchy into the flat
-`SimulationSceneBinding` / `SceneRegistry` index. Scene-level affordance
+Within `integration.yaml.scene_binding`, every affordance is nested in an
+`affordances` list under its owning `rigid_objects`, `articulations`, or `links`
+entry. The child keeps a globally unique `entity_id` and a closed `kind`
+discriminator (`antipodal_grasp`, `support_surface`, or `container`); the YAML
+does not repeat ownership with `object_id` or `parent_id`. The configured
+decoder derives that relation and normalizes the authoring hierarchy into the
+flat `SimulationSceneBinding` / `SceneRegistry` index. Scene-level affordance
 collections are not accepted.
 
 ## Effect assurance and acceptance

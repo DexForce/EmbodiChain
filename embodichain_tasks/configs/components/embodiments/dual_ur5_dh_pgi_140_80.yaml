@@ -1,9 +1,9 @@
-embodiment_id: dual_ur5_handover
+embodiment_id: dual_ur5_dh_pgi_140_80
 
 simulation:
-  uid: DualUR5HandOver
+  uid: DualUR5
   urdf_cfg:
-    fname: dual_ur5_hand_over
+    fname: dual_ur5_dh_pgi_140_80
     name_case:
       joint: lower
       link: lower
@@ -107,8 +107,8 @@ simulation:
 sensor: []
 
 skill_profile:
-  contract_id: dual_arm_parallel_gripper_handover
-  profile_id: dual_ur5_handover
+  contract_id: dual_arm_parallel_gripper
+  profile_id: dual_ur5_dh_pgi_140_80
   resources:
     - resource_id: left
       endpoints:
@@ -166,6 +166,5 @@ skill_profile:
     control_part_evidence:
       kind: joint_position_constraint
       control_parts: [left_hand, right_hand]
-      object_ids: [can]
       open_qpos: [0.0]
       minimum_displacement: 0.004

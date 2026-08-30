@@ -3,7 +3,23 @@ program_id: dual_ur5_hand_over
 
 requires:
   scene_contract: hand_over_scene_v1
-  embodiment_contract: dual_arm_parallel_gripper_handover
+  embodiment_contract: dual_arm_parallel_gripper
+
+scene_binding:
+  contract_id: hand_over_scene_v1
+  registry_id: dual_ur5_handover_v1
+  rigid_objects:
+    - entity_id: can
+      simulation_uid: handover_object
+      dynamics: dynamic
+      semantic_type: soda_can
+      affordances:
+        - entity_id: can_antipodal_grasp
+          kind: antipodal_grasp
+    - entity_id: support_surface
+      simulation_uid: support_surface
+      dynamics: static
+      semantic_type: support_surface
 
 profile:
   defaults:
