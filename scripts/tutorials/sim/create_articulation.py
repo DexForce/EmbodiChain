@@ -29,6 +29,7 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
     RenderCfg,
@@ -66,7 +67,7 @@ def create_articulation(sim: SimulationManager) -> Articulation:
         fpath=get_data_path(DRAWER_ASSET),
         asset_physics_mode="overlay",
         init_pos=(0.0, 0.0, 0.05),
-        fix_base=True,
+        articulation_props=ArticulationRootPropertiesCfg(fixed_base=True),
         drive_pros=JointDrivePropertiesCfg(drive_type="none"),
         # The asset limit is [0.0, 0.2]; keep 90% of its travel range.
         qpos_limits=DRAWER_USER_QPOS_LIMITS,
@@ -228,8 +229,11 @@ def main() -> None:
         print("[INFO]: Running simulation. Press Ctrl+C to stop.", flush=True)
         run_simulation(sim, articulation, max_steps=args.max_steps)
     finally:
-        sim.destroy()
+        sim.destroy(exit_process=False)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        SimulationManager.flush_cleanup_queue()

@@ -17,9 +17,11 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
+from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg
 from embodichain.lab.sim.objects.articulation import Articulation
 from embodichain.lab.sim.spawn.scene import SpawnScene
 
@@ -53,6 +55,19 @@ class _RetryableFacade:
         self.is_declared = False
 
 
+class _RuntimeConfigFacade(_RetryableFacade):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    def attach_spawn_handles(self, entities: tuple[object, ...]) -> None:
+        self.events.append("attach")
+        super().attach_spawn_handles(entities)
+
+    def _prepare_spawn_runtime_config(self, _result: object) -> None:
+        self.events.append("runtime_config")
+
+
 def test_bind_retries_only_incomplete_declarations() -> None:
     first_handle = object()
     second_handle = object()
@@ -82,6 +97,70 @@ def test_bind_retries_only_incomplete_declarations() -> None:
     assert second._entities == [second_handle]
     assert first.bind_attempts == 1
     assert second.bind_attempts == 2
+
+
+def test_runtime_config_attaches_articulation_before_preparing_it() -> None:
+    scene = _make_scene({})
+    events: list[str] = []
+    facade = _RuntimeConfigFacade(events)
+    scene.track(
+        "articulation",
+        "robot",
+        SimpleNamespace(name="robot", per_env=False),
+        facade=facade,
+    )
+    handle = object()
+    scene.builder.result.handles["robot"] = handle
+
+    scene.prepare_runtime_config(scene.builder.result)
+
+    assert facade._entities == [handle]
+    assert events == ["attach", "runtime_config"]
+
+
+def test_default_root_properties_prepare_once_per_topology_revision() -> None:
+    native_articulation = MagicMock()
+    articulation = object.__new__(Articulation)
+    articulation.cfg = SimpleNamespace(
+        articulation_props=ArticulationRootPropertiesCfg(
+            min_position_iters=32,
+            min_velocity_iters=8,
+        )
+    )
+    articulation._entities = [SimpleNamespace(_physics_binding=native_articulation)]
+    articulation._prepared_default_root_topology_revision = -1
+    result = SimpleNamespace(backend="dexsim", topology_revision=3)
+
+    articulation._prepare_spawn_runtime_config(result)
+    articulation._prepare_spawn_runtime_config(result)
+
+    native_articulation.set_solver_iteration_counts.assert_called_once_with(
+        min_position_iters=32,
+        min_velocity_iters=8,
+    )
+
+    result.topology_revision = 4
+    articulation._prepare_spawn_runtime_config(result)
+    assert native_articulation.set_solver_iteration_counts.call_count == 2
+
+
+def test_newton_skips_default_root_runtime_properties() -> None:
+    native_articulation = MagicMock()
+    articulation = object.__new__(Articulation)
+    articulation.cfg = SimpleNamespace(
+        articulation_props=ArticulationRootPropertiesCfg(
+            min_position_iters=32,
+            min_velocity_iters=8,
+        )
+    )
+    articulation._entities = [SimpleNamespace(_physics_binding=native_articulation)]
+    articulation._prepared_default_root_topology_revision = -1
+
+    articulation._prepare_spawn_runtime_config(
+        SimpleNamespace(backend="newton", topology_revision=3)
+    )
+
+    native_articulation.set_solver_iteration_counts.assert_not_called()
 
 
 def test_commit_resolves_and_configures_before_finalize(monkeypatch) -> None:

@@ -17,13 +17,15 @@
 from typing import TypeVar
 
 from embodichain.lab.sim.cfg import (
+    _raise_removed_articulation_cfg_fields,
     JointDrivePropertiesCfg,
+    JointDynamicsPropertiesCfg,
     RigidBodyAttributesCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
 from embodichain.lab.sim.solvers import SolverCfg
-from embodichain.utils import logger
+from embodichain.utils import is_configclass, logger
 
 _ConfigT = TypeVar("_ConfigT")
 
@@ -35,7 +37,15 @@ def _merge_non_none_config(base: _ConfigT | None, override: _ConfigT) -> _Config
     for field_name in override.__dataclass_fields__:
         value = getattr(override, field_name)
         if value is not None:
-            setattr(base, field_name, value)
+            base_value = getattr(base, field_name)
+            if (
+                base_value is not None
+                and type(base_value) is type(value)
+                and is_configclass(base_value)
+            ):
+                _merge_non_none_config(base_value, value)
+            else:
+                setattr(base, field_name, value)
     return base
 
 
@@ -103,6 +113,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
         RobotCfg: The merged robot configuration.
     """
 
+    _raise_removed_articulation_cfg_fields(override_cfg_dict)
+
     # Only parse keys the base RobotCfg recognizes, so subclass-only variant
     # fields (version, ...) set by _build_defaults don't trigger
     # spurious "Key not found in RobotCfg" warnings from the base from_dict.
@@ -166,10 +178,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge joint drive properties
             user_drive_pros_dict = override_cfg_dict.get("drive_pros")
             if isinstance(user_drive_pros_dict, dict):
-                if (
-                    user_drive_pros_dict.get("backend") == "newton"
-                    or "target_mode" in user_drive_pros_dict
-                ):
+                if user_drive_pros_dict.get("backend") == "newton":
                     base_cfg.drive_pros = JointDrivePropertiesCfg.from_dict(
                         user_drive_pros_dict,
                         defaults=base_cfg.drive_pros,
@@ -190,6 +199,26 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             else:
                 logger.log_warning(
                     "drive_pros should be a dictionary. Skipping drive_pros merge."
+                )
+        elif key == "joint_props":
+            user_joint_props = override_cfg_dict.get("joint_props")
+            if isinstance(user_joint_props, dict):
+                parsed = JointDynamicsPropertiesCfg.from_dict(user_joint_props)
+                if base_cfg.joint_props is None:
+                    base_cfg.joint_props = parsed
+                    continue
+                for prop in parsed.__dataclass_fields__:
+                    value = getattr(parsed, prop)
+                    if value is None:
+                        continue
+                    default_value = getattr(base_cfg.joint_props, prop)
+                    if isinstance(value, dict) and isinstance(default_value, dict):
+                        default_value.update(value)
+                    else:
+                        setattr(base_cfg.joint_props, prop, value)
+            else:
+                logger.log_warning(
+                    "joint_props should be a dictionary. Skipping joint_props merge."
                 )
         elif key == "attrs":
             # merge physics attributes

@@ -276,6 +276,54 @@ def test_flush_cleanup_queue_waits_after_running_pending_destroy(
     wait_scene_destruction.assert_called_once_with()
 
 
+def test_deferred_destroy_prepares_backend_before_releasing_world(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backend-owned views are released before Spawn and World resources."""
+    events: list[str] = []
+    sim = object.__new__(SimulationManager)
+    spawn_scene = MagicMock()
+    spawn_scene.close.side_effect = lambda: events.append("spawn_close")
+    sim.physics = SimpleNamespace(
+        prepare_for_teardown=lambda: events.append("backend_prepare")
+    )
+    sim._gizmos = {}
+    sim._markers = {}
+    sim._rigid_objects = {}
+    sim._constraints = {}
+    sim._rigid_object_groups = {}
+    sim._deformable_objects = {}
+    sim._articulations = {}
+    sim._robots = {}
+    sim._sensors = {}
+    sim._lights = {}
+    sim._visual_materials = {}
+    sim._texture_cache = {}
+    sim._arenas = []
+    sim._spawn_scene = spawn_scene
+    sim._default_plane = object()
+    sim._env = SimpleNamespace(clean=lambda: events.append("env_clean"))
+    sim._world = SimpleNamespace(quit=lambda: events.append("world_quit"))
+    sim.instance_id = 0
+    sim.is_window_recording = lambda: False
+    sim.wait_window_record_saves = lambda: events.append("record_wait")
+    sim.clean_materials = lambda: events.append("material_clean")
+    sim.is_window_opened = False
+
+    monkeypatch.setattr(
+        SimulationManager,
+        "reset",
+        lambda _instance_id: events.append("manager_reset"),
+    )
+    monkeypatch.setattr(gc, "collect", lambda: events.append("gc_collect"))
+
+    sim._deferred_destroy()
+
+    assert events.index("backend_prepare") < events.index("gc_collect")
+    assert events.index("backend_prepare") < events.index("spawn_close")
+    assert events.index("backend_prepare") < events.index("world_quit")
+
+
 def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -> None:
     sim, runtime = _make_visualization_sim_manager()
 
@@ -622,6 +670,11 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     spawn_scene.builder.result = None
     spawn_scene.commit.return_value = result
     spawn_scene.arena_names = ["arena_0"]
+    events: list[str] = []
+    spawn_scene.prepare_runtime_config.side_effect = lambda _result: events.append(
+        "runtime_config"
+    )
+    spawn_scene.bind.side_effect = lambda: events.append("bind")
 
     sim = object.__new__(SimulationManager)
     sync_render_state = MagicMock()
@@ -631,6 +684,7 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     )
     sim.device = device
     sim._world = MagicMock()
+    sim._world.init_gpu_physics.side_effect = lambda: events.append("gpu_init")
     sim._spawn_scene = spawn_scene
     sim._default_plane = object()
     sim._pending_sensor_attachments = []
@@ -639,13 +693,16 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
 
     sim.prepare()
 
+    spawn_scene.prepare_runtime_config.assert_called_once_with(result)
     spawn_scene.bind.assert_called_once_with()
     sync_render_state.assert_called_once_with(result)
     sim._world.update.assert_not_called()
     if initializes_direct_gpu:
         sim._world.init_gpu_physics.assert_called_once_with()
+        assert events == ["runtime_config", "gpu_init", "bind"]
     else:
         sim._world.init_gpu_physics.assert_not_called()
+        assert events == ["runtime_config", "bind"]
 
 
 def test_prepare_retries_runtime_and_binding_without_recommit() -> None:

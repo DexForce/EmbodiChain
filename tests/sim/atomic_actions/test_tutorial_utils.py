@@ -518,9 +518,8 @@ def test_tutorial_rigid_body_physics_groups_backend_specific_properties() -> Non
     assert physics.collision_props.rest_offset == 0.001
 
 
-def test_run_tutorial_synchronizes_cuda_before_destroying_newton_scene() -> None:
+def test_run_tutorial_uses_deferred_simulation_cleanup() -> None:
     sim = MagicMock()
-    sim.is_newton_backend = True
     sim.is_window_recording.return_value = False
 
     with (
@@ -538,17 +537,10 @@ def test_run_tutorial_synchronizes_cuda_before_destroying_newton_scene() -> None
             "scripts.tutorials.atomic_action.tutorial_utils."
             "SimulationManager.flush_cleanup_queue"
         ) as flush_cleanup_queue,
-        patch(
-            "scripts.tutorials.atomic_action.tutorial_utils." "torch.cuda.is_available",
-            return_value=True,
-        ),
-        patch(
-            "scripts.tutorials.atomic_action.tutorial_utils." "torch.cuda.synchronize"
-        ) as synchronize,
     ):
         run_tutorial(lambda: None)
 
-    synchronize.assert_called_once_with()
+    sim.wait_window_record_saves.assert_called_once_with()
     sim.destroy.assert_called_once_with(exit_process=False)
     flush_cleanup_queue.assert_called_once_with()
 

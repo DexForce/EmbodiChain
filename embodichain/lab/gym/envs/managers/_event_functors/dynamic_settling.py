@@ -124,8 +124,9 @@ def _get_dynamic_entity_catalog(
 def _is_dynamic_entity(kind: str, entity: _DynamicEntity) -> bool:
     """Return whether an entity participates in dynamic physics.
 
-    Articulation links are physics-backed even when ``fix_base`` constrains the
-    root link, so every non-robot articulation is a valid settle target.
+    Articulation links are physics-backed even when
+    ``articulation_props.fixed_base`` constrains the root link, so every
+    non-robot articulation is a valid settle target.
     """
     if kind == "articulation":
         return True

@@ -39,6 +39,7 @@ from embodichain.lab.gym.envs.differentiable_env import DifferentiableEmbodiedEn
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim.cfg import (
+    ArticulationRootPropertiesCfg,
     NewtonPhysicsCfg,
     RobotCfg,
     URDFCfg,
@@ -146,7 +147,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
             robot_cfg = RobotCfg(
                 uid="franka",
                 urdf_cfg=URDFCfg().set_urdf(urdf),
-                fix_base=True,
+                articulation_props=ArticulationRootPropertiesCfg(fixed_base=True),
             )
             cfg = EmbodiedEnvCfg(
                 sim_cfg=SimulationManagerCfg(

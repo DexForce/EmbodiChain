@@ -107,6 +107,17 @@ class PhysicsBackend(ABC):
         """
         del result
 
+    def prepare_for_teardown(self) -> None:
+        """Release backend-owned views before Spawn releases their parents.
+
+        :class:`SimulationManager` calls this during deferred destruction,
+        after render workers stop and before it closes the Spawn result. A
+        backend can use this boundary to synchronize device work and release
+        borrowed render or physics views while their World-owned native
+        parents are still alive. Backends without such views keep the default
+        no-op implementation.
+        """
+
     # ------------------------------------------------------------------ #
     # Scene access
     # ------------------------------------------------------------------ #

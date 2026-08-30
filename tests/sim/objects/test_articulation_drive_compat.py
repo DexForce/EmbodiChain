@@ -20,6 +20,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import torch
 from dexsim.types import DriveType
 
 from embodichain.lab.sim.objects.articulation import Articulation
@@ -46,7 +47,7 @@ def test_newton_target_modes_map_to_portable_drive_types() -> None:
             DriveType.FORCE,
             DriveType.FORCE,
             DriveType.FORCE,
-            DriveType.FORCE,
+            DriveType.NONE,
         ]
     ]
 
@@ -64,3 +65,26 @@ def test_newton_drive_type_query_honors_joint_selection() -> None:
     assert articulation.get_joint_drive_type(joint_ids=[2, 1]) == [
         [DriveType.NONE, DriveType.FORCE]
     ]
+
+
+def test_runtime_effort_mode_disables_pd_gains_on_newton() -> None:
+    calls: list[dict[str, object]] = []
+    entity = SimpleNamespace(set_newton_drive=lambda **kwargs: calls.append(kwargs))
+    articulation = object.__new__(Articulation)
+    articulation._spawn_result = object()
+    articulation._entities = [entity]
+    articulation._all_indices = np.asarray([0], dtype=np.int32)
+    articulation._data = SimpleNamespace(is_newton_backend=True, dof=1)
+    articulation.device = torch.device("cpu")
+
+    articulation.set_joint_drive(
+        stiffness=torch.tensor([[12.0]]),
+        damping=torch.tensor([[4.0]]),
+        drive_type="force",
+        target_mode="effort",
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["target_mode"] == 4
+    assert calls[0]["target_ke"] == 0.0
+    assert calls[0]["target_kd"] == 0.0

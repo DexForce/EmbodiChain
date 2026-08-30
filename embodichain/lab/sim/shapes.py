@@ -125,6 +125,9 @@ class MeshCfg(ShapeCfg):
     If set to larger than 1, the mesh will be decomposed into multiple convex hulls
     using the approximate convex decomposition method specified by :attr:`acd_method`.
     Reference: https://github.com/SarahWeiii/CoACD
+
+    Compatibility alias. New rigid-object definitions should use
+    ``RigidBodyPhysicsCfg.mesh_collision_props.max_convex_hull_num``.
     """
 
     acd_method: str = "coacd"
@@ -132,6 +135,9 @@ class MeshCfg(ShapeCfg):
 
     Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
     :attr:`max_convex_hull_num` is set to larger than 1.
+
+    Compatibility alias; the independent mesh-collision config takes
+    precedence when set.
     """
 
     sdf_resolution: int = 0
@@ -141,6 +147,9 @@ class MeshCfg(ShapeCfg):
     of the mesh, divided by the resolution. If ``sdf_resolution`` is set to larger
     than 0, an SDF will be generated for collision detection. SDF increases the
     accuracy of collision, but also takes more time to initialize and simulate.
+
+    Compatibility alias; the independent mesh-collision config takes
+    precedence when set.
     """
 
 

@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import argparse
-import gc
 import math
 import re
 import time
@@ -261,11 +260,6 @@ def run_tutorial(main: Callable[[], None]) -> None:
                 if sim.is_window_recording():
                     sim.stop_window_record()
                 sim.wait_window_record_saves()
-                if sim.is_newton_backend and torch.cuda.is_available():
-                    # Newton owns CUDA resources that can still be referenced by
-                    # asynchronous Torch work from an atomic-action plan.
-                    gc.collect()
-                    torch.cuda.synchronize()
                 sim.destroy(exit_process=False)
                 SimulationManager.flush_cleanup_queue()
 

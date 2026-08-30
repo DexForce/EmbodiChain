@@ -99,6 +99,7 @@ from embodichain.lab.sim.cfg import (
     ClothObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     RobotCfg,
     RobotPresetCfg,
     RigidConstraintCfg,
@@ -1039,6 +1040,7 @@ class SimulationManager:
         # Runtime readiness belongs to the SimulationManager. Keep this and
         # facade binding outside the topology-change branch so a failed call
         # remains retryable without rematerializing the scene.
+        scene.prepare_runtime_config(result)
         self._prepare_spawn_runtime(result)
         scene.bind()
         self._sync_spawn_render_state(result)
@@ -1788,8 +1790,14 @@ class SimulationManager:
                 cfg.init_local_pose = descriptor.pose.copy()
                 cfg.asset_physics_mode = "preserve"
                 cfg.use_usd_properties = None
-                cfg.fix_base = bool(descriptor.fixed_base)
-                cfg.disable_self_collision = not descriptor.enable_self_collision
+                if robot_cfg is None:
+                    cfg.articulation_props = ArticulationRootPropertiesCfg()
+                else:
+                    cfg.articulation_props = cfg.articulation_props.copy()
+                cfg.articulation_props.fixed_base = bool(descriptor.fixed_base)
+                cfg.articulation_props.self_collision_enabled = (
+                    descriptor.enable_self_collision
+                )
                 cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
                 cfg.build_pk_chain = False
                 facade = facade_type(
@@ -3870,6 +3878,13 @@ class SimulationManager:
             self.close_window()
 
         import sys, gc
+
+        # Release backend-owned views before SpawnResult closes the native
+        # resources that back them. Newton also synchronizes its device here.
+        self.physics.prepare_for_teardown()
+        # Run wrapper destructors while their World is still alive. The later
+        # collections continue to break cycles left by the native teardown.
+        gc.collect()
 
         # Render-only cameras may be attached to Spawn articulation link
         # nodes. Remove their Arena views before closing SpawnResult, which

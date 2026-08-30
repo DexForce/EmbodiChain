@@ -30,6 +30,7 @@ from embodichain.lab.sim.cfg import (
     WindowCameraPoseCfg,
 )
 from embodichain.lab.sim.physics import NewtonPhysicsBackend
+from embodichain.lab.sim.physics import newton as newton_physics
 from embodichain.lab.sim import sim_manager
 
 
@@ -189,6 +190,69 @@ def test_newton_backend_exposes_resolved_solver_type() -> None:
 
     assert backend.solver_type == "xpbd"
     assert world_config.newton_cfg.solver_cfg.solver_type == "xpbd"
+
+
+def test_newton_teardown_releases_render_views_on_the_resolved_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    render_sync = MagicMock()
+    newton_backend = SimpleNamespace(render_sync=render_sync)
+    manager = SimpleNamespace(_world=object())
+    backend = NewtonPhysicsBackend(manager)
+    world_config = SimpleNamespace(newton_cfg=None)
+    synchronize_device = MagicMock()
+    sim_config = SimulationManagerCfg(
+        gpu_id=2,
+        physics_cfg=NewtonPhysicsCfg(device="cuda"),
+    )
+    monkeypatch.setattr(
+        newton_physics.wp,
+        "synchronize_device",
+        synchronize_device,
+    )
+    from dexsim.engine.newton_physics import backend_registry
+
+    monkeypatch.setattr(
+        backend_registry,
+        "get_newton_backend",
+        lambda world: newton_backend if world is manager._world else None,
+    )
+
+    backend.configure_world(world_config, sim_config)
+    backend.prepare_for_teardown()
+
+    synchronize_device.assert_called_once_with("cuda:2")
+    render_sync.clear.assert_called_once_with()
+
+
+def test_newton_teardown_skips_cpu_devices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    render_sync = MagicMock()
+    newton_backend = SimpleNamespace(render_sync=render_sync)
+    manager = SimpleNamespace(_world=object())
+    backend = NewtonPhysicsBackend(manager)
+    world_config = SimpleNamespace(newton_cfg=None)
+    synchronize_device = MagicMock()
+    sim_config = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg(device="cpu"))
+    monkeypatch.setattr(
+        newton_physics.wp,
+        "synchronize_device",
+        synchronize_device,
+    )
+    from dexsim.engine.newton_physics import backend_registry
+
+    monkeypatch.setattr(
+        backend_registry,
+        "get_newton_backend",
+        lambda world: newton_backend if world is manager._world else None,
+    )
+
+    backend.configure_world(world_config, sim_config)
+    backend.prepare_for_teardown()
+
+    synchronize_device.assert_not_called()
+    render_sync.clear.assert_called_once_with()
 
 
 def test_newton_backend_syncs_render_state_without_physics_step(

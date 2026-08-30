@@ -25,6 +25,7 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.objects.backends.newton import _default_mujoco_mimic_solref
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.lab.sim.cfg import physics_cfg_for_backend
 from embodichain.data import get_data_path
@@ -50,6 +51,20 @@ CONTROL_PARTS = {
         "RIGHT_J7",
     ],
 }
+
+W1_ACTIVE_DOF = 40  # Dexforce W1 v021 scalar active-DOF count.
+
+
+@pytest.mark.no_sim
+def test_default_mujoco_mimic_solref_preserves_damping_and_timestep_floor():
+    np.testing.assert_allclose(
+        _default_mujoco_mimic_solref(physics_dt=0.01, num_substeps=10),
+        [2.0e-3, 1.0e1],
+    )
+    np.testing.assert_allclose(
+        _default_mujoco_mimic_solref(physics_dt=1.0e-4, num_substeps=10),
+        [1.0e-4, 1.0e1],
+    )
 
 
 def test_get_qf_selects_control_part_joint_efforts():
@@ -257,6 +272,52 @@ class BaseRobotTest:
         assert (
             len(right_eef_ids_without_mimic) == 6
         ), f"Expected 6 right eef joint IDs without mimic, got {len(right_eef_ids_without_mimic)}"
+
+    def test_default_mimic_tracks_closed_hand_target(self):
+        """Keep W1 hand mimic constraints equally stiff on CPU and CUDA."""
+        self.robot.reset()
+        open_target = torch.tensor(
+            [[0.0, 1.5, 0.0, 0.0, 0.0, 0.0]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        close_target = torch.tensor(
+            [[0.1, 1.5, 0.3, 0.2, 0.3, 0.3]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        for target in (open_target, close_target):
+            self.robot.set_qpos(
+                target.repeat(self.robot.num_instances, 1), name="right_eef"
+            )
+            self.sim.update(step=100)
+
+        qpos = self.robot.body_data.qpos
+        target_qpos = self.robot.body_data.target_qpos
+        right_eef_ids = self.robot.get_joint_ids("right_eef")
+        right_mimic_errors = []
+        for mimic_id, parent_id, multiplier, offset in zip(
+            self.robot.mimic_ids,
+            self.robot.mimic_parents,
+            self.robot.mimic_multipliers,
+            self.robot.mimic_offsets,
+            strict=True,
+        ):
+            if not self.robot.joint_names[parent_id].startswith("RIGHT_HAND"):
+                continue
+            right_mimic_errors.append(
+                torch.abs(
+                    qpos[:, mimic_id] - (qpos[:, parent_id] * multiplier + offset)
+                )
+            )
+
+        assert torch.max(torch.stack(right_mimic_errors)).item() < 0.02
+        assert (
+            torch.max(
+                torch.abs(qpos[:, right_eef_ids] - target_qpos[:, right_eef_ids])
+            ).item()
+            < 0.01
+        )
 
     def test_setter_and_getter_with_control_part(self):
         left_arm_qpos = self.robot.get_qpos(name="left_arm")
@@ -546,6 +607,7 @@ class TestRobotNewton:
         )
         self.sim = SimulationManager(config)
         cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
+        cfg.init_qpos = [0.0001 * (index + 1) for index in range(W1_ACTIVE_DOF)]
         self.robot: Robot = self.sim.add_robot(cfg=cfg)
         self.sim.prepare()
 
@@ -565,9 +627,143 @@ class TestRobotNewton:
         assert self.robot.body_data.is_ready
         assert self.robot.dof > 0
 
+        state_joint_names = self.robot.body_data.articulation_view.joint_names
+        assert self.robot.joint_names == state_joint_names
+        source_joint_names = self.robot._entities[0].get_actived_joint_names()
+        initial_qpos_by_name = dict(
+            zip(source_joint_names, self.robot.cfg.init_qpos, strict=True)
+        )
+        mimic_relations = list(
+            zip(
+                self.robot.mimic_ids,
+                self.robot.mimic_parents,
+                self.robot.mimic_multipliers,
+                self.robot.mimic_offsets,
+                strict=True,
+            )
+        )
+        assert all(
+            state_joint_names[mimic_id].endswith("_PIP")
+            and "_HAND_" in state_joint_names[parent_id]
+            for mimic_id, parent_id, _, _ in mimic_relations
+        )
+        initial_qpos = self.robot.body_data.qpos[0].detach().cpu().tolist()
+        assert dict(zip(state_joint_names, initial_qpos, strict=True)) == pytest.approx(
+            initial_qpos_by_name
+        )
+
+        binding = self.robot._entities[0]._physics_binding
+        model = binding._runtime.model
+        runtime_joints = {joint.name: joint for joint in binding.joints}
+        mimic_joint0 = np.asarray(model.constraint_mimic_joint0.numpy()).reshape(-1)
+        mimic_joint1 = np.asarray(model.constraint_mimic_joint1.numpy()).reshape(-1)
+        row_by_pair = {
+            (int(child), int(parent)): row
+            for row, (child, parent) in enumerate(
+                zip(mimic_joint0, mimic_joint1, strict=True)
+            )
+        }
+        constraint_rows = []
+        for mimic_id, parent_id, _, _ in mimic_relations:
+            child = runtime_joints[state_joint_names[mimic_id]]
+            parent = runtime_joints[state_joint_names[parent_id]]
+            constraint_rows.append(
+                row_by_pair[(int(child.joint_id), int(parent.joint_id))]
+            )
+
+        solver = binding._runtime.solver
+        mapping = np.asarray(solver.mjc_eq_to_newton_mimic.numpy())
+        selected_eq = np.isin(mapping, np.asarray(constraint_rows, dtype=np.int32))
+        assert int(selected_eq.sum()) == len(mimic_relations)
+        eq_solref = np.asarray(solver.mjw_model.eq_solref.numpy())
+        np.testing.assert_allclose(
+            eq_solref[selected_eq],
+            np.broadcast_to([2.0e-3, 1.0e1], (len(mimic_relations), 2)),
+        )
+        target_ke = np.asarray(model.joint_target_ke.numpy())
+        target_kd = np.asarray(model.joint_target_kd.numpy())
+        target_mode = np.asarray(model.joint_target_mode.numpy())
+        eq_active = np.asarray(solver.mjw_data.eq_active.numpy())
+        assert np.all(eq_active[selected_eq])
+        for mimic_id, parent_id, _, _ in mimic_relations:
+            child = runtime_joints[state_joint_names[mimic_id]]
+            parent = runtime_joints[state_joint_names[parent_id]]
+            assert target_ke[child.qd_start] == pytest.approx(
+                target_ke[parent.qd_start] * 1.0e-2
+            )
+            assert target_kd[child.qd_start] == pytest.approx(
+                target_kd[parent.qd_start] * 1.0e-2
+            )
+            assert target_mode[child.qd_start] == target_mode[parent.qd_start]
+
+        # This physical check covers both hands and keeps the native coupled
+        # constraints bounded under the W1's self-contacts. Default can also
+        # deflect these compliant joints by several tenths of a radian.
+        self.sim.update(step=100)
+        settled_qpos = self.robot.body_data.qpos
+        settled_errors = []
+        for mimic_id, parent_id, multiplier, offset in mimic_relations:
+            settled_errors.append(
+                torch.abs(
+                    settled_qpos[:, mimic_id]
+                    - (settled_qpos[:, parent_id] * multiplier + offset)
+                )
+            )
+        assert torch.max(torch.stack(settled_errors)).item() < 0.5
+
         left_ids = self.robot.get_joint_ids("left_arm")
         right_ids = self.robot.get_joint_ids("right_arm")
         assert len(left_ids) > 0 and len(right_ids) > 0
+        assert [
+            state_joint_names[index] for index in left_ids
+        ] == self.robot.control_parts["left_arm"]
+        assert [
+            state_joint_names[index] for index in right_ids
+        ] == self.robot.control_parts["right_arm"]
+        right_eef_ids = self.robot.get_joint_ids("right_eef")
+        assert [
+            state_joint_names[index] for index in right_eef_ids
+        ] == self.robot.control_parts["right_eef"]
+
+        right_qpos_limits = self.robot.get_qpos_limits(name="right_arm")
+        requested_target = torch.full(
+            (1, len(right_ids)), 0.1, dtype=torch.float32, device=self.sim.device
+        )
+        expected_target = requested_target.clamp(
+            right_qpos_limits[..., 0], right_qpos_limits[..., 1]
+        )
+        self.robot.set_qpos(requested_target, name="right_arm")
+        torch.testing.assert_close(
+            self.robot.body_data.target_qpos[:, right_ids], expected_target
+        )
+
+        hand_target = torch.tensor(
+            [[0.1, 1.0, 0.2, 0.3, 0.4, 0.5]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        self.robot.set_qpos(hand_target, name="right_eef")
+        target_qpos = self.robot.body_data.target_qpos
+        torch.testing.assert_close(target_qpos[:, right_eef_ids], hand_target)
+        for mimic_id, parent_id, multiplier, offset in mimic_relations:
+            torch.testing.assert_close(
+                target_qpos[:, mimic_id],
+                target_qpos[:, parent_id] * multiplier + offset,
+            )
+        hand_velocity_target = torch.tensor(
+            [[0.05, 0.1, 0.15, 0.2, 0.25, 0.3]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        self.robot.set_qvel(hand_velocity_target, name="right_eef")
+        target_qvel = self.robot.body_data.target_qvel
+        torch.testing.assert_close(target_qvel[:, right_eef_ids], hand_velocity_target)
+        for mimic_id, parent_id, multiplier, _ in mimic_relations:
+            torch.testing.assert_close(
+                target_qvel[:, mimic_id],
+                target_qvel[:, parent_id] * multiplier,
+            )
+        self.robot.set_qvel(torch.zeros_like(hand_velocity_target), name="right_eef")
 
         # State round-trip via the Newton articulation view.
         qpos = torch.zeros(

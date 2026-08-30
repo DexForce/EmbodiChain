@@ -22,8 +22,8 @@ import numpy as np
 from typing import TYPE_CHECKING, Dict, List, Union
 
 from embodichain.lab.sim.cfg import (
+    ArticulationRootPropertiesCfg,
     CollisionPropertiesCfg,
-    DefaultRigidBodyPropertiesCfg,
     RobotCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -125,10 +125,6 @@ class CobotMagicCfg(RobotCfg):
                 ),
             ),
         }
-        # Retain the legacy articulation aliases while Spawn consumes the
-        # grouped Default-native rigid properties below.
-        self.min_position_iters = 8
-        self.min_velocity_iters = 2
         self.drive_pros = JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={
@@ -150,11 +146,11 @@ class CobotMagicCfg(RobotCfg):
                 "right_joint[7-8]": 3e3,
             },
         )
+        self.articulation_props = ArticulationRootPropertiesCfg(
+            min_position_iters=8,
+            min_velocity_iters=2,
+        )
         self.attrs = RigidBodyPhysicsCfg(
-            rigid_props=DefaultRigidBodyPropertiesCfg(
-                min_position_iters=8,
-                min_velocity_iters=2,
-            ),
             collision_props=CollisionPropertiesCfg(
                 contact_offset=0.001,
                 rest_offset=0.0,

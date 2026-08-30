@@ -9,7 +9,7 @@
 | Global simulation config | `embodichain/lab/sim/sim_manager.py` → `SimulationManagerCfg` |
 | Spawn lifecycle coordinator | `embodichain/lab/sim/spawn/scene.py` → `SpawnScene` |
 | EmbodiChain-to-Spawn translation | `embodichain/lab/sim/spawn/descriptors.py` |
-| Object and physics configs | `embodichain/lab/sim/cfg.py` |
+| Object and physics configs | `embodichain/lab/sim/cfg/` (public facade: `cfg/__init__.py`) |
 | Gym lifecycle integration | `embodichain/lab/gym/envs/base_env.py` |
 | Task scene construction | `embodichain/lab/gym/envs/embodied_env.py` |
 
@@ -57,6 +57,7 @@ EnvCfg.sim_cfg
        → for Newton, resolve source metadata and configure exact-name overlays
        → finalize/rebuild pending Spawn descriptors once
        → for Default, apply pending source overlays to materialized handles
+       → apply Default articulation-root runtime properties to native handles
        → prepare manager-owned runtime buffers for the committed revision
        → bind declared EmbodiChain facades in place
        → publish bound state through the backend render-sync hook
@@ -73,6 +74,15 @@ EnvCfg.sim_cfg
        → profiler report
        → SimulationManager.destroy()
 ```
+
+`destroy(exit_process=False)` queues native cleanup; callers flush that queue
+only after their scene/object locals have unwound. During
+`SimulationManager._deferred_destroy()`, the manager stops recording and the
+native window, invokes `PhysicsBackend.prepare_for_teardown()`, then runs GC
+before closing the Spawn result, environment, and World. Default backends use
+the no-op hook. Newton synchronizes its resolved Warp CUDA device and clears
+its render bridge while Spawn still owns the parent skeletons, so cached link
+views cannot be destructed after their native parents.
 
 After backend materialization, dynamic `RigidObject`, `Articulation`, and
 `RigidObjectGroup` facades capture their resolved mass, inertia diagonal, and
@@ -181,7 +191,7 @@ readiness path defensively before advancing the requested physics steps.
 | World, arenas, asset registries, physics update, cleanup | `sim_manager.py` | `simulation-system` |
 | Spawn declaration, source resolution, commit/rebuild, and facade binding | `spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` | `simulation-system` |
 | Backend-neutral batched state/property access | `objects/backends/spawn.py` | `simulation-system` |
-| Shared object, render, physics, drive, and URDF configs | `cfg.py` | `configclass-pattern` for config mechanics |
+| Shared object, render, physics, drive, and URDF configs | `cfg/` domain modules; `cfg/__init__.py` preserves the public import surface | `configclass-pattern` for config mechanics |
 | Rigid, articulation, robot, light, constraint, gizmo | `objects/` | `robot-system` for robots |
 | Common deformable contract and DexSim volume/surface adapters | `objects/deformable/` | `sim-visualization` for export |
 | Camera, stereo camera, contact sensor | `sensors/` | `sensor-system` |
@@ -232,8 +242,8 @@ step ratio. CLI and task config loaders may override runtime fields before
 constructing the environment. Trace those overrides through the caller rather
 than changing a default in the manager blindly.
 
-Object-specific configuration belongs in `lab/sim/cfg.py` or the
-corresponding robot/sensor module. Scene composition belongs in
+Object-specific configuration belongs in the matching `lab/sim/cfg/` domain
+module or the corresponding robot/sensor module. Scene composition belongs in
 `EmbodiedEnv` or a task config, not in `SimulationManagerCfg`.
 
 Deformable configs use an explicit `deformable_type: volume|surface`
@@ -243,31 +253,42 @@ the volume subclass, and cloth attributes stay on the surface subclass. Do not
 add backend conditionals to one monolithic deformable config. Add a backend
 implementation at the manager dispatch boundary when its runtime exists.
 
-New rigid-body configs use `RigidBodyPhysicsCfg`, with one slot per physical
-concept:
+New rigid-body configs use `RigidBodyPhysicsCfg`. Portable intent is organized
+by physical concept:
 
 - `mass_props`: `MassPropertiesCfg` (`mass`, `density`, inertia, and COM);
 - `rigid_props`: the common `RigidBodyPropertiesCfg` root or a
   `DefaultRigidBodyPropertiesCfg` / `NewtonRigidBodyPropertiesCfg` subclass;
 - `collision_props`: common collision enablement and the portable
-  `contact_offset/rest_offset` envelope, optionally extended by a backend
-  subclass;
+  `contact_offset/rest_offset` envelope;
+- `mesh_collision_props`: mesh approximation/cooking settings such as convex
+  decomposition and SDF resolution, independent of render `MeshCfg`;
 - `material_props`: common friction/restitution or a backend material subclass.
 
-This follows the IsaacLab property-group/base-subclass pattern while matching
-DexSim Spawn's actual ownership. A common quantity is defined once; backend
-classes add only native fields. `NewtonRigidBodyPropertiesCfg` is intentionally
-empty until DexSim Spawn exposes a Newton-only body property. Every grouped
-field defaults to `None`, meaning “do not author this field”; source USD/URDF
-values and backend defaults therefore survive partial overlays. Dynamic and
-kinematic mass priority is explicit inertia with positive mass, then mass,
-then density; static descriptors omit mass properties.
+Native properties live in the simultaneously usable `default_props` and
+`newton_props` blocks (`DefaultRigidBodyPhysicsCfg` and
+`NewtonRigidBodyPhysicsCfg`). Each block groups the backend's rigid, collision,
+material, and—in Newton's case—mesh/SDF extensions. If a native value is also
+provided through the older polymorphic common-slot subtype, the explicit
+backend block wins. Portable inherited fields are rejected inside explicit
+backend blocks and must remain in the common slots.
 
-Python callers select a backend by constructing its subclass. Dict/YAML input
-uses a local `backend: common|default|newton` discriminator inside the property
-group (the unique native fields can also infer it). `to_dict()` emits this
-discriminator so typed configs round-trip. Do not mix the deprecated flat
-`RigidBodyAttributesCfg` fields with grouped fields in one config or override.
+This follows the IsaacLab property-group pattern while matching DexSim Spawn's
+actual ownership. `NewtonRigidBodyPropertiesCfg` is intentionally empty until
+DexSim Spawn exposes a Newton-only body property. Every grouped field defaults
+to `None`, meaning “do not author this field”; source USD/URDF values and
+backend defaults therefore survive partial overlays. Dynamic and kinematic
+mass priority is explicit inertia with positive mass, then mass, then density;
+static descriptors omit mass properties.
+
+The polymorphic slots and their local `backend: common|default|newton`
+discriminator remain a compatibility input. New Dict/YAML definitions should
+use common slots plus `default_props`/`newton_props`; all forms round-trip
+through `to_dict()`. `MeshCfg.max_convex_hull_num`, `acd_method`, and
+`sdf_resolution`, plus the SDF fields on `NewtonCollisionPropertiesCfg`, are
+compatibility aliases. Explicit mesh-collision configs take precedence. Do not
+mix deprecated flat `RigidBodyAttributesCfg` fields with grouped fields in one
+config or override.
 
 Robot configs normally keep these portable values on one ordinary `RobotCfg`.
 For a genuine backend-specific asset or actuator difference, subclass
@@ -285,37 +306,131 @@ EmbodiChain fields after DexSim has translated the real materialized source.
 This policy applies equally to USD rigid objects and USD/URDF articulations.
 Generic `RigidObjectCfg` and `ArticulationCfg` default to `preserve`; `RobotCfg`
 defaults to `overlay` to retain its established configured-drive behavior.
+If an articulation in preserve mode contains explicit `attrs`, `link_attrs`,
+`drive_pros`, `joint_props`, or `qpos_limits`, configuration emits a warning
+naming the ignored overlay fields instead of silently discarding them.
 `use_usd_properties` remains only as a deprecated compatibility alias (`True`
 maps to `preserve`, `False` to `overlay`) and must not be used by new callers.
 Import concerns that the source format does not author, such as URDF root
-fixation and body scale, remain controlled by their dedicated fields.
+fixation and body scale, remain controlled by their dedicated fields. An
+explicit `articulation_props` value also overrides the corresponding USD root
+property; `None` preserves USD and selects the established URDF import default.
 
-`ArticulationRootPropertiesCfg` groups fixed-base and self-collision intent;
-its backend subclasses are extension points. `JointDrivePropertiesCfg` owns
-portable gains, limits, friction, and armature. Every drive field is optional;
-`None` means source-owned, which permits sparse overlays without resetting the
-asset's drive mode or unrelated limits. Use the
-`NewtonJointDrivePropertiesCfg` subclass only when a Newton `target_mode` is
-needed; common effort/velocity/armature values stay on `JointDesc` instead of
-being duplicated in both backend blocks. `link_attrs` accepts the same grouped
-rigid-body schema for partial per-link overrides.
+`ArticulationRootPropertiesCfg` is the single root-property definition. Spawn
+consumes its portable fixed-base and self-collision intent through common
+articulation descriptor fields. Its `sleep_threshold`, `min_position_iters`,
+and `min_velocity_iters` fields are Default-only: EmbodiChain applies them to
+the materialized native articulation before Direct GPU initialization and the
+first reset, while Newton ignores them. PhysX Direct GPU runtime setup captures
+the articulation solver iteration counts; applying them only during facade
+binding leaves the active GPU solver at its source/default values and can make
+mimic constraints much softer than CPU. The preparation is idempotent per
+Spawn topology revision. The two iteration counts must be configured together
+because the Default native API exposes one atomic setter. This remains distinct
+from `DefaultRigidBodyPropertiesCfg`, whose same-named values configure
+individual rigid bodies or articulation links. `articulation_props` is the only
+root-property interface; `fix_base`, `disable_self_collision`, and the former
+flat root solver fields are removed. `JointDrivePropertiesCfg` keeps the
+original `drive_type` (`force`, Default-only `acceleration`, or `none`) and adds
+the portable actuator `target_mode` (`none`, `position`, `velocity`,
+`position_velocity`, or `effort`) and the stiffness/damping gains.
+`JointDynamicsPropertiesCfg` independently owns effort/velocity limits,
+passive friction, and armature through `ArticulationCfg.joint_props`. The same
+fields remain temporarily accepted on `drive_pros`; matching `joint_props`
+rules take precedence. Every field is optional; `None` means source-owned,
+which permits sparse overlays without resetting unrelated source values. If
+`target_mode` is unset,
+`drive_type="force"` or `"acceleration"` defaults it to `position_velocity`,
+while `drive_type="none"` defaults it to `none`.
+`NewtonJointDrivePropertiesCfg` is only a serialized configuration
+compatibility subtype; new robot definitions use the common class. Common
+effort/velocity/armature values stay on `JointDesc` instead of being duplicated
+in both backend blocks. `link_attrs` accepts the same grouped rigid-body schema
+for partial per-link overrides.
+
+Spawn resolves drive intent per source-resolved joint before lowering it.
+Default selects its force/acceleration enum and masks inactive gains; Newton
+authors `JointTargetMode` values 0 through 4. `none` and `effort` always clear
+both target gains, and `velocity` clears the position gain, so Newton solvers
+that ignore `joint_target_mode` still receive deterministic passive,
+effort-only, and velocity-only behavior. Non-MuJoCo Newton position mode is an
+explicit gain-based emulation that assumes a zero velocity target. An active
+`drive_type="acceleration"` is rejected for Newton because it has no exact
+equivalent.
 
 For articulations, `SimulationManager._declare_spawn_articulation()` supplies
 `configure_articulation_desc()` as the source-configuration callback. Preserve
 mode leaves source descriptors untouched, while overlay mode applies
-exact-name link/joint fields. Default obtains those names from its loaded
-native articulation and applies the typed properties live. Newton resolves the
-same metadata first and consumes the configured descriptor during its initial
-immutable-model build, so initial source configuration must not be implemented
-as finalize-then-rebuild. Do not duplicate these writes in
-`Articulation._apply_spawn_config()`.
+exact-name link/joint fields. Both regex dictionaries and flattened
+`(num_dofs, 2)` arrays in `qpos_limits` are compiled into the resolved
+joint descriptors before either backend builds. Default obtains those names
+from its loaded native articulation and applies the typed properties live.
+Newton resolves the same metadata first and consumes the configured descriptor
+during its initial immutable-model build, so initial source configuration must
+not be implemented as finalize-then-rebuild. Do not duplicate these link/joint
+descriptor writes in `Articulation._apply_spawn_config()`; that hook is
+reserved for Default-native root setters, finalized Newton runtime adaptation,
+and render work requiring finalized resources.
+
+Spawn articulation state IDs follow the final batch `qpos`/`qvel` layout, which
+can differ from Newton's source-articulation traversal order. Initial `qpos`,
+mimic child/parent metadata, control groups, and every batch mutation must be
+mapped by joint name into that state layout. Public `joint_names` uses this
+same state-buffer order; use the Spawn handle's source-name query only when
+resolving source topology. Newton solvers without configured mimic compliance
+project reset positions onto the authored relation before the first step. The
+MuJoCo-Warp compliance path preserves the authored current position, matching
+Default's initial hand state.
+`SpawnArticulationView` filters Newton root-pose rows that already match the
+requested translation and rotation before calling the Spawn batch write. This
+keeps ordinary fixed-root resets from invalidating a captured CUDA graph while
+still forwarding genuine root-pose changes, which refresh Newton solver
+constants and recapture the graph as required.
+Initialization code that intentionally changes fixed-root poses should do so
+after `prepare()` but before the first `update()`, allowing the first Newton
+CUDA graph to capture the final anchors instead of immediately invalidating a
+graph captured from transient poses.
+
+MuJoCo-Warp lowers URDF mimic joints to native joint equality constraints, but
+its default equality solver reference is underdamped compared with Default's
+PhysX mimic. During
+`Articulation._apply_spawn_config()`,
+`_configure_newton_mimic_compliance()` in `objects/backends/newton.py` resolves
+only that articulation's constraint rows and approximates Default's natural
+frequency/damping ratio with MuJoCo's positive, effective-mass-scaled
+`(timeconst, dampratio)` `solref`; the time constant observes MuJoCo's
+two-solver-timestep safety floor. The native rows remain enabled, preserving
+contact force coupling between follower and leader joints. A very weak
+follower drive (one percent of its leader's target gains; `ke=1`, `kd=0.1`
+for the W1 hand) stabilizes the equality between solver updates; target
+`set_qpos()` and `set_qvel()` writes propagate the authored leader relation to
+that drive. Never copy measured follower state or disable
+the native equality: doing either turns mimic into an independent servo and
+loses the Default backend's mechanical coupling. Other Newton solvers,
+gradient mode, and Default retain native behavior. Keep private Newton
+runtime/solver access inside this backend helper; the generic `Articulation`
+owns state-order metadata, reset behavior, and target propagation only.
+
+DexSim 0.4.3's Newton `RigidBodyBatch.apply_pose()` writes maximal `body_q`
+state but does not update the standalone body's reduced FREE-joint state read
+by MuJoCo-Warp on the next step. `SpawnRigidBodyView` therefore caches a
+`StandaloneRigidStateSync` for its stable batch and projects both Newton state
+buffers after pose writes. Invalidate that cache on a Spawn topology revision;
+remove the compatibility path once DexSim's public batch operation guarantees
+the same synchronization.
+
+The `grasp_cup_to_caffe.py` comparison demo seeds its XY perturbations after
+`prepare()` (default seed `0`). This placement makes the scene independent of
+random numbers consumed by backend initialization. Pass a negative `--seed`
+to restore non-deterministic perturbations.
 
 Rigid USD objects follow the same overlay rule: parsed source descriptors are
 updated field-by-field, never replaced wholesale by a partial config. The
 legacy flat `RigidBodyAttributesCfg` and `RigidBodyAttributesOverrideCfg` live
-together in private `_legacy_cfg.py` and are temporarily re-exported by
-`cfg.py` so existing imports keep working. They are accepted by the Default
-backend only, expose no nested Newton config, and Newton Spawn rejects them
+together in private `_legacy_cfg.py` and are temporarily re-exported by the
+`cfg/__init__.py` facade so existing `embodichain.lab.sim.cfg` imports keep
+working. They are accepted by the Default backend only, expose no nested
+Newton config, and Newton Spawn rejects them
 with a grouped-config migration message. New code should use the grouped
 schema so “unset” is distinguishable from an authored default and the entire
 legacy layer can eventually be removed as one unit.
@@ -328,7 +443,8 @@ legacy layer can eventually be removed as one unit.
 | Spawn source translation or typed link/joint overrides | `spawn/descriptors.py` plus the DexSim Spawn descriptor/adapter boundary |
 | Declaration-to-result binding or retry behavior | `spawn/scene.py` and the object's `bind_spawn()` |
 | Batched row/DOF selection or backend property parity | `objects/backends/spawn.py` and the DexSim Spawn batch facade |
-| Shared object or physics config type | `cfg.py` |
+| Newton object/runtime adaptation | `objects/backends/newton.py` |
+| Shared object or physics config type | Matching domain module under `cfg/`, then re-export from `cfg/__init__.py` |
 | Deformable nodal/surface contract or topology-specific buffers | `objects/deformable/` |
 | Add/get/remove behavior for a scene entity | `sim_manager.py` plus its `objects/` implementation |
 | Task scene composition | `embodied_env.py` or the task config |

@@ -220,6 +220,25 @@ class SpawnScene:
                 facade.attach_spawn_handles(self.handles(uid))
             facade.bind_spawn(result)
 
+    def prepare_runtime_config(self, result: Any) -> None:
+        """Apply facade configuration required before backend initialization.
+
+        Default Direct GPU simulation snapshots some native articulation
+        properties during initialization. Articulation facades therefore get
+        a narrow pre-bind hook after materialization but before the manager
+        initializes backend runtime buffers.
+        """
+        if result is not self.builder.result or not self.builder.is_finalized:
+            raise RuntimeError("Spawn scene must be materialized before runtime setup.")
+
+        for uid, declaration in self._assets.items():
+            facade = declaration.facade
+            if facade is None or declaration.kind != "articulation":
+                continue
+            if not facade._entities:
+                facade.attach_spawn_handles(self.handles(uid))
+            facade._prepare_spawn_runtime_config(result)
+
     def close(self) -> None:
         """Release Spawn resources and facade references."""
         result = self.builder.result

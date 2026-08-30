@@ -39,6 +39,7 @@ from dexsim.models import MeshObject
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     LinkPhysicsOverrideCfg,
     RigidBodyAttributesCfg,
     RigidBodyAttributesOverrideCfg,
@@ -375,17 +376,21 @@ def _set_dexsim_articulation_cfg(
         art.set_body_scale(cfg.body_scale)
 
     link_names = art.get_link_names()
-    art.set_physical_attr(cfg.attrs.attr())
+    physical_attr = cfg.attrs.attr()
+    art.set_physical_attr(physical_attr)
     _apply_link_physics_overrides(art, cfg, link_names)
-    art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
-    art.set_articulation_flag(
-        ArticulationFlag.DISABLE_SELF_COLLISION, cfg.disable_self_collision
+    root_props = cfg.articulation_props
+    fixed_base = True if root_props.fixed_base is None else bool(root_props.fixed_base)
+    self_collision_enabled = (
+        False
+        if root_props.self_collision_enabled is None
+        else bool(root_props.self_collision_enabled)
     )
-    if hasattr(art, "set_solver_iteration_counts"):
-        art.set_solver_iteration_counts(
-            min_position_iters=cfg.min_position_iters,
-            min_velocity_iters=cfg.min_velocity_iters,
-        )
+    art.set_articulation_flag(ArticulationFlag.FIX_BASE, fixed_base)
+    art.set_articulation_flag(
+        ArticulationFlag.DISABLE_SELF_COLLISION, not self_collision_enabled
+    )
+    _apply_default_articulation_root_properties(art, root_props)
 
     for name in link_names:
         if not hasattr(art, "get_physical_body"):
@@ -403,6 +408,29 @@ def _set_dexsim_articulation_cfg(
             # TODO: will crash when exit if not explicitly delete.
             # This may due to the destruction of render body order when exiting.
             del render_body
+
+
+def _apply_default_articulation_root_properties(
+    art: Articulation,
+    props: ArticulationRootPropertiesCfg,
+) -> None:
+    """Apply explicitly configured Default-native articulation-root values."""
+    if props.sleep_threshold is not None:
+        art.set_sleep_threshold(float(props.sleep_threshold))
+
+    position_iters = props.min_position_iters
+    velocity_iters = props.min_velocity_iters
+    if (position_iters is None) != (velocity_iters is None):
+        raise ValueError(
+            "Articulation-root min_position_iters and min_velocity_iters "
+            "must be configured together."
+        )
+    if position_iters is not None:
+        assert velocity_iters is not None
+        art.set_solver_iteration_counts(
+            min_position_iters=int(position_iters),
+            min_velocity_iters=int(velocity_iters),
+        )
 
 
 def is_rt_enabled() -> bool:

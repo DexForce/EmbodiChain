@@ -1119,8 +1119,7 @@ class Robot(Articulation):
                 joint names or regular expressions that match joint names.
         """
         joint_name_to_ids = {
-            name: i
-            for i, name in enumerate(self._entities[0].get_actived_joint_names())
+            name: i for i, name in enumerate(self._state_joint_names())
         }
         for name, joint_names in control_parts.items():
             # convert joint_names which is a regular expression to a list of joint names
@@ -1156,12 +1155,16 @@ class Robot(Articulation):
         max_velocity: torch.Tensor | None = None,
         friction: torch.Tensor | None = None,
         armature: torch.Tensor | None = None,
-        drive_type: str = "force",
+        drive_type: str | None = "force",
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
+        *,
+        target_mode: str | int | None = None,
     ) -> None:
         """Set the drive properties for the robot.
-           Different from Articulation, default drive type is 'force' instead of 'none'
+
+        With no explicit mode, robots retain their position+velocity force
+        drive default.
 
         Args:
             stiffness (torch.Tensor): The stiffness of the joint drive with shape (len(env_ids), len(joint_ids)).
@@ -1170,9 +1173,10 @@ class Robot(Articulation):
             max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
             friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
             armature (torch.Tensor): The joint armature with shape (len(env_ids), len(joint_ids)).
-            drive_type (str, optional): The type of drive to apply. Defaults to "force".
+            drive_type: Drive type to apply. Defaults to ``"force"``.
             joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
             env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
+            target_mode: Portable target mode name or integer value 0 through 4.
         """
         super().set_joint_drive(
             stiffness=stiffness,
@@ -1184,6 +1188,7 @@ class Robot(Articulation):
             drive_type=drive_type,
             joint_ids=joint_ids,
             env_ids=env_ids,
+            target_mode=target_mode,
         )
 
     def _set_default_joint_drive(self) -> None:
@@ -1243,9 +1248,17 @@ class Robot(Articulation):
 
         drive_pros = self.cfg.drive_pros
         if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type", "force")
+            drive_type = drive_pros.get("drive_type")
+            target_mode = drive_pros.get("target_mode")
         else:
-            drive_type = getattr(drive_pros, "drive_type", "force")
+            drive_type = getattr(drive_pros, "drive_type", None)
+            target_mode = getattr(drive_pros, "target_mode", None)
+        if isinstance(target_mode, dict):
+            logger.log_warning(
+                "Per-joint target_mode mappings require a Spawn-bound robot; "
+                "the retained raw-robot path preserves its current target modes."
+            )
+            target_mode = None
 
         # Apply drive parameters to all articulations in the batch
         self.set_joint_drive(
@@ -1256,6 +1269,7 @@ class Robot(Articulation):
             friction=self.default_joint_friction,
             armature=self.default_joint_armature,
             drive_type=drive_type,
+            target_mode=target_mode,
         )
 
     def _sync_solver_limits(self, name: str | None = None) -> None:
@@ -1416,21 +1430,29 @@ class Robot(Articulation):
         """
         control_group = ControlGroup()
         joint_id_list = []
+        state_joint_ids = {
+            name: index for index, name in enumerate(self._state_joint_names())
+        }
+        source_joint_ids = {
+            name: index
+            for index, name in enumerate(self._entities[0].get_actived_joint_names())
+        }
 
         for joint_name in joint_names:
-            if joint_name in self.joint_names:
-                joint_index = self.joint_names.index(joint_name)
-                joint_id_list.append(joint_index)
+            if joint_name in state_joint_ids and joint_name in source_joint_ids:
+                joint_id_list.append(state_joint_ids[joint_name])
                 control_group.joint_names.append(joint_name)
 
                 # Set root link for first joint
                 if len(control_group.link_names) == 0:
                     parent_names = self._entities[0].get_ancestral_link_names(
-                        joint_index
+                        source_joint_ids[joint_name]
                     )
                     control_group.link_names.extend(parent_names)
 
-                child_name = self._entities[0].get_child_link_name(joint_index)
+                child_name = self._entities[0].get_child_link_name(
+                    source_joint_ids[joint_name]
+                )
                 control_group.link_names.append(child_name)
 
         control_group.joint_ids = joint_id_list

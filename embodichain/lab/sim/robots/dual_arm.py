@@ -50,7 +50,6 @@ import torch
 
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
-    NewtonJointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
 )
@@ -290,9 +289,7 @@ def _mirror_drive_pros(
         A fresh :class:`JointDrivePropertiesCfg` for the dual arm.
     """
     new = type(base_drive)(drive_type=base_drive.drive_type)
-    properties = list(_DRIVE_PROPS)
-    if isinstance(base_drive, NewtonJointDrivePropertiesCfg):
-        properties.append("target_mode")
+    properties = [*_DRIVE_PROPS, "target_mode"]
     for prop in properties:
         val = getattr(base_drive, prop, None)
         if val is None:
@@ -410,11 +407,7 @@ def _populate_dual_cfg(
 
     cfg.drive_pros = _mirror_drive_pros(base_cfg.drive_pros, name_case)
     cfg.attrs = base_cfg.attrs.copy()
-    cfg.min_position_iters = base_cfg.min_position_iters
-    cfg.min_velocity_iters = base_cfg.min_velocity_iters
-    cfg.fix_base = base_cfg.fix_base
-    cfg.disable_self_collision = base_cfg.disable_self_collision
-    cfg.sleep_threshold = base_cfg.sleep_threshold
+    cfg.articulation_props = base_cfg.articulation_props.copy()
 
 
 def build_dual_arm_cfg(
