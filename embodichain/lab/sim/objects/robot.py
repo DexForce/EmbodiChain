@@ -1080,6 +1080,52 @@ class Robot(Articulation):
         qpos = qpos_batch.reshape(len(local_env_ids), n_batch, n_dof)
         return ret, qpos
 
+    def compute_ik_path(
+        self,
+        pose: torch.Tensor | np.ndarray,
+        joint_seed: torch.Tensor | np.ndarray,
+        name: str,
+        env_ids: Sequence[int] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Solve a pose path while preserving IK branch continuity.
+
+        Args:
+            pose: Arena-frame pose matrices shaped ``(B, N, 4, 4)``.
+            joint_seed: Initial joint seed shaped ``(B, DOF)``.
+            name: Control part whose solver should be used.
+            env_ids: Optional environment indices. Defaults to all environments.
+
+        Returns:
+            Per-sample success shaped ``(B, N)`` and joint positions shaped
+            ``(B, N, DOF)``, or ``None`` when the solver is unavailable.
+
+        Raises:
+            ValueError: If the solver does not implement continuous path IK or
+                an input shape is invalid.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        solver = self._solvers.get(name)
+        if solver is None:
+            return None
+        solve_path = getattr(solver, "get_ik_path", None)
+        if not callable(solve_path):
+            raise ValueError(f"Solver for {name!r} does not support path IK.")
+        pose_tensor = to_tensor(pose, device=self.device)
+        seed_tensor = to_tensor(joint_seed, device=self.device)
+        batch_size = len(local_env_ids)
+        if pose_tensor.ndim != 4 or pose_tensor.shape[0] != batch_size:
+            raise ValueError("pose must have shape (B, N, 4, 4).")
+        if seed_tensor.shape != (batch_size, solver.dof):
+            raise ValueError(
+                f"joint_seed must have shape ({batch_size}, {solver.dof})."
+            )
+        base_pose = self.get_link_pose(
+            link_name=solver.root_link_name, env_ids=local_env_ids, to_matrix=True
+        )
+        solver_poses = torch.matmul(torch.inverse(base_pose)[:, None], pose_tensor)
+        success, qpos = solve_path(solver_poses, seed_tensor)
+        return success.to(self.device), qpos.to(self.device)
+
     def _init_control_parts(self, control_parts: Dict[str, List[str]]) -> None:
         """Initialize the control parts of the robot.
 

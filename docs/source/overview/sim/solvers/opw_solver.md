@@ -11,6 +11,7 @@
 * Flexible configuration via `OPWSolverCfg`
 * Strict enforcement of joint limits
 * Forward kinematics (FK) and multiple IK solution branches
+* Continuous whole-path IK with two Warp launches independent of sample count
 
 ## Configuration
 
@@ -103,6 +104,13 @@ solver = OPWSolver(cfg, device="cuda")
   # Convergence info: tensor([[-3.141593, 0.793811, 0.0, 0.0, 2.522188, 1.570792]], device='cuda:0')
 
 ```
+
+* `get_ik_path(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]`
+  Solves a pose path shaped `(B, N, 4, 4)`. The first Warp kernel computes all
+  eight analytical candidates for every pose. A second kernel assigns one
+  thread to each environment and walks its samples in time order, selecting
+  each solution relative to the previously selected joint state. It returns
+  validity `(B, N)` and continuous joint positions `(B, N, 6)`.
 
 ## References
 

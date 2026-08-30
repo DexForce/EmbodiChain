@@ -205,6 +205,11 @@ and available CUDA backends in seeded and full redundancy-search modes.
 
 - `a1, a2, b, c1–c4, offsets, flip_axes, has_parallelogram`: OPW kinematic parameters.
 - `safe_margin`: joint-limit safety margin in radians.
+- `get_ik_path(target_xpos, qpos_seed)` solves every `(B, N)` target with one
+  batched OPW candidate kernel launch, then runs one Warp selector thread per
+  environment. Each selector walks time in order and uses its previous result
+  as the next seed, preserving analytical-branch continuity without repeated
+  Python-side IK launches.
 
 ---
 

@@ -34,6 +34,9 @@ from embodichain.lab.sim.planners import (
     ToppraPlanner,
     ToppraPlannerCfg,
     ToppraPlanOptions,
+    TrapezoidalPlanner,
+    TrapezoidalPlannerCfg,
+    TrapezoidalPlanOptions,
     NeuralPlanner,
     NeuralPlannerCfg,
     CuroboPlanner,
@@ -63,7 +66,6 @@ __all__ = ["MotionGenerator", "MotionGenCfg", "MotionGenOptions"]
 
 @configclass
 class MotionGenCfg:
-
     planner_cfg: BasePlannerCfg = MISSING
     """Configuration for the underlying planner. Must include 'planner_type' attribute to specify 
     which planner to use, and any additional parameters required by that planner.
@@ -74,7 +76,6 @@ class MotionGenCfg:
 
 @configclass
 class MotionGenOptions:
-
     strategy: Literal["motion_gen", "ik_interp"] = "motion_gen"
     """Motion strategy: backend planning or deterministic IK interpolation."""
 
@@ -168,6 +169,7 @@ class MotionGenerator:
 
     _support_planner_dict = {
         "toppra": (ToppraPlanner, ToppraPlannerCfg),
+        "trapezoidal": (TrapezoidalPlanner, TrapezoidalPlannerCfg),
         "neural": (NeuralPlanner, NeuralPlannerCfg),
         "curobo": (CuroboPlanner, CuroboPlannerCfg),
     }
@@ -237,8 +239,7 @@ class MotionGenerator:
             for entity_id in entity_ids
         ):
             raise TypeError(
-                f"{field_name} keys must be non-empty strings without outer "
-                "whitespace."
+                f"{field_name} keys must be non-empty strings without outer whitespace."
             )
         return set(entity_ids)
 
@@ -423,6 +424,18 @@ class MotionGenerator:
                     "acceleration": (
                         0.5 if acceleration_limit is None else acceleration_limit
                     ),
+                },
+            )
+        if sample_count is not None and self.planner.cfg.planner_type == "trapezoidal":
+            return TrapezoidalPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=sample_count,
+                constraints={
+                    "velocity": 0.2 if velocity_limit is None else velocity_limit,
+                    "acceleration": (
+                        0.5 if acceleration_limit is None else acceleration_limit
+                    ),
+                    "jerk": 2.0,
                 },
             )
         return self.planner.default_plan_options()
@@ -1085,7 +1098,7 @@ class MotionGenerator:
             alpha = 1.0 if batch_size == 1 else max(0.2, 1.0 / np.sqrt(batch_size))
 
             for i in range(self.dofs):
-                label = f"Joint {i+1}" if b == 0 else ""
+                label = f"Joint {i + 1}" if b == 0 else ""
                 axs[0].plot(
                     time_steps,
                     positions[b, :, i].numpy(),

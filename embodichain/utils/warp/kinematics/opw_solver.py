@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import warp as wp
 import numpy as np
 from typing import Tuple
@@ -522,3 +524,63 @@ def opw_ik_select_kernel(
     else:
         # no valid solution
         best_ik_valid[i] = 0
+
+
+@wp.kernel
+def opw_ik_path_select_kernel(
+    full_ik_result: wp.array(dtype=float, ndim=4),  # [B, N, N_SOL, DOF]
+    full_ik_valid: wp.array(dtype=int, ndim=3),  # [B, N, N_SOL]
+    initial_seed: wp.array(dtype=float, ndim=2),  # [B, DOF]
+    joint_weights: wp_vec6f,
+    lower_limits: wp_vec6f,
+    upper_limits: wp_vec6f,
+    path_result: wp.array(dtype=float, ndim=3),  # [B, N, DOF]
+    path_valid: wp.array(dtype=int, ndim=2),  # [B, N]
+):
+    """Select a temporally continuous OPW branch for one environment."""
+    batch = wp.tid()
+    sample_count = full_ik_result.shape[1]
+    for sample in range(sample_count):
+        best_distance = float(1.0e10)
+        best_solution = int(-1)
+        for candidate in range(8):
+            if full_ik_valid[batch, sample, candidate] == 0:
+                continue
+            distance = float(0.0)
+            for joint in range(6):
+                seed = initial_seed[batch, joint]
+                if sample > 0:
+                    seed = path_result[batch, sample - 1, joint]
+                solution = full_ik_result[batch, sample, candidate, joint]
+                nearest = solution + wp.round((seed - solution) / (2.0 * wp.pi)) * (
+                    2.0 * wp.pi
+                )
+                if nearest >= lower_limits[joint] and nearest <= upper_limits[joint]:
+                    solution = nearest
+                error = (solution - seed) * joint_weights[joint]
+                distance += error * error
+            if distance < best_distance:
+                best_distance = distance
+                best_solution = candidate
+        if best_solution >= 0:
+            path_valid[batch, sample] = 1
+            for joint in range(6):
+                seed = initial_seed[batch, joint]
+                if sample > 0:
+                    seed = path_result[batch, sample - 1, joint]
+                solution = full_ik_result[batch, sample, best_solution, joint]
+                nearest = solution + wp.round((seed - solution) / (2.0 * wp.pi)) * (
+                    2.0 * wp.pi
+                )
+                if nearest >= lower_limits[joint] and nearest <= upper_limits[joint]:
+                    solution = nearest
+                path_result[batch, sample, joint] = solution
+        else:
+            path_valid[batch, sample] = 0
+            for joint in range(6):
+                if sample == 0:
+                    path_result[batch, sample, joint] = initial_seed[batch, joint]
+                else:
+                    path_result[batch, sample, joint] = path_result[
+                        batch, sample - 1, joint
+                    ]

@@ -971,6 +971,17 @@ embodichain.lab.sim.planners.toppra_planner
    ToppraPlannerCfg
    ToppraPlanOptions
 
+embodichain.lab.sim.planners.trapezoidal_planner
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.planners.trapezoidal_planner
+
+.. autosummary::
+
+   TrapezoidalPlanOptions
+   TrapezoidalPlanner
+   TrapezoidalPlannerCfg
+
 embodichain.lab.sim.planners.utils
 ----------------------------------
 
