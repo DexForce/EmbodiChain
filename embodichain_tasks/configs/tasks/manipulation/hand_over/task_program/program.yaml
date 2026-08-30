@@ -1,10 +1,4 @@
 program_id: dual_ur5_hand_over
-
-integration:
-  robot_profile: dual_ur5_handover_v1
-  scene_registry: dual_ur5_handover_v1
-  runtime_preset: safe
-
 targets:
   delivery_pose:
     kind: cyclic_pose

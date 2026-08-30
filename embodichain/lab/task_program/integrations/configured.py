@@ -24,7 +24,6 @@ from enum import Enum
 import hashlib
 import json
 import math
-from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 from ._configured_services import (
@@ -2085,40 +2084,3 @@ def _decode_configured_task_program_integration(
         adapter_factory=adapter_factory,
         integration_fingerprint=integration_fingerprint,
     )
-
-
-def _load_configured_task_program_integration(
-    path: str | Path,
-    *,
-    base_dir: str | Path | None = None,
-) -> _ConfiguredTaskProgramIntegration:
-    """Load one task-local YAML integration declaration.
-
-    Args:
-        path: YAML or YML integration path.
-        base_dir: Optional directory used to resolve a relative path.
-
-    Returns:
-        The decoded provider-free integration and lazy adapter factory.
-
-    Raises:
-        FileNotFoundError: If the resolved path is not a regular file.
-        ValueError: If the path is not YAML or the document is malformed.
-        TypeError: If the document root is not a mapping.
-    """
-    integration_path = Path(path).expanduser()
-    if base_dir is not None and not integration_path.is_absolute():
-        integration_path = Path(base_dir).expanduser() / integration_path
-    if not integration_path.is_file():
-        raise FileNotFoundError(
-            f"Task Program integration path is not a file: {integration_path}."
-        )
-    if integration_path.suffix.lower() not in {".yaml", ".yml"}:
-        raise ValueError(
-            "Task Program integration must use a .yaml or .yml extension; "
-            f"got {integration_path.name!r}."
-        )
-
-    from embodichain.utils.utility import load_config
-
-    return _decode_configured_task_program_integration(load_config(integration_path))

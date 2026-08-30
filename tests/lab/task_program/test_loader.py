@@ -27,6 +27,7 @@ import yaml
 from embodichain.lab.task_program import (
     ConfigPath,
     TaskProgramDecodeError,
+    TaskProgramIntegrationCfg,
     TaskProgramValidationError,
     InvokeCfg,
     PickCfg,
@@ -57,6 +58,15 @@ def _program_data() -> dict[str, object]:
 def _program_json() -> str:
     """Serialize the minimal program using standards-compliant JSON."""
     return json.dumps(_program_data())
+
+
+def _deployment_selection() -> TaskProgramIntegrationCfg:
+    """Return the trusted integration selection used by configured loading."""
+    return TaskProgramIntegrationCfg(
+        robot_profile="deployed_robot",
+        scene_registry="deployed_scene",
+        runtime_preset="trajectory",
+    )
 
 
 class _RejectingValidationContext:
@@ -115,6 +125,35 @@ def test_loads_task_program_json_decodes_one_plain_document() -> None:
     assert type(config.program) is InvokeCfg
     assert type(config.program.call) is PickCfg
     assert config.program.call.object == "cube"
+
+
+@pytest.mark.parametrize("suffix", [".json", ".yaml"])
+def test_load_task_program_binds_trusted_deployment_into_unbound_source(
+    tmp_path: Path,
+    suffix: str,
+) -> None:
+    """Configured sources stay robot-independent until deployment loading."""
+    data = _program_data()
+    data.pop("integration")
+    serialized = json.dumps(data) if suffix == ".json" else yaml.safe_dump(data)
+    path = tmp_path / f"program{suffix}"
+    path.write_text(serialized, encoding="utf-8")
+
+    config = load_task_program(path, integration=_deployment_selection())
+
+    assert config.integration == _deployment_selection()
+
+
+def test_trusted_deployment_rejects_source_owned_integration() -> None:
+    """A configured source cannot override its environment's selection."""
+    with pytest.raises(TaskProgramDecodeError) as error:
+        loads_task_program_json(
+            _program_json(),
+            integration=_deployment_selection(),
+        )
+
+    assert error.value.code == "integration_owned_by_deployment"
+    assert error.value.path == ("integration",)
 
 
 @pytest.mark.parametrize("suffix", [".json", ".yaml"])

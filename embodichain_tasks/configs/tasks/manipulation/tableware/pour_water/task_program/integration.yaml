@@ -1,62 +1,26 @@
-scene:
-  registry_id: task_program_pour_water
-  rigid_objects:
-  - entity_id: cup
-    dynamics: dynamic
-    semantic_type: cup
-  - entity_id: bottle
-    dynamics: dynamic
-    semantic_type: bottle
-    affordances:
-    - entity_id: bottle_grasp
-      kind: antipodal_grasp
-      internal_axis:
-      - 1.0
-      - 0.0
-      - 0.0
-robot_profile:
-  profile_id: task_program_cobotmagic_pour
-  resources:
-  - resource_id: right_manipulator
-    endpoints:
-    - endpoint_id: motion
-      control_part: right_arm
-      capabilities:
-      - kinematics.batch_inverse
-      - motion.cartesian_pose
-      - kinematics.forward
-    - endpoint_id: grasp
-      control_part: right_eef
-      capabilities:
-      - interaction.grasp
-      command_preset: right_parallel_jaw_commands
-  command_presets:
-  - preset_id: right_parallel_jaw_commands
-    control_part: right_eef
-    commands:
-      open:
-      - 0.05
-      - 0.05
-      grasp:
-      - 0.0
-      - 0.0
+integration_id: pour_water_v1
+program_id: pour_water_with_right_arm
+
+requires:
+  scene_contract: pour_water_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+profile:
   defaults:
     pick_up:
-      primary: right_manipulator
+      primary: primary_manipulator
     move_held_object:
-      primary: right_manipulator
+      primary: primary_manipulator
     pour:
-      primary: right_manipulator
+      primary: primary_manipulator
     place:
-      primary: right_manipulator
-  presets:
-  - preset_id: trajectory
-    action_options:
-      pick:
-        kind: pick_up
-        hand_interp_steps: 11
-        grasp_settle_steps: 25
-        fixed_object_to_eef:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      hand_interp_steps: 11
+      grasp_settle_steps: 25
+      fixed_object_to_eef:
         - -0.0530918874
         - 0.4963395894
         - 0.8665033579
@@ -73,55 +37,39 @@ robot_profile:
         - 0.0
         - 0.0
         - 1.0
-      simulation.move_held_object:
-        kind: move_held_object
-      simulation.pour:
-        kind: pour
-        rotate_angle: -1.0471975511965976
-      place:
-        kind: place
-        hand_interp_steps: 11
-        release_settle_steps: 15
-        preserve_current_object_orientation: true
-    motion:
-      sample_count: 60
-      dynamic_collision_mode: 'off'
-    tracking:
-      kind: timed
-    recovery:
-      max_replans: 0
-      max_action_retries: 0
-      goal_rotation_threshold: 3.141592653589793
-    workflow_recovery:
-      max_recovery_attempts: 0
-    runner:
-      minimum_cycle_time: 0.0
-      hold_on_completion: false
-      hold_during_effect_verification: false
-    effect_assurance: projected
-    effect_monitors: {}
-  default_preset: trajectory
+    simulation.move_held_object:
+      kind: move_held_object
+    simulation.pour:
+      kind: pour
+      rotate_angle: -1.0471975511965976
+    place:
+      kind: place
+      hand_interp_steps: 11
+      release_settle_steps: 15
+      preserve_current_object_orientation: true
+  effect_monitors: {}
+
 runtime_services:
   registered_semantic_lowerers:
-  - kind: move_held_object
-    target_id: cup_pour_pose
-    reference_entity_id: cup
-    relative_pose:
-    - 1.0
-    - 0.0
-    - 0.0
-    - 0.05
-    - 0.0
-    - 1.0
-    - 0.0
-    - -0.1
-    - 0.0
-    - 0.0
-    - 1.0
-    - 0.125
-    - 0.0
-    - 0.0
-    - 0.0
-    - 1.0
-  - kind: pour
-    object_id: bottle
+    - kind: move_held_object
+      target_id: cup_pour_pose
+      reference_entity_id: cup
+      relative_pose:
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.05
+        - 0.0
+        - 1.0
+        - 0.0
+        - -0.1
+        - 0.0
+        - 0.0
+        - 1.0
+        - 0.125
+        - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+    - kind: pour
+      object_id: bottle

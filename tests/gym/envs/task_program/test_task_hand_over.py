@@ -34,9 +34,10 @@ from embodichain.lab.task_program.integrations import ConfiguredHandOverPoseProv
 from embodichain.lab.task_program.integrations._configured_services import (
     _JointPositionConstraintObserver,
 )
-from embodichain.lab.task_program.integrations.configured import (
-    _load_configured_task_program_integration,
+from embodichain.lab.task_program.integrations._configured_composition import (
+    _load_configured_task_program_deployment,
 )
+from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.sim.atomic_actions import HandOverOptions
@@ -55,13 +56,14 @@ from embodichain.lab.task_program.semantics import (
     HeldObjectRelation,
     HeldObjectStateExpectation,
 )
+from embodichain.utils.utility import load_config
 
 _ENV_ID = "HandOver-v1"
 _CAN_ID = "can"
 _CAN_SIMULATION_UID = "handover_object"
 _SUPPORT_SURFACE_UID = "support_surface"
 _SCENE_ID = "dual_ur5_handover_v1"
-_PROFILE_ID = "dual_ur5_handover_v1"
+_PROFILE_ID = "dual_ur5_handover"
 _OPEN_QPOS = 0.0
 _GRASP_QPOS = 0.04
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
@@ -82,24 +84,29 @@ def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "embodichain_tasks/configs/tasks/manipulation/hand_over/env.json"
+        / "embodichain_tasks/configs/tasks/manipulation/hand_over/env.yaml"
     )
 
 
 def _gym_payload() -> dict[str, object]:
-    """Load the runnable HandOver Gym config as inert JSON data."""
-    payload = json.loads(_gym_config_path().read_text(encoding="utf-8"))
+    """Load the runnable HandOver Gym config as inert YAML data."""
+    payload = load_config(_gym_config_path())
     assert type(payload) is dict
     return payload
 
 
 def _integration():
-    """Decode a fresh HandOver integration from its packaged YAML file."""
-    relative_dir = _gym_payload()["task_program_dir"]
-    assert type(relative_dir) is str
-    return _load_configured_task_program_integration(
-        _gym_config_path().parent / relative_dir / "integration.yaml"
-    )
+    """Compose a fresh HandOver integration from its deployment."""
+    payload = _gym_payload()
+    physical = _resolve_gym_components(payload, base_dir=_gym_config_path().parent)
+    assert physical.embodiment_skill_profile is not None
+    assert physical.scene_task_program is not None
+    return _load_configured_task_program_deployment(
+        task_program=payload["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        scene=physical.scene_task_program,
+        base_dir=_gym_config_path().parent,
+    ).integration
 
 
 def _configured_env_cfg():
@@ -131,8 +138,14 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
     payload = _gym_payload()
 
     assert payload["id"] == _ENV_ID
-    assert payload["task_program_dir"] == "task_program"
-    assert payload["sensor"] == []
+    assert payload["task_program"] == {
+        "program": "task_program/program.yaml",
+        "integration": "task_program/integration.yaml",
+        "execution_policy": (
+            "../../../components/execution_policies/motion_gen_verified.yaml"
+        ),
+    }
+    assert payload["scene"] == {"component": "task_program/scene.yaml"}
     assert payload["env"]["extensions"] == {}
     settle = payload["env"]["events"]["settle_can_on_reset"]
     assert settle["func"] == "wait_for_dynamic_objects_to_settle"

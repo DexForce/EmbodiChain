@@ -403,22 +403,25 @@ def config_to_cfg(
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
-    A config containing ``task_program_dir`` loads ``integration.yaml`` before
-    ``program.yaml`` from that directory. After the remaining
-    environment values parse successfully, the existing
+    Any config may select reusable ``embodiment.component`` and
+    ``scene.component`` files before the remaining environment values parse.
+    Inline ``robot``, ``sensor``, and scene fields remain valid when their
+    corresponding component selector is absent. A config containing
+    ``task_program`` additionally composes its program, task integration, and
+    execution-policy components. The existing
     :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class is registered under
     the config's ``id`` with the decoded integration factory.
     Re-loading an identical declaration is idempotent; an ID collision with a
     different declaration fails closed.
 
     Args:
-        config (dict): The configuration dictionary containing robot, sensor, light, background, and interactive objects.
+        config (dict): The configuration dictionary containing an embodiment
+            component or inline robot plus optional scene values.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
-        source_path: Optional path of the Gym configuration source file. A
-            relative top-level ``task_program_dir`` is resolved from this
-            file's directory. Without it, relative paths use the current
-            working directory.
+        source_path: Optional path of the Gym configuration source file.
+            Relative component paths resolve from this file's directory.
+            Without it, relative paths use the current working directory.
         task_program_path_override: Optional explicit program path. This is
             selected instead of the Gym-config path and resolves from the
             process working directory.
@@ -463,66 +466,80 @@ def config_to_cfg(
     env_cfg = EmbodiedEnvCfg()
 
     # check all necessary keys
-    required_keys = ["id", "env", "robot"]
+    required_keys = ["id", "env"]
     for key in required_keys:
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
     removed_task_program_fields = sorted(
         field
-        for field in ("task_program_path", "task_program_integration_path")
+        for field in (
+            "task_program_dir",
+            "task_program_path",
+            "task_program_integration_path",
+        )
         if field in config
     )
     if removed_task_program_fields:
         raise ValueError(
             f"Removed Task Program fields {removed_task_program_fields}; "
-            "use task_program_dir instead."
+            "use the task_program component mapping instead."
         )
+
+    from embodichain.lab.gym.utils._component_composition import (
+        _resolve_gym_components,
+    )
+
+    base_dir = (
+        Path.cwd() if source_path is None else Path(source_path).expanduser().parent
+    )
+    component_resolution = _resolve_gym_components(config, base_dir=base_dir)
+    config = component_resolution.config
 
     configured_task_program_integration = None
-    configured_task_program_dir: Path | None = None
+    configured_task_program_selection = None
+    configured_task_program_id: str | None = None
     configured_task_program_path: Path | None = None
-    if "task_program_dir" in config:
-        task_program_dir = config["task_program_dir"]
-        if type(task_program_dir) is not str:
-            raise TypeError("task_program_dir must be an exact string.")
-        if not task_program_dir or task_program_dir != task_program_dir.strip():
+    if "task_program" in config:
+        if not component_resolution.embodiment_selected:
             raise ValueError(
-                "task_program_dir must be a non-empty string without outer "
-                "whitespace."
+                "A configured Task Program environment must declare "
+                "embodiment.component."
             )
-        configured_task_program_dir = Path(task_program_dir).expanduser()
-        if source_path is not None and not configured_task_program_dir.is_absolute():
-            configured_task_program_dir = (
-                Path(source_path).expanduser().parent / configured_task_program_dir
+        if component_resolution.embodiment_skill_profile is None:
+            raise ValueError(
+                "A configured Task Program embodiment component must declare "
+                "skill_profile metadata."
             )
-        if not configured_task_program_dir.exists():
-            raise FileNotFoundError(
-                "Task Program directory does not exist: "
-                f"{configured_task_program_dir}."
+        if not component_resolution.scene_selected:
+            raise ValueError(
+                "A configured Task Program environment must declare scene.component."
             )
-        if not configured_task_program_dir.is_dir():
-            raise NotADirectoryError(
-                "Task Program path is not a directory: "
-                f"{configured_task_program_dir}."
+        if component_resolution.scene_task_program is None:
+            raise ValueError(
+                "A configured Task Program scene component must declare "
+                "task_program metadata."
             )
-        from embodichain.lab.task_program.integrations.configured import (
-            _load_configured_task_program_integration,
+        from embodichain.lab.task_program.integrations._configured_composition import (
+            _load_configured_task_program_deployment,
         )
 
-        configured_task_program_integration = _load_configured_task_program_integration(
-            configured_task_program_dir / "integration.yaml",
+        deployment = _load_configured_task_program_deployment(
+            task_program=config["task_program"],
+            skill_profile=component_resolution.embodiment_skill_profile,
+            scene=component_resolution.scene_task_program,
+            base_dir=base_dir,
         )
-        configured_task_program_path = configured_task_program_dir / "program.yaml"
-        if not configured_task_program_path.is_file():
-            raise FileNotFoundError(
-                "Task Program source path is not a file: "
-                f"{configured_task_program_path}."
-            )
+        configured_task_program_integration = deployment.integration
+        configured_task_program_selection = deployment.selection
+        configured_task_program_id = deployment.program_id
+        configured_task_program_path = deployment.program_path
+    elif "robot" not in config:
+        log_error("Missing required config key: robot")
 
     if (
         task_program_path_override is not None
-        or configured_task_program_dir is not None
+        or configured_task_program_path is not None
     ):
         if task_program_path_override is not None:
             task_program_path = task_program_path_override
@@ -553,8 +570,18 @@ def config_to_cfg(
             registration.assert_unchanged()
         task_program = load_task_program(
             task_program_path_text,
+            integration=configured_task_program_selection,
             validation_context=(None if registration is None else registration.catalog),
         )
+        if (
+            configured_task_program_id is not None
+            and task_program.program_id != configured_task_program_id
+        ):
+            raise ValueError(
+                f"Task integration expects program_id "
+                f"{configured_task_program_id!r}, got "
+                f"{task_program.program_id!r}."
+            )
         if registration is not None:
             registration.catalog.preflight(task_program)
         env_cfg.task_program = task_program

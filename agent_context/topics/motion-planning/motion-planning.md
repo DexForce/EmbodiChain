@@ -190,14 +190,15 @@ Grasp-pose generation is a sibling planning service, not a
 `MotionGenerator` feature. `embodichain.toolkits.graspkit` owns its standalone
 contract and the `pg_grasp` implementation without importing `embodichain.lab`.
 Atomic Skills and Task Program install a generator instance in
-`AtomicActionEngine`. The reference integrations declare their scenes,
-robot profiles, trajectory policies, and grasp-generator parameters in
-task-local `task_program/integration.yaml` files. The Gym config only references
-the containing directory through `task_program_dir`.
-`task_program/integrations/configured.py` decodes the shared
-composition schema and lazily creates the production simulation adapter; the
-config loader registers the existing `EmbodiedEnv` under the config-selected
-ID. There are no task-specific environment subclasses or direct-planning paths.
+`AtomicActionEngine`. Reference deployments select execution policies under
+`configs/components/execution_policies/`, while reusable embodiment components
+own the simulation robot and sensors; their optional `skill_profile` owns
+grasp-generator geometry/tuning. Task-local integrations retain only semantic
+action options and typed task-specific overrides.
+`task_program/integrations/_configured_composition.py` checks the component
+contracts and lowers the result through the strict decoder in `configured.py`;
+the config loader registers the existing `EmbodiedEnv` under the selected ID.
+There are no task-specific environment subclasses or direct-planning paths.
 
 `MotionGenOptions` fields:
 

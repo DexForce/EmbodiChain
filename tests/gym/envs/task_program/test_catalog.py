@@ -41,9 +41,10 @@ from embodichain.lab.task_program.integrations import (
     SimulationSceneBinding,
     SupportSurfaceAffordanceBinding,
 )
-from embodichain.lab.task_program.integrations.configured import (
-    _load_configured_task_program_integration,
+from embodichain.lab.task_program.integrations._configured_composition import (
+    _load_configured_task_program_deployment,
 )
+from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.registration import EnvSpec
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
@@ -97,20 +98,30 @@ from embodichain.lab.task_program.semantics.effects import EffectMonitorRef
 from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelCommandSafetyValidator,
 )
+from embodichain.utils.utility import load_config
 
 _CATALOG_REGISTERED_CALL_ID = "test.catalog_call"
 _CUBE_RUNTIME_PRESET_ID = "trajectory"
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_CUBE_INTEGRATION_PATH = (
+_CUBE_ENV_PATH = (
     _REPOSITORY_ROOT
     / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
-    / "task_program/integration.yaml"
+    / "env.ur5.yaml"
 )
 
 
 def _cube_integration():
-    """Decode a fresh cube integration from the production declaration."""
-    return _load_configured_task_program_integration(_CUBE_INTEGRATION_PATH)
+    """Compose a fresh cube integration from the production deployment."""
+    config = load_config(_CUBE_ENV_PATH)
+    physical = _resolve_gym_components(config, base_dir=_CUBE_ENV_PATH.parent)
+    assert physical.embodiment_skill_profile is not None
+    assert physical.scene_task_program is not None
+    return _load_configured_task_program_deployment(
+        task_program=config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        scene=physical.scene_task_program,
+        base_dir=_CUBE_ENV_PATH.parent,
+    ).integration
 
 
 def create_cube_scene_binding() -> SimulationSceneBinding:

@@ -109,9 +109,14 @@ EmbodiChain/
 Official tasks use a task-first layout:
 
 - Import-registered Python entry point: `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`
-- Scene and MDP config: `embodichain_tasks/configs/tasks/<category-path>/<task>/env.{json,yaml}`
-- Optional Task Program bundle: `<task config>/task_program/`, containing
-  `program.yaml` and `integration.yaml`
+- Deployment config: `embodichain_tasks/configs/tasks/<category-path>/<task>/env[.<embodiment>].{json,yaml}`
+- Optional Task Program components: `<task config>/task_program/`, containing
+  `program.yaml`, `integration.yaml`, and `scene.yaml`
+- Reusable embodiment and execution-policy components:
+  `embodichain_tasks/configs/components/{embodiments,execution_policies}/`.
+  An embodiment owns one simulation robot, its sensor suite, and its Task
+  Program-facing `skill_profile` declaration when that semantic metadata is
+  needed.
 - Optional RL configuration: `<task config>/agents/<algorithm>.{json,yaml}`
 
 The category path starts with a top-level task family and may include a
@@ -125,10 +130,21 @@ modules when the existing JSON/YAML config and manager functors express the
 task. Organize tasks by task family, optional subdomain, and task identity,
 not by solution method such as `task_program` or `rl`.
 
+Any Gym deployment, including an import-registered handwritten-demo task, may
+select `embodiment.component` and `scene.component`. `config_to_cfg()` expands
+those physical components before ordinary environment parsing. A deployment
+must choose either a component or the corresponding inline `robot`/`sensor` or
+scene fields, never both. An embodiment component may omit `skill_profile`,
+and a scene component may omit `task_program`, when the deployment does not
+declare `task_program`. The original inline Gym format remains supported.
+
 A supported configuration-defined Task Program may omit `<task>.py`:
-set `task_program_dir` to the task-local `task_program/` directory in
-`env.json`, and let `config_to_cfg()` load its fixed `program.yaml` and
-`integration.yaml` files before registering the common `EmbodiedEnv`.
+declare `task_program.{program,integration,execution_policy}`,
+`embodiment.component`, and `scene.component` in an environment deployment.
+`config_to_cfg()` composes those typed YAML components, checks their
+scene/embodiment contracts, binds the trusted integration IDs into the
+otherwise embodiment-independent program, and registers the common
+`EmbodiedEnv`. Component files do not use compatibility `version` fields.
 
 ---
 

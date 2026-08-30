@@ -91,6 +91,10 @@ topics:
       - task listing
       - supports_rl
       - gym
+      - embodiment.component
+      - reusable embodiment
+      - handwritten trajectory config
+      - componentized Gym config
       - task
       - step
       - reset
@@ -113,6 +117,9 @@ topics:
       - embodichain/learning/rl/env.py
       - embodichain_tasks/embodichain_tasks/
       - embodichain/lab/gym/utils/
+      - embodichain/lab/gym/utils/_component_composition.py
+      - embodichain_tasks/configs/components/embodiments/cobotmagic_tabletop_stereo.yaml
+      - embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json
     related_topics:
       - simulation-system
       - manager-functor
@@ -268,6 +275,8 @@ topics:
       - 相机
     keywords:
       - sensor
+      - embodiment sensor
+      - embodiment.component
       - camera
       - stereo
       - contact
@@ -285,6 +294,10 @@ topics:
       - embodichain/lab/sim/sensors/camera.py
       - embodichain/lab/sim/sensors/stereo.py
       - embodichain/lab/sim/sensors/contact_sensor.py
+      - embodichain/lab/gym/utils/gym_utils.py
+      - embodichain/lab/gym/utils/_component_composition.py
+      - embodichain/lab/task_program/integrations/_configured_composition.py
+      - embodichain_tasks/configs/components/embodiments/
     related_topics:
       - simulation-system
       - robot-system
@@ -398,13 +411,19 @@ topics:
       - embodichain/lab/task_program/semantics/scene.py
       - embodichain/toolkits/graspkit/pose_generator.py
       - embodichain/lab/task_program/integrations/configured.py
+      - embodichain/lab/task_program/integrations/_configured_composition.py
       - embodichain/lab/gym/envs/task_program/registration.py
       - embodichain/lab/task_program/integrations/_configured_services.py
-      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
+      - embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml
+      - embodichain_tasks/configs/components/embodiments/franka_panda.yaml
+      - embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.ur5.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.franka.yaml
       - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/integration.yaml
-      - embodichain_tasks/configs/tasks/manipulation/open_drawer/env.json
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/env.ur5.yaml
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/env.franka.yaml
       - embodichain_tasks/configs/tasks/manipulation/open_drawer/task_program/integration.yaml
-      - embodichain_tasks/configs/tasks/manipulation/hand_over/env.json
+      - embodichain_tasks/configs/tasks/manipulation/hand_over/env.yaml
       - embodichain_tasks/configs/tasks/manipulation/hand_over/task_program/integration.yaml
     related_topics:
       - simulation-system
@@ -786,8 +805,13 @@ topics:
       - create_simulation_task_program_adapter
       - load_task_program
       - decode_task_program
-      - task_program_dir
-      - Task Program directory
+      - task_program component
+      - Task Program deployment
+      - embodiment.component
+      - embodiment skill_profile
+      - skill_profile
+      - scene.component
+      - execution_policy
       - integration.yaml
       - configured Task Program integration
       - nested affordances
@@ -872,8 +896,11 @@ topics:
       - embodichain/lab/gym/envs/embodied_env.py
       - embodichain/lab/gym/envs/demo.py
       - embodichain/lab/scripts/run_env.py
+      - embodichain/lab/gym/utils/_component_composition.py
       - embodichain/lab/task_program/semantics/calls.py
       - embodichain/lab/task_program/semantics/integration.py
+      - embodichain/lab/task_program/integrations/_configured_composition.py
+      - embodichain_tasks/configs/components/
       - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/
       - embodichain_tasks/configs/tasks/manipulation/open_drawer/
       - embodichain_tasks/configs/tasks/manipulation/hand_over/
@@ -883,4 +910,5 @@ topics:
       - env-framework
       - simulation-system
       - motion-planning
+      - sensor-system
     status: active

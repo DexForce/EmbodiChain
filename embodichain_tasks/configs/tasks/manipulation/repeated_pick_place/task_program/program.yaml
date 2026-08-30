@@ -1,8 +1,4 @@
 program_id: repeated_cube_pick_place
-integration:
-  robot_profile: task_program_ur5_pick_place
-  scene_registry: task_program_repeated_pick_place
-  runtime_preset: trajectory
 targets:
   drop_pose:
     kind: cyclic_pose
@@ -24,8 +20,6 @@ program:
           call:
             kind: pick
             object: cube
-            resources:
-              primary: manipulator
         - kind: invoke
           call:
             kind: place
@@ -33,5 +27,3 @@ program:
             at:
               kind: target_ref
               target: drop_pose
-            resources:
-              primary: manipulator

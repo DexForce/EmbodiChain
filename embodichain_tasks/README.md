@@ -20,7 +20,10 @@ embodichain_tasks/<category-path>/<task>.py
 configs/tasks/<category-path>/<task>/env.{json,yaml}
 configs/tasks/<category-path>/<task>/task_program/program.yaml
 configs/tasks/<category-path>/<task>/task_program/integration.yaml
+configs/tasks/<category-path>/<task>/task_program/scene.yaml
 configs/tasks/<category-path>/<task>/agents/<algorithm>.yaml
+configs/components/embodiments/<embodiment>.yaml
+configs/components/execution_policies/<policy>.yaml
 ```
 
 The category path begins with a top-level task family and may include a
@@ -28,12 +31,24 @@ subdomain: tableware tasks use `manipulation/tableware`, while general
 manipulation tasks can stay directly under `manipulation`. The Python entry
 stays flat beneath its owning category; the task-local configuration directory
 remains because it can own environment, Task Program, and policy artifacts.
-A configuration-defined Task Program task sets `task_program_dir` in
-`env.json`; the referenced directory contains fixed `program.yaml` and
-`integration.yaml` files. Loading that config registers the common
-`EmbodiedEnv`, so no Python task module is needed. The Gym config stays focused
-on environment lifecycle while the integration file owns scene/profile and
-live-service declarations.
+A Gym deployment of any kind may select a reusable `embodiment.component` (and
+optionally `scene.component`) instead of repeating inline robot, sensor, and
+scene fields. A physical-only embodiment may omit `skill_profile`, and a
+physical-only scene may omit `task_program`; this is used by the CobotMagic
+tableware handwritten demos. Inline Gym configs remain valid, but
+component-owned fields cannot also be declared inline in the same file.
+
+A configuration-defined Task Program environment is a small deployment file.
+It selects a task-local program, task integration, and scene plus reusable
+embodiment and execution-policy components. An embodiment owns the simulation
+robot and its sensor suite. Its optional `skill_profile` owns the logical
+resources, command presets, and embodiment-specific Task Program services.
+Loading that deployment checks explicit scene/embodiment contracts and
+registers the common `EmbodiedEnv`, so no Python task module is needed.
+Programs contain no concrete embodiment/profile IDs; changing the
+`embodiment.component` reference is sufficient when another embodiment
+satisfies the same contract. These files intentionally have no compatibility
+`version` field.
 
 ## Migrating from the solution-first layout
 
@@ -45,7 +60,7 @@ paths must use the task-first locations:
 | `embodichain_tasks.rl.basic.<task>` | `embodichain_tasks.classic_control.<task>` |
 | `embodichain_tasks.rl.push_cube` | `embodichain_tasks.manipulation.push_cube` |
 | `embodichain_tasks.tableware.<task>` | `embodichain_tasks.manipulation.tableware.<task>` |
-| Task Program-specific Python task modules | No replacement module for supported config-defined examples; load `configs/tasks/manipulation/<task>/env.json` |
+| Task Program-specific Python task modules | No replacement module for supported config-defined examples; load `configs/tasks/manipulation/<task>/env[.<embodiment>].yaml` |
 | `configs/tasks/tableware/<task>/` | `configs/tasks/manipulation/tableware/<task>/` |
 | `configs/gym/`, `configs/task_program/`, `configs/agents/rl/` | `configs/tasks/<category-path>/<task>/` |
 
@@ -86,14 +101,14 @@ selected by the `"id"` field of the gym config.
 
 ```bash
 # Data generation mode
-embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
+embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.franka.yaml
 
 # Preview mode
-embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json --preview
+embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.franka.yaml --preview
 
 # Equivalent invocations
-python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
-python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json
+python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.ur5.yaml
+python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.ur5.yaml
 ```
 
 ## How registration works
@@ -101,7 +116,7 @@ python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs
 Importing `embodichain_tasks` recursively imports every task module, which
 triggers its `@register_env` decorator and registers it in the gymnasium
 registry. Configuration-defined Task Program IDs are registered later by
-`config_to_cfg()` when their `env.json` is loaded. The unified CLI calls
+`config_to_cfg()` when their environment deployment is loaded. The unified CLI calls
 `discover_task_packages()` (from `embodichain.lab.gym.utils.registration`) at
 startup, which imports this package via its entry point. See the
 [task-package discovery utilities](../embodichain/lab/gym/utils/registration.py)

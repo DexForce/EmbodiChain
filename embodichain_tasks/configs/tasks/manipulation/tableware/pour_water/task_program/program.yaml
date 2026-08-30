@@ -1,8 +1,4 @@
 program_id: pour_water_with_right_arm
-integration:
-  robot_profile: task_program_cobotmagic_pour
-  scene_registry: task_program_pour_water
-  runtime_preset: trajectory
 targets:
   bottle_return_pose:
     kind: cyclic_pose
@@ -20,24 +16,18 @@ program:
           kind: pick
           object: bottle
           grasp: bottle_grasp
-          resources:
-            primary: right_manipulator
       - kind: invoke
         call:
           kind: registered
           call_id: simulation.move_held_object
           arguments:
             target: cup_pour_pose
-          resources:
-            primary: right_manipulator
       - kind: invoke
         call:
           kind: registered
           call_id: simulation.pour
           arguments:
             object: bottle
-          resources:
-            primary: right_manipulator
       - kind: invoke
         call:
           kind: place
@@ -45,8 +35,6 @@ program:
           at:
             kind: target_ref
             target: bottle_return_pose
-          resources:
-            primary: right_manipulator
   post:
     - kind: wait_stable
       entity: bottle

@@ -177,7 +177,7 @@ def _config_environment_entries(
                 if not isinstance(env_id, str) or not env_id:
                     continue
                 capabilities = []
-                if "task_program_dir" in config:
+                if "task_program" in config:
                     capabilities.append(_TASK_PROGRAM)
                 _merge_environment_entry(
                     entries,

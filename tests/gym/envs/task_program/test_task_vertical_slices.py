@@ -34,9 +34,10 @@ from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.task_program.integrations import (
     SimulationRobotSkillProfileBinding,
 )
-from embodichain.lab.task_program.integrations.configured import (
-    _load_configured_task_program_integration,
+from embodichain.lab.task_program.integrations._configured_composition import (
+    _load_configured_task_program_deployment,
 )
+from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.gym.envs.task_program.bridge import (
@@ -82,18 +83,17 @@ _REPEATED_CUBE_PROGRAM = Path(
 _REPEATED_CUBE_INTEGRATION = Path(
     "tasks/manipulation/repeated_pick_place/task_program/integration.yaml"
 )
-_REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/env.json")
+_REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/env.ur5.yaml")
 _OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/task_program/program.yaml")
-_OPEN_DRAWER_INTEGRATION = Path(
-    "tasks/manipulation/open_drawer/task_program/integration.yaml"
-)
-_OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/env.json")
+_OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/env.ur5.yaml")
+_TRAJECTORY_POLICY = Path("components/execution_policies/trajectory_open_loop.yaml")
+_UR5_COMPONENT = Path("components/embodiments/ur5_dh_pgi_140_80.yaml")
 _OPEN_DRAWER_CALL_ID = "simulation.articulation_link_slide"
 _OPEN_DRAWER_ENTITY_ID = "drawer"
 _OPEN_DRAWER_HANDLE_ID = "drawer_handle"
 _OPEN_DRAWER_HANDLE_LINK_NAME = "large_handle_bar"
 _OPEN_DRAWER_SCENE_ID = "task_program_open_drawer"
-_OPEN_DRAWER_PROFILE_ID = "task_program_ur5_slide"
+_OPEN_DRAWER_PROFILE_ID = "ur5_dh_pgi_140_80"
 _LIFECYCLE_BATCH_SIZE = 2
 _LIFECYCLE_ROBOT_DOF = 3
 _LIFECYCLE_STEP_DT = 0.02
@@ -248,22 +248,47 @@ def _read_payload(relative_path: Path) -> dict[str, object]:
     return payload
 
 
-def _integration_path(relative_path: Path) -> Path:
-    """Resolve one packaged Task Program integration path."""
-    return _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
-
-
-def _cube_integration():
-    """Decode a fresh cube integration from the packaged YAML file."""
-    return _load_configured_task_program_integration(
-        _integration_path(_REPEATED_CUBE_INTEGRATION)
+def _deployment(relative_path: Path):
+    """Compose one packaged environment deployment."""
+    path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
+    payload = _read_payload(relative_path)
+    physical = _resolve_gym_components(payload, base_dir=path.parent)
+    assert physical.embodiment_skill_profile is not None
+    assert physical.scene_task_program is not None
+    return _load_configured_task_program_deployment(
+        task_program=payload["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        scene=physical.scene_task_program,
+        base_dir=path.parent,
     )
 
 
+def _cube_integration():
+    """Compose a fresh cube integration from the packaged deployment."""
+    return _deployment(_REPEATED_CUBE_GYM_CONFIG).integration
+
+
 def _drawer_integration():
-    """Decode a fresh drawer integration from the packaged YAML file."""
-    return _load_configured_task_program_integration(
-        _integration_path(_OPEN_DRAWER_INTEGRATION)
+    """Compose a fresh drawer integration from the packaged deployment."""
+    return _deployment(_OPEN_DRAWER_GYM_CONFIG).integration
+
+
+def _decode_deployed_program(
+    payload: dict[str, object],
+    *,
+    deployment_path: Path,
+):
+    """Bind a trusted deployment selection before strict decoding."""
+    deployment = _deployment(deployment_path)
+    selected = deepcopy(payload)
+    selected["integration"] = {
+        "robot_profile": deployment.selection.robot_profile,
+        "scene_registry": deployment.selection.scene_registry,
+        "runtime_preset": deployment.selection.runtime_preset,
+    }
+    return decode_task_program(
+        selected,
+        validation_context=deployment.integration.registration.catalog,
     )
 
 
@@ -319,7 +344,10 @@ def _drawer_compiler() -> TaskProgramCompiler:
 
 def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
     """The packaged cube task expands to three independently scoped cycles."""
-    config = decode_task_program(_read_payload(_REPEATED_CUBE_PROGRAM))
+    config = _decode_deployed_program(
+        _read_payload(_REPEATED_CUBE_PROGRAM),
+        deployment_path=_REPEATED_CUBE_GYM_CONFIG,
+    )
 
     integration = _cube_integration()
     assert (
@@ -347,7 +375,10 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
 
 def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
     """The real packaged program owns three ordered observable lifecycles."""
-    config = decode_task_program(_read_payload(_REPEATED_CUBE_PROGRAM))
+    config = _decode_deployed_program(
+        _read_payload(_REPEATED_CUBE_PROGRAM),
+        deployment_path=_REPEATED_CUBE_GYM_CONFIG,
+    )
     compiled = _cube_compiler().compile(config)
     lifecycle_events: list[tuple[str, int]] = []
     observation = _FreshObservationPort()
@@ -439,7 +470,11 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
     )
     payload["program"]["count"] = 4
 
-    segments = tuple(_cube_compiler().compile(decode_task_program(payload)))
+    config = _decode_deployed_program(
+        payload,
+        deployment_path=_REPEATED_CUBE_GYM_CONFIG,
+    )
+    segments = tuple(_cube_compiler().compile(config))
 
     assert len(segments) == 4
     last_place = segments[-1].calls[-1].call
@@ -451,10 +486,9 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
 def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     """The drawer config supplies one registered call with no acceptance hooks."""
     payload = _read_payload(_OPEN_DRAWER_PROGRAM)
-    registration = _drawer_integration().registration
-    config = decode_task_program(
+    config = _decode_deployed_program(
         payload,
-        validation_context=registration.catalog,
+        deployment_path=_OPEN_DRAWER_GYM_CONFIG,
     )
 
     assert config.integration.scene_registry == _OPEN_DRAWER_SCENE_ID
@@ -471,7 +505,7 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
     assert dict(call.arguments) == {
         "handle": "drawer_handle",
     }
-    assert dict(call.resources) == {"primary": "manipulator"}
+    assert dict(call.resources) == {}
     assert segments[0].post_policies == ()
     assert segments[0].validators == ()
 
@@ -684,9 +718,7 @@ def test_cube_config_declares_the_canonical_scene_and_profile_ids() -> None:
     assert registration.scene_binding.registry_id == (
         "task_program_repeated_pick_place"
     )
-    assert registration.robot_profile_binding.profile_id == (
-        "task_program_ur5_pick_place"
-    )
+    assert registration.robot_profile_binding.profile_id == ("ur5_dh_pgi_140_80")
 
 
 @pytest.mark.parametrize(
@@ -719,15 +751,16 @@ def test_example_profiles_execute_only_open_loop_trajectories(
     assert expected_grasp_samples == _EXPECTED_GRASP_SAMPLES
 
 
-def test_cube_integration_parameters_are_owned_by_integration_yaml() -> None:
-    """Trajectory and grasp costs live outside the focused Gym config."""
+def test_cube_policy_and_skill_parameters_have_single_component_owners() -> None:
+    """Execution and grasp tuning live in policy and embodiment components."""
     integration = _read_payload(_REPEATED_CUBE_INTEGRATION)
-    profile = integration["robot_profile"]
-    services = integration["runtime_services"]
+    policy = _read_payload(_TRAJECTORY_POLICY)
+    embodiment = _read_payload(_UR5_COMPONENT)
 
-    assert profile["presets"][0]["motion"]["sample_count"] == (
-        _EXPECTED_TRAJECTORY_SAMPLE_COUNT
-    )
+    assert "motion" not in integration["profile"]
+    assert "grasp_pose_generators" not in integration.get("runtime_services", {})
+    assert policy["motion"]["sample_count"] == _EXPECTED_TRAJECTORY_SAMPLE_COUNT
+    services = embodiment["skill_profile"]["runtime_services"]
     assert services["grasp_pose_generators"]["hand"]["sample_count"] == (
         _EXPECTED_GRASP_SAMPLES
     )
@@ -744,8 +777,8 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
 @pytest.mark.parametrize(
     "relative_path",
     (
-        Path("tasks/manipulation/repeated_pick_place/env.json"),
-        Path("tasks/manipulation/open_drawer/env.json"),
+        Path("tasks/manipulation/repeated_pick_place/env.ur5.yaml"),
+        Path("tasks/manipulation/open_drawer/env.ur5.yaml"),
     ),
 )
 def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
@@ -754,11 +787,17 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     """Runnable examples keep only deterministic simulation and motion inputs."""
     payload = _read_payload(relative_path)
 
-    assert payload["task_program_dir"] == "task_program"
+    assert set(payload["task_program"]) == {
+        "program",
+        "integration",
+        "execution_policy",
+    }
+    assert set(payload["embodiment"]) <= {"component", "overrides"}
+    assert payload["scene"] == {"component": "task_program/scene.yaml"}
+    assert "version" not in payload
     assert "task_program_path" not in payload
     assert "task_program_integration_path" not in payload
     assert "task_program_runtime" not in payload
-    assert payload["sensor"] == []
     assert payload["env"]["events"] == {}
     assert payload["env"]["dataset"] == {}
     assert "physics_config" not in payload

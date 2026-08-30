@@ -18,13 +18,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import subprocess
 import sys
 
 import pytest
 
+from embodichain.utils.utility import load_config, save_config
 from scripts.benchmark.task_program.demo_success import (
     aggregate_demo_success_trials,
     load_raw_trials,
@@ -32,7 +32,9 @@ from scripts.benchmark.task_program.demo_success import (
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
-_OPEN_DRAWER_GYM_CONFIG = _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/env.json"
+_OPEN_DRAWER_GYM_CONFIG = (
+    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/env.ur5.yaml"
+)
 _OPEN_DRAWER_TASK_PROGRAM = (
     _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task_program/program.yaml"
 )
@@ -48,24 +50,35 @@ _RUN_PUBLIC_MAIN = (
 
 def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
     """Write a deterministic copy of the canonical live-physics config."""
-    payload = json.loads(_OPEN_DRAWER_GYM_CONFIG.read_text(encoding="utf-8"))
+    payload = load_config(_OPEN_DRAWER_GYM_CONFIG)
     if type(payload) is not dict:
-        raise TypeError("The packaged OpenDrawer Gym config must be a JSON object.")
+        raise TypeError("The packaged OpenDrawer Gym config must be a mapping.")
     env_config = payload.get("env")
     if type(env_config) is not dict:
-        raise TypeError("The packaged OpenDrawer env config must be a JSON object.")
+        raise TypeError("The packaged OpenDrawer env config must be a mapping.")
 
-    payload["sensor"] = []
     env_config["events"] = {}
     env_config["observations"] = {}
     env_config["dataset"] = {}
-    payload["task_program_dir"] = str(_OPEN_DRAWER_TASK_PROGRAM.parent)
-
-    output = tmp_path / "open_drawer_headless_cpu.json"
-    output.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    task_program = payload["task_program"]
+    assert type(task_program) is dict
+    for field_name in ("program", "integration", "execution_policy"):
+        task_program[field_name] = str(
+            (_OPEN_DRAWER_GYM_CONFIG.parent / task_program[field_name]).resolve()
+        )
+    embodiment = payload["embodiment"]
+    scene = payload["scene"]
+    assert type(embodiment) is dict
+    assert type(scene) is dict
+    embodiment["component"] = str(
+        (_OPEN_DRAWER_GYM_CONFIG.parent / embodiment["component"]).resolve()
     )
+    scene["component"] = str(
+        (_OPEN_DRAWER_GYM_CONFIG.parent / scene["component"]).resolve()
+    )
+
+    output = tmp_path / "open_drawer_headless_cpu.yaml"
+    save_config(output, payload)
     return output
 
 

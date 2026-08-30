@@ -53,11 +53,11 @@ def test_resolve_config_path_redirects_packaged_task_config(
     monkeypatch.chdir(tmp_path)
 
     resolved = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json"
+        "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml"
     )
 
     assert resolved.is_file()
-    assert resolved.name == "env.json"
+    assert resolved.name == "env.yaml"
     assert resolved.parent.name == "pour_water"
 
 

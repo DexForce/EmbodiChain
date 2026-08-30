@@ -31,7 +31,9 @@ from scripts.benchmark.task_program.demo_success import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_CUBE_GYM_CONFIG = get_config_path("tasks/manipulation/repeated_pick_place/env.json")
+_CUBE_GYM_CONFIG = get_config_path(
+    "tasks/manipulation/repeated_pick_place/env.ur5.yaml"
+)
 _CUBE_TASK_PROGRAM = get_config_path(
     "tasks/manipulation/repeated_pick_place/task_program/program.yaml"
 )

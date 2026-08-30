@@ -204,7 +204,11 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
         json.dumps(
             {
                 "id": "PickPlace-v1",
-                "task_program_dir": "task_program",
+                "task_program": {
+                    "program": "task_program/program.yaml",
+                    "integration": "task_program/integration.yaml",
+                    "execution_policy": "policies/trajectory.yaml",
+                },
             }
         ),
         encoding="utf-8",

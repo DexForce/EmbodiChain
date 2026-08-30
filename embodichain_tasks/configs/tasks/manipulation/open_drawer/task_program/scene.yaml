@@ -1,0 +1,38 @@
+scene_id: open_drawer_default
+
+simulation:
+  light:
+    direct:
+      - uid: main_light
+        color: [0.6, 0.6, 0.6]
+        intensity: 30.0
+        init_pos: [0.0, 0.0, 3.0]
+  background: []
+  rigid_object: []
+  rigid_object_group: []
+  articulation:
+    - uid: drawer
+      fpath: Drawer/model_split_links_with_inertials.urdf
+      init_pos: [-1.1, 0.0, 0.0]
+      init_rot: [0.0, 0.0, 90.0]
+      init_qpos: [0.0]
+      fix_base: true
+      drive_pros:
+        drive_type: none
+      attrs:
+        static_friction: 1.0
+        dynamic_friction: 1.0
+
+task_program:
+  contract_id: open_drawer_scene_v1
+  registry_id: task_program_open_drawer
+  articulations:
+    - entity_id: drawer
+      dynamics: dynamic
+      semantic_type: drawer
+  links:
+    - entity_id: drawer_handle
+      articulation_id: drawer
+      native_link_name: large_handle_bar
+      dynamics: dynamic
+      semantic_type: drawer_handle

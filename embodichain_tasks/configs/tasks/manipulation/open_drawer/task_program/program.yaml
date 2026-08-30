@@ -1,8 +1,4 @@
 program_id: slide_open_drawer
-integration:
-  robot_profile: task_program_ur5_slide
-  scene_registry: task_program_open_drawer
-  runtime_preset: trajectory
 targets: {}
 program:
   kind: segment
@@ -14,5 +10,3 @@ program:
       call_id: simulation.articulation_link_slide
       arguments:
         handle: drawer_handle
-      resources:
-        primary: manipulator

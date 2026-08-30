@@ -25,7 +25,7 @@ from pathlib import Path
 
 import yaml
 
-from .schema import TaskProgramCfg
+from .schema import TaskProgramCfg, TaskProgramIntegrationCfg
 from .decoder import (
     TaskProgramDecodeError,
     TaskProgramValidationContext,
@@ -199,6 +199,7 @@ def parse_task_program_json(
 def loads_task_program_json(
     text: str,
     *,
+    integration: TaskProgramIntegrationCfg | None = None,
     validation_context: TaskProgramValidationContext | None = None,
     max_bytes: int = MAX_TASK_PROGRAM_BYTES,
 ) -> TaskProgramCfg:
@@ -210,6 +211,9 @@ def loads_task_program_json(
 
     Args:
         text: Untrusted JSON response text.
+        integration: Optional trusted integration selection injected before
+            strict decoding. The source document must omit ``integration``
+            when this is provided.
         validation_context: Optional provider-free static reference validator.
         max_bytes: Maximum UTF-8 encoded response size.
 
@@ -221,8 +225,36 @@ def loads_task_program_json(
         ValueError: If ``max_bytes`` is not positive.
         TaskProgramDecodeError: If parsing or strict decoding fails.
     """
-    data = parse_task_program_json(text, max_bytes=max_bytes)
+    data = _bind_task_program_integration(
+        parse_task_program_json(text, max_bytes=max_bytes),
+        integration,
+    )
     return decode_task_program(data, validation_context=validation_context)
+
+
+def _bind_task_program_integration(
+    data: dict[str, object],
+    integration: TaskProgramIntegrationCfg | None,
+) -> dict[str, object]:
+    """Inject one trusted deployment selection into an unbound program."""
+    if integration is None:
+        return data
+    if type(integration) is not TaskProgramIntegrationCfg:
+        raise TypeError("integration must be exactly TaskProgramIntegrationCfg.")
+    if "integration" in data:
+        raise TaskProgramDecodeError(
+            "integration_owned_by_deployment",
+            ("integration",),
+            "Configured Task Program sources must not declare integration; "
+            "the environment deployment owns that selection.",
+        )
+    bound = dict(data)
+    bound["integration"] = {
+        "robot_profile": integration.robot_profile,
+        "scene_registry": integration.scene_registry,
+        "runtime_preset": integration.runtime_preset,
+    }
+    return bound
 
 
 class _UniqueKeySafeLoader(yaml.SafeLoader):
@@ -269,6 +301,7 @@ def load_task_program(
     path: str | os.PathLike[str],
     *,
     base_dir: str | os.PathLike[str] | None = None,
+    integration: TaskProgramIntegrationCfg | None = None,
     validation_context: TaskProgramValidationContext | None = None,
 ) -> TaskProgramCfg:
     """Safely load and strictly decode one JSON or YAML Task Program file.
@@ -280,6 +313,8 @@ def load_task_program(
     Args:
         path: JSON, YAML, or YML file to load.
         base_dir: Optional directory used to resolve a relative ``path``.
+        integration: Optional trusted integration selection injected into an
+            unbound program before strict decoding.
         validation_context: Optional provider-free static reference validator
             applied after decoding either serialized format.
 
@@ -317,6 +352,7 @@ def load_task_program(
     if suffix == ".json":
         return loads_task_program_json(
             text,
+            integration=integration,
             validation_context=validation_context,
         )
     try:
@@ -325,7 +361,12 @@ def load_task_program(
         raise ValueError(
             f"Invalid Task Program YAML in {program_path}: {error}"
         ) from error
+    if type(data) is not dict:
+        return decode_task_program(
+            data,
+            validation_context=validation_context,
+        )
     return decode_task_program(
-        data,
+        _bind_task_program_integration(data, integration),
         validation_context=validation_context,
     )

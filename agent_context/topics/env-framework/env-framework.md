@@ -15,7 +15,9 @@
 | `embodichain/lab/gym/envs/embodied_env.py` | `EmbodiedEnv(BaseEnv)` + `EmbodiedEnvCfg` — modular task base class |
 | `embodichain/lab/gym/utils/registration.py` | `@register_env` decorator + `REGISTERED_ENVS` registry + `make()` |
 | `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing and config-owned runtime registration |
+| `embodichain/lab/gym/utils/_component_composition.py` | Reusable embodiment/scene physical component resolution for every Gym config |
 | `embodichain/lab/task_program/integrations/configured.py` | Strict built-in Task Program integration decoder |
+| `embodichain/lab/task_program/integrations/_configured_composition.py` | Task Program semantic component and contract composition |
 | `embodichain/lab/gym/envs/task_program/registration.py` | Config-owned Gym ID registration |
 | `embodichain_tasks/embodichain_tasks/__init__.py` | Recursively imports official tasks to trigger registration |
 | `embodichain/lab/gym/envs/managers/__init__.py` | Manager re-exports: `EventManager`, `ObservationManager`, `RewardManager`, `ActionManager`, `DatasetManager` |
@@ -143,13 +145,34 @@ class MyTaskEnv(EmbodiedEnv):
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
+### Reusable Gym deployment components
+
+`config_to_cfg()` resolves `embodiment.component` and `scene.component` before
+ordinary Gym parsing for every environment type. This is not coupled to Task
+Program: an import-registered handwritten-demo task can reuse an embodiment's
+simulation robot and sensor suite while keeping its events, observations,
+objects, and Python demo logic task-local. Component paths resolve relative to
+the Gym config source file. Component-owned fields and their inline
+counterparts are mutually exclusive; without a selector, the original inline
+`robot`, `sensor`, and scene fields continue to parse unchanged.
+
+The physical component boundary is implemented in
+`gym/utils/_component_composition.py`. An embodiment or scene component may be
+physical-only. An embodiment's optional `skill_profile` and a scene's optional
+`task_program` mapping are consumed only by a configured Task Program
+deployment. The shared
+`cobotmagic_tabletop_stereo.yaml` component and the tableware handwritten
+configs are the reference for one embodiment reused by multiple Python tasks.
+
 ### Configuration-owned Task Program environment
 
 A simple supported Task Program does not require a task subclass. Its Gym
-config points `task_program_dir` at a directory containing fixed
-`program.yaml` and `integration.yaml` files. `config_to_cfg()` strictly loads
-the integration, uses its immutable catalog to preflight the program, parses
-the remaining environment config, and then calls
+deployment selects task-local program/integration/scene components and shared
+embodiment/execution-policy components. After the generic physical resolver
+lowers the selected robot, sensors, and scene into the existing
+`EmbodiedEnvCfg` fields, the Task Program layer requires semantic metadata on
+both physical components, checks scene/embodiment contracts, composes the
+immutable catalog, preflights the deployment-bound program, and calls
 `register_env_function(EmbodiedEnv, config["id"], ...)`.
 
 The ID is selected by the config and may be any free valid Gym ID. Loading the
@@ -185,7 +208,7 @@ and packaged `configs/tasks/` paths. The other columns show the environment ID
 and supported use:
 
 - `[Expert Demo: Task Program]` comes from a task-local Gym config declaring
-  `task_program_dir`;
+  the `task_program` component mapping;
 - `[Expert Demo: Handwritten Trajectory]` means the registered task class
   overrides `create_demo_segments()` or `create_demo_action_list()`;
 - `[RL]` comes from explicit simulator `supports_rl`, a task-local agents

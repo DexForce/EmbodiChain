@@ -121,6 +121,7 @@ def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
         config_root = TASK_CONFIG_ROOT / "manipulation/tableware" / task_name
 
         assert find_spec(module_name) is None
-        assert (config_root / "env.json").is_file()
+        assert (config_root / "env.yaml").is_file()
         assert (config_root / "task_program/program.yaml").is_file()
         assert (config_root / "task_program/integration.yaml").is_file()
+        assert (config_root / "task_program/scene.yaml").is_file()

@@ -1,84 +1,31 @@
-scene:
-  registry_id: task_program_open_drawer
-  articulations:
-  - entity_id: drawer
-    dynamics: dynamic
-    semantic_type: drawer
-  links:
-  - entity_id: drawer_handle
-    articulation_id: drawer
-    native_link_name: large_handle_bar
-    dynamics: dynamic
-    semantic_type: drawer_handle
-robot_profile:
-  profile_id: task_program_ur5_slide
-  resources:
-  - resource_id: manipulator
-    endpoints:
-    - endpoint_id: motion
-      control_part: arm
-      capabilities:
-      - kinematics.batch_inverse
-      - motion.cartesian_pose
-      - kinematics.forward
-    - endpoint_id: grasp
-      control_part: hand
-      capabilities:
-      - interaction.grasp
-      command_preset: parallel_jaw_commands
-  command_presets:
-  - preset_id: parallel_jaw_commands
-    control_part: hand
-    commands:
-      open:
-      - 0.0
-      grasp:
-      - 0.024
+integration_id: open_drawer_v1
+program_id: slide_open_drawer
+
+requires:
+  scene_contract: open_drawer_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+profile:
   defaults:
     slide:
-      primary: manipulator
-  presets:
-  - preset_id: trajectory
-    action_options:
-      simulation.articulation_link_slide:
-        kind: slide
-        direction: pull
-        hand_interp_steps: 12
-        approach_distance: 0.1
-        translation_distance: 0.18
-    motion:
-      sample_count: 40
-      dynamic_collision_mode: 'off'
-    tracking:
-      kind: timed
-    recovery:
-      max_replans: 0
-      max_action_retries: 0
-    workflow_recovery:
-      max_recovery_attempts: 0
-    runner:
-      minimum_cycle_time: 0.0
-      hold_on_completion: false
-      hold_during_effect_verification: false
-    effect_assurance: projected
-    effect_monitors: {}
-  default_preset: trajectory
+      primary: primary_manipulator
+  action_options:
+    simulation.articulation_link_slide:
+      kind: slide
+      direction: pull
+      hand_interp_steps: 12
+      approach_distance: 0.1
+      translation_distance: 0.18
+  effect_monitors: {}
+
 runtime_services:
-  grasp_pose_generators:
+  grasp_pose_generator_overrides:
     hand:
-      kind: antipodal_parallel_jaw
-      sample_count: 1000
       opening_margin: 0.03
-      point_sample_density: 0.012
-      filter_ground_collision: false
-      model: dh_pgi_140_80
   registered_semantic_lowerers:
-  - kind: articulation_link_slide
-    articulation_id: drawer
-    articulation_simulation_uid: drawer
-    link_entity_id: drawer_handle
-    translation_axis:
-    - 0.0
-    - 1.0
-    - 0.0
-    target_pose_mode: snapshot
+    - kind: articulation_link_slide
+      articulation_id: drawer
+      articulation_simulation_uid: drawer
+      link_entity_id: drawer_handle
+      translation_axis: [0.0, 1.0, 0.0]
+      target_pose_mode: snapshot

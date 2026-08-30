@@ -36,6 +36,8 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
 | Immutable catalog and extension declarations | `embodichain/lab/task_program/integrations/catalog.py`, `extensions.py` |
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |
+| Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
+| Configured semantic/policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
@@ -107,12 +109,51 @@ settling presets, grounders, endpoint transports, evidence and safety
 factories, and registered-call lowerers. Adapter creation calls
 `assert_unchanged()` and revalidates all live bindings.
 
-Configured environments expose one `task_program_dir` entry. That directory
-must contain fixed `integration.yaml` and `program.yaml` files.
-`config_to_cfg()` loads the integration first, preflights the program through
-its immutable catalog, parses the environment, and registers the common
-`EmbodiedEnv`. The integration file cannot select dotted imports or arbitrary
-callables. The CLI may override only the program.
+Configured environments are deployment roots with five typed selections:
+`task_program.program`, `task_program.integration`,
+`task_program.execution_policy`, `embodiment.component`, and `scene.component`.
+`config_to_cfg()` resolves every path from the deployment file, checks the
+task's required scene/embodiment contracts, composes the immutable integration
+catalog, injects its trusted profile/scene/preset selection into the unbound
+program, and registers the common `EmbodiedEnv`. The CLI may override only the
+program. Components have closed fields and intentionally omit compatibility
+`version` values.
+
+Ownership is explicit rather than a generic deep merge:
+
+- `program.yaml` owns task flow, targets, post-policies, and validators; it
+  contains neither robot IDs nor an `integration` selection;
+- task-local `integration.yaml` owns required contracts, semantic defaults,
+  action options, effect monitors, and task-specific runtime services;
+- task-local `scene.yaml` owns simulation entities and their canonical semantic
+  registry, but not the selected sensors;
+- `configs/components/embodiments/*.yaml` owns simulation robot construction,
+  the sensor suite, and an optional `skill_profile` containing logical
+  resources/endpoints, command presets, and embodiment-specific services;
+- `configs/components/execution_policies/*.yaml` owns motion, tracking,
+  recovery, runner, and effect-assurance policy.
+
+The reference embodiment `skill_profile.contract_id` and `profile_id` values
+are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
+separate identity domains and do not imply a skill-profile version.
+
+Deployment embodiment overrides affect only the robot simulation fields and
+are restricted to `uid`, `init_pos`, `init_rot`, and `init_qpos`. Sensor lists
+are selected atomically with the embodiment. Task grasp-generator overrides
+are similarly allowlisted. This gives one embodiment to many tasks and one
+task to many compatible embodiments without copying either declaration or
+admitting arbitrary merge semantics. `repeated_pick_place` and `open_drawer`
+each provide UR5 and Franka deployments as reference compositions.
+
+Physical embodiment/scene expansion is owned by
+`gym/utils/_component_composition.py` and runs for ordinary handwritten Gym
+tasks as well. In that case an embodiment component may omit `skill_profile`,
+and a scene component may omit `task_program`; selecting a component reuses
+physical configuration but does not by itself parameterize hard-coded Python
+control-part names or trajectory dimensions. A deployment that declares
+`task_program` must select an embodiment `skill_profile` and scene
+`task_program` metadata satisfying the integration and execution-policy
+contracts. The removed embodiment-level `task_program` key is not accepted.
 
 Within `integration.yaml`, every affordance is nested in an `affordances` list
 under its owning `rigid_objects`, `articulations`, or `links` entry. The child
