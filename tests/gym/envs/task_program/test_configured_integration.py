@@ -306,8 +306,11 @@ def test_task_rejects_embodiment_with_an_incompatible_contract() -> None:
         )
 
 
-def test_embodiment_owns_the_deployed_sensor_suite() -> None:
+def test_embodiment_owns_the_deployed_sensor_suite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Sensors are selected with the physical embodiment, not the task scene."""
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
     path = _tableware_config_path("pour_water")
     config = _tableware_gym_config("pour_water")
     physical = _physical_components(path, config)
