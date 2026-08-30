@@ -982,6 +982,20 @@ embodichain.lab.sim.planners.trapezoidal_planner
    TrapezoidalPlanner
    TrapezoidalPlannerCfg
 
+embodichain.lab.sim.planners.trapezoidal_warp
+---------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.planners.trapezoidal_warp
+
+Warp-accelerated helpers construct scalar trapezoidal or Double-S motion
+profiles and compose their sampled path derivatives into batched joint-space
+trajectories.
+
+.. autosummary::
+
+   build_profile_warp
+   compose_profile_samples_warp
+
 embodichain.lab.sim.planners.utils
 ----------------------------------
 
@@ -1290,6 +1304,19 @@ embodichain.lab.sim.solvers.null_space_posture_task
 .. autosummary::
 
    NullSpacePostureTask
+
+embodichain.lab.sim.solvers.opw_solver
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.opw_solver
+
+Configuration and runtime solver for analytic OPW forward and inverse
+kinematics of compatible six-axis manipulators.
+
+.. autosummary::
+
+   OPWSolver
+   OPWSolverCfg
 
 embodichain.lab.sim.solvers.pink_solver
 ---------------------------------------
