@@ -28,6 +28,8 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
     GraspGoal,
+    HeldObjectPoseGoal,
+    MoveHeldObjectOptions,
 )
 from embodichain.lab.sim.planners.curobo.curobo_planner import CuroboPlanner
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult
@@ -452,6 +454,89 @@ def test_atomic_task_pickup_builds_engine_owned_endpoint_binding():
         ("primary", "motion"),
         ("primary", "grasp"),
     }
+
+
+def test_atomic_task_prepare_planner_registers_benchmark_objects_in_scene():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 7
+    robot.control_parts = {"arm": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 7)
+    robot.get_qvel.return_value = torch.zeros(1, 7)
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    adapter = Mock()
+    adapter.require_motion_generator.return_value = motion_generator
+
+    object_pose = torch.eye(4).unsqueeze(0)
+    entity = Mock(uid="atomic_cube")
+    entity.get_local_pose.return_value = object_pose
+    scenario = AtomicTaskScenario()
+    scenario._objects["cube"] = Mock(object_id="cube", entity=entity)
+
+    scenario.prepare_planner(adapter, Mock())
+
+    scene = scenario.require_engine().initial_context().scene
+    assert tuple(scene.entities) == ("atomic_cube",)
+    assert torch.equal(scene.entities["atomic_cube"].pose, object_pose)
+
+
+def test_atomic_task_move_held_object_uses_current_options_contract():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    target_object_pose = torch.eye(4).unsqueeze(0)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="move_held_object",
+        case_id="atomic-task:move_held_object:cube:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=1,
+        path_shape="held_object_transport",
+        start_state_bin="object_held",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=target_object_pose.unsqueeze(1),
+        reference_qpos=torch.zeros(1, 1, 7),
+        skill_id="move_held_object",
+        object_id="cube",
+        case_parameters={
+            "sample_count": 12,
+            "target_object_pose": target_object_pose.tolist(),
+        },
+    )
+
+    invocation = create_atomic_skill_provider("move_held_object").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+
+    assert isinstance(invocation.goal, HeldObjectPoseGoal)
+    assert type(invocation.skill_options) is MoveHeldObjectOptions
 
 
 @pytest.mark.parametrize("override", [{"nmg_pos_eps": 0.0}, {"nmg_rot_eps": -0.1}])

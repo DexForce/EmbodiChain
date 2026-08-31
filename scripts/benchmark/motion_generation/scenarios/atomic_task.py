@@ -49,6 +49,7 @@ from embodichain.lab.sim.atomic_actions import (
     PressGoal,
     PressOptions,
     TaskState,
+    create_simulation_atomic_action_engine,
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 from embodichain.lab.sim.planners.utils import PlanResult
@@ -1047,7 +1048,7 @@ class _MoveHeldObjectCases(_HeldObjectCases):
                 strategy="motion_gen",
                 sample_count=int(case.case_parameters["sample_count"]),
             ),
-            skill_options=MoveHeldObjectOptions(pick_rotate_upright=0.0),
+            skill_options=MoveHeldObjectOptions(),
         )
 
     def task_result(
@@ -1580,10 +1581,19 @@ class AtomicTaskScenario(ScenarioProvider):
                     grasp=self._gripper_grasp,
                 )
             }
-        self._engine = AtomicActionEngine(
-            motion_generator=adapter.require_motion_generator(),
-            control_profiles=control_profiles,
-        )
+        motion_generator = adapter.require_motion_generator()
+        scene_entities = tuple(handle.entity for handle in self._objects.values())
+        if scene_entities:
+            self._engine = create_simulation_atomic_action_engine(
+                motion_generator=motion_generator,
+                scene_entities=scene_entities,
+                control_profiles=control_profiles,
+            )
+        else:
+            self._engine = AtomicActionEngine(
+                motion_generator=motion_generator,
+                control_profiles=control_profiles,
+            )
 
     def close_planner(self, adapter: PlannerAdapter) -> None:
         """Drop the engine before its adapter closes the shared generator."""
