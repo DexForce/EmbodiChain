@@ -125,6 +125,48 @@ def test_ordered_waypoint_requires_position_and_rotation_at_same_sample():
     assert result["arrival_indices"] == []
 
 
+def test_press_waypoint_validation_accepts_half_turn_about_z_symmetry():
+    target = torch.eye(4)
+    target[:3, 0] = -target[:3, 0]
+    target[:3, 1] = -target[:3, 1]
+    positions = torch.zeros(1, 2, 7)
+    strict_case = replace(
+        _case(),
+        scenario_id="press",
+        skill_id="press",
+        target_waypoints=target.reshape(1, 1, 4, 4),
+    )
+    symmetric_case = replace(
+        strict_case,
+        case_parameters={"waypoint_rotation_symmetry": "half_turn_about_z"},
+    )
+
+    strict = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        strict_case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+    symmetric = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        symmetric_case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+
+    assert strict[0].failure_code == "waypoint_miss"
+    assert symmetric[0].motion_valid is True
+    assert symmetric[0].final_rotation_err_deg == pytest.approx(0.0)
+
+
 def test_waypoint_errors_use_threshold_greedy_arrivals():
     """Continuous errors must come from the same matching as motion_valid."""
     waypoints = torch.stack([_translated_pose(0.0), _translated_pose(0.10)])

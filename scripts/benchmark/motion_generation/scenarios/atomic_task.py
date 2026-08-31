@@ -1311,6 +1311,7 @@ class _PressCases(AtomicSkillCaseProvider):
                 "hand_interp_steps": options.hand_interp_steps,
                 "approach_distance_m": options.approach_distance,
                 "press_distance_m": options.press_distance,
+                "waypoint_rotation_symmetry": "half_turn_about_z",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },

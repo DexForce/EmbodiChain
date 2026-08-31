@@ -42,7 +42,10 @@ __all__ = [
 
 
 def _pose_error_matrices(
-    waypoints: torch.Tensor, trajectory_poses: torch.Tensor
+    waypoints: torch.Tensor,
+    trajectory_poses: torch.Tensor,
+    *,
+    rotation_symmetry: str | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return waypoint-by-sample translation and geodesic rotation errors."""
     waypoints = torch.as_tensor(waypoints, dtype=torch.float64)
@@ -57,10 +60,31 @@ def _pose_error_matrices(
     relative = waypoint_rot.transpose(-1, -2) @ trajectory_rot
     trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
     rotation_error = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    if rotation_symmetry == "half_turn_about_z":
+        symmetric_rot = waypoint_rot.clone()
+        symmetric_rot[..., :2] = -symmetric_rot[..., :2]
+        symmetric_relative = symmetric_rot.transpose(-1, -2) @ trajectory_rot
+        symmetric_trace = torch.diagonal(symmetric_relative, dim1=-2, dim2=-1).sum(
+            dim=-1
+        )
+        symmetric_error = torch.arccos(
+            torch.clamp((symmetric_trace - 1.0) * 0.5, -1.0, 1.0)
+        )
+        rotation_error = torch.minimum(rotation_error, symmetric_error)
+    elif rotation_symmetry is not None:
+        raise ValueError(
+            "rotation_symmetry must be None or 'half_turn_about_z', "
+            f"got {rotation_symmetry!r}."
+        )
     return pos_error, rotation_error
 
 
-def get_pose_err(matrix_a: torch.Tensor, matrix_b: torch.Tensor) -> tuple[float, float]:
+def get_pose_err(
+    matrix_a: torch.Tensor,
+    matrix_b: torch.Tensor,
+    *,
+    rotation_symmetry: str | None = None,
+) -> tuple[float, float]:
     """Return translation (m) and geodesic rotation (rad) pose errors."""
     tensor_a = torch.as_tensor(matrix_a, dtype=torch.float64)
     tensor_b = torch.as_tensor(matrix_b, dtype=torch.float64, device=tensor_a.device)
@@ -72,6 +96,24 @@ def get_pose_err(matrix_a: torch.Tensor, matrix_b: torch.Tensor) -> tuple[float,
     relative = tensor_a[:, :3, :3].transpose(-1, -2) @ tensor_b[:, :3, :3]
     trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
     rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    if rotation_symmetry == "half_turn_about_z":
+        symmetric_b = tensor_b.clone()
+        symmetric_b[:, :3, :2] = -symmetric_b[:, :3, :2]
+        symmetric_relative = (
+            tensor_a[:, :3, :3].transpose(-1, -2) @ symmetric_b[:, :3, :3]
+        )
+        symmetric_trace = torch.diagonal(symmetric_relative, dim1=-2, dim2=-1).sum(
+            dim=-1
+        )
+        symmetric_rotation = torch.arccos(
+            torch.clamp((symmetric_trace - 1.0) * 0.5, -1.0, 1.0)
+        )
+        rotation = torch.minimum(rotation, symmetric_rotation)
+    elif rotation_symmetry is not None:
+        raise ValueError(
+            "rotation_symmetry must be None or 'half_turn_about_z', "
+            f"got {rotation_symmetry!r}."
+        )
     return float(translation.mean().item()), float(rotation.mean().item())
 
 
@@ -81,6 +123,7 @@ def match_ordered_waypoints(
     *,
     position_threshold_m: float,
     rotation_threshold_rad: float,
+    rotation_symmetry: str | None = None,
 ) -> dict[str, object]:
     """Evaluate ordered arrival and threshold-constrained waypoint errors.
 
@@ -105,7 +148,11 @@ def match_ordered_waypoints(
             "min_position_errors_at_orientation_m": [],
         }
 
-    pos_error, rot_error = _pose_error_matrices(waypoints, trajectory_poses)
+    pos_error, rot_error = _pose_error_matrices(
+        waypoints,
+        trajectory_poses,
+        rotation_symmetry=rotation_symmetry,
+    )
     arrival_indices: list[int] = []
     next_sample = 0
     for waypoint_index in range(waypoints.shape[0]):
@@ -168,6 +215,7 @@ def compute_waypoint_errors(
     *,
     position_threshold_m: float = 0.01,
     rotation_threshold_rad: float = 0.1,
+    rotation_symmetry: str | None = None,
 ) -> dict[str, float]:
     """Return ordered, same-sample waypoint errors for one trajectory."""
     if isinstance(trajectory_poses, list):
@@ -183,6 +231,7 @@ def compute_waypoint_errors(
         waypoints,
         position_threshold_m=position_threshold_m,
         rotation_threshold_rad=rotation_threshold_rad,
+        rotation_symmetry=rotation_symmetry,
     )
     pos_mm = [float(value) * 1000.0 for value in matched["position_errors_m"]]
     rot_deg = [
@@ -408,11 +457,15 @@ def compute_case_outcomes(
             )
 
         waypoints = case.target_waypoints[env_index]
+        rotation_symmetry = case.case_parameters.get("waypoint_rotation_symmetry")
+        if rotation_symmetry is not None and not isinstance(rotation_symmetry, str):
+            raise TypeError("waypoint_rotation_symmetry must be a string or None.")
         matching = match_ordered_waypoints(
             poses,
             waypoints,
             position_threshold_m=position_threshold_m,
             rotation_threshold_rad=rotation_threshold_rad,
+            rotation_symmetry=rotation_symmetry,
         )
         pos_errors_mm = [
             float(value) * 1000.0 for value in matching["position_errors_m"]
@@ -436,8 +489,16 @@ def compute_case_outcomes(
         motion_valid = finite and ordered and not joint_violation
 
         if poses.shape[0] > 0:
-            final_pos_m, final_rot_rad = get_pose_err(poses[-1], waypoints[-1])
-            all_pos_error, all_rot_error = _pose_error_matrices(waypoints, native_poses)
+            final_pos_m, final_rot_rad = get_pose_err(
+                poses[-1],
+                waypoints[-1],
+                rotation_symmetry=rotation_symmetry,
+            )
+            all_pos_error, all_rot_error = _pose_error_matrices(
+                waypoints,
+                native_poses,
+                rotation_symmetry=rotation_symmetry,
+            )
             min_pos_m = float(all_pos_error[-1].min().item())
             min_rot_rad = float(all_rot_error[-1].min().item())
             joint_length, cartesian_length, efficiency = _path_metrics(
