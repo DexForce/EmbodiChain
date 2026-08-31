@@ -147,7 +147,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
             robot_cfg = RobotCfg(
                 uid="franka",
                 urdf_cfg=URDFCfg().set_urdf(urdf),
-                articulation_props=ArticulationRootPropertiesCfg(fixed_base=True),
+                root_props=ArticulationRootPropertiesCfg(fixed_base=True),
             )
             cfg = EmbodiedEnvCfg(
                 sim_cfg=SimulationManagerCfg(

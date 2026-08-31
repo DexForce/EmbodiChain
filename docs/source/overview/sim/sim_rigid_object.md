@@ -16,7 +16,7 @@ Configured via the {class}`~cfg.RigidObjectCfg` class.
 | `attrs` | {class}`~cfg.RigidBodyAttributesCfg` | defaults in code | Physical attributes (mass, damping, friction, restitution, collision offsets, CCD, etc.). |
 | `init_pos` | `Sequence[float]` | `(0,0,0)` | Initial root position (x, y, z). |
 | `init_rot` | `Sequence[float]` | `(0,0,0)` (Euler degrees) | Initial root orientation (Euler angles in degrees) or provide `init_local_pose`. |
-| `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
+| `asset_physics_mode` | {class}`~cfg.AssetPhysicsMode` | `"preserve"` | Preserve source-authored physics or overlay explicitly configured values. |
 | `uid` | `str` | `None` | Optional unique identifier for the object; manager will assign one if omitted. |
 
 ### Rigid Body Attributes ({class}`~cfg.RigidBodyAttributesCfg`)
@@ -85,7 +85,7 @@ from embodichain.data import get_data_path
 usd_cfg = RigidObjectCfg(
     shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
     body_type="dynamic",
-    use_usd_properties=True  # Keep USD properties
+    asset_physics_mode="preserve",  # Keep USD properties
 )
 obj = sim.add_rigid_object(cfg=usd_cfg)
 
@@ -93,8 +93,8 @@ obj = sim.add_rigid_object(cfg=usd_cfg)
 usd_cfg_override = RigidObjectCfg(
     shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
     body_type="dynamic",
-    use_usd_properties=False,  # Use config instead
-    attrs=RigidBodyAttributesCfg(mass=2.0)
+    asset_physics_mode="overlay",
+    attrs=RigidBodyAttributesCfg(mass=2.0),
 )
 obj2 = sim.add_rigid_object(cfg=usd_cfg_override)
 ```

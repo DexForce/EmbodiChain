@@ -86,7 +86,7 @@ def main():
                 dt=0.1,
             )
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"Joint[1-6]": 1e4},
             damping={"Joint[1-6]": 1e3},

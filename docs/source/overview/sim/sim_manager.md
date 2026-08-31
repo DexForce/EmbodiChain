@@ -253,14 +253,14 @@ EmbodiChain supports importing USD files (`.usd`, `.usda`, `.usdc`) for both rig
 # Import rigid object with USD properties
 rigid_cfg = RigidObjectCfg(
     shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
-    use_usd_properties=True  # Use properties from USD file
+    asset_physics_mode="preserve",
 )
 obj = sim.add_rigid_object(cfg=rigid_cfg)
 
 # Import articulation with USD properties
 robot_cfg = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
-    use_usd_properties=True  # Use joint drive properties from USD
+    asset_physics_mode="preserve",
 )
 robot = sim.add_articulation(cfg=robot_cfg)
 ```

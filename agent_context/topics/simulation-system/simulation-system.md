@@ -307,13 +307,11 @@ This policy applies equally to USD rigid objects and USD/URDF articulations.
 Generic `RigidObjectCfg` and `ArticulationCfg` default to `preserve`; `RobotCfg`
 defaults to `overlay` to retain its established configured-drive behavior.
 If an articulation in preserve mode contains explicit `attrs`, `link_attrs`,
-`drive_pros`, `joint_props`, or `qpos_limits`, configuration emits a warning
+`joint_drive_props`, or `qpos_limits`, configuration emits a warning
 naming the ignored overlay fields instead of silently discarding them.
-`use_usd_properties` remains only as a deprecated compatibility alias (`True`
-maps to `preserve`, `False` to `overlay`) and must not be used by new callers.
 Import concerns that the source format does not author, such as URDF root
 fixation and body scale, remain controlled by their dedicated fields. An
-explicit `articulation_props` value also overrides the corresponding USD root
+explicit `root_props` value also overrides the corresponding USD root
 property; `None` preserves USD and selects the established URDF import default.
 
 `ArticulationRootPropertiesCfg` is the single root-property definition. Spawn
@@ -328,16 +326,14 @@ mimic constraints much softer than CPU. The preparation is idempotent per
 Spawn topology revision. The two iteration counts must be configured together
 because the Default native API exposes one atomic setter. This remains distinct
 from `DefaultRigidBodyPropertiesCfg`, whose same-named values configure
-individual rigid bodies or articulation links. `articulation_props` is the only
+individual rigid bodies or articulation links. `root_props` is the only
 root-property interface; `fix_base`, `disable_self_collision`, and the former
 flat root solver fields are removed. `JointDrivePropertiesCfg` keeps the
 original `drive_type` (`force`, Default-only `acceleration`, or `none`) and adds
 the portable actuator `target_mode` (`none`, `position`, `velocity`,
-`position_velocity`, or `effort`) and the stiffness/damping gains.
-`JointDynamicsPropertiesCfg` independently owns effort/velocity limits,
-passive friction, and armature through `ArticulationCfg.joint_props`. The same
-fields remain temporarily accepted on `drive_pros`; matching `joint_props`
-rules take precedence. Every field is optional; `None` means source-owned,
+`position_velocity`, or `effort`), stiffness/damping gains, effort/velocity
+limits, passive friction, and armature. `ArticulationCfg.joint_drive_props` is
+the single joint-property entry point. Every field is optional; `None` means source-owned,
 which permits sparse overlays without resetting unrelated source values. If
 `target_mode` is unset,
 `drive_type="force"` or `"acceleration"` defaults it to `position_velocity`,

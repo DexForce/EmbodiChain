@@ -95,7 +95,7 @@ class BaseSolverTest:
                     {"component_type": "hand", "urdf_path": gripper_urdf_path},
                 ]
             ),
-            drive_pros=JointDrivePropertiesCfg(
+            joint_drive_props=JointDrivePropertiesCfg(
                 stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e3},
                 damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e2},
                 max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e4},

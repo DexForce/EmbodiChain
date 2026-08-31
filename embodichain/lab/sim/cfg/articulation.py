@@ -108,13 +108,16 @@ class ArticulationRootPropertiesCfg:
 
 
 _REMOVED_ARTICULATION_CFG_FIELDS = {
-    "fix_base": "articulation_props.fixed_base",
+    "fix_base": "root_props.fixed_base",
     "disable_self_collision": (
-        "articulation_props.self_collision_enabled (invert the old boolean)"
+        "root_props.self_collision_enabled (invert the old boolean)"
     ),
-    "sleep_threshold": "articulation_props.sleep_threshold",
-    "min_position_iters": "articulation_props.min_position_iters",
-    "min_velocity_iters": "articulation_props.min_velocity_iters",
+    "sleep_threshold": "root_props.sleep_threshold",
+    "min_position_iters": "root_props.min_position_iters",
+    "min_velocity_iters": "root_props.min_velocity_iters",
+    "articulation_props": "root_props",
+    "drive_pros": "joint_drive_props",
+    "joint_props": "joint_drive_props",
 }
 
 
@@ -187,7 +190,7 @@ def link_attrs_from_dict(
 
 @configclass
 class JointDrivePropertiesCfg:
-    """Portable joint-drive intent and gains.
+    """Portable joint-drive and joint-dynamics properties.
 
     A scalar applies to every resolved joint.  A dictionary maps exact joint
     names, full-match regular expressions, or robot control-part names to
@@ -199,10 +202,8 @@ class JointDrivePropertiesCfg:
     Spawn resolves the two concepts before lowering them to the Default drive
     descriptor and Newton ``JointDofConfig``.
 
-    The limit, friction, and armature fields remain as compatibility aliases;
-    new configurations should place them in
-    :class:`JointDynamicsPropertiesCfg`. Explicit ``joint_props`` values take
-    precedence over these aliases during descriptor compilation.
+    Effort and velocity limits, friction, and armature share the same matching
+    rules and descriptor compilation boundary as the actuator target and gains.
 
     Newton stores all fields in the model, but individual solvers may ignore
     limits, friction, armature, or target modes; consult the `Newton solver
@@ -340,7 +341,7 @@ class JointDrivePropertiesCfg:
         wants_newton = backend == "newton"
         if backend not in {"common", "default", "newton"}:
             raise ValueError(
-                "drive_pros.backend must be 'common', 'default', or 'newton', "
+                "joint_drive_props.backend must be 'common', 'default', or 'newton', "
                 f"got {backend!r}."
             )
         if wants_newton and not isinstance(defaults, NewtonJointDrivePropertiesCfg):
@@ -379,46 +380,6 @@ class NewtonJointDrivePropertiesCfg(JointDrivePropertiesCfg):
 
 
 @configclass
-class JointDynamicsPropertiesCfg:
-    """Portable joint limits, passive friction, and armature properties.
-
-    A scalar applies to every resolved joint. A mapping accepts the same exact
-    name, regular-expression, and robot control-part rules as joint-drive
-    gains. ``None`` preserves the source/backend value.
-    """
-
-    max_effort: Dict[str, float] | float | None = None
-    """Maximum joint effort [N or N*m depending on joint type]."""
-
-    max_velocity: Dict[str, float] | float | None = None
-    """Maximum joint speed [m/s or rad/s depending on joint type]."""
-
-    friction: Dict[str, float] | float | None = None
-    """Passive friction applied along the joint degree of freedom."""
-
-    armature: Dict[str, float] | float | None = None
-    """Artificial inertia added to the joint-space diagonal."""
-
-    @classmethod
-    def from_dict(
-        cls,
-        init_dict: Mapping[str, Any],
-        *,
-        defaults: JointDynamicsPropertiesCfg | None = None,
-    ) -> JointDynamicsPropertiesCfg:
-        """Parse a sparse joint-dynamics overlay."""
-        cfg = defaults.copy() if defaults is not None else cls()
-        unknown = set(init_dict) - {item.name for item in fields(cls)}
-        if unknown:
-            raise KeyError(
-                f"Unknown JointDynamicsPropertiesCfg fields: {sorted(unknown)}"
-            )
-        for key, value in init_dict.items():
-            setattr(cfg, key, value)
-        return cfg
-
-
-@configclass
 class ArticulationCfg(ObjectBaseCfg):
     """Configuration for an articulation asset in the simulation.
 
@@ -429,23 +390,25 @@ class ArticulationCfg(ObjectBaseCfg):
     fpath: str = None
     """Path to the articulation asset file."""
 
-    drive_pros: JointDrivePropertiesCfg | None = None
-    """Optional joint-drive overrides.
-
-    ``None`` preserves source drive properties. Individual ``None`` fields in
-    a provided config also preserve the corresponding source values.
-    """
-
-    joint_props: JointDynamicsPropertiesCfg | None = None
-    """Optional joint effort/speed limits, passive friction, and armature.
-
-    These properties are independent of actuator target mode and gains.
-    Compatibility values in :attr:`drive_pros` remain supported; matching
-    values here take precedence.
-    """
-
     body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the articulation in the simulation world frame."""
+
+    compute_uv: bool = False
+    """Whether to compute the UV mapping for the articulation link.
+
+    Currently, the uv mapping is computed for each link with projection uv mapping method.
+    """
+
+    asset_physics_mode: AssetPhysicsMode = "preserve"
+    """How source-authored articulation physics is handled.
+
+    ``"preserve"`` keeps link, joint-drive, and joint-limit properties from
+    either USD or URDF. ``"overlay"`` applies only explicitly configured
+    values after the source has been resolved.
+
+    Import policy such as root fixation and body scale remains controlled by
+    :attr:`root_props` and :attr:`body_scale`.
+    """
 
     attrs: RigidBodyPhysicsCfg | RigidBodyAttributesCfg = RigidBodyPhysicsCfg()
     """Physical attributes for all links. We use default mass from the USD/URDF file if available.
@@ -460,13 +423,20 @@ class ArticulationCfg(ObjectBaseCfg):
     matched links only. A link must not match more than one group.
     """
 
-    articulation_props: ArticulationRootPropertiesCfg = ArticulationRootPropertiesCfg()
+    root_props: ArticulationRootPropertiesCfg = ArticulationRootPropertiesCfg()
     """Grouped articulation-root properties.
 
     Fixed-base and self-collision intent is portable. Root sleep and solver
     iterations are Default-only fields and are ignored by Newton. ``None``
     preserves an authored USD/backend value. For URDF imports, unset portable
     fields use the established fixed-base, self-collision-off defaults.
+    """
+
+    joint_drive_props: JointDrivePropertiesCfg | None = None
+    """Optional joint-drive and joint-dynamics overrides.
+
+    ``None`` preserves source drive properties. Individual ``None`` fields in
+    a provided config also preserve the corresponding source values.
     """
 
     init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
@@ -498,42 +468,9 @@ class ArticulationCfg(ObjectBaseCfg):
     build_pk_chain: bool = True
     """Whether to build pytorch-kinematics chain for forward kinematics and jacobian computation."""
 
-    compute_uv: bool = False
-    """Whether to compute the UV mapping for the articulation link.
-    
-    Currently, the uv mapping is computed for each link with projection uv mapping method.
-    """
-
-    asset_physics_mode: AssetPhysicsMode | None = None
-    """How source-authored articulation physics is handled.
-
-    ``"preserve"`` keeps link, joint-drive, and joint-limit properties from
-    either USD or URDF. ``"overlay"`` applies only explicitly configured
-    values after the source has been resolved. ``None`` selects the generic
-    articulation default, ``"preserve"``.
-
-    Import policy such as root fixation and body scale remains controlled by
-    :attr:`articulation_props` and :attr:`body_scale`.
-    """
-
-    use_usd_properties: bool | None = None
-    """Deprecated alias for :attr:`asset_physics_mode`.
-
-    ``True`` maps to ``"preserve"`` and ``False`` maps to ``"overlay"`` for
-    both USD and URDF sources.
-    """
-
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""
-        return _resolve_asset_physics_mode(
-            self.asset_physics_mode,
-            self.use_usd_properties,
-            default=self._default_asset_physics_mode(),
-        )
-
-    def _default_asset_physics_mode(self) -> AssetPhysicsMode:
-        """Return the policy used when no compatibility field is authored."""
-        return "preserve"
+        return _resolve_asset_physics_mode(self.asset_physics_mode)
 
     @classmethod
     def from_dict(
@@ -547,15 +484,10 @@ class ArticulationCfg(ObjectBaseCfg):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_attrs_from_dict(value)
-            elif key == "drive_pros" and isinstance(value, Mapping):
-                cfg.drive_pros = JointDrivePropertiesCfg.from_dict(
+            elif key == "joint_drive_props" and isinstance(value, Mapping):
+                cfg.joint_drive_props = JointDrivePropertiesCfg.from_dict(
                     dict(value),
-                    defaults=cfg.drive_pros,
-                )
-            elif key == "joint_props" and isinstance(value, Mapping):
-                cfg.joint_props = JointDynamicsPropertiesCfg.from_dict(
-                    value,
-                    defaults=cfg.joint_props,
+                    defaults=cfg.joint_drive_props,
                 )
             elif hasattr(cfg, key):
                 attr = getattr(cfg, key)

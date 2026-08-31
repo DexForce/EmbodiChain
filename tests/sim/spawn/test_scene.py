@@ -122,7 +122,7 @@ def test_default_root_properties_prepare_once_per_topology_revision() -> None:
     native_articulation = MagicMock()
     articulation = object.__new__(Articulation)
     articulation.cfg = SimpleNamespace(
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             min_position_iters=32,
             min_velocity_iters=8,
         )
@@ -148,7 +148,7 @@ def test_newton_skips_default_root_runtime_properties() -> None:
     native_articulation = MagicMock()
     articulation = object.__new__(Articulation)
     articulation.cfg = SimpleNamespace(
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             min_position_iters=32,
             min_velocity_iters=8,
         )

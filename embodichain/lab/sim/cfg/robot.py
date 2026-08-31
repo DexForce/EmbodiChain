@@ -35,7 +35,6 @@ from ..workspace.cfg import RobotWorkspaceCfg
 from .articulation import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
-    JointDynamicsPropertiesCfg,
     _raise_removed_articulation_cfg_fields,
     link_attrs_from_dict,
 )
@@ -63,7 +62,7 @@ class RobotCfg(ArticulationCfg):
     """Configuration for a robot asset in the simulation.
     """
 
-    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(
+    joint_drive_props: JointDrivePropertiesCfg = JointDrivePropertiesCfg(
         drive_type="force",
         stiffness=1e4,
         damping=1e3,
@@ -72,11 +71,10 @@ class RobotCfg(ArticulationCfg):
         friction=0.0,
         armature=0.0,
     )
-    """Properties to define the drive mechanism of a joint."""
+    """Joint drive, limit, friction, and armature properties."""
 
-    def _default_asset_physics_mode(self) -> AssetPhysicsMode:
-        """Keep the established Robot behavior of applying drive config."""
-        return "overlay"
+    asset_physics_mode: AssetPhysicsMode = "overlay"
+    """Apply configured robot physics on top of source-authored values."""
 
     control_parts: Dict[str, List[str]] | None = None
     """Control parts is the mapping from part name to joint names.
@@ -89,7 +87,7 @@ class RobotCfg(ArticulationCfg):
             keys corresponding to the control parts name.
         - The joint names in the control parts support regular expressions, e.g., 'joint[1-6]'.
             After initialization of robot, the names will be expanded to a list of full joint names.
-        - `Robot` is a derived class of `Articulation`, with control parts support. So the `drive_pros`
+        - `Robot` is a derived class of `Articulation`, with control parts support. So the `joint_drive_props`
             in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties, 
             which will be overridden if these joint names are already specified.
     """
@@ -124,11 +122,6 @@ class RobotCfg(ArticulationCfg):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_attrs_from_dict(value)
-            elif key == "joint_props" and isinstance(value, Mapping):
-                cfg.joint_props = JointDynamicsPropertiesCfg.from_dict(
-                    value,
-                    defaults=cfg.joint_props,
-                )
             elif hasattr(cfg, key):
                 attr = getattr(cfg, key)
                 if key == "urdf_cfg":
@@ -197,7 +190,7 @@ class RobotCfg(ArticulationCfg):
 
         Subclasses override this to read variant/version fields from
         ``init_dict``, set them on ``self``, and populate ``urdf_cfg``,
-        ``control_parts``, ``solver_cfg``, ``drive_pros`` and ``attrs``.
+        ``control_parts``, ``solver_cfg``, ``joint_drive_props`` and ``attrs``.
         The base implementation is a no-op.
 
         .. attention::

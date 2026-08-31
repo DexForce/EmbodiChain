@@ -57,27 +57,17 @@ class RigidObjectCfg(ObjectBaseCfg):
     body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
 
-    asset_physics_mode: AssetPhysicsMode | None = None
+    asset_physics_mode: AssetPhysicsMode = "preserve"
     """How a file-backed asset's physical properties are handled.
 
     ``"preserve"`` keeps the USD-authored physics. ``"overlay"`` applies
-    configured properties on top of the parsed asset. ``None`` selects the
-    rigid-object default, ``"preserve"``. Procedural shapes always use config.
-    """
-
-    use_usd_properties: bool | None = None
-    """Deprecated alias for :attr:`asset_physics_mode`.
-
-    ``True`` maps to ``"preserve"`` and ``False`` maps to ``"overlay"``.
+    configured properties on top of the parsed asset. Procedural shapes always
+    use config.
     """
 
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""
-        return _resolve_asset_physics_mode(
-            self.asset_physics_mode,
-            self.use_usd_properties,
-            default="preserve",
-        )
+        return _resolve_asset_physics_mode(self.asset_physics_mode)
 
     def to_dexsim_body_type(self) -> ActorType:
         """Convert the body type to dexsim ActorType."""

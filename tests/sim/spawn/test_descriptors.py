@@ -57,7 +57,6 @@ from embodichain.lab.sim.cfg import (
     DefaultRigidBodyPhysicsCfg,
     DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
-    JointDynamicsPropertiesCfg,
     LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
     MeshCollisionPropertiesCfg,
@@ -793,7 +792,7 @@ def test_articulation_root_properties_compile_to_common_descriptor() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             fixed_base=False,
             self_collision_enabled=True,
         ),
@@ -826,7 +825,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
         uid="robot",
         fpath="robot.usd",
         asset_physics_mode="preserve",
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             fixed_base=True,
             self_collision_enabled=False,
         ),
@@ -869,7 +868,7 @@ def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="acceleration",
         ),
     )
@@ -913,7 +912,7 @@ def test_portable_joint_target_modes_compile_for_both_backends(
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             target_mode=target_mode,  # type: ignore[arg-type]
             stiffness=12.0,
@@ -942,7 +941,7 @@ def test_force_drive_defaults_newton_target_to_position_velocity() -> None:
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+        joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
     )
     descriptor = _resolved_articulation_desc()
 
@@ -974,7 +973,7 @@ def test_non_mode_aware_newton_solver_uses_gain_fallbacks(
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             target_mode=target_mode,  # type: ignore[arg-type]
             stiffness=12.0,
             damping=4.0,
@@ -994,7 +993,7 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             target_mode="position",
             stiffness=12.0,
             damping=4.0,
@@ -1050,7 +1049,7 @@ def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
                 replace_inertial=True,
             )
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"arm_.*": 10.0},
             damping=3.0,
@@ -1113,20 +1112,15 @@ def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
     assert joint.upper_limit == 1.0
 
 
-def test_joint_dynamics_override_legacy_drive_aliases() -> None:
+def test_joint_drive_properties_compile_joint_dynamics() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness=10.0,
-            max_effort=5.0,
-            max_velocity=2.0,
-            friction=0.1,
-            armature=0.2,
-        ),
-        joint_props=JointDynamicsPropertiesCfg(
             max_effort=20.0,
+            max_velocity=2.0,
             friction=0.4,
             armature=0.7,
         ),
@@ -1165,7 +1159,7 @@ def test_robot_control_part_drive_rule_expands_before_spawn() -> None:
         uid="robot",
         fpath="robot.urdf",
         control_parts={"arm": ["arm_joint"]},
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"arm": 10.0, "arm_joint": 20.0},
         ),
@@ -1184,7 +1178,7 @@ def test_newton_joint_compatibility_subclass_uses_portable_target_mode() -> None
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=NewtonJointDrivePropertiesCfg(
+        joint_drive_props=NewtonJointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"arm_.*": 12.0},
             damping=4.0,
@@ -1281,7 +1275,7 @@ def test_articulation_preserve_mode_keeps_source_physics(source_path: str) -> No
         fpath=source_path,
         asset_physics_mode="preserve",
         attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=9.0)),
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness=10.0,
             damping=20.0,
@@ -1291,7 +1285,7 @@ def test_articulation_preserve_mode_keeps_source_physics(source_path: str) -> No
 
     with pytest.warns(
         UserWarning,
-        match="preserve.*attrs, drive_pros, qpos_limits",
+        match="preserve.*attrs, joint_drive_props, qpos_limits",
     ):
         configure_articulation_desc(descriptor, cfg)
 
@@ -1319,7 +1313,7 @@ def test_articulation_drive_overlay_preserves_unspecified_source_fields() -> Non
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(stiffness=configured_stiffness),
+        joint_drive_props=JointDrivePropertiesCfg(stiffness=configured_stiffness),
     )
 
     configure_articulation_desc(descriptor, cfg)
@@ -1394,7 +1388,9 @@ def test_articulation_overlay_does_not_invent_collision_geometry() -> None:
             ArticulationCfg(
                 uid="robot",
                 fpath="robot.urdf",
-                drive_pros=JointDrivePropertiesCfg(stiffness={"missing_.*": 10.0}),
+                joint_drive_props=JointDrivePropertiesCfg(
+                    stiffness={"missing_.*": 10.0}
+                ),
             ),
             ValueError,
         ),
@@ -1402,7 +1398,7 @@ def test_articulation_overlay_does_not_invent_collision_geometry() -> None:
             ArticulationCfg(
                 uid="robot",
                 fpath="robot.urdf",
-                drive_pros=JointDrivePropertiesCfg(
+                joint_drive_props=JointDrivePropertiesCfg(
                     stiffness={"arm_.*": "not-a-number"}
                 ),
             ),
@@ -1428,7 +1424,7 @@ def test_articulation_overlay_does_not_invent_collision_geometry() -> None:
             ArticulationCfg(
                 uid="robot",
                 fpath="robot.urdf",
-                drive_pros=NewtonJointDrivePropertiesCfg(
+                joint_drive_props=NewtonJointDrivePropertiesCfg(
                     target_mode={"arm_.*": "servo"}
                 ),
             ),
@@ -1476,7 +1472,7 @@ def test_usd_articulation_uses_the_same_exact_name_configuration() -> None:
                 attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=2.0)),
             )
         },
-        drive_pros=JointDrivePropertiesCfg(stiffness={"arm_.*": 10.0}),
+        joint_drive_props=JointDrivePropertiesCfg(stiffness={"arm_.*": 10.0}),
     )
     source = ArticulationDesc(
         name="source",
@@ -1542,7 +1538,7 @@ def test_spawn_post_config_applies_default_only_root_properties() -> None:
     entity = SimpleNamespace(_physics_binding=native_articulation)
     articulation = object.__new__(Articulation)
     articulation.cfg = ArticulationCfg(
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             sleep_threshold=0.005,
             min_position_iters=8,
             min_velocity_iters=2,
@@ -1565,7 +1561,7 @@ def test_newton_skips_default_only_articulation_root_properties() -> None:
     entity = SimpleNamespace(_physics_binding=native_articulation)
     articulation = object.__new__(Articulation)
     articulation.cfg = ArticulationCfg(
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             sleep_threshold=0.005,
             min_position_iters=8,
             min_velocity_iters=2,

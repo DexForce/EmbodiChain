@@ -94,7 +94,7 @@ def create_microwave(sim) -> Articulation:
             asset_physics_mode="overlay",
             init_pos=MICROWAVE_POSITION,
             init_rot=MICROWAVE_ORIENTATION,
-            drive_pros=JointDrivePropertiesCfg(
+            joint_drive_props=JointDrivePropertiesCfg(
                 drive_type="force",
                 stiffness=1e-3,
                 damping=1e2,

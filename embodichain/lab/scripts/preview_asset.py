@@ -123,11 +123,7 @@ def load_assets(
     init_pos = tuple(args.init_pos)
     init_rot = tuple(args.init_rot)
     spacing = float(args.asset_spacing)
-    asset_physics_mode = getattr(args, "asset_physics_mode", None)
-    if asset_physics_mode is None:
-        asset_physics_mode = (
-            "preserve" if getattr(args, "use_usd_properties", False) else "overlay"
-        )
+    asset_physics_mode = args.asset_physics_mode
 
     loaded_assets = []
     for idx, asset_path in enumerate(asset_paths):
@@ -166,7 +162,7 @@ def load_assets(
                 fpath=asset_path,
                 init_pos=asset_init_pos,
                 init_rot=init_rot,
-                articulation_props=ArticulationRootPropertiesCfg(
+                root_props=ArticulationRootPropertiesCfg(
                     fixed_base=args.fix_base,
                 ),
                 asset_physics_mode=asset_physics_mode,
@@ -422,8 +418,7 @@ def _create_parser() -> argparse.ArgumentParser:
         default="kinematic",
         help="Body type for rigid objects (default: kinematic).",
     )
-    asset_physics = parser.add_mutually_exclusive_group()
-    asset_physics.add_argument(
+    parser.add_argument(
         "--asset_physics_mode",
         "--asset-physics-mode",
         dest="asset_physics_mode",
@@ -432,17 +427,6 @@ def _create_parser() -> argparse.ArgumentParser:
         help=(
             "Preserve source-authored physics or overlay explicitly configured "
             "values (default: overlay)."
-        ),
-    )
-    asset_physics.add_argument(
-        "--use_usd_properties",
-        "--use-usd-properties",
-        dest="asset_physics_mode",
-        action="store_const",
-        const="preserve",
-        help=(
-            "Deprecated alias for --asset-physics-mode preserve; also applies "
-            "to URDF articulations."
         ),
     )
     parser.add_argument(

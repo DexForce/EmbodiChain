@@ -35,7 +35,10 @@ topics:
       - collision isolation
       - arena isolation
       - JointDrivePropertiesCfg
-      - JointDynamicsPropertiesCfg
+      - joint_drive_props
+      - root_props
+      - AssetPhysicsMode
+      - asset_physics_mode
       - RigidBodyPhysicsCfg
       - MeshCollisionPropertiesCfg
       - default_props
@@ -261,8 +264,10 @@ topics:
       - control
       - drive
       - JointDrivePropertiesCfg
-      - JointDynamicsPropertiesCfg
-      - joint_props
+      - joint_drive_props
+      - root_props
+      - AssetPhysicsMode
+      - asset_physics_mode
       - target_mode
       - drive_type
       - joint

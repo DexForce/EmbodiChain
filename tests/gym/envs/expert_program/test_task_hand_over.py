@@ -201,7 +201,7 @@ def test_hand_over_config_owns_tuned_can_and_pgi_physics() -> None:
     cfg = _configured_env_cfg()
 
     assert cfg.rigid_object[0].attrs.mass == pytest.approx(0.33)
-    drive = cfg.robot.drive_pros
+    drive = cfg.robot.joint_drive_props
     expected_values = {
         "stiffness": 1e3,
         "damping": 1e2,

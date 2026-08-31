@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import warnings
 from typing import Dict, Literal
 
 import numpy as np
@@ -31,32 +30,14 @@ AssetPhysicsMode = Literal["preserve", "overlay"]
 
 
 def _resolve_asset_physics_mode(
-    mode: AssetPhysicsMode | None,
-    legacy_use_usd_properties: bool | None,
-    *,
-    default: AssetPhysicsMode,
+    mode: AssetPhysicsMode,
 ) -> AssetPhysicsMode:
-    """Resolve the source-agnostic policy and its deprecated USD alias."""
-    if mode is not None and mode not in ("preserve", "overlay"):
+    """Validate and return a source-agnostic asset-physics policy."""
+    if mode not in ("preserve", "overlay"):
         raise ValueError(
             f"asset_physics_mode must be 'preserve' or 'overlay', got {mode!r}."
         )
-    if legacy_use_usd_properties is not None:
-        legacy_mode: AssetPhysicsMode = (
-            "preserve" if legacy_use_usd_properties else "overlay"
-        )
-        if mode is not None and mode != legacy_mode:
-            raise ValueError(
-                "asset_physics_mode conflicts with deprecated use_usd_properties."
-            )
-        warnings.warn(
-            "use_usd_properties is deprecated; set "
-            "asset_physics_mode='preserve' or 'overlay' instead.",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-        return legacy_mode
-    return default if mode is None else mode
+    return mode
 
 
 @configclass

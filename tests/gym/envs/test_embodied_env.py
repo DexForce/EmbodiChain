@@ -75,7 +75,7 @@ METADATA = {
     ],
     "robot": {
         "fpath": urdf_path,
-        "drive_pros": {"stiffness": {"joint[1-6]": 200.0}},
+        "joint_drive_props": {"stiffness": {"joint[1-6]": 200.0}},
         "solver_cfg": {
             "class_type": "PytorchSolver",
             "end_link_name": "ee_link",

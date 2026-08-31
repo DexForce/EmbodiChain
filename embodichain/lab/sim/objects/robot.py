@@ -1196,7 +1196,7 @@ class Robot(Articulation):
         import numbers
         from embodichain.utils.string import resolve_matching_names_values
 
-        drive_props = [
+        joint_property_targets = [
             ("damping", self.default_joint_damping),
             ("stiffness", self.default_joint_stiffness),
             ("max_effort", self.default_joint_max_effort),
@@ -1205,8 +1205,8 @@ class Robot(Articulation):
             ("armature", self.default_joint_armature),
         ]
 
-        for prop_name, default_array in drive_props:
-            value = getattr(self.cfg.drive_pros, prop_name, None)
+        for prop_name, default_array in joint_property_targets:
+            value = getattr(self.cfg.joint_drive_props, prop_name, None)
             if value is None:
                 continue
             if isinstance(value, numbers.Number):
@@ -1246,13 +1246,13 @@ class Robot(Articulation):
                 except Exception as e:
                     logger.log_error(f"Failed to set {prop_name}: {e}")
 
-        drive_pros = self.cfg.drive_pros
-        if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type")
-            target_mode = drive_pros.get("target_mode")
+        joint_drive_props = self.cfg.joint_drive_props
+        if isinstance(joint_drive_props, dict):
+            drive_type = joint_drive_props.get("drive_type")
+            target_mode = joint_drive_props.get("target_mode")
         else:
-            drive_type = getattr(drive_pros, "drive_type", None)
-            target_mode = getattr(drive_pros, "target_mode", None)
+            drive_type = getattr(joint_drive_props, "drive_type", None)
+            target_mode = getattr(joint_drive_props, "target_mode", None)
         if isinstance(target_mode, dict):
             logger.log_warning(
                 "Per-joint target_mode mappings require a Spawn-bound robot; "

@@ -159,7 +159,7 @@ def create_dual_tutorial_robot_cfg(
         ("damping", hand_damping),
         ("max_effort", hand_max_effort),
     ):
-        getattr(base_cfg.drive_pros, property_name)[hand_joint_pattern] = value
+        getattr(base_cfg.joint_drive_props, property_name)[hand_joint_pattern] = value
 
     arm_facing_rotation = make_yaw_transform(
         (0.0, 0.0, 0.0),

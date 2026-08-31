@@ -147,7 +147,7 @@ def create_robot(sim):
                     "LEFT_HAND_PINKY",
                 ],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {"LEFT_[A-Z|_]+[0-9]?": 1e2},
                 "damping": {"LEFT_[A-Z|_]+[0-9]?": 1e1},
                 "max_effort": {"LEFT_[A-Z|_]+[0-9]?": 1e3},
@@ -261,7 +261,7 @@ def create_container(sim: SimulationManager):
             min_position_iters=32,
             min_velocity_iters=8,
         ),
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness=1.0, damping=0.1, max_effort=100.0, drive_type="force"
         ),
     )

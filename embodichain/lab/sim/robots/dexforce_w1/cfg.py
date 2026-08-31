@@ -176,7 +176,7 @@ class DexforceW1Cfg(RobotCfg):
 
         Reads ``version``/``with_default_eef`` from ``init_dict``,
         sets them on ``self``, then populates ``urdf_cfg``, ``control_parts``,
-        ``solver_cfg``, ``drive_pros`` and ``attrs``.
+        ``solver_cfg``, ``joint_drive_props`` and ``attrs``.
         """
         init_dict = init_dict or {}
         self.version = DexforceW1Version.parse(
@@ -284,26 +284,26 @@ class DexforceW1Cfg(RobotCfg):
             "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e3},
             "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10, HEAD_JOINTS: 1e5},
         }
-        drive_pros = JointDrivePropertiesCfg(
+        joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",
             **joint_params,
         )
 
         if with_default_eef:
             eef_joint_names = DEFAULT_EEF_HAND_JOINT_NAMES
-            drive_pros.stiffness.update(
+            joint_drive_props.stiffness.update(
                 {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["stiffness"]}
             )
-            drive_pros.damping.update(
+            joint_drive_props.damping.update(
                 {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["damping"]}
             )
-            drive_pros.max_effort.update(
+            joint_drive_props.max_effort.update(
                 {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["max_effort"]}
             )
 
         return {
-            "drive_pros": drive_pros,
-            "articulation_props": ArticulationRootPropertiesCfg(
+            "joint_drive_props": joint_drive_props,
+            "root_props": ArticulationRootPropertiesCfg(
                 min_position_iters=32,
                 min_velocity_iters=8,
             ),

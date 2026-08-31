@@ -170,7 +170,7 @@ class BaseArticulationTest:
         cfg_dict = {
             "fpath": art_path,
             "asset_physics_mode": "overlay",
-            "drive_pros": {"drive_type": "force"},
+            "joint_drive_props": {"drive_type": "force"},
         }
         self.art: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg.from_dict(cfg_dict)
@@ -515,7 +515,7 @@ class BaseArticulationTest:
                 uid="passive_drawer",
                 fpath=get_data_path(ART_PATH),
                 asset_physics_mode="overlay",
-                drive_pros=JointDrivePropertiesCfg(drive_type="none"),
+                joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
             )
         )
 
@@ -547,7 +547,7 @@ class BaseArticulationTest:
                 asset_physics_mode="preserve",
                 init_pos=(1.0, 0.0, 0.0),
                 attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=123.0)),
-                drive_pros=JointDrivePropertiesCfg(
+                joint_drive_props=JointDrivePropertiesCfg(
                     drive_type="none",
                     stiffness=987.0,
                     damping=654.0,
@@ -995,7 +995,7 @@ class BaseArticulationTest:
             uid="drawer_cfg_qpos_limits",
             fpath=get_data_path(ART_PATH),
             asset_physics_mode="overlay",
-            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
             qpos_limits={".*": [-0.05, 0.05]},
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
@@ -1020,7 +1020,7 @@ class BaseArticulationTest:
             uid="drawer_expanded_limits",
             fpath=get_data_path(ART_PATH),
             asset_physics_mode="overlay",
-            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
             qpos_limits={joint_name: [expanded_lower, expanded_upper]},
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
@@ -1085,7 +1085,7 @@ class BaseArticulationLinkPhysicsTest:
             uid="drawer_global_attrs",
             fpath=self.art_path,
             asset_physics_mode="overlay",
-            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
             attrs=RigidBodyAttributesCfg(static_friction=global_friction),
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
@@ -1101,7 +1101,7 @@ class BaseArticulationLinkPhysicsTest:
             uid="drawer_link_attrs",
             fpath=self.art_path,
             asset_physics_mode="overlay",
-            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
             attrs=RigidBodyAttributesCfg(static_friction=global_friction),
             link_attrs={
                 "handle": LinkPhysicsOverrideCfg(
@@ -1127,7 +1127,7 @@ class BaseArticulationLinkPhysicsTest:
                 "uid": "drawer_link_attrs_dict",
                 "fpath": self.art_path,
                 "asset_physics_mode": "overlay",
-                "drive_pros": {"drive_type": "force"},
+                "joint_drive_props": {"drive_type": "force"},
                 "attrs": {"static_friction": 0.4},
                 "link_attrs": {
                     "handle": {
@@ -1148,7 +1148,7 @@ class BaseArticulationLinkPhysicsTest:
             uid="drawer_runtime_attrs",
             fpath=self.art_path,
             asset_physics_mode="overlay",
-            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
         self.sim.prepare()

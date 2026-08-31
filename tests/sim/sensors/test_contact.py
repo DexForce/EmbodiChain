@@ -127,7 +127,7 @@ class ContactTest:
             },
             "init_pos": position,
             "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {"finger[1-2]_joint": 1e2},
                 "damping": {"finger[1-2]_joint": 1e1},
                 "max_effort": {"finger[1-2]_joint": 1e3},

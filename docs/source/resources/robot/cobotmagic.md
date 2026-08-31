@@ -56,7 +56,7 @@ robot = sim.add_robot(cfg=CobotMagicCfg().from_dict({}))
 - **urdf_cfg**: URDF configuration, supports multi-component assembly (e.g., dual arms)
 - **control_parts**: Control groups for independent control of each arm and gripper
 - **solver_cfg**: Inverse kinematics solver configuration, customizable end-effector and base
-- **drive_pros**: Joint drive properties (stiffness, damping, max effort, etc.)
+- **joint_drive_props**: Joint drive properties (stiffness, damping, max effort, etc.)
 - **attrs**: Rigid body physical attributes (mass, friction, damping, etc.)
 
 ### 2. Custom Usage Example

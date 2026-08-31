@@ -229,7 +229,7 @@ def create_caffe(sim: SimulationManager) -> Robot:
             mass_props=MassPropertiesCfg(mass=1.0),
         ),
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness=1.0,
             damping=0.1,

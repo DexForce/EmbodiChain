@@ -1008,7 +1008,7 @@ def create_ur5_gripper_robot_cfg(
             "control_parts": {
                 "hand": [GRIPPER_HAND_JOINT_PATTERN],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {
                     GRIPPER_HAND_JOINT_PATTERN: 1e3,
                 },
@@ -1072,7 +1072,7 @@ def create_franka_panda_robot_cfg(
             ],
         },
         "control_parts": {"hand": [GRIPPER_HAND_JOINT_PATTERN]},
-        "drive_pros": {
+        "joint_drive_props": {
             "stiffness": {GRIPPER_HAND_JOINT_PATTERN: 1e3},
             "damping": {GRIPPER_HAND_JOINT_PATTERN: 1e2},
             "max_effort": {GRIPPER_HAND_JOINT_PATTERN: 1e4},
@@ -1090,9 +1090,9 @@ def create_franka_panda_robot_cfg(
     if init_qpos is None:
         cfg.init_qpos[-2:] = [0.0, 0.0]
     for drive_values in (
-        cfg.drive_pros.stiffness,
-        cfg.drive_pros.damping,
-        cfg.drive_pros.max_effort,
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
     ):
         drive_values.pop("fr3_finger_joint[1-2]", None)
     return cfg
@@ -1143,7 +1143,7 @@ def create_ur10_robotiq_robot_cfg(
             "control_parts": {
                 "hand": [ROBOTIQ_HAND_JOINT_PATTERN],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
                 "damping": {ROBOTIQ_HAND_JOINT_PATTERN: 1e2},
                 "max_effort": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},

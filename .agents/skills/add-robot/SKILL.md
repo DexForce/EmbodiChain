@@ -17,7 +17,7 @@ Every robot config subclasses `RobotCfg` and overrides two hooks:
 
 - `_build_defaults(self, init_dict=None)` — read variant fields from `init_dict`,
   set them on `self`, then populate `urdf_cfg` / `control_parts` / `solver_cfg` /
-  `drive_pros` / `attrs`.
+  `joint_drive_props` / `attrs`.
 - `build_pk_serial_chain(self, device=...)` — return `{control_part: pk.SerialChain}`,
   reading the PK URDF from a single `_pk_urdf_path` source.
 
@@ -46,7 +46,7 @@ A cfg's `_build_defaults` must populate:
 - `urdf_cfg` (URDFCfg) or `fpath`
 - `control_parts` (Dict[str, List[str]]; joint names support regex)
 - `solver_cfg` (Dict[str, SolverCfg]; keys match `control_parts`)
-- `drive_pros` (JointDrivePropertiesCfg)
+- `joint_drive_props` (JointDrivePropertiesCfg)
 - `attrs` (RigidBodyAttributesCfg)
 
 `build_pk_serial_chain` must read from `_pk_urdf_path` (a property for
@@ -69,7 +69,7 @@ must match the matching `control_parts` entry (the test stub asserts this).
        self.urdf_cfg = URDFCfg(components=[...])
        self.control_parts = {"arm": ["JOINT[1-6]"]}
        self.solver_cfg = {"arm": OPWSolverCfg(end_link_name="link6", root_link_name="base_link")}
-       self.drive_pros = JointDrivePropertiesCfg(stiffness={"JOINT[1-6]": 1e4})
+       self.joint_drive_props = JointDrivePropertiesCfg(stiffness={"JOINT[1-6]": 1e4})
    ```
 
    Variant-aware template (reads version / arm_kind):
@@ -79,7 +79,7 @@ must match the matching `control_parts` entry (the test stub asserts this).
        init_dict = init_dict or {}
        self.version = MyRobotVersion(init_dict.get("version", "v1"))
        self.arm_kind = MyRobotArmKind(init_dict.get("arm_kind", "default"))
-       ...  # then urdf_cfg / control_parts / solver_cfg / drive_pros / attrs
+       ...  # then urdf_cfg / control_parts / solver_cfg / joint_drive_props / attrs
    ```
 
 4. **Implement `build_pk_serial_chain`** reading from `_pk_urdf_path`:
@@ -137,7 +137,7 @@ must match the matching `control_parts` entry (the test stub asserts this).
 | `urdf_cfg` | URDFCfg | URDF file and components |
 | `control_parts` | Dict[str, List[str]] | Joint groups for control |
 | `solver_cfg` | Dict[str, SolverCfg] | IK solver configurations |
-| `drive_pros` | JointDrivePropertiesCfg | Joint stiffness, damping, force |
+| `joint_drive_props` | JointDrivePropertiesCfg | Joint drive, limits, friction, and armature |
 | `attrs` | RigidBodyAttributesCfg | Rigid-body physics attributes |
 | variant fields | enum / str / bool | Optional subclass fields |
 | `_pk_urdf_path` | property or method → str | URDF for the FK/IK serial chain |

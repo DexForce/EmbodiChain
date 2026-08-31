@@ -653,7 +653,7 @@ def _articulation_root_values(
     self_collision_default: bool = False,
 ) -> tuple[bool, bool]:
     """Resolve articulation-root values over source/import defaults."""
-    props = cfg.articulation_props
+    props = cfg.root_props
     fixed_base = (
         fixed_base_default if props.fixed_base is None else bool(props.fixed_base)
     )
@@ -686,10 +686,8 @@ def _configured_articulation_overlay_fields(cfg: ArticulationCfg) -> list[str]:
         configured.append("attrs")
     if cfg.link_attrs:
         configured.append("link_attrs")
-    if _configured_values(cfg.drive_pros):
-        configured.append("drive_pros")
-    if _configured_values(cfg.joint_props):
-        configured.append("joint_props")
+    if _configured_values(cfg.joint_drive_props):
+        configured.append("joint_drive_props")
     if cfg.qpos_limits is not None:
         configured.append("qpos_limits")
     return configured
@@ -845,8 +843,8 @@ def _compile_joint_properties(
     control_parts = getattr(cfg, "control_parts", None)
     target_mode_cfg: object = None
     drive_type: str | None = None
-    if cfg.drive_pros is not None:
-        target_mode_cfg, drive_type = cfg.drive_pros._resolve_modes()
+    if cfg.joint_drive_props is not None:
+        target_mode_cfg, drive_type = cfg.joint_drive_props._resolve_modes()
 
     joint_target_modes: dict[str, int] = {}
     if target_mode_cfg is not None:
@@ -919,9 +917,9 @@ def _compile_joint_properties(
         "friction": ("joint_friction", "friction"),
     }
     for property_name in ("stiffness", "damping"):
-        if cfg.drive_pros is None:
+        if cfg.joint_drive_props is None:
             continue
-        configured = getattr(cfg.drive_pros, property_name)
+        configured = getattr(cfg.joint_drive_props, property_name)
         if configured is None:
             continue
         matches = _joint_property_matches(
@@ -942,11 +940,8 @@ def _compile_joint_properties(
             setattr(default_desc, default_field, scalar)
             setattr(newton_desc, newton_field, scalar)
 
-    # Compile compatibility aliases first, then layer the canonical independent
-    # joint-dynamics config so its matching rules take precedence.
-    for source in (cfg.drive_pros, cfg.joint_props):
-        if source is None:
-            continue
+    if cfg.joint_drive_props is not None:
+        source = cfg.joint_drive_props
         for property_name in (
             "max_effort",
             "max_velocity",

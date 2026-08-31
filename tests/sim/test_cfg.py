@@ -39,7 +39,6 @@ from embodichain.lab.sim.cfg import (
     DefaultRigidBodyMaterialCfg,
     DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
-    JointDynamicsPropertiesCfg,
     MassPropertiesCfg,
     MeshCollisionPropertiesCfg,
     NewtonCollisionPipelineCfg,
@@ -81,7 +80,7 @@ def test_articulation_cfg_defaults_to_preserving_asset_physics() -> None:
     """Generic articulations do not author source drive properties."""
     articulation_cfg = ArticulationCfg()
 
-    assert articulation_cfg.drive_pros is None
+    assert articulation_cfg.joint_drive_props is None
     assert articulation_cfg.resolve_asset_physics_mode() == "preserve"
 
 
@@ -94,8 +93,11 @@ def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
         "sleep_threshold",
         "min_position_iters",
         "min_velocity_iters",
+        "articulation_props",
+        "drive_pros",
+        "joint_props",
     }.isdisjoint(field_names)
-    assert ArticulationCfg().articulation_props == ArticulationRootPropertiesCfg()
+    assert ArticulationCfg().root_props == ArticulationRootPropertiesCfg()
 
 
 @pytest.mark.parametrize(
@@ -106,6 +108,9 @@ def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
         "sleep_threshold",
         "min_position_iters",
         "min_velocity_iters",
+        "articulation_props",
+        "drive_pros",
+        "joint_props",
     ],
 )
 def test_removed_articulation_fields_fail_with_migration_target(
@@ -126,74 +131,81 @@ def test_physics_cfg_factory_rejects_noncanonical_backend_names() -> None:
 def test_articulation_cfg_parses_sparse_drive_overrides() -> None:
     """Unspecified drive fields remain source-owned."""
     articulation_cfg = ArticulationCfg.from_dict(
-        {"drive_pros": {"stiffness": 0.0, "damping": 0.0}}
+        {"joint_drive_props": {"stiffness": 0.0, "damping": 0.0}}
     )
 
-    assert articulation_cfg.drive_pros.drive_type is None
-    assert articulation_cfg.drive_pros.stiffness == 0.0
-    assert articulation_cfg.drive_pros.damping == 0.0
-    assert articulation_cfg.drive_pros.max_effort is None
+    assert articulation_cfg.joint_drive_props.drive_type is None
+    assert articulation_cfg.joint_drive_props.stiffness == 0.0
+    assert articulation_cfg.joint_drive_props.damping == 0.0
+    assert articulation_cfg.joint_drive_props.max_effort is None
 
 
 def test_robot_cfg_defaults_to_portable_position_velocity_drive() -> None:
     """The original force drive resolves to position+velocity targets."""
     robot_cfg = RobotCfg()
 
-    assert robot_cfg.drive_pros.drive_type == "force"
-    assert robot_cfg.drive_pros.target_mode is None
-    assert robot_cfg.drive_pros._resolve_modes() == ("position_velocity", "force")
+    assert robot_cfg.joint_drive_props.drive_type == "force"
+    assert robot_cfg.joint_drive_props.target_mode is None
+    assert robot_cfg.joint_drive_props._resolve_modes() == (
+        "position_velocity",
+        "force",
+    )
     assert robot_cfg.resolve_asset_physics_mode() == "overlay"
 
 
 def test_robot_cfg_partial_drive_properties_preserve_portable_drive() -> None:
     """Partial robot drive overrides retain the original force mode."""
-    robot_cfg = RobotCfg.from_dict({"drive_pros": {"stiffness": 0.0, "damping": 0.0}})
+    robot_cfg = RobotCfg.from_dict(
+        {"joint_drive_props": {"stiffness": 0.0, "damping": 0.0}}
+    )
 
-    assert robot_cfg.drive_pros.drive_type == "force"
-    assert robot_cfg.drive_pros.target_mode is None
-    assert robot_cfg.drive_pros._resolve_modes() == ("position_velocity", "force")
+    assert robot_cfg.joint_drive_props.drive_type == "force"
+    assert robot_cfg.joint_drive_props.target_mode is None
+    assert robot_cfg.joint_drive_props._resolve_modes() == (
+        "position_velocity",
+        "force",
+    )
 
 
 def test_drive_type_override_replaces_robot_force_default() -> None:
-    override = {"drive_pros": {"drive_type": "none"}}
+    override = {"joint_drive_props": {"drive_type": "none"}}
     robot_cfg = RobotCfg.from_dict(override)
     merged_cfg = merge_robot_cfg(RobotCfg(), override)
 
     for cfg in (robot_cfg, merged_cfg):
-        assert cfg.drive_pros.target_mode is None
-        assert cfg.drive_pros.drive_type == "none"
-        assert cfg.drive_pros._resolve_modes() == ("none", "none")
+        assert cfg.joint_drive_props.target_mode is None
+        assert cfg.joint_drive_props.drive_type == "none"
+        assert cfg.joint_drive_props._resolve_modes() == ("none", "none")
 
 
 def test_common_target_mode_does_not_require_newton_subclass() -> None:
     articulation_cfg = ArticulationCfg.from_dict(
         {
-            "drive_pros": {
+            "joint_drive_props": {
                 "target_mode": "effort",
                 "drive_type": "force",
             }
         }
     )
 
-    assert type(articulation_cfg.drive_pros) is JointDrivePropertiesCfg
-    assert articulation_cfg.drive_pros.target_mode == "effort"
-    assert articulation_cfg.drive_pros.drive_type == "force"
+    assert type(articulation_cfg.joint_drive_props) is JointDrivePropertiesCfg
+    assert articulation_cfg.joint_drive_props.target_mode == "effort"
+    assert articulation_cfg.joint_drive_props.drive_type == "force"
 
 
-def test_asset_physics_policy_supports_legacy_alias_and_conflict_checks() -> None:
+def test_asset_physics_policy_uses_explicit_modes() -> None:
     rigid_cfg = RigidObjectCfg()
-    articulation_cfg = ArticulationCfg(use_usd_properties=False)
+    articulation_cfg = ArticulationCfg()
+    robot_cfg = RobotCfg()
+    overlay_cfg = ArticulationCfg(asset_physics_mode="overlay")
 
+    assert rigid_cfg.asset_physics_mode == "preserve"
     assert rigid_cfg.resolve_asset_physics_mode() == "preserve"
-    with pytest.warns(DeprecationWarning, match="use_usd_properties"):
-        assert articulation_cfg.resolve_asset_physics_mode() == "overlay"
-
-    conflicting_cfg = ArticulationCfg(
-        asset_physics_mode="preserve",
-        use_usd_properties=False,
-    )
-    with pytest.raises(ValueError, match="conflicts"):
-        conflicting_cfg.resolve_asset_physics_mode()
+    assert articulation_cfg.asset_physics_mode == "preserve"
+    assert articulation_cfg.resolve_asset_physics_mode() == "preserve"
+    assert robot_cfg.asset_physics_mode == "overlay"
+    assert robot_cfg.resolve_asset_physics_mode() == "overlay"
+    assert overlay_cfg.resolve_asset_physics_mode() == "overlay"
 
     invalid_cfg = RigidObjectCfg(asset_physics_mode="replace")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="must be 'preserve' or 'overlay'"):
@@ -203,7 +215,7 @@ def test_asset_physics_policy_supports_legacy_alias_and_conflict_checks() -> Non
 def test_articulation_cfg_parses_polymorphic_newton_joint_drive() -> None:
     articulation_cfg = ArticulationCfg.from_dict(
         {
-            "drive_pros": {
+            "joint_drive_props": {
                 "backend": "newton",
                 "stiffness": {"arm_.*": 25.0},
                 "target_mode": "position",
@@ -211,10 +223,10 @@ def test_articulation_cfg_parses_polymorphic_newton_joint_drive() -> None:
         }
     )
 
-    assert articulation_cfg.drive_pros.drive_type is None
-    assert isinstance(articulation_cfg.drive_pros, NewtonJointDrivePropertiesCfg)
-    assert articulation_cfg.drive_pros.stiffness == {"arm_.*": 25.0}
-    assert articulation_cfg.drive_pros.target_mode == "position"
+    assert articulation_cfg.joint_drive_props.drive_type is None
+    assert isinstance(articulation_cfg.joint_drive_props, NewtonJointDrivePropertiesCfg)
+    assert articulation_cfg.joint_drive_props.stiffness == {"arm_.*": 25.0}
+    assert articulation_cfg.joint_drive_props.target_mode == "position"
 
 
 def test_joint_drive_from_dict_preserves_newton_subclass_defaults() -> None:
@@ -236,7 +248,7 @@ def test_joint_drive_from_dict_preserves_newton_subclass_defaults() -> None:
 
 def test_robot_cfg_merge_preserves_typed_backend_property_configs() -> None:
     base = RobotCfg(
-        drive_pros=NewtonJointDrivePropertiesCfg(
+        joint_drive_props=NewtonJointDrivePropertiesCfg(
             stiffness=10.0,
             target_mode="position",
         ),
@@ -249,15 +261,15 @@ def test_robot_cfg_merge_preserves_typed_backend_property_configs() -> None:
     merged = merge_robot_cfg(
         base,
         {
-            "drive_pros": {"backend": "newton", "damping": 4.0},
+            "joint_drive_props": {"backend": "newton", "damping": 4.0},
             "attrs": {"material_props": {"backend": "newton", "kd": 50.0}},
         },
     )
 
-    assert isinstance(merged.drive_pros, NewtonJointDrivePropertiesCfg)
-    assert merged.drive_pros.stiffness == 10.0
-    assert merged.drive_pros.damping == 4.0
-    assert merged.drive_pros.target_mode == "position"
+    assert isinstance(merged.joint_drive_props, NewtonJointDrivePropertiesCfg)
+    assert merged.joint_drive_props.stiffness == 10.0
+    assert merged.joint_drive_props.damping == 4.0
+    assert merged.joint_drive_props.target_mode == "position"
     assert isinstance(merged.attrs, RigidBodyPhysicsCfg)
     assert isinstance(merged.attrs.material_props, NewtonRigidBodyMaterialCfg)
     assert merged.attrs.material_props.ke == 1000.0
@@ -347,24 +359,23 @@ def test_rigid_physics_explicit_backend_blocks_can_coexist_and_round_trip() -> N
     assert restored.newton_props.mesh_collision_props.force_sdf is True
 
 
-def test_articulation_cfg_parses_independent_joint_dynamics() -> None:
+def test_articulation_cfg_parses_joint_drive_and_dynamics() -> None:
     cfg = ArticulationCfg.from_dict(
         {
-            "drive_pros": {"stiffness": 12.0},
-            "joint_props": {
+            "joint_drive_props": {
+                "stiffness": 12.0,
                 "max_effort": 20.0,
                 "friction": {"arm_.*": 0.2},
             },
         }
     )
 
-    assert cfg.drive_pros.stiffness == pytest.approx(12.0)
-    assert isinstance(cfg.joint_props, JointDynamicsPropertiesCfg)
-    assert cfg.joint_props.max_effort == pytest.approx(20.0)
-    assert cfg.joint_props.friction == {"arm_.*": 0.2}
+    assert cfg.joint_drive_props.stiffness == pytest.approx(12.0)
+    assert cfg.joint_drive_props.max_effort == pytest.approx(20.0)
+    assert cfg.joint_drive_props.friction == {"arm_.*": 0.2}
 
 
-def test_robot_cfg_merge_composes_backend_blocks_and_joint_dynamics() -> None:
+def test_robot_cfg_merge_composes_backend_blocks_and_joint_drive_properties() -> None:
     base = RobotCfg(
         attrs=RigidBodyPhysicsCfg(
             default_props=DefaultRigidBodyPhysicsCfg(
@@ -374,7 +385,7 @@ def test_robot_cfg_merge_composes_backend_blocks_and_joint_dynamics() -> None:
                 mesh_collision_props=NewtonMeshCollisionPropertiesCfg(sdf_padding=0.01)
             ),
         ),
-        joint_props=JointDynamicsPropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             max_effort={"arm": 10.0},
             friction=0.1,
         ),
@@ -391,7 +402,7 @@ def test_robot_cfg_merge_composes_backend_blocks_and_joint_dynamics() -> None:
                     "mesh_collision_props": {"force_sdf": True},
                 },
             },
-            "joint_props": {
+            "joint_drive_props": {
                 "max_effort": {"wrist": 20.0},
                 "armature": 0.3,
             },
@@ -404,9 +415,9 @@ def test_robot_cfg_merge_composes_backend_blocks_and_joint_dynamics() -> None:
         0.01
     )
     assert merged.attrs.newton_props.mesh_collision_props.force_sdf is True
-    assert merged.joint_props.max_effort == {"arm": 10.0, "wrist": 20.0}
-    assert merged.joint_props.friction == pytest.approx(0.1)
-    assert merged.joint_props.armature == pytest.approx(0.3)
+    assert merged.joint_drive_props.max_effort == {"arm": 10.0, "wrist": 20.0}
+    assert merged.joint_drive_props.friction == pytest.approx(0.1)
+    assert merged.joint_drive_props.armature == pytest.approx(0.3)
 
 
 def test_portable_collision_envelope_round_trips_as_common_config() -> None:
@@ -585,8 +596,8 @@ def test_robot_cfg_round_trip_preserves_grouped_backend_types() -> None:
             collision_props=NewtonCollisionPropertiesCfg(margin=0.01),
             material_props=NewtonRigidBodyMaterialCfg(ke=1000.0),
         ),
-        drive_pros=NewtonJointDrivePropertiesCfg(target_mode="position"),
-        articulation_props=ArticulationRootPropertiesCfg(fixed_base=False),
+        joint_drive_props=NewtonJointDrivePropertiesCfg(target_mode="position"),
+        root_props=ArticulationRootPropertiesCfg(fixed_base=False),
     )
 
     restored = RobotCfg.from_dict(cfg.to_dict())
@@ -594,8 +605,8 @@ def test_robot_cfg_round_trip_preserves_grouped_backend_types() -> None:
     assert isinstance(restored.attrs, RigidBodyPhysicsCfg)
     assert isinstance(restored.attrs.collision_props, NewtonCollisionPropertiesCfg)
     assert isinstance(restored.attrs.material_props, NewtonRigidBodyMaterialCfg)
-    assert isinstance(restored.drive_pros, NewtonJointDrivePropertiesCfg)
-    assert type(restored.articulation_props) is ArticulationRootPropertiesCfg
+    assert isinstance(restored.joint_drive_props, NewtonJointDrivePropertiesCfg)
+    assert type(restored.root_props) is ArticulationRootPropertiesCfg
 
 
 def test_rigid_physics_from_dict_rejects_unknown_fields() -> None:

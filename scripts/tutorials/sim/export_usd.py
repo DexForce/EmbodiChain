@@ -214,7 +214,7 @@ def create_caffe(sim: SimulationManager) -> Robot:
         attrs=RigidBodyAttributesCfg(
             mass=1.0,
         ),
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness=1.0, damping=0.1, max_effort=100.0, drive_type="force"
         ),
     )

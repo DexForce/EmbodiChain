@@ -72,7 +72,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
                     {"component_type": "hand", "urdf_path": gripper_urdf_path},
                 ]
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {"FINGER[1-2]": 1e2},
                 "damping": {"FINGER[1-2]": 1e1},
                 "max_effort": {"FINGER[1-2]": 1e3},

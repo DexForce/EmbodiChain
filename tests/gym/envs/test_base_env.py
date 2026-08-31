@@ -77,7 +77,7 @@ class RandomReachEnv(BaseEnv):
                 fpath=file_path,
                 init_pos=(0, 0, 1),
                 init_qpos=self.robot_init_qpos,
-                drive_pros=JointDrivePropertiesCfg(drive_type=self.drive_type),
+                joint_drive_props=JointDrivePropertiesCfg(drive_type=self.drive_type),
             )
         )
 

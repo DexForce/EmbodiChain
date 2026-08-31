@@ -39,7 +39,7 @@ EmbodiedEnvCfg
 │   └── visualization: VisualizationCfg
 ├── robot: RobotCfg
 │   ├── urdf_cfg: URDFCfg
-│   ├── drive_pros: JointDrivePropertiesCfg
+│   ├── joint_drive_props: JointDrivePropertiesCfg
 │   └── solver_cfg: Dict[str, SolverCfg]
 ├── sensor: List[SensorCfg]
 ├── events: EventCfg

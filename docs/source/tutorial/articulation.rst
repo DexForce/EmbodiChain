@@ -44,7 +44,7 @@ Loading the URDF
 
 Resolve the bundled drawer asset, then pass its path to
 :class:`cfg.ArticulationCfg`. The example intentionally does not set
-``drive_pros``. Therefore the configuration uses the Articulation default,
+``joint_drive_props``. Therefore the configuration uses the Articulation default,
 ``drive_type="none"``. ``SimulationManager.add_articulation`` loads one drawer
 into each configured environment and returns a batched
 :class:`objects.Articulation` handle.
@@ -62,7 +62,7 @@ effective physics limit used by both the backend and the force-control loop.
 Verifying the constructed drive type
 ------------------------------------
 
-Checking ``articulation.cfg.drive_pros.drive_type`` confirms the requested
+Checking ``articulation.cfg.joint_drive_props.drive_type`` confirms the requested
 configuration, but it does not prove what the physics backend received. The
 example therefore calls :meth:`objects.Articulation.get_joint_drive_type`,
 which reads the drive type from every constructed DexSim entity. It raises an
@@ -158,7 +158,7 @@ articulation needs an actuator, opt in with
 
    articulation_cfg = ArticulationCfg(
        fpath="path/to/articulation.urdf",
-       drive_pros=JointDrivePropertiesCfg(
+       joint_drive_props=JointDrivePropertiesCfg(
            drive_type="force",
            stiffness=1.0e4,
            damping=1.0e3,
@@ -170,8 +170,8 @@ For a controllable robot, prefer :class:`cfg.RobotCfg` and
 
 .. attention::
 
-   For USD assets, ``use_usd_properties=True`` preserves the drive types stored
-   in the USD file instead of applying the Articulation configuration default.
+   For file-backed assets, ``asset_physics_mode="preserve"`` keeps source
+   physics, while ``"overlay"`` applies explicitly configured values.
 
 Next Steps
 ~~~~~~~~~~

@@ -97,7 +97,7 @@ def create_microwave(sim: SimulationManager) -> Articulation:
             fpath=get_data_path(MICROWAVE_ASSET),
             init_pos=MICROWAVE_POSITION,
             init_rot=MICROWAVE_ORIENTATION,
-            drive_pros=JointDrivePropertiesCfg(drive_type="none"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
             attrs=RigidBodyAttributesCfg(
                 static_friction=1.0,
                 dynamic_friction=1.0,

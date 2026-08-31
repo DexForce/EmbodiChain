@@ -14,12 +14,12 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `fpath` | `str` | `None` | Path to the asset file (URDF/USD). |
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
-| `articulation_props` | `ArticulationRootPropertiesCfg` | all fields `None` | Fixed-base/self-collision are portable; root sleep and paired solver iterations are Default-only and ignored by Newton. `None` preserves source/backend values. |
+| `root_props` | `ArticulationRootPropertiesCfg` | all fields `None` | Fixed-base/self-collision are portable; root sleep and paired solver iterations are Default-only and ignored by Newton. `None` preserves source/backend values. |
 | `asset_physics_mode` | `"preserve" \| "overlay"` | `"preserve"` | Preserve source link/joint physics, or apply explicitly configured overlays after source resolution. |
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
 | `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override limits by flattened source-resolved DOF order or joint-name/regex rules before backend build. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
-| `drive_pros` | `JointDrivePropertiesCfg` | `None` | Optional sparse joint-drive overlay. |
+| `joint_drive_props` | `JointDrivePropertiesCfg` | `None` | Optional sparse joint drive, limit, friction, and armature overlay. |
 | `attrs` | `RigidBodyPhysicsCfg` | empty groups | Grouped rigid-body physics applied to all links. |
 | `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
@@ -57,7 +57,7 @@ for the same partial-override behavior.
 
 ### Drive Configuration
 
-The `drive_pros` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.
+The `joint_drive_props` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -129,7 +129,7 @@ sim = SimulationManager(sim_config=sim_cfg)
 art_cfg = ArticulationCfg(
     fpath="assets/robots/franka/franka.urdf",
     init_pos=(0, 0, 0.5),
-    articulation_props=ArticulationRootPropertiesCfg(fixed_base=True),
+    root_props=ArticulationRootPropertiesCfg(fixed_base=True),
 )
 
 # 3. Spawn Articulation
@@ -152,7 +152,7 @@ from embodichain.data import get_data_path
 usd_art_cfg = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
     init_pos=(0, 0, 0.5),
-    use_usd_properties=True  # Keep USD drive/physics properties
+    asset_physics_mode="preserve",
 )
 usd_robot = sim.add_articulation(cfg=usd_art_cfg)
 
@@ -160,8 +160,8 @@ usd_robot = sim.add_articulation(cfg=usd_art_cfg)
 usd_art_cfg_override = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
     init_pos=(0, 0, 0.5),
-    use_usd_properties=False,  # Use config instead
-    drive_pros=JointDrivePropertiesCfg(stiffness=5000, damping=500)
+    asset_physics_mode="overlay",
+    joint_drive_props=JointDrivePropertiesCfg(stiffness=5000, damping=500),
 )
 robot = sim.add_articulation(cfg=usd_art_cfg_override)
 ```

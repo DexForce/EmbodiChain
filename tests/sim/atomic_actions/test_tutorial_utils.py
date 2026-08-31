@@ -299,8 +299,8 @@ def test_franka_tutorial_config_uses_ur5_gripper_component() -> None:
     assert franka_cfg.init_qpos[-2:] == [0.0, 0.0]
     assert franka_cfg.init_rot == FRANKA_TUTORIAL_BASE_ROTATION
     for property_name in ("stiffness", "damping", "max_effort"):
-        ur5_values = getattr(ur5_cfg.drive_pros, property_name)
-        franka_values = getattr(franka_cfg.drive_pros, property_name)
+        ur5_values = getattr(ur5_cfg.joint_drive_props, property_name)
+        franka_values = getattr(franka_cfg.joint_drive_props, property_name)
         assert franka_values["gripper_finger1_joint_1"] == (
             ur5_values["gripper_finger1_joint_1"]
         )

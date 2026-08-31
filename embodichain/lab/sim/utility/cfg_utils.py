@@ -19,7 +19,6 @@ from typing import TypeVar
 from embodichain.lab.sim.cfg import (
     _raise_removed_articulation_cfg_fields,
     JointDrivePropertiesCfg,
-    JointDynamicsPropertiesCfg,
     RigidBodyAttributesCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
@@ -174,51 +173,31 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                             f"new solver entry, or ensure the part name "
                             f"matches an existing solver."
                         )
-        elif key == "drive_pros":
+        elif key == "joint_drive_props":
             # merge joint drive properties
-            user_drive_pros_dict = override_cfg_dict.get("drive_pros")
-            if isinstance(user_drive_pros_dict, dict):
-                if user_drive_pros_dict.get("backend") == "newton":
-                    base_cfg.drive_pros = JointDrivePropertiesCfg.from_dict(
-                        user_drive_pros_dict,
-                        defaults=base_cfg.drive_pros,
+            user_joint_drive_props_dict = override_cfg_dict.get("joint_drive_props")
+            if isinstance(user_joint_drive_props_dict, dict):
+                if user_joint_drive_props_dict.get("backend") == "newton":
+                    base_cfg.joint_drive_props = JointDrivePropertiesCfg.from_dict(
+                        user_joint_drive_props_dict,
+                        defaults=base_cfg.joint_drive_props,
                     )
                     continue
-                for prop, val in user_drive_pros_dict.items():
+                for prop, val in user_joint_drive_props_dict.items():
                     if prop == "backend":
                         continue
                     # Get the current value in cfg (which has defaults)
-                    default_val = getattr(base_cfg.drive_pros, prop, None)
+                    default_val = getattr(base_cfg.joint_drive_props, prop, None)
 
                     if isinstance(val, dict) and isinstance(default_val, dict):
                         # Merge dictionaries
                         default_val.update(val)
                     else:
                         # Overwrite if not both dicts
-                        setattr(base_cfg.drive_pros, prop, val)
+                        setattr(base_cfg.joint_drive_props, prop, val)
             else:
                 logger.log_warning(
-                    "drive_pros should be a dictionary. Skipping drive_pros merge."
-                )
-        elif key == "joint_props":
-            user_joint_props = override_cfg_dict.get("joint_props")
-            if isinstance(user_joint_props, dict):
-                parsed = JointDynamicsPropertiesCfg.from_dict(user_joint_props)
-                if base_cfg.joint_props is None:
-                    base_cfg.joint_props = parsed
-                    continue
-                for prop in parsed.__dataclass_fields__:
-                    value = getattr(parsed, prop)
-                    if value is None:
-                        continue
-                    default_value = getattr(base_cfg.joint_props, prop)
-                    if isinstance(value, dict) and isinstance(default_value, dict):
-                        default_value.update(value)
-                    else:
-                        setattr(base_cfg.joint_props, prop, value)
-            else:
-                logger.log_warning(
-                    "joint_props should be a dictionary. Skipping joint_props merge."
+                    "joint_drive_props should be a dictionary. Skipping joint_drive_props merge."
                 )
         elif key == "attrs":
             # merge physics attributes

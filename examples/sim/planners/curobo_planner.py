@@ -328,7 +328,7 @@ def _build_scene(
                             "LEFT_HAND_PINKY",
                         ],
                     },
-                    "drive_pros": {
+                    "joint_drive_props": {
                         "stiffness": {"LEFT_[A-Z|_]+[0-9]?": 1e2},
                         "damping": {"LEFT_[A-Z|_]+[0-9]?": 1e1},
                         "max_effort": {"LEFT_[A-Z|_]+[0-9]?": 1e3},

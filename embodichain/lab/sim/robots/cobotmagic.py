@@ -125,7 +125,7 @@ class CobotMagicCfg(RobotCfg):
                 ),
             ),
         }
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={
                 "left_joint[1-6]": 7e4,
@@ -146,7 +146,7 @@ class CobotMagicCfg(RobotCfg):
                 "right_joint[7-8]": 3e3,
             },
         )
-        self.articulation_props = ArticulationRootPropertiesCfg(
+        self.root_props = ArticulationRootPropertiesCfg(
             min_position_iters=8,
             min_velocity_iters=2,
         )

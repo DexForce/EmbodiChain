@@ -24,6 +24,12 @@ Public backend selectors use only ``default`` and ``newton``. Nested physical
 property groups may additionally use ``common`` for backend-neutral intent;
 DexSim names belong to the runtime and Spawn SDK adapter boundary.
 
+.. rubric:: Type aliases
+
+.. autosummary::
+
+   AssetPhysicsMode
+
 .. rubric:: Classes
 
 .. autosummary::

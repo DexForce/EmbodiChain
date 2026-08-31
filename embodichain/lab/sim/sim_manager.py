@@ -1789,15 +1789,12 @@ class SimulationManager:
                 cfg.fpath = file_path
                 cfg.init_local_pose = descriptor.pose.copy()
                 cfg.asset_physics_mode = "preserve"
-                cfg.use_usd_properties = None
                 if robot_cfg is None:
-                    cfg.articulation_props = ArticulationRootPropertiesCfg()
+                    cfg.root_props = ArticulationRootPropertiesCfg()
                 else:
-                    cfg.articulation_props = cfg.articulation_props.copy()
-                cfg.articulation_props.fixed_base = bool(descriptor.fixed_base)
-                cfg.articulation_props.self_collision_enabled = (
-                    descriptor.enable_self_collision
-                )
+                    cfg.root_props = cfg.root_props.copy()
+                cfg.root_props.fixed_base = bool(descriptor.fixed_base)
+                cfg.root_props.self_collision_enabled = descriptor.enable_self_collision
                 cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
                 cfg.build_pk_chain = False
                 facade = facade_type(

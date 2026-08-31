@@ -103,7 +103,7 @@ def main():
                 dt=0.1,
             ),
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness={"LEFT_J[1-7]": 1e4, "RIGHT_J[1-7]": 1e4},
             damping={"LEFT_J[1-7]": 1e3, "RIGHT_J[1-7]": 1e3},
         ),

@@ -95,7 +95,7 @@ class BaseUsdTest:
                 build_pk_chain=False,
                 asset_physics_mode="overlay",
                 init_pos=[0.0, 0.0, 1.2],
-                drive_pros=default_drive,
+                joint_drive_props=default_drive,
             )
         )
         self.sim.prepare()

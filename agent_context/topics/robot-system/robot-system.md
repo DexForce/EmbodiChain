@@ -9,7 +9,7 @@
 | Replace-only backend preset | `embodichain/lab/sim/cfg/robot.py` → `RobotPresetCfg` |
 | Environment robot declaration | `embodichain/lab/gym/envs/embodied_env.py` → `EmbodiedEnvCfg.robot` |
 | ArticulationCfg parent | `embodichain/lab/sim/cfg/articulation.py` → `ArticulationCfg` |
-| Joint drive/dynamics configs | `embodichain/lab/sim/cfg/articulation.py` → `JointDrivePropertiesCfg`, `JointDynamicsPropertiesCfg` |
+| Joint drive/dynamics config | `embodichain/lab/sim/cfg/articulation.py` → `JointDrivePropertiesCfg` |
 | Robot registry (all robots) | `embodichain/lab/sim/robots/__init__.py` |
 | Robot executable smoke entry points | Each specified robot module's ``__main__`` block |
 | DexforceW1 config package | `embodichain/lab/sim/robots/dexforce_w1/` |
@@ -36,10 +36,10 @@ Inheritance chain:
 
 ```
 ObjectBaseCfg          uid, init_pos, init_rot, init_local_pose
-  └─ ArticulationCfg   fpath, drive_pros, joint_props, attrs, link_attrs, articulation_props,
+  └─ ArticulationCfg   fpath, joint_drive_props, attrs, link_attrs, root_props,
   │                     init_qpos, qpos_limits, body_scale, build_pk_chain,
   │                     asset_physics_mode
-      └─ RobotCfg      control_parts, urdf_cfg, solver_cfg, drive_pros (position+velocity force default)
+      └─ RobotCfg      control_parts, urdf_cfg, solver_cfg, joint_drive_props (position+velocity force default)
           ├─ DexforceW1Cfg   version, hand_versions, with_default_eef
           └─ CobotMagicCfg   (dual-arm defaults)
 ```
@@ -51,11 +51,10 @@ Key fields on `RobotCfg`:
 | `control_parts` | `Dict[str, List[str]] \| None` | Part name → joint names (supports regex like `JOINT[1-6]`) |
 | `urdf_cfg` | `URDFCfg \| None` | Multi-component URDF assembly (e.g. left_arm + right_arm) |
 | `solver_cfg` | `SolverCfg \| Dict[str, SolverCfg] \| None` | IK solver config; dict keys must match `control_parts` keys |
-| `drive_pros` | `JointDrivePropertiesCfg` | Robot supplies the established `drive_type="force"`; with no explicit target this resolves to `target_mode="position_velocity"`. Individual fields set to `None` in a custom config remain source-owned |
-| `joint_props` | `JointDynamicsPropertiesCfg \| None` | Independent effort/velocity limits, passive friction, and armature. Matching rules override compatibility values still supplied through `drive_pros` |
-| `asset_physics_mode` | `"preserve" \| "overlay" \| None` | Robot defaults to `overlay`; generic articulations default to `preserve`. The deprecated `use_usd_properties` alias is compatibility-only |
+| `joint_drive_props` | `JointDrivePropertiesCfg` | Single joint-property entry point for target mode, gains, effort/velocity limits, passive friction, and armature. Robot supplies the established `drive_type="force"`; unspecified fields remain source-owned |
+| `asset_physics_mode` | `AssetPhysicsMode` | Robot defaults to `overlay`; generic articulations default to `preserve` |
 | `attrs` | `RigidBodyPhysicsCfg \| RigidBodyAttributesCfg` | Grouped rigid-body physics; the deprecated flat config is a Default-backend-only compatibility input |
-| `articulation_props` | `ArticulationRootPropertiesCfg` | Sole root-property interface. Fixed-base/self-collision are portable; root sleep and paired solver-iteration fields are Default-only |
+| `root_props` | `ArticulationRootPropertiesCfg` | Sole root-property interface. Fixed-base/self-collision are portable; root sleep and paired solver-iteration fields are Default-only |
 | variant fields | `enum \| str \| bool` | Optional subclass fields (e.g. `version`, `with_default_eef`) |
 | `_pk_urdf_path` | `property \| method → str` | URDF for the FK/IK serial chain (one source, so it can't drift from sim) |
 
@@ -74,7 +73,7 @@ def from_dict(cls, init_dict):
 
 - **`_build_defaults(self, init_dict=None)`** — read variant fields from `init_dict`,
   set them on `self`, then populate `urdf_cfg`, `control_parts`, `solver_cfg`,
-  `drive_pros`, optional `joint_props`, and `attrs`. (Base
+  `joint_drive_props` and `attrs`. (Base
   `RobotCfg._build_defaults` is a no-op.)
 - **`build_pk_serial_chain(self, device=...)`** — return `{control_part: pk.SerialChain}`,
   reading the PK URDF from a single `_pk_urdf_path` source (a property for
@@ -97,7 +96,7 @@ Default and to Newton's `margin=rest_offset`,
 `gap=contact_offset-rest_offset`. Use `DefaultCollisionPropertiesCfg` only as a
 Default-native extension point; those two inherited fields are portable.
 Default-only articulation sleep and solver iterations belong directly in
-`ArticulationRootPropertiesCfg` under `articulation_props`; `sleep_threshold`,
+`ArticulationRootPropertiesCfg` under `root_props`; `sleep_threshold`,
 `min_position_iters`, and `min_velocity_iters` no longer exist as flat
 `ArticulationCfg` fields. EmbodiChain applies these values to the Default-native
 articulation root before the first reset, while Newton ignores them. Use
@@ -181,7 +180,7 @@ constraints.
 
 ## Drive Properties
 
-`JointDrivePropertiesCfg` controls actuator target intent and gains:
+`JointDrivePropertiesCfg` is the single joint-property config:
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
@@ -189,21 +188,10 @@ constraints.
 | `target_mode` | `"none" \| "position" \| "velocity" \| "position_velocity" \| "effort"` or per-joint mapping | Derived from `drive_type` | Portable actuator intent; integer values 0–4 are accepted. `force` defaults to `position_velocity` |
 | `stiffness` | `float \| Dict[str, float]` | `1e4` | Per-joint via dict; keys support regex |
 | `damping` | `float \| Dict[str, float]` | `1e3` | Same |
-
-`JointDynamicsPropertiesCfg`, assigned through `joint_props`, owns the
-independent physical properties:
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
 | `max_effort` | `float \| Dict[str, float]` | `None` | Max torque/force |
 | `max_velocity` | `float \| Dict[str, float]` | `None` | rad/s or m/s |
 | `friction` | `float \| Dict[str, float]` | `None` | Passive joint friction |
 | `armature` | `float \| Dict[str, float]` | `None` | Added joint-space inertia |
-
-The four fields remain on `JointDrivePropertiesCfg` as compatibility aliases,
-including the established generic `RobotCfg` defaults. New definitions should
-use `joint_props`; matching canonical rules are compiled after and override
-the aliases.
 
 When using a dict, keys are joint names or regex patterns matching joint names. Control-part names can also be used as keys (resolved via `ArticulationCfg` logic).
 
@@ -212,7 +200,7 @@ Target mode is backend-neutral and belongs directly on
 mode and effective gains; Newton authors `JointTargetMode` values for
 `"none"`, `"position"`, `"velocity"`, `"position_velocity"`, and
 `"effort"` (integer values 0–4). `NewtonJointDrivePropertiesCfg` remains only
-to round-trip older `drive_pros.backend: newton` dictionaries; do not use it in
+to round-trip older `joint_drive_props.backend: newton` dictionaries; do not use it in
 new specified robots.
 
 `drive_type` retains its original meaning. With no explicit `target_mode`,
@@ -246,7 +234,7 @@ Full guide: `docs/source/tutorial/add_robot.rst` · Quick reference: `docs/sourc
 
 Minimal checklist:
 1. Create a `@configclass` inheriting `RobotCfg`.
-2. Override `_build_defaults(self, init_dict=None)` — read variant fields from `init_dict`, then populate `urdf_cfg`, `control_parts`, `solver_cfg`, `drive_pros` and `attrs`.
+2. Override `_build_defaults(self, init_dict=None)` — read variant fields from `init_dict`, then populate `urdf_cfg`, `control_parts`, `solver_cfg`, `joint_drive_props` and `attrs`.
 3. Keep `from_dict` as the 3-line template (`cls()` → `_build_defaults` → `merge_robot_cfg`) unless version-derived state requires an explicitly documented post-merge step.
 4. Define `control_parts` mapping part names to joint name lists.
 5. Configure `solver_cfg` (one `SolverCfg` per control part).
@@ -280,7 +268,7 @@ on either backend rather than maintaining backend-specific demo configs.
 
 - **`solver_cfg` keys don't match `control_parts` keys** — solver init silently uses wrong part or errors at IK time.
 - **Regex joint names not expanded** — if robot is not properly initialized, regex patterns like `JOINT[1-6]` remain unexpanded. Always construct via `from_dict()` or let `Robot.__init__` handle expansion.
-- **No drive config on generic `ArticulationCfg`** — its `drive_pros=None` keeps source drives. Use `RobotCfg` for the standard position+velocity force-drive defaults, or provide an explicit sparse drive overlay.
+- **No drive config on generic `ArticulationCfg`** — its `joint_drive_props=None` keeps source drives. Use `RobotCfg` for the standard position+velocity force-drive defaults, or provide an explicit sparse drive overlay.
 - **Missing `urdf_cfg` for multi-component robots** — single-file robots use `fpath`; multi-component robots (e.g. dual-arm) require `urdf_cfg` with component transforms.
 - **Mimic joints not excluded** — `get_joint_ids(remove_mimic=False)` includes mimic joints by default. Pass `remove_mimic=True` for active-only joints.
 - **`init_qpos` shape mismatch** — must match active DOFs. A wrong-length array causes initialization errors.

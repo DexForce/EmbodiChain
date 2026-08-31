@@ -140,7 +140,7 @@ class FrankaPandaCfg(RobotCfg):
             ),
         }
 
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={
                 "fr3_joint[1-7]": 1e4,

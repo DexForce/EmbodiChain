@@ -67,15 +67,15 @@ def _mock_w1_asset_paths(monkeypatch, tmp_path):
 
 def test_dexforce_w1_roundtrip():
     cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
-    assert type(cfg.articulation_props) is ArticulationRootPropertiesCfg
-    assert cfg.articulation_props.min_position_iters == 32
-    assert cfg.articulation_props.min_velocity_iters == 8
+    assert type(cfg.root_props) is ArticulationRootPropertiesCfg
+    assert cfg.root_props.min_position_iters == 32
+    assert cfg.root_props.min_velocity_iters == 8
     d = cfg.to_dict()
     assert d["uid"] == "dexforce_w1"
     cfg2 = DexforceW1Cfg.from_dict(d)
     assert cfg2.uid == "dexforce_w1"
     assert cfg2.version == DexforceW1Version.V021
-    assert type(cfg2.articulation_props) is ArticulationRootPropertiesCfg
+    assert type(cfg2.root_props) is ArticulationRootPropertiesCfg
 
 
 def test_dexforce_w1_solver_cfg_is_srs_and_set_once():
@@ -416,7 +416,7 @@ class _RoundTripCfg(RobotCfg):
         self.uid = "roundtrip"
         self.variant = _RoundTripVariant(init_dict.get("variant", "a"))
         self.control_parts = {"arm": ["J1", "J2"]}
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
             stiffness={"J[1-2]": 1e4}, damping={"J[1-2]": 1e3}
         )
 
@@ -433,7 +433,7 @@ def test_robotcfg_to_dict_roundtrip():
     assert cfg2.uid == "roundtrip"
     assert cfg2.variant == _RoundTripVariant.B
     assert cfg2.control_parts == {"arm": ["J1", "J2"]}
-    assert cfg2.drive_pros.stiffness == {"J[1-2]": 1e4}
+    assert cfg2.joint_drive_props.stiffness == {"J[1-2]": 1e4}
 
 
 from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
@@ -457,9 +457,9 @@ def test_cobotmagic_from_dict_and_roundtrip():
     assert type(cfg.attrs.collision_props) is CollisionPropertiesCfg
     assert cfg.attrs.collision_props.contact_offset == pytest.approx(0.001)
     assert cfg.attrs.collision_props.rest_offset == pytest.approx(0.0)
-    assert type(cfg.articulation_props) is ArticulationRootPropertiesCfg
-    assert cfg.articulation_props.min_position_iters == 8
-    assert cfg.articulation_props.min_velocity_iters == 2
+    assert type(cfg.root_props) is ArticulationRootPropertiesCfg
+    assert cfg.root_props.min_position_iters == 8
+    assert cfg.root_props.min_velocity_iters == 2
 
     d = cfg.to_dict()
     assert d["uid"] == "CobotMagic"
@@ -484,10 +484,10 @@ def test_specified_robots_use_portable_joint_drive_semantics(
 ) -> None:
     cfg = cfg_type.from_dict(init_dict)
 
-    assert type(cfg.drive_pros) is JointDrivePropertiesCfg
-    assert cfg.drive_pros.drive_type == "force"
-    assert cfg.drive_pros.target_mode is None
-    assert cfg.drive_pros._resolve_modes() == ("position_velocity", "force")
+    assert type(cfg.joint_drive_props) is JointDrivePropertiesCfg
+    assert cfg.joint_drive_props.drive_type == "force"
+    assert cfg.joint_drive_props.target_mode is None
+    assert cfg.joint_drive_props._resolve_modes() == ("position_velocity", "force")
 
 
 def test_robotcfg_save_to_file(tmp_path):
@@ -598,7 +598,7 @@ def test_ur_robot_max_effort_scales_with_size():
     ur3 = URRobotCfg.from_dict({"robot_type": "ur3"})
     ur5 = URRobotCfg.from_dict({"robot_type": "ur5"})
     ur10 = URRobotCfg.from_dict({"robot_type": "ur10"})
-    eff = lambda c: c.drive_pros.max_effort["arm"]  # noqa: E731
+    eff = lambda c: c.joint_drive_props.max_effort["arm"]  # noqa: E731
     assert eff(ur3) < eff(ur5) < eff(ur10)
 
 

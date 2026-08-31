@@ -379,7 +379,7 @@ def _set_dexsim_articulation_cfg(
     physical_attr = cfg.attrs.attr()
     art.set_physical_attr(physical_attr)
     _apply_link_physics_overrides(art, cfg, link_names)
-    root_props = cfg.articulation_props
+    root_props = cfg.root_props
     fixed_base = True if root_props.fixed_base is None else bool(root_props.fixed_base)
     self_collision_enabled = (
         False
@@ -684,7 +684,6 @@ def spawn_rigid_object_entities(
             prototype = _import_usd_rigid_prototype(source_env, fpath, prototype_name)
         else:
             cfg.asset_physics_mode = "overlay"
-            cfg.use_usd_properties = None
             prototype = _load_rigid_mesh_prototype(
                 source_env,
                 cfg,

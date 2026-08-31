@@ -56,7 +56,7 @@ class ReplayTestEnv(EmbodiedEnv):
             uid="UR10",
             fpath=get_data_path("UniversalRobots/UR10/UR10.urdf"),
             init_pos=(0.0, 0.0, 1.0),
-            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
         )
         cfg.rigid_object = [
             RigidObjectCfg(
@@ -469,7 +469,7 @@ class ReplayDeltaEnv(EmbodiedEnv):
             uid="UR10",
             fpath=get_data_path("UniversalRobots/UR10/UR10.urdf"),
             init_pos=(0.0, 0.0, 1.0),
-            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
         )
         cfg.rigid_object = [
             RigidObjectCfg(

@@ -792,7 +792,7 @@ class Articulation(BatchEntity):
         if (
             spawn_result is None
             and not preserve_asset_physics
-            and self.cfg.drive_pros is not None
+            and self.cfg.joint_drive_props is not None
         ):
             self._set_default_joint_drive()
 
@@ -1017,7 +1017,7 @@ class Articulation(BatchEntity):
         if self._prepared_default_root_topology_revision == topology_revision:
             return
 
-        root_props = getattr(self.cfg, "articulation_props", None)
+        root_props = getattr(self.cfg, "root_props", None)
         default_root_values_configured = root_props is not None and (
             root_props.sleep_threshold is not None
             or root_props.min_position_iters is not None
@@ -2919,18 +2919,18 @@ class Articulation(BatchEntity):
 
     def _set_default_joint_drive(
         self,
-        drive_pros: JointDrivePropertiesCfg | dict | None = None,
+        joint_drive_props: JointDrivePropertiesCfg | dict | None = None,
     ) -> None:
         """Set default joint drive parameters based on the configuration."""
         import numbers
         from embodichain.utils.string import resolve_matching_names_values
 
-        if drive_pros is None:
-            drive_pros = self.cfg.drive_pros
-        if drive_pros is None:
+        if joint_drive_props is None:
+            joint_drive_props = self.cfg.joint_drive_props
+        if joint_drive_props is None:
             return
 
-        drive_props = [
+        joint_property_targets = [
             ("damping", self.default_joint_damping),
             ("stiffness", self.default_joint_stiffness),
             ("max_effort", self.default_joint_max_effort),
@@ -2939,11 +2939,11 @@ class Articulation(BatchEntity):
             ("armature", self.default_joint_armature),
         ]
 
-        for prop_name, default_array in drive_props:
+        for prop_name, default_array in joint_property_targets:
             value = (
-                drive_pros.get(prop_name)
-                if isinstance(drive_pros, dict)
-                else getattr(drive_pros, prop_name, None)
+                joint_drive_props.get(prop_name)
+                if isinstance(joint_drive_props, dict)
+                else getattr(joint_drive_props, prop_name, None)
             )
             if value is None:
                 continue
@@ -2960,12 +2960,12 @@ class Articulation(BatchEntity):
                 except Exception as e:
                     logger.log_error(f"Failed to set {prop_name}: {e}")
 
-        if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type")
-            target_mode = drive_pros.get("target_mode")
+        if isinstance(joint_drive_props, dict):
+            drive_type = joint_drive_props.get("drive_type")
+            target_mode = joint_drive_props.get("target_mode")
         else:
-            drive_type = getattr(drive_pros, "drive_type", None)
-            target_mode = getattr(drive_pros, "target_mode", None)
+            drive_type = getattr(joint_drive_props, "drive_type", None)
+            target_mode = getattr(joint_drive_props, "target_mode", None)
         if isinstance(target_mode, dict):
             logger.log_warning(
                 "Per-joint target_mode mappings require a Spawn-bound "

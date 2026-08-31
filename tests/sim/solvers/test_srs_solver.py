@@ -426,7 +426,7 @@ class BaseRobotSolverTest:
                 "torso": ["ANKLE", "KNEE", "BUTTOCK", "WAIST"],
                 "head": [f"NECK{i + 1}" for i in range(2)],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {
                     "LEFT_J[1-7]": 1e4,
                     "RIGHT_J[1-7]": 1e4,

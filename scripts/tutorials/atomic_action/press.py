@@ -102,7 +102,7 @@ def create_microwave(sim) -> Articulation:
             init_pos=MICROWAVE_POSITION,
             init_qpos=(0, 0, 0, 0),
             init_rot=MICROWAVE_ORIENTATION,
-            drive_pros=JointDrivePropertiesCfg(
+            joint_drive_props=JointDrivePropertiesCfg(
                 drive_type="force",
                 stiffness=1e-3,
                 damping=1e2,

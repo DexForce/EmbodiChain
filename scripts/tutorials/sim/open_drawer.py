@@ -106,7 +106,7 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
         }
     )
     if sim.is_newton_backend:
-        robot_cfg.drive_pros.damping["fr3_finger_joint[1-2]"] = 10.0
+        robot_cfg.joint_drive_props.damping["fr3_finger_joint[1-2]"] = 10.0
     robot = sim.add_robot(cfg=robot_cfg)
     if robot is None:
         raise RuntimeError("Failed to add the Franka Panda robot.")
@@ -121,7 +121,7 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
             init_pos=(0.72, 0.0, 0.42),
             init_rot=(0.0, 0.0, 180.0),
             fix_base=True,
-            drive_pros=JointDrivePropertiesCfg(drive_type="none"),
+            joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
             attrs=RigidBodyAttributesCfg(
                 static_friction=1.0,
                 dynamic_friction=1.0,

@@ -138,7 +138,7 @@ class URRobotCfg(RobotCfg):
             ),
         }
 
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"arm": 1e4},
             damping={"arm": 1e3},
