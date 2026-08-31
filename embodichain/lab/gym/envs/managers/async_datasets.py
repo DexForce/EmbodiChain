@@ -76,7 +76,7 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
     5. Returns immediately - the sim is free to reset and keep stepping.
 
     A single daemon worker thread drains the queue and runs the standard
-    :meth:`LeRobotRecorder._save_single_episode` on each cloned payload.
+    :meth:`LeRobotRecorder._persist_episode_payload` on each cloned payload.
 
     Correctness
     -----------
@@ -146,8 +146,13 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                 # Sentinel: finalize() is draining. Exit the worker.
                 break
             env_id, obs_clone, action_clone, annotations, episode_metadata = item
+            fragment_id = None
+            is_fragment = bool(
+                episode_metadata is not None and episode_metadata.get("fragment", False)
+            )
             try:
-                saved = self._save_single_episode(
+                fragment_id = self._fragment_id_from_metadata(episode_metadata)
+                saved = self._persist_episode_payload(
                     env_id,
                     obs_clone,
                     action_clone,
@@ -157,14 +162,19 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                 if not saved:
                     self._record_background_error(env_id, "episode save returned False")
             except BaseException as error:  # noqa: BLE001 - worker must not die
-                self._record_background_error(env_id, str(error))
+                label = (
+                    f"fragment {fragment_id!r}"
+                    if fragment_id is not None
+                    else ("fragment payload" if is_fragment else "episode")
+                )
+                self._record_background_error(env_id, f"{label}: {error}")
                 logger.log_warning(
                     f"[AsyncLeRobotRecorder] Background worker failed on "
-                    f"env {env_id}: {error}"
+                    f"env {env_id} {label}: {error}"
                 )
 
     def _record_background_error(self, env_id: int, message: str) -> None:
-        """Remember one failed committed episode for the final durability check."""
+        """Remember one failed committed payload for the durability barrier."""
         with self._background_error_lock:
             self._background_errors.append((env_id, message))
 

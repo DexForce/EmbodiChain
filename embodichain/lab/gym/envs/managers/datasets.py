@@ -176,6 +176,9 @@ class LeRobotRecorder(Functor):
         self.curr_episode: int = 0
         self._metadata_lock = threading.Lock()
         self._subtask_to_index: dict[str, int] = {}
+        self._fragment_commit_lock = threading.RLock()
+        self._committed_fragment_ids: dict[str, int] = {}
+        self._partial_fragment_commits: dict[str, tuple[int, str]] = {}
         self._finalize_lock = threading.Lock()
         self._finalized = False
         self._finalize_result: Optional[str] = None
@@ -262,7 +265,7 @@ class LeRobotRecorder(Functor):
         """Save completed episodes for specified environments.
 
         This reads each env's slice from the rollout buffer and delegates to
-        :meth:`_save_single_episode`. The slice read happens in the caller
+        :meth:`_persist_episode_payload`. The slice read happens in the caller
         thread so that subclasses (e.g. :class:`AsyncLeRobotRecorder`) can
         clone the slice and defer the actual conversion/disk-write to a
         background worker without racing the buffer reuse on reset.
@@ -303,12 +306,33 @@ class LeRobotRecorder(Functor):
                     f"Committed fragment collection for env {env_id} had no "
                     "eligible segment spans."
                 )
+            resolved_fragment_ids: list[str] = []
             for payload in payloads:
-                saved = self._save_single_episode(*payload)
-                if not saved:
-                    raise RuntimeError(
-                        f"Committed episode for env {env_id} was not persisted."
+                fragment_id = self._fragment_id_from_metadata(payload[-1])
+                try:
+                    saved = self._persist_episode_payload(*payload)
+                except Exception as error:
+                    if fragment_id is None:
+                        raise
+                    prior = (
+                        f" Earlier fragments {resolved_fragment_ids!r} remain "
+                        "committed and will be deduplicated on retry."
+                        if resolved_fragment_ids
+                        else ""
                     )
+                    raise RuntimeError(
+                        f"Failed to persist fragment {fragment_id!r} for env "
+                        f"{env_id}.{prior}"
+                    ) from error
+                if not saved:
+                    label = (
+                        f"fragment {fragment_id!r}"
+                        if fragment_id is not None
+                        else f"episode for env {env_id}"
+                    )
+                    raise RuntimeError(f"Committed {label} was not persisted.")
+                if fragment_id is not None:
+                    resolved_fragment_ids.append(fragment_id)
 
     def _episode_payloads(
         self,
@@ -389,6 +413,10 @@ class LeRobotRecorder(Functor):
             segment_provenance = segment.get("metadata", {})
             if not isinstance(segment_provenance, Mapping):
                 segment_provenance = {}
+            source_program_id = segment_provenance.get("task_program_id")
+            if source_program_id is None:
+                # Schema-v2 Expert Program sidecars remain readable.
+                source_program_id = segment_provenance.get("expert_program_id")
             segment_attempt_id = int(
                 segment.get("attempt_id", episode_metadata.get("attempt_id", 0))
             )
@@ -418,7 +446,7 @@ class LeRobotRecorder(Functor):
                         f"{int(segment.get('segment_id', 0))}:"
                         f"{segment_attempt_id}:{continuity_id}"
                     ),
-                    "source_program_id": segment_provenance.get("expert_program_id"),
+                    "source_program_id": source_program_id,
                     "program_segment_id": segment_provenance.get("program_segment_id"),
                     "source_episode_index": fragment_metadata.get("episode_index"),
                     "source_env_id": env_id,
@@ -446,6 +474,91 @@ class LeRobotRecorder(Functor):
                 fragment_annotations,
                 fragment_metadata,
             )
+
+    @staticmethod
+    def _fragment_id_from_metadata(
+        episode_metadata: Mapping[str, Any] | None,
+    ) -> str | None:
+        """Return the stable idempotency key for one fragment payload."""
+        if episode_metadata is None or not episode_metadata.get("fragment", False):
+            return None
+        fragment_id = episode_metadata.get("fragment_id")
+        if (
+            not isinstance(fragment_id, str)
+            or not fragment_id
+            or fragment_id != fragment_id.strip()
+        ):
+            raise ValueError(
+                "Fragment metadata must contain a non-empty fragment_id without "
+                "outer whitespace."
+            )
+        return fragment_id
+
+    def _ensure_fragment_commit_tracking(self) -> None:
+        """Initialize fragment commit state for lightweight test instances."""
+        if not hasattr(self, "_fragment_commit_lock"):
+            self._fragment_commit_lock = threading.RLock()
+        if not hasattr(self, "_committed_fragment_ids"):
+            self._committed_fragment_ids = {}
+        if not hasattr(self, "_partial_fragment_commits"):
+            self._partial_fragment_commits = {}
+
+    def _persist_episode_payload(
+        self,
+        env_id: int,
+        obs_list: Any,
+        action_list: Any,
+        annotations: Mapping[str, Any] | None = None,
+        episode_metadata: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Persist one payload, deduplicating completed fragment commits.
+
+        Fragment ids are scoped to the current recorder/dataset. A successful
+        fragment is an independent commit and is skipped if the same source
+        collection is retried. A post-commit failure is sticky: the LeRobot
+        episode already exists, so retrying raises instead of creating a
+        duplicate with incomplete sidecar durability.
+        """
+        fragment_id = self._fragment_id_from_metadata(episode_metadata)
+        if fragment_id is None:
+            return self._save_single_episode(
+                env_id,
+                obs_list,
+                action_list,
+                annotations=annotations,
+                episode_metadata=episode_metadata,
+            )
+
+        self._ensure_fragment_commit_tracking()
+        with self._fragment_commit_lock:
+            partial_commit = self._partial_fragment_commits.get(fragment_id)
+            if partial_commit is not None:
+                episode_index, message = partial_commit
+                raise RuntimeError(
+                    f"Fragment {fragment_id!r} already reached LeRobot episode "
+                    f"{episode_index}, but post-commit finalization failed: "
+                    f"{message}. Refusing to write a duplicate."
+                )
+            committed_episode = self._committed_fragment_ids.get(fragment_id)
+            if committed_episode is not None:
+                logger.log_info(
+                    f"[LeRobotRecorder] Skipping duplicate fragment "
+                    f"{fragment_id!r}; already saved as episode "
+                    f"{committed_episode}."
+                )
+                return True
+
+            episode_index = int(getattr(self, "curr_episode", 0))
+            saved = self._save_single_episode(
+                env_id,
+                obs_list,
+                action_list,
+                annotations=annotations,
+                episode_metadata=episode_metadata,
+            )
+            if saved:
+                self._committed_fragment_ids[fragment_id] = episode_index
+            return saved
 
     def _episode_length(self, env_id: int) -> int:
         """Return the valid buffered length for one environment."""
@@ -522,6 +635,7 @@ class LeRobotRecorder(Functor):
         depth_prefix = f"{LeRobotKey.OBS_PREFIX.value}depth."
         episode_index = self.curr_episode
         dataset_committed = False
+        fragment_id = self._fragment_id_from_metadata(episode_metadata)
         episode_attempt_id = int((episode_metadata or {}).get("attempt_id", 0))
         episode_continuity_id = int((episode_metadata or {}).get("continuity_id", 0))
         try:
@@ -642,6 +756,13 @@ class LeRobotRecorder(Functor):
 
             return True
         except Exception as error:
+            if dataset_committed and fragment_id is not None:
+                self._ensure_fragment_commit_tracking()
+                with self._fragment_commit_lock:
+                    self._partial_fragment_commits[fragment_id] = (
+                        episode_index,
+                        f"{type(error).__name__}: {error}",
+                    )
             if not dataset_committed:
                 self.total_time = previous_total_time
             if self._depth_manager is not None and not dataset_committed:

@@ -254,6 +254,36 @@ class TestAsyncLeRobotRecorder:
             for frame in mock_ds.add_frame_calls
         )
 
+    def test_duplicate_fragment_enqueue_is_idempotent(self):
+        """The worker writes one stable fragment id at most once."""
+        env = _MockEnv(num_envs=1, steps=2)
+        env.episode_metadata = {
+            "output_mode": "segment_fragments",
+            "save_failed_fragments": False,
+            "episode_index": 4,
+            "attempt_id": 0,
+            "program_run_id": "4:0",
+            "segments": [
+                {
+                    "segment_id": 0,
+                    "start_step": 0,
+                    "end_step": 2,
+                    "success": True,
+                    "instruction": "pick task",
+                    "metadata": {},
+                }
+            ],
+        }
+        recorder = _make_recorder(env, _MockDataset())
+        recorder._save_single_episode = Mock(return_value=True)
+
+        recorder(env, env_ids=torch.tensor([0]))
+        recorder(env, env_ids=torch.tensor([0]))
+        env.current_rollout_step = 0
+        recorder.finalize()
+
+        recorder._save_single_episode.assert_called_once()
+
     def test_worker_operates_on_clone_not_live_buffer(self):
         """Mutating the rollout buffer after __call__ must not corrupt the save.
 

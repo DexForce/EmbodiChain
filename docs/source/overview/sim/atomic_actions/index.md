@@ -6,8 +6,6 @@
 :hidden:
 
 builtin_actions
-robot_skill_profiles
-expert_programs
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions
@@ -32,13 +30,13 @@ payloads, and transports without adding fixed resource categories to the core.
 
 ```text
 +--------------------------------+    +--------------------------------+
-| Action Agent / semantic graph  |    | User-authored application      |
-| skill call + object references |    | typed goal + binding + policy  |
+| Task Program                 |    | User-authored application      |
+| semantic calls + task sequence |    | typed goal + binding + policy  |
 +---------------+----------------+    +---------------+----------------+
                 |                                     |
                 v                                     |
- SemanticSkillCompiler / SkillRuntime:                 |
- schema validation, SceneRegistry grounding, binding  |
+ Task Program adapter: validation, grounding,      |
+ and lowering to a typed ActionInvocation             |
                 |                                     |
                 +------------------+------------------+
                                    |
@@ -80,8 +78,8 @@ The boundary is deliberate:
 
 | Concern | Owner | Contract |
 |---|---|---|
-| Task intent and sequencing | Action Agent, task graph, or user-authored application | Selects skills, goals, and execution order |
-| Invocation construction | Agent adapter or user-authored code/config loader | Produces the same typed `ActionInvocation`; the engine has no agent-only interface |
+| Task intent and sequencing | Task Program or user-authored application | Selects skills, goals, and execution order |
+| Invocation construction | Task Program adapter or direct Python caller | Produces the same typed `ActionInvocation`; the engine has no agent-only interface |
 | Perception and grounding | `SceneRegistry` on the canonical path; adapter or user application on the advanced path | Normalizes aliases to canonical typed references and publishes snapshots, or supplies already-grounded values directly |
 | Deterministic motion planning | Atomic action module | Produces an `ActionPlan` from an invocation and context |
 | Motion-generation resources | `AtomicActionEngine` | Owns one robot, motion generator, planner backend, device, trajectory builder, and control-part command profiles |
@@ -103,13 +101,8 @@ state.
 
 ### Caller entry points
 
-The engine supports two first-class caller paths. An Action Agent or
-configuration-driven application can emit a semantic call for
-{class}`~embodichain.lab.sim.skills.SemanticSkillCompiler` and
-{class}`~embodichain.lab.sim.skills.SkillRuntime` to validate, ground, and
-convert into an `ActionInvocation`. A user can instead author the typed
-invocation directly in Python or load it from an application-owned
-configuration layer:
+Atomic Actions is the direct Python action-generation entry point. A caller
+constructs a typed invocation itself:
 
 ```python
 binding = engine.bind_control_parts(
@@ -130,9 +123,8 @@ static_program = engine.compile((manual_invocation,), latest_context)
 live_session = engine.start((manual_invocation,), latest_context)
 ```
 
-A manual caller may bypass the semantic-schema adapter only when its target and
-robot-resource endpoints are already grounded. Scene-relative goals still need
-a current `PlanningContext`, and object names or participant selections still
+A direct caller must already own grounded targets and robot-resource endpoints.
+Scene-relative goals still need a current `PlanningContext`, and object names or participant selections still
 need to be resolved by the user application (or by reusing the same grounding
 adapter as the Agent path).
 
@@ -220,11 +212,11 @@ added.
 ### Skill contracts and endpoint binding
 
 The canonical semantic path uses a
-{doc}`RobotSkillProfile <robot_skill_profiles>` to match skill-local slots and
-endpoint capabilities against a generic robot resource graph. It validates
-participant pairing, typed commands, physical claims, complete defaults, and
-policy presets before producing the engine-owned `ActionBinding` used by an
-invocation.
+{doc}`RobotSkillProfile <../../task_program/robot_profiles>` to match
+skill-local slots and endpoint capabilities against a generic robot resource
+graph. It validates participant pairing, typed commands, physical claims,
+complete defaults, and policy presets before producing the engine-owned
+`ActionBinding` used by an invocation.
 
 Each `AtomicAction` declares one explicit `SkillBindingContract`. A **slot** is
 an action-local participant such as `primary`, `source`, or `destination`. Each
@@ -245,7 +237,8 @@ controller.
 The canonical path resolves the skill through a bound profile:
 
 ```python
-resolved = engine.skill_profile.resolve(
+bound_profile = robot_profile.bind(engine)
+resolved = bound_profile.resolve(
     "pick_up",
     selections={"primary": "left_participant"},
 )
@@ -293,13 +286,13 @@ by the motion endpoint's control-part target.
 ### Control-part semantic commands
 
 On the canonical semantic path, declare embodiment commands on the
-{doc}`RobotSkillProfile <robot_skill_profiles>` and pass the profile through the
-engine's `skill_profile` argument. For a direct-core integration, register the
-same command profiles explicitly when constructing the engine. Profile command
-IDs are generic and selected by endpoint adapters; the built-in control-part
-adapter defaults them to concrete `robot.control_parts` names. Direct-core
-engine keys are always concrete control-part names. The command names remain
-semantic:
+{doc}`RobotSkillProfile <../../task_program/robot_profiles>`, lower
+its control-part command profiles into the engine constructor, and then bind
+the profile in the semantic layer. For a direct-core integration, register the
+same command profiles explicitly when constructing the engine. Profile command IDs are generic and
+selected by endpoint adapters; the built-in control-part adapter defaults them
+to concrete `robot.control_parts` names. Direct-core engine keys are always
+concrete control-part names. The command names remain semantic:
 
 ```python
 engine = AtomicActionEngine(
@@ -379,16 +372,16 @@ calls the skill-specific `_plan()` hook. Individual skills therefore do not
 own dynamic-obstacle parameters or mutate caller-owned motion policies.
 
 For a canonical integration, construct the snapshot provider and collision
-world from one {doc}`SceneRegistry <../scene_registry>`. Direct use of
+world from one {doc}`SceneRegistry <../../task_program/scene_registry>`.
+Direct use of
 `RigidObjectSceneProvider` remains an advanced-core path.
 
 Registration means that an implementation is installed, not that every robot
 can execute it. `engine.actions` contains direct-core implementations;
 `engine.skills` contains installed, agent-visible implementations with an
-explicit generic binding contract; and `engine.skill_profile.skills` applies
-embodiment capability filtering. Required task-state preconditions remain
-runtime conditions and are validated while an invocation is resolved and
-planned.
+explicit generic binding contract; and `bound_profile.skills` applies embodiment
+capability filtering. Required task-state preconditions remain runtime conditions
+and are validated while an invocation is resolved and planned.
 
 Use invocation `skill_options` whenever behavior varies per call. Two variants
 with the same stable skill ID therefore share one built-in implementation:
@@ -562,6 +555,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionStatus,
     RecoveryPolicy,
     SceneEntityPose,
+    TrackingPolicy,
 )
 
 moving_goal = ActionInvocation(
@@ -580,10 +574,13 @@ moving_goal = ActionInvocation(
     recovery_policy=RecoveryPolicy(
         max_replans=3,
         max_action_retries=2,
-        tracking_error_threshold=0.05,
         goal_translation_threshold=0.02,
         goal_rotation_threshold=0.087,
         action_timeout=30.0,
+    ),
+    tracking_policy=TrackingPolicy.joint_position(
+        in_flight_max_abs_error=0.05,
+        terminal_max_abs_error=0.05,
     ),
 )
 
@@ -710,7 +707,7 @@ perception/hardware providers use
 `validate_collision_integration(..., scene_provider=...)` directly. Plain
 `make_scene_provider()` and `RigidObjectSceneProvider` are perception or
 advanced direct-core paths without eager planner agreement. See
-{doc}`../scene_registry` for setup.
+{doc}`../../task_program/scene_registry` for setup.
 
 `MotionPolicy.dynamic_collision_mode` controls this live-scene path. `AUTO`
 (the default) consumes collision entities when the selected motion strategy and
@@ -769,10 +766,10 @@ should pass their fresh context explicitly.
 ```{attention}
 Automatic dynamic-goal invalidation is dependency-driven. A goal must contain a
 `SceneEntityPose`, or an object-centric primitive must explicitly declare the
-`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp` and the
-implicit-initial-pose path of coordinated pickup declare that dependency
-automatically. The deprecated live-entity fallback does not trigger
-scene-motion replanning.
+`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp`,
+`HandOver`, and the implicit-initial-pose path of coordinated pickup declare
+that dependency automatically. The deprecated live-entity fallback does not
+trigger scene-motion replanning.
 
 An `ActionPlan.scene_dependency_end_segment` may bound monitoring to the
 reversible portion of a staged action for every dependency.
@@ -791,7 +788,7 @@ changing their geometry requires rebuilding the planner world.
 ## Planning success versus physical success
 
 `ActionPlan.plan_success` only means a valid command plan was produced for an
-environment row. Pick, place, handover, and coordinated skills also return an
+environment row. Pick, place, and coordinated skills also return an
 uncommitted `StateDelta` describing the attachment state expected after
 execution.
 
@@ -799,13 +796,16 @@ execution.
 Multi-arm grasps use multiple entries that share the same `ObjectSemantics`;
 there is no parallel coordinated-attachment representation to synchronize.
 Consumers query per-environment active and exclusive-hold masks from that one
-map. A single-arm transport, release, or handover row fails safely while a
-second manipulator still holds the same semantic object or live entity.
+map. A single-arm transport or release row fails safely while a second
+manipulator still holds the same semantic object or live entity. The unified
+`HandOver` action instead requires both candidate arms to start unoccupied.
 
 At the terminal waypoint, an `ExecutionSession` requests an external
 correlated per-environment result before committing a non-empty effect:
 
 ```python
+import torch
+
 from embodichain.lab.sim.atomic_actions import EffectVerificationResult
 
 tick = session.tick(latest_context)
@@ -816,6 +816,8 @@ if tick.pending_effect is not None:
         verification_id=request.verification_id,
         success_mask=success_mask,
         failure_mask=failure_mask,
+        invalidation_mask=failure_mask,
+        retry_mask=torch.zeros_like(failure_mask),
     )
     tick = session.tick(latest_context, effect_result=effect_result)
 ```
@@ -828,6 +830,14 @@ and failure masks are disjoint subsets of the request mask; omitted request rows
 remain unresolved. Request IDs change after mask shrinkage or whole-action
 retry, so a delayed result cannot commit a newer attempt.
 
+Every result also classifies failed rows with `invalidation_mask` and
+`retry_mask`, both subsets of `failure_mask`. Invalidation applies the
+request's core-owned, removal-only `failure_invalidation`; the verifier cannot
+inject replacement state. Retry is valid only while the same invocation's
+physical preconditions remain satisfied. Other failed rows enter external
+recovery, and unresolved evidence at the deadline removes covered active
+verified state before recovery.
+
 `request.deadline` is expressed in the robot-observation timestamp domain.
 `RecoveryPolicy.action_timeout` covers both trajectory execution and the
 terminal effect wait; a retry invalidates the old request ID. With
@@ -836,24 +846,39 @@ its `effect_result`: schedule another call using `wait_duration`, re-read the
 current request, and submit a result for that current ID. Partial resolution and
 row deactivation can also replace the request before the delayed result arrives.
 
-## Action Agent integration
+Task Program lowering installs segment-scoped held-object guards and blocking
+physical-effect gates for curated manipulation calls. A guard observes a
+negative invariant before a due command and, on proven attachment loss,
+applies an action-authorized removal-only `StateDelta` before retry or
+`RECOVERY_REQUIRED`. A gate blocks entry to a named segment until the positive
+physical transition is verified. While unresolved, the waypoint cursor stays
+fixed and the preceding command is replayed for the synchronized active cohort,
+preserving gripper preload or open intent. Gate success unlocks motion without
+committing `TaskState`; terminal verification remains authoritative.
+
+Pick gates attachment before `lift`, and Place gates detachment before
+`retract`. The unified HandOver action gates source pickup before
+`pickup_transport`, destination pickup before `handover_release`, and source
+release before `place`; source- and destination-held guards cover the motion
+segments that depend on those relations. Each boundary owns an independent
+monitor and correlated request ID. These checks are observational and never
+create simulator attachments, freeze objects, or override poses.
+
+## Agent and task integration
 
 An MLLM should not construct `ActionInvocation` by copying arbitrary JSON into
-runtime objects. The `embodichain.lab.sim.skills` package provides the semantic
-boundary: stable call descriptors, immutable call values, scene/profile
-manifests, a compiler, and a runtime facade. The agent selects from the semantic
-call catalog and supplies declarative object-centric values; the compiler
-performs validation and grounding before the atomic engine sees the request:
+runtime objects. It should emit the constrained Task Program schema. The
+`embodichain.lab.task_program.semantics` package supplies declarative call,
+scene, profile, and effect contracts; Task Program owns validation,
+compilation, lowering, and execution:
 
 ```text
-MLLM / application SemanticCallSpec
-    -> SemanticCallCatalog discovery
-    -> SemanticIntegrationManifest validation
-    -> SemanticSkillCompiler.analyze()
-       object / affordance / resource / effect-flow validation
-    -> SemanticSkillCompiler.ground(latest_context)
-       participant binding + safe options + ActionInvocation
-    -> SkillRuntime / AtomicActionEngine
+MLLM / application Task Program
+    -> strict decode and bounded validation
+    -> provider-free TaskProgramCompiler
+    -> environment-owned semantic integration
+    -> live grounding + ActionInvocation
+    -> AtomicActionEngine
     -> verified task state + structured execution events
 ```
 
@@ -864,13 +889,10 @@ installed version-matched lowerer. Invocation IDs and monotonic revisions
 correlate compatible in-flight updates with planner diagnostics and execution
 events without mutating a request implicitly.
 
-The semantic runtime is also useful without an agent. `run()` executes one
-known workflow and preserves verified state for a later workflow submitted at a
-terminal result boundary. Call-local recovery remains owned by
-`ExecutionRunner`; automatic skill replacement or symbolic-state reconciliation
-after a terminal failure is intentionally not provided. See
-{doc}`../semantic_skills` for the complete compiler/runtime and dynamic-task
-contract.
+There is no public semantic execution facade. Applications choose either this
+direct Atomic Actions API or {doc}`Task Program <../../task_program/index>`.
+Call-local recovery remains owned by `ExecutionRunner`; Task Program may add
+bounded workflow recovery and segment acceptance around it.
 
 ## Extending the module
 
@@ -898,8 +920,12 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 
 ## Further reading
 
-- {doc}`../scene_registry` — canonical scene identity, snapshots, and collision integration
-- {doc}`../semantic_skills` — semantic calls, compilation, runtime execution, and dynamic task boundaries
+- {doc}`../../task_program/scene_registry` — canonical scene identity,
+  snapshots, and collision integration
+- {doc}`../../task_program/index` — declarative semantic calls, scenes,
+  robot profiles, and effects
+- {doc}`../../task_program/robot_profiles` — embodiment resources and presets
+- {doc}`../../task_program/index` — semantic task compilation and execution
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples

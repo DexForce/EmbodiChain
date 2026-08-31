@@ -12,7 +12,7 @@
 | Lightweight env registry | `embodichain/learning/rl/env.py` |
 | Standard trainer | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
 | Differentiable trainer | `embodichain/learning/rl/differentiable_trainer.py` |
-| Official configs | `embodichain_tasks/configs/agents/rl/` |
+| Official configs | `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
 
 The compatibility module entry point is:
 
@@ -63,7 +63,10 @@ Select this path with `trainer.gym_config`.
 6. A sample reset determines flattened observation and action dimensions.
 
 Simulator environments use standard rollouts. A differentiable algorithm on
-this path is rejected.
+this path is rejected. Simulator tasks with a supported training configuration
+declare `supports_rl=True` in `@register_env`; `embodichain list-task` displays
+them with `[Simulator, RL]` instead of treating the simulator registry as a
+mutually exclusive capability group.
 
 Direct callers of `train_from_config()` that bypass `cli()` must ensure
 task packages and init hooks needed by a simulator environment have already
@@ -164,10 +167,10 @@ currently support this distributed path.
 
 | Example | Environment path | Config location |
 |---------|------------------|-----------------|
-| CartPole | registered simulator Gym env | `embodichain_tasks/configs/agents/rl/basic/cart_pole/` |
-| PushCube | registered simulator Gym env | `embodichain_tasks/configs/agents/rl/push_cube/` |
-| PointMass PPO | registered lightweight env, standard rollout | `embodichain_tasks/configs/agents/rl/basic/point_mass/train_ppo.yaml` |
-| PointMass APG | differentiable lightweight env | `embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml` |
+| CartPole | registered simulator Gym env | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
+| PushCube | registered simulator Gym env | `embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
+| PointMass PPO | registered lightweight env, standard rollout | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
+| PointMass APG | differentiable lightweight env | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
 | Newton planar reach | experimental differentiable FK reference | `embodichain/learning/rl/experimental/newton/` |
 
 `PointMassRL` is the reference environment for comparing standard and
@@ -196,8 +199,9 @@ example is an experimental gradient reference, not a general simulator task.
 2. Register the factory with `@register_learning_env`.
 3. Ensure finished rows auto-reset while returning terminal reward/done with
    the next initial observation.
-4. Add an official config under `embodichain_tasks/configs/agents/rl/` when
-   it is a bundled task.
+4. Add an official config under
+   `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
+   bundled task.
 
 Use `add-task-env` for simulator-backed task environments and
 `manager-functor` for their observation, reward, event, and action

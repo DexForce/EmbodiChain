@@ -465,7 +465,10 @@ class TestOnlineDataEngine:
                     f"(exit code {process.exitcode})"
                 )
 
-            process.join(timeout=PROCESS_CLEANUP_TIMEOUT)
+            # A spawned consumer imports Torch and EmbodiChain from scratch.
+            # Under xdist load, interpreter cleanup can exceed the generic
+            # process-termination timeout even after the result is available.
+            process.join(timeout=CONSUMER_RESULT_TIMEOUT)
             if process.is_alive():
                 pytest.fail("consumer process did not exit after publishing a result")
             if process.exitcode != 0:

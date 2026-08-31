@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 import dexsim
 import numpy as np
@@ -67,6 +69,62 @@ from embodichain.lab.sim.utility.solver_utils import (
     create_pk_serial_chain,
 )
 from embodichain.utils import logger
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class ArticulationJointKinematics:
+    """Backend-neutral kinematic description of one articulation joint.
+
+    The value contains only stable names and copied numeric geometry. It does
+    not expose the simulator's native joint-info object.
+
+    Args:
+        name: Stable joint name.
+        joint_type: Normalized lowercase joint type, such as ``fixed``,
+            ``revolute``, or ``prismatic``.
+        parent_link_name: Name of the joint's parent link.
+        child_link_name: Name of the joint's child link.
+        origin_pose: Joint-frame pose in the parent-link frame with shape
+            ``(4, 4)``.
+        axis: Joint axis in the joint frame with shape ``(3,)``.
+        joint_limits: Optional lower and upper position limits.
+    """
+
+    name: str
+    joint_type: str
+    parent_link_name: str
+    child_link_name: str
+    origin_pose: torch.Tensor
+    axis: torch.Tensor
+    joint_limits: tuple[float, float] | None = None
+
+    def __post_init__(self) -> None:
+        for value, field_name in (
+            (self.name, "name"),
+            (self.joint_type, "joint_type"),
+            (self.parent_link_name, "parent_link_name"),
+            (self.child_link_name, "child_link_name"),
+        ):
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string.")
+        origin_pose = torch.as_tensor(self.origin_pose, dtype=torch.float32)
+        if origin_pose.shape != (4, 4) or not torch.isfinite(origin_pose).all():
+            raise ValueError("origin_pose must be a finite tensor with shape (4, 4).")
+        axis = torch.as_tensor(self.axis, dtype=torch.float32)
+        if axis.shape != (3,) or not torch.isfinite(axis).all():
+            raise ValueError("axis must be a finite tensor with shape (3,).")
+        joint_limits = self.joint_limits
+        if joint_limits is not None:
+            if not isinstance(joint_limits, tuple) or len(joint_limits) != 2:
+                raise TypeError("joint_limits must be a (lower, upper) tuple or None.")
+            lower, upper = (float(value) for value in joint_limits)
+            if math.isnan(lower) or math.isnan(upper) or lower > upper:
+                raise ValueError("joint_limits must be ordered and cannot contain NaN.")
+            joint_limits = lower, upper
+        object.__setattr__(self, "joint_type", self.joint_type.lower())
+        object.__setattr__(self, "origin_pose", origin_pose.clone())
+        object.__setattr__(self, "axis", axis.clone())
+        object.__setattr__(self, "joint_limits", joint_limits)
 
 
 @dataclass
@@ -834,6 +892,88 @@ class Articulation(BatchEntity):
             List[str]: The names of the joints in the articulation.
         """
         return self._entities[0].get_joint_names()
+
+    def get_parent_joint_chain(
+        self,
+        link_name: str,
+    ) -> tuple[ArticulationJointKinematics, ...]:
+        """Return the joints from a link toward the articulation root.
+
+        The immediate parent joint is first. Native simulator joint-info values
+        are copied into :class:`ArticulationJointKinematics`, keeping callers
+        independent of DexSim objects and the private entity collection.
+
+        Args:
+            link_name: Link whose parent chain should be queried.
+
+        Returns:
+            Parent-joint chain ordered from the requested link toward the root.
+
+        Raises:
+            TypeError: If ``link_name`` is not a string.
+            ValueError: If the link is unknown, native topology is incomplete,
+                multiple joints own one child link, or the chain contains a
+                cycle.
+        """
+        if type(link_name) is not str:
+            raise TypeError("link_name must be a string.")
+        if not link_name or link_name != link_name.strip():
+            raise ValueError("link_name must be a non-empty link name.")
+        if link_name not in self.link_names:
+            raise ValueError(
+                f"Unknown articulation link {link_name!r}. Available links: "
+                f"{list(self.link_names)}."
+            )
+
+        entity = self._entities[0]
+        joints_by_child: dict[str, ArticulationJointKinematics] = {}
+        for joint_name in entity.get_joint_names():
+            native = entity.get_joint_info(joint_name)
+            if native is None:
+                raise ValueError(
+                    f"Native articulation has no joint info for {joint_name!r}."
+                )
+            native_joint_type = getattr(
+                native.joint_type,
+                "name",
+                native.joint_type,
+            )
+            lower_limit = getattr(native, "lower_limit", None)
+            upper_limit = getattr(native, "upper_limit", None)
+            joint_limits = (
+                None
+                if lower_limit is None or upper_limit is None
+                else (float(lower_limit), float(upper_limit))
+            )
+            joint = ArticulationJointKinematics(
+                name=native.name,
+                joint_type=str(native_joint_type),
+                parent_link_name=native.parent_link_name,
+                child_link_name=native.child_link_name,
+                origin_pose=torch.as_tensor(native.origin_pose),
+                axis=torch.as_tensor(native.axis),
+                joint_limits=joint_limits,
+            )
+            if joint.child_link_name in joints_by_child:
+                raise ValueError(
+                    "Articulation topology contains multiple parent joints for "
+                    f"child link {joint.child_link_name!r}."
+                )
+            joints_by_child[joint.child_link_name] = joint
+
+        chain: list[ArticulationJointKinematics] = []
+        current_link = link_name
+        visited_links: set[str] = set()
+        while current_link in joints_by_child:
+            if current_link in visited_links:
+                raise ValueError(
+                    f"Articulation parent chain for {link_name!r} contains a cycle."
+                )
+            visited_links.add(current_link)
+            joint = joints_by_child[current_link]
+            chain.append(joint)
+            current_link = joint.parent_link_name
+        return tuple(chain)
 
     @property
     def body_data(self) -> ArticulationData:
@@ -2545,4 +2685,4 @@ class Articulation(BatchEntity):
             arenas[i].remove_articulation(entity)
 
 
-__all__ = ["ArticulationData", "Articulation"]
+__all__ = ["ArticulationData", "Articulation", "ArticulationJointKinematics"]

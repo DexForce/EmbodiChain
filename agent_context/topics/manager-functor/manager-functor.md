@@ -46,9 +46,20 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | Recorder | File | Behavior |
 |----------|------|----------|
 | `LeRobotRecorder` | `managers/datasets.py` | Synchronous. `__call__` runs convert + `add_frame` + `save_episode` inline, blocking `env.reset()`. Default; base class for the async variant. |
-| `AsyncLeRobotRecorder` | `managers/async_datasets.py` | Subclass. `__call__` clones the rollout-buffer slice (obs+actions) to CPU, enqueues it, and returns immediately. A single daemon worker thread drains the queue and runs the same `_save_single_episode` path. `finalize()` drains then calls `dataset.finalize()`. |
+| `AsyncLeRobotRecorder` | `managers/async_datasets.py` | Subclass. `__call__` clones the rollout-buffer slice (obs+actions) to CPU, enqueues it, and returns immediately. A single daemon worker thread drains the queue through the same `_persist_episode_payload` path. `finalize()` drains then calls `dataset.finalize()`. |
 
-**Save flow**: `env.step` writes each frame into `rollout_buffer` (`_hook_after_sim_step`). On truncation the caller does `env.reset(options={"save_data": True})` -> `_initialize_episode` -> `DatasetManager.apply("save", env_ids)`. `DatasetFunctorCfg.save_failed_episodes=True` saves every env on every reset (not only successes). `env.close()` -> `dataset_manager.finalize()` flushes any remaining buffer.
+**Save flow**: `env.step` writes each frame into `rollout_buffer` (`_hook_after_sim_step`). On truncation the caller does `env.reset(options={"save_data": True})` -> `_initialize_episode` -> `DatasetManager.apply("save", env_ids)`. For a final partial vector batch, `run-env` performs one full reset with `save_data=False` and `commit_env_ids`, so only selected **dataset** rows are persisted while whole-world reset events remain safe; camera and trajectory recorders retain their normal discard behavior. `DatasetFunctorCfg.save_failed_episodes=True` saves every env on every ordinary reset (not only successes). `env.close()` -> `dataset_manager.finalize()` drains explicitly committed async work; it never commits the live rollout implicitly.
+
+`DemoExecutionCfg(mode="segment_fragments")` changes one buffered Task Program
+row into independent natural-segment payloads. Accepted segments are retained
+by default; failed segments require `save_failed_fragments=True`. Every
+fragment carries dense `segment_accepted`, `segment_attempt_id`, and
+`continuity_id` features plus Task Program provenance in the JSONL sidecar.
+Fragment commits are append-only: failure of a later fragment does not roll
+back earlier ones. The recorder-local deterministic `fragment_id` registry
+deduplicates same-run retries. A LeRobot commit followed by sidecar/depth
+failure is sticky and rejects retry rather than writing a duplicate. This is
+not a cross-process recovery journal.
 
 **Two independent speed levers** (both honor `image_writer_threads` / `image_writer_processes` in `params`, wired through to `LeRobotDataset.create()` -> lerobot `AsyncImageWriter`):
 - Opt A: `LeRobotRecorder` + `image_writer_threads=4` - per-frame PNG writes offloaded to a thread pool. ~2.5x faster, no background thread, bounded memory.
@@ -61,6 +72,8 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 **Correctness invariants for the async recorder** (do not break these when editing):
 - The buffer slice is **cloned in the caller thread** before enqueue - the worker must not hold a view into `rollout_buffer` (it is cleared/reused on reset).
 - **Single worker** only - `LeRobotDataset` is not thread-safe and FIFO order must be preserved for `episode_index`.
+- Duplicate fragment ids pass through `_persist_episode_payload` so sync and
+  async writers share the same idempotency rule.
 - `finalize()` must drain the queue before `dataset.finalize()`.
 - `__call__` accepts `**kwargs` because `DatasetManager.apply` passes `**functor_cfg.params` (includes construction-only params like `image_writer_threads`); `manager_base._resolve_common_functor_cfg` tolerates `**kwargs`.
 

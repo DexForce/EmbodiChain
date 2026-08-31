@@ -22,10 +22,13 @@ from pathlib import Path
 import subprocess
 import sys
 
+import embodichain.lab.sim.atomic_actions as atomic_actions
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-PRIMITIVES_DIRECTORY = (
-    REPOSITORY_ROOT / "embodichain" / "lab" / "sim" / "atomic_actions" / "primitives"
+ATOMIC_ACTIONS_DIRECTORY = (
+    REPOSITORY_ROOT / "embodichain" / "lab" / "sim" / "atomic_actions"
 )
+PRIMITIVES_DIRECTORY = ATOMIC_ACTIONS_DIRECTORY / "primitives"
 TUTORIAL_DIRECTORY = REPOSITORY_ROOT / "scripts" / "tutorials" / "atomic_action"
 
 PUBLIC_PRIMITIVE_SCRIPTS = tuple(
@@ -77,3 +80,38 @@ def test_all_atomic_action_tutorials_import_without_running_main() -> None:
     result = _run_import_check(IMPORT_TUTORIALS_CODE, TUTORIAL_SCRIPTS)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_atomic_action_public_exports_exist() -> None:
+    """Every declared public export should resolve on the package."""
+    missing = [
+        name for name in atomic_actions.__all__ if not hasattr(atomic_actions, name)
+    ]
+
+    assert missing == []
+
+
+def test_atomic_action_star_import_resolves_all_public_exports() -> None:
+    """Star import should not fail on a stale public export."""
+    namespace: dict[str, object] = {}
+
+    exec("from embodichain.lab.sim.atomic_actions import *", namespace)
+
+    assert set(atomic_actions.__all__).issubset(namespace)
+
+
+def test_atomic_action_modules_do_not_depend_on_semantics() -> None:
+    """The Atomic Skill core must not import the Task Program semantic layer."""
+    forbidden_dependencies = (
+        "embodichain.lab.task_program.semantics",
+        "from ..skills",
+        "from .skills",
+        "RobotSkillProfile",
+    )
+    offenders = [
+        str(path.relative_to(REPOSITORY_ROOT))
+        for path in sorted(ATOMIC_ACTIONS_DIRECTORY.rglob("*.py"))
+        if any(value in path.read_text() for value in forbidden_dependencies)
+    ]
+
+    assert offenders == []

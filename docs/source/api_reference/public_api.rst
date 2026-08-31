@@ -9,18 +9,18 @@ covered by a more focused API-reference page. Prefer curated pages for APIs
 that need deeper explanations or examples. Sphinx obtains signatures and
 summaries here from the canonical Python docstrings.
 
-embodichain.agents.mllm.expert_program
+embodichain.agents.mllm.task_program
 --------------------------------------
 
 Strict MLLM entry points that inject host-owned integration settings before
-decoding and compiling the constrained Expert Program schema surface.
+decoding and compiling the constrained Task Program schema surface.
 
-.. currentmodule:: embodichain.agents.mllm.expert_program
+.. currentmodule:: embodichain.agents.mllm.task_program
 
 .. autosummary::
 
-   compile_mllm_expert_program
-   decode_mllm_expert_program
+   compile_mllm_task_program
+   decode_mllm_task_program
 
 embodichain.data.assets.planner_assets
 --------------------------------------
@@ -55,6 +55,197 @@ embodichain.data_pipeline.depth_video
    DEPTH_METER_UNIT
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
+
+embodichain.gen_sim.env
+-----------------------
+
+.. currentmodule:: embodichain.gen_sim.env
+
+.. autosummary::
+
+   find_gen_sim_env_file
+   get_embodichain_root
+   load_gen_sim_env
+
+embodichain.gen_sim.gradio_ui.app_articraft
+-------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_articraft
+
+.. autosummary::
+
+   build_articraft_panel
+   cleanup_articraft_session
+   configure_articraft_environment
+   generate_articraft_asset
+   reset_articraft_asset
+
+embodichain.gen_sim.gradio_ui.app_asset_engine
+----------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_asset_engine
+
+.. autosummary::
+
+   build_asset_engine_panel
+   cleanup_asset_engine_session
+   prepare_asset_input_preview
+   reset_simready_asset
+   run_simready_asset
+
+embodichain.gen_sim.gradio_ui.app_commands
+------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_commands
+
+.. autosummary::
+
+   build_run_agent_command
+
+embodichain.gen_sim.gradio_ui.app_env
+-------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_env
+
+.. autosummary::
+
+   ACTION_ENGINE_VISER_PORT
+   ARTICULATION_SERVER_BASE_URL
+   ARTICULATION_SERVER_POLL_INTERVAL_S
+   ARTICULATION_SERVER_TASK_TIMEOUT_S
+   ARTICULATION_SERVER_TIMEOUT_S
+   ARTICRAFT_CONDA_ENV
+   ARTICRAFT_OUTPUT_ROOT
+   ARTICRAFT_REPOSITORY_URL
+   ARTICRAFT_ROOT
+   DIRECT_NO_PROXY_VALUE
+   EMBODICHAIN_ROOT
+   GRADIO_AUTH_PASSWORD
+   GRADIO_AUTH_USERNAME
+   PROXY_ENV_KEYS
+   SCENE_ENGINE_VISER_PORT
+   SERVER_NAME
+   SERVER_PORT
+   SIMREADY_OPENAI_API_KEY
+   SIMREADY_OPENAI_BASE_URL
+   SIMREADY_OPENAI_MODEL
+   build_gradio_allowed_paths
+   build_gradio_blocked_paths
+   configure_direct_network_env
+   configure_simready_llm_env
+   get_inherited_network_env
+   get_gradio_auth
+   validate_gradio_artifact_root
+
+embodichain.gen_sim.gradio_ui.app_media
+---------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_media
+
+.. autosummary::
+
+   latest_audience_output_video
+
+embodichain.gen_sim.gradio_ui.app_processes
+-------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_processes
+
+.. autosummary::
+
+   SessionProcessRegistry
+   build_codex_env
+   build_pipeline_env
+   build_run_agent_command
+   force_stop_all_child_processes
+   get_request_session_id
+   kill_process_group
+   read_process_output
+   register_managed_process
+   run_agent_cli_supports_robot_profile
+   start_pipeline
+   terminate_process_group
+   redact_sensitive_text
+
+embodichain.gen_sim.gradio_ui.app_services
+------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_services
+
+.. autosummary::
+
+   build_app
+
+embodichain.gen_sim.gradio_ui.app_state
+---------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_state
+
+.. autosummary::
+
+   PHASES
+   Phase
+   RuntimeState
+   SessionRuntimeRegistry
+   runtime_lock
+   runtime_registry
+   set_runtime_phase_locked
+
+embodichain.gen_sim.gradio_ui.app_ui
+------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_ui
+
+.. autosummary::
+
+   build_app
+
+embodichain.gen_sim.gradio_ui.app_workflows
+-------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.app_workflows
+
+.. autosummary::
+
+   cleanup_workflow_session
+   format_status
+   preview_editable_scene
+   preview_saved_scene
+   refresh_saved_scenes
+   reset_scene_engine
+   run_action_engine_from_current
+   run_scene_edit
+   run_scene_engine
+   stop_action_engine
+   ui_snapshot
+
+embodichain.gen_sim.gradio_ui.gradio_app
+----------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.gradio_ui.gradio_app
+
+.. autosummary::
+
+   main
+
+embodichain.gen_sim.scene_engine.core.scene_edit_plan
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.core.scene_edit_plan
+
+.. autosummary::
+
+   SceneEditOperation
+   SceneEditPlan
+
+embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
+-------------------------------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
+
+.. autosummary::
+
+   prepare_scene_edit_assets
 
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------
@@ -103,6 +294,15 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.task_program.integrations.simulation.handover
+-----------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.integrations.simulation.handover
+
+.. autosummary::
+
+   ConfiguredHandOverPoseProvider
 
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
@@ -312,6 +512,10 @@ embodichain.lab.sim.atomic_actions
    PickUpOptions
    PlaceOptions
    PoseGoalValue
+   PushObject
+   PushObjectGoal
+   PushObjectOptions
+   PushObjectToolCalibration
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    RunnerStepCallback
@@ -327,6 +531,7 @@ embodichain.lab.sim.atomic_actions.affordance
 
    Affordance
    AntipodalAffordance
+   AxisAlignAffordance
    SlideAffordance
    PressAffordance
    TwistAffordance
@@ -400,14 +605,27 @@ embodichain.lab.sim.atomic_actions.execution
 
 .. autosummary::
 
-   EffectVerificationRequest
-   EffectVerificationResult
    ExecutionEvent
    ExecutionEventKind
    ExecutionPlanAttempt
    ExecutionSession
    ExecutionStatus
    ExecutionTick
+
+embodichain.lab.sim.atomic_actions.verification
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+
+.. autosummary::
+
+   EffectExpectationResult
+   EffectVerificationRequest
+   EffectVerificationResult
+   HeldObjectGuardRequest
+   HeldObjectGuardResult
+   PhaseEffectGateRequest
+   PhaseEffectGateResult
 
 embodichain.lab.sim.atomic_actions.goals
 ----------------------------------------
@@ -439,6 +657,7 @@ embodichain.lab.sim.atomic_actions.invocation
    ActionOptions
    GoalT
    OptionsT
+   PhaseEffectGateRequirement
    ResolvedActionRequest
 
 embodichain.lab.sim.atomic_actions.plans
@@ -451,8 +670,8 @@ embodichain.lab.sim.atomic_actions.plans
    ActionPlan
    CompiledTrajectory
    EffectVerificationRequirement
-   ExecutionFeedbackMode
    PlannerDiagnostics
+   PlanningFailure
    TimedTrajectory
    TrajectorySegment
    normalize_success_mask
@@ -512,8 +731,10 @@ embodichain.lab.sim.atomic_actions.runner
    ExecutionClock
    ExecutionRunner
    ExecutionRunnerCfg
+   HeldObjectGuardVerifier
    MonotonicExecutionClock
    ObservationProvider
+   PhaseEffectGateVerifier
    RunnerStatus
    RunnerStep
    RunnerStepCallback
@@ -556,6 +777,7 @@ embodichain.lab.sim.atomic_actions.sim_adapter
 
 .. autosummary::
 
+   create_simulation_atomic_action_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    SceneSnapshotSupplier
@@ -616,6 +838,7 @@ embodichain.lab.sim.objects.articulation
 
    ArticulationData
    Articulation
+   ArticulationJointKinematics
 
 embodichain.lab.sim.objects.cloth_object
 ----------------------------------------
@@ -887,10 +1110,10 @@ embodichain.lab.sim.sim_manager
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
-embodichain.lab.sim.skills.calls
---------------------------------
+embodichain.lab.task_program.semantics.calls
+------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.calls
+.. currentmodule:: embodichain.lab.task_program.semantics.calls
 
 .. autosummary::
 
@@ -906,36 +1129,14 @@ embodichain.lab.sim.skills.calls
    SemanticPose
    builtin_semantic_call_catalog
 
-.. automodule:: embodichain.lab.sim.skills.calls
+.. automodule:: embodichain.lab.task_program.semantics.calls
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.compiler
------------------------------------
+embodichain.lab.task_program.semantics.integration
+------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.skills.compiler
-
-.. autosummary::
-
-   AnalyzedSemanticCall
-   GroundedSemanticCall
-   HandOverPoseProvider
-   HandOverPoseTargets
-   RelationTargetGrounder
-   RegisteredSemanticLowerer
-   SemanticEffectDependency
-   SemanticEffectKind
-   SemanticHandOverTarget
-   SemanticLowering
-   SemanticObjectTarget
-   SemanticRelationTarget
-   SemanticSkillCompiler
-   SemanticWorkflow
-
-embodichain.lab.sim.skills.integration
---------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.integration
+.. currentmodule:: embodichain.lab.task_program.semantics.integration
 
 .. autosummary::
 
@@ -948,42 +1149,28 @@ embodichain.lab.sim.skills.integration
    SemanticIntegrationManifest
    SemanticValidationError
 
-.. automodule:: embodichain.lab.sim.skills.integration
+.. automodule:: embodichain.lab.task_program.semantics.integration
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.effects
-----------------------------------
+embodichain.lab.task_program.semantics.effects
+--------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.effects
+.. automodule:: embodichain.lab.task_program.semantics.effects
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.evidence
------------------------------------
+embodichain.lab.task_program.semantics.evidence
+---------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.evidence
+.. automodule:: embodichain.lab.task_program.semantics.evidence
    :members:
    :no-index:
 
-embodichain.lab.sim.skills.parallel
-------------------------------------
+embodichain.lab.task_program.semantics.profiles
+---------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.parallel
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.parallel_runtime
---------------------------------------------
-
-.. automodule:: embodichain.lab.sim.skills.parallel_runtime
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.profiles
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.profiles
+.. currentmodule:: embodichain.lab.task_program.semantics.profiles
 
 .. autosummary::
 
@@ -991,6 +1178,7 @@ embodichain.lab.sim.skills.profiles
    BoundRobotSkillProfile
    ControlPartEndpoint
    ControlPartEndpointAdapter
+   EffectAssurance
    EndpointResolution
    ProfileValidationError
    ResourceEndpoint
@@ -1004,18 +1192,12 @@ embodichain.lab.sim.skills.profiles
    RobotSkillProfile
    SkillPolicyPreset
    UnsupportedSkillError
+   WorkflowRecoveryPolicy
 
-embodichain.lab.sim.skills.runtime
-----------------------------------
+embodichain.lab.task_program.semantics.scene
+------------------------------------------------
 
-.. automodule:: embodichain.lab.sim.skills.runtime
-   :members:
-   :no-index:
-
-embodichain.lab.sim.skills.scene
---------------------------------
-
-.. currentmodule:: embodichain.lab.sim.skills.scene
+.. currentmodule:: embodichain.lab.task_program.semantics.scene
 
 .. autosummary::
 
@@ -1039,7 +1221,7 @@ embodichain.lab.sim.skills.scene
    SceneRegistry
    UnsupportedSceneAffordanceError
 
-.. automodule:: embodichain.lab.sim.skills.scene
+.. automodule:: embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
 
@@ -1052,6 +1234,25 @@ embodichain.lab.sim.solvers.neural_ik_solver
 
    NeuralIKSolverCfg
    NeuralIKSolver
+
+embodichain.lab.sim.solvers.null_space_posture_task
+---------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.null_space_posture_task
+
+.. autosummary::
+
+   NullSpacePostureTask
+
+embodichain.lab.sim.solvers.pink_solver
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.pink_solver
+
+.. autosummary::
+
+   PinkSolver
+   PinkSolverCfg
 
 embodichain.lab.sim.solvers.srs_solver
 --------------------------------------
@@ -1653,14 +1854,27 @@ embodichain.toolkits.urdf_assembly.urdf_assembly_manager
 
    URDFAssemblyManager
 
-embodichain.workspace_cache_cli
--------------------------------
+embodichain_tasks.classic_control.cart_pole
+--------------------------------------------
 
-.. currentmodule:: embodichain.workspace_cache_cli
+Cart-pole environment registration under the task-first import path.
+
+.. currentmodule:: embodichain_tasks.classic_control.cart_pole
 
 .. autosummary::
 
-   main
+   CartPoleEnv
+
+embodichain_tasks.classic_control.point_mass
+---------------------------------------------
+
+Differentiable lightweight point-mass task and learning-environment registration.
+
+.. currentmodule:: embodichain_tasks.classic_control.point_mass
+
+.. autosummary::
+
+   PointMassEnv
 
 embodichain_tasks.configs
 -------------------------
@@ -1671,82 +1885,77 @@ embodichain_tasks.configs
 
    get_config_path
 
-embodichain_tasks.expert_program
---------------------------------
+embodichain_tasks.manipulation.push_cube
+----------------------------------------
 
-Declarative task references that bind packaged Expert Programs to live
-simulation scenes, robot skill profiles, and atomic actions.
-
-.. currentmodule:: embodichain_tasks.expert_program
+.. currentmodule:: embodichain_tasks.manipulation.push_cube
 
 .. autosummary::
 
-   ExpertProgramOpenDrawerEnv
-   ExpertProgramRepeatedPickPlaceEnv
+   PushCubeEnv
 
-embodichain_tasks.expert_program.open_drawer
---------------------------------------------
+embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
+-----------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.expert_program.open_drawer
-
-.. autosummary::
-
-   ExpertProgramOpenDrawerEnv
-
-embodichain_tasks.expert_program.repeated_pick_place
-----------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.expert_program.repeated_pick_place
+.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
 
 .. autosummary::
 
-   ExpertProgramRepeatedPickPlaceEnv
+   BlocksRankingRGBEnv
 
-embodichain_tasks.multi_segments
---------------------------------
+embodichain_tasks.manipulation.tableware.blocks_ranking_size
+------------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.multi_segments
-
-.. autosummary::
-
-   MultiSegmentsCubePickPlaceEnv
-
-embodichain_tasks.multi_segments.cube_pick_place
-------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.multi_segments.cube_pick_place
+.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_size
 
 .. autosummary::
 
-   MultiSegmentsCubePickPlaceEnv
+   BlocksRankingSizeEnv
 
-embodichain_tasks.rl
---------------------
+embodichain_tasks.manipulation.tableware.match_object_container
+---------------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.rl
-
-.. autosummary::
-
-   build_env
-
-embodichain_tasks.rl.basic
---------------------------
-
-.. currentmodule:: embodichain_tasks.rl.basic
+.. currentmodule:: embodichain_tasks.manipulation.tableware.match_object_container
 
 .. autosummary::
 
-   CartPoleEnv
-   PointMassEnv
+   MatchObjectContainerEnv
 
-embodichain_tasks.rl.basic.point_mass
--------------------------------------
+embodichain_tasks.manipulation.tableware.place_object_drawer
+------------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.rl.basic.point_mass
+.. currentmodule:: embodichain_tasks.manipulation.tableware.place_object_drawer
 
 .. autosummary::
 
-   PointMassEnv
+   PlaceObjectDrawerEnv
+
+embodichain_tasks.manipulation.tableware.scoop_ice
+--------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.scoop_ice
+
+.. autosummary::
+
+   ScoopIce
+
+embodichain_tasks.manipulation.tableware.stack_blocks_two
+---------------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_blocks_two
+
+.. autosummary::
+
+   StackBlocksTwoEnv
+
+embodichain_tasks.manipulation.tableware.stack_cups
+---------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_cups
+
+.. autosummary::
+
+   StackCupsEnv
 
 embodichain_tasks.special.simple_task
 -------------------------------------
@@ -1765,116 +1974,6 @@ embodichain_tasks.special.stay_still_save
 .. autosummary::
 
    StayStillSaveEnv
-
-embodichain_tasks.tableware
----------------------------
-
-.. currentmodule:: embodichain_tasks.tableware
-
-.. autosummary::
-
-   OpenDrawerEnv
-
-embodichain_tasks.tableware.blocks_ranking_rgb
-----------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.blocks_ranking_rgb
-
-.. autosummary::
-
-   BlocksRankingRGBEnv
-
-embodichain_tasks.tableware.blocks_ranking_size
------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.blocks_ranking_size
-
-.. autosummary::
-
-   BlocksRankingSizeEnv
-
-embodichain_tasks.tableware.match_object_container
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.match_object_container
-
-.. autosummary::
-
-   MatchObjectContainerEnv
-
-embodichain_tasks.tableware.open_drawer
----------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.open_drawer
-
-.. autosummary::
-
-   OpenDrawerEnv
-
-embodichain_tasks.tableware.place_object_drawer
------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.place_object_drawer
-
-.. autosummary::
-
-   PlaceObjectDrawerEnv
-
-embodichain_tasks.tableware.pour_water.action_bank
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.pour_water.action_bank
-
-.. autosummary::
-
-   PourWaterActionBank
-
-embodichain_tasks.tableware.pour_water.pour_water
--------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.pour_water.pour_water
-
-.. autosummary::
-
-   PourWaterEnv
-   PourWaterAgentEnv
-
-embodichain_tasks.tableware.rearrangement
------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.rearrangement
-
-.. autosummary::
-
-   RearrangementEnv
-   RearrangementAgentEnv
-
-embodichain_tasks.tableware.scoop_ice
--------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.scoop_ice
-
-.. autosummary::
-
-   ScoopIce
-
-embodichain_tasks.tableware.stack_blocks_two
---------------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.stack_blocks_two
-
-.. autosummary::
-
-   StackBlocksTwoEnv
-
-embodichain_tasks.tableware.stack_cups
---------------------------------------
-
-.. currentmodule:: embodichain_tasks.tableware.stack_cups
-
-.. autosummary::
-
-   StackCupsEnv
 
 embodichain_tasks.utils.importer
 --------------------------------

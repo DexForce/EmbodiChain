@@ -409,9 +409,10 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         mesh_triangles: torch.Tensor,
         obj_poses: torch.Tensor,
         approach_direction: torch.Tensor,
-        object_part: str = "center",
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return ranked antipodal candidates for every object pose."""
+        """Return ranked candidates, optionally from one projected axis end."""
         backend = self._backend(mesh_vertices, mesh_triangles)
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
@@ -419,12 +420,50 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             batch_size=poses.shape[0],
             device=backend.device,
         )
+        axes: torch.Tensor | None = None
+        if obj_longest_axis is not None:
+            axes = torch.as_tensor(
+                obj_longest_axis,
+                dtype=torch.float32,
+                device=backend.device,
+            )
+            if axes.shape == (3,):
+                axes = axes.unsqueeze(0).expand(poses.shape[0], -1)
+            if axes.shape != (poses.shape[0], 3):
+                raise ValueError(
+                    "obj_longest_axis must have shape (3,) or "
+                    f"({poses.shape[0]}, 3)."
+                )
+            lengths = torch.linalg.vector_norm(axes, dim=1, keepdim=True)
+            if not torch.isfinite(axes).all() or torch.any(lengths <= 1.0e-8):
+                raise ValueError("obj_longest_axis must contain finite non-zero rows.")
+            axes = axes / lengths
+        if isinstance(is_positive_part, bool):
+            positive_parts = torch.full(
+                (poses.shape[0],),
+                is_positive_part,
+                dtype=torch.bool,
+                device=backend.device,
+            )
+        else:
+            positive_parts = torch.as_tensor(
+                is_positive_part,
+                device=backend.device,
+            )
+            if positive_parts.dtype != torch.bool or positive_parts.shape != (
+                poses.shape[0],
+            ):
+                raise ValueError(
+                    "is_positive_part must be a bool or a bool tensor with shape "
+                    f"({poses.shape[0]},)."
+                )
         results: list[tuple[torch.Tensor, torch.Tensor]] = []
         for index, object_pose in enumerate(poses):
             success, grasp_poses, _, costs = backend.get_valid_grasp_poses(
                 object_pose=object_pose,
                 approach_direction=directions[index],
-                object_part=object_part,
+                obj_longest_axis=None if axes is None else axes[index],
+                is_positive_part=bool(positive_parts[index].item()),
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)

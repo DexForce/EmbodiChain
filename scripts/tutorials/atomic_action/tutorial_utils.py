@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import argparse
 import math
+import re
 import time
 from collections.abc import Callable, Collection, Sequence
 from typing import Literal
 
 import torch
 
+from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -43,7 +45,6 @@ from embodichain.lab.sim.planners import (
     ToppraPlannerCfg,
 )
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
-from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -69,6 +70,14 @@ DEFAULT_AXIS_SIZE = 0.003
 
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
+ROBOTIQ_2F_140_URDF_PATH = "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+ROBOTIQ_HAND_JOINT_PATTERN = r".*(?:finger|knuckle)_joint"
+ROBOTIQ_2F_140_TCP = (
+    (0.0, -1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.21),
+    (0.0, 0.0, 0.0, 1.0),
+)
 TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgi_140_80",
     min_opening_width=0.003,
@@ -101,8 +110,12 @@ TutorialCliFeature = Literal[
     "headless_play",
     "visualize_axes",
 ]
-TutorialRobot = Literal["ur5", "franka"]
-TUTORIAL_ROBOTS: tuple[TutorialRobot, ...] = ("ur5", "franka")
+TutorialRobot = Literal["ur5", "franka", "ur10"]
+TUTORIAL_ROBOTS: tuple[TutorialRobot, ...] = (
+    "ur5",
+    "franka",
+    "ur10",
+)
 
 
 def create_tutorial_argument_parser(
@@ -164,23 +177,6 @@ def create_tutorial_argument_parser(
     return parser
 
 
-def make_ur5_solver_cfg(tcp_z: float) -> URSolverCfg:
-    """Create the UR5 arm solver cfg used by atomic-action tutorials."""
-    cfg = URSolverCfg(
-        ur_type="ur5",
-        end_link_name="ee_link",
-        root_link_name="base_link",
-        tcp=[
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, tcp_z],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-    )
-    cfg.urdf_path = None
-    return cfg
-
-
 def create_tutorial_simulation(
     args: argparse.Namespace,
     *,
@@ -198,11 +194,10 @@ def create_tutorial_simulation(
     Returns:
         A simulation manager with the tutorial key light configured.
     """
-    width, height = get_tutorial_window_size(args)
     sim = SimulationManager(
         SimulationManagerCfg(
-            width=width,
-            height=height,
+            width=VIEWER_WIDTH,
+            height=VIEWER_HEIGHT,
             headless=True,
             num_envs=args.num_envs,
             sim_device=args.device,
@@ -284,34 +279,12 @@ def add_ur5_gripper_robot(
     )
 
 
-def add_franka_panda_robot(
-    sim: SimulationManager,
-    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
-    init_qpos: Sequence[float] | None = None,
-) -> Robot:
-    """Add a Franka arm with the standard PGI tutorial gripper.
-
-    Args:
-        sim: Simulation manager that owns the robot.
-        init_pos: Root position of the robot in its arena.
-        init_qpos: Optional full robot joint configuration.
-
-    Returns:
-        The added robot instance.
-    """
-    return sim.add_robot(
-        cfg=create_franka_panda_robot_cfg(
-            init_pos=init_pos,
-            init_qpos=init_qpos,
-        )
-    )
-
-
 def add_tutorial_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> Robot:
     """Add a selected tutorial robot with the shared PGI gripper.
 
@@ -332,6 +305,7 @@ def add_tutorial_robot(
             robot_type,
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     )
 
@@ -368,14 +342,21 @@ def get_hand_open_close_qpos(
     robot: Robot,
     *,
     hand_control_part: str = "hand",
-    close_qpos: float = DEFAULT_GRIPPER_CLOSE_QPOS,
+    close_qpos: float | Sequence[float] = DEFAULT_GRIPPER_CLOSE_QPOS,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return the open limit and a safe closed position for a PGI gripper.
+    """Return open and closed positions for a tutorial parallel gripper.
+
+    PGI hands use their lower position limit as the open command. A Robotiq
+    2F-140 hand is recognized from its six expanded finger/knuckle joint names;
+    its open command is zero and a scalar close magnitude is negated for the
+    three knuckle joints according to the URDF mimic directions. Supplying a
+    sequence always uses those explicit signed per-joint positions.
 
     Args:
         robot: Robot containing the gripper control part.
         hand_control_part: Name of the gripper control part.
-        close_qpos: Desired per-joint closed position, clamped to joint limits.
+        close_qpos: Desired scalar close magnitude or explicit per-joint closed
+            positions, clamped to joint limits.
 
     Returns:
         Open and closed joint-position tensors on the robot device.
@@ -383,8 +364,39 @@ def get_hand_open_close_qpos(
     hand_limits = robot.get_qpos_limits(name=hand_control_part)[0].to(
         device=robot.device, dtype=torch.float32
     )
-    return hand_limits[:, 0], torch.clamp(
-        torch.full_like(hand_limits[:, 1], close_qpos),
+    hand_joint_names = tuple(robot.cfg.control_parts.get(hand_control_part, ()))
+    is_robotiq_2f_140 = len(hand_joint_names) == 6 and all(
+        re.fullmatch(ROBOTIQ_HAND_JOINT_PATTERN, joint_name)
+        for joint_name in hand_joint_names
+    )
+    if isinstance(close_qpos, Sequence) and not isinstance(close_qpos, (str, bytes)):
+        hand_close = torch.as_tensor(
+            close_qpos,
+            device=robot.device,
+            dtype=torch.float32,
+        )
+        if hand_close.shape != (hand_limits.shape[0],):
+            raise ValueError(
+                "close_qpos must contain one value per hand joint; expected "
+                f"{hand_limits.shape[0]}, got {tuple(hand_close.shape)}."
+            )
+    else:
+        hand_close = torch.full_like(hand_limits[:, 1], float(close_qpos))
+        if is_robotiq_2f_140:
+            directions = torch.tensor(
+                [
+                    -1.0 if "knuckle_joint" in joint_name else 1.0
+                    for joint_name in hand_joint_names
+                ],
+                device=robot.device,
+                dtype=torch.float32,
+            )
+            hand_close = hand_close * directions
+    hand_open = (
+        torch.zeros_like(hand_limits[:, 0]) if is_robotiq_2f_140 else hand_limits[:, 0]
+    )
+    return hand_open, torch.clamp(
+        hand_close,
         min=hand_limits[:, 0],
         max=hand_limits[:, 1],
     )
@@ -412,7 +424,7 @@ def create_antipodal_semantics(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
         ),
-        entity=obj,
+        entity_id=obj.uid,
     )
 
 
@@ -708,30 +720,26 @@ def make_clear_dynamics_callback(
     return clear_dynamics
 
 
-def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
-    """Return the viewer window size used by atomic-action tutorials."""
-    return VIEWER_WIDTH, VIEWER_HEIGHT
+_NONINTERACTIVE_DISPLAY_FLAGS = (
+    "headless",
+    "viser",
+    "diagnose_plan",
+    "headless_play",
+)
+
+
+def _uses_noninteractive_display(args: argparse.Namespace) -> bool:
+    return any(getattr(args, flag, False) for flag in _NONINTERACTIVE_DISPLAY_FLAGS)
 
 
 def should_open_tutorial_window(args: argparse.Namespace) -> bool:
     """Return whether an interactive viewer window should be opened."""
-    return not (
-        getattr(args, "headless", False)
-        or getattr(args, "viser", False)
-        or getattr(args, "diagnose_plan", False)
-        or getattr(args, "headless_play", False)
-    )
+    return not _uses_noninteractive_display(args)
 
 
 def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
     """Return whether the tutorial should pause for terminal input."""
-    return not (
-        getattr(args, "auto_play", False)
-        or getattr(args, "headless", False)
-        or getattr(args, "viser", False)
-        or getattr(args, "diagnose_plan", False)
-        or getattr(args, "headless_play", False)
-    )
+    return not (getattr(args, "auto_play", False) or _uses_noninteractive_display(args))
 
 
 def start_auto_play_recording(
@@ -863,6 +871,7 @@ def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
     tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
+    **kwargs,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
@@ -937,6 +946,7 @@ def create_ur5_gripper_robot_cfg(
 def create_franka_panda_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> RobotCfg:
     """Build a Franka arm + PGI gripper configuration for the tutorials.
 
@@ -996,10 +1006,68 @@ def create_franka_panda_robot_cfg(
     return cfg
 
 
+def create_ur10_robotiq_robot_cfg(
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    **kwargs,
+) -> RobotCfg:
+    """Build a UR10 arm with a six-DOF Robotiq 2F-140 gripper.
+
+    The hand control part is intentionally expressed as one regular expression.
+    Robot materialization expands it over the six active finger/knuckle joints
+    while excluding the gripper's fixed joints. The solver TCP includes the
+    Robotiq mounting rotation and its 0.23 m tool offset.
+
+    Args:
+        init_pos: Initial root position of the robot in the arena.
+        init_qpos: Optional full 12-DOF arm-plus-hand configuration.
+
+    Returns:
+        A UR10/Robotiq configuration exposing ``arm`` and six-joint ``hand``
+        control parts.
+    """
+    qpos = (
+        [0.0, -1.57, 1.57, -1.57, -1.57, 0.0] + [0.0] * 6
+        if init_qpos is None
+        else list(init_qpos)
+    )
+    if len(qpos) != 12:
+        raise ValueError(
+            "UR10/Robotiq init_qpos must contain 12 values: six arm and six "
+            f"gripper joints, got {len(qpos)}."
+        )
+    return URRobotCfg.from_dict(
+        {
+            "robot_type": "ur10",
+            "uid": "UR10Robotiq2F140",
+            "urdf_cfg": {
+                "components": [
+                    {
+                        "component_type": "hand",
+                        "urdf_path": get_data_path(ROBOTIQ_2F_140_URDF_PATH),
+                    }
+                ],
+            },
+            "control_parts": {
+                "hand": [ROBOTIQ_HAND_JOINT_PATTERN],
+            },
+            "drive_pros": {
+                "stiffness": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
+                "damping": {ROBOTIQ_HAND_JOINT_PATTERN: 1e2},
+                "max_effort": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
+            },
+            "solver_cfg": {"arm": {"tcp": ROBOTIQ_2F_140_TCP}},
+            "init_qpos": qpos,
+            "init_pos": init_pos,
+        }
+    )
+
+
 def create_tutorial_robot_cfg(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    **kwargs,
 ) -> RobotCfg:
     """Build a selected tutorial arm with the common PGI gripper contract.
 
@@ -1009,7 +1077,8 @@ def create_tutorial_robot_cfg(
         init_qpos: Optional full robot joint configuration.
 
     Returns:
-        A UR5 or Franka robot configuration exposing ``arm`` and ``hand``.
+        A UR5, Franka, or UR10/Robotiq robot configuration exposing ``arm``
+        and ``hand``.
 
     Raises:
         ValueError: If ``robot_type`` is not supported.
@@ -1018,11 +1087,19 @@ def create_tutorial_robot_cfg(
         return create_ur5_gripper_robot_cfg(
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
         )
     if robot_type == "franka":
         return create_franka_panda_robot_cfg(
             init_pos=init_pos,
             init_qpos=init_qpos,
+            **kwargs,
+        )
+    if robot_type == "ur10":
+        return create_ur10_robotiq_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+            **kwargs,
         )
     raise ValueError(
         f"Unsupported tutorial robot {robot_type!r}; expected one of {TUTORIAL_ROBOTS}."
@@ -1037,11 +1114,13 @@ __all__ = [
     "DEFAULT_TUTORIAL_LIGHT_POS",
     "GRIPPER_HAND_JOINT_PATTERN",
     "GRIPPER_URDF_PATH",
+    "ROBOTIQ_2F_140_TCP",
+    "ROBOTIQ_2F_140_URDF_PATH",
+    "ROBOTIQ_HAND_JOINT_PATTERN",
     "TOP_DOWN_EEF_ROTATION",
     "TutorialCliFeature",
     "TutorialRobot",
     "TUTORIAL_ROBOTS",
-    "add_franka_panda_robot",
     "add_tutorial_robot",
     "add_ur5_gripper_robot",
     "broadcast_pose_batch",
@@ -1055,15 +1134,14 @@ __all__ = [
     "create_tutorial_argument_parser",
     "create_tutorial_robot_cfg",
     "create_tutorial_simulation",
+    "create_ur10_robotiq_robot_cfg",
     "create_ur5_gripper_robot_cfg",
     "format_tensor",
     "get_hand_open_close_qpos",
     "initialize_pre_pick_robot_pose",
-    "make_ur5_solver_cfg",
     "make_eef_pose_at",
     "make_clear_dynamics_callback",
     "make_top_down_eef_pose",
-    "get_tutorial_window_size",
     "prepare_tutorial_scene",
     "publish_tutorial_scene",
     "replay_trajectory",

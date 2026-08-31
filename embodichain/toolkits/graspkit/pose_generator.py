@@ -21,6 +21,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from copy import deepcopy
 import math
+from types import MappingProxyType
 
 import torch
 
@@ -30,6 +31,7 @@ __all__ = [
     "GraspPoseGenerator",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGripperModelCfg",
+    "get_parallel_jaw_gripper_model",
 ]
 
 
@@ -106,11 +108,59 @@ class ParallelJawGripperModelCfg:
             )
 
 
+_PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
+    {
+        "dh_pgi_140_80": MappingProxyType(
+            {
+                "model_id": "dh_pgi_140_80",
+                "min_opening_width": 0.005,
+                "max_opening_width": 0.1,
+                "finger_length": 0.12,
+                "finger_width": 0.04,
+                "finger_thickness": 0.01,
+                "palm_depth": 0.096,
+            }
+        ),
+    }
+)
+
+
+def get_parallel_jaw_gripper_model(model_id: str) -> ParallelJawGripperModelCfg:
+    """Return a fresh configuration for a named parallel-jaw gripper model.
+
+    The built-in catalog contains grasp-planning geometry rather than URDF or
+    downloadable asset metadata. Callers with an unregistered calibration can
+    construct :class:`ParallelJawGripperModelCfg` directly.
+
+    Args:
+        model_id: Stable identifier of a built-in gripper geometry.
+
+    Returns:
+        An independently owned gripper-model configuration.
+
+    Raises:
+        ValueError: If ``model_id`` is malformed or is not built in.
+    """
+    if type(model_id) is not str or not model_id or model_id != model_id.strip():
+        raise ValueError(
+            "model_id must be a non-empty string without outer whitespace."
+        )
+    try:
+        values = _PARALLEL_JAW_GRIPPER_MODELS[model_id]
+    except KeyError as exc:
+        available = sorted(_PARALLEL_JAW_GRIPPER_MODELS)
+        raise ValueError(
+            f"unknown parallel-jaw gripper model {model_id!r}; "
+            f"available models are {available}."
+        ) from exc
+    return ParallelJawGripperModelCfg(**dict(values))
+
+
 class GraspPoseGenerator(ABC):
     """Standalone service that generates grasp poses from target geometry.
 
     The contract has no dependency on Gym, simulation, atomic actions, or
-    Expert Program. Application code may call it directly or install the same
+    Task Program. Application code may call it directly or install the same
     service instance alongside a motion generator in a higher-level runtime.
     """
 
@@ -122,9 +172,10 @@ class GraspPoseGenerator(ABC):
         mesh_triangles: torch.Tensor,
         obj_poses: torch.Tensor,
         approach_direction: torch.Tensor,
-        object_part: str = "center",
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return candidate poses and ranking costs for every object pose."""
+        """Return candidates, optionally restricted to one projected axis end."""
 
     @abstractmethod
     def get_best_grasp_poses(

@@ -551,7 +551,7 @@ def _as_bool_tuple(value: Any, num_envs: int) -> tuple[bool, ...]:
 def _has_terminal_runtime_failure_trace(segment: DemoSegment) -> bool:
     """Return whether a lazy segment recorded a canonical failed runtime.
 
-    Expert-program action iterables may terminate before yielding a controller
+    Task Program action iterables may terminate before yielding a controller
     command when planning fails.  Their bridge finalizes the runtime trace while
     exhausting the iterable and exposes a validator that commits row-local
     failure.  This marker distinguishes that outcome from an ordinary empty

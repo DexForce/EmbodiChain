@@ -175,9 +175,9 @@ pip install -e .
 ```
 
 Commands can continue to use repository-style paths such as
-`embodichain_tasks/configs/gym/pour_water/gym_config.json`. EmbodiChain resolves
-these paths from the checkout when present and otherwise from the installed
-wheel.
+`embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml`.
+EmbodiChain resolves these paths from the checkout when present and otherwise
+from the installed wheel.
 
 ## Optional: cuRobo V2 motion planning
 

@@ -189,12 +189,16 @@ Unified interface for trajectory planning with optional pre-interpolation.
 Grasp-pose generation is a sibling planning service, not a
 `MotionGenerator` feature. `embodichain.toolkits.graspkit` owns its standalone
 contract and the `pg_grasp` implementation without importing `embodichain.lab`.
-Atomic actions and Expert Program install a generator instance in
-`AtomicActionEngine`; the non-atomic reference environment
-`embodichain_tasks/embodichain_tasks/multi_segments/cube_pick_place.py` calls
-the same generator directly, then feeds the selected end-effector poses into
-four explicit `MotionGenerator.generate()` phases. That task deliberately does
-not create an `AtomicActionEngine`.
+Atomic Skills and Task Program install a generator instance in
+`AtomicActionEngine`. Reference deployments select execution policies under
+`configs/components/execution_policies/`, while reusable embodiment components
+own the simulation robot and sensors; their optional `skill_profile` owns
+grasp-generator geometry/tuning. Task-local integrations retain only semantic
+action options and typed task-specific overrides.
+`task_program/integrations/_configured_composition.py` checks the component
+contracts and lowers the result through the strict decoder in `configured.py`;
+the config loader registers the existing `EmbodiedEnv` under the selected ID.
+There are no task-specific environment subclasses or direct-planning paths.
 
 `MotionGenOptions` fields:
 

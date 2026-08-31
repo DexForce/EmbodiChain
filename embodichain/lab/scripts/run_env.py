@@ -36,9 +36,6 @@ from embodichain.lab.gym.envs.demo import (
     DemoExecutionCfg,
     execute_demo_episode,
 )
-from embodichain.lab.gym.envs.expert_program.loader import (
-    load_expert_program as _load_expert_program,
-)
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -139,17 +136,20 @@ def _commit_pending_episode(
     env: Any,
     save_env_ids: Sequence[int] | torch.Tensor | None,
 ) -> None:
-    """Commit selected rows and discard unused rows from the same vector batch."""
+    """Commit selected dataset rows through one reset of the full vector batch."""
     selected = _normalize_save_env_ids(env, save_env_ids)
-    num_envs = int(getattr(_env_target(env), "num_envs", 1))
-    _reset_episode_rows(env, selected, save_data=True)
+    target = _env_target(env)
+    all_env_ids = tuple(range(int(getattr(target, "num_envs", 1))))
+    if selected == all_env_ids:
+        _reset_episode_rows(env, selected, save_data=True)
+        return
 
-    selected_set = set(selected)
-    discarded = tuple(
-        env_id for env_id in range(num_envs) if env_id not in selected_set
+    commit_env_ids = torch.tensor(
+        selected,
+        dtype=torch.int32,
+        device=getattr(target, "device", None),
     )
-    if discarded:
-        _reset_episode_rows(env, discarded, save_data=False)
+    env.reset(options={"save_data": False, "commit_env_ids": commit_env_ids})
 
 
 def _save_failed_episodes_enabled(env: Any) -> bool:
@@ -263,13 +263,15 @@ def generate_function(
     execution_cfg: DemoExecutionCfg | None = None,
     **kwargs: Any,
 ) -> bool:
-    """Generate, execute, and transactionally save one task episode batch.
+    """Generate, execute, and commit one demonstration collection batch.
 
     A task owns its segment count through ``create_demo_segments``. The legacy
     ``num_traj`` parameter is accepted only as ``None`` or ``1`` so callers do
     not accidentally repeat a one-grasp planner inside the same episode. When
     a dataset functor enables ``save_failed_episodes``, a failed result with at
     least one frame in every selected row is committed instead of retried.
+    Continuous mode has one reset commit boundary; fragment mode delegates
+    independent idempotent fragment commits to the dataset recorder.
 
     Args:
         env: The environment instance.
@@ -828,10 +830,10 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.set_defaults(viser_image_fps=None)
 
     parser.add_argument(
-        "--expert-program",
+        "--task-program",
         type=str,
         default=None,
-        help="Path to a declarative Expert Program (.json, .yaml, or .yml).",
+        help="Path to a declarative Task Program (.json, .yaml, or .yml).",
     )
     parser.add_argument(
         "--debug-mode",
@@ -930,22 +932,6 @@ def cli(argv: Sequence[str] | None = None) -> None:
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
-    expert_program_path = getattr(args, "expert_program", None)
-    if expert_program_path is not None:
-        if getattr(env_cfg, "expert_program", None) is not None:
-            raise ValueError(
-                "Expert Program input is ambiguous: choose either the Gym "
-                "config's expert_program_path or --expert-program, not both."
-            )
-        env_cfg.expert_program = _load_expert_program(expert_program_path)
-    if (
-        getattr(env_cfg, "expert_program", None) is not None
-        and getattr(args, "action_config", None) is not None
-    ):
-        raise ValueError(
-            "Declarative Expert Programs and --action_config are mutually "
-            "exclusive execution sources."
-        )
 
     if args.replay and args.replay_mode == "control":
         log_info("Dataset saving disabled for control replay mode.", color="green")

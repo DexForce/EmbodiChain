@@ -21,7 +21,7 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
    .. autosummary::
 
       demo
-      expert_program
+      task_program
       managers
       types
       wrapper
@@ -29,7 +29,7 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
 .. toctree::
    :hidden:
 
-   embodichain.lab.gym.envs.expert_program
+   embodichain.lab.gym.envs.task_program
 
 .. currentmodule:: embodichain.lab.gym.envs
 
@@ -102,7 +102,7 @@ segment spans.
 Dynamic Settling
 ----------------
 
-The shared settling monitor is used by both reset events and Expert Program
+The shared settling monitor is used by both reset events and Task Program
 post-policies, so they apply the same row-local stability semantics.
 
 .. currentmodule:: embodichain.lab.gym.envs.settling

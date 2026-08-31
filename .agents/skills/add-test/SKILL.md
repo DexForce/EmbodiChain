@@ -21,7 +21,7 @@ Tests mirror the source tree under `tests/`:
 embodichain/lab/sim/solvers/pytorch_solver.py  →  tests/sim/solvers/test_pytorch_solver.py
 embodichain/lab/gym/envs/managers/rewards.py    →  tests/gym/envs/managers/test_reward_functors.py
 embodichain/toolkits/graspkit/pg_grasp/foo.py   →  tests/toolkits/test_pg_grasp.py
-embodichain_tasks/embodichain_tasks/rl/push_cube.py → tests/gym/envs/tasks/test_push_cube.py
+embodichain_tasks/embodichain_tasks/manipulation/push_cube.py → tests/gym/envs/tasks/test_push_cube.py
 ```
 
 Rules:
@@ -125,6 +125,34 @@ For backend/device matrices, run the complete contract on one representative
 configuration and use small (one environment, low-resolution) smoke tests for
 the remaining configurations. Always destroy a real `SimulationManager` and
 flush its cleanup queue in teardown.
+
+## Task Program and task-configuration tests
+
+Choose the test surface by ownership layer:
+
+| Changed boundary | Primary test location |
+|---|---|
+| Language schema, strict decoder, AST/compiler | `tests/lab/task_program/` |
+| Semantic scene/profile/call/effect contracts | `tests/lab/task_program/semantics/` |
+| Configured integration, catalog, simulation assembly | `tests/gym/envs/task_program/` |
+| Gym bridge and episode completion | `tests/gym/envs/task_program/`, `tests/gym/envs/test_embodied_env_task_program.py` |
+| Packaged task components/deployments | `tests/test_task_program_package_data.py`, task-layout/config tests |
+| Lightweight RL environment/trainer routing | `tests/learning/` |
+
+For JSON/YAML configuration, test through the same strict loader and component
+composition used by production. A `yaml.safe_load()` assertion alone does not
+prove closed fields, relative component paths, physical scene targets,
+contracts, catalog coverage, or program preflight.
+
+Add negative coverage for the earliest ownership boundary being changed:
+unknown fields, missing component files, duplicate inline/component ownership,
+absent `simulation_uid`, contract mismatch, unknown Semantic Calls, or missing
+registered lowerers. Keep live-simulation qualification separate from
+provider-free decode/compiler tests.
+
+For a complete configured Task Program deployment, use
+`$add-task-program`'s read-only inspector as a focused smoke check before
+adding a heavier environment test.
 
 ## Mocking Patterns for Functor Tests
 

@@ -31,6 +31,8 @@ topics:
       - manual update
       - GPU physics
       - simulation lifecycle
+      - ArticulationJointKinematics
+      - get_parent_joint_chain
     paths:
       - topics/simulation-system/simulation-system.md
     source_of_truth:
@@ -41,10 +43,10 @@ topics:
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
       - embodichain/lab/sim/objects/__init__.py
+      - embodichain/lab/sim/objects/articulation.py
       - embodichain/lab/sim/sensors/__init__.py
       - embodichain/lab/sim/solvers/__init__.py
       - embodichain/lab/sim/planners/__init__.py
-      - embodichain/lab/sim/skills/__init__.py
       - embodichain/lab/sim/workspace/__init__.py
       - embodichain/lab/gym/envs/base_env.py
       - embodichain/lab/gym/envs/embodied_env.py
@@ -71,6 +73,8 @@ topics:
       - gym environment
       - register env
       - task registration
+      - list task
+      - list-task
       - 环境框架
       - 任务环境
       - env profiler
@@ -83,7 +87,17 @@ topics:
       - EmbodiedEnv
       - BaseEnv
       - register_env
+      - list-task
+      - task listing
+      - supports_rl
       - gym
+      - environment.component
+      - reusable physical environment
+      - embodiment.component
+      - reusable embodiment
+      - scene_binding
+      - handwritten trajectory config
+      - componentized Gym config
       - task
       - step
       - reset
@@ -97,17 +111,24 @@ topics:
     paths:
       - topics/env-framework/env-framework.md
     source_of_truth:
+      - embodichain/__main__.py
       - embodichain/lab/gym/envs/base_env.py
       - embodichain/lab/gym/envs/types.py
       - embodichain/lab/gym/envs/demo.py
       - embodichain/lab/gym/envs/embodied_env.py
-      - embodichain/lab/gym/envs/expert_program/bridge.py
+      - embodichain/lab/gym/envs/task_program/bridge.py
+      - embodichain/learning/rl/env.py
       - embodichain_tasks/embodichain_tasks/
       - embodichain/lab/gym/utils/
+      - embodichain/lab/gym/utils/_component_composition.py
+      - embodichain_tasks/configs/components/embodiments/cobotmagic.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.yaml
+      - embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json
     related_topics:
       - simulation-system
       - manager-functor
       - sim-visualization
+      - task-programs
     status: active
 
   - id: manager-functor
@@ -258,6 +279,8 @@ topics:
       - 相机
     keywords:
       - sensor
+      - embodiment sensor
+      - embodiment.component
       - camera
       - stereo
       - contact
@@ -275,6 +298,10 @@ topics:
       - embodichain/lab/sim/sensors/camera.py
       - embodichain/lab/sim/sensors/stereo.py
       - embodichain/lab/sim/sensors/contact_sensor.py
+      - embodichain/lab/gym/utils/gym_utils.py
+      - embodichain/lab/gym/utils/_component_composition.py
+      - embodichain/lab/task_program/integrations/_configured_composition.py
+      - embodichain_tasks/configs/components/embodiments/
     related_topics:
       - simulation-system
       - robot-system
@@ -385,9 +412,24 @@ topics:
       - embodichain/lab/sim/planners/motion_generator.py
       - embodichain/lab/sim/planners/neural_planner.py
       - embodichain/lab/sim/planners/utils.py
-      - embodichain/lab/sim/skills/scene.py
+      - embodichain/lab/task_program/semantics/scene.py
       - embodichain/toolkits/graspkit/pose_generator.py
-      - embodichain_tasks/embodichain_tasks/multi_segments/cube_pick_place.py
+      - embodichain/lab/task_program/integrations/configured.py
+      - embodichain/lab/task_program/integrations/_configured_composition.py
+      - embodichain/lab/gym/envs/task_program/registration.py
+      - embodichain/lab/task_program/integrations/_configured_services.py
+      - embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml
+      - embodichain_tasks/configs/components/embodiments/dual_ur5_dh_pgi_140_80.yaml
+      - embodichain_tasks/configs/components/embodiments/franka_panda.yaml
+      - embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/integration.yaml
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/task.franka.yaml
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/task_program/integration.yaml
+      - embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml
+      - embodichain_tasks/configs/tasks/manipulation/hand_over/task_program/integration.yaml
     related_topics:
       - simulation-system
       - robot-system
@@ -460,8 +502,11 @@ topics:
       - embodichain/lab/gym/utils/gym_utils.py
       - embodichain/lab/gym/utils/registration.py
       - embodichain/utils/utility.py
-      - embodichain_tasks/configs/agents/rl/
-      - embodichain_tasks/embodichain_tasks/rl/
+      - embodichain_tasks/configs/tasks/
+      - embodichain_tasks/configs/tasks/classic_control/
+      - embodichain_tasks/configs/tasks/manipulation/push_cube/
+      - embodichain_tasks/embodichain_tasks/classic_control/
+      - embodichain_tasks/embodichain_tasks/manipulation/push_cube.py
     related_topics:
       - simulation-system
       - env-framework
@@ -532,29 +577,21 @@ topics:
     status: active
 
   - id: atomic-actions
-    title: Atomic Actions
+    title: Atomic Skills
     aliases:
+      - atomic skill
+      - atomic skills
       - atomic action
       - atomic actions
       - motion primitive
       - action primitive
-      - object semantics
-      - scene grounding
-      - scene registry
-      - semantic scene
-      - robot skill profile
-      - resource graph
-      - resource DAG
-      - semantic skill catalog
-      - semantic skill compiler
-      - semantic call
-      - semantic workflow
-      - semantic integration manifest
       - capability binding
       - AtomicAction
       - ActionInvocation
       - AtomicActionEngine
+      - trajectory-only execution
       - trajectory ops
+      - 原子技能
       - 原子动作
     keywords:
       - atomic
@@ -568,10 +605,13 @@ topics:
       - ParallelJawGripperModelCfg
       - grasp pose generator
       - ActionPlan
+      - PlanningFailure
       - TrajectorySegment
       - TimedTrajectory
       - PlanningContext
       - ExecutionSession
+      - ExecutionEvent
+      - TRAJECTORY_SEGMENT_ENTERED
       - EffectVerificationRequest
       - EffectVerificationResult
       - eligible_mask
@@ -584,35 +624,18 @@ topics:
       - SceneSnapshotSupplier
       - SceneProvider
       - RigidObjectSceneProvider
-      - SceneRegistry
-      - RegistrySceneProvider
-      - SceneEntityRef
-      - SceneObjectRef
-      - SceneArticulationRef
-      - SceneLinkRef
-      - SceneAffordanceRef
-      - SceneEntityRegistration
-      - SceneCollisionRole
-      - SceneCollisionWorldMode
-      - from_simulation
-      - validate_collision_integration
-      - make_planning_scene_provider
-      - collision_geometry_by_id
-      - collision_world_entity_ids
-      - canonical scene ID
-      - logical collision source ID
-      - sphere derived obstacle names
-      - empty collision mesh
-      - flat entity namespace
-      - native_name
-      - parent native source identity
+      - create_simulation_atomic_action_engine
       - ObjectSemantics
       - entity_id
       - frozen ObjectSemantics
-      - legacy uid
-      - stable entity identity
+      - canonical entity identity
       - snapshot grounding
       - AssembleGoal
+      - PushObject
+      - PushObjectGoal
+      - PushObjectOptions
+      - PushObjectToolCalibration
+      - push_object
       - AssembleAffordance
       - base_pose
       - _scene_dependencies
@@ -630,50 +653,6 @@ topics:
       - SkillEndpointRequirement
       - DisjointSlotEndpoints
       - DisjointResourceSlots
-      - RobotSkillProfile
-      - BoundRobotSkillProfile
-      - RobotResource
-      - ResourceEndpoint
-      - ResourceEndpointAdapter
-      - ControlPartEndpoint
-      - ControlPartEndpointAdapter
-      - EndpointResolution
-      - ResolvedResourceEndpoint
-      - ResourceBinding
-      - ResourceClaim
-      - ResolvedRobotResource
-      - ResolvedSkillBinding
-      - SkillPolicyPreset
-      - SkillPolicyPreset.required_planner
-      - SemanticCallSpec
-      - SemanticPose
-      - Pick
-      - Place
-      - HandOver
-      - RegisteredSemanticCall
-      - SemanticCallCatalog
-      - SceneManifest
-      - SemanticIntegrationManifest
-      - BoundSemanticIntegration
-      - SemanticSkillCompiler
-      - SkillRuntime
-      - AtomicSkills
-      - SkillResult
-      - SkillFailure
-      - execution_prefix_length
-      - EffectEvidenceCollector
-      - ParallelSkillRuntime
-      - ParallelCommandSafetyValidator
-      - SemanticWorkflow
-      - SemanticLowering
-      - GroundedSemanticCall
-      - RelationTargetGrounder
-      - HandOverPoseProvider
-      - SemanticDiagnostic
-      - SemanticValidationError
-      - affordance_capabilities
-      - default_affordances
-      - grounding_providers
       - skill_catalog_revision
       - binding_contract
       - engine.skills
@@ -690,7 +669,13 @@ topics:
       - SceneEntityPose
       - PressGoal.target_pose
       - SlideGoal.target_pose
+      - OpenDoorGoal.target_pose
       - TwistGoal.target_pose
+      - OpenDoorGoal.open_fraction
+      - OpenDoorAffordance.opening_direction
+      - OpenDoorAffordance.from_articulation
+      - hinge_joint_name
+      - ObservedArticulationJointState
       - open_loop
       - axis_translation_keyframes
       - dynamic goal
@@ -714,6 +699,15 @@ topics:
       - cancel then hold
       - ActionPlan.commands
       - joint_trajectory
+      - TrackingPolicy
+      - TrackingRuntime
+      - TrackingFeedbackProvider
+      - TrackingCommandProjector
+      - TrackingMetricEvaluator
+      - TrackingFrame
+      - TimedTrackingSequence
+      - typed tracking
+      - terminal acceptance
       - invocation revision
       - MotionPolicy
       - MotionPolicy.strategy
@@ -749,10 +743,12 @@ topics:
       - embodichain/lab/sim/atomic_actions/requirements.py
       - embodichain/lab/sim/atomic_actions/runtime.py
       - embodichain/lab/sim/atomic_actions/runtime_commands.py
+      - embodichain/lab/sim/atomic_actions/tracking.py
       - embodichain/lab/sim/atomic_actions/transports.py
       - embodichain/lab/sim/atomic_actions/state.py
       - embodichain/lab/sim/atomic_actions/plans.py
       - embodichain/lab/sim/atomic_actions/execution.py
+      - embodichain/lab/sim/atomic_actions/verification.py
       - embodichain/lab/sim/atomic_actions/runner.py
       - embodichain/lab/sim/atomic_actions/scene.py
       - embodichain/lab/sim/atomic_actions/sim_adapter.py
@@ -764,21 +760,165 @@ topics:
       - embodichain/toolkits/graspkit/pose_generator.py
       - embodichain/toolkits/graspkit/pg_grasp/pose_generator.py
       - embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py
-      - embodichain/lab/sim/skills/scene.py
-      - embodichain/lab/sim/skills/profiles.py
-      - embodichain/lab/sim/skills/calls.py
-      - embodichain/lab/sim/skills/integration.py
-      - embodichain/lab/sim/skills/compiler.py
-      - embodichain/lab/sim/skills/effects.py
-      - embodichain/lab/sim/skills/evidence.py
-      - embodichain/lab/sim/skills/parallel.py
-      - embodichain/lab/sim/skills/parallel_runtime.py
-      - embodichain/lab/sim/skills/runtime.py
-      - embodichain/lab/sim/skills/__init__.py
-      - scripts/tutorials/semantic_skill/
     related_topics:
       - simulation-system
       - motion-planning
       - robot-system
       - ik-solvers
+      - task-programs
+    status: active
+
+  - id: task-programs
+    title: Embodied Task Program
+    aliases:
+      - task program
+      - task programs
+      - embodied task program
+      - embodied task DSL
+      - task DSL
+      - declarative task program
+      - declarative task programs
+      - task program schema
+      - task program compiler
+      - task program bridge
+      - task program registration
+      - semantic call
+      - semantic calls
+      - semantic contracts
+      - semantic workflow
+      - semantic integration manifest
+      - scene registry
+      - semantic scene
+      - robot skill profile
+      - resource graph
+      - resource DAG
+      - 任务程序
+      - 具身任务程序
+      - 语义调用
+    keywords:
+      - TaskProgramCfg
+      - TaskProgramCompiler
+      - CompiledTaskProgram
+      - TaskProgramEnvironmentAdapter
+      - SimulationTaskProgramRegistration
+      - RegisteredSemanticLowererFactory
+      - RegisteredSemanticLowererDeclaration
+      - TaskProgramDemoBridge
+      - DemoSegment
+      - SimulationSceneBinding
+      - SimulationRobotSkillProfileBinding
+      - create_simulation_task_program_adapter
+      - load_task_program
+      - decode_task_program
+      - task_program component
+      - Task Program deployment
+      - environment.component
+      - reusable physical environment
+      - embodiment.component
+      - embodiment skill_profile
+      - skill_profile
+      - scene.component
+      - scene_binding
+      - integration scene_binding
+      - physical scene
+      - execution_policy
+      - integration.yaml
+      - configured Task Program integration
+      - nested affordances
+      - affordance ownership
+      - config-driven environment
+      - runtime environment ID
+      - dynamic environment registration
+      - SequenceCfg
+      - RepeatCfg
+      - SegmentCfg
+      - InvokeCfg
+      - ParallelCfg
+      - BarrierCfg
+      - RegisteredSemanticCallCfg
+      - ObjectNearTargetValidatorCfg
+      - ArticulationJointPositionValidatorCfg
+      - SemanticCallSpec
+      - SemanticPose
+      - Pick
+      - Place
+      - HandOver
+      - RegisteredSemanticCall
+      - SemanticCallCatalog
+      - SceneRegistry
+      - RegistrySceneProvider
+      - SceneEntityRef
+      - SceneObjectRef
+      - SceneArticulationRef
+      - SceneLinkRef
+      - SceneAffordanceRef
+      - SceneEntityRegistration
+      - SceneCollisionRole
+      - SceneCollisionWorldMode
+      - SceneManifest
+      - RobotSkillProfile
+      - BoundRobotSkillProfile
+      - RobotResource
+      - ResourceEndpoint
+      - ResourceEndpointAdapter
+      - ControlPartEndpoint
+      - ControlPartEndpointAdapter
+      - EndpointResolution
+      - ResolvedResourceEndpoint
+      - ResourceBinding
+      - ResourceClaim
+      - ResolvedRobotResource
+      - ResolvedSkillBinding
+      - SkillPolicyPreset
+      - EffectAssurance
+      - EffectEvidenceCollector
+      - SemanticIntegrationManifest
+      - BoundSemanticIntegration
+      - SemanticDiagnostic
+      - SemanticValidationError
+      - ParallelCommandSafetyValidator
+      - affordance_capabilities
+      - default_affordances
+      - grounding_providers
+      - integration fingerprint
+      - provider-aware preflight
+      - segment acceptance
+      - trajectory-only preset
+      - effect_monitors
+      - target_pose_mode
+      - simulation.move_held_object
+      - simulation.pour
+      - simulation.push_object
+      - program completion mask
+      - repeated pick place
+      - open drawer
+      - hand over
+      - pour water
+      - 配置生成环境
+      - 集成配置
+      - 运行时环境注册
+    paths:
+      - topics/task-programs/task-programs.md
+    source_of_truth:
+      - embodichain/agents/mllm/task_program.py
+      - embodichain/lab/task_program/
+      - embodichain/lab/gym/envs/task_program/
+      - embodichain/lab/gym/envs/embodied_env.py
+      - embodichain/lab/gym/envs/demo.py
+      - embodichain/lab/scripts/run_env.py
+      - embodichain/lab/gym/utils/_component_composition.py
+      - embodichain/lab/task_program/semantics/calls.py
+      - embodichain/lab/task_program/semantics/integration.py
+      - embodichain/lab/task_program/integrations/_configured_composition.py
+      - embodichain_tasks/configs/components/
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/
+      - embodichain_tasks/configs/tasks/manipulation/hand_over/
+      - embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/
+    related_topics:
+      - atomic-actions
+      - env-framework
+      - simulation-system
+      - motion-planning
+      - sensor-system
     status: active

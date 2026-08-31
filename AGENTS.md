@@ -34,8 +34,8 @@ the agent should:
 
 Available topics: `simulation-system`, `env-framework`,
 `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`,
-`sim-visualization`, `motion-planning`, `atomic-actions`, `rl-learning`,
-`configclass-pattern`, `randomization`.
+`sim-visualization`, `motion-planning`, `atomic-actions`, `task-programs`,
+`rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
 
@@ -63,9 +63,15 @@ EmbodiChain/
 │   ├── learning/                 # Learning systems
 │   │   └── rl/                   # RL: PPO/GRPO/APG, buffers, collectors, policies
 │   ├── lab/                      # Simulation lab
+│   │   ├── task_program/         # Embodied Task Program language, semantics, compiler, runtime, integrations
+│   │   │   ├── language/         # Schema/AST, strict decoder, validation, loader
+│   │   │   ├── semantics/        # Semantic Calls, scene/profile/effect/evidence contracts
+│   │   │   ├── compiler/         # AST compilation and Semantic Call lowering
+│   │   │   ├── runtime/          # Sequential/parallel Semantic Call execution
+│   │   │   └── integrations/     # Explicit environment and simulation assembly
 │   │   ├── visualization/        # Browser visualization protocol, runtime, and Viser backend
 │   │   ├── gym/                  # OpenAI Gym-compatible environments
-│   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
+│   │   │   ├── envs/             # BaseEnv, EmbodiedEnv, narrow Task Program Gym bridge
 │   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
 │   │   │   │   │   └── randomization/  # Physics, geometry, spatial, visual randomizers
 │   │   │   │   ├── action_bank/  # Configurable action primitives
@@ -78,7 +84,6 @@ EmbodiChain/
 │   │   │   ├── robots/           # Robot-specific configs and params (dexforce_w1, cobotmagic)
 │   │   │   ├── planners/         # Motion planners (TOPPRA, motion generator)
 │   │   │   ├── solvers/          # IK solvers (SRS, OPW, pink, pinocchio, pytorch)
-│   │   │   ├── skills/           # Semantic scene and robot-skill binding contracts
 │   │   │   └── workspace/        # Reachability analysis and runtime workspace queries
 │   │   ├── devices/              # Real-device controllers
 │   │   └── scripts/              # Environment, preview, and analysis entry points
@@ -100,6 +105,57 @@ EmbodiChain/
 ├── setup.py                      # Package setup
 └── VERSION                       # Package version file
 ```
+
+Official tasks use a task-first layout:
+
+- Import-registered Python entry point: `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`
+- Import-registered tasks may keep an inline runnable deployment at
+  `embodichain_tasks/configs/tasks/<category-path>/<task>/env.{json,yaml}`
+- Componentized tasks use a reusable physical-environment `env.yaml`, owning
+  both simulation-scene entities and ordinary environment values, plus one or
+  more runnable `task.<embodiment>.yaml` deployments; the reusable environment
+  contains no `id`, robot, sensor, or Task Program fields
+- Optional Task Program components: `<task config>/task_program/`, containing
+  `program.yaml` and `integration.yaml`; the integration owns its nested
+  semantic `scene_binding`
+- Reusable embodiment and execution-policy components:
+  `embodichain_tasks/configs/components/{embodiments,execution_policies}/`.
+  An embodiment owns one simulation robot, its sensor suite, and its Task
+  Program-facing `skill_profile` declaration when that semantic metadata is
+  needed.
+- Optional RL configuration: `<task config>/agents/<algorithm>.{json,yaml}`
+
+The category path starts with a top-level task family and may include a
+subdomain. For example, tableware tasks belong under
+`manipulation/tableware`, while a general manipulation task can live directly
+under `manipulation`.
+
+Keep `@register_env` in the task-named module. Do not create a same-named
+per-task Python package for a single entry point, or Python `scenario` / `mdp`
+modules when the existing JSON/YAML config and manager functors express the
+task. Organize tasks by task family, optional subdomain, and task identity,
+not by solution method such as `task_program` or `rl`.
+
+Any Gym deployment, including an import-registered handwritten-demo task, may
+select `environment.component`, `embodiment.component`, and `scene.component`.
+`config_to_cfg()` expands those components before ordinary environment parsing.
+A deployment must choose either an environment component or inline environment
+and scene fields, and either an embodiment component or inline
+`robot`/`sensor` fields, never both. An embodiment
+component may omit `skill_profile`. A scene component is always physical-only;
+Task Program semantic roots and affordances live in the task integration's
+nested `scene_binding`. The original inline Gym format remains supported.
+
+A supported configuration-defined Task Program may omit `<task>.py`:
+declare `environment.component`,
+`task_program.{program,integration,execution_policy}`, and
+`embodiment.component` in a runnable task deployment. The reusable environment
+is independent of Task Program and can also be selected by handwritten tasks.
+`config_to_cfg()` composes those typed YAML components,
+checks that scene-binding targets exist in the physical scene, validates the
+scene/embodiment contracts, binds the trusted integration IDs into the
+otherwise embodiment-independent program, and registers the common
+`EmbodiedEnv`. Component files do not use compatibility `version` fields.
 
 ---
 
@@ -269,7 +325,27 @@ Also add robot documentation in `docs/source/resources/robot/` (see existing exa
 
 ### Adding a New Task Environment
 
-Use the `/add-task-env` skill to scaffold a new task with the correct file structure, `@register_env` decorator, base class, and test stub.
+Use the `/add-task-env` skill to route a new task to an environment-only
+baseline, handwritten expert trajectory, Task Program expert trajectory, or RL
+implementation. The skill creates a Python task entry point only when the
+selected route requires one.
+
+### Adding a Task Program
+
+Use the `/add-task-program` skill to author a program, generate its trusted
+integration configuration, attach embodiment-specific deployments, or validate
+and repair an existing configured Task Program.
+
+### Adding an Embodiment Component
+
+Use the `/add-embodiment-component` skill to package one simulation robot,
+its sensor suite, and an optional Task Program-facing `skill_profile` for reuse
+across tasks.
+
+### Adding a Semantic Call
+
+Use the `/add-semantic-call` skill to expose an Atomic Skill through a
+registered Task Program call or to make a deliberate built-in language change.
 
 ### Adding Functors
 
@@ -289,7 +365,10 @@ Tool-specific adapter files should stay thin and point back to the canonical ski
 | Skill | Command | Purpose |
 |-------|---------|---------|
 | Add Atomic Action | `/add-atomic-action` | Scaffold a new simulation atomic action |
-| Add Task Env | `/add-task-env` | Scaffold a new `EmbodiedEnv` task |
+| Add Task Env | `/add-task-env` | Route and scaffold environment, expert, and RL task variants |
+| Add Task Program | `/add-task-program` | Author, integrate, deploy, validate, or repair a Task Program |
+| Add Embodiment Component | `/add-embodiment-component` | Add a reusable robot/sensor/skill-profile component |
+| Add Semantic Call | `/add-semantic-call` | Expose an Atomic Skill as a Task Program Semantic Call |
 | Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
 | Add Test | `/add-test` | Scaffold tests following project conventions |
 | Update API Docs | `/update-api-docs` | Document public exports reported by the read-only API checker |

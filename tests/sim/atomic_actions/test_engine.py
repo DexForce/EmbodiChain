@@ -35,6 +35,7 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     BUILTIN_ACTION_TYPES,
     ControlPartCommandProfile,
+    EntityState,
     JointPositionCommand,
     JointPositionGoal,
     JointPositionTarget,
@@ -46,16 +47,12 @@ from embodichain.lab.sim.atomic_actions import (
     PressGoal,
     PressOptions,
     ResolvedActionRequest,
+    SceneSnapshot,
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
     TimedTrajectory,
-)
-from embodichain.lab.sim.skills import (
-    ControlPartEndpoint,
-    ResourceBinding,
-    RobotResource,
-    RobotSkillProfile,
+    TrackingPolicy,
 )
 
 ACTION_DT = 0.02
@@ -113,6 +110,24 @@ class OtherStubAction(StubAction):
     """Second configured skill used to verify shared engine resources."""
 
     skill_id: ClassVar[str] = "other_stub"
+
+
+class StubSceneProvider:
+    """Record scene captures and return one configured snapshot."""
+
+    def __init__(self, scene: SceneSnapshot) -> None:
+        self.scene = scene
+        self.calls: list[tuple[float, torch.Tensor]] = []
+
+    def snapshot(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> SceneSnapshot:
+        """Return the configured scene and retain owned call arguments."""
+        self.calls.append((timestamp, env_ids.clone()))
+        return self.scene
 
 
 def _motion_generator(
@@ -201,6 +216,52 @@ def test_engine_can_disable_builtin_loading() -> None:
     assert _engine(load_builtins=False).actions == {}
 
 
+def test_initial_context_uses_configured_scene_provider() -> None:
+    scene = SceneSnapshot(
+        timestamp=1.5,
+        version=3,
+        entities={"target": EntityState(torch.eye(4))},
+    )
+    provider = StubSceneProvider(scene)
+    engine = AtomicActionEngine(
+        _motion_generator(),
+        load_builtins=False,
+        scene_provider=provider,
+    )
+
+    context = engine.initial_context(timestamp=1.5)
+
+    assert context.scene is scene
+    assert len(provider.calls) == 1
+    timestamp, env_ids = provider.calls[0]
+    assert timestamp == pytest.approx(1.5)
+    assert torch.equal(env_ids, torch.tensor([0, 1]))
+
+
+def test_initial_context_explicit_scene_overrides_configured_provider() -> None:
+    provider = StubSceneProvider(SceneSnapshot(timestamp=0.0, version=1))
+    explicit_scene = SceneSnapshot(timestamp=0.0, version=2)
+    engine = AtomicActionEngine(
+        _motion_generator(),
+        load_builtins=False,
+        scene_provider=provider,
+    )
+
+    context = engine.initial_context(scene=explicit_scene)
+
+    assert context.scene is explicit_scene
+    assert provider.calls == []
+
+
+def test_engine_rejects_invalid_scene_provider() -> None:
+    with pytest.raises(TypeError, match="scene_provider must implement SceneProvider"):
+        AtomicActionEngine(
+            _motion_generator(),
+            load_builtins=False,
+            scene_provider=object(),  # type: ignore[arg-type]
+        )
+
+
 def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
     generator = _motion_generator(robot_dof=3)
     generator.robot.control_parts = {"arm": object(), "hand": object()}
@@ -217,6 +278,7 @@ def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
     semantics = ObjectSemantics(
         affordance=PressAffordance(press_position=(0.0, 0.0, 0.0)),
         geometry={},
+        entity_id="button",
     )
     invocation = ActionInvocation(
         skill_id="press",
@@ -362,12 +424,14 @@ def test_engine_make_invocation_binds_direct_control_parts() -> None:
     engine.register(StubAction())
     goal = JointPositionGoal(torch.ones(2, 3))
     motion_policy = MotionPolicy(sample_count=2)
+    tracking_policy = TrackingPolicy.timed()
 
     invocation = engine.make_invocation(
         "stub",
         goal,
         control_parts={"primary": {"motion": "all"}},
         motion_policy=motion_policy,
+        tracking_policy=tracking_policy,
         invocation_id="direct-call",
         revision=1,
     )
@@ -378,48 +442,14 @@ def test_engine_make_invocation_binds_direct_control_parts() -> None:
     assert invocation.skill_id == "stub"
     assert invocation.goal is goal
     assert invocation.motion_policy is motion_policy
+    assert invocation.tracking_policy is tracking_policy
     assert invocation.invocation_id == "direct-call"
     assert invocation.revision == 1
     assert target.control_part == "all"
     assert engine.plan(invocation).plan_success.tolist() == [True, True]
 
 
-def test_engine_make_invocation_uses_profile_default_binding() -> None:
-    engine = _engine(robot_dof=3)
-    engine.register(StubAction())
-    engine.bind_skill_profile(
-        RobotSkillProfile(
-            profile_id="stub-profile",
-            resources={
-                "whole_robot": RobotResource(
-                    "whole_robot",
-                    endpoints={
-                        "motion": ControlPartEndpoint(
-                            "all",
-                            capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
-                        )
-                    },
-                )
-            },
-            defaults={
-                "stub": ResourceBinding({"primary": "whole_robot"}),
-            },
-        )
-    )
-
-    invocation = engine.make_invocation(
-        "stub",
-        JointPositionGoal(torch.ones(2, 3)),
-        motion_policy=MotionPolicy(sample_count=2),
-    )
-    endpoint = invocation.binding.endpoint("primary", "motion")
-
-    assert endpoint.resource_id == "whole_robot"
-    assert endpoint.require_target(JointPositionTarget).control_part == "all"
-    assert engine.plan(invocation).plan_success.tolist() == [True, True]
-
-
-def test_engine_make_invocation_requires_direct_binding_without_profile() -> None:
+def test_engine_make_invocation_requires_direct_binding() -> None:
     engine = _engine()
     engine.register(StubAction())
 
@@ -427,31 +457,6 @@ def test_engine_make_invocation_requires_direct_binding_without_profile() -> Non
         engine.make_invocation(
             "stub",
             JointPositionGoal(torch.ones(2, 3)),
-        )
-
-
-def test_engine_make_invocation_rejects_resources_without_profile() -> None:
-    engine = _engine()
-    engine.register(StubAction())
-
-    with pytest.raises(ValueError, match="requires a bound RobotSkillProfile"):
-        engine.make_invocation(
-            "stub",
-            JointPositionGoal(torch.ones(2, 3)),
-            resources={"primary": "whole_robot"},
-        )
-
-
-def test_engine_make_invocation_rejects_conflicting_binding_sources() -> None:
-    engine = _engine()
-    engine.register(StubAction())
-
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        engine.make_invocation(
-            "stub",
-            JointPositionGoal(torch.ones(2, 3)),
-            control_parts={"primary": {"motion": "all"}},
-            resources={"primary": "whole_robot"},
         )
 
 
@@ -504,41 +509,21 @@ def test_engine_motion_generator_is_read_only() -> None:
         engine.motion_generator = Mock()  # type: ignore[misc]
 
 
-def test_engine_plan_action_supports_unregistered_configured_instance() -> None:
+def test_engine_requires_registered_skill_id_for_direct_binding() -> None:
     engine = _engine()
     action = StubAction()
-    binding = engine.bind_control_parts(
-        action,
-        {"primary": {"motion": "all"}},
-    )
-    invocation = ActionInvocation(
-        skill_id="stub",
-        goal=JointPositionGoal(torch.ones(2, 3)),
-        binding=binding,
-        motion_policy=MotionPolicy(sample_count=2),
-    )
-
-    plan = engine.plan_action(
-        action,
-        invocation,
-        engine.initial_context(),
-    )
-
-    assert plan.plan_success.tolist() == [True, True]
-    assert action.is_bound
-    assert engine.actions == {}
-
-
-def test_engine_cannot_build_binding_for_action_owned_by_another_engine() -> None:
-    action = StubAction()
-    first = _engine()
-    first.register(action)
-
-    with pytest.raises(ValueError, match="belongs to another engine"):
-        _engine().bind_control_parts(
-            action,
+    with pytest.raises(TypeError, match="skill_id must be a string"):
+        engine.bind_control_parts(
+            action,  # type: ignore[arg-type]
             {"primary": {"motion": "all"}},
         )
+
+    with pytest.raises(KeyError, match="No atomic action registered"):
+        engine.bind_control_parts("stub", {"primary": {"motion": "all"}})
+
+    engine.register(action)
+    binding = engine.bind_control_parts("stub", {"primary": {"motion": "all"}})
+    assert binding.endpoint("primary", "motion").target.control_part == "all"
 
 
 def test_action_cannot_be_rebound_to_another_engine() -> None:

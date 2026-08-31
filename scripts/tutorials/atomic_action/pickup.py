@@ -29,8 +29,8 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     GraspGoal,
     PickUpOptions,
     MotionPolicy,
@@ -125,14 +125,15 @@ def main() -> None:
     """Plan and replay a sampled antipodal PickUp trajectory."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot)
+    robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
     motion_gen = create_curobo_motion_generator(robot)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,

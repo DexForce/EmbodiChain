@@ -897,7 +897,7 @@ def test_segment_fragment_payloads_are_independent_and_keep_provenance() -> None
                 "continuity_id": 0,
                 "outcome_kind": "succeeded",
                 "metadata": {
-                    "expert_program_id": "repeat_pick_place",
+                    "task_program_id": "repeat_pick_place",
                     "program_segment_id": "pick_0",
                 },
             },
@@ -968,6 +968,61 @@ def test_failed_segment_fragment_requires_explicit_opt_in() -> None:
     assert len(payloads) == 1
     assert not payloads[0][3]["segment_accepted"].any()
     assert payloads[0][4]["success"] is False
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_fragment_retry_skips_an_earlier_independent_commit() -> None:
+    """A later fragment failure cannot duplicate an earlier committed slice."""
+    env = Mock()
+    env.rollout_steps = torch.tensor([2])
+    env.rollout_buffer = TensorDict(
+        {
+            "obs": torch.zeros(1, 2, 1),
+            "actions": torch.zeros(1, 2, 1),
+        },
+        batch_size=[1, 2],
+    )
+    env.get_demo_episode_metadata.return_value = {"output_mode": "segment_fragments"}
+    first_payload = (
+        0,
+        [object()],
+        [object()],
+        {},
+        {"fragment": True, "fragment_id": "run:0:first"},
+    )
+    second_payload = (
+        0,
+        [object()],
+        [object()],
+        {},
+        {"fragment": True, "fragment_id": "run:0:second"},
+    )
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = env
+    recorder.curr_episode = 0
+    recorder._episode_payloads = Mock(return_value=[first_payload, second_payload])
+    recorder._save_single_episode = Mock(
+        side_effect=[True, OSError("second fragment disk failure")]
+    )
+
+    with pytest.raises(RuntimeError, match="run:0:second") as error_info:
+        recorder._save_episodes(torch.tensor([0]))
+
+    assert "run:0:first" in str(error_info.value)
+    assert recorder._committed_fragment_ids == {"run:0:first": 0}
+
+    recorder._save_single_episode.reset_mock(side_effect=True)
+    recorder._save_episodes(torch.tensor([0]))
+
+    recorder._save_single_episode.assert_called_once()
+    assert recorder._save_single_episode.call_args.kwargs["episode_metadata"] == {
+        "fragment": True,
+        "fragment_id": "run:0:second",
+    }
+    assert recorder._committed_fragment_ids == {
+        "run:0:first": 0,
+        "run:0:second": 0,
+    }
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
@@ -1101,6 +1156,49 @@ def test_post_commit_metadata_failure_does_not_reuse_episode_index() -> None:
 
     with pytest.raises(OSError, match="disk full"):
         recorder._save_single_episode(0, [object()], [object()])
+
+    recorder.dataset.save_episode.assert_called_once_with()
+    assert recorder.curr_episode == 1
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_post_commit_fragment_failure_is_sticky_and_not_duplicated() -> None:
+    """A committed fragment with a failed sidecar cannot be written twice."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = MockEnvForDataset(has_sensors=False)
+    recorder.instruction = None
+    recorder.extra = {}
+    recorder.total_time = 0.0
+    recorder.curr_episode = 0
+    recorder.dataset_full_path = Path("/tmp/test_dataset")
+    recorder.dataset = MagicMock()
+    recorder.dataset.meta.info = {"fps": 30}
+    recorder._depth_manager = None
+    recorder._register_subtasks = MagicMock(return_value={"unknown_task": 0})
+    recorder._convert_frame_to_lerobot = MagicMock(return_value={})
+    recorder._write_episode_metadata = MagicMock(side_effect=OSError("disk full"))
+    fragment_metadata = {
+        "fragment": True,
+        "fragment_id": "run:0:pick",
+        "segments": [],
+    }
+
+    with pytest.raises(OSError, match="disk full"):
+        recorder._persist_episode_payload(
+            0,
+            [object()],
+            [object()],
+            episode_metadata=fragment_metadata,
+        )
+
+    recorder._write_episode_metadata.side_effect = None
+    with pytest.raises(RuntimeError, match="Refusing to write a duplicate"):
+        recorder._persist_episode_payload(
+            0,
+            [object()],
+            [object()],
+            episode_metadata=fragment_metadata,
+        )
 
     recorder.dataset.save_episode.assert_called_once_with()
     assert recorder.curr_episode == 1
