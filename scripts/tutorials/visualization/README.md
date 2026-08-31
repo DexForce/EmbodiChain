@@ -40,7 +40,7 @@ own `--host`/`--port` options:
 python scripts/tutorials/sim/create_scene.py --viser
 python examples/sim/solvers/srs_solver.py --viser
 python examples/sim/workspace/analyze_joint_workspace.py --viser
-embodichain run-env --gym_config path/to/task.yaml --viser
+embodichain run-env --gym_config path/to/task.ur5.yaml --viser
 ```
 
 Use `--viser-host`, `--viser-port`, `--viser-fps`, `--viser-image-fps`,

@@ -65,7 +65,7 @@ The `transformation` property returns a `4×4 torch.Tensor` homogeneous matrix.
 For any componentized Gym environment, sensors are declared in
 `configs/components/embodiments/<embodiment>.yaml` beside the embodiment's
 `simulation` robot mapping. The deployment selects that file with
-`embodiment.component`; task-local `scene.yaml` does not own a `sensor` field.
+`embodiment.component`; task-local `env.yaml` does not own a `sensor` field.
 `config_to_cfg()` resolves the embodiment and passes its `sensor` list through
 the same `SensorCfg.from_dict()` boundary used by ordinary environment configs.
 Changing embodiments therefore changes the robot and its mounted sensor suite

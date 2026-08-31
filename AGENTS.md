@@ -109,9 +109,15 @@ EmbodiChain/
 Official tasks use a task-first layout:
 
 - Import-registered Python entry point: `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`
-- Deployment config: `embodichain_tasks/configs/tasks/<category-path>/<task>/env[.<embodiment>].{json,yaml}`
+- Import-registered tasks may keep an inline runnable deployment at
+  `embodichain_tasks/configs/tasks/<category-path>/<task>/env.{json,yaml}`
+- Componentized tasks use a reusable physical-environment `env.yaml`, owning
+  both simulation-scene entities and ordinary environment values, plus one or
+  more runnable `task.<embodiment>.yaml` deployments; the reusable environment
+  contains no `id`, robot, sensor, or Task Program fields
 - Optional Task Program components: `<task config>/task_program/`, containing
-  `program.yaml`, `integration.yaml`, and `scene.yaml`
+  `program.yaml` and `integration.yaml`; the integration owns its nested
+  semantic `scene_binding`
 - Reusable embodiment and execution-policy components:
   `embodichain_tasks/configs/components/{embodiments,execution_policies}/`.
   An embodiment owns one simulation robot, its sensor suite, and its Task
@@ -131,17 +137,22 @@ task. Organize tasks by task family, optional subdomain, and task identity,
 not by solution method such as `task_program` or `rl`.
 
 Any Gym deployment, including an import-registered handwritten-demo task, may
-select `embodiment.component` and `scene.component`. `config_to_cfg()` expands
-those physical components before ordinary environment parsing. A deployment
-must choose either a component or the corresponding inline `robot`/`sensor` or
-scene fields, never both. An embodiment component may omit `skill_profile`,
-and a scene component may omit `task_program`, when the deployment does not
-declare `task_program`. The original inline Gym format remains supported.
+select `environment.component`, `embodiment.component`, and `scene.component`.
+`config_to_cfg()` expands those components before ordinary environment parsing.
+A deployment must choose either an environment component or inline environment
+and scene fields, and either an embodiment component or inline
+`robot`/`sensor` fields, never both. An embodiment
+component may omit `skill_profile`. A scene component is always physical-only;
+Task Program semantic roots and affordances live in the task integration's
+nested `scene_binding`. The original inline Gym format remains supported.
 
 A supported configuration-defined Task Program may omit `<task>.py`:
-declare `task_program.{program,integration,execution_policy}`,
-`embodiment.component`, and `scene.component` in an environment deployment.
-`config_to_cfg()` composes those typed YAML components, checks their
+declare `environment.component`,
+`task_program.{program,integration,execution_policy}`, and
+`embodiment.component` in a runnable task deployment. The reusable environment
+is independent of Task Program and can also be selected by handwritten tasks.
+`config_to_cfg()` composes those typed YAML components,
+checks that scene-binding targets exist in the physical scene, validates the
 scene/embodiment contracts, binds the trusted integration IDs into the
 otherwise embodiment-independent program, and registers the common
 `EmbodiedEnv`. Component files do not use compatibility `version` fields.
@@ -314,7 +325,27 @@ Also add robot documentation in `docs/source/resources/robot/` (see existing exa
 
 ### Adding a New Task Environment
 
-Use the `/add-task-env` skill to scaffold a new task with the correct file structure, `@register_env` decorator, base class, and test stub.
+Use the `/add-task-env` skill to route a new task to an environment-only
+baseline, handwritten expert trajectory, Task Program expert trajectory, or RL
+implementation. The skill creates a Python task entry point only when the
+selected route requires one.
+
+### Adding a Task Program
+
+Use the `/add-task-program` skill to author a program, generate its trusted
+integration configuration, attach embodiment-specific deployments, or validate
+and repair an existing configured Task Program.
+
+### Adding an Embodiment Component
+
+Use the `/add-embodiment-component` skill to package one simulation robot,
+its sensor suite, and an optional Task Program-facing `skill_profile` for reuse
+across tasks.
+
+### Adding a Semantic Call
+
+Use the `/add-semantic-call` skill to expose an Atomic Skill through a
+registered Task Program call or to make a deliberate built-in language change.
 
 ### Adding Functors
 
@@ -334,7 +365,10 @@ Tool-specific adapter files should stay thin and point back to the canonical ski
 | Skill | Command | Purpose |
 |-------|---------|---------|
 | Add Atomic Action | `/add-atomic-action` | Scaffold a new simulation atomic action |
-| Add Task Env | `/add-task-env` | Scaffold a new `EmbodiedEnv` task |
+| Add Task Env | `/add-task-env` | Route and scaffold environment, expert, and RL task variants |
+| Add Task Program | `/add-task-program` | Author, integrate, deploy, validate, or repair a Task Program |
+| Add Embodiment Component | `/add-embodiment-component` | Add a reusable robot/sensor/skill-profile component |
+| Add Semantic Call | `/add-semantic-call` | Expose an Atomic Skill as a Task Program Semantic Call |
 | Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
 | Add Test | `/add-test` | Scaffold tests following project conventions |
 | Update API Docs | `/update-api-docs` | Document public exports reported by the read-only API checker |

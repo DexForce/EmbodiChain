@@ -241,3 +241,11 @@ This tutorial demonstrates the full power of EmbodiChain's modular environment s
 
    - **/add-task-env** — Scaffold a new task environment with the correct file structure, ``@register_env`` decorator, base class methods, ``__init__.py`` update, and test stub.
    - **/add-functor** — Add observation, reward, event, or randomization functors with the correct signature and module placement.
+
+Next Steps
+~~~~~~~~~~
+
+- :doc:`task_program` — Compose a modular environment with a declarative Task
+  Program, embodiment, scene binding, and execution policy.
+- :doc:`data_generation` — Record expert demonstrations from modular
+  environments.

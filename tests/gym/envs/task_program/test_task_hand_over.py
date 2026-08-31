@@ -32,6 +32,7 @@ from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.task_program.integrations import ConfiguredHandOverPoseProvider
 from embodichain.lab.task_program.integrations._configured_services import (
+    _JointPositionConstraintEvidenceProviderFactory,
     _JointPositionConstraintObserver,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
@@ -40,7 +41,11 @@ from embodichain.lab.task_program.integrations._configured_composition import (
 from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
-from embodichain.lab.sim.atomic_actions import HandOverOptions
+from embodichain.lab.sim.atomic_actions import (
+    AntipodalAffordance,
+    EntityState,
+    HandOverOptions,
+)
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.task_program.semantics import (
     BinaryEffectClause,
@@ -52,9 +57,14 @@ from embodichain.lab.task_program.semantics import (
     ControlPartEvidenceAddress,
     EffectEvidenceCollectionContext,
     EffectEvidenceSourceRef,
+    GRASP_AFFORDANCE_CAPABILITY,
     HandOver,
     HeldObjectRelation,
     HeldObjectStateExpectation,
+    SceneAffordanceRef,
+    SceneEntityRegistration,
+    SceneObjectRef,
+    SceneRegistry,
 )
 from embodichain.utils.utility import load_config
 
@@ -63,7 +73,7 @@ _CAN_ID = "can"
 _CAN_SIMULATION_UID = "handover_object"
 _SUPPORT_SURFACE_UID = "support_surface"
 _SCENE_ID = "dual_ur5_handover_v1"
-_PROFILE_ID = "dual_ur5_handover"
+_PROFILE_ID = "dual_ur5_dh_pgi_140_80"
 _OPEN_QPOS = 0.0
 _GRASP_QPOS = 0.04
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
@@ -84,7 +94,8 @@ def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "embodichain_tasks/configs/tasks/manipulation/hand_over/env.yaml"
+        / "embodichain_tasks/configs/tasks/manipulation/hand_over/"
+        "task.dual_ur5_dh_pgi_140_80.yaml"
     )
 
 
@@ -100,11 +111,9 @@ def _integration():
     payload = _gym_payload()
     physical = _resolve_gym_components(payload, base_dir=_gym_config_path().parent)
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
     return _load_configured_task_program_deployment(
-        task_program=payload["task_program"],
+        task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
-        scene=physical.scene_task_program,
         base_dir=_gym_config_path().parent,
     ).integration
 
@@ -136,6 +145,7 @@ def test_hand_over_registers_plain_embodied_env_from_config() -> None:
 def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() -> None:
     """Normal startup selects the semantic program and needs no contact sensor."""
     payload = _gym_payload()
+    environment = load_config(_gym_config_path().parent / "env.yaml")
 
     assert payload["id"] == _ENV_ID
     assert payload["task_program"] == {
@@ -145,9 +155,19 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
             "../../../components/execution_policies/motion_gen_verified.yaml"
         ),
     }
-    assert payload["scene"] == {"component": "task_program/scene.yaml"}
-    assert payload["env"]["extensions"] == {}
-    settle = payload["env"]["events"]["settle_can_on_reset"]
+    assert payload["environment"] == {"component": "env.yaml"}
+    assert payload["embodiment"] == {
+        "component": ("../../../components/embodiments/dual_ur5_dh_pgi_140_80.yaml")
+    }
+    embodiment = load_config(
+        _gym_config_path().parent / payload["embodiment"]["component"]
+    )
+    evidence = embodiment["skill_profile"]["runtime_services"]["control_part_evidence"]
+    assert embodiment["embodiment_id"] == _PROFILE_ID
+    assert "object_ids" not in evidence
+    assert "task_program" not in environment
+    assert environment["env"]["extensions"] == {}
+    settle = environment["env"]["events"]["settle_can_on_reset"]
     assert settle["func"] == "wait_for_dynamic_objects_to_settle"
     assert settle["params"]["entity_cfgs"] == [{"uid": _CAN_SIMULATION_UID}]
 
@@ -157,7 +177,7 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     cfg = _configured_env_cfg()
 
     assert type(cfg.robot) is RobotCfg
-    assert cfg.robot.uid == "DualUR5HandOver"
+    assert cfg.robot.uid == "DualUR5"
     assert cfg.robot.control_parts["left_arm"] == ["left_joint[0-9]"]
     assert cfg.robot.control_parts["right_arm"] == ["right_joint[0-9]"]
     assert cfg.robot.control_parts["left_hand"] == ["left_gripper_finger1_joint_1"]
@@ -231,8 +251,8 @@ def test_hand_over_config_owns_tuned_can_and_pgi_physics() -> None:
     assert finger_attrs.static_friction == pytest.approx(2.0)
 
 
-def test_hand_over_integration_owns_scene_pose_and_evidence_services() -> None:
-    """The generic integration composes all HandOver declarations."""
+def test_hand_over_composition_owns_scene_pose_and_evidence_services() -> None:
+    """The composed registration exposes task and embodiment services."""
     registration = _integration().registration
     scene = registration.scene_binding
     grasp = scene.antipodal_grasps[0]
@@ -255,6 +275,42 @@ def test_hand_over_integration_owns_scene_pose_and_evidence_services() -> None:
     assert declaration is not None
     assert declaration.provider_id == CONTROL_PART_EVIDENCE_PROVIDER_ID
     assert declaration.revision == CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+
+def test_dual_ur5_evidence_scope_follows_graspable_scene_objects() -> None:
+    """The generic embodiment derives object scope from the selected task scene."""
+    factory = _integration().registration.control_part_evidence_factory
+    assert type(factory) is _JointPositionConstraintEvidenceProviderFactory
+    assert factory.object_ids is None
+
+    class StateProvider:
+        @staticmethod
+        def observe(*, timestamp: float, env_ids: torch.Tensor) -> EntityState:
+            del timestamp
+            return EntityState(torch.eye(4).repeat(env_ids.numel(), 1, 1))
+
+    state_provider = StateProvider()
+    bottle = SceneObjectRef("bottle")
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(ref=bottle, state_provider=state_provider),
+            SceneEntityRegistration(
+                ref=SceneObjectRef("support_surface"),
+                state_provider=state_provider,
+            ),
+            SceneEntityRegistration(
+                ref=SceneAffordanceRef("bottle_grasp"),
+                parent=bottle,
+                native_name="bottle_grasp",
+                affordance=AntipodalAffordance(),
+                affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                affordance_revision="1",
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+
+    assert factory._resolve_object_ids(registry) == ("bottle",)
 
 
 def test_hand_over_joint_position_evidence_uses_measured_aperture() -> None:

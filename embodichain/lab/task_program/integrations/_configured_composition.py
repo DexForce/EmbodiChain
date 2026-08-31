@@ -67,6 +67,7 @@ class _ConfiguredTaskProgramDeployment:
     program_path: Path
     selection: TaskProgramIntegrationCfg
     integration: _ConfiguredTaskProgramIntegration
+    scene_binding: dict[str, object]
 
 
 def _component_path(
@@ -242,7 +243,15 @@ def _resolve_task_program_components(
     integration = _mapping(
         _load_yaml_component(integration_path, field_name="task integration"),
         path="task integration",
-        required=frozenset({"integration_id", "program_id", "requires", "profile"}),
+        required=frozenset(
+            {
+                "integration_id",
+                "program_id",
+                "requires",
+                "scene_binding",
+                "profile",
+            }
+        ),
         optional=frozenset({"runtime_services"}),
     )
     policy = _mapping(
@@ -290,7 +299,7 @@ def _compose_integration_payload(
     )
     scene_contract = _identifier(
         scene["contract_id"],
-        path="scene component.task_program.contract_id",
+        path="scene binding.contract_id",
     )
     embodiment_contract = _identifier(
         skill_profile["contract_id"],
@@ -371,7 +380,6 @@ def _load_configured_task_program_deployment(
     *,
     task_program: object,
     skill_profile: object,
-    scene: object,
     base_dir: str | Path,
 ) -> _ConfiguredTaskProgramDeployment:
     """Compose Task Program metadata after Gym resolves physical components."""
@@ -388,9 +396,9 @@ def _load_configured_task_program_deployment(
         ),
         optional=frozenset({"runtime_services"}),
     )
-    scene_task_program = _mapping(
-        scene,
-        path="scene component.task_program",
+    scene_binding = _mapping(
+        task["scene_binding"],
+        path="task integration.scene_binding",
         required=frozenset({"contract_id", "registry_id"}),
         optional=frozenset(
             {
@@ -405,7 +413,7 @@ def _load_configured_task_program_deployment(
         task=task,
         policy=policy,
         skill_profile=selected_skill_profile,
-        scene=scene_task_program,
+        scene=scene_binding,
     )
     integration = _decode_configured_task_program_integration(payload)
     integration_id = _identifier(
@@ -430,4 +438,5 @@ def _load_configured_task_program_deployment(
         program_path=program_path,
         selection=selection,
         integration=integration,
+        scene_binding=deepcopy(dict(scene_binding)),
     )

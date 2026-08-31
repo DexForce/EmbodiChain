@@ -2,6 +2,6 @@
 
 Canonical source: `.agents/skills/add-task-env/`
 
-Use this adapter when creating a new EmbodiChain task environment or registered
-`EmbodiedEnv` subclass. Then follow `.agents/skills/add-task-env/SKILL.md`.
-
+Use this adapter when creating a new EmbodiChain task/environment, handwritten
+or Task Program expert demonstration, or simulator/lightweight RL task. Follow
+the prompt router in `.agents/skills/add-task-env/SKILL.md`.

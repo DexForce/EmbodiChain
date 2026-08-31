@@ -52,35 +52,35 @@ _PROGRAMS = {
     ): "pour_water_with_right_arm",
 }
 _DEPLOYMENTS = {
-    Path("tasks/manipulation/repeated_pick_place/env.ur5.yaml"): (
+    Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
     ),
-    Path("tasks/manipulation/repeated_pick_place/env.franka.yaml"): (
+    Path("tasks/manipulation/repeated_pick_place/task.franka.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
         "franka_panda",
     ),
-    Path("tasks/manipulation/open_drawer/env.ur5.yaml"): (
+    Path("tasks/manipulation/open_drawer/task.ur5.yaml"): (
         "slide_open_drawer",
         "task_program_open_drawer",
         "ur5_dh_pgi_140_80",
     ),
-    Path("tasks/manipulation/open_drawer/env.franka.yaml"): (
+    Path("tasks/manipulation/open_drawer/task.franka.yaml"): (
         "slide_open_drawer",
         "task_program_open_drawer",
         "franka_panda",
     ),
-    Path("tasks/manipulation/hand_over/env.yaml"): (
+    Path("tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml"): (
         "dual_ur5_hand_over",
         "dual_ur5_handover_v1",
-        "dual_ur5_handover",
+        "dual_ur5_dh_pgi_140_80",
     ),
-    Path("tasks/manipulation/tableware/pour_water/env.yaml"): (
+    Path("tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml"): (
         "pour_water_with_right_arm",
         "task_program_pour_water",
-        "cobotmagic_right_arm",
+        "cobotmagic",
     ),
 }
 _RESOURCE_PATHS = frozenset(
@@ -90,18 +90,18 @@ _RESOURCE_PATHS = frozenset(
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
         Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
-        Path("components/embodiments/cobotmagic_right_arm.yaml"),
-        Path("components/embodiments/dual_ur5_handover.yaml"),
+        Path("components/embodiments/cobotmagic.yaml"),
+        Path("components/embodiments/dual_ur5_dh_pgi_140_80.yaml"),
         Path("components/embodiments/franka_panda.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),
+        Path("tasks/manipulation/hand_over/env.yaml"),
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
-        Path("tasks/manipulation/hand_over/task_program/scene.yaml"),
+        Path("tasks/manipulation/open_drawer/env.yaml"),
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
-        Path("tasks/manipulation/open_drawer/task_program/scene.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/env.yaml"),
         Path("tasks/manipulation/repeated_pick_place/task_program/integration.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/task_program/scene.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/env.yaml"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
-        Path("tasks/manipulation/tableware/pour_water/task_program/scene.yaml"),
     }
 )
 
@@ -240,11 +240,9 @@ for relative_path, expected_ids in expected_deployments.items():
     config = load_config(env_path)
     physical = _resolve_gym_components(config, base_dir=env_path.parent)
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
     deployment = _load_configured_task_program_deployment(
-        task_program=config["task_program"],
+        task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
-        scene=physical.scene_task_program,
         base_dir=env_path.parent,
     )
     program = load_task_program(

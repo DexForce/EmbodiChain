@@ -129,16 +129,14 @@ def _iter_task_directories(
     """Yield task directories and their paths below a config root."""
     children = sorted(root.iterdir(), key=lambda child: child.name.casefold())
     child_by_name = {child.name: child for child in children}
-    env_configs = [
+    config_resources = [
         child
         for child in children
-        if child.is_file()
-        and child.name.startswith("env")
-        and child.name.endswith((".json", ".yaml", ".yml"))
+        if child.is_file() and child.name.endswith((".json", ".yaml", ".yml"))
     ]
     agents = child_by_name.get("agents")
-    if env_configs or (agents is not None and agents.is_dir()):
-        yield relative_path, env_configs, agents
+    if config_resources or (agents is not None and agents.is_dir()):
+        yield relative_path, config_resources, agents
 
     for child in children:
         if not child.is_dir() or child.name in {"agents", "task_program"}:
@@ -169,12 +167,15 @@ def _config_environment_entries(
     """Collect environment metadata encoded by task-local configs."""
     entries: dict[str, _EnvironmentListEntry] = {}
     for root in config_roots:
-        for task_path, env_resources, agents in _iter_task_directories(root):
+        for task_path, config_resources, agents in _iter_task_directories(root):
             env_ids: list[str] = []
-            for resource in env_resources:
-                config = _load_mapping(resource)
+            for resource in config_resources:
+                try:
+                    config = _load_mapping(resource)
+                except TypeError:
+                    continue
                 env_id = config.get("id")
-                if not isinstance(env_id, str) or not env_id:
+                if type(env_id) is not str or not env_id or env_id != env_id.strip():
                     continue
                 capabilities = []
                 if "task_program" in config:
