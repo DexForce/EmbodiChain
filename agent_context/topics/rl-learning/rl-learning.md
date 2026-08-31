@@ -39,7 +39,7 @@ CLI --config
   → trainer / policy / algorithm blocks
   → choose trainer.learning_env or trainer.gym_config
   → build environment
-  → build policy and optional MLP or waypoint-Transformer modules
+  → build policy and optional MLP modules
   → build algorithm config from the registry
   → route by algorithm.rollout_kind
   → train, evaluate, log, and checkpoint
@@ -149,7 +149,7 @@ supports a pre-clip policy-gradient safety limit that skips unsafe updates.
 | PPO, GRPO, APG implementations | `algo/ppo.py`, `algo/grpo.py`, `algo/apg.py` |
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
-| Policy interface, actor-critic, actor-only, MLP/waypoint Transformer builders | `models/` |
+| Policy interface, actor-critic, actor-only, MLP builder | `models/` |
 | Running observation statistics | `normalization.py` |
 | Batched action-adjoint stabilization | `gradients.py` |
 | Standard collect/update loop | `utils/trainer.py` |
@@ -219,13 +219,6 @@ example is an experimental gradient reference, not a general simulator task.
 2. Register it in `models/__init__.py`.
 3. Ensure its outputs satisfy every intended algorithm.
 4. Provide graph-preserving sampling if used with differentiable rollouts.
-
-The built-in `waypoint_transformer` module consumes the unified ordered
-constraint layout: joint state, end-effector pose, absolute pose/joint targets,
-active/valid and modality masks, last action, optional relative pose/joint
-errors, and waypoint type. Its token sequence is
-`[ACTION, STATE, ACTIVE_GOAL, WP_1..WP_K]`; attention is bidirectional so the
-action can depend on future valid waypoints.
 
 ### Add a Lightweight Environment
 

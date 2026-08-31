@@ -28,14 +28,6 @@ from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
 from .policy import Policy
 from .mlp import MLP
-from .waypoint_transformer import (
-    WaypointTransformerActor,
-    WaypointTransformerCritic,
-    WaypointTransformerEncoder,
-    parse_waypoint_observation,
-    waypoint_observation_dim,
-    waypoint_observation_normalize_mask,
-)
 
 # In-module policy registry
 _POLICY_REGISTRY: Dict[str, Type[Policy]] = {}
@@ -160,62 +152,6 @@ def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
     return model
 
 
-def build_model_from_cfg(
-    module_cfg: Dict,
-    in_dim: int,
-    out_dim: int,
-    *,
-    role: str,
-) -> torch.nn.Module:
-    """Build an actor or critic module from a JSON-like config.
-
-    Args:
-        module_cfg: Module configuration with ``type`` and ``network_cfg``.
-        in_dim: Flat observation dimension.
-        out_dim: Requested output dimension.
-        role: ``"actor"`` or ``"critic"``.
-
-    Returns:
-        Constructed PyTorch module.
-
-    Raises:
-        ValueError: If the module type or role is unsupported.
-    """
-    module_type = module_cfg.get("type", "").lower()
-    if module_type == "mlp":
-        return build_mlp_from_cfg(module_cfg, in_dim, out_dim)
-    if module_type != "waypoint_transformer":
-        raise ValueError(
-            "Supported actor/critic module types are 'mlp' and "
-            f"'waypoint_transformer', got {module_type!r}."
-        )
-    if role not in {"actor", "critic"}:
-        raise ValueError("role must be 'actor' or 'critic'.")
-
-    network_cfg = dict(module_cfg.get("network_cfg", {}))
-    kwargs = {
-        "observation_dim": in_dim,
-        "num_waypoints": int(network_cfg["num_waypoints"]),
-        "joint_dim": int(network_cfg.get("joint_dim", 7)),
-        "use_relative_observations": bool(
-            network_cfg.get("use_relative_observations", True)
-        ),
-        "hidden_dim": int(network_cfg.get("hidden_dim", 256)),
-        "num_attention_heads": int(network_cfg.get("num_attention_heads", 4)),
-        "num_layers": int(network_cfg.get("num_layers", 2)),
-        "feedforward_dim": (
-            int(network_cfg["feedforward_dim"])
-            if int(network_cfg.get("feedforward_dim", 0)) > 0
-            else None
-        ),
-    }
-    if role == "actor":
-        return WaypointTransformerActor(action_dim=out_dim, **kwargs)
-    if out_dim != 1:
-        raise ValueError("A waypoint Transformer critic must have out_dim=1.")
-    return WaypointTransformerCritic(**kwargs)
-
-
 # default registrations
 register_policy("actor_critic", ActorCritic)
 register_policy("actor_only", ActorOnly)
@@ -226,15 +162,8 @@ __all__ = [
     "register_policy",
     "get_registered_policy_names",
     "build_policy",
-    "build_model_from_cfg",
     "build_mlp_from_cfg",
     "get_policy_class",
     "Policy",
     "MLP",
-    "WaypointTransformerActor",
-    "WaypointTransformerCritic",
-    "WaypointTransformerEncoder",
-    "parse_waypoint_observation",
-    "waypoint_observation_dim",
-    "waypoint_observation_normalize_mask",
 ]

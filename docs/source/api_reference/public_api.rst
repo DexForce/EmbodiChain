@@ -1888,23 +1888,6 @@ embodichain.learning.rl.models.policy
 
    Policy
 
-embodichain.learning.rl.models.waypoint_transformer
----------------------------------------------------
-
-Unified tokenization and full-context models for ordered Cartesian, joint, and
-mixed-modality waypoint policies.
-
-.. currentmodule:: embodichain.learning.rl.models.waypoint_transformer
-
-.. autosummary::
-
-   WaypointTransformerActor
-   WaypointTransformerCritic
-   WaypointTransformerEncoder
-   parse_waypoint_observation
-   waypoint_observation_dim
-   waypoint_observation_normalize_mask
-
 embodichain.learning.rl.normalization
 -------------------------------------
 

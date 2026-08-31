@@ -28,11 +28,8 @@ import wandb
 from torch.utils.tensorboard import SummaryWriter
 from copy import deepcopy
 
-from embodichain.learning.rl.models import (
-    build_model_from_cfg,
-    build_policy,
-    get_registered_policy_names,
-)
+from embodichain.learning.rl.models import build_policy, get_registered_policy_names
+from embodichain.learning.rl.models import build_mlp_from_cfg
 from embodichain.learning.rl.algo import (
     RolloutKind,
     build_algo,
@@ -128,14 +125,12 @@ def _build_learning_policy(
     actor_cfg = policy_block.get("actor")
     critic_cfg = policy_block.get("critic")
     actor = (
-        build_model_from_cfg(actor_cfg, obs_dim, action_dim, role="actor")
+        build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
         if actor_cfg is not None
         else None
     )
     critic = (
-        build_model_from_cfg(critic_cfg, obs_dim, 1, role="critic")
-        if critic_cfg is not None
-        else None
+        build_mlp_from_cfg(critic_cfg, obs_dim, 1) if critic_cfg is not None else None
     )
     policy = build_policy(
         policy_block,

@@ -497,7 +497,6 @@ topics:
       - gradient accumulation
       - action adjoint
       - observation normalization
-      - waypoint transformer
       - SyncCollector
       - learning_env
       - gym_config
