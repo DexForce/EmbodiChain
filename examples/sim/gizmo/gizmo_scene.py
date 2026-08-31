@@ -39,7 +39,7 @@ from embodichain.lab.sim.cfg import (
     URDFCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.shapes import CubeCfg
@@ -127,11 +127,15 @@ def main():
         uid="interactive_cube",
         shape=CubeCfg(size=[0.1, 0.1, 0.1]),
         body_type="kinematic",
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            dynamic_friction=0.5,
-            static_friction=0.5,
-            restitution=0.1,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 1.0},
+                "material_props": {
+                    "dynamic_friction": 0.5,
+                    "static_friction": 0.5,
+                    "restitution": 0.1,
+                },
+            }
         ),
         init_pos=[1.0, 0.0, 0.5],  # Position to the side of the robot
     )

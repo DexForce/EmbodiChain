@@ -26,7 +26,7 @@ import time
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RenderCfg,
     physics_cfg_for_backend,
 )
@@ -68,11 +68,15 @@ def main():
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
 
-    physics_attrs = RigidBodyAttributesCfg(
-        mass=1.0,
-        dynamic_friction=0.5,
-        static_friction=0.5,
-        restitution=0.1,
+    physics_attrs = RigidBodyPhysicsCfg.from_dict(
+        {
+            "mass_props": {"mass": 1.0},
+            "material_props": {
+                "dynamic_friction": 0.5,
+                "static_friction": 0.5,
+                "restitution": 0.1,
+            },
+        }
     )
 
     # Add objects to the scene

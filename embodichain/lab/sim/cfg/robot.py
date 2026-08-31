@@ -39,7 +39,7 @@ from .articulation import (
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode
-from .rigid import _rigid_body_attrs_from_dict
+from .rigid import _rigid_body_physics_from_dict
 from .simulation import (
     PhysicsBackendCfg,
     _normalize_newton_solver_type,
@@ -121,7 +121,7 @@ class RobotCfg(ArticulationCfg):
             if key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
-                cfg.attrs = _rigid_body_attrs_from_dict(value)
+                cfg.attrs = _rigid_body_physics_from_dict(value)
             elif hasattr(cfg, key):
                 attr = getattr(cfg, key)
                 if key == "urdf_cfg":

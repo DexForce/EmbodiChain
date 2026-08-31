@@ -29,7 +29,7 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     RigidObjectCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
@@ -49,7 +49,7 @@ class BaseUsdTest:
         self.sim = SimulationManager(config)
 
     def test_import_rigid(self):
-        default_attr = RigidBodyAttributesCfg()
+        default_attr = RigidBodyPhysicsCfg()
         sugar_box_path = get_data_path("SugarBox/sugar_box_usd/sugar_box.usda")
         sugar_box: RigidObject = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(

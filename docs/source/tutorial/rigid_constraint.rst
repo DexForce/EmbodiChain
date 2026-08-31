@@ -47,7 +47,7 @@ Adding two cubes
 
 Two dynamic cubes are added with :meth:`SimulationManager.add_rigid_object`.
 Each uses a :class:`CubeCfg` shape (a primitive cube, so no mesh asset file is
-needed) and a :class:`RigidBodyAttributesCfg` for mass and friction. ``cube_a``
+needed) and a :class:`RigidBodyPhysicsCfg` for mass and friction. ``cube_a``
 is placed slightly higher than ``cube_b`` so that, once detached, the lower
 cube lands first and the relative pose visibly changes.
 

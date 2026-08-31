@@ -30,7 +30,7 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     physics_cfg_for_backend,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     LightCfg,
     RobotCfg,
     URDFCfg,
@@ -141,11 +141,15 @@ def main():
         cfg = LightCfg(uid=uid, intensity=intensity, radius=600, init_pos=[x, y, z])
         lights.append(sim.add_light(cfg))
 
-    physics_attrs = RigidBodyAttributesCfg(
-        mass=10,
-        dynamic_friction=0.5,
-        static_friction=0.5,
-        restitution=0.1,
+    physics_attrs = RigidBodyPhysicsCfg.from_dict(
+        {
+            "mass_props": {"mass": 10},
+            "material_props": {
+                "dynamic_friction": 0.5,
+                "static_friction": 0.5,
+                "restitution": 0.1,
+            },
+        }
     )
 
     try:

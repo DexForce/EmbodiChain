@@ -26,7 +26,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.sensors import (
     ContactSensorCfg,
@@ -91,12 +91,16 @@ class ContactTest:
                 uid=uid,
                 shape=CubeCfg(size=cube_size),
                 body_type="dynamic",
-                attrs=RigidBodyAttributesCfg(
-                    mass=0.1,
-                    dynamic_friction=0.9,
-                    static_friction=0.95,
-                    restitution=0.01,
-                    sleep_threshold=0.0,
+                attrs=RigidBodyPhysicsCfg.from_dict(
+                    {
+                        "mass_props": {"mass": 0.1},
+                        "rigid_props": {"sleep_threshold": 0.0},
+                        "material_props": {
+                            "dynamic_friction": 0.9,
+                            "static_friction": 0.95,
+                            "restitution": 0.01,
+                        },
+                    }
                 ),
                 init_pos=position,
             )

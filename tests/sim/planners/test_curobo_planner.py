@@ -935,7 +935,7 @@ def test_generated_mesh_yaml_loads_in_curobo_scene_cfg(tmp_path):
 
 def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, object]:
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+    from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg
     from embodichain.lab.sim.objects import RigidObjectCfg
     from embodichain.lab.sim.robots import FrankaPandaCfg
     from embodichain.lab.sim.shapes import CubeCfg
@@ -956,7 +956,7 @@ def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, objec
         cfg=RigidObjectCfg(
             uid="block",
             shape=CubeCfg(size=_SIM_BLOCK_DIMS),
-            attrs=RigidBodyAttributesCfg(),
+            attrs=RigidBodyPhysicsCfg(),
             body_type="static",
             init_pos=_SIM_BLOCK_POS,
             init_rot=(0.0, 0.0, 0.0),

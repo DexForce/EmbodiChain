@@ -31,7 +31,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     NewtonPhysicsCfg,
     RenderCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     physics_cfg_for_backend,
 )
 from embodichain.lab.sim.objects import Articulation, Robot
@@ -100,8 +100,10 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
             "uid": "tutorial_franka",
             "robot_type": "panda",
             "attrs": {
-                "static_friction": 1.0,
-                "dynamic_friction": 1.0,
+                "material_props": {
+                    "static_friction": 1.0,
+                    "dynamic_friction": 1.0,
+                },
             },
         }
     )
@@ -122,9 +124,8 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
             init_rot=(0.0, 0.0, 180.0),
             fix_base=True,
             joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
-            attrs=RigidBodyAttributesCfg(
-                static_friction=1.0,
-                dynamic_friction=1.0,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}}
             ),
         )
     )

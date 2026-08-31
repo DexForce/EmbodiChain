@@ -32,20 +32,23 @@ override specific links (matched by regex, same rules as joint drive dict keys):
 ```python
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    CollisionPropertiesCfg,
     LinkPhysicsOverrideCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
 )
 
 art_cfg = ArticulationCfg(
     fpath="path/to/robot.urdf",
-    attrs=RigidBodyAttributesCfg(static_friction=0.5),
+    attrs=RigidBodyPhysicsCfg(
+        material_props=RigidBodyMaterialCfg(static_friction=0.5),
+    ),
     link_attrs={
         "eef": LinkPhysicsOverrideCfg(
             link_names_expr=[".*(hand|finger|ee).*"],
-            attrs=RigidBodyAttributesOverrideCfg(
-                static_friction=0.95,
-                contact_offset=0.001,
+            attrs=RigidBodyPhysicsCfg(
+                material_props=RigidBodyMaterialCfg(static_friction=0.95),
+                collision_props=CollisionPropertiesCfg(contact_offset=0.001),
             ),
         ),
     },

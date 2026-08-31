@@ -39,6 +39,7 @@ from embodichain.lab.sim.cfg import (
     DefaultRigidBodyMaterialCfg,
     DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
+    LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
     MeshCollisionPropertiesCfg,
     NewtonCollisionPipelineCfg,
@@ -52,7 +53,6 @@ from embodichain.lab.sim.cfg import (
     PhysicsBackendCfg,
     PhysicsCfg,
     RenderCfg,
-    RigidBodyAttributesCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RigidBodyPropertiesCfg,
@@ -326,6 +326,34 @@ def test_rigid_physics_from_dict_selects_backend_subclasses() -> None:
     assert isinstance(cfg.rigid_props, DefaultRigidBodyPropertiesCfg)
     assert isinstance(cfg.collision_props, NewtonCollisionPropertiesCfg)
     assert isinstance(cfg.material_props, NewtonRigidBodyMaterialCfg)
+
+
+def test_recompute_inertia_is_a_mass_property() -> None:
+    cfg = RigidBodyPhysicsCfg.from_dict(
+        {"mass_props": {"mass": 2.0, "recompute_inertia": True}}
+    )
+
+    assert "replace_inertial" not in {
+        item.name for item in fields(LinkPhysicsOverrideCfg)
+    }
+    assert cfg.mass_props.recompute_inertia is True
+    assert cfg.to_dict()["mass_props"]["recompute_inertia"] is True
+
+    link_cfg = LinkPhysicsOverrideCfg.from_dict(
+        {
+            "link_names_expr": ["finger_.*"],
+            "attrs": {"mass_props": {"recompute_inertia": True}},
+        }
+    )
+    assert link_cfg.attrs.mass_props.recompute_inertia is True
+
+    with pytest.raises(ValueError, match="attrs.mass_props.recompute_inertia"):
+        LinkPhysicsOverrideCfg.from_dict(
+            {
+                "link_names_expr": ["finger_.*"],
+                "replace_inertial": True,
+            }
+        )
 
 
 def test_rigid_physics_explicit_backend_blocks_can_coexist_and_round_trip() -> None:
@@ -614,18 +642,18 @@ def test_rigid_physics_from_dict_rejects_unknown_fields() -> None:
         RigidBodyPhysicsCfg.from_dict({"collision_props": {"margn": 0.01}})
 
 
-def test_robot_cfg_merge_keeps_flat_override_as_default_only_legacy_cfg() -> None:
+def test_robot_cfg_merge_preserves_grouped_overrides() -> None:
     base = RobotCfg(
         attrs=RigidBodyPhysicsCfg(
             material_props=RigidBodyMaterialCfg(dynamic_friction=0.8)
         )
     )
 
-    merged = merge_robot_cfg(base, {"attrs": {"mass": 2.0}})
+    merged = merge_robot_cfg(base, {"attrs": {"mass_props": {"mass": 2.0}}})
 
-    assert isinstance(merged.attrs, RigidBodyAttributesCfg)
-    assert merged.attrs.mass == 2.0
-    assert merged.attrs.dynamic_friction == 0.8
+    assert isinstance(merged.attrs, RigidBodyPhysicsCfg)
+    assert merged.attrs.mass_props.mass == 2.0
+    assert merged.attrs.material_props.dynamic_friction == 0.8
 
 
 def test_newton_physics_inherits_common_gravity_and_collision_config() -> None:

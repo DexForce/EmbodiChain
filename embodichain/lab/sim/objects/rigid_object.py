@@ -22,13 +22,13 @@ import numpy as np
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Sequence, Union
+from typing import TYPE_CHECKING, List, Sequence
 from functools import cached_property
 
 from dexsim.models import MeshObject
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
 from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.objects.backends import (
     DefaultRigidBodyView,
     NewtonRigidBodyView,
@@ -399,15 +399,15 @@ class RigidObject(BatchEntity):
                     # attributes during add_rigidbody(); MeshObject
                     # set_physical_attr() is still default-backend only.
                     continue
-                entity.set_physical_attr(cfg.attrs.attr())
+                entity.set_physical_attr(cfg.attrs.to_dexsim_physical_attr())
         elif spawn_result is None:
             # Read current properties from USD-loaded entities and write back to cfg
             # Use first entity as reference
             first_entity: MeshObject = entities[0]
 
             cfg.body_scale = tuple(first_entity.get_body_scale())
-            cfg.attrs = RigidBodyAttributesCfg().from_dict(
-                first_entity.get_physical_attr().as_dict()
+            cfg.attrs = RigidBodyPhysicsCfg.from_dexsim_physical_attr(
+                first_entity.get_physical_attr()
             )
 
         super().__init__(cfg, entities, device)
@@ -426,7 +426,11 @@ class RigidObject(BatchEntity):
 
         # TODO: Must be called after setting all attributes.
         # May be improved in the future.
-        if spawn_result is None and cfg.attrs.enable_collision is False:
+        if (
+            spawn_result is None
+            and cfg.attrs.collision_props is not None
+            and cfg.attrs.collision_props.collision_enabled is False
+        ):
             flag = torch.zeros(len(entities), dtype=torch.bool)
             self.enable_collision(flag)
 
@@ -999,34 +1003,27 @@ class RigidObject(BatchEntity):
 
     def set_attrs(
         self,
-        attrs: Union[RigidBodyAttributesCfg, List[RigidBodyAttributesCfg]],
+        attrs: RigidBodyPhysicsCfg | list[RigidBodyPhysicsCfg],
         env_ids: Sequence[int] | None = None,
     ) -> None:
         """Set physical attributes for the rigid object.
 
         Args:
-            attrs (Union[RigidBodyAttributesCfg, List[RigidBodyAttributesCfg]]): The physical attributes to set.
+            attrs: Grouped physical attributes, shared or one per environment.
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
-        if self._data is not None and self._data.is_newton_backend:
-            raise TypeError(
-                "RigidBodyAttributesCfg is a deprecated Default-backend-only "
-                "configuration. Use grouped RigidBodyPhysicsCfg during Newton "
-                "asset declaration and the granular runtime setters afterward."
-            )
-
-        if isinstance(attrs, List) and len(local_env_ids) != len(attrs):
+        if isinstance(attrs, list) and len(local_env_ids) != len(attrs):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match attrs length {len(attrs)}."
             )
 
         # Resolve per-env physical attrs into a flat list aligned with local_env_ids.
-        if isinstance(attrs, RigidBodyAttributesCfg):
-            physical_attrs = [attrs.attr() for _ in local_env_ids]
+        if isinstance(attrs, RigidBodyPhysicsCfg):
+            physical_attrs = [attrs.to_dexsim_physical_attr() for _ in local_env_ids]
         else:
-            physical_attrs = [a.attr() for a in attrs]
+            physical_attrs = [a.to_dexsim_physical_attr() for a in attrs]
 
         if self.is_spawn_bound:
             if self._data is None:
@@ -1165,7 +1162,7 @@ class RigidObject(BatchEntity):
             # gives them no body id), but the legacy API exposed their authored
             # configuration. Preserve that readable metadata contract without
             # manufacturing a dynamic-body batch solely for property queries.
-            configured_mass = self.cfg.attrs.mass
+            configured_mass = self.cfg.attrs.to_dexsim_physical_attr().mass
             value = 0.0 if configured_mass is None else float(configured_mass)
             return torch.full(
                 (len(local_env_ids),),
@@ -1251,7 +1248,7 @@ class RigidObject(BatchEntity):
         if self.is_spawn_bound and self.is_static:
             return torch.full(
                 (len(local_env_ids),),
-                float(self.cfg.attrs.dynamic_friction),
+                float(self.cfg.attrs.to_dexsim_physical_attr().dynamic_friction),
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -1338,8 +1335,8 @@ class RigidObject(BatchEntity):
             if self._data is None:
                 return torch.tensor(
                     [
-                        self.cfg.attrs.linear_damping,
-                        self.cfg.attrs.angular_damping,
+                        self.cfg.attrs.to_dexsim_physical_attr().linear_damping,
+                        self.cfg.attrs.to_dexsim_physical_attr().angular_damping,
                     ],
                     dtype=torch.float32,
                     device=self.device,

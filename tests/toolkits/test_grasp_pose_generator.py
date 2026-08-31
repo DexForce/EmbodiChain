@@ -41,7 +41,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
     URDFCfg,
 )
@@ -138,10 +138,11 @@ def create_mug(sim: SimulationManager):
             fpath=get_data_path("CoffeeCup/cup.ply"),
             max_convex_hull_num=16,
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.01,
-            dynamic_friction=0.97,
-            static_friction=0.99,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 0.01},
+                "material_props": {"dynamic_friction": 0.97, "static_friction": 0.99},
+            }
         ),
         init_pos=[0.55, 0.0, 0.01],
         init_rot=[0.0, 0.0, -90],

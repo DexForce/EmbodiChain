@@ -69,9 +69,9 @@ class ObjectBaseCfg:
                 if key == "attrs" and isinstance(value, Mapping):
                     # Keep the base module independent of rigid schemas at
                     # import time; only rigid-derived configs expose this key.
-                    from .rigid import _rigid_body_attrs_from_dict
+                    from .rigid import _rigid_body_physics_from_dict
 
-                    setattr(cfg, key, _rigid_body_attrs_from_dict(value))
+                    setattr(cfg, key, _rigid_body_physics_from_dict(value))
                 elif is_configclass(attr):
                     setattr(
                         cfg, key, attr.from_dict(value)

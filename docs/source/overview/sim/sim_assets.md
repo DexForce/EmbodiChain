@@ -98,31 +98,29 @@ Configured via {class}`~cfg.RigidObjectCfg`.
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `shape` | `ShapeCfg` | `ShapeCfg()` | Shape configuration (e.g., Mesh, Box). |
-| `attrs` | `RigidBodyAttributesCfg` | `RigidBodyAttributesCfg()` | Physical attributes. |
+| `attrs` | `RigidBodyPhysicsCfg` | `RigidBodyPhysicsCfg()` | Grouped physical attributes. |
 | `body_type` | `Literal` | `"dynamic"` | "dynamic", "kinematic", or "static". |
 | `max_convex_hull_num` | `int` | `1` | Max convex hulls for decomposition (CoACD). |
 | `sdf_resolution` | `int` | `0` | Resolution for signed distance field. In most cases, a resolution of around 250 produces good results; resolutions exceeding 1000 are rarely necessary.|
 | `body_scale` | `tuple` | `(1.0, 1.0, 1.0)` | Scale of the rigid body. |
 
-### Rigid Body Attributes
+### Rigid Body Physics
 
-The {class}`~cfg.RigidBodyAttributesCfg` class defines physical properties for rigid bodies.
+{class}`~cfg.RigidBodyPhysicsCfg` keeps physical settings in optional groups.
+An unset field leaves the source asset or backend default intact, which makes
+the same configuration usable as either a complete procedural definition or a
+sparse USD/URDF overlay.
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `mass` | `float` | `1.0` | Mass in kg. Set to 0 to use density. |
-| `density` | `float` | `1000.0` | Density in kg/m^3. |
-| `angular_damping` | `float` | `0.7` | Angular damping coefficient. |
-| `linear_damping` | `float` | `0.7` | Linear damping coefficient. |
-| `max_depenetration_velocity` | `float` | `10.0` | Maximum depenetration velocity. |
-| `sleep_threshold` | `float` | `0.001` | Threshold below which the body can go to sleep. |
-| `enable_ccd` | `bool` | `False` | Enable continuous collision detection. |
-| `contact_offset` | `float` | `0.002` | Contact offset for collision detection. |
-| `rest_offset` | `float` | `0.001` | Rest offset for collision detection. |
-| `enable_collision` | `bool` | `True` | Enable collision for the rigid body. |
-| `restitution` | `float` | `0.0` | Restitution (bounciness) coefficient. |
-| `dynamic_friction` | `float` | `0.5` | Dynamic friction coefficient. |
-| `static_friction` | `float` | `0.5` | Static friction coefficient. |
+| Group | Type | Contents |
+| :--- | :--- | :--- |
+| `mass_props` | `MassPropertiesCfg` | Mass, density, inertia, and COM pose. |
+| `rigid_props` | `RigidBodyPropertiesCfg` | Portable/default rigid-body behavior such as damping and CCD. |
+| `collision_props` | `CollisionPropertiesCfg` | Collision enablement and contact/rest offsets. |
+| `material_props` | `RigidBodyMaterialCfg` | Restitution and friction. |
+| `default_props` / `newton_props` | backend-specific grouped cfg | Backend-native extensions when their semantics are not portable. |
+
+COM quaternions in configuration use `xyzw`. The Spawn adapter converts to the
+native backend order only when it writes an engine descriptor.
 
 For a runnable rigid-object example, see the {doc}`Create Scene </tutorial/create_scene>` tutorial.
 

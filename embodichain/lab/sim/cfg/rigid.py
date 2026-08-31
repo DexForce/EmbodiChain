@@ -26,8 +26,7 @@ import numpy as np
 from dexsim.types import PhysicalAttr
 
 from embodichain.utils import configclass
-
-from .._legacy_cfg import RigidBodyAttributesCfg, RigidBodyAttributesOverrideCfg
+from embodichain.utils.math import convert_quat
 
 
 @configclass
@@ -35,10 +34,11 @@ class MassPropertiesCfg:
     """Backend-neutral rigid-body mass properties.
 
     ``None`` means that the source asset or selected backend keeps ownership of
-    that value.  For a non-static body, explicit inertia requires a positive
-    mass; otherwise a positive mass rescales geometry-derived inertia, while
-    density derives mass, center of mass, and inertia from collision geometry.
-    Static bodies omit all mass properties during Spawn compilation.
+    that value. For a non-static body, explicit inertia requires a positive
+    mass. A source-backed body retains authored inertia unless
+    :attr:`recompute_inertia` is enabled; procedural or recomputed bodies derive
+    inertia from collision geometry and the effective mass or density. Static
+    bodies omit all mass properties during Spawn compilation.
     """
 
     mass: float | None = None
@@ -64,6 +64,16 @@ class MassPropertiesCfg:
     shared by both backends, prefer principal moments plus
     :attr:`com_quaternion`; the current Default adapter consumes the principal-
     moment representation, while Newton can retain a full tensor.
+    """
+
+    recompute_inertia: bool | None = None
+    """Whether collision geometry should replace source-authored inertia.
+
+    ``True`` discards source inertia so the backend recomputes it from the
+    collision geometry and effective mass or density. ``False`` preserves the
+    source inertia. ``None`` inherits an outer rigid-body overlay and otherwise
+    behaves like ``False``. Explicit :attr:`inertia` cannot be combined with
+    recomputation.
     """
 
     com_position: Sequence[float] | np.ndarray | None = None
@@ -526,28 +536,6 @@ class NewtonRigidBodyPhysicsCfg:
         )
 
 
-_RIGID_PHYSICS_LEGACY_FIELD_GROUPS = {
-    "mass": "mass_props",
-    "density": "mass_props",
-    "inertia": "mass_props",
-    "com_position": "mass_props",
-    "com_quaternion": "mass_props",
-    "linear_damping": "rigid_props",
-    "angular_damping": "rigid_props",
-    "max_linear_velocity": "rigid_props",
-    "max_angular_velocity": "rigid_props",
-    "max_depenetration_velocity": "rigid_props",
-    "enable_ccd": "rigid_props",
-    "min_position_iters": "rigid_props",
-    "min_velocity_iters": "rigid_props",
-    "sleep_threshold": "rigid_props",
-    "contact_offset": "collision_props",
-    "rest_offset": "collision_props",
-    "static_friction": "material_props",
-    "dynamic_friction": "material_props",
-    "restitution": "material_props",
-}
-
 _RIGID_PHYSICS_GROUP_FIELDS = frozenset(
     {
         "mass_props",
@@ -639,6 +627,24 @@ def _physics_property_cfg_to_dict(
     return data
 
 
+def _copy_dexsim_physical_attr(source: PhysicalAttr) -> PhysicalAttr:
+    """Copy a native ``PhysicalAttr`` without relying on pickle support.
+
+    DexSim exposes ``PhysicalAttr`` through a pybind extension object, so
+    :func:`copy.deepcopy` cannot clone it.  Copy scalar fields from the native
+    mapping and clone its array-valued mass/COM fields explicitly before a
+    sparse grouped overlay is applied.
+    """
+    copied = PhysicalAttr()
+    for field_name, value in source.as_dict().items():
+        setattr(copied, field_name, value)
+    for field_name in ("inertia", "com_position", "com_quaternion"):
+        value = getattr(source, field_name, None)
+        if value is not None:
+            setattr(copied, field_name, np.array(value, dtype=np.float32, copy=True))
+    return copied
+
+
 @configclass
 class RigidBodyPhysicsCfg:
     """Grouped rigid-body physics configuration used by Spawn.
@@ -663,7 +669,7 @@ class RigidBodyPhysicsCfg:
     """
 
     mass_props: MassPropertiesCfg | None = None
-    """Backend-neutral mass, inertia, and center-of-mass overrides."""
+    """Backend-neutral mass, inertia, COM, and recomputation overrides."""
 
     rigid_props: RigidBodyPropertiesCfg | None = None
     """Optional body-level backend properties.
@@ -814,80 +820,154 @@ class RigidBodyPhysicsCfg:
         )
         return True if value is None else bool(value)
 
-    def attr(self) -> PhysicalAttr:
-        """Project Default-compatible values to the legacy ``PhysicalAttr``.
+    def to_dexsim_physical_attr(
+        self,
+        *,
+        base: PhysicalAttr | None = None,
+    ) -> PhysicalAttr:
+        """Translate configured Default-compatible values to ``PhysicalAttr``.
 
-        Newton-native fields have no representation in ``PhysicalAttr`` and are
-        intentionally omitted.  New Spawn code should consume the grouped
-        configuration directly instead of calling this compatibility method.
+        Args:
+            base: Optional native attributes to overlay.  This is used by the
+                retained raw Default articulation path for sparse per-link
+                updates.
+
+        Returns:
+            A DexSim physical-attribute object using its defaults for every
+            unconfigured grouped field.
         """
-        attr = PhysicalAttr()
-        for cfg in (
-            self.mass_props,
+        attr = PhysicalAttr() if base is None else _copy_dexsim_physical_attr(base)
+        configs = (
+            (self.mass_props, {"recompute_inertia": None}),
+            (self.rigid_props, {}),
+            (self.collision_props, {"collision_enabled": "enable_collision"}),
+            (self.material_props, {}),
             (
-                self.rigid_props
-                if isinstance(self.rigid_props, DefaultRigidBodyPropertiesCfg)
-                else None
+                None if self.default_props is None else self.default_props.rigid_props,
+                {},
             ),
             (
-                self.collision_props
-                if isinstance(self.collision_props, CollisionPropertiesCfg)
-                else None
-            ),
-            self.material_props,
-            *(
                 (
-                    self.default_props.rigid_props,
-                    self.default_props.collision_props,
-                    self.default_props.material_props,
-                )
-                if self.default_props is not None
-                else ()
+                    None
+                    if self.default_props is None
+                    else self.default_props.collision_props
+                ),
+                {"collision_enabled": "enable_collision"},
             ),
-        ):
+            (
+                (
+                    None
+                    if self.default_props is None
+                    else self.default_props.material_props
+                ),
+                {},
+            ),
+        )
+        for cfg, field_map in configs:
             if cfg is None:
                 continue
             for item in fields(cfg):
                 value = getattr(cfg, item.name)
-                if value is not None and hasattr(attr, item.name):
-                    setattr(attr, item.name, value)
+                target_name = field_map.get(item.name, item.name)
+                if (
+                    value is None
+                    or target_name is None
+                    or not hasattr(attr, target_name)
+                ):
+                    continue
+                if target_name in {"inertia", "com_position"}:
+                    value = np.asarray(value, dtype=np.float32)
+                elif target_name == "com_quaternion":
+                    value = convert_quat(np.asarray(value, dtype=np.float32), to="wxyz")
+                setattr(attr, target_name, value)
         return attr
 
-    def __getattr__(self, name: str) -> Any:
-        """Provide read-only compatibility for legacy flat property access."""
-        group_name = _RIGID_PHYSICS_LEGACY_FIELD_GROUPS.get(name)
-        if group_name is None:
-            raise AttributeError(name)
-        group = object.__getattribute__(self, group_name)
-        if group is not None and hasattr(group, name):
-            value = getattr(group, name)
-            if value is not None:
-                return value
-        default_props = object.__getattribute__(self, "default_props")
-        if default_props is not None:
-            backend_group = getattr(default_props, group_name, None)
-            if backend_group is not None and hasattr(backend_group, name):
-                value = getattr(backend_group, name)
-                if value is not None:
-                    return value
-        legacy_defaults = PhysicalAttr()
-        return getattr(legacy_defaults, name, None)
+    @classmethod
+    def from_dexsim_physical_attr(
+        cls,
+        attr: PhysicalAttr,
+    ) -> RigidBodyPhysicsCfg:
+        """Capture native Default attributes in the grouped configuration."""
+
+        def _array(name: str) -> np.ndarray | None:
+            value = getattr(attr, name, None)
+            return None if value is None else np.asarray(value, dtype=np.float32)
+
+        com_quaternion = _array("com_quaternion")
+        if com_quaternion is not None:
+            com_quaternion = convert_quat(com_quaternion, to="xyzw")
+        return cls(
+            mass_props=MassPropertiesCfg(
+                mass=getattr(attr, "mass", None),
+                density=getattr(attr, "density", None),
+                inertia=_array("inertia"),
+                com_position=_array("com_position"),
+                com_quaternion=com_quaternion,
+            ),
+            rigid_props=DefaultRigidBodyPropertiesCfg(
+                angular_damping=getattr(attr, "angular_damping", None),
+                linear_damping=getattr(attr, "linear_damping", None),
+                max_depenetration_velocity=getattr(
+                    attr, "max_depenetration_velocity", None
+                ),
+                sleep_threshold=getattr(attr, "sleep_threshold", None),
+                min_position_iters=getattr(attr, "min_position_iters", None),
+                min_velocity_iters=getattr(attr, "min_velocity_iters", None),
+                max_linear_velocity=getattr(attr, "max_linear_velocity", None),
+                max_angular_velocity=getattr(attr, "max_angular_velocity", None),
+                enable_ccd=getattr(attr, "enable_ccd", None),
+            ),
+            collision_props=CollisionPropertiesCfg(
+                collision_enabled=getattr(attr, "enable_collision", None),
+                contact_offset=getattr(attr, "contact_offset", None),
+                rest_offset=getattr(attr, "rest_offset", None),
+            ),
+            material_props=RigidBodyMaterialCfg(
+                restitution=getattr(attr, "restitution", None),
+                dynamic_friction=getattr(attr, "dynamic_friction", None),
+                static_friction=getattr(attr, "static_friction", None),
+            ),
+        )
 
 
-def _rigid_body_attrs_from_dict(
-    value: Mapping[str, Any],
-    *,
-    override: bool = False,
-) -> RigidBodyPhysicsCfg | RigidBodyAttributesCfg | RigidBodyAttributesOverrideCfg:
-    """Parse grouped physics or the deprecated Default-only flat schema."""
-    grouped_fields = _RIGID_PHYSICS_GROUP_FIELDS.intersection(value)
-    if grouped_fields:
-        flat_fields = set(value) - _RIGID_PHYSICS_GROUP_FIELDS
-        if flat_fields:
-            raise ValueError(
-                "Do not mix deprecated flat rigid-body fields with grouped "
-                f"RigidBodyPhysicsCfg fields: {sorted(flat_fields)}"
-            )
-        return RigidBodyPhysicsCfg.from_dict(value)
-    legacy_type = RigidBodyAttributesOverrideCfg if override else RigidBodyAttributesCfg
-    return legacy_type.from_dict(dict(value))
+_REMOVED_FLAT_RIGID_BODY_FIELDS = frozenset(
+    {
+        "mass",
+        "density",
+        "inertia",
+        "com_position",
+        "com_quaternion",
+        "angular_damping",
+        "linear_damping",
+        "max_depenetration_velocity",
+        "sleep_threshold",
+        "min_position_iters",
+        "min_velocity_iters",
+        "max_linear_velocity",
+        "max_angular_velocity",
+        "enable_ccd",
+        "contact_offset",
+        "rest_offset",
+        "enable_collision",
+        "restitution",
+        "dynamic_friction",
+        "static_friction",
+    }
+)
+
+
+def _rigid_body_physics_from_dict(value: Mapping[str, Any]) -> RigidBodyPhysicsCfg:
+    """Parse the grouped rigid-body physics schema.
+
+    Flat ``attrs`` fields and their compatibility configuration types were
+    removed. Reject them at the config boundary so no input silently changes
+    physical meaning.
+    """
+    flat_fields = _REMOVED_FLAT_RIGID_BODY_FIELDS.intersection(value)
+    if flat_fields:
+        raise ValueError(
+            "Removed flat rigid-body attrs fields: "
+            f"{sorted(flat_fields)}. Use grouped mass_props, rigid_props, "
+            "collision_props, and material_props."
+        )
+    return RigidBodyPhysicsCfg.from_dict(value)

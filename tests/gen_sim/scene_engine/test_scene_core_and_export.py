@@ -62,7 +62,10 @@ def _scene_object(
 def _physics(body_type: str) -> ObjectPhysics:
     return ObjectPhysics(
         body_type=body_type,  # type: ignore[arg-type]
-        attrs={"mass": 1.0, "static_friction": 0.8},
+        attrs={
+            "mass_props": {"mass": 1.0},
+            "material_props": {"static_friction": 0.8},
+        },
         max_convex_hull_num=16,
     )
 

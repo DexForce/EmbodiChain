@@ -35,7 +35,7 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
     physics_cfg_for_backend,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     ArticulationCfg,
     RigidObjectGroupCfg,
     JointDrivePropertiesCfg,
@@ -186,13 +186,16 @@ def create_scoop(sim: SimulationManager):
             fpath=get_data_path("ScoopIceNewEnv/scoop.ply"),
             max_convex_hull_num=12,
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.5,
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 0.5},
+                "rigid_props": {"min_position_iters": 32, "min_velocity_iters": 8},
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                    "restitution": 0.01,
+                },
+            }
         ),
         body_type="dynamic",
         init_pos=[0.6, 0.0, 0.09],
@@ -209,13 +212,16 @@ def create_heave_ice(sim: SimulationManager):
         shape=MeshCfg(
             fpath=get_data_path("ScoopIceNewEnv/ice_mesh_small/ice_000.obj"),
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.5,
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 0.5},
+                "rigid_props": {"min_position_iters": 32, "min_velocity_iters": 8},
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                    "restitution": 0.01,
+                },
+            }
         ),
         body_type="dynamic",
         init_pos=[10, 10, 0.08],
@@ -231,13 +237,16 @@ def create_padding_box(sim: SimulationManager):
         shape=CubeCfg(
             size=[0.1, 0.16, 0.05],
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 1.0},
+                "rigid_props": {"min_position_iters": 32, "min_velocity_iters": 8},
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                    "restitution": 0.01,
+                },
+            }
         ),
         body_type="kinematic",
         init_pos=[0.6, 0.15, 0.025],
@@ -253,13 +262,16 @@ def create_container(sim: SimulationManager):
         fpath=get_data_path("ScoopIceNewEnv/IceContainer/ice_container.urdf"),
         init_pos=[0.7, -0.4, 0.21],
         init_rot=[0, 0, -90],
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 1.0},
+                "rigid_props": {"min_position_iters": 32, "min_velocity_iters": 8},
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                    "restitution": 0.01,
+                },
+            }
         ),
         joint_drive_props=JointDrivePropertiesCfg(
             stiffness=1.0, damping=0.1, max_effort=100.0, drive_type="force"
@@ -279,15 +291,21 @@ def create_ice_cubes(sim: SimulationManager):
         "rigid_objects": {
             "obj": {
                 "attrs": {
-                    "mass": 0.003,
-                    "contact_offset": 0.001,
-                    "rest_offset": 0,
-                    "dynamic_friction": 0.05,
-                    "static_friction": 0.1,
-                    "restitution": 0.01,
-                    "min_position_iters": 32,
-                    "min_velocity_iters": 4,
-                    "max_depenetration_velocity": 1.0,
+                    "mass_props": {"mass": 0.003},
+                    "rigid_props": {
+                        "min_position_iters": 32,
+                        "min_velocity_iters": 4,
+                        "max_depenetration_velocity": 1.0,
+                    },
+                    "collision_props": {
+                        "contact_offset": 0.001,
+                        "rest_offset": 0,
+                    },
+                    "material_props": {
+                        "dynamic_friction": 0.05,
+                        "static_friction": 0.1,
+                        "restitution": 0.01,
+                    },
                 },
                 "shape": {"shape_type": "Mesh"},
                 "init_pos": [20.0, 0, 1.0],

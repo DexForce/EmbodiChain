@@ -40,6 +40,7 @@ topics:
       - AssetPhysicsMode
       - asset_physics_mode
       - RigidBodyPhysicsCfg
+      - recompute_inertia
       - MeshCollisionPropertiesCfg
       - default_props
       - newton_props
@@ -57,7 +58,6 @@ topics:
       - embodichain/lab/sim/__init__.py
       - embodichain/lab/sim/sim_manager.py
       - embodichain/lab/sim/cfg/
-      - embodichain/lab/sim/_legacy_cfg.py
       - embodichain/lab/sim/common.py
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
@@ -287,7 +287,6 @@ topics:
       - embodichain/lab/sim/sim_manager.py
       - embodichain/lab/sim/robots/
       - embodichain/lab/sim/cfg/
-      - embodichain/lab/sim/_legacy_cfg.py
     related_topics:
       - simulation-system
       - ik-solvers

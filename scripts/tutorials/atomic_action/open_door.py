@@ -43,7 +43,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.utils import logger
@@ -98,9 +98,8 @@ def create_microwave(sim: SimulationManager) -> Articulation:
             init_pos=MICROWAVE_POSITION,
             init_rot=MICROWAVE_ORIENTATION,
             joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
-            attrs=RigidBodyAttributesCfg(
-                static_friction=1.0,
-                dynamic_friction=1.0,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}}
             ),
             fix_base=True,
         )

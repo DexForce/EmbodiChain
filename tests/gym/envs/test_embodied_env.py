@@ -103,7 +103,7 @@ METADATA = {
                 "fpath": "ShopTableSimple/shop_table_simple.ply",
                 "max_convex_hull_num": 2,
             },
-            "attrs": {"mass": 10.0},
+            "attrs": {"mass_props": {"mass": 10.0}},
             "body_scale": (2, 1.6, 1),
         }
     ],

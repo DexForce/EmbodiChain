@@ -43,7 +43,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
     URDFCfg,
 )
@@ -159,10 +159,11 @@ def create_obj(sim: SimulationManager):
             max_convex_hull_num=16,
             acd_method="vhacd",
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.01,
-            dynamic_friction=0.97,
-            static_friction=0.99,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 0.01},
+                "material_props": {"dynamic_friction": 0.97, "static_friction": 0.99},
+            }
         ),
         init_pos=[0.55, 0.0, 0.08],
         init_rot=[0.0, 0.0, 0.0],

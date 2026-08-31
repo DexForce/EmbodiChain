@@ -35,8 +35,6 @@ from embodichain.lab.sim.cfg import (
     LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
     physics_cfg_for_backend,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
     RigidBodyPhysicsCfg,
 )
 from embodichain.data import get_data_path
@@ -128,17 +126,23 @@ class _EntityMethodOverride:
         return getattr(self._entity, name)
 
 
-class TestRigidBodyAttributesOverride:
+class TestLinkPhysicsOverrideCfg:
     """Pure-Python tests for per-link physics config merging."""
 
-    def test_merge_with_applies_only_set_fields(self):
-        base = RigidBodyAttributesCfg(
-            static_friction=0.3,
-            dynamic_friction=0.25,
-            linear_damping=0.5,
+    def test_grouped_override_applies_only_configured_fields(self):
+        base = RigidBodyPhysicsCfg.from_dict(
+            {
+                "rigid_props": {"linear_damping": 0.5},
+                "material_props": {
+                    "static_friction": 0.3,
+                    "dynamic_friction": 0.25,
+                },
+            }
         )
-        override = RigidBodyAttributesOverrideCfg(static_friction=0.85)
-        merged = override.merge_with(base)
+        override = RigidBodyPhysicsCfg.from_dict(
+            {"material_props": {"static_friction": 0.85}}
+        )
+        merged = override.to_dexsim_physical_attr(base=base.to_dexsim_physical_attr())
         assert abs(merged.static_friction - 0.85) < 1e-6
         assert abs(merged.dynamic_friction - 0.25) < 1e-6
         assert abs(merged.linear_damping - 0.5) < 1e-6
@@ -1086,7 +1090,9 @@ class BaseArticulationLinkPhysicsTest:
             fpath=self.art_path,
             asset_physics_mode="overlay",
             joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
-            attrs=RigidBodyAttributesCfg(static_friction=global_friction),
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {"material_props": {"static_friction": global_friction}}
+            ),
         )
         art: Articulation = self.sim.add_articulation(cfg=cfg)
         self.sim.prepare()
@@ -1102,12 +1108,14 @@ class BaseArticulationLinkPhysicsTest:
             fpath=self.art_path,
             asset_physics_mode="overlay",
             joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
-            attrs=RigidBodyAttributesCfg(static_friction=global_friction),
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {"material_props": {"static_friction": global_friction}}
+            ),
             link_attrs={
                 "handle": LinkPhysicsOverrideCfg(
                     link_names_expr=["handle_xpos"],
-                    attrs=RigidBodyAttributesOverrideCfg(
-                        static_friction=handle_friction
+                    attrs=RigidBodyPhysicsCfg.from_dict(
+                        {"material_props": {"static_friction": handle_friction}}
                     ),
                 ),
             },
@@ -1128,11 +1136,11 @@ class BaseArticulationLinkPhysicsTest:
                 "fpath": self.art_path,
                 "asset_physics_mode": "overlay",
                 "joint_drive_props": {"drive_type": "force"},
-                "attrs": {"static_friction": 0.4},
+                "attrs": {"material_props": {"static_friction": 0.4}},
                 "link_attrs": {
                     "handle": {
                         "link_names_expr": ["handle_xpos"],
-                        "attrs": {"static_friction": 0.77},
+                        "attrs": {"material_props": {"static_friction": 0.77}},
                     }
                 },
             }
@@ -1158,7 +1166,9 @@ class BaseArticulationLinkPhysicsTest:
         }
         handle_friction = 0.66
         art.set_link_physical_attr(
-            RigidBodyAttributesOverrideCfg(static_friction=handle_friction),
+            RigidBodyPhysicsCfg.from_dict(
+                {"material_props": {"static_friction": handle_friction}}
+            ),
             link_names=["handle_xpos"],
         )
         self.sim.prepare()

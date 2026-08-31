@@ -111,43 +111,22 @@ pre-finalize), and visual material/visibility/geometry/scale/user-id APIs.
 Static Newton bodies do not have `RigidBodyData`; static collision-filter writes
 use DexSim's per-entity metadata hook when a Newton body ID is not available.
 
-### Newton-native physics attributes (Phase 3)
+### Grouped Newton and Default physics attributes
 
-`RigidBodyAttributesCfg` previously flattened to the legacy default-backend
-`PhysicalAttr` via `.attr()`, so on Newton: Newton-native contact/shape params
-(`ke`/`kd`/`margin`/`gap`/`mu_torsional`/...) were not representable, default-only
-fields were silently ignored, and `density`/`enable_collision` were dropped.
-This is now fixed by adopting dexsim's spawn-descriptor pattern at the EmbodiChain
-config layer.
+`RigidBodyPhysicsCfg` is the single public schema for rigid-object and
+articulation link physics. It separates portable values into `mass_props`,
+`rigid_props`, `collision_props`, and `material_props`, while
+`default_props` and `newton_props` carry backend-native extensions. Every
+field is optional, so source-authored values survive sparse USD/URDF overlays.
+The same partial schema is used by `LinkPhysicsOverrideCfg`, eliminating the
+former flat compatibility/override type pair.
 
-- `cfg.py`: `NewtonCollisionAttributesCfg` (20 fields mirroring
-  `dexsim.spawn.descs.NewtonCollisionDesc`, all `Optional`, `None` = keep backend
-  default) + a `newton` sub-config on `RigidBodyAttributesCfg` and
-  `RigidBodyAttributesOverrideCfg`. `from_dict` parses nested `"newton"`.
-  `RigidBodyAttributesOverrideCfg.merged_cfg(base)` returns a merged
-  `RigidBodyAttributesCfg` preserving the `newton` sub-config (override non-None
-  wins, else base); `merge_with()` keeps its legacy `PhysicalAttr` return for the
-  default path. `.attr()` is unchanged (no default-backend regression).
-- `physics_attrs.py` (new resolver): `ResolvedNewtonShape(NewtonCollisionDesc)`
-  + `resolve_newton_shape` (projects common `dynamic_friction→mu`,
-  `restitution`, `enable_collision→has_shape_collision`, `density` — positive so
-  dexsim computes a positive body mass) + `resolve_newton_body`
-  (`RigidBodyPhysicsDesc.dynamic/static/kinematic`) +
-  `resolve_rigid_body_attributes` (dispatch by backend). Re-exports dexsim's
-  `NEWTON_CONTACT_SOLVER_FIELDS` / `NEWTON_CONTACT_FIELDS` and ports
-  `warn_ignored_contact_fields` (per-solver) + `warn_backend_mismatched_fields`
-  (Default-only fields on Newton).
-- RigidObject spawn (`sim_utils.py`): **opt-in desc-native path** — when
-  `is_newton and cfg.attrs.newton is not None`, route box/sphere/CONVEX-mesh
-  through `register_mesh_object_to_newton_patch(newton_shape=, newton_body=)`
-  (populating the `mgr.dexsim_meta` scaffolding registration/rebuild read),
-  bypassing legacy `PhysicalAttr` so Newton-native contact/shape params reach the
-  model. SDF and CoACD keep the legacy path this phase. When `attrs.newton` is
-  `None`, the legacy `add_rigidbody(attr=)` path is unchanged.
-- Articulation: common fields apply via the legacy `set_physical_attr` path on
-  BUILDER skeletons; `set_dexsim_articulation_cfg` warns when Newton-native
-  per-link fields are set (dexsim's `NewtonArticulation` has no per-link
-  contact-material API — see Deferred).
+Spawn compiles these groups into its backend-neutral rigid-body and shape
+descriptors, then projects Default- or Newton-specific values at the selected
+backend boundary. The remaining raw Default path uses a private
+`PhysicalAttr` adapter only at that boundary. User-facing COM quaternions stay
+in `xyzw` order; adapters convert to DexSim's `wxyz` order when writing native
+attributes and convert back on reads.
 
 ### Runtime attribute mutation on Newton
 

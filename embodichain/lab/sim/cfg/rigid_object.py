@@ -26,7 +26,6 @@ from dexsim.types import ActorType
 
 from embodichain.utils import configclass, is_configclass, logger
 
-from .._legacy_cfg import RigidBodyAttributesCfg
 from ..shapes import ShapeCfg
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .rigid import RigidBodyPhysicsCfg
@@ -45,11 +44,10 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     # TODO: supoort basic primitive shapes, such as box, sphere, etc cfg and spawn method.
 
-    attrs: RigidBodyPhysicsCfg | RigidBodyAttributesCfg = RigidBodyPhysicsCfg()
+    attrs: RigidBodyPhysicsCfg = RigidBodyPhysicsCfg()
     """Rigid-body physics.
 
-    The grouped :class:`RigidBodyPhysicsCfg` is backend-aware. The deprecated
-    flat :class:`RigidBodyAttributesCfg` is accepted by the Default backend only.
+    :class:`RigidBodyPhysicsCfg` groups portable and backend-native intent.
     """
 
     body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"

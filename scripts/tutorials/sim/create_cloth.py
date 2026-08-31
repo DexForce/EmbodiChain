@@ -35,7 +35,7 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
     physics_cfg_for_backend,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     ClothObjectCfg,
     ClothPhysicalAttributesCfg,
 )
@@ -136,13 +136,16 @@ def main():
         shape=CubeCfg(
             size=[0.1, 0.1, 0.06],
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 1.0},
+                "rigid_props": {"min_position_iters": 32, "min_velocity_iters": 8},
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                    "restitution": 0.01,
+                },
+            }
         ),
         body_type="dynamic",
         init_pos=[0.5, 0.0, 0.04],

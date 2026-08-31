@@ -47,8 +47,6 @@ from embodichain.lab.sim.cfg import (
     _normalize_joint_target_mode,
     ArticulationCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
     RigidBodyPhysicsCfg,
 )
 from dexsim.types import PhysicalAttr
@@ -2386,17 +2384,17 @@ class Articulation(BatchEntity):
 
     def set_link_physical_attr(
         self,
-        attrs: RigidBodyAttributesCfg | RigidBodyAttributesOverrideCfg | PhysicalAttr,
+        attrs: RigidBodyPhysicsCfg | PhysicalAttr,
         link_names: str | Sequence[str] | None = None,
         env_ids: Sequence[int] | None = None,
         *,
-        base_attrs: RigidBodyAttributesCfg | RigidBodyPhysicsCfg | None = None,
+        base_attrs: RigidBodyPhysicsCfg | None = None,
         replace_inertial: bool = False,
     ) -> None:
         """Set physical attributes for selected articulation links.
 
         Args:
-            attrs: Full, partial, or DexSim physical attributes to apply.
+            attrs: Grouped or DexSim physical attributes to apply.
             link_names: Link names or regex patterns. If None, all links are updated.
             env_ids: Environment indices. If None, all environments are updated.
             base_attrs: Base config used when ``attrs`` is a partial override.
@@ -2424,16 +2422,15 @@ class Articulation(BatchEntity):
                 keys=link_names, list_of_strings=self.link_names
             )
 
-        if isinstance(attrs, RigidBodyAttributesOverrideCfg):
+        if isinstance(attrs, RigidBodyPhysicsCfg):
             if base_attrs is None:
                 base_attrs = self.cfg.attrs
-            if isinstance(base_attrs, RigidBodyPhysicsCfg):
-                base_attrs = RigidBodyAttributesCfg.from_grouped(base_attrs)
-            physical_attr = attrs.merge_with(base_attrs)
-            if attrs.mass is not None:
-                replace_inertial = True
-        elif isinstance(attrs, RigidBodyAttributesCfg):
-            physical_attr = attrs.attr()
+            physical_attr = attrs.to_dexsim_physical_attr(
+                base=base_attrs.to_dexsim_physical_attr()
+            )
+            mass_props = attrs.mass_props
+            if mass_props is not None and mass_props.recompute_inertia is not None:
+                replace_inertial = bool(mass_props.recompute_inertia)
         else:
             physical_attr = attrs
 

@@ -26,7 +26,6 @@ from typing import Literal
 
 from embodichain.data import get_data_path
 
-from .._legacy_cfg import RigidBodyAttributesCfg, RigidBodyAttributesOverrideCfg
 from ..shapes import MeshCfg, ShapeCfg
 from ..workspace.cfg import RobotWorkspaceCfg
 from .articulation import (
@@ -124,8 +123,6 @@ __all__ = [
     "DefaultRigidBodyPhysicsCfg",
     "NewtonRigidBodyPhysicsCfg",
     "RigidBodyPhysicsCfg",
-    "RigidBodyAttributesCfg",
-    "RigidBodyAttributesOverrideCfg",
     "ObjectBaseCfg",
     "LightCfg",
     "RigidObjectCfg",

@@ -256,7 +256,8 @@ implementation at the manager dispatch boundary when its runtime exists.
 New rigid-body configs use `RigidBodyPhysicsCfg`. Portable intent is organized
 by physical concept:
 
-- `mass_props`: `MassPropertiesCfg` (`mass`, `density`, inertia, and COM);
+- `mass_props`: `MassPropertiesCfg` (`mass`, `density`, inertia, COM, and the
+  source-inertia recomputation policy);
 - `rigid_props`: the common `RigidBodyPropertiesCfg` root or a
   `DefaultRigidBodyPropertiesCfg` / `NewtonRigidBodyPropertiesCfg` subclass;
 - `collision_props`: common collision enablement and the portable
@@ -281,14 +282,28 @@ backend defaults therefore survive partial overlays. Dynamic and kinematic
 mass priority is explicit inertia with positive mass, then mass, then density;
 static descriptors omit mass properties.
 
+`MassPropertiesCfg.recompute_inertia=True` discards source-authored inertia so
+the backend derives it from collision geometry and the effective mass or
+density. The default `None` inherits an outer per-body overlay and otherwise
+preserves source inertia. Explicit inertia and recomputation are mutually
+exclusive. The policy lives with mass properties so global articulation,
+per-link articulation, and rigid USD overlays share the same behavior;
+`LinkPhysicsOverrideCfg` only selects links and carries their partial `attrs`.
+
 The polymorphic slots and their local `backend: common|default|newton`
 discriminator remain a compatibility input. New Dict/YAML definitions should
 use common slots plus `default_props`/`newton_props`; all forms round-trip
 through `to_dict()`. `MeshCfg.max_convex_hull_num`, `acd_method`, and
 `sdf_resolution`, plus the SDF fields on `NewtonCollisionPropertiesCfg`, are
-compatibility aliases. Explicit mesh-collision configs take precedence. Do not
-mix deprecated flat `RigidBodyAttributesCfg` fields with grouped fields in one
-config or override.
+compatibility aliases. Explicit mesh-collision configs take precedence.
+
+`RigidBodyPhysicsCfg` is the only user-facing rigid-body physics schema.
+Flat `attrs` keys such as `mass`, `dynamic_friction`, and `enable_collision`
+are rejected at the parsing boundary; place them in `mass_props`,
+`material_props`, or `collision_props` instead. `LinkPhysicsOverrideCfg.attrs`
+uses the same partial schema, so global and per-link overlays share one model.
+COM quaternions in every EmbodiChain config and public runtime API are `xyzw`.
+The Spawn/Default adapter alone converts them to DexSim's native `wxyz` order.
 
 Robot configs normally keep these portable values on one ordinary `RobotCfg`.
 For a genuine backend-specific asset or actuator difference, subclass
@@ -422,14 +437,9 @@ to restore non-deterministic perturbations.
 
 Rigid USD objects follow the same overlay rule: parsed source descriptors are
 updated field-by-field, never replaced wholesale by a partial config. The
-legacy flat `RigidBodyAttributesCfg` and `RigidBodyAttributesOverrideCfg` live
-together in private `_legacy_cfg.py` and are temporarily re-exported by the
-`cfg/__init__.py` facade so existing `embodichain.lab.sim.cfg` imports keep
-working. They are accepted by the Default backend only, expose no nested
-Newton config, and Newton Spawn rejects them
-with a grouped-config migration message. New code should use the grouped
-schema so “unset” is distinguishable from an authored default and the entire
-legacy layer can eventually be removed as one unit.
+former flat `RigidBodyAttributesCfg` and `RigidBodyAttributesOverrideCfg`
+types have been removed. New and migrated definitions use the grouped schema,
+where `None` means “leave the source/backend value unchanged.”
 
 ## Where to Make Changes
 

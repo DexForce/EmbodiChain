@@ -518,7 +518,7 @@ def create_benchmark_object(
 ):
     """Create one benchmark object at a selected initial position."""
     from embodichain.data import get_data_path
-    from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+    from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
     from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 
     if preset.shape_type == "mesh":
@@ -538,21 +538,29 @@ def create_benchmark_object(
     cfg = RigidObjectCfg(
         uid=f"benchmark_{preset.label}_{position_case.name}_{uid_suffix}",
         shape=shape,
-        attrs=RigidBodyAttributesCfg(
-            mass=preset.mass,
-            dynamic_friction=preset.dynamic_friction,
-            static_friction=preset.static_friction,
-            restitution=preset.restitution,
-            contact_offset=preset.contact_offset,
-            rest_offset=preset.rest_offset,
-            linear_damping=preset.linear_damping,
-            angular_damping=preset.angular_damping,
-            max_depenetration_velocity=preset.max_depenetration_velocity,
-            min_position_iters=preset.min_position_iters,
-            min_velocity_iters=preset.min_velocity_iters,
-            max_linear_velocity=preset.max_linear_velocity,
-            max_angular_velocity=preset.max_angular_velocity,
-            enable_ccd=preset.enable_ccd,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": preset.mass},
+                "rigid_props": {
+                    "linear_damping": preset.linear_damping,
+                    "angular_damping": preset.angular_damping,
+                    "max_depenetration_velocity": preset.max_depenetration_velocity,
+                    "min_position_iters": preset.min_position_iters,
+                    "min_velocity_iters": preset.min_velocity_iters,
+                    "max_linear_velocity": preset.max_linear_velocity,
+                    "max_angular_velocity": preset.max_angular_velocity,
+                    "enable_ccd": preset.enable_ccd,
+                },
+                "collision_props": {
+                    "contact_offset": preset.contact_offset,
+                    "rest_offset": preset.rest_offset,
+                },
+                "material_props": {
+                    "dynamic_friction": preset.dynamic_friction,
+                    "static_friction": preset.static_friction,
+                    "restitution": preset.restitution,
+                },
+            }
         ),
         init_pos=[position_case.xy[0], position_case.xy[1], preset.initial_z],
         init_rot=preset.init_rot,

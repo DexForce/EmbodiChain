@@ -70,7 +70,7 @@ Key parameters
 +---------------------+----------------------------------+----------------------------------+
 | ``joint_drive_props``      | JointDrivePropertiesCfg          | Joint drive, limits, friction    |
 +---------------------+----------------------------------+----------------------------------+
-| ``attrs``           | RigidBodyAttributesCfg           | Rigid-body physics attributes    |
+| ``attrs``           | RigidBodyPhysicsCfg               | Grouped rigid-body physics       |
 +---------------------+----------------------------------+----------------------------------+
 | variant fields      | enum / str / bool                | Optional subclass fields         |
 |                     |                                  | (e.g. ``version``)               |

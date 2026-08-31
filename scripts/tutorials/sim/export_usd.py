@@ -32,7 +32,7 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     ArticulationCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
@@ -184,9 +184,7 @@ def create_table(sim: SimulationManager) -> RigidObject:
             fpath=get_data_path("MultiW1Data/table_a.obj"),
             max_convex_hull_num=8,
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.5,
-        ),
+        attrs=RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 0.5}}),
         body_type="kinematic",
         init_pos=[1.1, -0.5, 0.08],
         init_rot=[0.0, 0.0, 0.0],
@@ -211,9 +209,7 @@ def create_caffe(sim: SimulationManager) -> Robot:
         asset_physics_mode="overlay",
         init_pos=[1.05, -0.5, 0.79],
         init_rot=[0, 0, -30],
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-        ),
+        attrs=RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 1.0}}),
         joint_drive_props=JointDrivePropertiesCfg(
             stiffness=1.0, damping=0.1, max_effort=100.0, drive_type="force"
         ),
@@ -239,9 +235,7 @@ def create_cup(sim: SimulationManager) -> RigidObject:
             fpath=get_data_path("MultiW1Data/paper_cup_2.obj"),
             max_convex_hull_num=1,
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.3,
-        ),
+        attrs=RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 0.3}}),
         body_type="dynamic",
         init_pos=[0.86, -0.76, 0.841],
         init_rot=[0.0, 0.0, 0.0],

@@ -19,10 +19,10 @@ from typing import TypeVar
 from embodichain.lab.sim.cfg import (
     _raise_removed_articulation_cfg_fields,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
+from embodichain.lab.sim.cfg.rigid import _rigid_body_physics_from_dict
 from embodichain.lab.sim.solvers import SolverCfg
 from embodichain.utils import is_configclass, logger
 
@@ -204,36 +204,16 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             user_attrs_dict = override_cfg_dict.get("attrs")
             if isinstance(user_attrs_dict, dict):
                 grouped_fields = set(RigidBodyPhysicsCfg.__dataclass_fields__)
-                if grouped_fields.intersection(user_attrs_dict):
-                    parsed = RigidBodyPhysicsCfg.from_dict(user_attrs_dict)
-                    if isinstance(base_cfg.attrs, RigidBodyPhysicsCfg):
-                        for field_name in grouped_fields:
-                            override = getattr(parsed, field_name)
-                            if override is None:
-                                continue
-                            base = getattr(base_cfg.attrs, field_name)
-                            if base is not None and type(base) is type(override):
-                                _merge_non_none_config(base, override)
-                            else:
-                                setattr(base_cfg.attrs, field_name, override)
+                parsed = _rigid_body_physics_from_dict(user_attrs_dict)
+                for field_name in grouped_fields:
+                    override = getattr(parsed, field_name)
+                    if override is None:
+                        continue
+                    base = getattr(base_cfg.attrs, field_name)
+                    if base is not None and type(base) is type(override):
+                        _merge_non_none_config(base, override)
                     else:
-                        base_cfg.attrs = parsed
-                    continue
-                if "newton" in user_attrs_dict:
-                    raise ValueError(
-                        "Deprecated flat attrs are Default-backend-only and no "
-                        "longer accept attrs.newton. Use grouped "
-                        "RigidBodyPhysicsCfg properties for Newton."
-                    )
-                if user_attrs_dict and isinstance(base_cfg.attrs, RigidBodyPhysicsCfg):
-                    base_cfg.attrs = RigidBodyAttributesCfg.from_grouped(base_cfg.attrs)
-                for attr_key, attr_val in user_attrs_dict.items():
-                    if hasattr(base_cfg.attrs, attr_key):
-                        setattr(base_cfg.attrs, attr_key, attr_val)
-                    else:
-                        logger.log_warning(
-                            f"Key '{attr_key}' not found in " "RigidBodyAttributesCfg."
-                        )
+                        setattr(base_cfg.attrs, field_name, override)
             else:
                 logger.log_warning(
                     "attrs should be a dictionary. Skipping attrs merge."

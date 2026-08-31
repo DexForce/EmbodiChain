@@ -453,14 +453,18 @@ class BaseRobotSolverTest:
                 },
             },
             "attrs": {
-                "mass": 1e-1,
-                "static_friction": 0.95,
-                "dynamic_friction": 0.9,
-                "linear_damping": 0.7,
-                "angular_damping": 0.7,
-                "max_depenetration_velocity": 10.0,
-                "min_position_iters": 32,
-                "min_velocity_iters": 8,
+                "mass_props": {"mass": 1e-1},
+                "rigid_props": {
+                    "linear_damping": 0.7,
+                    "angular_damping": 0.7,
+                    "max_depenetration_velocity": 10.0,
+                    "min_position_iters": 32,
+                    "min_velocity_iters": 8,
+                },
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                },
             },
             "solver_cfg": {
                 "left_arm": {

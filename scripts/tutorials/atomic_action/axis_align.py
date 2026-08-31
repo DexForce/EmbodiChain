@@ -37,7 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
@@ -105,10 +105,14 @@ def create_align_object(
         cfg=RigidObjectCfg(
             uid="cube",
             shape=CubeCfg(size=list(OBJECT_SIZE)),
-            attrs=RigidBodyAttributesCfg(
-                mass=0.05,
-                dynamic_friction=0.97,
-                static_friction=0.99,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 0.05},
+                    "material_props": {
+                        "dynamic_friction": 0.97,
+                        "static_friction": 0.99,
+                    },
+                }
             ),
             init_pos=init_pos,
         )

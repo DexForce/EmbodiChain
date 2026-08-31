@@ -19,7 +19,7 @@ Configured via the {class}`~cfg.RigidObjectGroupCfg` class.
 | `ext` | `str` | `".obj"` | File extension filter when loading assets from `folder_path`. |
 | `init_pos` / `init_rot` | `Sequence` (optional) | group-level transform | Optional transform to apply as a base offset to all members. |
 
-Refer to {class}`~cfg.RigidObjectCfg` and {class}`~cfg.RigidBodyAttributesCfg` for per-member configuration options (mass, friction, restitution, collision options, shapes, etc.).
+Refer to {class}`~cfg.RigidObjectCfg` and {class}`~cfg.RigidBodyPhysicsCfg` for per-member configuration options (mass, friction, restitution, collision options, shapes, etc.).
 
 ### Folder-based initialization
 
@@ -40,7 +40,11 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import (
     RigidObjectGroup, RigidObjectGroupCfg, RigidObjectCfg
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+)
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -48,11 +52,13 @@ sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_cfg)
 
 # 2. Define shared physics attributes
-physics_attrs = RigidBodyAttributesCfg(
-    mass=1.0,
-    dynamic_friction=0.5,
-    static_friction=0.5,
-    restitution=0.1,
+physics_attrs = RigidBodyPhysicsCfg(
+    mass_props=MassPropertiesCfg(mass=1.0),
+    material_props=RigidBodyMaterialCfg(
+        dynamic_friction=0.5,
+        static_friction=0.5,
+        restitution=0.1,
+    ),
 )
 
 # 3. Create group config with multiple members

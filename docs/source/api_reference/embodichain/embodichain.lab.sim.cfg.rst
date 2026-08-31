@@ -55,8 +55,6 @@ DexSim names belong to the runtime and Spawn SDK adapter boundary.
    DefaultRigidBodyMaterialCfg
    NewtonRigidBodyMaterialCfg
    RigidBodyPhysicsCfg
-   RigidBodyAttributesCfg
-   RigidBodyAttributesOverrideCfg
    ArticulationRootPropertiesCfg
    LinkPhysicsOverrideCfg
    SoftbodyVoxelAttributesCfg

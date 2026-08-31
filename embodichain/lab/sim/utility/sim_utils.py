@@ -41,8 +41,6 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     ArticulationRootPropertiesCfg,
     LinkPhysicsOverrideCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
     SoftObjectCfg,
@@ -159,19 +157,17 @@ def _apply_link_physics_overrides(
         group_cfg = link_to_group.get(name)
         if group_cfg is None:
             continue
-        if not isinstance(group_cfg.attrs, RigidBodyAttributesOverrideCfg):
-            raise TypeError(
-                "The deprecated raw articulation path does not support grouped "
-                "link_attrs; use SimulationManager.add_articulation()."
-            )
-        base_attrs = cfg.attrs
-        if isinstance(base_attrs, RigidBodyPhysicsCfg):
-            base_attrs = RigidBodyAttributesCfg.from_grouped(base_attrs)
-        physical_attr = group_cfg.attrs.merge_with(base_attrs)
-        replace_inertial = group_cfg.replace_inertial or (
-            group_cfg.attrs.mass is not None
+        base_attr = cfg.attrs.to_dexsim_physical_attr()
+        physical_attr = group_cfg.attrs.to_dexsim_physical_attr(base=base_attr)
+        mass_props = group_cfg.attrs.mass_props
+        recompute_inertia = bool(
+            mass_props is not None and mass_props.recompute_inertia
         )
-        art.set_physical_attr(physical_attr, name, is_replace_inertial=replace_inertial)
+        art.set_physical_attr(
+            physical_attr,
+            name,
+            is_replace_inertial=recompute_inertia,
+        )
 
 
 def _warn_legacy_articulation_api(name: str) -> None:
@@ -376,7 +372,7 @@ def _set_dexsim_articulation_cfg(
         art.set_body_scale(cfg.body_scale)
 
     link_names = art.get_link_names()
-    physical_attr = cfg.attrs.attr()
+    physical_attr = cfg.attrs.to_dexsim_physical_attr()
     art.set_physical_attr(physical_attr)
     _apply_link_physics_overrides(art, cfg, link_names)
     root_props = cfg.root_props
@@ -533,7 +529,11 @@ def _configure_primitive_rigidbody(
             "RigidBodyPhysicsCfg properties for Newton."
         )
     obj.set_body_scale(*cfg.body_scale)
-    obj.add_rigidbody(body_type, shape_type, cfg.attrs.attr())
+    obj.add_rigidbody(
+        body_type,
+        shape_type,
+        cfg.attrs.to_dexsim_physical_attr(),
+    )
 
 
 def _import_usd_rigid_prototype(
@@ -603,11 +603,15 @@ def _load_rigid_mesh_prototype(
             body_type,
             RigidBodyShape.SDF,
             config=sdf_cfg,
-            attr=cfg.attrs.attr(),
+            attr=cfg.attrs.to_dexsim_physical_attr(),
         )
     else:
         obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
-        obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
+        obj.add_rigidbody(
+            body_type,
+            RigidBodyShape.CONVEX,
+            cfg.attrs.to_dexsim_physical_attr(),
+        )
 
     _apply_mesh_uv_mapping(obj, cfg)
     return obj

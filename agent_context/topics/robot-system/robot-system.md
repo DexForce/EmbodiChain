@@ -53,7 +53,7 @@ Key fields on `RobotCfg`:
 | `solver_cfg` | `SolverCfg \| Dict[str, SolverCfg] \| None` | IK solver config; dict keys must match `control_parts` keys |
 | `joint_drive_props` | `JointDrivePropertiesCfg` | Single joint-property entry point for target mode, gains, effort/velocity limits, passive friction, and armature. Robot supplies the established `drive_type="force"`; unspecified fields remain source-owned |
 | `asset_physics_mode` | `AssetPhysicsMode` | Robot defaults to `overlay`; generic articulations default to `preserve` |
-| `attrs` | `RigidBodyPhysicsCfg \| RigidBodyAttributesCfg` | Grouped rigid-body physics; the deprecated flat config is a Default-backend-only compatibility input |
+| `attrs` | `RigidBodyPhysicsCfg` | Grouped rigid-body physics. Flat attribute keys are rejected; COM quaternions use `xyzw`. |
 | `root_props` | `ArticulationRootPropertiesCfg` | Sole root-property interface. Fixed-base/self-collision are portable; root sleep and paired solver-iteration fields are Default-only |
 | variant fields | `enum \| str \| bool` | Optional subclass fields (e.g. `version`, `with_default_eef`) |
 | `_pk_urdf_path` | `property \| method → str` | URDF for the FK/IK serial chain (one source, so it can't drift from sim) |

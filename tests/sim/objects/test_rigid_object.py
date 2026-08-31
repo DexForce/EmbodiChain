@@ -31,7 +31,6 @@ from embodichain.lab.sim.cfg import (
     MassPropertiesCfg,
     NewtonCollisionPropertiesCfg,
     NewtonRigidBodyMaterialCfg,
-    RigidBodyAttributesCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
     physics_cfg_for_backend,
@@ -95,9 +94,7 @@ class BaseRigidObjectTest:
                 "shape_type": "Mesh",
                 "fpath": duck_path,
             },
-            "attrs": (
-                {"mass_props": {"mass": 1.0}} if physics == "newton" else {"mass": 1.0}
-            ),
+            "attrs": {"mass_props": {"mass": 1.0}},
             "body_type": "dynamic",
         }
         self.duck: RigidObject = self.sim.add_rigid_object(
@@ -529,8 +526,13 @@ class BaseRigidObjectTest:
             assert self.duck.get_damping().shape == (NUM_ARENAS, 2)
             assert torch.isfinite(self.duck.get_damping()).all()
 
-            with pytest.raises(TypeError, match="Default-backend-only"):
-                self.duck.set_attrs(RigidBodyAttributesCfg(mass=2.5))
+            self.duck.set_attrs(
+                RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 2.5}})
+            )
+            assert torch.allclose(
+                self.duck.get_mass(),
+                torch.full((NUM_ARENAS,), 2.5, device=self.sim.device),
+            )
 
             # Actor type is topology, not a runtime batch property.
             with pytest.raises(NotImplementedError, match="descriptor mutation"):
@@ -600,14 +602,16 @@ class BaseRigidObjectTest:
             assert self.chair.body_type == "kinematic"
 
         # 4. attrs
-        new_attrs = RigidBodyAttributesCfg(mass=2.5, density=1000.0)
+        new_attrs = RigidBodyPhysicsCfg.from_dict(
+            {"mass_props": {"mass": 2.5, "density": 1000.0}}
+        )
         self.duck.set_attrs(new_attrs)
         masses = self.duck.get_mass()
         assert torch.allclose(
             masses, torch.tensor([2.5] * NUM_ARENAS, device=self.sim.device)
         ), f"Mass not set correctly: {masses.tolist()}"
 
-        partial_attrs = RigidBodyAttributesCfg(mass=3.0)
+        partial_attrs = RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 3.0}})
         self.duck.set_attrs(partial_attrs, env_ids=[0])
         masses = self.duck.get_mass()
         assert torch.allclose(
@@ -1184,7 +1188,11 @@ class TestRigidObjectNewton(BaseRigidObjectTest):
             for arena_name in result.arenas.names[1:]
         ]
         assert len(result.create_rigid_body_batch(handles)) == NUM_ARENAS
-        assert all(handle.physics_body is not None for handle in handles)
+        assert all(handle.is_valid for handle in handles)
+        assert all(
+            handle.desc is not None and handle.desc.physics is not None
+            for handle in handles
+        )
         # Common fields round-trip via the batch view (mass applied live).
         assert torch.allclose(
             obj.get_mass(),

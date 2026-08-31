@@ -28,11 +28,10 @@ import torch
 
 from embodichain.utils import configclass, is_configclass, logger
 
-from .._legacy_cfg import RigidBodyAttributesCfg, RigidBodyAttributesOverrideCfg
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .rigid import (
     RigidBodyPhysicsCfg,
-    _rigid_body_attrs_from_dict,
+    _rigid_body_physics_from_dict,
 )
 
 
@@ -144,23 +143,25 @@ class LinkPhysicsOverrideCfg:
     link_names_expr: list[str] = MISSING
     """Regular expressions matched against complete source link names."""
 
-    attrs: RigidBodyPhysicsCfg | RigidBodyAttributesOverrideCfg = RigidBodyPhysicsCfg()
-    """Partial grouped overlay, or the deprecated Default-only flat form."""
+    attrs: RigidBodyPhysicsCfg = RigidBodyPhysicsCfg()
+    """Partial grouped overlay for the selected links.
 
-    replace_inertial: bool = False
-    """Whether a mass/density override discards source inertia for recomputation.
-
-    An explicitly configured inertia remains authoritative.  With ``False``, a
-    source-authored inertia is retained when only mass or density changes.
+    Configure source-inertia recomputation through
+    :attr:`RigidBodyPhysicsCfg.mass_props`.
     """
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> LinkPhysicsOverrideCfg:
         """Initialize the configuration from a dictionary."""
+        if "replace_inertial" in init_dict:
+            raise ValueError(
+                "LinkPhysicsOverrideCfg.replace_inertial was removed; use "
+                "attrs.mass_props.recompute_inertia instead."
+            )
         cfg = cls()
         for key, value in init_dict.items():
             if key == "attrs" and isinstance(value, dict):
-                setattr(cfg, key, _rigid_body_attrs_from_dict(value, override=True))
+                setattr(cfg, key, _rigid_body_physics_from_dict(value))
             elif hasattr(cfg, key):
                 setattr(cfg, key, value)
             else:
@@ -410,10 +411,9 @@ class ArticulationCfg(ObjectBaseCfg):
     :attr:`root_props` and :attr:`body_scale`.
     """
 
-    attrs: RigidBodyPhysicsCfg | RigidBodyAttributesCfg = RigidBodyPhysicsCfg()
+    attrs: RigidBodyPhysicsCfg = RigidBodyPhysicsCfg()
     """Physical attributes for all links. We use default mass from the USD/URDF file if available.
-    The mass and density in attrs will only be used if specified. Deprecated
-    flat :class:`RigidBodyAttributesCfg` inputs are Default-backend-only.
+    The mass and density in attrs will only be used if specified.
     """
 
     link_attrs: dict[str, LinkPhysicsOverrideCfg] | None = None
@@ -483,7 +483,7 @@ class ArticulationCfg(ObjectBaseCfg):
             if key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
-                cfg.attrs = _rigid_body_attrs_from_dict(value)
+                cfg.attrs = _rigid_body_physics_from_dict(value)
             elif key == "joint_drive_props" and isinstance(value, Mapping):
                 cfg.joint_drive_props = JointDrivePropertiesCfg.from_dict(
                     dict(value),

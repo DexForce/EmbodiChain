@@ -29,7 +29,6 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
-    RigidBodyAttributesCfg,
     RigidObjectCfg,
     URDFCfg,
 )

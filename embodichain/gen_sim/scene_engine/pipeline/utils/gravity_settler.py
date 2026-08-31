@@ -32,7 +32,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
     transform_matrix_to_layout_object,
 )
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils.logger import log_info
 
@@ -292,11 +292,11 @@ class GravitySettler:
         )
 
     @staticmethod
-    def _rigid_body_attrs(physics: ObjectPhysics | None) -> RigidBodyAttributesCfg:
+    def _rigid_body_attrs(physics: ObjectPhysics | None) -> RigidBodyPhysicsCfg:
         """Convert persisted collision material data into one Lab config."""
         if physics is None:
             raise ValueError("Gravity settling requires SimReady physics settings.")
-        return RigidBodyAttributesCfg(**physics.attrs)
+        return RigidBodyPhysicsCfg.from_dict(physics.attrs)
 
     @staticmethod
     def _max_convex_hull_num(physics: ObjectPhysics | None) -> int:
