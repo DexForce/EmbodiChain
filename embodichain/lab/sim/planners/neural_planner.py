@@ -421,7 +421,8 @@ class NeuralPlanner(BasePlanner):
             dtype=torch.float32,
             device=self.device,
         )
-        dt = dt.unsqueeze(0).expand(b, -1)
+        dt = dt.unsqueeze(0).expand(b, -1).clone()
+        dt[:, 0] = 0.0
         positions_t = positions_t.permute(1, 0, 2)
         xpos_t = xpos_t.permute(1, 0, 2, 3)
         velocities_t, accelerations_t = self._compute_vel_acc_via_finite_diff(
@@ -435,11 +436,6 @@ class NeuralPlanner(BasePlanner):
             accelerations=accelerations_t,
             xpos_list=xpos_t,
             dt=dt,
-            duration=torch.full(
-                (b,),
-                float(max(positions_t.shape[1] - 1, 0) * self.cfg.dt),
-                device=self.device,
-            ),
         )
 
     def _parse_waypoints(self, target_states: list[PlanState]) -> tuple[

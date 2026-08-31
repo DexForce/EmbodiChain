@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import MISSING
@@ -27,6 +28,7 @@ import torch
 
 from embodichain.lab.sim.planners import (
     BasePlannerCfg,
+    CollisionWorldInfo,
     PlanOptions,
     BasePlanner,
     ToppraPlanner,
@@ -105,6 +107,9 @@ class MotionGenOptions:
         - The pre-interpolation only works for PlanState with MoveType.EEF_MOVE or MoveType.JOINT_MOVE.
     """
 
+    interpolation_dt: float | None = None
+    """Explicit waypoint interval for deterministic interpolation."""
+
     interpolate_nums: int | list[int] = 10
     """Number of interpolation points to generate between each pair of waypoints. 
     
@@ -112,6 +117,13 @@ class MotionGenOptions:
 
     is_linear: bool = False
     """If True, use cartesian linear interpolation, else joint space"""
+
+    preserve_cartesian_samples: bool = False
+    """Treat Cartesian targets as exact output samples and solve each with IK.
+
+    This constrained mode requires exactly ``sample_count - 1`` target states;
+    the observed start configuration supplies the first output sample.
+    """
 
     interpolate_position_step: float = 0.002
     """Step size for interpolation. If is_linear is True, this is the step size in Cartesian space (meters). If is_linear is False, this is the step size in joint space (radians)."""
@@ -133,6 +145,15 @@ class MotionGenOptions:
             raise ValueError("velocity_limit must be greater than zero when set.")
         if self.acceleration_limit is not None and self.acceleration_limit <= 0.0:
             raise ValueError("acceleration_limit must be greater than zero when set.")
+        if self.interpolation_dt is not None:
+            if isinstance(self.interpolation_dt, bool) or not isinstance(
+                self.interpolation_dt, (int, float)
+            ):
+                raise TypeError("interpolation_dt must be a real number or None.")
+            if not math.isfinite(self.interpolation_dt) or self.interpolation_dt <= 0.0:
+                raise ValueError(
+                    "interpolation_dt must be finite and greater than zero when set."
+                )
 
 
 class MotionGenerator:
@@ -160,50 +181,48 @@ class MotionGenerator:
         self.device = self.robot.device
 
     @property
+    def collision_world_info(self) -> CollisionWorldInfo | None:
+        """Return the selected planner's collision-world contract."""
+        info = self.planner.collision_world_info
+        if info is not None and not isinstance(info, CollisionWorldInfo):
+            raise TypeError(
+                "Planner.collision_world_info must be a CollisionWorldInfo or None."
+            )
+        return info
+
+    @property
     def supports_dynamic_collision_world(self) -> bool:
         """Whether the planner accepts per-plan dynamic obstacle poses.
 
         Returns:
             ``True`` when the selected planner supports collision-world updates.
         """
-        return getattr(self.planner, "supports_collision_world_updates", False) is True
+        info = self.collision_world_info
+        return info is not None and info.supports_updates
+
+    @property
+    def supports_joint_trajectory_validation(self) -> bool:
+        """Whether the backend checks exact joint samples for collisions."""
+        return (
+            getattr(
+                self.planner,
+                "supports_joint_trajectory_validation",
+                False,
+            )
+            is True
+        )
 
     @property
     def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
         """Return canonical dynamic-obstacle IDs declared by the planner."""
-        entity_ids = getattr(self.planner, "dynamic_collision_entity_ids", ())
-        return self._validate_collision_entity_ids(
-            entity_ids,
-            field_name="dynamic_collision_entity_ids",
-        )
+        info = self.collision_world_info
+        return () if info is None else info.dynamic_entity_ids
 
     @property
     def collision_world_entity_ids(self) -> tuple[str, ...]:
         """Return every canonical entity ID in the planner collision world."""
-        entity_ids = getattr(self.planner, "collision_world_entity_ids", ())
-        return self._validate_collision_entity_ids(
-            entity_ids,
-            field_name="collision_world_entity_ids",
-        )
-
-    @staticmethod
-    def _validate_collision_entity_ids(
-        entity_ids: object,
-        *,
-        field_name: str,
-    ) -> tuple[str, ...]:
-        """Validate one planner-owned canonical collision-ID declaration."""
-        if not isinstance(entity_ids, tuple) or not all(
-            isinstance(entity_id, str) and entity_id and entity_id == entity_id.strip()
-            for entity_id in entity_ids
-        ):
-            raise TypeError(
-                f"Planner.{field_name} must be a tuple of "
-                "non-empty strings without outer whitespace."
-            )
-        if len(set(entity_ids)) != len(entity_ids):
-            raise ValueError(f"Planner.{field_name} must contain unique IDs.")
-        return entity_ids
+        info = self.collision_world_info
+        return () if info is None else info.entity_ids
 
     @staticmethod
     def _validate_collision_pose_keys(
@@ -226,13 +245,8 @@ class MotionGenerator:
     @property
     def collision_world_batch_mode(self) -> Literal["shared", "per_env"] | None:
         """Return the backend's dynamic collision-world batch-sharing mode."""
-        mode = getattr(self.planner, "collision_world_batch_mode", None)
-        if mode not in (None, "shared", "per_env"):
-            raise ValueError(
-                "Planner.collision_world_batch_mode must be 'shared', 'per_env', "
-                "or None."
-            )
-        return mode
+        info = self.collision_world_info
+        return None if info is None else info.batch_mode
 
     def bind_collision_world(
         self,
@@ -252,13 +266,15 @@ class MotionGenerator:
         Raises:
             ValueError: If the selected planner cannot consume dynamic obstacles.
         """
-        if not self.supports_dynamic_collision_world:
+        info = self.collision_world_info
+        if info is None or not info.supports_updates:
             logger.log_error(
                 f"{type(self.planner).__name__} does not support dynamic "
                 "collision-world updates.",
                 ValueError,
             )
-        configured_ids = self.dynamic_collision_entity_ids
+        assert info is not None
+        configured_ids = info.dynamic_entity_ids
         received_ids = tuple(obstacle_poses)
         if not all(
             isinstance(entity_id, str) and entity_id and entity_id == entity_id.strip()
@@ -320,6 +336,56 @@ class MotionGenerator:
                     f"configuration; missing={bound_missing}, extra={bound_extra}."
                 )
         return bound
+
+    def validate_joint_trajectory(
+        self,
+        trajectory: torch.Tensor,
+        *,
+        control_part: str,
+        obstacle_poses: Mapping[str, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Check exact joint samples through the selected planner backend.
+
+        Args:
+            trajectory: Simulator-order joint samples with shape ``(B, T, D)``.
+            control_part: Robot control part whose ordered joints form ``D``.
+            obstacle_poses: Optional live dynamic-obstacle poses.
+
+        Returns:
+            Boolean validity mask with shape ``(B, T)`` on the trajectory device.
+        """
+        if not self.supports_joint_trajectory_validation:
+            raise ValueError(
+                f"Planner {type(self.planner).__name__} does not support exact "
+                "joint-trajectory collision validation."
+            )
+        if not isinstance(trajectory, torch.Tensor):
+            raise TypeError("trajectory must be a torch.Tensor.")
+        if (
+            not trajectory.is_floating_point()
+            or trajectory.dim() != 3
+            or 0 in trajectory.shape
+            or not bool(torch.isfinite(trajectory).all().item())
+        ):
+            raise ValueError(
+                "trajectory must be finite floating shape (B, T, D) with "
+                "non-zero dimensions."
+            )
+        if type(control_part) is not str or not control_part:
+            raise ValueError("control_part must be a non-empty string.")
+        validity = self.planner.validate_joint_trajectory(
+            trajectory,
+            control_part=control_part,
+            obstacle_poses=obstacle_poses,
+        )
+        if not isinstance(validity, torch.Tensor):
+            raise TypeError("Planner.validate_joint_trajectory() must return a tensor.")
+        if validity.dtype != torch.bool or validity.shape != trajectory.shape[:2]:
+            raise ValueError(
+                "Planner.validate_joint_trajectory() must return bool shape "
+                f"{tuple(trajectory.shape[:2])}."
+            )
+        return validity.to(trajectory.device).clone()
 
     def resolve_plan_options(
         self,
@@ -426,9 +492,13 @@ class MotionGenerator:
             names = sorted(move_type.name for move_type in move_types)
             raise ValueError(f"All target states must share move_type; got {names}.")
         move_type = target_states[0].move_type
-        use_interpolation = options.strategy == "ik_interp" or (
-            move_type is MoveType.JOINT_MOVE
-            and not self.planner.supports_move_type(MoveType.JOINT_MOVE)
+        use_interpolation = (
+            options.preserve_cartesian_samples
+            or options.strategy == "ik_interp"
+            or (
+                move_type is MoveType.JOINT_MOVE
+                and not self.planner.supports_move_type(MoveType.JOINT_MOVE)
+            )
         )
         if use_interpolation:
             raw_result = self._generate_ik_interpolation(target_states, options)
@@ -538,6 +608,8 @@ class MotionGenerator:
             raise ValueError("IK interpolation requires start_qpos.")
         if options.sample_count is None:
             raise ValueError("IK interpolation requires sample_count.")
+        if options.interpolation_dt is None:
+            raise ValueError("IK interpolation requires explicit interpolation_dt.")
         start_qpos = options.start_qpos
         if start_qpos.dim() == 1:
             start_qpos = start_qpos.unsqueeze(0)
@@ -570,9 +642,16 @@ class MotionGenerator:
                 interp_num=options.sample_count,
                 device=device,
             )
+            dt = self._uniform_dt(
+                batch_size=batch_size,
+                waypoint_count=positions.shape[1],
+                step_dt=options.interpolation_dt,
+                device=device,
+            )
             return PlanResult(
                 success=torch.ones(batch_size, dtype=torch.bool, device=device),
                 positions=positions,
+                dt=dt,
             )
 
         if move_type is not MoveType.EEF_MOVE:
@@ -633,14 +712,52 @@ class MotionGenerator:
             [start_qpos.unsqueeze(1), torch.stack(solved_waypoints, dim=1)],
             dim=1,
         )
-        positions = interpolate_with_distance(
-            trajectory=keyframes,
-            interp_num=options.sample_count,
-            device=device,
-        )
+        if options.preserve_cartesian_samples:
+            if keyframes.shape[1] != options.sample_count:
+                raise ValueError(
+                    "Linear Cartesian targets must provide sample_count - 1 "
+                    "keyframes so every output sample is IK-grounded; got "
+                    f"{len(target_states)} targets for sample_count "
+                    f"{options.sample_count}."
+                )
+            positions = keyframes
+        else:
+            positions = interpolate_with_distance(
+                trajectory=keyframes,
+                interp_num=options.sample_count,
+                device=device,
+            )
         held = start_qpos.unsqueeze(1).expand_as(positions)
         positions = torch.where(success[:, None, None], positions, held)
-        return PlanResult(success=success, positions=positions)
+        dt = self._uniform_dt(
+            batch_size=batch_size,
+            waypoint_count=positions.shape[1],
+            step_dt=options.interpolation_dt,
+            device=device,
+        )
+        return PlanResult(
+            success=success,
+            positions=positions,
+            dt=dt,
+        )
+
+    @staticmethod
+    def _uniform_dt(
+        *,
+        batch_size: int,
+        waypoint_count: int,
+        step_dt: float,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Return explicit uniform arrival intervals for interpolation."""
+        dt = torch.zeros(
+            (batch_size, waypoint_count),
+            dtype=torch.float32,
+            device=device,
+        )
+        if waypoint_count > 1:
+            dt[:, 1:] = step_dt
+        return dt
 
     def _normalize_plan_result(
         self,
@@ -696,6 +813,21 @@ class MotionGenerator:
         if not torch.isfinite(positions).all():
             raise ValueError("MotionGenerator returned non-finite positions.")
 
+        dt = result.dt
+        if not isinstance(dt, torch.Tensor):
+            raise ValueError(
+                "MotionGenerator planner results with positions require explicit dt."
+            )
+        if dt.shape != positions.shape[:2]:
+            raise ValueError(
+                "MotionGenerator dt must match positions batch and sample "
+                f"dimensions, got {tuple(dt.shape)} and "
+                f"{tuple(positions.shape[:2])}."
+            )
+        if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
+            raise ValueError("MotionGenerator returned invalid time deltas.")
+        raw_duration = dt.sum(dim=1)
+
         resampled = False
         preserve_samples = getattr(self.planner, "preserve_plan_samples", False) is True
         if (
@@ -709,6 +841,13 @@ class MotionGenerator:
                 device=device,
             )
             resampled = True
+            dt = torch.zeros(
+                positions.shape[:2],
+                dtype=result.dt.dtype,
+                device=device,
+            )
+            if positions.shape[1] > 1:
+                dt[:, 1:] = raw_duration[:, None] / (positions.shape[1] - 1)
 
         def normalize_derivative(
             value: torch.Tensor | None,
@@ -729,22 +868,6 @@ class MotionGenerator:
 
         velocities = normalize_derivative(result.velocities, "velocities")
         accelerations = normalize_derivative(result.accelerations, "accelerations")
-        dt = None if resampled else result.dt
-        if dt is not None:
-            if not isinstance(dt, torch.Tensor):
-                raise TypeError("MotionGenerator dt must be a torch.Tensor.")
-            if dt.shape != positions.shape[:2]:
-                raise ValueError(
-                    "MotionGenerator dt must match positions batch and sample "
-                    f"dimensions, got {tuple(dt.shape)} and "
-                    f"{tuple(positions.shape[:2])}."
-                )
-            if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
-                raise ValueError("MotionGenerator returned invalid time deltas.")
-            duration: float | torch.Tensor = dt.sum(dim=1)
-        else:
-            duration = result.duration
-
         preserve_failed_positions = (
             getattr(self.planner, "preserve_failed_plan_positions", False) is True
         )
@@ -777,7 +900,6 @@ class MotionGenerator:
             velocities=velocities,
             accelerations=accelerations,
             dt=dt,
-            duration=duration,
         )
 
     def _runtime_device(self) -> torch.device:

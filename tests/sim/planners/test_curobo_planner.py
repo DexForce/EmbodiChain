@@ -316,9 +316,12 @@ def test_curobo_planner_exposes_collision_world_contract(multi_env, expected_mod
         ),
     )
 
-    assert planner.dynamic_collision_entity_ids == ("registry_cube",)
-    assert planner.collision_world_entity_ids == ("registry_cube",)
-    assert planner.collision_world_batch_mode == expected_mode
+    info = planner.collision_world_info
+
+    assert info.dynamic_entity_ids == ("registry_cube",)
+    assert info.entity_ids == ("registry_cube",)
+    assert info.batch_mode == expected_mode
+    assert info.supports_updates is True
 
 
 def test_curobo_collision_world_binding_merges_owned_obstacle_poses():
@@ -698,6 +701,74 @@ def test_dynamic_update_uses_registry_id_in_curobo_backend():
     assert [(name, env_idx) for name, _, env_idx in updates] == [("registry_cube", 0)]
 
 
+def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
+    """The collision gate preserves samples and maps simulator joint order."""
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        world=CuroboWorldCfg(multi_env=True),
+    )
+    planner._curobo_device = torch.device("cpu")
+    joint_states = []
+    collision_queries = []
+
+    def from_position(position, *, joint_names):
+        joint_states.append((position.clone(), tuple(joint_names)))
+        return SimpleNamespace(position=position)
+
+    def validate(sample, *, env_query_idx):
+        collision_queries.append((sample.clone(), env_query_idx.clone()))
+        validity = torch.ones(sample.shape[:2], dtype=torch.bool)
+        if len(collision_queries) == 2:
+            validity[1, 0] = False
+        return validity
+
+    planner._bindings = SimpleNamespace(
+        JointState=SimpleNamespace(from_position=from_position),
+    )
+    backend = SimpleNamespace(
+        sim_joint_names=["sim_left", "sim_right"],
+        sim_to_curobo_col_idx=None,
+        collision_checker=SimpleNamespace(validate=validate),
+        profile=SimpleNamespace(
+            sim_to_curobo_joint_names={
+                "sim_left": "curobo_left",
+                "sim_right": "curobo_right",
+            },
+        ),
+        planner=SimpleNamespace(
+            joint_names=["curobo_right", "curobo_left"],
+        ),
+    )
+    planner._get_backend = lambda control_part, batch_size, move_type: backend
+    trajectory = torch.tensor(
+        (
+            ((0.0, 1.0), (0.1, 1.1), (0.2, 1.2)),
+            ((2.0, 3.0), (2.1, 3.1), (2.2, 3.2)),
+        ),
+        dtype=torch.float32,
+    )
+
+    validity = planner.validate_joint_trajectory(
+        trajectory,
+        control_part="dual_arm",
+    )
+
+    assert torch.equal(
+        validity,
+        torch.tensor(((True, True, True), (True, False, True))),
+    )
+    assert len(collision_queries) == trajectory.shape[1]
+    for sample_index, (sample, env_query_idx) in enumerate(collision_queries):
+        torch.testing.assert_close(
+            sample[:, 0],
+            trajectory[:, sample_index].flip(dims=(-1,)),
+        )
+        assert torch.equal(env_query_idx, torch.tensor((0, 1), dtype=torch.int32))
+    torch.testing.assert_close(joint_states[0][0], trajectory[:, 0].flip(dims=(-1,)))
+    assert joint_states[0][1] == ("curobo_right", "curobo_left")
+
+
 def test_generate_mesh_world_yaml_assembles_schema(tmp_path):
     rigid_object = _FakeRigidObject(
         "demo_block",
@@ -928,7 +999,6 @@ def _make_curobo_engine(
 def test_curobo_reuses_non_graph_backend():
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
@@ -939,13 +1009,17 @@ def test_curobo_reuses_non_graph_backend():
     try:
         engine = _make_curobo_engine(block)
         target = _target_beyond_block(robot)
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": _SIM_CONTROL_PART}},
+        )
 
         result = engine.compile(
             (
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
@@ -964,7 +1038,7 @@ def test_curobo_reuses_non_graph_backend():
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
@@ -982,7 +1056,6 @@ def test_curobo_reuses_non_graph_backend():
 def test_curobo_uses_accelerator_with_cpu_physics():
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
@@ -993,13 +1066,17 @@ def test_curobo_uses_accelerator_with_cpu_physics():
     try:
         engine = _make_curobo_engine(block, use_cuda_graph=True)
         target = _target_beyond_block(robot)
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": _SIM_CONTROL_PART}},
+        )
 
         result = engine.compile(
             (
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )

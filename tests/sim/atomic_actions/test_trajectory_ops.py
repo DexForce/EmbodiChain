@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
@@ -26,8 +26,10 @@ import torch
 from embodichain.lab.sim.atomic_actions.plans import normalize_success_mask
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     resolve_object_target,
+    split_joint_trajectory_at_pose,
 )
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    axis_translation_keyframes,
     build_joint_plan_states,
     build_pose_plan_states,
     interpolate_hand_qpos,
@@ -300,6 +302,35 @@ class TestSplitThreeSegments:
         assert (first, hand, third) == (5, 2, 3)
 
 
+def test_split_joint_trajectory_uses_per_environment_target_pose_boundary():
+    trajectory = torch.arange(5, dtype=torch.float32).reshape(1, 5, 1).repeat(2, 1, 1)
+    trajectory_xpos = torch.eye(4).reshape(1, 1, 4, 4).repeat(2, 5, 1, 1)
+    trajectory_xpos[:, :, 0, 3] = trajectory[:, :, 0]
+    trajectory_xpos[0, 0, 0, 3] = 2.0  # Same pose at start; prefer expected progress.
+    split_pose = torch.eye(4).repeat(2, 1, 1)
+    split_pose[:, 0, 3] = torch.tensor([2.0, 3.0])
+    robot = Mock()
+    robot.compute_batch_fk.return_value = trajectory_xpos
+
+    with patch(
+        "embodichain.lab.sim.atomic_actions.primitives._helpers.resample_with_distance",
+        side_effect=lambda trajectory, interp_num, device: trajectory[:, :interp_num],
+    ) as resample:
+        split_joint_trajectory_at_pose(
+            trajectory,
+            split_pose,
+            robot=robot,
+            control_part="arm",
+            first_sample_count=5,
+            second_sample_count=5,
+        )
+
+    first_input = resample.call_args_list[0].args[0]
+    second_input = resample.call_args_list[1].args[0]
+    assert first_input[:, :, 0].tolist() == [[0, 1, 2, 2, 2], [0, 1, 2, 3, 3]]
+    assert second_input[:, :, 0].tolist() == [[2, 3, 4, 4, 4], [3, 4, 4, 4, 4]]
+
+
 class TestTranslatePoseWorld:
     def test_offset_adds_to_translation(self):
         pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
@@ -320,6 +351,45 @@ class TestTranslatePoseWorld:
         offset = torch.zeros(3, 3)
         with pytest.raises(ValueError, match="offset batch size"):
             translate_pose_world(pose, offset)
+
+
+class TestAxisTranslationKeyframes:
+    def test_excludes_start_includes_end_and_stays_on_axis(self):
+        start = torch.eye(4).repeat(2, 1, 1)
+        start[:, :3, 3] = torch.tensor([[-0.1, 0.2, 0.3], [0.4, -0.2, 0.1]])
+        axis = torch.tensor([[1.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
+        axis = torch.nn.functional.normalize(axis, dim=1)
+        end = start.clone()
+        end[:, :3, 3] += axis * torch.tensor([[0.5], [-0.3]])
+
+        keyframes = axis_translation_keyframes(
+            start,
+            end,
+            axis,
+            n_waypoints=5,
+        )
+
+        displacement = keyframes[:, :, :3, 3] - start[:, None, :3, 3]
+        orthogonal = (
+            displacement
+            - (displacement * axis[:, None]).sum(dim=-1, keepdim=True) * axis[:, None]
+        )
+        assert keyframes.shape == (2, 5, 4, 4)
+        assert torch.allclose(keyframes[:, -1], end)
+        assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+
+    def test_rejects_off_axis_displacement(self):
+        start = torch.eye(4).unsqueeze(0)
+        end = start.clone()
+        end[:, 1, 3] = 0.1
+
+        with pytest.raises(ValueError, match="parallel to axis"):
+            axis_translation_keyframes(
+                start,
+                end,
+                torch.tensor([1.0, 0.0, 0.0]),
+                n_waypoints=2,
+            )
 
 
 def test_interpolate_hand_qpos_preserves_endpoints():

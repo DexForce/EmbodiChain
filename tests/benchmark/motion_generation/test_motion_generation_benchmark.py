@@ -24,6 +24,11 @@ from unittest.mock import Mock
 import pytest
 import torch
 
+from embodichain.lab.sim.atomic_actions import (
+    AtomicActionEngine,
+    ControlPartCommandProfile,
+    GraspGoal,
+)
 from embodichain.lab.sim.planners.curobo.curobo_planner import CuroboPlanner
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
@@ -53,6 +58,10 @@ from scripts.benchmark.motion_generation.reporting import (
 )
 from scripts.benchmark.motion_generation.run_benchmark import (
     _apply_overrides,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_task import (
+    AtomicTaskScenario,
+    create_atomic_skill_provider,
 )
 
 
@@ -172,10 +181,26 @@ def _valid_motion_case_and_positions() -> tuple[BenchmarkCase, torch.Tensor]:
     return case, positions
 
 
+def _timed_plan_result(
+    positions: torch.Tensor,
+    *,
+    success: bool | torch.Tensor,
+) -> PlanResult:
+    """Build a synthetic plan with explicit benchmark timing."""
+    dt = torch.zeros(positions.shape[:2], device=positions.device)
+    if positions.shape[1] > 1:
+        dt[:, 1:] = 0.025
+    return PlanResult(
+        success=success,
+        positions=positions,
+        dt=dt,
+    )
+
+
 def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregates():
     case, positions = _valid_motion_case_and_positions()
     outcomes = compute_case_outcomes(
-        PlanResult(success=False, positions=positions),
+        _timed_plan_result(positions, success=False),
         case,
         _MetricRobot(),
         "arm",
@@ -245,7 +270,7 @@ def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     positions = torch.zeros(1, 2, 7)
     positions[0, :, 0] = 2.0
     violated = compute_case_outcomes(
-        PlanResult(success=True, positions=positions),
+        _timed_plan_result(positions, success=True),
         case,
         _MetricRobot(),
         "arm",
@@ -265,7 +290,7 @@ def test_non_finite_trajectory_skips_joint_limit_metrics():
     positions = torch.zeros(1, 2, 7)
     positions[0, 1, 0] = float("inf")
     outcomes = compute_case_outcomes(
-        PlanResult(success=True, positions=positions),
+        _timed_plan_result(positions, success=True),
         case,
         _MetricRobot(),
         "arm",
@@ -306,6 +331,127 @@ def test_seed_override_applies_to_atomic_tracks():
 
     assert suite.free_space.seeds == [104]
     assert suite.enabled_tracks()[0].config["seeds"] == [104]
+
+
+def test_atomic_task_antipodal_grasp_uses_standalone_generator(monkeypatch):
+    from scripts.tutorials.atomic_action import tutorial_utils
+
+    vertices = torch.tensor(
+        [[-0.025, -0.025, -0.025], [0.025, 0.025, 0.025]],
+        dtype=torch.float32,
+    )
+    triangles = torch.tensor([[0, 1, 0]], dtype=torch.int64)
+    entity = Mock(uid="atomic_cube")
+    entity.get_vertices.return_value = [vertices]
+    entity.get_triangles.return_value = [triangles]
+    handle = Mock(object_id="cube", entity=entity)
+
+    candidate = torch.eye(4)
+    candidate[1, 1] = -1.0
+    candidate[2, 2] = -1.0
+    generator = Mock()
+    generator.get_valid_grasp_poses.return_value = [
+        (candidate.unsqueeze(0), torch.tensor([0.25]))
+    ]
+    generator_factory = Mock(return_value=generator)
+    monkeypatch.setattr(
+        tutorial_utils,
+        "create_parallel_jaw_grasp_pose_generator",
+        generator_factory,
+    )
+
+    scenario = AtomicTaskScenario()
+    scenario.robot = Mock(device=torch.device("cpu"))
+    scenario.robot.compute_ik.return_value = (
+        torch.tensor([True]),
+        torch.zeros(1, 7),
+    )
+    result = scenario.resolve_antipodal_grasp(
+        handle,
+        torch.eye(4).unsqueeze(0),
+        torch.tensor([0.0, 0.0, -1.0]),
+        seed=11,
+        start_qpos=torch.zeros(1, 7),
+        pre_grasp_distance=0.15,
+        lift_height=0.16,
+        n_sample=321,
+        max_candidates=8,
+        alignment_max_angle_deg=10.0,
+    )
+
+    generator_factory.assert_called_once_with(n_sample=321, force_refresh=False)
+    call = generator.get_valid_grasp_poses.call_args.kwargs
+    assert torch.equal(call["mesh_vertices"], vertices)
+    assert torch.equal(call["mesh_triangles"], triangles)
+    assert torch.equal(result, candidate.unsqueeze(0))
+
+
+def test_atomic_task_pickup_builds_engine_owned_endpoint_binding():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    entity = Mock(uid="atomic_cube")
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    scenario._objects["cube"] = Mock(object_id="cube", entity=entity)
+    poses = torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 3, 1, 1)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="pick_up",
+        case_id="atomic-task:pick_up:cube:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=3,
+        path_shape="approach_grasp_lift",
+        start_state_bin="pre_pick",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=poses,
+        reference_qpos=torch.zeros(1, 3, 7),
+        skill_id="pick_up",
+        object_id="cube",
+        case_parameters={
+            "sample_count": 12,
+            "approach_direction": [0.0, 0.0, -1.0],
+            "pre_grasp_distance_m": 0.15,
+            "lift_height_m": 0.16,
+            "hand_interp_steps": 4,
+        },
+    )
+
+    invocation = create_atomic_skill_provider("pick_up").build_invocation(
+        scenario,
+        case,
+        Mock(motion_policy_planner="curobo"),
+    )
+
+    assert isinstance(invocation.goal, GraspGoal)
+    assert invocation.goal.semantics.entity_id == "atomic_cube"
+    assert invocation.binding.owner_id == engine.binding_owner_id
+    assert set(invocation.binding.endpoint_keys) == {
+        ("primary", "motion"),
+        ("primary", "grasp"),
+    }
 
 
 @pytest.mark.parametrize("override", [{"nmg_pos_eps": 0.0}, {"nmg_rot_eps": -0.1}])
@@ -1107,7 +1253,7 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         def plan(self, case: BenchmarkCase) -> PlanResult:
             steps = max(case.num_waypoints + 1, 2)
             positions = case.start_qpos.unsqueeze(1).expand(-1, steps, -1).clone()
-            return PlanResult(success=True, positions=positions)
+            return _timed_plan_result(positions, success=True)
 
     class _IncapableFake(PlannerAdapter):
         capabilities = frozenset({"eef_waypoint"})

@@ -27,7 +27,17 @@ import numpy as np
 import gymnasium as gym
 
 from dataclasses import MISSING
-from typing import Dict, Union, Sequence, Tuple, Any, Iterable, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Union,
+    Sequence,
+    Tuple,
+    Any,
+    Iterable,
+    List,
+    Optional,
+)
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
@@ -53,6 +63,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegment,
     DemoSegmentResult,
 )
+from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
@@ -69,6 +80,14 @@ from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
 from embodichain.utils import configclass, logger
 from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+
+if TYPE_CHECKING:
+    from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
+    from embodichain.lab.task_program.integrations import (
+        TaskProgramAdapterFactory,
+        TaskProgramEnvironmentAdapter,
+    )
+    from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
@@ -240,6 +259,14 @@ class EmbodiedEnvCfg(EnvCfg):
     """If True (and record_trajectory is True), auto-save each env's trajectory to
     ``trajectory_save_dir`` at episode end and on close()."""
 
+    task_program: TaskProgramCfg | None = None
+    """Optional declarative Task Program used to generate demo segments.
+
+    The program remains inert until :meth:`EmbodiedEnv.create_demo_segments`
+    requests an explicit environment compiler and bridge through the dedicated
+    hooks. No live provider, planner, or callable is stored in this config.
+    """
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -266,6 +293,15 @@ class EmbodiedEnv(BaseEnv):
     - affordance_datas: The affordance data that can be used to store the intermediate results or information
     """
 
+    _defer_initialization_summary: bool = True
+    _manager_summary_fields: tuple[tuple[str, str], ...] = (
+        ("EventManager", "event_manager"),
+        ("ObservationManager", "observation_manager"),
+        ("RewardManager", "reward_manager"),
+        ("ActionManager", "action_manager"),
+        ("DatasetManager", "dataset_manager"),
+    )
+
     @classmethod
     def __init_subclass__(cls, **kwargs):
         """Automatically wrap subclass demo-action builders with shape checks.
@@ -287,9 +323,30 @@ class EmbodiedEnv(BaseEnv):
         wrapped_create_demo_action_list._demo_action_shape_wrapped = True
         setattr(cls, "create_demo_action_list", wrapped_create_demo_action_list)
 
-    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
+    def __init__(
+        self,
+        cfg: EmbodiedEnvCfg,
+        *,
+        task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+        **kwargs,
+    ):
+        if task_program_adapter_factory is not None:
+            from embodichain.lab.task_program.integrations import (
+                TaskProgramAdapterFactory,
+            )
+
+            if not isinstance(
+                task_program_adapter_factory,
+                TaskProgramAdapterFactory,
+            ):
+                raise TypeError(
+                    "task_program_adapter_factory must implement "
+                    "TaskProgramAdapterFactory or be None."
+                )
         self.affordance_datas = {}
         self.action_bank = None
+        self._task_program_adapter: TaskProgramEnvironmentAdapter | None = None
+        self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -304,6 +361,19 @@ class EmbodiedEnv(BaseEnv):
         self.dataset_manager: DatasetManager | None = None
 
         super().__init__(cfg, **kwargs)
+
+        if task_program_adapter_factory is not None:
+            from embodichain.lab.task_program.integrations import (
+                TaskProgramEnvironmentAdapter,
+            )
+
+            adapter = task_program_adapter_factory.create_adapter(self)
+            if type(adapter) is not TaskProgramEnvironmentAdapter:
+                raise TypeError(
+                    "TaskProgramAdapterFactory.create_adapter() must return "
+                    "exactly TaskProgramEnvironmentAdapter."
+                )
+            self._task_program_adapter = adapter
 
         dataset_terms = getattr(self.cfg.dataset, "__dict__", self.cfg.dataset)
         if dataset_terms and not self.cfg.filter_dataset_saving:
@@ -389,6 +459,87 @@ class EmbodiedEnv(BaseEnv):
         all_env_ids = torch.arange(self.num_envs, device=self.device)
         self._seed_recording_state(self._init_raw_obs, all_env_ids)
 
+        self._log_initialization_summary()
+
+    def _extra_initialization_summary_lines(self) -> list[str]:
+        """Build manager and functor details for the initialization summary."""
+        manager_summaries: list[tuple[str, list[tuple[str, list[str]]] | None, int]] = (
+            []
+        )
+        active_manager_count = 0
+        total_functor_count = 0
+
+        for manager_name, attribute_name in self._manager_summary_fields:
+            manager = getattr(self, attribute_name, None)
+            if manager is None:
+                manager_summaries.append((manager_name, None, 0))
+                continue
+
+            groups = self._manager_functor_groups(manager_name, manager)
+            functor_count = sum(len(names) for _, names in groups)
+            manager_summaries.append((manager_name, groups, functor_count))
+            active_manager_count += 1
+            total_functor_count += functor_count
+
+        functor_noun = "functor" if total_functor_count == 1 else "functors"
+        lines = [
+            f"├─ Managers ({active_manager_count}/{len(manager_summaries)} active, "
+            f"{total_functor_count} {functor_noun})"
+        ]
+        for manager_name, groups, functor_count in manager_summaries:
+            if groups is None:
+                lines.append(
+                    self._format_initialization_summary_row(manager_name, "disabled")
+                )
+                continue
+
+            manager_functor_noun = "functor" if functor_count == 1 else "functors"
+            lines.append(
+                self._format_initialization_summary_row(
+                    manager_name, f"{functor_count} {manager_functor_noun}"
+                )
+            )
+            for mode, names in groups:
+                lines.append(
+                    self._format_initialization_summary_row(
+                        mode, ", ".join(names), indent=1
+                    )
+                )
+        return lines
+
+    @staticmethod
+    def _manager_functor_groups(
+        manager_name: str, manager: object
+    ) -> list[tuple[str, list[str]]]:
+        """Normalize a manager's active functors into display groups."""
+        active_functors = manager.active_functors
+        if isinstance(active_functors, Mapping):
+            return [
+                (str(mode), [str(name) for name in names])
+                for mode, names in active_functors.items()
+            ]
+
+        names = [str(name) for name in active_functors]
+        if manager_name != "ActionManager":
+            return [("terms", names)] if names else []
+
+        get_terms_by_mode = getattr(manager, "get_terms_by_mode", None)
+        if not callable(get_terms_by_mode):
+            return [("terms", names)] if names else []
+
+        groups: list[tuple[str, list[str]]] = []
+        grouped_names: set[str] = set()
+        for mode in ("pre", "post"):
+            mode_names = [str(name) for name, _ in get_terms_by_mode(mode)]
+            if mode_names:
+                groups.append((mode, mode_names))
+                grouped_names.update(mode_names)
+
+        remaining_names = [name for name in names if name not in grouped_names]
+        if remaining_names:
+            groups.append(("terms", remaining_names))
+        return groups
+
     def reset(
         self, seed: int | None = None, options: dict | None = None
     ) -> tuple[EnvObs, Dict]:
@@ -401,12 +552,14 @@ class EmbodiedEnv(BaseEnv):
         Args:
             seed: Optional random seed forwarded to :class:`BaseEnv`.
             options: Reset options. ``reset_ids`` may select only some vector
-                environment rows.
+                environment rows. ``commit_env_ids`` may select a subset of
+                the reset rows whose pending dataset episodes are persisted.
 
         Returns:
             The reset observation and info dictionary.
         """
         obs, info = super().reset(seed=seed, options=options)
+        self._active_task_program_bridge = None
         if options is None or "reset_ids" not in options:
             reset_ids = torch.arange(self.num_envs, device=self.device)
         else:
@@ -731,11 +884,36 @@ class EmbodiedEnv(BaseEnv):
                 list(env_ids), device=status_device, dtype=torch.long
             )
 
-        # Save dataset before clearing buffers for environments that are being reset
-        if save_data and self.dataset_manager:
-            if "save" in self.dataset_manager.available_modes:
+        commit_env_ids = kwargs.get("commit_env_ids")
+        if commit_env_ids is None:
+            env_ids_to_commit = (
+                env_ids_to_process
+                if save_data
+                else torch.empty(0, device=status_device, dtype=torch.long)
+            )
+        elif isinstance(commit_env_ids, torch.Tensor):
+            env_ids_to_commit = commit_env_ids.to(
+                device=status_device, dtype=torch.long
+            ).reshape(-1)
+        else:
+            env_ids_to_commit = torch.tensor(
+                list(commit_env_ids), device=status_device, dtype=torch.long
+            )
 
-                if self.dataset_manager.save_failed_episodes:
+        if commit_env_ids is not None and env_ids_to_commit.numel() > 0:
+            if torch.unique(env_ids_to_commit).numel() != env_ids_to_commit.numel():
+                raise ValueError("commit_env_ids must not contain duplicate rows.")
+            if not bool(torch.isin(env_ids_to_commit, env_ids_to_process).all().item()):
+                raise ValueError(
+                    "commit_env_ids must be a subset of the rows being reset."
+                )
+
+        # Save dataset before clearing buffers for environments that are being reset
+        if env_ids_to_commit.numel() > 0 and self.dataset_manager:
+            if "save" in self.dataset_manager.available_modes:
+                if commit_env_ids is not None:
+                    env_ids_to_save = env_ids_to_commit
+                elif self.dataset_manager.save_failed_episodes:
                     env_ids_to_save = env_ids_to_process
                 else:
                     successful_envs = self.episode_success_status | self._task_success
@@ -1248,18 +1426,24 @@ class EmbodiedEnv(BaseEnv):
             : self.num_envs, self.current_rollout_step
         ].copy_(truncateds.to(buffer_device), non_blocking=True)
 
-    def _normalize_demo_action(self, action: EnvAction) -> EnvAction:
-        """Normalize one legacy or segment action to the environment action space."""
+    def _normalize_demo_action(
+        self, action: EnvAction | ControllerAction
+    ) -> EnvAction | ControllerAction:
+        """Normalize one raw action or preserve a controller-ready envelope."""
+        if isinstance(action, ControllerAction):
+            return action.snapshot()
         expected_dim = int(np.prod(self.single_action_space.shape))
         return self._normalize_demo_action_tensor(action, expected_dim)
 
     def _mask_demo_action(
-        self, action: EnvAction, active_mask: Sequence[bool]
-    ) -> EnvAction:
+        self,
+        action: EnvAction | ControllerAction,
+        active_mask: Sequence[bool],
+    ) -> EnvAction | ControllerAction:
         """Accept an asynchronously completed vector-demo action.
 
         Raw actions may still require :class:`ActionManager` preprocessing, so
-        the actual hold/no-op substitution is applied to the processed command
+        the actual hold/no-op substitution is applied to the controller command
         in :meth:`_preprocess_action`. Subclasses with a specialized safe action
         may override this hook and return a replacement raw action.
 
@@ -1273,8 +1457,72 @@ class EmbodiedEnv(BaseEnv):
         self._set_demo_active_mask(active_mask)
         return action
 
-    def _mask_processed_demo_action(self, action: EnvAction) -> EnvAction:
-        """Replace inactive processed commands with a safe hold or no-op."""
+    def _prepare_controller_action(self, action: EnvAction) -> EnvAction:
+        """Validate and normalize one command at the robot-control boundary.
+
+        Both raw actions emitted by ``ActionManager`` and explicit
+        :class:`ControllerAction` values pass through this method exactly once.
+        Controller tensors must use a supported command key, match the vector
+        environment batch, and target either active joints or the full robot.
+
+        Args:
+            action: Candidate controller command.
+
+        Returns:
+            A controller command whose tensors are on the environment device.
+
+        Raises:
+            TypeError: If the action or one of its commands has an invalid type.
+            ValueError: If its keys, batch, dimensions, or values are invalid.
+        """
+        supported_keys = ("qpos", "qvel", "qf")
+        active_dim = len(self.active_joint_ids)
+        full_dim = int(self.robot.get_qpos().shape[-1])
+
+        def prepare_command(command: torch.Tensor, key: str) -> torch.Tensor:
+            if not isinstance(command, torch.Tensor):
+                raise TypeError(f"Controller {key} command must be a torch.Tensor.")
+            if not command.is_floating_point():
+                raise TypeError(f"Controller {key} command must be floating point.")
+            if command.dim() != 2 or command.shape[0] != self.num_envs:
+                raise ValueError(
+                    f"Controller {key} command must have shape (num_envs, D); "
+                    f"received {tuple(command.shape)} for {self.num_envs} environments."
+                )
+            if command.shape[1] not in {active_dim, full_dim}:
+                raise ValueError(
+                    f"Controller {key} command has dim {command.shape[1]}; expected "
+                    f"active-joint dim {active_dim} or full robot dim {full_dim}."
+                )
+            return command.to(self.device)
+
+        if isinstance(action, torch.Tensor):
+            return prepare_command(action, "qpos")
+        if not isinstance(action, TensorDict):
+            raise TypeError(
+                "Controller action must be a torch.Tensor or TensorDict, "
+                f"got {type(action).__name__}."
+            )
+        if tuple(action.batch_size) != (self.num_envs,):
+            raise ValueError(
+                "Controller TensorDict batch size must match num_envs; "
+                f"received {tuple(action.batch_size)} for {self.num_envs} environments."
+            )
+        keys = tuple(action.keys())
+        control_keys = tuple(key for key in supported_keys if key in action)
+        if not control_keys:
+            raise ValueError(
+                "Controller TensorDict must contain at least one of "
+                f"{list(supported_keys)}; received keys {list(keys)}."
+            )
+
+        prepared = action.clone().to(self.device)
+        for key in control_keys:
+            prepared[key] = prepare_command(prepared[key], key)
+        return prepared
+
+    def _mask_controller_demo_action(self, action: EnvAction) -> EnvAction:
+        """Replace inactive controller commands with a safe hold or no-op."""
         active_mask = self._demo_active_mask
         if bool(active_mask.all()):
             return action
@@ -1298,13 +1546,13 @@ class EmbodiedEnv(BaseEnv):
         active_qpos = measured_qpos[:, self.active_joint_ids]
 
         def qpos_replacement(value: torch.Tensor) -> torch.Tensor:
-            """Select the measured qpos layout matching the processed command."""
+            """Select the measured qpos layout matching the controller command."""
             if value.shape[1:] == active_qpos.shape[1:]:
                 return active_qpos
             if value.shape[1:] == measured_qpos.shape[1:]:
                 return measured_qpos
             raise ValueError(
-                "Cannot construct a qpos hold command for processed demo action "
+                "Cannot construct a qpos hold command for controller demo action "
                 f"shape {tuple(value.shape)}; measured active/full layouts are "
                 f"{tuple(active_qpos.shape)} and {tuple(measured_qpos.shape)}."
             )
@@ -1313,7 +1561,7 @@ class EmbodiedEnv(BaseEnv):
             return replace_rows(action, qpos_replacement(action), "qpos")
         if not isinstance(action, TensorDict):
             raise TypeError(
-                "Processed demo actions must be torch.Tensor or TensorDict, "
+                "Controller demo actions must be torch.Tensor or TensorDict, "
                 f"got {type(action).__name__}."
             )
 
@@ -1330,7 +1578,7 @@ class EmbodiedEnv(BaseEnv):
             masked_action[key] = replace_rows(value, replacement, key)
         if not supported_key:
             raise ValueError(
-                "Cannot mask a processed demo TensorDict without qpos, qvel, or qf."
+                "Cannot mask a controller demo TensorDict without qpos, qvel, or qf."
             )
         return masked_action
 
@@ -1469,7 +1717,7 @@ class EmbodiedEnv(BaseEnv):
             if command.shape[-1] == full_dim:
                 return command[..., self.active_joint_ids].to(self.device)
             raise ValueError(
-                f"Processed {key} action has dim {command.shape[-1]}; expected "
+                f"Controller {key} action has dim {command.shape[-1]}; expected "
                 f"active-joint dim {active_dim} or full robot dim {full_dim}."
             )
 
@@ -1548,18 +1796,22 @@ class EmbodiedEnv(BaseEnv):
                 eval_dict[key] = value
         return eval_dict
 
-    def _preprocess_action(self, action: EnvAction) -> EnvAction:
-        """Delegate to ActionManager when configured; stash raw action for trajectory."""
+    def _preprocess_action(self, action: EnvAction | ControllerAction) -> EnvAction:
+        """Resolve one raw or controller-ready action for robot control."""
+        is_controller_action = isinstance(action, ControllerAction)
+        if is_controller_action:
+            action = action.value
         if self._traj_buffer is not None:
             self._traj_raw_action = (
                 action.clone() if hasattr(action, "clone") else action
             )
-        if self.action_manager is not None:
+        if self.action_manager is not None and not is_controller_action:
             action = self.action_manager.process_action(action, mode="pre")
-        else:
+        elif not is_controller_action:
             action = super()._preprocess_action(action)
+        action = self._prepare_controller_action(action)
         if getattr(self, "_demo_no_auto_reset", False):
-            action = self._mask_processed_demo_action(action)
+            action = self._mask_controller_demo_action(action)
         return action
 
     def _postprocess_action(self, action):
@@ -1763,21 +2015,144 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def create_demo_segments(self, *args, **kwargs) -> Iterable[DemoSegment] | None:
+    @property
+    def task_program_adapter(self) -> TaskProgramEnvironmentAdapter:
+        """Return the adapter injected after the environment built its scene.
+
+        A registered environment normally receives an
+        :class:`TaskProgramAdapterFactory` through its :class:`EnvSpec`.
+        Advanced integrations may still override this property.
+        """
+        adapter = self._task_program_adapter
+        if adapter is None:
+            raise NotImplementedError(
+                "An environment with an Task Program must receive an "
+                "task_program_adapter_factory or override "
+                "task_program_adapter."
+            )
+        return adapter
+
+    def _checked_task_program_adapter(self) -> TaskProgramEnvironmentAdapter:
+        """Return the exact configured adapter before touching live providers."""
+        from embodichain.lab.task_program.integrations import (
+            TaskProgramEnvironmentAdapter,
+        )
+
+        adapter = self.task_program_adapter
+        if type(adapter) is not TaskProgramEnvironmentAdapter:
+            raise TypeError(
+                "task_program_adapter must be exactly " "TaskProgramEnvironmentAdapter."
+            )
+        return adapter
+
+    def compile_task_program(
+        self,
+        program: TaskProgramCfg,
+    ) -> CompiledTaskProgram:
+        """Compile a configured Task Program through the explicit adapter.
+
+        Args:
+            program: Strict Task Program configuration attached to ``cfg``.
+
+        Returns:
+            Provider-free compiled program ready for runtime assembly.
+
+        """
+        return self._checked_task_program_adapter().compile(program)
+
+    def create_task_program_bridge(
+        self,
+        program: CompiledTaskProgram,
+    ) -> TaskProgramDemoBridge:
+        """Create the Gym demo bridge through the explicit adapter.
+
+        Args:
+            program: Compiled provider-free Task Program.
+
+        Returns:
+            Atomic demo bridge whose segments are consumed lazily.
+
+        """
+        return self._checked_task_program_adapter().create_bridge(program)
+
+    def is_task_success(self, **kwargs: Any) -> torch.Tensor:
+        """Return completed Task Program acceptance or legacy task success.
+
+        Task Program success is published only after its bridge has consumed
+        every segment lifecycle, including post-policies and validators.
+
+        Args:
+            **kwargs: Compatibility keywords forwarded for tasks without a Task Program.
+
+        Returns:
+            Per-environment task-success mask.
+        """
+        bridge = self._active_task_program_bridge
+        task_program = getattr(getattr(self, "cfg", None), "task_program", None)
+        if bridge is None:
+            if task_program is None:
+                return super().is_task_success(**kwargs)
+            return torch.zeros(
+                self.num_envs,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        if not bridge.program_completed:
+            return torch.zeros(
+                self.num_envs,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        completion = bridge.completion_mask
+        if completion.dtype != torch.bool or completion.shape != (self.num_envs,):
+            raise ValueError(
+                "Task Program completion mask must be bool with one value per "
+                "environment."
+            )
+        return completion.to(device=self.device)
+
+    def create_demo_segments(
+        self,
+        *args,
+        task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
+        **kwargs,
+    ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
 
-        The default adapter preserves existing tasks by wrapping their single
-        ``create_demo_action_list`` result in one segment. Multi-object tasks
-        should override this method and may return a lazy generator so each
-        segment can be planned from the scene state left by the previous one.
+        An episode-level ``task_program`` takes precedence over the static
+        configuration. This lets trusted callers supply a model-produced,
+        already compiled program without mutating :attr:`cfg`. Otherwise, a
+        configured program is compiled through the injected adapter. With no
+        selected program, the legacy action-list path remains unchanged.
 
         Args:
             *args: Positional arguments forwarded to the legacy planner.
+            task_program: Optional episode-level program config or provider-free
+                compiled program.
             **kwargs: Keyword arguments forwarded to the legacy planner.
 
         Returns:
             Segment sequence, or ``None`` when planning fails.
         """
+        selected_program = task_program
+        if selected_program is None:
+            selected_program = getattr(
+                getattr(self, "cfg", None),
+                "task_program",
+                None,
+            )
+        if selected_program is not None:
+            from embodichain.lab.task_program import CompiledTaskProgram
+
+            compiled_program = (
+                selected_program
+                if type(selected_program) is CompiledTaskProgram
+                else self.compile_task_program(selected_program)
+            )
+            bridge = self.create_task_program_bridge(compiled_program)
+            self._active_task_program_bridge = bridge
+            return bridge.iter_segments()
+
         actions = self.create_demo_action_list(*args, **kwargs)
         if actions is None:
             return None

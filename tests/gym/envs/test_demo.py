@@ -20,13 +20,136 @@ from __future__ import annotations
 
 import threading
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 import torch
 from tensordict import TensorDict
 
-from embodichain.lab.gym.envs.demo import DemoSegment, execute_demo_episode
+from embodichain.lab.gym.envs.demo import (
+    DemoSegment,
+    DemoSegmentResult,
+    execute_demo_episode,
+)
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.envs.types import ControllerAction
+
+
+def test_demo_segment_result_owns_json_safe_lifecycle_metadata() -> None:
+    metadata = {
+        "runtime": {"status": "completed"},
+        "validation": {"accepted_mask": [True, False]},
+    }
+    result = DemoSegmentResult(
+        segment_id=0,
+        name="place",
+        start_step=0,
+        end_step=2,
+        success=False,
+        metadata=metadata,
+    )
+
+    metadata["runtime"]["status"] = "mutated"
+    exported = result.to_metadata()
+    exported["metadata"]["validation"]["accepted_mask"][0] = False
+
+    assert result.metadata["runtime"]["status"] == "completed"
+    assert result.metadata["validation"]["accepted_mask"] == [True, False]
+
+
+def test_demo_segment_result_rejects_non_json_metadata() -> None:
+    with pytest.raises(TypeError, match="non-JSON value Tensor"):
+        DemoSegmentResult(
+            segment_id=0,
+            name="place",
+            start_step=0,
+            end_step=1,
+            success=True,
+            metadata={"mask": torch.tensor([True])},
+        )
+
+
+def _controller_action_env() -> EmbodiedEnv:
+    env = object.__new__(EmbodiedEnv)
+    env._num_envs = 2
+    env._traj_buffer = None
+    env.action_manager = Mock(
+        process_action=Mock(side_effect=lambda action, mode: action)
+    )
+    env._demo_no_auto_reset = False
+    env.active_joint_ids = [0, 1, 2]
+    env.robot = Mock()
+    env.robot.get_qpos.return_value = torch.zeros(2, 3)
+    env.sim = Mock(device=torch.device("cpu"))
+    return env
+
+
+def test_embodied_env_skips_preprocessing_for_controller_action() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(value=torch.ones(2, 3))
+
+    normalized = env._normalize_demo_action(action)
+    controller = env._preprocess_action(normalized)
+
+    assert isinstance(normalized, ControllerAction)
+    assert normalized is not action
+    assert torch.equal(controller, action.value)
+    env.action_manager.process_action.assert_not_called()
+
+
+def test_embodied_env_preprocesses_raw_action_before_controller_validation() -> None:
+    env = _controller_action_env()
+    raw_action = torch.ones(2, 3)
+
+    controller = env._preprocess_action(raw_action)
+
+    assert torch.equal(controller, raw_action)
+    env.action_manager.process_action.assert_called_once_with(raw_action, mode="pre")
+
+
+def test_embodied_env_applies_post_terms_to_controller_action() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(value=torch.ones(2, 3))
+
+    controller = env._preprocess_action(action)
+    env._postprocess_action(controller)
+
+    env.action_manager.process_action.assert_called_once_with(controller, mode="post")
+
+
+def test_embodied_env_validates_controller_action_batch_size() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(value=torch.ones(1, 3))
+
+    with pytest.raises(ValueError, match=r"shape \(num_envs, D\)"):
+        env._preprocess_action(action)
+
+
+def test_embodied_env_rejects_unsupported_controller_action_key() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(
+        value=TensorDict({"eef_pose": torch.ones(2, 7)}, batch_size=[2])
+    )
+
+    with pytest.raises(ValueError, match="must contain at least one"):
+        env._preprocess_action(action)
+
+
+def test_embodied_env_preserves_controller_action_auxiliary_fields() -> None:
+    env = _controller_action_env()
+    action = ControllerAction(
+        value=TensorDict(
+            {
+                "qpos": torch.ones(2, 3),
+                "ik_success": torch.tensor([True, False]),
+            },
+            batch_size=[2],
+        )
+    )
+
+    controller = env._preprocess_action(action)
+
+    assert torch.equal(controller["ik_success"], torch.tensor([True, False]))
 
 
 class _SegmentedEnv:
@@ -92,6 +215,142 @@ def test_execute_demo_episode_runs_lazy_segments_as_one_episode() -> None:
     assert [item.target_uid for item in result.segments] == ["object_a", "object_b"]
     assert all(env.no_auto_reset_during_steps)
     assert not env._demo_no_auto_reset
+
+
+class _LifecycleMetadataEnv:
+    """Populate one shared metadata mapping at lazy lifecycle boundaries."""
+
+    def __init__(self) -> None:
+        self.num_envs = 1
+        self.lifecycle = {"runtime": None, "validation": None}
+
+    def create_demo_segments(self):
+        def actions():
+            yield 1
+            self.lifecycle["runtime"] = {"status": "completed"}
+
+        def validate() -> bool:
+            self.lifecycle["validation"] = {"accepted_mask": [True]}
+            return True
+
+        return (
+            DemoSegment(
+                actions=actions(),
+                name="lifecycle",
+                metadata=self.lifecycle,
+                validator=validate,
+            ),
+        )
+
+    def step(self, action: int):
+        del action
+        return (
+            None,
+            torch.zeros(1),
+            torch.zeros(1, dtype=torch.bool),
+            torch.zeros(1, dtype=torch.bool),
+            {"success": torch.tensor([True])},
+        )
+
+    def is_task_success(self) -> torch.Tensor:
+        return torch.tensor([True])
+
+
+class _EmptySuccessfulSegmentEnv:
+    """Expose an empty ordinary segment whose callbacks otherwise succeed."""
+
+    num_envs = 1
+
+    def __init__(self) -> None:
+        self.validator_calls = 0
+        self.step_calls = 0
+
+    def create_demo_segments(self):
+        return (
+            DemoSegment(
+                actions=(),
+                name="empty",
+                validator=self._validate,
+            ),
+        )
+
+    def _validate(self) -> bool:
+        self.validator_calls += 1
+        return True
+
+    def step(self, action: object):
+        del action
+        self.step_calls += 1
+        raise AssertionError("An empty segment must not call env.step().")
+
+    @staticmethod
+    def is_task_success() -> torch.Tensor:
+        return torch.tensor([True])
+
+
+def test_execute_demo_episode_snapshots_finalized_lifecycle_metadata() -> None:
+    env = _LifecycleMetadataEnv()
+
+    result = execute_demo_episode(env)
+    env.lifecycle["runtime"]["status"] = "mutated"
+
+    assert result.segments[0].metadata == {
+        "runtime": {"status": "completed"},
+        "validation": {"accepted_mask": [True]},
+    }
+
+
+def test_empty_ordinary_segment_keeps_existing_empty_segment_guard() -> None:
+    env = _EmptySuccessfulSegmentEnv()
+
+    result = execute_demo_episode(env)
+
+    assert env.step_calls == 0
+    assert env.validator_calls == 0
+    assert not result.completed
+    assert result.terminal_reason == "empty_segment"
+    assert result.segments[0].failure_reason == "empty_segment"
+
+
+class _GeneratorFailureEnv:
+    """Raise between lazy actions and expose an emergency hold callback."""
+
+    def __init__(self) -> None:
+        self.num_envs = 1
+        self.actions: list[int] = []
+        self.abort_calls: list[tuple[str, bool]] = []
+
+    def create_demo_segments(self):
+        def actions():
+            yield 1
+            raise ValueError("planner stream failed")
+
+        def abort(reason: str, *, last_action_consumed: bool):
+            self.abort_calls.append((reason, last_action_consumed))
+            yield 0
+
+        return (DemoSegment(actions=actions(), abort_actions=abort),)
+
+    def step(self, action: int):
+        self.actions.append(action)
+        return (
+            None,
+            torch.zeros(1),
+            torch.zeros(1, dtype=torch.bool),
+            torch.zeros(1, dtype=torch.bool),
+            {},
+        )
+
+
+def test_action_generator_failure_safe_stops_before_propagating() -> None:
+    env = _GeneratorFailureEnv()
+
+    with pytest.raises(RuntimeError, match="action generation") as error:
+        execute_demo_episode(env)
+
+    assert isinstance(error.value.__cause__, ValueError)
+    assert env.actions == [1, 0]
+    assert env.abort_calls == [("action_generation_failed", True)]
 
 
 class _TerminatingEnv(_SegmentedEnv):
@@ -211,6 +470,30 @@ def test_vector_failure_aborts_peer_and_preserves_per_env_reason() -> None:
     assert result.terminated == (True, False)
     assert result.success == (False, False)
     assert result.lengths == (2, 2)
+
+
+class _RowIndependentFailureEnv(_VectorFailureEnv):
+    def create_demo_segments(self):
+        return (
+            DemoSegment(
+                actions=(1, 2, 3),
+                name="shared",
+                failure_policy="row_independent",
+            ),
+        )
+
+
+def test_row_independent_failure_freezes_only_failed_environment() -> None:
+    env = _RowIndependentFailureEnv()
+
+    result = execute_demo_episode(env)
+
+    assert env.actions == [1, 2, 3]
+    assert env.masked_actions == [(3, (False, True))]
+    assert result.completed_by_env == (False, True)
+    assert result.terminal_reasons == ("failure", "success")
+    assert result.success == (False, True)
+    assert result.lengths == (2, 3)
 
 
 class _ValidatedSegmentEnv(_SegmentedEnv):
@@ -386,6 +669,35 @@ def test_validator_batch_abort_has_consistent_peer_status() -> None:
         "segment_validation_failed",
     )
     assert result.segments[0].failure_reason == "segment_validation_failed"
+
+
+class _RowIndependentValidatorEnv(_VectorValidatorEnv):
+    def create_demo_segments(self):
+        return (
+            DemoSegment(
+                actions=(1,),
+                name="validated",
+                validator=lambda: torch.tensor([True, False]),
+                failure_policy="row_independent",
+            ),
+        )
+
+
+def test_row_independent_validator_keeps_accepted_peer_active() -> None:
+    result = execute_demo_episode(_RowIndependentValidatorEnv())
+
+    assert result.segments[0].successes == (True, False)
+    assert result.segments[0].failure_reasons == (
+        None,
+        "segment_validation_failed",
+    )
+    assert result.completed_by_env == (True, False)
+    assert result.terminal_reasons == ("success", "segment_validation_failed")
+
+
+def test_demo_segment_rejects_unknown_failure_policy() -> None:
+    with pytest.raises(ValueError, match="failure_policy"):
+        DemoSegment(actions=(1,), failure_policy="continue")
 
 
 class _CancellationEnv(_ValidatedSegmentEnv):
@@ -572,11 +884,11 @@ class _ActionMaskStub:
     _demo_active_mask = torch.tensor([False, True])
 
 
-def test_processed_qpos_action_holds_inactive_row() -> None:
+def test_controller_qpos_action_holds_inactive_row() -> None:
     """Inactive qpos-controlled rows hold their measured joint position."""
     env = _ActionMaskStub()
 
-    masked = EmbodiedEnv._mask_processed_demo_action(
+    masked = EmbodiedEnv._mask_controller_demo_action(
         env, torch.tensor([[9.0, 9.0], [8.0, 8.0]])
     )
 
@@ -584,12 +896,12 @@ def test_processed_qpos_action_holds_inactive_row() -> None:
     assert torch.allclose(masked[1], torch.tensor([8.0, 8.0]))
 
 
-def test_processed_qpos_action_supports_full_robot_layout() -> None:
+def test_controller_qpos_action_supports_full_robot_layout() -> None:
     """A full-DOF IK command holds measured full qpos for inactive rows."""
     env = _ActionMaskStub()
     env.active_joint_ids = [0]
 
-    masked = EmbodiedEnv._mask_processed_demo_action(
+    masked = EmbodiedEnv._mask_controller_demo_action(
         env, torch.tensor([[9.0, 9.0], [8.0, 8.0]])
     )
 
@@ -628,7 +940,7 @@ def test_full_dof_hold_is_sliced_before_active_joint_step() -> None:
         batch_size=[2],
     )
 
-    masked = EmbodiedEnv._mask_processed_demo_action(env, action)
+    masked = EmbodiedEnv._mask_controller_demo_action(env, action)
     applied = EmbodiedEnv._step_action(env, masked)
 
     assert torch.allclose(
@@ -639,14 +951,14 @@ def test_full_dof_hold_is_sliced_before_active_joint_step() -> None:
     assert applied["qpos"].shape == (2, 2)
 
 
-def test_processed_velocity_action_zeros_inactive_row() -> None:
+def test_controller_velocity_action_zeros_inactive_row() -> None:
     """Inactive velocity-controlled rows receive a no-op command."""
     env = _ActionMaskStub()
     action = TensorDict(
         {"qvel": torch.tensor([[9.0, 9.0], [8.0, 8.0]])}, batch_size=[2]
     )
 
-    masked = EmbodiedEnv._mask_processed_demo_action(env, action)
+    masked = EmbodiedEnv._mask_controller_demo_action(env, action)
 
     assert torch.equal(masked["qvel"][0], torch.zeros(2))
     assert torch.equal(masked["qvel"][1], torch.tensor([8.0, 8.0]))

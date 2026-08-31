@@ -40,7 +40,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import torch
 import yaml
@@ -51,6 +51,7 @@ from embodichain.utils.math import pose_inv, quat_from_matrix
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
+    CollisionWorldInfo,
     PlanOptions,
     validate_plan_options,
 )
@@ -715,6 +716,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
     try:
         planner_mod = importlib.import_module("curobo.motion_planner")
         batch_mod = importlib.import_module("curobo.batch_motion_planner")
+        collision_mod = importlib.import_module("curobo.collision_checking")
         types_mod = importlib.import_module("curobo.types")
     except ModuleNotFoundError as exc:
         raise ImportError(
@@ -729,6 +731,8 @@ def _require_curobo(log_level: str = "error") -> "Any":
         MotionPlanner=planner_mod.MotionPlanner,
         MotionPlannerCfg=planner_mod.MotionPlannerCfg,
         BatchMotionPlanner=batch_mod.BatchMotionPlanner,
+        RobotCollisionChecker=collision_mod.RobotCollisionChecker,
+        RobotCollisionCheckerCfg=collision_mod.RobotCollisionCheckerCfg,
         JointState=types_mod.JointState,
         Pose=types_mod.Pose,
         GoalToolPose=types_mod.GoalToolPose,
@@ -816,6 +820,7 @@ class CuroboPlanner(BasePlanner):
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
     supports_collision_world_updates = True
+    supports_joint_trajectory_validation = True
 
     @property
     def preserve_plan_samples(self) -> bool:
@@ -828,21 +833,115 @@ class CuroboPlanner(BasePlanner):
         return self.cfg.preserve_plan_samples
 
     @property
-    def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
-        """Return canonical registry IDs accepted for dynamic pose updates."""
-        return tuple(self.cfg.world.dynamic_obstacle_names)
-
-    @property
-    def collision_world_entity_ids(self) -> tuple[str, ...]:
-        """Return every obstacle ID represented in the generated world."""
-        return tuple(
-            name for name, _ in _named_rigid_objects(self.cfg.world.rigid_objects)
+    def collision_world_info(self) -> CollisionWorldInfo:
+        """Return the configured collision-world integration contract."""
+        return CollisionWorldInfo(
+            entity_ids=tuple(
+                name for name, _ in _named_rigid_objects(self.cfg.world.rigid_objects)
+            ),
+            dynamic_entity_ids=tuple(self.cfg.world.dynamic_obstacle_names),
+            batch_mode="per_env" if self.cfg.world.multi_env else "shared",
+            supports_updates=True,
         )
 
-    @property
-    def collision_world_batch_mode(self) -> Literal["shared", "per_env"]:
-        """Return the configured collision-world batching policy."""
-        return "per_env" if self.cfg.world.multi_env else "shared"
+    def validate_joint_trajectory(
+        self,
+        trajectory: torch.Tensor,
+        *,
+        control_part: str,
+        obstacle_poses: Mapping[str, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Validate every supplied joint sample with cuRobo collision models.
+
+        The samples are not replanned or replaced. They are mapped from the
+        simulator's control-part order into the exact cuRobo model, then checked
+        against joint bounds, self-collision, and the live world collision
+        checker. Calling the configuration validator once per horizon sample
+        works around cuRobo 0.8's configuration-only ``validate`` contract while
+        retaining batched environments.
+        """
+        if (
+            not isinstance(trajectory, torch.Tensor)
+            or not trajectory.is_floating_point()
+            or trajectory.dim() != 3
+            or 0 in trajectory.shape
+            or not bool(torch.isfinite(trajectory).all().item())
+        ):
+            raise ValueError("trajectory must be finite floating shape (B, T, D).")
+        batch_size, horizon, dof = trajectory.shape
+        backend = self._get_backend(
+            control_part,
+            batch_size,
+            MoveType.JOINT_MOVE,
+        )
+        if dof != len(backend.sim_joint_names):
+            raise ValueError(
+                f"Trajectory for {control_part!r} has {dof} joints, expected "
+                f"{len(backend.sim_joint_names)}."
+            )
+
+        dynamic_ids = tuple(self.cfg.world.dynamic_obstacle_names)
+        if dynamic_ids and obstacle_poses is None:
+            raise ValueError(
+                "Live dynamic-obstacle poses are required for exact trajectory "
+                "validation."
+            )
+        poses = None if obstacle_poses is None else dict(obstacle_poses)
+        if poses is not None:
+            _validate_dynamic_obstacles(poses, list(dynamic_ids))
+            missing = sorted(set(dynamic_ids).difference(poses))
+            extra = sorted(set(poses).difference(dynamic_ids))
+            if missing or extra:
+                raise ValueError(
+                    "Dynamic collision obstacle IDs do not match the planner "
+                    f"configuration; missing={missing}, extra={extra}."
+                )
+            if poses:
+                base_pose_inv = pose_inv(self._get_sim_base_pose(backend, batch_size))
+                self.update_dynamic_obstacles(
+                    poses,
+                    backend,
+                    base_pose_inv,
+                )
+
+        if backend.collision_checker is None:
+            checker_cfg = self._bindings.RobotCollisionCheckerCfg.load_from_config(
+                robot_config=backend.profile.robot_config_path,
+                scene_collision_checker=backend.planner.scene_collision_checker,
+                device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
+                num_envs=batch_size,
+                collision_activation_distance=self.cfg.collision_activation_distance,
+            )
+            backend.collision_checker = self._bindings.RobotCollisionChecker(
+                checker_cfg
+            )
+
+        self._to_curobo_joint_state(trajectory[:, 0], backend)
+        assert backend.sim_to_curobo_col_idx is not None
+        curobo_trajectory = trajectory.to(
+            device=self._curobo_device,
+            dtype=torch.float32,
+        ).index_select(-1, backend.sim_to_curobo_col_idx)
+        env_query_idx = (
+            torch.arange(batch_size, device=self._curobo_device, dtype=torch.int32)
+            if self.cfg.world.multi_env
+            else None
+        )
+        samples: list[torch.Tensor] = []
+        device_context = (
+            torch.cuda.device(self._curobo_device)
+            if self._curobo_device.type == "cuda"
+            else nullcontext()
+        )
+        with device_context:
+            for sample_index in range(horizon):
+                sample = curobo_trajectory[:, sample_index : sample_index + 1]
+                valid = backend.collision_checker.validate(
+                    sample,
+                    env_query_idx=env_query_idx,
+                )
+                samples.append(valid[:, 0].to(torch.bool))
+        return torch.stack(samples, dim=1).to(trajectory.device)
 
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
         super().__init__(cfg)
@@ -2084,12 +2183,10 @@ class CuroboPlanner(BasePlanner):
             else:
                 positions[b, :1] = start[b]
                 positions[b, 1:] = start[b]
-        duration = dt.sum(dim=1)
         return PlanResult(
             success=alive.to(self.device),
             positions=positions.to(self.device),
             dt=dt.to(self.device),
-            duration=duration.to(self.device),
         )
 
     # ------------------------------------------------------------------
@@ -2430,6 +2527,7 @@ class _CuroboBackend:
     batch_size: int
     use_cuda_graph: bool
     planning_mode: MoveType
+    collision_checker: "Any | None" = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a
     # planner's life, so these are built once on first use and reused across

@@ -50,26 +50,26 @@ Training is configured via a JSON or YAML file that defines runtime settings, en
 Example Configuration
 ---------------------   
 
-The configuration file (e.g., ``train_config.json`` or ``train_config.yaml``) is located in ``embodichain_tasks/configs/agents/rl/push_cube`` or ``embodichain_tasks/configs/agents/rl/basic/cart_pole``. PointMass APG/PPO configs live under ``embodichain_tasks/configs/agents/rl/basic/point_mass``:
+Training configurations are task-local: PushCube uses ``embodichain_tasks/configs/tasks/manipulation/push_cube/agents`` and CartPole uses ``embodichain_tasks/configs/tasks/classic_control/cart_pole/agents``. PointMass APG/PPO configs live under ``embodichain_tasks/configs/tasks/classic_control/point_mass/agents``:
 
 .. dropdown:: Example: train_config.json
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/agents/rl/push_cube/train_config.json
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
       :language: json
       :linenos:
 
 .. dropdown:: Example: train_config.yaml (CartPole)
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
       :language: yaml
       :linenos:
 
 .. dropdown:: Example: train_apg.yaml (PointMass)
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
       :language: yaml
       :linenos:
 
@@ -78,11 +78,11 @@ APG and PPO. Launch either config with the same CLI:
 
 .. code-block:: bash
 
-   embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml
-   embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_ppo.yaml
+   embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
+   embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml
 
 Configuration Sections
----------------------
+----------------------
 
 Runtime Settings
 ^^^^^^^^^^^^^^^^
@@ -134,7 +134,7 @@ Example:
    }
 
 Policy Configuration
-^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
 
 The ``policy`` section defines the neural network policy:
 
@@ -249,13 +249,13 @@ To start training, run:
 
 .. code-block:: bash
 
-   embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+   embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 
 JSON configs are also supported:
 
 .. code-block:: bash
 
-   embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
+   embodichain train-rl --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
 
 Outputs
 -------
@@ -266,7 +266,7 @@ All outputs are written to ``./outputs/<exp_name>_<timestamp>/``:
 - **checkpoints/**: Model checkpoints
 
 Training Process
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 The training process follows this sequence:
 
@@ -326,7 +326,7 @@ Available Algorithms
 - **GRPO**: Group Relative Policy Optimization (no Critic, step-wise returns, masked group normalization). Use ``actor_only`` policy. Set ``kl_coef=0`` for from-scratch training (CartPole, dense reward); ``kl_coef=0.02`` for VLA/LLM fine-tuning.
 
 Adding a New Algorithm
----------------------
+----------------------
 
 To add a new algorithm:
 

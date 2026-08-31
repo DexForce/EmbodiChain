@@ -172,6 +172,76 @@ def translate_pose_world(pose: torch.Tensor, offset: torch.Tensor) -> torch.Tens
     return result
 
 
+def axis_translation_keyframes(
+    start_pose: torch.Tensor,
+    end_pose: torch.Tensor,
+    axis: torch.Tensor,
+    *,
+    n_waypoints: int,
+) -> torch.Tensor:
+    """Build exact Cartesian translation targets along one world-space axis.
+
+    The returned targets exclude ``start_pose`` and include ``end_pose``. This
+    matches motion generation, where the observed start configuration is added
+    separately. Rotation remains fixed for the entire constrained segment.
+
+    Args:
+        start_pose: Batched segment-start poses, shape ``(B, 4, 4)``.
+        end_pose: Batched segment-end poses, shape ``(B, 4, 4)``.
+        axis: Shared ``(3,)`` or batched ``(B, 3)`` world-space axis.
+        n_waypoints: Number of target poses, excluding the segment start.
+
+    Returns:
+        Batched keyframes with shape ``(B, n_waypoints, 4, 4)``.
+
+    Raises:
+        ValueError: If poses, axis, count, rotation, or displacement are invalid.
+    """
+    if (
+        start_pose.dim() != 3
+        or start_pose.shape[1:] != (4, 4)
+        or end_pose.shape != start_pose.shape
+    ):
+        raise ValueError("start_pose and end_pose must have shape (B, 4, 4).")
+    if n_waypoints < 1:
+        raise ValueError("n_waypoints must be at least 1.")
+    axis = axis.to(device=start_pose.device, dtype=start_pose.dtype)
+    if axis.shape == (3,):
+        axis = axis.unsqueeze(0).expand(start_pose.shape[0], -1)
+    if axis.shape != (start_pose.shape[0], 3) or not torch.isfinite(axis).all():
+        raise ValueError("axis must be finite with shape (3,) or (B, 3).")
+    axis_norm = torch.linalg.vector_norm(axis, dim=1, keepdim=True)
+    if torch.any(axis_norm <= 1.0e-6):
+        raise ValueError("axis must be non-zero.")
+    axis = axis / axis_norm
+    if not torch.allclose(
+        start_pose[:, :3, :3],
+        end_pose[:, :3, :3],
+        rtol=1.0e-5,
+        atol=1.0e-6,
+    ):
+        raise ValueError("Axis translation requires a fixed segment rotation.")
+    displacement = end_pose[:, :3, 3] - start_pose[:, :3, 3]
+    orthogonal = displacement - (displacement * axis).sum(dim=1, keepdim=True) * axis
+    if torch.any(torch.linalg.vector_norm(orthogonal, dim=1) > 1.0e-5):
+        raise ValueError("Segment displacement must be parallel to axis.")
+
+    weights = torch.linspace(
+        0.0,
+        1.0,
+        n_waypoints + 1,
+        dtype=start_pose.dtype,
+        device=start_pose.device,
+    )[1:]
+    result = start_pose[:, None].expand(-1, n_waypoints, -1, -1).clone()
+    result[:, :, :3, 3] = torch.lerp(
+        start_pose[:, None, :3, 3],
+        end_pose[:, None, :3, 3],
+        weights[None, :, None],
+    )
+    return result
+
+
 def split_three_segments(
     sample_count: int,
     hand_interp_steps: int,
@@ -250,7 +320,6 @@ def to_full_robot_trajectory(
     base_qpos: torch.Tensor,
     joint_ids: list[int],
     env_ids: torch.Tensor,
-    control_dt: float,
 ) -> tuple[torch.Tensor, TimedTrajectory]:
     """Embed a controlled-joint plan into a timed full-robot trajectory."""
     positions = result.positions
@@ -270,23 +339,14 @@ def to_full_robot_trajectory(
         full[:, :, joint_ids] = value
         return full
 
-    duration: float | torch.Tensor | None = result.duration
     if result.dt is None:
-        duration_tensor = torch.as_tensor(
-            result.duration,
-            dtype=torch.float32,
-            device=base_qpos.device,
-        )
-        if not bool((duration_tensor > 0.0).any().item()):
-            duration = None
+        raise ValueError("PlanResult must include explicit dt.")
     timed = TimedTrajectory.from_positions(
         full_positions,
         env_ids=env_ids,
-        control_dt=control_dt,
         velocities=embed_derivative(result.velocities),
         accelerations=embed_derivative(result.accelerations),
         dt=result.dt,
-        duration=duration,
     )
     success = normalize_success_mask(
         result.success,
@@ -298,6 +358,7 @@ def to_full_robot_trajectory(
 
 
 __all__ = [
+    "axis_translation_keyframes",
     "build_joint_plan_states",
     "build_pose_plan_states",
     "interpolate_hand_qpos",

@@ -19,6 +19,10 @@
 from __future__ import annotations
 
 import importlib
+import inspect
+import math
+import re
+import xml.etree.ElementTree as ET
 from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
@@ -40,6 +44,8 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     create_dual_tutorial_robot_cfg,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    ROBOTIQ_2F_140_TCP,
+    ROBOTIQ_HAND_JOINT_PATTERN,
     TUTORIAL_ROBOTS,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
@@ -49,7 +55,9 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_franka_panda_robot_cfg,
     create_tutorial_argument_parser,
     create_tutorial_robot_cfg,
+    create_ur10_robotiq_robot_cfg,
     create_ur5_gripper_robot_cfg,
+    create_parallel_jaw_grasp_pose_generator,
     get_hand_open_close_qpos,
     replay_trajectory,
     should_open_tutorial_window,
@@ -61,18 +69,23 @@ MOVE_DURATION = 0.25
 Y_OFFSET = 0.18
 EXPECTED_STEP_COUNT = 3
 CUBOID_SIZE = (0.2, 0.2, 0.2)
+STRICT_RECOVERY_TRACKING_ERROR = 0.1
+STRICT_RECOVERY_SPHERE_DENSITY = 0.3
+STRICT_RECOVERY_MINIMUM_CLEARANCE = 0.01
 FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 DUAL_FRANKA_MOUNT_X_AXIS = torch.tensor([0.0, -1.0, 0.0])
 PGI_TUTORIAL_TCP = torch.tensor(
     [
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 1.0, 0.17],
         [0.0, 0.0, 0.0, 1.0],
     ]
 )
 ATOMIC_ACTION_TUTORIAL_MODULES = (
     "assemble",
+    "axis_align",
+    "control_dt",
     "coordinated_pickment",
     "coordinated_placement",
     "dynamic_obstacle_recovery",
@@ -81,9 +94,39 @@ ATOMIC_ACTION_TUTORIAL_MODULES = (
     "move_held_object",
     "move_joints",
     "moving_target_recovery",
+    "open_door",
     "pickup",
     "place",
+    "pour",
     "press",
+    "slide",
+    "twist",
+)
+RIGID_SCENE_TUTORIAL_MODULES = (
+    "assemble",
+    "axis_align",
+    "coordinated_placement",
+    "hand_over",
+    "move_held_object",
+    "pickup",
+    "place",
+    "pour",
+)
+STATIC_POSE_TUTORIAL_MODULES = (
+    "coordinated_pickment",
+    "press",
+    "slide",
+    "twist",
+)
+EXPLICIT_SCENE_LIFECYCLE_TUTORIAL_MODULES = (
+    "dynamic_obstacle_recovery",
+    "moving_target_recovery",
+    "open_door",
+)
+SCENE_FREE_TUTORIAL_MODULES = (
+    "control_dt",
+    "move_end_effector",
+    "move_joints",
 )
 
 
@@ -219,23 +262,26 @@ def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
     vertices = torch.tensor([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]])
     triangles = torch.tensor([[0, 1, 1]])
     obj = MagicMock()
+    obj.uid = "cube"
     obj.get_vertices.return_value = vertices.unsqueeze(0)
     obj.get_triangles.return_value = triangles.unsqueeze(0)
 
-    semantics = create_antipodal_semantics(
-        obj,
-        label="cube",
-        n_sample=64,
-        force_reannotate=True,
-    )
+    semantics = create_antipodal_semantics(obj, label="cube")
 
-    assert semantics.entity is obj
+    assert semantics.entity_id == "cube"
     assert semantics.label == "cube"
     assert semantics.geometry == {}
     assert torch.equal(semantics.affordance.mesh_vertices, vertices)
     assert torch.equal(semantics.affordance.mesh_triangles, triangles)
-    assert semantics.affordance.force_reannotate is True
-    assert semantics.affordance.generator_cfg.antipodal_sampler_cfg.n_sample == 64
+    assert not hasattr(semantics.affordance, "generator_cfg")
+
+    generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=64,
+        force_refresh=True,
+    )
+    assert generator.algorithm_cfg.sample_count == 64
+    assert generator.annotation_cfg.force_refresh is True
+    assert generator.gripper_model.model_id == "dh_pgi_140_80"
 
 
 def test_franka_tutorial_config_uses_ur5_gripper_component() -> None:
@@ -274,14 +320,49 @@ def test_ur5_and_franka_configs_share_place_binding_contract() -> None:
     )
 
 
+def test_ur10_robotiq_config_matches_six_active_hand_joints_and_tcp() -> None:
+    cfg = create_ur10_robotiq_robot_cfg()
+    hand_urdf = cfg.urdf_cfg.components["hand"]["urdf_path"]
+    active_hand_joints = [
+        joint.attrib["name"]
+        for joint in ET.parse(hand_urdf).getroot().findall("joint")
+        if joint.attrib.get("type") != "fixed"
+    ]
+
+    assert cfg.control_parts["hand"] == [ROBOTIQ_HAND_JOINT_PATTERN]
+    assert len(active_hand_joints) == 6
+    assert all(
+        re.fullmatch(ROBOTIQ_HAND_JOINT_PATTERN, joint_name)
+        for joint_name in active_hand_joints
+    )
+    assert len(cfg.init_qpos) == 12
+    assert cfg.init_qpos[-6:] == [0.0] * 6
+    assert torch.allclose(
+        torch.as_tensor(cfg.solver_cfg["arm"].tcp),
+        torch.as_tensor(ROBOTIQ_2F_140_TCP),
+    )
+
+
 @pytest.mark.parametrize(
-    ("robot_type", "arm_dof", "solver_name"),
-    (("ur5", 6, "URSolverCfg"), ("franka", 7, "PytorchSolverCfg")),
+    ("robot_type", "arm_dof", "solver_name", "hand_pattern", "expected_tcp"),
+    (
+        ("ur5", 6, "URSolverCfg", "gripper_finger1_joint_1", None),
+        ("franka", 7, "PytorchSolverCfg", "gripper_finger1_joint_1", None),
+        (
+            "ur10",
+            6,
+            "URSolverCfg",
+            ROBOTIQ_HAND_JOINT_PATTERN,
+            ROBOTIQ_2F_140_TCP,
+        ),
+    ),
 )
-def test_dual_tutorial_configs_share_pgi_binding_contract(
+def test_dual_tutorial_configs_share_hand_binding_contract(
     robot_type: str,
     arm_dof: int,
     solver_name: str,
+    hand_pattern: str,
+    expected_tcp: tuple[tuple[float, ...], ...] | None,
 ) -> None:
     single_cfg = create_tutorial_robot_cfg(robot_type)
     dual_cfg = create_dual_tutorial_robot_cfg(
@@ -290,8 +371,11 @@ def test_dual_tutorial_configs_share_pgi_binding_contract(
         urdf_name=f"test_dual_{robot_type}",
         tcp_z=0.121,
     )
-    expected_tcp = PGI_TUTORIAL_TCP.clone()
-    expected_tcp[2, 3] = 0.121
+    if expected_tcp is None:
+        expected_tcp_tensor = PGI_TUTORIAL_TCP.clone()
+        expected_tcp_tensor[2, 3] = 0.121
+    else:
+        expected_tcp_tensor = torch.as_tensor(expected_tcp)
 
     assert tuple(dual_cfg.urdf_cfg.components) == (
         "left_arm",
@@ -304,15 +388,17 @@ def test_dual_tutorial_configs_share_pgi_binding_contract(
     assert dual_cfg.init_qpos[1 : 2 * arm_dof : 2] == expected_arm_home
     for side in ("left", "right"):
         assert len(dual_cfg.control_parts[f"{side}_arm"]) == arm_dof
-        assert dual_cfg.control_parts[f"{side}_hand"] == [
-            f"{side}_gripper_finger1_joint_1"
-        ]
+        assert dual_cfg.control_parts[f"{side}_hand"] == [f"{side}_{hand_pattern}"]
         assert dual_cfg.urdf_cfg.components[f"{side}_hand"]["urdf_path"] == (
             single_cfg.urdf_cfg.components["hand"]["urdf_path"]
         )
         solver = dual_cfg.solver_cfg[f"{side}_arm"]
         assert type(solver).__name__ == solver_name
-        assert torch.allclose(torch.as_tensor(solver.tcp), expected_tcp)
+        assert torch.allclose(torch.as_tensor(solver.tcp), expected_tcp_tensor)
+
+    if robot_type == "ur10":
+        assert len(dual_cfg.init_qpos) == 24
+        assert dual_cfg.init_qpos[-12:] == [0.0] * 12
 
 
 def test_dual_franka_mount_preserves_single_arm_facing_direction() -> None:
@@ -346,6 +432,45 @@ def test_hand_commands_use_pgi_open_limit() -> None:
     assert torch.allclose(hand_close, torch.tensor([0.024]))
 
 
+def test_hand_commands_cover_all_six_robotiq_joints_with_mimic_directions() -> None:
+    robot = MagicMock()
+    robot.device = torch.device("cpu")
+    robot.cfg.control_parts = {
+        "left_hand": [
+            "left_finger_joint",
+            "left_left_inner_knuckle_joint",
+            "left_left_inner_finger_joint",
+            "left_right_outer_knuckle_joint",
+            "left_right_inner_knuckle_joint",
+            "left_right_inner_finger_joint",
+        ]
+    }
+    robot.get_qpos_limits.return_value = torch.tensor(
+        [
+            [
+                [0.0, 0.7],
+                [-0.8757, 0.8757],
+                [-0.8757, 0.8757],
+                [-0.725, 0.725],
+                [-0.8757, 0.8757],
+                [-0.8757, 0.8757],
+            ]
+        ]
+    )
+
+    hand_open, hand_close = get_hand_open_close_qpos(
+        robot,
+        hand_control_part="left_hand",
+        close_qpos=0.4,
+    )
+
+    assert torch.allclose(hand_open, torch.zeros(6))
+    assert torch.allclose(
+        hand_close,
+        torch.tensor([0.4, -0.4, 0.4, -0.4, -0.4, 0.4]),
+    )
+
+
 def test_curobo_motion_generator_factory_selects_curobo_backend() -> None:
     robot = MagicMock(uid="tutorial_robot")
 
@@ -360,14 +485,16 @@ def test_curobo_motion_generator_factory_selects_curobo_backend() -> None:
     assert cfg.planner_cfg.robot_uid == "tutorial_robot"
 
 
-def test_shared_robot_selection_keeps_ur5_default_and_accepts_franka() -> None:
+def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> None:
     parser = create_tutorial_argument_parser("test parser")
     default_args = parser.parse_args([])
     franka_args = parser.parse_args(["--robot", "franka"])
+    ur10_args = parser.parse_args(["--robot", "ur10"])
 
-    assert TUTORIAL_ROBOTS == ("ur5", "franka")
+    assert TUTORIAL_ROBOTS == ("ur5", "franka", "ur10")
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
+    assert ur10_args.robot == "ur10"
 
 
 def test_arm_direction_uses_selected_robot_solver_roots() -> None:
@@ -405,6 +532,127 @@ def test_all_atomic_action_tutorials_accept_both_robot_choices(
     assert franka_args.robot == "franka"
 
 
+def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.place")
+    args = Namespace(
+        auto_play=True,
+        force_reannotate=False,
+        n_sample=1,
+        no_vis_eef_axis=True,
+        robot="ur5",
+    )
+    sim = MagicMock()
+    sim.device = torch.device("cpu")
+    sim.sim_config.physics_dt = PHYSICS_DT
+    robot = MagicMock()
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    obj = MagicMock()
+    obj.uid = "cube"
+    obj.get_vertices.return_value = [torch.zeros(1, 3)]
+    obj.get_triangles.return_value = [torch.zeros(1, 3, dtype=torch.long)]
+    engine = MagicMock()
+    engine.compile.return_value = SimpleNamespace(plan_success=torch.tensor([False]))
+
+    with (
+        patch.object(module, "parse_arguments", return_value=args),
+        patch.object(module, "create_tutorial_simulation", return_value=sim),
+        patch.object(module, "add_tutorial_robot", return_value=robot),
+        patch.object(module, "create_pick_object", return_value=obj),
+        patch.object(module, "create_curobo_motion_generator"),
+        patch.object(
+            module,
+            "get_hand_open_close_qpos",
+            return_value=(
+                torch.zeros(1),
+                torch.ones(1),
+            ),
+        ),
+        patch.object(module, "initialize_pre_pick_robot_pose"),
+        patch.object(
+            module,
+            "create_simulation_atomic_action_engine",
+            return_value=engine,
+        ) as engine_factory,
+        patch.object(module, "create_parallel_jaw_grasp_pose_generator"),
+        patch.object(module, "prepare_tutorial_scene", return_value=False),
+    ):
+        module.main()
+
+    assert engine_factory.call_args.kwargs["scene_entities"] == (obj,)
+    engine.initial_context.assert_called_once_with(control_dt=PHYSICS_DT)
+
+
+def test_atomic_action_tutorial_scene_strategies_cover_every_entry_point() -> None:
+    classified = (
+        set(RIGID_SCENE_TUTORIAL_MODULES)
+        | set(STATIC_POSE_TUTORIAL_MODULES)
+        | set(EXPLICIT_SCENE_LIFECYCLE_TUTORIAL_MODULES)
+        | set(SCENE_FREE_TUTORIAL_MODULES)
+    )
+
+    assert classified == set(ATOMIC_ACTION_TUTORIAL_MODULES)
+
+
+@pytest.mark.parametrize("module_name", RIGID_SCENE_TUTORIAL_MODULES)
+def test_rigid_scene_tutorials_use_simulation_engine_factory(
+    module_name: str,
+) -> None:
+    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    source = inspect.getsource(module)
+
+    assert "create_simulation_atomic_action_engine(" in source
+    assert "RigidObjectSceneProvider" not in source
+    assert "SceneSnapshot" not in source
+
+
+@pytest.mark.parametrize("module_name", STATIC_POSE_TUTORIAL_MODULES)
+def test_static_pose_tutorials_do_not_construct_scene_snapshots(
+    module_name: str,
+) -> None:
+    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    source = inspect.getsource(module)
+
+    assert "SceneSnapshot" not in source
+    assert "SceneEntityPose" not in source
+
+
+def test_axis_align_tutorial_exposes_upright_and_horizontal_modes() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.axis_align")
+
+    with patch("sys.argv", ["axis_align.py"]):
+        upright_args = module.parse_arguments()
+    with patch(
+        "sys.argv",
+        ["axis_align.py", "--alignment", "horizontal_align"],
+    ):
+        horizontal_args = module.parse_arguments()
+
+    assert upright_args.alignment == "upright"
+    assert horizontal_args.alignment == "horizontal_align"
+    assert module.ALIGNMENT_AXES["upright"] == (
+        (1.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    )
+    assert module.ALIGNMENT_AXES["horizontal_align"] == (
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+    )
+
+
+def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.pour")
+
+    with patch("sys.argv", ["pour.py"]):
+        default_args = module.parse_arguments()
+    with patch("sys.argv", ["pour.py", "--rotate_angle", "-1.25"]):
+        configured_args = module.parse_arguments()
+
+    assert default_args.rotate_angle == pytest.approx(math.pi / 4.0)
+    assert configured_args.rotate_angle == pytest.approx(-1.25)
+    assert module.APPROACH_DIRECTION == pytest.approx((-0.707, 0.0, -0.707))
+    assert module.POUR_INTERNAL_AXIS == (1.0, 0.0, 0.0)
+
+
 def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
     sim = MagicMock()
     sim.sim_config.physics_dt = 0.1
@@ -412,7 +660,6 @@ def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
     trajectory = TimedTrajectory.from_positions(
         torch.zeros(1, 3, 2),
         env_ids=torch.tensor([0], dtype=torch.long),
-        control_dt=0.1,
         dt=torch.tensor([[0.0, 0.2, 0.25]]),
     )
 
@@ -469,6 +716,26 @@ def test_blocking_pose_targets_the_selected_initial_path_waypoint() -> None:
     assert waypoint_index == 1
     assert torch.equal(target_pose[:, :3, 3], path[:, waypoint_index])
     assert torch.equal(start_pose, torch.eye(4).unsqueeze(0))
+
+
+def test_dynamic_obstacle_recovery_keeps_strict_collision_contract() -> None:
+    module = importlib.import_module(
+        "scripts.tutorials.atomic_action.dynamic_obstacle_recovery"
+    )
+    main_source = inspect.getsource(module.main)
+
+    assert module.TRACKING_ERROR_THRESHOLD == pytest.approx(
+        STRICT_RECOVERY_TRACKING_ERROR
+    )
+    assert module.COLLISION_SPHERE_FIT_TYPE == "morphit"
+    assert module.COLLISION_SPHERE_FIT_DENSITY == pytest.approx(
+        STRICT_RECOVERY_SPHERE_DENSITY
+    )
+    assert module.MINIMUM_REPLAN_CLEARANCE == pytest.approx(
+        STRICT_RECOVERY_MINIMUM_CLEARANCE
+    )
+    assert "blocked_path_clearance > MAXIMUM_BLOCKED_PATH_CLEARANCE" in main_source
+    assert "replan_clearance < MINIMUM_REPLAN_CLEARANCE" in main_source
 
 
 def test_maximum_path_deviation_measures_detour_from_reference_polyline() -> None:

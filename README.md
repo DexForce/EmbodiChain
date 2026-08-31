@@ -43,7 +43,8 @@ To get started with EmbodiChain, follow these steps:
 ## Task Environments
 
 EmbodiChain's task environments are decoupled from the core framework at the
-import-package level. The official tableware, RL, and special tasks live in the
+import-package level. The official classic-control, manipulation, and special
+task families live in the
 [embodichain_tasks source tree](https://github.com/DexForce/EmbodiChain/tree/main/embodichain_tasks)
 and are included in the main `embodichain` wheel. Both `pip install embodichain`
 and editable `pip install -e .` therefore install
@@ -58,19 +59,22 @@ embodichain run-env --gym_config path/to/gym_config.json
 
 To build your own task environments, start from the
 [embodichain_task_template](https://github.com/DexForce/embodichain_task_template)
-repository: fork it, implement an `EmbodiedEnv` subclass with `@register_env`,
-add a gym config, `pip install -e .`, then launch with `embodichain run-env`.
-See the
+repository. Tasks with custom Python behavior implement an `EmbodiedEnv`
+subclass with `@register_env`; supported configuration-defined Task Programs
+may instead compose the common environment from reusable `env.yaml`,
+embodiment, integration, and policy components. In either case, add a runnable
+gym config with `id`, install with `pip install -e .`, and launch it with
+`embodichain run-env`. See the
 [embodichain_tasks README](https://github.com/DexForce/EmbodiChain/blob/main/embodichain_tasks/README.md)
 for details.
 
 ## Contribution Guide
 
-We welcome contributions! Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file in this repository for guidelines on how to get started.
+We welcome contributions! Please see the [CONTRIBUTING.md](https://github.com/DexForce/EmbodiChain/blob/main/CONTRIBUTING.md) file in this repository for guidelines on how to get started.
 
 ## Publications
 
-See [Academic Publications](docs/source/resources/publications/README.md) for a complete list of academic papers related to EmbodiChain.
+See [Academic Publications](https://dexforce.github.io/EmbodiChain/main/resources/publications/README.html) for a complete list of academic papers related to EmbodiChain.
 
 ## Citation
 

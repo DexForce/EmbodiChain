@@ -23,11 +23,18 @@ from unittest.mock import Mock
 import pytest
 import torch
 
+from embodichain.lab.sim.objects import ArticulationJointKinematics
+
 from embodichain.lab.sim.atomic_actions.affordance import (
     Affordance,
     AntipodalAffordance,
     AssembleAffordance,
+    AxisAlignAffordance,
     InteractionPoints,
+    OpenDoorAffordance,
+    PressAffordance,
+    SlideAffordance,
+    TwistAffordance,
 )
 
 
@@ -47,6 +54,40 @@ class TestAffordance:
 
 
 class TestAntipodalAffordance:
+    @staticmethod
+    def _long_box_mesh() -> tuple[torch.Tensor, torch.Tensor]:
+        vertices = torch.tensor(
+            [
+                [-0.1, -0.1, -1.0],
+                [0.1, -0.1, -1.0],
+                [0.1, 0.1, -1.0],
+                [-0.1, 0.1, -1.0],
+                [-0.1, -0.1, 1.0],
+                [0.1, -0.1, 1.0],
+                [0.1, 0.1, 1.0],
+                [-0.1, 0.1, 1.0],
+            ],
+            dtype=torch.float32,
+        )
+        triangles = torch.tensor(
+            [
+                [0, 1, 2],
+                [0, 2, 3],
+                [4, 6, 5],
+                [4, 7, 6],
+                [0, 4, 5],
+                [0, 5, 1],
+                [1, 5, 6],
+                [1, 6, 2],
+                [2, 6, 7],
+                [2, 7, 3],
+                [3, 7, 4],
+                [3, 4, 0],
+            ],
+            dtype=torch.long,
+        )
+        return vertices, triangles
+
     def test_stores_mesh_fields_directly(self):
         v = torch.randn(8, 3)
         t = torch.randint(0, 8, (5, 3))
@@ -59,63 +100,379 @@ class TestAntipodalAffordance:
         aff = AntipodalAffordance()
         assert not hasattr(aff, "geometry")
 
-    def test_failed_valid_grasp_poses_are_batched_with_inf_costs(self):
-        aff = AntipodalAffordance()
-        generator = Mock()
-        generator.device = torch.device("cpu")
-        generator.get_valid_grasp_poses.return_value = (
-            False,
-            torch.eye(4),
-            0.0,
-            torch.zeros(1),
+    def test_owns_no_generator_configuration_or_runtime(self):
+        affordance = AntipodalAffordance()
+        assert not hasattr(affordance, "generator_cfg")
+        assert not hasattr(affordance, "gripper_collision_cfg")
+        assert not hasattr(affordance, "force_reannotate")
+        assert not hasattr(affordance, "_generator")
+
+    def test_requires_mesh_fields_together(self):
+        with pytest.raises(ValueError, match="provided together"):
+            AntipodalAffordance(mesh_vertices=torch.zeros(3, 3))
+
+    def test_surface_svd_uses_at_most_1000_points_in_current_pose(self):
+        vertices, triangles = self._long_box_mesh()
+        affordance = AntipodalAffordance(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
         )
-        aff._generator = generator
+        first_points = affordance.sample_surface_points(max_points=1000)
+        second_points = affordance.sample_surface_points(max_points=1000)
+        poses = torch.eye(4).repeat(2, 1, 1)
+        poses[1, :3, :3] = torch.tensor(
+            [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+        )
 
-        results = aff.get_valid_grasp_poses(torch.eye(4).unsqueeze(0))
+        axes = affordance.get_object_longest_axis(poses, max_points=1000)
 
-        grasp_poses, costs = results[0]
-        assert grasp_poses.shape == (1, 4, 4)
-        assert costs.shape == (1,)
-        assert torch.isinf(costs).all()
+        assert first_points.shape == (1000, 3)
+        assert torch.equal(first_points, second_points)
+        assert torch.abs(axes[0, 2]) > 0.99
+        assert torch.abs(axes[1, 0]) > 0.99
 
-    def test_valid_grasp_poses_casts_approach_direction_to_generator_device(self):
-        aff = AntipodalAffordance()
-        generator = Mock()
-        generator.device = torch.device("cpu")
-        generator.get_valid_grasp_poses.return_value = (
-            True,
+
+class TestAxisAlignAffordance:
+    def test_extends_antipodal_affordance_with_owned_internal_axis(self):
+        internal_axis = torch.tensor([1.0, 0.0, 0.0])
+
+        affordance = AxisAlignAffordance(internal_axis=internal_axis)
+        internal_axis[0] = 0.0
+
+        assert isinstance(affordance, AntipodalAffordance)
+        assert torch.equal(affordance.internal_axis, torch.tensor([1.0, 0.0, 0.0]))
+
+    @pytest.mark.parametrize(
+        "internal_axis",
+        (
+            torch.zeros(3),
+            torch.tensor([float("nan"), 0.0, 0.0]),
+            torch.zeros(2),
+        ),
+    )
+    def test_rejects_invalid_internal_axis(self, internal_axis):
+        with pytest.raises(ValueError, match="internal_axis"):
+            AxisAlignAffordance(internal_axis=internal_axis)
+
+
+class TestTwistAffordance:
+    def test_requires_explicit_grasp_position_and_axis_origin(self):
+        with pytest.raises(TypeError, match="grasp_position"):
+            TwistAffordance()  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize(
+        "twist_axis",
+        (
+            torch.tensor([1.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, -1.0]),
+        ),
+    )
+    def test_builds_right_handed_orthonormal_grasp_frame(self, twist_axis):
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        affordance = TwistAffordance(
+            grasp_position=(0.25, -0.5, 0.75),
+            axis_origin=(0.1, 0.2, 0.3),
+            twist_axis=twist_axis,
+        )
+
+        grasp_pose = affordance.get_grasp_pose(link_pose)
+        rotation = grasp_pose[:, :3, :3]
+
+        assert torch.allclose(
+            grasp_pose[:, :3, 3],
+            link_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
+        )
+        assert torch.allclose(
+            torch.matmul(rotation.transpose(1, 2), rotation),
+            torch.eye(3).expand(2, -1, -1),
+            atol=1.0e-6,
+        )
+        assert torch.allclose(torch.linalg.det(rotation), torch.ones(2), atol=1.0e-6)
+
+
+class TestSlideAffordance:
+    def test_uses_only_local_antipodal_mesh_and_translation_axis(self):
+        vertices = torch.tensor(
+            [
+                [-1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ]
+        )
+        triangles = torch.tensor([[0, 1, 2]])
+        affordance = SlideAffordance(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
+            translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+        )
+        assert isinstance(affordance, AntipodalAffordance)
+        assert affordance.mesh_vertices is vertices
+        assert affordance.mesh_triangles is triangles
+        assert torch.equal(
+            affordance.translation_axis,
+            torch.tensor([0.0, -1.0, 0.0]),
+        )
+
+    def test_requires_local_antipodal_geometry(self):
+        with pytest.raises(TypeError, match="mesh_vertices"):
+            SlideAffordance()
+
+    @pytest.mark.parametrize(
+        "translation_axis",
+        (
+            torch.zeros(3),
+            torch.tensor([float("nan"), 0.0, 0.0]),
+            torch.zeros(2),
+        ),
+    )
+    def test_rejects_invalid_translation_axis(self, translation_axis):
+        with pytest.raises(ValueError, match="translation_axis"):
+            SlideAffordance(
+                mesh_vertices=torch.ones(3, 3),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+                translation_axis=translation_axis,
+            )
+
+
+class TestOpenDoorAffordance:
+    @staticmethod
+    def _joint(
+        name: str,
+        joint_type: str,
+        parent_link_name: str,
+        child_link_name: str,
+    ) -> ArticulationJointKinematics:
+        return ArticulationJointKinematics(
+            name=name,
+            joint_type=joint_type,
+            parent_link_name=parent_link_name,
+            child_link_name=child_link_name,
+            axis=(
+                torch.tensor([0.0, 0.0, 1.0])
+                if joint_type == "revolute"
+                else torch.zeros(3)
+            ),
+            origin_pose=torch.eye(4),
+            joint_limits=(0.0, 2.0) if joint_type != "fixed" else (0.0, 0.0),
+        )
+
+    @staticmethod
+    def _articulation_with_parent_hinge() -> Mock:
+        fixed_joint = TestOpenDoorAffordance._joint(
+            "door_to_door_handle_fixed",
+            "fixed",
+            "door",
+            "door_handle",
+        )
+        hinge_joint = TestOpenDoorAffordance._joint(
+            "door_hinge",
+            "revolute",
+            "body",
+            "door",
+        )
+        articulation = Mock(
+            spec=[
+                "get_parent_joint_chain",
+                "get_link_pose",
+                "get_link_vert_face",
+            ]
+        )
+        articulation.get_parent_joint_chain.return_value = (
+            fixed_joint,
+            hinge_joint,
+        )
+        articulation.fixed_joint = fixed_joint
+        articulation.hinge_joint = hinge_joint
+        body_pose = torch.eye(4).unsqueeze(0)
+        handle_pose = torch.eye(4).unsqueeze(0)
+        handle_pose[:, 0, 3] = 1.0
+        poses = {
+            "body": body_pose,
+            "door_handle": handle_pose,
+        }
+        articulation.get_link_pose.side_effect = lambda link_name, **_: poses[link_name]
+        articulation.get_link_vert_face.return_value = (
+            torch.tensor(
+                [
+                    [0.9, -0.1, 0.0],
+                    [1.1, -0.1, 0.0],
+                    [1.0, 0.1, 0.0],
+                ]
+            ),
+            torch.tensor([[0, 1, 2]]),
+        )
+        return articulation
+
+    def test_resolves_first_parent_revolute_joint_from_handle_link(self):
+        articulation = self._articulation_with_parent_hinge()
+
+        affordance = OpenDoorAffordance.from_articulation(
+            articulation,
+            "door_handle",
+        )
+
+        assert affordance.joint_name == "door_hinge"
+        assert torch.allclose(
+            affordance.rotation_axis,
+            torch.tensor([0.0, 0.0, 1.0]),
+        )
+        assert affordance.axis_origin == pytest.approx((-1.0, 0.0, 0.0))
+        assert affordance.joint_limits == pytest.approx((0.0, 2.0))
+        assert affordance.opening_direction == 1
+        articulation.get_parent_joint_chain.assert_called_once_with("door_handle")
+
+    def test_accepts_affordance_owned_negative_opening_direction(self):
+        articulation = self._articulation_with_parent_hinge()
+
+        affordance = OpenDoorAffordance.from_articulation(
+            articulation,
+            "door_handle",
+            opening_direction=-1,
+        )
+
+        assert affordance.opening_direction == -1
+
+    def test_rejects_handle_without_parent_revolute_joint(self):
+        articulation = self._articulation_with_parent_hinge()
+        articulation.get_parent_joint_chain.return_value = (articulation.fixed_joint,)
+
+        with pytest.raises(ValueError, match="No active parent joint"):
+            OpenDoorAffordance.from_articulation(articulation, "door_handle")
+
+    def test_requires_explicit_hinge_across_prismatic_ancestor(self):
+        articulation = self._articulation_with_parent_hinge()
+        prismatic = self._joint(
+            "handle_slide",
+            "prismatic",
+            "door",
+            "door_handle",
+        )
+        articulation.get_parent_joint_chain.return_value = (
+            prismatic,
+            articulation.hinge_joint,
+        )
+
+        with pytest.raises(ValueError, match="Ambiguous active ancestors"):
+            OpenDoorAffordance.from_articulation(articulation, "door_handle")
+
+        affordance = OpenDoorAffordance.from_articulation(
+            articulation,
+            "door_handle",
+            hinge_joint_name="door_hinge",
+        )
+        assert affordance.joint_name == "door_hinge"
+
+    def test_requires_explicit_hinge_when_handle_has_revolute_latch(self):
+        articulation = self._articulation_with_parent_hinge()
+        latch = self._joint(
+            "handle_latch",
+            "revolute",
+            "door",
+            "door_handle",
+        )
+        articulation.get_parent_joint_chain.return_value = (
+            latch,
+            articulation.hinge_joint,
+        )
+
+        with pytest.raises(ValueError, match="Ambiguous active ancestors"):
+            OpenDoorAffordance.from_articulation(articulation, "door_handle")
+
+    def test_rejects_explicit_non_revolute_hinge(self):
+        articulation = self._articulation_with_parent_hinge()
+        prismatic = self._joint(
+            "handle_slide",
+            "prismatic",
+            "door",
+            "door_handle",
+        )
+        articulation.get_parent_joint_chain.return_value = (
+            prismatic,
+            articulation.hinge_joint,
+        )
+
+        with pytest.raises(ValueError, match="must be revolute"):
+            OpenDoorAffordance.from_articulation(
+                articulation,
+                "door_handle",
+                hinge_joint_name="handle_slide",
+            )
+
+
+class TestPressAffordance:
+    def test_requires_explicit_surface_press_position(self):
+        with pytest.raises(TypeError, match="press_position"):
+            PressAffordance()  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize(
+        "press_axis",
+        (
+            torch.tensor([1.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, -1.0]),
+        ),
+    )
+    def test_builds_right_handed_orthonormal_press_frame(self, press_axis):
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        affordance = PressAffordance(
+            press_axis=press_axis,
+            press_position=(0.25, -0.5, 0.75),
+        )
+
+        press_pose = affordance.get_press_pose(link_pose)
+        rotation = press_pose[:, :3, :3]
+
+        assert torch.allclose(
+            press_pose[:, :3, 3],
+            link_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
+        )
+        assert torch.allclose(
+            torch.matmul(rotation.transpose(1, 2), rotation),
+            torch.eye(3).expand(2, -1, -1),
+            atol=1.0e-6,
+        )
+        assert torch.allclose(torch.linalg.det(rotation), torch.ones(2), atol=1.0e-6)
+
+    def test_rejects_zero_press_axis(self):
+        with pytest.raises(ValueError, match="press_axis must be non-zero"):
+            PressAffordance(
+                press_axis=torch.zeros(3),
+                press_position=(0.0, 0.0, 0.0),
+            )
+
+    def test_uses_configured_press_position(self):
+        object_pose = torch.eye(4).repeat(2, 1, 1)
+        object_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        affordance = PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(0.25, -0.5, 0.75),
+        )
+
+        press_pose = affordance.get_press_pose(object_pose)
+
+        assert torch.allclose(
+            press_pose[:, :3, 3],
+            object_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
+        )
+
+    def test_per_call_press_position_overrides_affordance_position(self):
+        affordance = PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(1.0, 1.0, 1.0),
+        )
+
+        press_pose = affordance.get_press_pose(
             torch.eye(4).unsqueeze(0),
-            0.0,
-            torch.zeros(1),
-        )
-        aff._generator = generator
-
-        aff.get_valid_grasp_poses(
-            torch.eye(4).unsqueeze(0),
-            approach_direction=torch.tensor([0, 0, -1], dtype=torch.int64),
+            press_position=(0.1, 0.2, 0.3),
         )
 
-        approach_direction = generator.get_valid_grasp_poses.call_args.kwargs[
-            "approach_direction"
-        ]
-        assert approach_direction.dtype == torch.float32
-        assert approach_direction.device == generator.device
-
-    def test_best_grasp_poses_casts_approach_direction_to_generator_device(self):
-        aff = AntipodalAffordance()
-        generator = Mock()
-        generator.device = torch.device("cpu")
-        generator.get_grasp_poses.return_value = (True, torch.eye(4), 0.05)
-        aff._generator = generator
-
-        aff.get_best_grasp_poses(
-            torch.eye(4).unsqueeze(0),
-            approach_direction=torch.tensor([0, 0, -1], dtype=torch.int64),
+        assert torch.allclose(
+            press_pose[0, :3, 3],
+            torch.tensor([0.1, 0.2, 0.3]),
         )
-
-        _, approach_direction = generator.get_grasp_poses.call_args.args
-        assert approach_direction.dtype == torch.float32
-        assert approach_direction.device == generator.device
 
 
 class TestInteractionPoints:
@@ -160,10 +517,6 @@ class TestAssembleAffordance:
 
     def test_default_fields(self):
         aff = AssembleAffordance()
-        assert aff.base_object_label == ""
-        assert aff.assemble_object_label == ""
-        assert aff.base_object_entity is None
-        assert aff.assemble_object_entity is None
         assert torch.equal(aff.assemble_to_base_pose, torch.eye(4))
 
     def test_get_assemble_object_pose_single_base_pose(self):

@@ -14,6 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
 
 import os
 import open3d as o3d
@@ -242,6 +243,20 @@ class SodaCan(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
+class MicrowaveOven(EmbodiChainDataset):
+    """get_data_path("MicrowaveOven/microwave_oven.urdf")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "MicrowaveOven.zip"),
+            "5672da2d5a888a12469d6277636646b0",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
 class PlasticTray(EmbodiChainDataset):
     """get_data_path("PlasticTray/plastic_tray.glb")"""
 
@@ -263,6 +278,20 @@ class WaterBasin(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "WaterBasin.zip"),
             "9ae41630f6f52dccd7b95ab21b6ba989",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class Drawer(EmbodiChainDataset):
+    """get_data_path("Drawer/model_split_links_with_inertials.urdf")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "Drawer.zip"),
+            "3981636db1f4188146fce25d54084612",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

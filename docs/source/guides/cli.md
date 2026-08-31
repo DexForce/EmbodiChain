@@ -74,10 +74,24 @@ joint controls, the interactive terminal, and worked examples.
 
 ---
 
+(cli-list-tasks)=
+## List Tasks
+
+Discover installed tasks and show their environment IDs and supported expert
+demo or RL capabilities:
+
+```bash
+embodichain list-task
+```
+
+---
+
 (cli-run-environment)=
 ## Run Environment
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
+``embodichain run-task`` is an exact alias of ``embodichain run-env`` and accepts
+the same arguments.
 
 For an end-to-end explanation of mode selection, preview, the differences
 between dataset/video/trajectory recording, and all three replay modes, see
@@ -89,7 +103,9 @@ environments via ``@register_env``. The main ``embodichain`` distribution
 already includes and registers the official ``embodichain_tasks`` import
 package, so no separate task installation is needed. Repository-style task
 config paths resolve from the source checkout or installed wheel. The task to
-launch is selected by the ``"id"`` field of the gym config.
+launch is selected by the ``"id"`` field of the gym config. Pass a runnable
+config (for example ``task.ur5.yaml``), not a pure reusable ``env.yaml``
+component that has only ``environment_id``.
 
 ```bash
 # Run an environment with a gym config file
@@ -140,7 +156,7 @@ embodichain run-env --gym_config config.yaml \
 
 | Argument | Default | Description |
 |---|---|---|
-| ``--gym_config`` | *(required)* | Path to gym config file (``.json``, ``.yaml``, or ``.yml``) |
+| ``--gym_config`` | *(required)* | Path to a runnable gym config with ``id`` (``.json``, ``.yaml``, or ``.yml``) |
 | ``--action_config`` | ``None`` | Path to action config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--num_envs`` | ``1`` | Number of parallel environments |
 | ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
@@ -309,7 +325,7 @@ simulator:
 
 ```bash
 embodichain preview_lerobot_data \
-    outputs/lerobot/multi_segments \
+    outputs/lerobot/task_program \
     --latest \
     --episode 0 \
     --expect-segments 3
@@ -342,21 +358,21 @@ Launch reinforcement learning training from a JSON or YAML config file.
 
 ```bash
 # Train with a config file (JSON or YAML)
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 
 # JSON configs remain supported
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
+embodichain train-rl --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
 
 # Multi-GPU distributed training
 torchrun --nproc_per_node=2 -m embodichain train-rl \
-    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.yaml \
+    --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json \
     --distributed
 ```
 
 The module entry point remains available for compatibility:
 
 ```bash
-python -m embodichain.learning.rl.train --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 ```
 
 ### Arguments

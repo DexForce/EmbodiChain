@@ -29,8 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     JointPositionGoal,
@@ -100,20 +98,27 @@ def main() -> None:
     waypoints = (
         torch.stack([mid, home]).unsqueeze(0).repeat(robot.get_qpos().shape[0], 1, 1)
     )
-    binding = ActionBinding(manipulators={"primary": "arm"})
+    control_parts = {"primary": {"motion": "arm"}}
     policy = MotionPolicy(
         strategy="motion_gen",
         sample_count=MOVE_JOINTS_SAMPLE_INTERVAL,
     )
     compiled = engine.compile(
         (
-            ActionInvocation(
-                "move_joints", JointPositionGoal("ready"), binding, policy
+            engine.make_invocation(
+                "move_joints",
+                JointPositionGoal("ready"),
+                control_parts=control_parts,
+                motion_policy=policy,
             ),
-            ActionInvocation(
-                "move_joints", JointPositionGoal(waypoints), binding, policy
+            engine.make_invocation(
+                "move_joints",
+                JointPositionGoal(waypoints),
+                control_parts=control_parts,
+                motion_policy=policy,
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveJoints demo trajectory.")

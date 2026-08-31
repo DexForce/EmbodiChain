@@ -23,21 +23,25 @@ from typing import ClassVar
 
 import torch
 
-from ..core import AtomicAction
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
-from ..requirements import (
-    ActionBindingRoute,
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.requirements import (
     JOINT_POSITION_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
-from ..state import PlanningContext
-from ..trajectory_ops import (
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_joint_plan_states,
     resolve_joint_target,
     to_full_robot_trajectory,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_motion_slot,
 )
 
 
@@ -78,19 +82,12 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     skill_id: ClassVar[str] = "move_joints"
     GoalType: ClassVar[type] = JointPositionGoal
     OptionsType: ClassVar[type] = MoveJointsOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     agent_visible: ClassVar[bool] = False
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "primary"),
-                    ),
-                ),
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
             ),
         ),
     )
@@ -102,10 +99,11 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     ) -> ActionPlan:
         """Plan a joint-space goal without mutating the robot or task state."""
         goal = request.goal
-        manipulator = request.binding.manipulator("primary")
-        control_part = manipulator.name
-        joint_ids = list(manipulator.joint_ids)
-        joint_dof = manipulator.dof
+        motion = request.binding.endpoint("primary", "motion")
+        motion_target = motion.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        joint_ids = list(motion_target.joint_ids)
+        joint_dof = len(motion_target.joint_ids)
         target_qpos = resolve_joint_target(
             self._resolve_target_qpos(
                 goal,
@@ -123,6 +121,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
             options=request.motion_policy.to_motion_gen_options(
                 start_qpos=start_qpos,
                 control_part=control_part,
+                interpolation_dt=context.control_dt,
             ),
         )
         success, trajectory = to_full_robot_trajectory(
@@ -130,7 +129,6 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
             env_ids=context.env_ids,
-            control_dt=request.motion_policy.control_dt,
         )
         return self.build_plan(
             request,
@@ -149,7 +147,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
         """Resolve an explicit or named joint goal to a tensor."""
         if isinstance(goal.target, torch.Tensor):
             return goal.target
-        return request.binding.manipulator("primary").joint_positions(
+        return request.binding.endpoint("primary", "motion").joint_positions(
             goal.target,
             num_envs=context.batch_size,
             device=self.device,

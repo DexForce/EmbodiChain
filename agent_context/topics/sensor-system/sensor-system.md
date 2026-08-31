@@ -60,6 +60,20 @@ The `transformation` property returns a `4×4 torch.Tensor` homogeneous matrix.
 
 `SensorCfg.from_dict(init_dict)` creates the correct config class by looking up `init_dict["sensor_type"] + "Cfg"` in the sensors module. Nested configclass fields are recursively initialized via their own `from_dict()`.
 
+### Embodiment ownership in Gym deployments
+
+For any componentized Gym environment, sensors are declared in
+`configs/components/embodiments/<embodiment>.yaml` beside the embodiment's
+`simulation` robot mapping. The deployment selects that file with
+`embodiment.component`; task-local `env.yaml` does not own a `sensor` field.
+`config_to_cfg()` resolves the embodiment and passes its `sensor` list through
+the same `SensorCfg.from_dict()` boundary used by ordinary environment configs.
+Changing embodiments therefore changes the robot and its mounted sensor suite
+as one unit. Handwritten and Task Program tasks use the same physical resolver;
+only Task Program deployments additionally require the component's semantic
+`skill_profile` metadata. Inline `robot` and `sensor` fields remain valid when
+`embodiment.component` is absent.
+
 ## Camera System
 
 ### CameraCfg

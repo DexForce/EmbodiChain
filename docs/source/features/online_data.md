@@ -232,4 +232,4 @@ python examples/data_pipeline/online_dataset_demo.py
 ## See Also
 
 - [RL Architecture](../overview/rl/index.rst) — RL training pipeline
-- [Data Generation Tutorial](../tutorial/data_generation.rst) — Generating offline datasets
+- [Expert Data Generation Tutorial](../tutorial/data_generation.rst) — Generating offline datasets

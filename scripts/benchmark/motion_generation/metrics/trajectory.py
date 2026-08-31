@@ -437,9 +437,7 @@ def compute_case_outcomes(
 
         if poses.shape[0] > 0:
             final_pos_m, final_rot_rad = get_pose_err(poses[-1], waypoints[-1])
-            all_pos_error, all_rot_error = _pose_error_matrices(
-                waypoints, native_poses
-            )
+            all_pos_error, all_rot_error = _pose_error_matrices(waypoints, native_poses)
             min_pos_m = float(all_pos_error[-1].min().item())
             min_rot_rad = float(all_rot_error[-1].min().item())
             joint_length, cartesian_length, efficiency = _path_metrics(

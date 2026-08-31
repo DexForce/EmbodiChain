@@ -21,16 +21,28 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import torch
 
-from .bindings import ActionBinding, ResolvedActionBinding, ResolvedControlPart
-from .control import (
-    ActionControlOverrides,
-    ControlCommand,
-    ControlPartCommandProfile,
-)
+from embodichain.toolkits.graspkit import GraspPoseGenerator
+
+from .bindings import ActionBinding, EndpointBinding, JointPositionTarget
+from .control import ActionControlOverrides, ControlPartCommandProfile
 from .core import resolve_runtime_device
+from .requirements import (
+    DisjointResourceSlots,
+    DisjointSlotEndpoints,
+    SkillBindingContract,
+)
+from .tracking import (
+    JOINT_POSITION_CHANNEL,
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
+    TrackingFeedbackSourceRef,
+    TrackingProjectorRef,
+    TrackingRuntime,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -38,34 +50,36 @@ if TYPE_CHECKING:
 
 
 class ActionPlanningServices:
-    """Planning resources exclusively owned by one atomic-action engine.
+    """Engine-scoped registry of planning services used by atomic actions.
 
-    An action may borrow these resources after the engine binds it, but callers
-    never pass a motion generator to individual actions. Keeping the generator
-    here gives one engine a single planner backend, robot, device, cache, and
-    collision-world owner.
-
-    Args:
-        motion_generator: Motion generator owned by the engine.
-        control_profiles: Semantic command profiles keyed by names from the
-            owned robot's ``control_parts`` mapping.
+    The registry itself belongs to one engine. Grasp generators are retained by
+    reference so a composition root can reuse an already prepared standalone
+    service (and its geometry cache) in direct and atomic-action call paths.
     """
 
     def __init__(
         self,
         motion_generator: MotionGenerator,
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        tracking_runtime: TrackingRuntime | None = None,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
     ) -> None:
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
+        self._binding_owner_id = uuid4().hex
+        if tracking_runtime is not None and not isinstance(
+            tracking_runtime,
+            TrackingRuntime,
+        ):
+            raise TypeError("tracking_runtime must be a TrackingRuntime or None.")
+        self._tracking_runtime = tracking_runtime or TrackingRuntime.with_builtins()
         self._control_profiles = self._snapshot_control_profiles(
             {} if control_profiles is None else control_profiles
         )
-        self._binding_cache: dict[
-            tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]],
-            ResolvedActionBinding,
-        ] = {}
+        self._grasp_pose_generators = self._snapshot_grasp_pose_generators(
+            {} if grasp_pose_generators is None else grasp_pose_generators
+        )
 
     @property
     def motion_generator(self) -> MotionGenerator:
@@ -83,14 +97,76 @@ class ActionPlanningServices:
         return self._device
 
     @property
+    def binding_owner_id(self) -> str:
+        """Return the opaque identity required by this engine's bindings."""
+        return self._binding_owner_id
+
+    @property
+    def tracking_runtime(self) -> TrackingRuntime:
+        """Return the engine-owned typed tracking runtime."""
+        return self._tracking_runtime
+
+    @property
     def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
-        """Return owned semantic command profiles keyed by control-part name."""
+        """Return owned direct-core command profiles by control-part name."""
         return MappingProxyType(
             {
                 name: profile.snapshot()
                 for name, profile in self._control_profiles.items()
             }
         )
+
+    @property
+    def grasp_pose_generators(self) -> Mapping[str, GraspPoseGenerator]:
+        """Return grasp-pose services keyed by runtime endpoint target ID."""
+        return MappingProxyType(dict(self._grasp_pose_generators))
+
+    def grasp_pose_generator(self, target_id: str) -> GraspPoseGenerator:
+        """Resolve the generator installed for one grasp endpoint target.
+
+        Args:
+            target_id: Runtime target ID, normally a robot control-part name.
+
+        Returns:
+            The installed standalone grasp-pose generator.
+
+        Raises:
+            KeyError: If no generator is installed for ``target_id``.
+        """
+        try:
+            return self._grasp_pose_generators[target_id]
+        except KeyError as exc:
+            raise KeyError(
+                f"No grasp-pose generator is installed for endpoint target "
+                f"{target_id!r}; available targets are "
+                f"{sorted(self._grasp_pose_generators)}."
+            ) from exc
+
+    @staticmethod
+    def _snapshot_grasp_pose_generators(
+        values: Mapping[str, GraspPoseGenerator],
+    ) -> dict[str, GraspPoseGenerator]:
+        """Validate an endpoint-to-generator service mapping."""
+        if not isinstance(values, Mapping):
+            raise TypeError("grasp_pose_generators must be a mapping or None.")
+        generators: dict[str, GraspPoseGenerator] = {}
+        for target_id, generator in values.items():
+            if (
+                type(target_id) is not str
+                or not target_id
+                or target_id != target_id.strip()
+            ):
+                raise ValueError(
+                    "grasp_pose_generators keys must be non-empty strings "
+                    "without outer whitespace."
+                )
+            if not isinstance(generator, GraspPoseGenerator):
+                raise TypeError(
+                    "grasp_pose_generators values must be GraspPoseGenerator "
+                    "instances."
+                )
+            generators[target_id] = generator
+        return generators
 
     @property
     def planner_name(self) -> str:
@@ -101,110 +177,291 @@ class ActionPlanningServices:
         planner_name = getattr(planner_cfg, "planner_type", None)
         return "unknown" if planner_name is None else str(planner_name)
 
-    def resolve_binding(
+    def bind_control_parts(
         self,
-        binding: ActionBinding,
-        control_overrides: ActionControlOverrides | None = None,
-    ) -> ResolvedActionBinding:
-        """Resolve binding names against the owned robot's control parts.
+        contract: SkillBindingContract,
+        endpoints: Mapping[str, Mapping[str, str]],
+        *,
+        task_state_keys: Mapping[str, str] | None = None,
+    ) -> ActionBinding:
+        """Build a generic binding from explicit robot control-part names.
 
-        ``ActionBinding`` deliberately carries stable string references only.
-        This method establishes that every reference is a key in
-        ``Robot.control_parts`` and resolves its full-robot joint indices.
+        This is the advanced direct-core construction path. Higher-level
+        binding layers may produce the same :class:`ActionBinding` through
+        their own resource resolution.
 
         Args:
-            binding: Semantic-role mapping to validate and resolve.
-            control_overrides: Optional per-role command replacements for this
-                invocation revision.
+            contract: Typed endpoint contract for the bound skill.
+            endpoints: Nested ``slot_id -> endpoint_id -> control_part`` mapping.
+            task_state_keys: Optional stable task-state key for each resource
+                slot. If omitted, a slot inherits the control part of its
+                ``motion`` endpoint. A slot without ``motion`` can be inferred
+                from its sole control part, or otherwise uses its stable direct
+                binding resource ID.
 
         Returns:
-            Immutable runtime resources for action planning.
-
-        Raises:
-            TypeError: If ``binding`` or ``Robot.control_parts`` is invalid.
-            ValueError: If a referenced control part is unknown or empty.
+            Engine-owned generic endpoint binding.
         """
+        if not isinstance(contract, SkillBindingContract):
+            raise TypeError("contract must be a SkillBindingContract.")
+        if not isinstance(endpoints, Mapping):
+            raise TypeError("endpoints must be a slot-to-endpoint mapping.")
+        expected = {
+            (slot.slot_id, requirement.endpoint_id): requirement
+            for slot in contract.slots
+            for requirement in slot.endpoints
+        }
+        supplied: dict[tuple[str, str], str] = {}
+        for slot_id, slot_endpoints in endpoints.items():
+            if not isinstance(slot_id, str) or not slot_id.strip():
+                raise ValueError("Binding slot IDs must be non-empty strings.")
+            if not isinstance(slot_endpoints, Mapping):
+                raise TypeError(f"Binding slot {slot_id!r} must contain a mapping.")
+            for endpoint_id, control_part in slot_endpoints.items():
+                key = (slot_id, endpoint_id)
+                if key in supplied:
+                    raise ValueError(
+                        f"Binding endpoint {slot_id}.{endpoint_id} repeats."
+                    )
+                if not isinstance(endpoint_id, str) or not endpoint_id.strip():
+                    raise ValueError("Binding endpoint IDs must be non-empty strings.")
+                if not isinstance(control_part, str) or not control_part.strip():
+                    raise ValueError("Control-part names must be non-empty strings.")
+                supplied[key] = control_part
+        if set(supplied) != set(expected):
+            missing = sorted(set(expected) - set(supplied))
+            extra = sorted(set(supplied) - set(expected))
+            raise ValueError(
+                "Direct binding must cover the skill contract exactly: "
+                f"missing={missing}, extra={extra}."
+            )
+        slot_ids = {slot.slot_id for slot in contract.slots}
+        if task_state_keys is not None:
+            if not isinstance(task_state_keys, Mapping):
+                raise TypeError("task_state_keys must be a slot-to-key mapping.")
+            for slot_id, task_state_key in task_state_keys.items():
+                if (
+                    not isinstance(slot_id, str)
+                    or not slot_id
+                    or slot_id != slot_id.strip()
+                ):
+                    raise ValueError(
+                        "task_state_keys slot IDs must be non-empty strings "
+                        "without outer whitespace."
+                    )
+                if not isinstance(task_state_key, str) or not task_state_key.strip():
+                    raise ValueError(
+                        "task_state_keys values must be non-empty strings."
+                    )
+                if task_state_key != task_state_key.strip():
+                    raise ValueError(
+                        "task_state_keys values must not contain outer whitespace."
+                    )
+            supplied_task_slots = set(task_state_keys)
+            if supplied_task_slots != slot_ids:
+                missing = sorted(slot_ids - supplied_task_slots)
+                extra = sorted(supplied_task_slots - slot_ids)
+                raise ValueError(
+                    "task_state_keys must cover the binding slots exactly: "
+                    f"missing={missing}, extra={extra}."
+                )
+        if not expected:
+            binding = ActionBinding(owner_id=self.binding_owner_id)
+            self.validate_binding(binding, contract)
+            return binding
+
+        control_parts = getattr(self.robot, "control_parts", None)
+        if not isinstance(control_parts, Mapping):
+            raise TypeError("Direct control-part binding requires Robot.control_parts.")
+        available = sorted(str(name) for name in control_parts)
+        resolved_task_state_keys: dict[str, str]
+        if task_state_keys is not None:
+            resolved_task_state_keys = dict(task_state_keys)
+        else:
+            resolved_task_state_keys = {}
+            for slot in contract.slots:
+                motion_key = (slot.slot_id, "motion")
+                if motion_key in supplied:
+                    resolved_task_state_keys[slot.slot_id] = supplied[motion_key]
+                    continue
+                slot_control_parts = {
+                    supplied[(slot.slot_id, endpoint.endpoint_id)]
+                    for endpoint in slot.endpoints
+                }
+                if len(slot_control_parts) != 1:
+                    resolved_task_state_keys[slot.slot_id] = f"direct.{slot.slot_id}"
+                    continue
+                resolved_task_state_keys[slot.slot_id] = next(iter(slot_control_parts))
+        resolved: list[EndpointBinding] = []
+        for key, requirement in expected.items():
+            slot_id, endpoint_id = key
+            control_part = supplied[key]
+            if control_part not in control_parts:
+                raise ValueError(
+                    f"Endpoint {slot_id}.{endpoint_id} references control part "
+                    f"{control_part!r}, but Robot.control_parts contains {available}."
+                )
+            joint_ids = tuple(self.robot.get_joint_ids(name=control_part))
+            if not joint_ids:
+                raise ValueError(f"Control part {control_part!r} contains no joints.")
+            profile = self._control_profiles.get(control_part)
+            commands = {} if profile is None else profile.commands
+            for name, command_type in requirement.required_commands.items():
+                command = commands.get(name)
+                if not isinstance(command, command_type):
+                    raise ValueError(
+                        f"Endpoint {slot_id}.{endpoint_id} requires command {name!r} "
+                        f"of type {command_type.__name__}."
+                    )
+            target = JointPositionTarget(control_part, joint_ids)
+            resolved.append(
+                EndpointBinding(
+                    slot_id=slot_id,
+                    endpoint_id=endpoint_id,
+                    resource_id=f"direct.{slot_id}",
+                    adapter_id="control_part",
+                    target=target,
+                    task_state_key=resolved_task_state_keys[slot_id],
+                    tracking_channels={
+                        JOINT_POSITION_CHANNEL: EndpointTrackingChannelBinding(
+                            channel_id=JOINT_POSITION_CHANNEL,
+                            source=TrackingFeedbackSourceRef(
+                                provider_id="planning_context.robot",
+                                revision="1",
+                                address=EndpointTrackingFeedbackAddress(
+                                    target=target,
+                                    channel_id=JOINT_POSITION_CHANNEL,
+                                ),
+                            ),
+                            projector=TrackingProjectorRef(
+                                projector_id="joint_position_payload",
+                                revision="1",
+                            ),
+                        )
+                    },
+                    capabilities=requirement.capabilities,
+                    commands=commands,
+                    claim_tokens=frozenset({f"robot.control_part:{control_part}"}),
+                    joint_ids=joint_ids,
+                )
+            )
+        binding = ActionBinding(
+            owner_id=self.binding_owner_id,
+            endpoints=tuple(resolved),
+        )
+        self.validate_binding(binding, contract)
+        return binding
+
+    def validate_binding(
+        self,
+        binding: ActionBinding,
+        contract: SkillBindingContract,
+    ) -> None:
+        """Validate endpoint coverage, ownership, capabilities, and claims."""
         if not isinstance(binding, ActionBinding):
             raise TypeError("binding must be an ActionBinding.")
-        cache_key = (
-            tuple(sorted(binding.manipulators.items())),
-            tuple(sorted(binding.end_effectors.items())),
-        )
-        resolved = self._binding_cache.get(cache_key)
-        if resolved is None:
-            control_parts = getattr(self.robot, "control_parts", None)
-            if not isinstance(control_parts, Mapping):
-                if binding.manipulators or binding.end_effectors:
-                    raise TypeError(
-                        "ActionBinding resources must come from "
-                        "Robot.control_parts, but the engine robot does not "
-                        "define a control-parts mapping."
+        if binding.owner_id != self.binding_owner_id:
+            raise ValueError("ActionBinding belongs to another engine instance.")
+        expected = {
+            (slot.slot_id, requirement.endpoint_id): requirement
+            for slot in contract.slots
+            for requirement in slot.endpoints
+        }
+        if set(binding.endpoint_keys) != set(expected):
+            missing = sorted(set(expected) - set(binding.endpoint_keys))
+            extra = sorted(set(binding.endpoint_keys) - set(expected))
+            raise ValueError(
+                "ActionBinding must cover the skill contract exactly: "
+                f"missing={missing}, extra={extra}."
+            )
+        for key, requirement in expected.items():
+            endpoint = binding.endpoint(*key)
+            missing_capabilities = requirement.capabilities - endpoint.capabilities
+            if missing_capabilities:
+                raise ValueError(
+                    f"Endpoint {key[0]}.{key[1]} is missing capabilities "
+                    f"{sorted(missing_capabilities)}."
+                )
+            for name, command_type in requirement.required_commands.items():
+                command = endpoint.commands.get(name)
+                if not isinstance(command, command_type):
+                    raise ValueError(
+                        f"Endpoint {key[0]}.{key[1]} requires command {name!r} "
+                        f"of type {command_type.__name__}."
                     )
-                control_parts = {}
+        for slot in contract.slots:
+            for constraint in slot.constraints:
+                if not isinstance(constraint, DisjointSlotEndpoints):
+                    continue
+                selected = [
+                    binding.endpoint(slot.slot_id, endpoint_id)
+                    for endpoint_id in constraint.endpoint_ids
+                ]
+                self._validate_disjoint(selected, label=f"slot {slot.slot_id!r}")
+        for constraint in contract.constraints:
+            if not isinstance(constraint, DisjointResourceSlots):
+                continue
+            for index, left_slot in enumerate(constraint.slots):
+                left = [
+                    endpoint
+                    for endpoint in binding.endpoints
+                    if endpoint.slot_id == left_slot
+                ]
+                for right_slot in constraint.slots[index + 1 :]:
+                    right = [
+                        endpoint
+                        for endpoint in binding.endpoints
+                        if endpoint.slot_id == right_slot
+                    ]
+                    self._validate_disjoint(
+                        left + right,
+                        label=f"slots {left_slot!r} and {right_slot!r}",
+                        only_across=len(left),
+                    )
 
-            resolved = ResolvedActionBinding(
-                manipulators=self._resolve_resource_map(
-                    binding.manipulators,
-                    control_parts=control_parts,
-                    resource_kind="manipulator",
-                ),
-                end_effectors=self._resolve_resource_map(
-                    binding.end_effectors,
-                    control_parts=control_parts,
-                    resource_kind="end effector",
-                ),
-            )
-            self._binding_cache[cache_key] = resolved
-
-        if control_overrides is None:
-            return resolved
-        if not isinstance(control_overrides, ActionControlOverrides):
-            raise TypeError("control_overrides must be an ActionControlOverrides.")
-        if control_overrides.is_empty:
-            return resolved
-        return ResolvedActionBinding(
-            manipulators=self._apply_command_overrides(
-                resolved.manipulators,
-                control_overrides.manipulators,
-                resource_kind="manipulator",
-            ),
-            end_effectors=self._apply_command_overrides(
-                resolved.end_effectors,
-                control_overrides.end_effectors,
-                resource_kind="end effector",
-            ),
-        )
-
-    def _resolve_resource_map(
+    def apply_command_overrides(
         self,
-        resources: Mapping[str, str],
+        binding: ActionBinding,
+        overrides: ActionControlOverrides,
+    ) -> ActionBinding:
+        """Apply endpoint-scoped commands to an owned validated binding."""
+        if not isinstance(overrides, ActionControlOverrides):
+            raise TypeError("overrides must be an ActionControlOverrides.")
+        if overrides.is_empty:
+            return ActionBinding(binding.owner_id, binding.endpoints)
+        return binding.with_command_overrides(overrides.as_flat_mapping())
+
+    @staticmethod
+    def _validate_disjoint(
+        endpoints: list[EndpointBinding],
         *,
-        control_parts: Mapping[str, object],
-        resource_kind: str,
-    ) -> dict[str, ResolvedControlPart]:
-        """Resolve one role map through ``Robot.control_parts``."""
-        available = sorted(str(name) for name in control_parts)
-        resolved: dict[str, ResolvedControlPart] = {}
-        for role, name in resources.items():
-            if name not in control_parts:
-                raise ValueError(
-                    f"ActionBinding {resource_kind} role {role!r} references "
-                    f"control part {name!r}, but Robot.control_parts contains "
-                    f"{available}."
-                )
-            joint_ids = tuple(self.robot.get_joint_ids(name=name))
-            if not joint_ids:
-                raise ValueError(
-                    f"Robot control part {name!r} bound to {resource_kind} role "
-                    f"{role!r} contains no joints."
-                )
-            profile = self._control_profiles.get(name)
-            resolved[role] = ResolvedControlPart(
-                name=name,
-                joint_ids=joint_ids,
-                commands={} if profile is None else profile.commands,
+        label: str,
+        only_across: int | None = None,
+    ) -> None:
+        """Reject overlapping destination, claim-token, or joint ownership."""
+        pairs = (
+            (
+                (left, right)
+                for left in endpoints[:only_across]
+                for right in endpoints[only_across:]
             )
-        return resolved
+            if only_across is not None
+            else (
+                (left, right)
+                for index, left in enumerate(endpoints)
+                for right in endpoints[index + 1 :]
+            )
+        )
+        for left, right in pairs:
+            same_destination = left.destination_key == right.destination_key
+            overlapping_tokens = left.claim_tokens & right.claim_tokens
+            left_joints = set(left.joint_ids)
+            right_joints = set(right.joint_ids)
+            if same_destination or overlapping_tokens or left_joints & right_joints:
+                raise ValueError(
+                    f"ActionBinding violates disjoint constraint for {label}: "
+                    f"{left.key} conflicts with {right.key}."
+                )
 
     def _snapshot_control_profiles(
         self,
@@ -239,25 +496,6 @@ class ActionPlanningServices:
                 )
             snapshots[name] = profile.snapshot()
         return MappingProxyType(snapshots)
-
-    @staticmethod
-    def _apply_command_overrides(
-        resources: Mapping[str, ResolvedControlPart],
-        overrides: Mapping[str, Mapping[str, ControlCommand]],
-        *,
-        resource_kind: str,
-    ) -> dict[str, ResolvedControlPart]:
-        """Apply role-scoped commands to already resolved control parts."""
-        unknown_roles = sorted(set(overrides) - set(resources))
-        if unknown_roles:
-            raise KeyError(
-                f"Command overrides reference unbound {resource_kind} roles "
-                f"{unknown_roles}; bound roles are {sorted(resources)}."
-            )
-        return {
-            role: resource.with_command_overrides(overrides.get(role, {}))
-            for role, resource in resources.items()
-        }
 
 
 __all__ = ["ActionPlanningServices"]

@@ -14,7 +14,14 @@ cuRobo, and constructing this planner requires a CUDA-capable NVIDIA GPU.
 
 cuRobo V2 is installed separately from EmbodiChain because public package
 indexes do not accept Git dependencies in published package metadata. Select
-exactly one CUDA-matched source requirement:
+exactly one source requirement that matches the CUDA runtime used by PyTorch:
+
+~~~bash
+python -c "import torch; print(torch.version.cuda)"
+~~~
+
+Use `cu12` for a `12.x` result and `cu13` for a `13.x` result. Do not select the
+extra from the maximum CUDA version displayed by `nvidia-smi`.
 
 ~~~bash
 # Recommended for the normal EmbodiChain environment, where PyTorch is present.
@@ -31,8 +38,9 @@ pytest --pyargs curobo.tests
 
 These commands follow [NVIDIA's official cuRobo installation
 guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
-and pin the source dependency to the cuRobo V2 `v0.8.0` release. Use a Python
-3.10--3.13 environment on Linux with a supported NVIDIA GPU and driver. The
+and pin the source dependency to the cuRobo V2 `v0.8.0` release. Although
+cuRobo supports Python 3.10--3.13, use EmbodiChain's supported Python 3.10 or
+3.11 environment on Linux with a supported NVIDIA GPU and driver. The
 non-`torch` variants are preferred for EmbodiChain because the simulation
 environment normally already provides PyTorch; the `-torch` variants delegate
 the PyTorch version requirement to cuRobo. Keep cuRobo in the same Python
@@ -44,7 +52,7 @@ The cuRobo robot model and the per-control-part profile are both auto-generated
 internally - no external cuRobo robot YAML (e.g. `franka.yml`) and no
 `robot_profiles` config are needed. On the first plan, the adapter fits collision
 spheres to each link of the robot's URDF and writes a cuRobo V2 robot YAML (see
-[Auto-generated robot YAML](curobo-auto-generated-robot-yaml). The tool frame, TCP
+[Auto-generated robot YAML](#auto-generated-robot-yaml)). The tool frame, TCP
 offset, and base link are read from the control part's IK solver, and the
 simulator->cuRobo joint mapping is identity (the generated YAML reuses the
 URDF's own joint names). The control part is selected at plan time through
@@ -60,7 +68,8 @@ the fingers in the planned control part. A mismatch means cuRobo validates a
 different collision geometry from the one replayed in DexSim.
 
 Assuming the scene has been registered as shown in
-{doc}`../scene_registry`, construct the planner world from that catalog:
+{doc}`../../task_program/scene_registry`, construct the planner world from
+that catalog:
 
 ~~~python
 from embodichain.lab.sim.planners import (
@@ -69,7 +78,7 @@ from embodichain.lab.sim.planners import (
     MotionGenCfg,
     MotionGenerator,
 )
-from embodichain.lab.sim.skills import SceneCollisionWorldMode
+from embodichain.lab.task_program.semantics import SceneCollisionWorldMode
 
 collision_mode = registry.resolve_collision_world_mode(
     batch_size=robot.num_instances,
@@ -194,8 +203,9 @@ in `rigid_objects`. A sequence of objects is retained only as an advanced
 direct-core path; it derives names from each `uid` or an `obstacle_<index>`
 fallback. Do not use that form for a registry-backed world.
 
-The {doc}`../scene_registry` integration performs two higher-level checks before
-execution. First, all registry `STATIC ∪ DYNAMIC` IDs must exactly equal
+The {doc}`../../task_program/scene_registry` integration performs two
+higher-level checks before execution. First, all registry `STATIC ∪ DYNAMIC`
+IDs must exactly equal
 `MotionGenerator.collision_world_entity_ids`. Second, registry, derived scene
 provider, and planner dynamic-ID subsets must exactly agree. The planner must
 also support pose updates and its shared/per-environment batch mode must agree
@@ -333,7 +343,7 @@ assert result.success.all()
 Single-arm MoveEndEffector is supported through the normal
 `strategy="motion_gen"` route. MoveJoints can opt in to collision-aware
 joint-space planning with `strategy="motion_gen"`; the action uses the planner
-already owned by its MotionGenerator. Movement phases of PickUp, Place, Press,
+already owned by its MotionGenerator. Movement phases of PickUp, Place,
 and MoveHeldObject can use the same single-arm static-world route.
 
 This first release intentionally has the following limits:

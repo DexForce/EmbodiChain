@@ -38,10 +38,8 @@ from scipy.spatial.transform import Rotation as SciRotation
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     CoordinatedPlacementOptions,
     CoordinatedPlacementGoal,
     GraspGoal,
@@ -216,7 +214,7 @@ def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
 ) -> Robot:
-    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
@@ -583,8 +581,9 @@ def run_coordinated_placement_demo(
         hold_steps=6,
         retreat_steps=18,
     )
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(bread, pan),
         control_profiles={
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,
@@ -597,7 +596,7 @@ def run_coordinated_placement_demo(
         },
     )
     full_joint_ids = list(range(robot.dof))
-    state = engine.initial_context()
+    state = engine.initial_context(control_dt=sim.sim_config.physics_dt)
 
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the scene, then press Enter to compile both pick-ups..."
@@ -618,32 +617,26 @@ def run_coordinated_placement_demo(
         z_clearance=PAN_GRASP_Z_CLEARANCE,
     )
     pick_invocations = (
-        ActionInvocation(
-            skill_id="pick_up",
-            goal=GraspGoal(
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
                 semantics=bread_semantics,
                 grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=num_envs),
             ),
-            binding=ActionBinding(
-                manipulators={"primary": "left_arm"},
-                end_effectors={"primary": "left_hand"},
-            ),
+            control_parts={"primary": {"motion": "left_arm", "grasp": "left_hand"}},
             motion_policy=MotionPolicy(
                 strategy="motion_gen",
                 sample_count=PICK_SAMPLE_INTERVAL,
             ),
             skill_options=left_pick_options,
         ),
-        ActionInvocation(
-            skill_id="pick_up",
-            goal=GraspGoal(
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
                 semantics=pan_semantics,
                 grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=num_envs),
             ),
-            binding=ActionBinding(
-                manipulators={"primary": "right_arm"},
-                end_effectors={"primary": "right_hand"},
-            ),
+            control_parts={"primary": {"motion": "right_arm", "grasp": "right_hand"}},
             motion_policy=MotionPolicy(
                 strategy="motion_gen",
                 sample_count=PAN_PICK_SAMPLE_INTERVAL,
@@ -666,8 +659,12 @@ def run_coordinated_placement_demo(
     if not pick_compiled.plan_success.all():
         logger.log_warning("Failed to plan right pan pick-up trajectory.")
         return
-    left_pick_traj = left_pick_result.trajectory.positions
-    right_pick_traj = right_pick_result.trajectory.positions
+    left_pick_trajectory = left_pick_result.joint_trajectory
+    right_pick_trajectory = right_pick_result.joint_trajectory
+    if left_pick_trajectory is None or right_pick_trajectory is None:
+        raise RuntimeError("PickUp did not produce joint trajectories.")
+    left_pick_traj = left_pick_trajectory.positions
+    right_pick_traj = right_pick_trajectory.positions
     state = pick_compiled.projected_context
     bread_held_state = state.get_held_object("left_arm")
     if bread_held_state is None:
@@ -693,7 +690,7 @@ def run_coordinated_placement_demo(
         replay_trajectory(
             sim,
             robot,
-            left_pick_result.trajectory,
+            left_pick_trajectory,
             args,
             video_prefix="",
             hold_steps=0,
@@ -706,7 +703,7 @@ def run_coordinated_placement_demo(
         replay_trajectory(
             sim,
             robot,
-            right_pick_result.trajectory,
+            right_pick_trajectory,
             args,
             video_prefix="",
             hold_steps=0,
@@ -789,19 +786,13 @@ def run_coordinated_placement_demo(
     start_time = time.time()
     placement_compiled = engine.compile(
         (
-            ActionInvocation(
-                skill_id="coordinated_placement",
-                goal=coordinated_target,
-                binding=ActionBinding(
-                    manipulators={
-                        "placing": "left_arm",
-                        "support": "right_arm",
-                    },
-                    end_effectors={
-                        "placing": "left_hand",
-                        "support": "right_hand",
-                    },
-                ),
+            engine.make_invocation(
+                "coordinated_placement",
+                coordinated_target,
+                control_parts={
+                    "placing": {"motion": "left_arm", "grasp": "left_hand"},
+                    "support": {"motion": "right_arm", "grasp": "right_hand"},
+                },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=COORDINATED_SAMPLE_INTERVAL,

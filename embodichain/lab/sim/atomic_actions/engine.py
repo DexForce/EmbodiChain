@@ -23,22 +23,21 @@ from typing import Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
+from .bindings import ActionBinding
 from .core import AtomicAction, SkillDescriptor
-from .control import ControlPartCommandProfile
-from .invocation import ActionInvocation, ResolvedActionRequest
+from .control import ActionControlOverrides, ControlPartCommandProfile
+from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
+from .scene import SceneProvider
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
+from .tracking import TrackingPolicy, TrackingRuntime
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
-    from embodichain.lab.sim.skills import (
-        BoundRobotSkillProfile,
-        ResourceEndpoint,
-        ResourceEndpointAdapter,
-        RobotSkillProfile,
-    )
+    from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession
 
@@ -50,53 +49,42 @@ class AtomicActionEngine:
         self,
         motion_generator: MotionGenerator,
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         *,
         load_builtins: bool = True,
-        skill_profile: RobotSkillProfile | None = None,
-        endpoint_adapters: (
-            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
-        ) = None,
+        tracking_runtime: TrackingRuntime | None = None,
+        scene_provider: SceneProvider | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
         Args:
             motion_generator: Engine-owned motion-generation backend.
             control_profiles: Semantic commands keyed by robot control-part name.
+            grasp_pose_generators: Standalone grasp-pose services keyed by the
+                runtime target ID of each grasp endpoint, normally its robot
+                control-part name.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
-            skill_profile: Optional authoritative robot skill profile. Its
-                command profiles are installed automatically and validated
-                after built-in actions are loaded. ``control_profiles`` and
-                ``skill_profile`` are mutually exclusive.
-            endpoint_adapters: Optional exact-type endpoint adapters used when
-                binding ``skill_profile``. Invalid without a profile.
+            tracking_runtime: Optional exact-version feedback, projector, and
+                metric registries. Built-in joint tracking is installed when
+                omitted.
+            scene_provider: Optional default scene-observation source used by
+                :meth:`initial_context` when the caller does not supply an
+                explicit scene snapshot. The provider is borrowed by reference.
         """
-        if endpoint_adapters is not None and skill_profile is None:
-            raise ValueError("endpoint_adapters requires skill_profile.")
-        if skill_profile is not None:
-            from embodichain.lab.sim.skills import RobotSkillProfile
-
-            if not isinstance(skill_profile, RobotSkillProfile):
-                raise TypeError("skill_profile must be a RobotSkillProfile or None.")
-            if control_profiles is not None:
-                raise ValueError(
-                    "control_profiles and skill_profile are mutually exclusive; "
-                    "the profile is the authoritative semantic-command source."
-                )
-            control_profiles = skill_profile.action_control_profiles()
+        if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
+            raise TypeError("scene_provider must implement SceneProvider.")
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
+            tracking_runtime=tracking_runtime,
+            grasp_pose_generators=grasp_pose_generators,
         )
+        self._scene_provider = scene_provider
         self._actions: dict[str, AtomicAction] = {}
-        self._skill_profile: BoundRobotSkillProfile | None = None
+        self._skill_catalog_revision = 0
         if load_builtins:
             self._load_builtin_actions()
-        if skill_profile is not None:
-            self._skill_profile = skill_profile.bind(
-                self,
-                endpoint_adapters=endpoint_adapters,
-            )
 
     @property
     def motion_generator(self) -> MotionGenerator:
@@ -119,9 +107,24 @@ class AtomicActionEngine:
         return self._planning_services
 
     @property
+    def tracking_runtime(self) -> TrackingRuntime:
+        """Typed endpoint-feedback runtime used by plans and sessions."""
+        return self._planning_services.tracking_runtime
+
+    @property
+    def binding_owner_id(self) -> str:
+        """Return the opaque owner identity required by action bindings."""
+        return self._planning_services.binding_owner_id
+
+    @property
     def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
         """Semantic command profiles registered for robot control parts."""
         return self._planning_services.control_profiles
+
+    @property
+    def grasp_pose_generators(self) -> Mapping[str, GraspPoseGenerator]:
+        """Standalone grasp-pose services installed for endpoint targets."""
+        return self._planning_services.grasp_pose_generators
 
     @property
     def actions(self) -> dict[str, AtomicAction]:
@@ -148,41 +151,117 @@ class AtomicActionEngine:
         )
 
     @property
-    def skill_profile(self) -> BoundRobotSkillProfile | None:
-        """Return the currently bound semantic robot profile, when configured."""
-        return self._skill_profile
+    def skill_catalog_revision(self) -> int:
+        """Return the monotonic installed Atomic Skill catalog revision.
 
-    def bind_skill_profile(
+        Installing or replacing an agent-visible implementation advances the
+        revision even when its public descriptor is equal. External binding and
+        compilation layers can therefore reject stale implementation snapshots.
+        """
+        return self._skill_catalog_revision
+
+    def bind_control_parts(
         self,
-        profile: RobotSkillProfile,
+        skill_id: str,
+        endpoints: Mapping[str, Mapping[str, str]],
         *,
-        endpoint_adapters: (
-            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
-        ) = None,
-    ) -> BoundRobotSkillProfile:
-        """Validate and bind a profile after custom action installation.
-
-        The engine's immutable control-part profiles must already contain the
-        profile commands lowered into the current action core. Generic
-        non-core endpoint commands remain on resolved endpoints. Prefer the
-        constructor's ``skill_profile`` argument when no custom actions need
-        to be installed first.
+        task_state_keys: Mapping[str, str] | None = None,
+    ) -> ActionBinding:
+        """Build an advanced direct-core binding from control-part names.
 
         Args:
-            profile: Authoritative robot resource and policy profile.
-            endpoint_adapters: Optional exact-type endpoint adapters used for
-                custom controller declarations.
+            skill_id: Installed skill ID.
+            endpoints: Nested ``slot_id -> endpoint_id -> control_part`` mapping.
+            task_state_keys: Optional explicit stable task-state key for each
+                resource slot. See :meth:`ActionPlanningServices.bind_control_parts`
+                for inference rules when omitted.
 
         Returns:
-            Validated profile bound to this engine and its installed actions.
+            Engine-owned generic endpoint binding.
         """
-        from embodichain.lab.sim.skills import RobotSkillProfile
+        if type(skill_id) is not str:
+            raise TypeError("skill_id must be a string.")
+        action = self._actions.get(skill_id)
+        if action is None:
+            raise KeyError(f"No atomic action registered for skill {skill_id!r}.")
+        contract = type(action).__dict__.get("binding_contract")
+        if contract is None:
+            raise ValueError(
+                f"Skill {action.skill_id!r} has no explicit SkillBindingContract."
+            )
+        return self._planning_services.bind_control_parts(
+            contract,
+            endpoints,
+            task_state_keys=task_state_keys,
+        )
 
-        if not isinstance(profile, RobotSkillProfile):
-            raise TypeError("profile must be a RobotSkillProfile.")
-        bound = profile.bind(self, endpoint_adapters=endpoint_adapters)
-        self._skill_profile = bound
-        return bound
+    def make_invocation(
+        self,
+        skill_id: str,
+        goal: GoalT,
+        *,
+        control_parts: Mapping[str, Mapping[str, str]] | None = None,
+        motion_policy: MotionPolicy | None = None,
+        tracking_policy: TrackingPolicy | None = None,
+        recovery_policy: RecoveryPolicy | None = None,
+        skill_options: OptionsT | None = None,
+        control_overrides: ActionControlOverrides | None = None,
+        invocation_id: str | None = None,
+        revision: int = 0,
+    ) -> ActionInvocation[GoalT, OptionsT]:
+        """Construct a grounded invocation while naming the skill only once.
+
+        ``control_parts`` uses the advanced direct-core binding path. Profile-
+        based integrations resolve an :class:`ActionBinding` in the semantic
+        layer and construct :class:`ActionInvocation` directly.
+
+        Args:
+            skill_id: Stable identifier of an installed atomic skill.
+            goal: Action-specific typed goal.
+            control_parts: Direct ``slot -> endpoint -> control_part`` mapping.
+            motion_policy: Optional invocation motion policy.
+            tracking_policy: Optional typed tracking and terminal-acceptance policy.
+            recovery_policy: Optional invocation recovery policy.
+            skill_options: Optional action-specific invocation options.
+            control_overrides: Optional endpoint-scoped command overrides.
+            invocation_id: Optional correlation identifier.
+            revision: Monotonic invocation revision.
+
+        Returns:
+            A standard :class:`ActionInvocation` accepted by ``plan``,
+            ``compile``, and ``start``.
+
+        Raises:
+            ValueError: If ``control_parts`` is omitted.
+            KeyError: If the skill or control part is unknown.
+            TypeError: If an invocation field or binding input has an invalid type.
+        """
+        if control_parts is None:
+            raise ValueError("control_parts is required for direct-core invocation.")
+        binding = self.bind_control_parts(skill_id, control_parts)
+
+        return ActionInvocation(
+            skill_id=skill_id,
+            goal=goal,
+            binding=binding,
+            motion_policy=MotionPolicy() if motion_policy is None else motion_policy,
+            tracking_policy=(
+                TrackingPolicy.joint_position()
+                if tracking_policy is None
+                else tracking_policy
+            ),
+            recovery_policy=(
+                RecoveryPolicy() if recovery_policy is None else recovery_policy
+            ),
+            skill_options=skill_options,
+            control_overrides=(
+                ActionControlOverrides()
+                if control_overrides is None
+                else control_overrides
+            ),
+            invocation_id=invocation_id,
+            revision=revision,
+        )
 
     def register(self, action: AtomicAction, *, replace: bool = False) -> None:
         """Register one action instance using its descriptor.
@@ -208,7 +287,13 @@ class AtomicActionEngine:
             )
         action._bind(self._planning_services)
         self._actions[descriptor.skill_id] = action
-        self._skill_profile = None
+        existing_descriptor = None if existing is None else existing.descriptor()
+        if (descriptor.agent_visible and descriptor.binding_contract is not None) or (
+            existing_descriptor is not None
+            and existing_descriptor.agent_visible
+            and existing_descriptor.binding_contract is not None
+        ):
+            self._skill_catalog_revision += 1
 
     def _load_builtin_actions(self) -> None:
         """Create and bind fresh built-in action instances for this engine."""
@@ -218,6 +303,21 @@ class AtomicActionEngine:
 
         for action_type in BUILTIN_ACTION_TYPES:
             self.register(action_type())
+
+    def resolve(
+        self,
+        invocation: ActionInvocation,
+    ) -> ResolvedActionRequest:
+        """Resolve a registered invocation into an engine-owned snapshot."""
+        return self._resolve(invocation)
+
+    def plan_request(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext | None = None,
+    ) -> ActionPlan:
+        """Plan an already-resolved request without rebuilding its snapshot."""
+        return self._plan_request(request, context)
 
     def _resolve(
         self,
@@ -303,13 +403,17 @@ class AtomicActionEngine:
         task: TaskState | None = None,
         scene: SceneSnapshot | None = None,
         timestamp: float = 0.0,
+        control_dt: float | None = None,
     ) -> PlanningContext:
         """Capture the robot state needed to start offline compilation.
 
         Args:
             task: Optional symbolic task state; an empty state is used otherwise.
-            scene: Optional scene snapshot; an empty snapshot is used otherwise.
+            scene: Optional explicit scene snapshot. It overrides the engine's
+                configured scene provider; an empty snapshot is used when both
+                are absent.
             timestamp: Timestamp assigned to the captured robot observation.
+            control_dt: Explicit command period for action-owned interpolation.
 
         Returns:
             Planning context containing owned robot tensors.
@@ -323,15 +427,25 @@ class AtomicActionEngine:
                 qvel_value = candidate.to(self.device)
         qvel = torch.zeros_like(qpos) if qvel_value is None else qvel_value
         batch_size = int(qpos.shape[0])
+        env_ids = torch.arange(batch_size, dtype=torch.long, device=self.device)
         if task is None:
             task = TaskState.empty(batch_size=batch_size, device=self.device)
         if scene is None:
-            scene = SceneSnapshot.empty()
+            if self._scene_provider is None:
+                scene = SceneSnapshot.empty()
+            else:
+                scene = self._scene_provider.snapshot(
+                    timestamp=timestamp,
+                    env_ids=env_ids.clone(),
+                )
+                if not isinstance(scene, SceneSnapshot):
+                    raise TypeError("scene_provider must return a SceneSnapshot.")
         return PlanningContext(
             robot=RobotObservation(timestamp=timestamp, qpos=qpos, qvel=qvel),
             task=task,
             scene=scene,
-            env_ids=torch.arange(batch_size, dtype=torch.long, device=self.device),
+            env_ids=env_ids,
+            control_dt=control_dt,
         )
 
     def compile(
@@ -372,6 +486,11 @@ class AtomicActionEngine:
             previous_qpos = projected.robot.qpos
             plan = self.plan(invocation, projected)
             step_success = alive & plan.plan_success.to(self.device)
+            if plan.joint_trajectory is None:
+                raise ValueError(
+                    f"Skill {plan.skill_id!r} emits non-joint runtime commands and "
+                    "cannot be used with offline joint-trajectory compilation."
+                )
             preserve_failed_positions = (
                 getattr(
                     self.motion_generator.planner,
@@ -381,9 +500,9 @@ class AtomicActionEngine:
                 is True
             )
             trajectory = (
-                plan.trajectory
+                plan.joint_trajectory
                 if preserve_failed_positions
-                else plan.trajectory.hold_rows(step_success, previous_qpos)
+                else plan.joint_trajectory.hold_rows(step_success, previous_qpos)
             )
             plans.append(plan)
             trajectories.append(trajectory)
@@ -412,13 +531,18 @@ class AtomicActionEngine:
         self,
         invocations: Iterable[ActionInvocation],
         context: PlanningContext | None = None,
+        *,
+        eligible_mask: torch.Tensor | None = None,
     ) -> ExecutionSession:
-        """Start closed-loop execution for a grounded invocation sequence.
+        """Start incremental execution for a grounded invocation sequence.
 
         Args:
             invocations: Grounded action requests in execution order.
             context: Initial measured state and scene snapshot. The engine
                 captures one when omitted.
+            eligible_mask: Optional per-environment cohort allowed to execute.
+                Ineligible rows remain excluded for the whole session. All rows
+                are eligible when omitted.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -426,7 +550,12 @@ class AtomicActionEngine:
         from .execution import ExecutionSession
 
         initial = self.initial_context() if context is None else context
-        return ExecutionSession(self, tuple(invocations), initial)
+        return ExecutionSession(
+            self,
+            tuple(invocations),
+            initial,
+            eligible_mask=eligible_mask,
+        )
 
     def _validate_context(self, context: PlanningContext) -> None:
         """Validate an externally supplied planning context."""
@@ -464,15 +593,28 @@ class AtomicActionEngine:
             raise ValueError(
                 "ActionPlan.invocation_revision must preserve the request revision."
             )
-        trajectory = plan.trajectory
-        if trajectory.batch_size != context.batch_size:
+        if plan.tracking_policy != request.tracking_policy:
+            raise ValueError(
+                "ActionPlan.tracking_policy must preserve the resolved request "
+                "tracking policy."
+            )
+        commands = plan.commands
+        if commands.batch_size != context.batch_size:
             raise ValueError("Action plan batch size does not match the context.")
-        if trajectory.robot_dof != self.robot.dof:
-            raise ValueError("Action plan robot_dof does not match the engine robot.")
-        if trajectory.positions.device != self.device:
+        if commands.device != self.device:
             raise ValueError("Action plan and engine must share a device.")
-        if not torch.equal(trajectory.env_ids, context.env_ids):
+        if not torch.equal(commands.env_ids, context.env_ids):
             raise ValueError("Action plan and context must share ordered env_ids.")
+        if plan.joint_trajectory is not None:
+            if plan.joint_trajectory.robot_dof != self.robot.dof:
+                raise ValueError(
+                    "Action plan joint_trajectory robot_dof does not match the "
+                    "engine robot."
+                )
+            if plan.joint_trajectory.positions.device != self.device:
+                raise ValueError(
+                    "Action plan joint_trajectory and engine must share a device."
+                )
         if plan.planned_scene_version != context.scene.version:
             raise ValueError("Action plan must record the planning scene version.")
         collision_revision = context.scene.collision_world_revisions(context.batch_size)

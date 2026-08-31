@@ -57,6 +57,7 @@ nmg = [
 ]
 gensim = [
   "bpy",
+  "gradio>=6.17.3,<6.18",
   "pyrender==0.1.45",
   "requests",
   "Pillow",
@@ -69,9 +70,9 @@ gensim = [
 # ``embodichain run-env`` discovers all installed task packages (via the
 # ``embodichain.tasks`` entry points) and runs their init hooks (via
 # ``embodichain.init``) before building and launching the environment.
-# Other commands cover data assets, SimReady generation, asset and LeRobot
-# dataset preview, grasp annotation, RL training, URDF convex decomposition,
-# benchmarks, and workspace cache management.
+# Other commands cover environment discovery, data assets, SimReady generation,
+# asset and LeRobot dataset preview, grasp annotation, RL training, URDF convex
+# decomposition, benchmarks, and workspace cache management.
 embodichain = "embodichain.__main__:main"
 
 [project.entry-points."embodichain.tasks"]
@@ -100,6 +101,7 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "requires_sim: marks tests that require a real simulation backend",
+    "subprocess_sim: marks tests whose simulation is isolated to a child process",
     "no_sim: marks mock-only tests that must not initialize a simulation backend",
     "requires_tasks: marks tests that require installed task-package discovery",
     "gpu: marks tests that execute CUDA/GPU code (run serially)",

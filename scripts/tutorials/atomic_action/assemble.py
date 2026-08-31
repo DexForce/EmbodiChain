@@ -38,16 +38,15 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AssembleAffordance,
     AssembleGoal,
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     GraspGoal,
     PickUpOptions,
     PlaceOptions,
     MotionPolicy,
+    SceneEntityPose,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.data import get_data_path
@@ -65,6 +64,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -142,7 +142,7 @@ def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
 ) -> Robot:
-    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
@@ -256,8 +256,6 @@ def run_assemble_demo(
     can_semantics = create_antipodal_semantics(
         can,
         label="soda_can",
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
     )
     motion_gen = create_curobo_motion_generator(robot)
     left_open, left_close = get_hand_open_close_qpos(
@@ -295,12 +293,19 @@ def run_assemble_demo(
         lift_height=PLACE_LIFT_HEIGHT,
         hand_interp_steps=PLACE_HAND_INTERP_STEPS,
     )
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(can, cube),
         control_profiles={
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,
                 grasp=left_close,
+            )
+        },
+        grasp_pose_generators={
+            "left_hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
             )
         },
     )
@@ -312,39 +317,36 @@ def run_assemble_demo(
         sim.update(step=10)
 
     assemble_affordance = AssembleAffordance(
-        base_object_label="cube",
-        base_object_entity=cube,
-        assemble_object_label="soda_can",
-        assemble_object_entity=can,
         assemble_to_base_pose=assemble_to_base,
     )
-    binding = ActionBinding(
-        manipulators={"primary": "left_arm"},
-        end_effectors={"primary": "left_hand"},
-    )
+    endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_hand"}}
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(can_semantics),
-                binding,
-                MotionPolicy(
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICKUP_SAMPLE_INTERVAL,
                 ),
                 skill_options=pick_up_options,
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "place",
-                AssembleGoal(affordance=assemble_affordance),
-                binding,
-                MotionPolicy(
+                AssembleGoal(
+                    affordance=assemble_affordance,
+                    base_pose=SceneEntityPose(cube.uid),
+                ),
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PLACE_SAMPLE_INTERVAL,
                 ),
                 skill_options=place_options,
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions

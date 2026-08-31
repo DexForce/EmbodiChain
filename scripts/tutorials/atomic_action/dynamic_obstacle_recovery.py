@@ -32,13 +32,13 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, VisualMaterialCfg
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
+    JointPositionPayload,
+    JointPositionTarget,
     MotionPolicy,
     RecoveryPolicy,
     RigidObjectSceneProvider,
@@ -46,6 +46,8 @@ from embodichain.lab.sim.atomic_actions import (
     RunnerStep,
     SimulationExecutionAdapter,
     TaskState,
+    TimedCommandSequence,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
@@ -75,10 +77,11 @@ OBSTACLE_UID = "dynamic_obstacle"
 CONTROL_PART = "arm"
 SAMPLE_COUNT = 80
 COMMAND_CYCLE_TIME = 0.1
+COLLISION_SPHERE_FIT_TYPE = "morphit"
 COLLISION_SPHERE_FIT_DENSITY = 0.3
-ROBOT_COLLISION_BUFFER = 0.005
+ROBOT_COLLISION_BUFFER = 0.0
 MOVE_AFTER_COMMAND = 12
-OBSTACLE_SIZE = (0.10, 0.10, 0.12)
+OBSTACLE_SIZE = (0.08, 0.08, 0.10)
 OBSTACLE_START_POSITION = (0.59, -0.20, 0.455)
 BLOCKING_PATH_FRACTION = 0.50
 OBSTACLE_MOVE_DURATION = 0.6
@@ -86,6 +89,7 @@ AUTO_PLAY_LEAD_IN_DURATION = 0.75
 POST_EXECUTION_HOLD_DURATION = 1.0
 TRACKING_ERROR_THRESHOLD = 0.1
 MINIMUM_REPLAN_DETOUR = 0.04
+MAXIMUM_BLOCKED_PATH_CLEARANCE = 0.0
 MINIMUM_REPLAN_CLEARANCE = 0.01
 MAXIMUM_FINAL_EEF_ERROR = 0.04
 TRAJECTORY_MARKER_STRIDE = 8
@@ -293,21 +297,35 @@ def _minimum_cuboid_clearance(
     return (outside_distance + inside_distance).amin(dim=1)
 
 
-def _trajectory_eef_positions(
+def _command_eef_positions(
     robot: Robot,
-    trajectory_positions: torch.Tensor,
+    commands: TimedCommandSequence,
     *,
     control_part: str,
 ) -> torch.Tensor:
-    """Convert a full-robot joint trajectory to batched EEF positions."""
-    if trajectory_positions.dim() != 3:
-        raise ValueError("trajectory_positions must have shape (B, N, robot_dof).")
-    joint_ids = robot.get_joint_ids(name=control_part)
-    arm_trajectory = trajectory_positions[:, :, joint_ids]
+    """Convert one endpoint command sequence to batched EEF positions."""
+    if not commands.frames:
+        raise ValueError("commands must contain at least one frame.")
     positions = []
-    for waypoint_index in range(arm_trajectory.shape[1]):
+    for frame in commands.frames:
+        matching_commands = tuple(
+            command
+            for command in frame.commands
+            if isinstance(command.target, JointPositionTarget)
+            and command.target.control_part == control_part
+        )
+        if len(matching_commands) != 1:
+            raise ValueError(
+                f"Expected one joint command for control part {control_part!r}, "
+                f"got {len(matching_commands)}."
+            )
+        payload = matching_commands[0].payload
+        if not isinstance(payload, JointPositionPayload):
+            raise TypeError(
+                f"Control part {control_part!r} did not receive joint positions."
+            )
         pose = robot.compute_fk(
-            qpos=arm_trajectory[:, waypoint_index],
+            qpos=payload.positions,
             name=control_part,
             to_matrix=True,
         )
@@ -414,10 +432,10 @@ def main() -> None:
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=robot.uid,
                 # The coarse default voxel fit under-covers the hand and
-                # fingertips. A denser fit plus modest padding matches the
-                # physical gripper without making the arm path infeasible.
+                # fingertips. Keep the denser morphit fit, but no extra radius
+                # padding: 5 mm makes this tutorial's initial pose infeasible.
                 auto_gen=CuroboAutoGenCfg(
-                    fit_type="morphit",
+                    fit_type=COLLISION_SPHERE_FIT_TYPE,
                     sphere_density=COLLISION_SPHERE_FIT_DENSITY,
                     collision_sphere_buffer=ROBOT_COLLISION_BUFFER,
                 ),
@@ -437,6 +455,7 @@ def main() -> None:
     adapter = SimulationExecutionAdapter(
         sim,
         robot,
+        control_dt=COMMAND_CYCLE_TIME,
         scene_provider=scene_provider,
     )
 
@@ -452,27 +471,29 @@ def main() -> None:
         device=target_pose.device,
     )
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    invocation = ActionInvocation(
-        skill_id="move_end_effector",
-        goal=EndEffectorPoseGoal(target_pose),
-        binding=ActionBinding(manipulators={"primary": CONTROL_PART}),
+    invocation = engine.make_invocation(
+        "move_end_effector",
+        EndEffectorPoseGoal(target_pose),
+        control_parts={"primary": {"motion": CONTROL_PART}},
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=SAMPLE_COUNT,
-            control_dt=COMMAND_CYCLE_TIME,
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
-            tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
             action_timeout=30.0,
+        ),
+        tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+            terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
         ),
         invocation_id="dynamic-obstacle-demo",
     )
     task_state = TaskState.empty(robot.get_qpos().shape[0], robot.device)
     session = engine.start((invocation,), adapter.observe(task_state))
-    initial_eef_path = _trajectory_eef_positions(
+    initial_eef_path = _command_eef_positions(
         robot,
-        session.active_trajectory.positions,
+        session.active_commands,
         control_part=CONTROL_PART,
     )
     blocking_obstacle_pose, blocking_waypoint_index = _blocking_obstacle_pose(
@@ -480,10 +501,22 @@ def main() -> None:
         initial_eef_path,
         path_fraction=BLOCKING_PATH_FRACTION,
     )
+    blocked_path_clearance = _minimum_cuboid_clearance(
+        initial_eef_path,
+        blocking_obstacle_pose,
+        size=OBSTACLE_SIZE,
+    )
+    if (blocked_path_clearance > MAXIMUM_BLOCKED_PATH_CLEARANCE).any().item():
+        raise RuntimeError(
+            "Moved obstacle does not intersect the initial TCP path: "
+            f"clearance={blocked_path_clearance.detach().cpu().tolist()} m."
+        )
     logger.log_info(
         "Initial path prepared: obstacle will move onto waypoint "
         f"{blocking_waypoint_index}/{initial_eef_path.shape[1] - 1} at XYZ="
-        f"{blocking_obstacle_pose[:, :3, 3].detach().cpu().tolist()}."
+        f"{blocking_obstacle_pose[:, :3, 3].detach().cpu().tolist()}; "
+        "initial TCP-to-cube clearance="
+        f"{blocked_path_clearance.detach().cpu().tolist()} m."
     )
     runner = ExecutionRunner(
         session,
@@ -491,7 +524,7 @@ def main() -> None:
         adapter,
         clock=adapter,
         # cuRobo can supply a trajectory duration, which takes precedence over
-        # MotionPolicy.control_dt. Keep a runner-side floor so the simulated
+        # engine fallback timing. Keep a runner-side floor so the simulated
         # controller receives enough feedback cycles to follow every waypoint.
         cfg=ExecutionRunnerCfg(minimum_cycle_time=COMMAND_CYCLE_TIME),
     )
@@ -566,10 +599,16 @@ def main() -> None:
         for event in step.tick.events:
             observed_events.add(event.kind)
             if event.kind in {
+                ExecutionEventKind.ACTION_PLANNING_FAILED,
+                ExecutionEventKind.ACTION_RETRY,
+                ExecutionEventKind.ACTION_TIMEOUT,
                 ExecutionEventKind.COLLISION_WORLD_CHANGED,
+                ExecutionEventKind.DYNAMIC_GOAL_CHANGED,
                 ExecutionEventKind.REPLANNED,
-                ExecutionEventKind.TRACKING_ERROR,
+                ExecutionEventKind.TRACKING_DIVERGED,
+                ExecutionEventKind.TRACKING_FEEDBACK_FAILED,
                 ExecutionEventKind.RECOVERY_EXHAUSTED,
+                ExecutionEventKind.SESSION_FAILED,
             }:
                 rows = event.env_mask.nonzero(as_tuple=False).flatten().tolist()
                 logger.log_info(
@@ -578,12 +617,13 @@ def main() -> None:
                 )
             if (
                 event.kind is ExecutionEventKind.REPLANNED
+                and event.env_mask.any().item()
                 and replanned_eef_path is None
                 and ExecutionEventKind.COLLISION_WORLD_CHANGED in observed_events
             ):
-                replanned_eef_path = _trajectory_eef_positions(
+                replanned_eef_path = _command_eef_positions(
                     robot,
-                    session.active_trajectory.positions,
+                    session.active_commands,
                     control_part=CONTROL_PART,
                 )
                 replan_detour = _maximum_path_deviation(

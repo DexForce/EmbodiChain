@@ -25,34 +25,48 @@ import torch
 
 from embodichain.utils import logger
 
-from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
-from ..core import AtomicAction
-from ..effects import StateDelta
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
-from ..requirements import (
-    ActionBindingRoute,
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
+from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
-    DisjointSlotEndpoints,
-    GRASP_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
-from ..state import HeldObjectState, PlanningContext
-from ..trajectory_ops import (
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     interpolate_hand_qpos,
     translate_pose_world,
 )
-from ._helpers import (
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     plan_named_arm_trajectory,
+    require_shared_task_state_key,
     repeat_qpos,
     resolve_batched_pose,
     resolve_object_target,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
 )
 
 
@@ -125,10 +139,12 @@ class CoordinatedPlacementOptions(ActionOptions):
 class _CoordinatedPlacementResources:
     """Invocation-bound control parts and compatible hand commands."""
 
-    placing_arm: ResolvedControlPart
-    support_arm: ResolvedControlPart
-    placing_hand: ResolvedControlPart
-    support_hand: ResolvedControlPart
+    placing_task_state_key: str
+    support_task_state_key: str
+    placing_arm: JointPositionTarget
+    support_arm: JointPositionTarget
+    placing_hand: JointPositionTarget
+    support_hand: JointPositionTarget
     placing_hand_open_qpos: torch.Tensor
     placing_hand_close_qpos: torch.Tensor
     support_hand_close_qpos: torch.Tensor
@@ -142,46 +158,20 @@ class CoordinatedPlacement(
     skill_id: ClassVar[str] = "coordinated_placement"
     GoalType: ClassVar[type] = CoordinatedPlacementGoal
     OptionsType: ClassVar[type] = CoordinatedPlacementOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="placing",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "placing"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                        route=ActionBindingRoute("end_effector", "placing"),
-                    ),
-                ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            make_manipulation_slot(
+                "placing",
+                motion_capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
-            SkillResourceSlot(
-                slot_id="support",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "support"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={GRASP_COMMAND: JointPositionCommand},
-                        route=ActionBindingRoute("end_effector", "support"),
-                    ),
-                ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            make_manipulation_slot(
+                "support",
+                motion_capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                grasp_commands={GRASP_COMMAND: JointPositionCommand},
             ),
         ),
         constraints=(DisjointResourceSlots(("placing", "support")),),
@@ -196,38 +186,59 @@ class CoordinatedPlacement(
     ) -> _CoordinatedPlacementResources:
         """Resolve placing/support roles from robot control parts."""
         binding = request.binding
-        placing_arm = binding.manipulator("placing")
-        support_arm = binding.manipulator("support")
-        placing_hand = binding.end_effector("placing")
-        support_hand = binding.end_effector("support")
-        if placing_arm.name == support_arm.name:
+        placing_motion = binding.endpoint("placing", "motion")
+        support_motion = binding.endpoint("support", "motion")
+        placing_grasp = binding.endpoint("placing", "grasp")
+        support_grasp = binding.endpoint("support", "grasp")
+        placing_arm = placing_motion.require_target(JointPositionTarget)
+        support_arm = support_motion.require_target(JointPositionTarget)
+        placing_hand = placing_grasp.require_target(JointPositionTarget)
+        support_hand = support_grasp.require_target(JointPositionTarget)
+        placing_task_state_key = require_shared_task_state_key(
+            placing_motion,
+            placing_grasp,
+            participant="CoordinatedPlacement placing participant",
+        )
+        support_task_state_key = require_shared_task_state_key(
+            support_motion,
+            support_grasp,
+            participant="CoordinatedPlacement support participant",
+        )
+        if placing_task_state_key == support_task_state_key:
+            raise ValueError(
+                "CoordinatedPlacement placing and support participants must "
+                "use different task_state_key values."
+            )
+        if placing_arm.control_part == support_arm.control_part:
             raise ValueError(
                 "CoordinatedPlacement placing and support roles must use "
                 "different manipulator control parts."
             )
-        if placing_hand.name == support_hand.name:
+        if placing_hand.control_part == support_hand.control_part:
             raise ValueError(
                 "CoordinatedPlacement placing and support roles must use "
                 "different end-effector control parts."
             )
         return _CoordinatedPlacementResources(
+            placing_task_state_key=placing_task_state_key,
+            support_task_state_key=support_task_state_key,
             placing_arm=placing_arm,
             support_arm=support_arm,
             placing_hand=placing_hand,
             support_hand=support_hand,
-            placing_hand_open_qpos=placing_hand.joint_positions(
+            placing_hand_open_qpos=placing_grasp.joint_positions(
                 OPEN_COMMAND,
                 num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            placing_hand_close_qpos=placing_hand.joint_positions(
+            placing_hand_close_qpos=placing_grasp.joint_positions(
                 GRASP_COMMAND,
                 num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            support_hand_close_qpos=support_hand.joint_positions(
+            support_hand_close_qpos=support_grasp.joint_positions(
                 GRASP_COMMAND,
                 num_envs=self.num_envs,
                 device=self.device,
@@ -262,8 +273,8 @@ class CoordinatedPlacement(
             support_held_object,
         ) = self._resolve_target(target, state, resources, options)
         eligible = context.task.exclusive_held_object_mask(
-            resources.placing_arm.name
-        ) & context.task.exclusive_held_object_mask(resources.support_arm.name)
+            resources.placing_task_state_key
+        ) & context.task.exclusive_held_object_mask(resources.support_task_state_key)
         if not eligible.any():
             logger.log_warning(
                 "CoordinatedPlacement requires two exclusively held objects."
@@ -292,11 +303,12 @@ class CoordinatedPlacement(
         success_mask = eligible.clone()
         segment_success, placing_approach_traj = plan_named_arm_trajectory(
             self.motion_generator,
-            resources.placing_arm.name,
+            resources.placing_arm.control_part,
             placing_start_qpos,
             torch.stack([placing_lift_xpos, placing_xpos], dim=1),
             segments["approach"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -312,11 +324,12 @@ class CoordinatedPlacement(
 
         segment_success, support_approach_traj = plan_named_arm_trajectory(
             self.motion_generator,
-            resources.support_arm.name,
+            resources.support_arm.control_part,
             support_start_qpos,
             support_xpos.unsqueeze(1),
             segments["approach"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -371,11 +384,12 @@ class CoordinatedPlacement(
 
         segment_success, placing_retreat_traj = plan_named_arm_trajectory(
             self.motion_generator,
-            resources.placing_arm.name,
+            resources.placing_arm.control_part,
             placing_place_qpos,
             placing_lift_xpos.unsqueeze(1),
             segments["retreat"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -414,13 +428,17 @@ class CoordinatedPlacement(
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.placing_arm.name: (
+                    resources.placing_task_state_key: (
                         None if release else placing_held_object
                     ),
-                    resources.support_arm.name: support_held_object,
+                    resources.support_task_state_key: support_held_object,
                 },
             ),
             segment_lengths={
@@ -499,19 +517,19 @@ class CoordinatedPlacement(
         HeldObjectState,
         HeldObjectState,
     ]:
-        placing_control_part = resources.placing_arm.name
-        support_control_part = resources.support_arm.name
-        placing_held_object = state.get_held_object(placing_control_part)
+        placing_task_state_key = resources.placing_task_state_key
+        support_task_state_key = resources.support_task_state_key
+        placing_held_object = state.get_held_object(placing_task_state_key)
         if placing_held_object is None:
             raise ValueError(
-                "CoordinatedPlacement requires an object held by placing control "
-                f"part {placing_control_part!r}."
+                "CoordinatedPlacement requires an object held by placing "
+                f"task-state resource {placing_task_state_key!r}."
             )
-        support_held_object = state.get_held_object(support_control_part)
+        support_held_object = state.get_held_object(support_task_state_key)
         if support_held_object is None:
             raise ValueError(
-                "CoordinatedPlacement requires an object held by support control "
-                f"part {support_control_part!r}."
+                "CoordinatedPlacement requires an object held by support "
+                f"task-state resource {support_task_state_key!r}."
             )
         placing_height_offset = (
             options.placing_height_offset

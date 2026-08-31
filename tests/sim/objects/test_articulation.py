@@ -17,15 +17,17 @@
 from __future__ import annotations
 
 import os
-import torch
+from types import SimpleNamespace
+
 import pytest
+import torch
 
 from embodichain.lab.sim import (
     SimulationManager,
     SimulationManagerCfg,
     VisualMaterialCfg,
 )
-from embodichain.lab.sim.objects import Articulation
+from embodichain.lab.sim.objects import Articulation, ArticulationJointKinematics
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
@@ -39,6 +41,59 @@ from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
+
+
+def test_get_qf_returns_all_articulation_joint_efforts():
+    expected_qf = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
+    articulation = object.__new__(Articulation)
+    articulation._data = SimpleNamespace(qf=expected_qf)
+
+    actual_qf = articulation.get_qf()
+
+    assert torch.equal(actual_qf, expected_qf)
+
+
+@pytest.mark.no_sim
+def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values():
+    articulation = object.__new__(Articulation)
+    articulation._data = SimpleNamespace(link_names=["body", "door", "door_handle"])
+    fixed_origin = torch.eye(4).numpy()
+    fixed = SimpleNamespace(
+        name="handle_fixed",
+        joint_type=SimpleNamespace(name="FIXED"),
+        parent_link_name="door",
+        child_link_name="door_handle",
+        origin_pose=fixed_origin,
+        axis=torch.zeros(3).numpy(),
+        lower_limit=0.0,
+        upper_limit=0.0,
+    )
+    hinge = SimpleNamespace(
+        name="door_hinge",
+        joint_type=SimpleNamespace(name="REVOLUTE"),
+        parent_link_name="body",
+        child_link_name="door",
+        origin_pose=torch.eye(4).numpy(),
+        axis=torch.tensor([0.0, 0.0, 1.0]).numpy(),
+        lower_limit=0.0,
+        upper_limit=2.0,
+    )
+    joint_infos = {fixed.name: fixed, hinge.name: hinge}
+    articulation._entities = [
+        SimpleNamespace(
+            get_joint_names=lambda: [fixed.name, hinge.name],
+            get_joint_info=joint_infos.get,
+        )
+    ]
+
+    chain = articulation.get_parent_joint_chain("door_handle")
+    fixed_origin[0, 3] = 9.0
+
+    assert all(isinstance(joint, ArticulationJointKinematics) for joint in chain)
+    assert [joint.name for joint in chain] == ["handle_fixed", "door_hinge"]
+    assert [joint.joint_type for joint in chain] == ["fixed", "revolute"]
+    assert chain[1].joint_limits == (0.0, 2.0)
+    assert chain[0].origin_pose[0, 3].item() == 0.0
 
 
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:

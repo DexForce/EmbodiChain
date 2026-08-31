@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     Affordance,
     AtomicActionEngine,
@@ -46,6 +45,7 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpOptions,
     PlaceGoal,
     PlaceOptions,
+    PressAffordance,
     PressGoal,
     PressOptions,
     TaskState,
@@ -332,7 +332,7 @@ def _held_object_state(
         geometry={},
         properties={"benchmark_object_id": handle.object_id},
         label=handle.object_id,
-        entity=handle.entity,
+        entity_id=handle.entity.uid,
     )
     return HeldObjectState(
         semantics=semantics,
@@ -425,12 +425,11 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
-        return ActionInvocation(
-            skill_id=self.skill_id,
-            goal=EndEffectorPoseGoal(case.target_waypoints),
-            binding=ActionBinding(manipulators={"primary": scenario.control_part}),
+        return scenario.require_engine().make_invocation(
+            self.skill_id,
+            EndEffectorPoseGoal(case.target_waypoints),
+            control_parts={"primary": {"motion": scenario.control_part}},
             motion_policy=MotionPolicy(
-                planner=adapter.motion_policy_planner,
                 strategy="motion_gen",
                 sample_count=int(case.case_parameters["sample_count"]),
             ),
@@ -633,20 +632,21 @@ class _PickUpCases(AtomicSkillCaseProvider):
             geometry={},
             properties={"benchmark_object_id": handle.object_id},
             label=handle.object_id,
-            entity=handle.entity,
+            entity_id=handle.entity.uid,
         )
-        return ActionInvocation(
-            skill_id=self.skill_id,
-            goal=GraspGoal(
+        return scenario.require_engine().make_invocation(
+            self.skill_id,
+            GraspGoal(
                 semantics=semantics,
                 grasp_xpos=case.target_waypoints[:, 1],
             ),
-            binding=ActionBinding(
-                manipulators={"primary": scenario.control_part},
-                end_effectors={"primary": scenario.end_effector_part},
-            ),
+            control_parts={
+                "primary": {
+                    "motion": scenario.control_part,
+                    "grasp": scenario.end_effector_part,
+                }
+            },
             motion_policy=MotionPolicy(
-                planner=adapter.motion_policy_planner,
                 strategy="motion_gen",
                 sample_count=int(case.case_parameters["sample_count"]),
             ),
@@ -806,12 +806,11 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
             dtype=torch.float32,
             device=scenario.robot.device,
         )
-        return ActionInvocation(
-            skill_id=self.skill_id,
-            goal=JointPositionGoal(target),
-            binding=ActionBinding(manipulators={"primary": scenario.control_part}),
+        return scenario.require_engine().make_invocation(
+            self.skill_id,
+            JointPositionGoal(target),
+            control_parts={"primary": {"motion": scenario.control_part}},
             motion_policy=MotionPolicy(
-                planner=adapter.motion_policy_planner,
                 strategy="motion_gen",
                 sample_count=int(case.case_parameters["sample_count"]),
             ),
@@ -1033,17 +1032,18 @@ class _MoveHeldObjectCases(_HeldObjectCases):
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
-        return ActionInvocation(
-            skill_id=self.skill_id,
-            goal=HeldObjectPoseGoal(
+        return scenario.require_engine().make_invocation(
+            self.skill_id,
+            HeldObjectPoseGoal(
                 _case_pose(case, "target_object_pose", device=scenario.robot.device)
             ),
-            binding=ActionBinding(
-                manipulators={"primary": scenario.control_part},
-                end_effectors={"primary": scenario.end_effector_part},
-            ),
+            control_parts={
+                "primary": {
+                    "motion": scenario.control_part,
+                    "grasp": scenario.end_effector_part,
+                }
+            },
             motion_policy=MotionPolicy(
-                planner=adapter.motion_policy_planner,
                 strategy="motion_gen",
                 sample_count=int(case.case_parameters["sample_count"]),
             ),
@@ -1161,17 +1161,16 @@ class _PlaceCases(_HeldObjectCases):
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
-        return ActionInvocation(
-            skill_id=self.skill_id,
-            goal=PlaceGoal(
-                _case_pose(case, "release_pose", device=scenario.robot.device)
-            ),
-            binding=ActionBinding(
-                manipulators={"primary": scenario.control_part},
-                end_effectors={"primary": scenario.end_effector_part},
-            ),
+        return scenario.require_engine().make_invocation(
+            self.skill_id,
+            PlaceGoal(_case_pose(case, "release_pose", device=scenario.robot.device)),
+            control_parts={
+                "primary": {
+                    "motion": scenario.control_part,
+                    "grasp": scenario.end_effector_part,
+                }
+            },
             motion_policy=MotionPolicy(
-                planner=adapter.motion_policy_planner,
                 strategy="motion_gen",
                 sample_count=int(case.case_parameters["sample_count"]),
             ),
@@ -1230,8 +1229,8 @@ class _PressCases(AtomicSkillCaseProvider):
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
-        press_pose = start_pose.clone()
-        press_pose[:, :3, 3] += _randomized_vector(
+        target_pose = start_pose.clone()
+        target_pose[:, :3, 3] += _randomized_vector(
             _float_vector(
                 config.get("target_offset_m"),
                 name="target_offset_m",
@@ -1245,7 +1244,44 @@ class _PressCases(AtomicSkillCaseProvider):
             dtype=start_pose.dtype,
             device=start_pose.device,
         )
-        targets = torch.stack([press_pose, start_pose], dim=1)
+        press_axis = _float_vector(
+            config.get("press_axis"),
+            name="press_axis",
+            length=3,
+            default=(0.0, 0.0, 1.0),
+        )
+        press_position = _float_vector(
+            config.get("press_position"),
+            name="press_position",
+            length=3,
+            default=(0.0, 0.0, 0.0),
+        )
+        options = PressOptions(
+            hand_interp_steps=int(config.get("hand_interp_steps", 8)),
+            approach_distance=float(config.get("approach_distance_m", 0.1)),
+            press_distance=float(config.get("press_distance_m", 0.05)),
+            press_position=tuple(press_position),
+        )
+        affordance = PressAffordance(
+            press_axis=torch.tensor(
+                press_axis,
+                dtype=target_pose.dtype,
+                device=target_pose.device,
+            ),
+            press_position=tuple(press_position),
+        )
+        contact_pose = affordance.get_press_pose(
+            target_pose,
+            press_position=options.press_position,
+        )
+        approach_pose = contact_pose.clone()
+        approach_pose[:, :3, 3] -= contact_pose[:, :3, 2] * options.approach_distance
+        pressed_pose = contact_pose.clone()
+        pressed_pose[:, :3, 3] += contact_pose[:, :3, 2] * options.press_distance
+        targets = torch.stack(
+            [approach_pose, contact_pose, pressed_pose, approach_pose],
+            dim=1,
+        )
         references = scenario.solve_reference_qpos(start_qpos, targets)
         name = _case_name(config)
         return BenchmarkCase(
@@ -1255,8 +1291,8 @@ class _PressCases(AtomicSkillCaseProvider):
             case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
             seed=seed,
             batch_size=batch_size,
-            num_waypoints=2,
-            path_shape="press_retract",
+            num_waypoints=4,
+            path_shape="approach_contact_press_retract",
             start_state_bin="pre_action",
             start_qpos=start_qpos,
             target_waypoints=targets,
@@ -1268,8 +1304,12 @@ class _PressCases(AtomicSkillCaseProvider):
             full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
-                "press_pose": press_pose.detach().cpu().tolist(),
-                "hand_interp_steps": int(config.get("hand_interp_steps", 8)),
+                "press_target_pose": target_pose.detach().cpu().tolist(),
+                "press_axis": press_axis,
+                "press_position": press_position,
+                "hand_interp_steps": options.hand_interp_steps,
+                "approach_distance_m": options.approach_distance,
+                "press_distance_m": options.press_distance,
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1281,22 +1321,46 @@ class _PressCases(AtomicSkillCaseProvider):
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
-        return ActionInvocation(
-            skill_id=self.skill_id,
-            goal=PressGoal(
-                _case_pose(case, "press_pose", device=scenario.robot.device)
+        press_axis = torch.tensor(
+            case.case_parameters["press_axis"],
+            dtype=torch.float32,
+            device=scenario.robot.device,
+        )
+        press_position = tuple(case.case_parameters["press_position"])
+        semantics = ObjectSemantics(
+            affordance=PressAffordance(
+                press_axis=press_axis,
+                press_position=press_position,
             ),
-            binding=ActionBinding(
-                manipulators={"primary": scenario.control_part},
-                end_effectors={"primary": scenario.end_effector_part},
+            geometry={},
+            entity_id=f"benchmark.press_target.{case.case_id}",
+            label="benchmark_press_target",
+        )
+        return scenario.require_engine().make_invocation(
+            self.skill_id,
+            PressGoal(
+                semantics,
+                _case_pose(
+                    case,
+                    "press_target_pose",
+                    device=scenario.robot.device,
+                ),
             ),
+            control_parts={
+                "primary": {
+                    "motion": scenario.control_part,
+                    "grasp": scenario.end_effector_part,
+                }
+            },
             motion_policy=MotionPolicy(
-                planner=adapter.motion_policy_planner,
                 strategy="motion_gen",
                 sample_count=int(case.case_parameters["sample_count"]),
             ),
             skill_options=PressOptions(
-                hand_interp_steps=int(case.case_parameters["hand_interp_steps"])
+                hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
+                approach_distance=float(case.case_parameters["approach_distance_m"]),
+                press_distance=float(case.case_parameters["press_distance_m"]),
+                press_position=press_position,
             ),
         )
 
@@ -1526,6 +1590,12 @@ class AtomicTaskScenario(ScenarioProvider):
         del adapter
         self._engine = None
 
+    def require_engine(self) -> AtomicActionEngine:
+        """Return the prepared Atomic Action engine."""
+        if self._engine is None:
+            raise RuntimeError("Atomic Task planner resources were not prepared.")
+        return self._engine
+
     def reset_case(
         self,
         simulation: SimulationManager,
@@ -1561,21 +1631,26 @@ class AtomicTaskScenario(ScenarioProvider):
 
     def plan_case(self, adapter: PlannerAdapter, case: BenchmarkCase) -> object:
         """Compile one Atomic Action with an explicitly pinned motion backend."""
-        if self._engine is None:
-            raise RuntimeError("Atomic Task planner resources were not prepared.")
+        engine = self.require_engine()
+        if self.simulation is None:
+            raise RuntimeError("Atomic Task simulation is not configured.")
         provider = self._case_providers[case.case_id]
         invocation = provider.build_invocation(self, case, adapter)
         policy = invocation.motion_policy
-        if (
-            policy.strategy != "motion_gen"
-            or policy.planner != adapter.motion_policy_planner
-        ):
+        if policy.strategy != "motion_gen":
             raise RuntimeError(
-                "Atomic Task invocations must pin the adapter motion backend."
+                "Atomic Task invocations must use the motion_gen strategy."
+            )
+        if engine.motion_generator is not adapter.require_motion_generator():
+            raise RuntimeError(
+                "Atomic Task engine must own the selected adapter's MotionGenerator."
             )
         task = provider.initial_task_state(self, case)
-        context = None if task is None else self._engine.initial_context(task=task)
-        return self._engine.compile((invocation,), context=context)
+        context = engine.initial_context(
+            task=task,
+            control_dt=float(self.simulation.sim_config.physics_dt),
+        )
+        return engine.compile((invocation,), context=context)
 
     def plan_contract_error(self, result: object) -> str | None:
         """Accept compiled Atomic Action trajectories instead of raw plans."""
@@ -1613,7 +1688,11 @@ class AtomicTaskScenario(ScenarioProvider):
         arm_joint_ids = list(robot.get_joint_ids(name=control_part))
         arm_positions = result.trajectory.positions[:, :, arm_joint_ids]
         motion_outcomes = compute_case_outcomes(
-            PlanResult(success=result.plan_success, positions=arm_positions),
+            PlanResult(
+                success=result.plan_success,
+                positions=arm_positions,
+                dt=result.trajectory.dt,
+            ),
             case,
             robot,
             control_part,
@@ -1980,6 +2059,7 @@ class AtomicTaskScenario(ScenarioProvider):
             raise ValueError("grasp_alignment_max_angle_deg must be in (0, 90].")
         from scripts.tutorials.atomic_action.tutorial_utils import (
             create_antipodal_semantics,
+            create_parallel_jaw_grasp_pose_generator,
         )
 
         fork_devices = (
@@ -1992,10 +2072,15 @@ class AtomicTaskScenario(ScenarioProvider):
             semantics = create_antipodal_semantics(
                 handle.entity,
                 label=handle.object_id,
-                n_sample=n_sample,
-                force_reannotate=False,
             )
-            candidates, costs = semantics.affordance.get_valid_grasp_poses(
+            affordance = semantics.affordance
+            generator = create_parallel_jaw_grasp_pose_generator(
+                n_sample=n_sample,
+                force_refresh=False,
+            )
+            candidates, costs = generator.get_valid_grasp_poses(
+                mesh_vertices=affordance.mesh_vertices,
+                mesh_triangles=affordance.mesh_triangles,
                 obj_poses=object_pose,
                 approach_direction=approach_direction,
             )[0]

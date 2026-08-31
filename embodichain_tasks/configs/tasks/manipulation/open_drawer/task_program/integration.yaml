@@ -1,0 +1,46 @@
+integration_id: open_drawer_v1
+program_id: slide_open_drawer
+
+requires:
+  scene_contract: open_drawer_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+scene_binding:
+  contract_id: open_drawer_scene_v1
+  registry_id: task_program_open_drawer
+  articulations:
+    - entity_id: drawer
+      simulation_uid: drawer
+      dynamics: dynamic
+      semantic_type: drawer
+  links:
+    - entity_id: drawer_handle
+      articulation_id: drawer
+      native_link_name: large_handle_bar
+      dynamics: dynamic
+      semantic_type: drawer_handle
+
+profile:
+  defaults:
+    slide:
+      primary: primary_manipulator
+  action_options:
+    simulation.articulation_link_slide:
+      kind: slide
+      direction: pull
+      hand_interp_steps: 12
+      approach_distance: 0.1
+      translation_distance: 0.18
+  effect_monitors: {}
+
+runtime_services:
+  grasp_pose_generator_overrides:
+    hand:
+      opening_margin: 0.03
+  registered_semantic_lowerers:
+    - kind: articulation_link_slide
+      articulation_id: drawer
+      articulation_simulation_uid: drawer
+      link_entity_id: drawer_handle
+      translation_axis: [0.0, 1.0, 0.0]
+      target_pose_mode: snapshot

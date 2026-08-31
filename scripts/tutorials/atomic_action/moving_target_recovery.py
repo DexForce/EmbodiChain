@@ -31,16 +31,15 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, VisualMaterialCfg
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     Affordance,
     AtomicActionEngine,
     ControlPartCommandProfile,
     EntityState,
+    EffectVerificationRequest,
+    EffectVerificationResult,
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
-    ExecutionTick,
     GraspGoal,
     MotionPolicy,
     ObjectSemantics,
@@ -53,6 +52,7 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     SimulationExecutionAdapter,
     TaskState,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -250,6 +250,7 @@ def main() -> None:
     sim_runtime = SimulationExecutionAdapter(
         sim,
         robot,
+        control_dt=2.0 * sim.sim_config.physics_dt,
         scene_supplier=target_scene.snapshot,
     )
     motion_gen = create_curobo_motion_generator(robot)
@@ -274,12 +275,7 @@ def main() -> None:
         affordance=Affordance(),
         geometry={},
         label="cube",
-        entity=target,
         entity_id=TARGET_ENTITY_ID,
-    )
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
     )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -290,27 +286,29 @@ def main() -> None:
             )
         },
     )
-    pick_invocation = ActionInvocation(
-        skill_id="pick_up",
-        goal=GraspGoal(
+    pick_invocation = engine.make_invocation(
+        "pick_up",
+        GraspGoal(
             semantics,
             grasp_xpos=SceneEntityPose(
                 TARGET_ENTITY_ID,
                 relative_pose=target_to_grasp,
             ),
         ),
-        binding=binding,
+        control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=PICK_SAMPLE_COUNT,
-            control_dt=2.0 * sim_runtime.physics_dt,
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             max_action_retries=1,
-            tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
             goal_translation_threshold=GOAL_TRANSLATION_THRESHOLD,
             action_timeout=30.0,
+        ),
+        tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=TRACKING_ERROR_THRESHOLD,
+            terminal_max_abs_error=TRACKING_ERROR_THRESHOLD,
         ),
         skill_options=PickUpOptions(
             pre_grasp_distance=0.15,
@@ -408,8 +406,8 @@ def main() -> None:
 
     def verify_pickup_effect(
         _context: PlanningContext,
-        _: ExecutionTick,
-    ) -> torch.Tensor:
+        request: EffectVerificationRequest,
+    ) -> EffectVerificationResult:
         """Verify that the cube rose with, and remains near, the end effector."""
         cube_position = target.get_local_pose(to_matrix=True)[:, :3, 3]
         eef_position = robot.compute_fk(
@@ -428,7 +426,14 @@ def main() -> None:
             f"cube-to-EEF={held_distance.detach().cpu().tolist()} m, "
             f"success={success.detach().cpu().tolist()}."
         )
-        return success
+        verified_success = request.env_mask & success
+        return EffectVerificationResult(
+            verification_id=request.verification_id,
+            success_mask=verified_success,
+            failure_mask=request.env_mask & ~success,
+            invalidation_mask=request.env_mask & ~success,
+            retry_mask=request.env_mask & ~success,
+        )
 
     recording_started = start_auto_play_recording(
         sim,

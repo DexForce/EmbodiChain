@@ -14,193 +14,375 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Semantic-role to robot control-part bindings for atomic actions."""
+"""Generic runtime endpoint bindings consumed by atomic actions."""
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+from collections.abc import Hashable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, TypeVar
 
 import torch
 
-from .control import ControlCommand, JointPositionCommand
+from .control import ControlCommand
+from .tracking import (
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
+)
 
 
-def _normalize_resource_map(
-    values: Mapping[str, str],
+def _validate_identifier(value: str, *, field_name: str) -> str:
+    """Validate and return one strict identifier."""
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError(
+            f"{field_name} must be a non-empty string without outer whitespace."
+        )
+    return value
+
+
+def _normalize_identifiers(
+    values: frozenset[str],
     *,
     field_name: str,
-) -> Mapping[str, str]:
-    """Validate and freeze a semantic-role resource mapping."""
+) -> frozenset[str]:
+    """Validate and freeze an identifier set."""
+    if isinstance(values, (str, bytes)):
+        raise TypeError(f"{field_name} must be an iterable of strings.")
+    try:
+        normalized = frozenset(values)
+    except TypeError as exc:
+        raise TypeError(f"{field_name} must be an iterable of strings.") from exc
+    for value in normalized:
+        _validate_identifier(value, field_name=field_name)
+    return normalized
+
+
+def _snapshot_commands(
+    values: Mapping[str, ControlCommand],
+) -> Mapping[str, ControlCommand]:
+    """Validate semantic endpoint commands and own their snapshots."""
     if not isinstance(values, Mapping):
-        raise TypeError(f"{field_name} must be a mapping.")
-    normalized: dict[str, str] = {}
-    for role, resource in values.items():
-        if not isinstance(role, str) or not role.strip():
-            raise ValueError(f"{field_name} roles must be non-empty strings.")
-        if not isinstance(resource, str) or not resource.strip():
-            raise ValueError(f"{field_name} resources must be non-empty strings.")
-        normalized[role] = resource
-    return MappingProxyType(normalized)
+        raise TypeError("EndpointBinding.commands must be a mapping.")
+    commands: dict[str, ControlCommand] = {}
+    for name, command in values.items():
+        _validate_identifier(name, field_name="EndpointBinding command names")
+        if not isinstance(command, ControlCommand):
+            raise TypeError(
+                "EndpointBinding.commands values must be ControlCommand instances."
+            )
+        snapshot = command.snapshot()
+        if type(snapshot) is not type(command) or snapshot is command:
+            raise TypeError(
+                "ControlCommand.snapshot() must return an independently owned "
+                "value of the same command type."
+            )
+        commands[name] = snapshot
+    return MappingProxyType(commands)
 
 
-@dataclass(frozen=True, slots=True)
-class ActionBinding:
-    """Bind semantic action roles to names from ``Robot.control_parts``.
-
-    A role such as ``primary``, ``source`` or ``destination`` is an
-    action-defined semantic participant slot. It describes the responsibility
-    a resource has within that action and is not itself a robot resource.
-    Actions publish their required slots through ``manipulator_roles`` and
-    ``end_effector_roles``. Role names are scoped independently to those two
-    maps, so matching names associate an arm and hand/tool with the same
-    functional participant without making the maps interchangeable.
-
-    ``primary`` has no inherent left/right, ordering, or default-control-part
-    meaning. Only the compiler or application binding layer needs to map it to
-    concrete robot control-part names such as ``left_arm`` and ``left_hand``.
-
-    Every mapping value is a key from the current robot's ``control_parts``
-    configuration. This value object validates the mapping shape; the
-    :class:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine` validates
-    the names against its owned robot before planning. ``end_effectors`` refers
-    to actuated tool/hand control parts, not TCP or kinematic frame names.
-    """
-
-    manipulators: Mapping[str, str] = field(default_factory=dict)
-    """Manipulator control-part names keyed by semantic role."""
-
-    end_effectors: Mapping[str, str] = field(default_factory=dict)
-    """Tool or hand control-part names keyed by semantic role."""
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "manipulators",
-            _normalize_resource_map(self.manipulators, field_name="manipulators"),
+def _snapshot_tracking_channels(
+    values: Mapping[str, EndpointTrackingChannelBinding],
+    *,
+    target: RuntimeEndpointTarget,
+) -> Mapping[str, EndpointTrackingChannelBinding]:
+    """Validate and own endpoint-local tracking-channel bindings."""
+    if not isinstance(values, Mapping):
+        raise TypeError("EndpointBinding.tracking_channels must be a mapping.")
+    channels: dict[str, EndpointTrackingChannelBinding] = {}
+    for channel_id, binding in values.items():
+        _validate_identifier(
+            channel_id,
+            field_name="EndpointBinding tracking channel IDs",
         )
-        object.__setattr__(
-            self,
-            "end_effectors",
-            _normalize_resource_map(self.end_effectors, field_name="end_effectors"),
-        )
-
-    def manipulator(self, role: str = "primary") -> str:
-        """Return the manipulator control-part name bound to ``role``.
-
-        Args:
-            role: Semantic manipulator role.
-
-        Returns:
-            Key from the current robot's ``control_parts`` mapping.
-
-        Raises:
-            KeyError: If the requested role is not bound.
-        """
-        try:
-            return self.manipulators[role]
-        except KeyError as exc:
-            raise KeyError(f"No manipulator is bound to role {role!r}.") from exc
-
-    def end_effector(self, role: str = "primary") -> str:
-        """Return the tool/hand control-part name bound to ``role``.
-
-        Args:
-            role: Semantic end-effector role.
-
-        Returns:
-            Key from the current robot's ``control_parts`` mapping.
-
-        Raises:
-            KeyError: If the requested role is not bound.
-        """
-        try:
-            return self.end_effectors[role]
-        except KeyError as exc:
-            raise KeyError(f"No end effector is bound to role {role!r}.") from exc
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedControlPart:
-    """One engine-validated robot control part.
-
-    Instances are produced by engine-owned planning services. They keep
-    robot-specific indices out of :class:`ActionBinding` and agent-facing
-    invocation schemas.
-    """
-
-    name: str
-    """Key from ``Robot.control_parts``."""
-
-    joint_ids: tuple[int, ...]
-    """Full-robot joint indices belonging to this control part."""
-
-    commands: Mapping[str, ControlCommand] = field(default_factory=dict)
-    """Engine-profile commands, including invocation-level overrides."""
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name.strip():
-            raise ValueError("ResolvedControlPart.name must be a non-empty string.")
-        joint_ids = tuple(self.joint_ids)
-        if not joint_ids or not all(
-            isinstance(joint_id, int) and joint_id >= 0 for joint_id in joint_ids
+        if not isinstance(binding, EndpointTrackingChannelBinding):
+            raise TypeError(
+                "EndpointBinding.tracking_channels values must be "
+                "EndpointTrackingChannelBinding instances."
+            )
+        if binding.channel_id != channel_id:
+            raise ValueError(
+                f"Tracking channel key {channel_id!r} disagrees with its binding "
+                f"channel {binding.channel_id!r}."
+            )
+        snapshot = binding.snapshot()
+        if snapshot is binding:
+            raise TypeError(
+                "EndpointTrackingChannelBinding.snapshot() must return an "
+                "independently owned value."
+            )
+        address = snapshot.source.address
+        if (
+            isinstance(address, EndpointTrackingFeedbackAddress)
+            and address.target.address_fingerprint != target.address_fingerprint
         ):
             raise ValueError(
-                "ResolvedControlPart.joint_ids must contain non-negative integers."
+                f"Tracking channel {channel_id!r} addresses a different runtime "
+                "endpoint target."
             )
-        if len(set(joint_ids)) != len(joint_ids):
-            raise ValueError("ResolvedControlPart.joint_ids must be unique.")
-        object.__setattr__(self, "joint_ids", joint_ids)
-        if not isinstance(self.commands, Mapping):
-            raise TypeError("ResolvedControlPart.commands must be a mapping.")
-        commands: dict[str, ControlCommand] = {}
-        for name, command in self.commands.items():
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError("Control command names must be non-empty strings.")
-            if not isinstance(command, ControlCommand):
-                raise TypeError(
-                    "ResolvedControlPart.commands values must be ControlCommand "
-                    "instances."
-                )
-            commands[name] = command.snapshot()
-        object.__setattr__(self, "commands", MappingProxyType(commands))
+        channels[channel_id] = snapshot
+    return MappingProxyType(channels)
+
+
+def _validate_target_fingerprint(
+    target: RuntimeEndpointTarget,
+    *,
+    field_name: str,
+) -> Hashable:
+    """Return one hashable, snapshot-stable target address fingerprint."""
+    fingerprint = target.address_fingerprint
+    try:
+        hash(fingerprint)
+    except TypeError as exc:
+        raise TypeError(f"{field_name} must be hashable.") from exc
+    return fingerprint
+
+
+class RuntimeEndpointTarget(ABC):
+    """Stable controller destination produced by an endpoint adapter.
+
+    Targets contain immutable addressing data only. Live controllers, sockets,
+    simulator entities, and other process-owned handles belong to an
+    endpoint-command transport rather than this value.
+    """
 
     @property
-    def dof(self) -> int:
-        """Return the number of joints in this control part."""
-        return len(self.joint_ids)
+    @abstractmethod
+    def transport_id(self) -> str:
+        """Return the registered transport kind used by this target."""
 
-    def with_command_overrides(
-        self,
-        overrides: Mapping[str, ControlCommand],
-    ) -> ResolvedControlPart:
-        """Return a snapshot with role-local semantic command overrides."""
-        merged = dict(self.commands)
-        merged.update(overrides)
-        return ResolvedControlPart(
-            name=self.name,
-            joint_ids=self.joint_ids,
-            commands=merged,
+    @property
+    @abstractmethod
+    def target_id(self) -> str:
+        """Return the destination identifier within its transport."""
+
+    @property
+    def address_fingerprint(self) -> Hashable:
+        """Return the stable controller-address and safe-hold fingerprint.
+
+        The default covers the exact target type and transport-scoped
+        destination. Target types whose hold footprint depends on additional
+        immutable addressing fields must override this property and include
+        those fields. Replans and explicit revisions may replace payloads, but
+        they may not change this fingerprint in place.
+        """
+        return type(self), self.transport_id, self.target_id
+
+    def snapshot(self) -> RuntimeEndpointTarget:
+        """Return an independently owned target snapshot."""
+        return deepcopy(self)
+
+
+@dataclass(frozen=True, slots=True)
+class JointPositionTarget(RuntimeEndpointTarget):
+    """Joint-position destination backed by one robot control part."""
+
+    TRANSPORT_ID = "robot.joint_position"
+
+    control_part: str
+    joint_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        _validate_identifier(
+            self.control_part,
+            field_name="JointPositionTarget.control_part",
+        )
+        joint_ids = tuple(self.joint_ids)
+        if not joint_ids or not all(
+            isinstance(joint_id, int)
+            and not isinstance(joint_id, bool)
+            and joint_id >= 0
+            for joint_id in joint_ids
+        ):
+            raise ValueError(
+                "JointPositionTarget.joint_ids must contain non-negative integers."
+            )
+        if len(set(joint_ids)) != len(joint_ids):
+            raise ValueError("JointPositionTarget.joint_ids must be unique.")
+        object.__setattr__(self, "joint_ids", joint_ids)
+
+    @property
+    def transport_id(self) -> str:
+        """Return the built-in joint-position transport identifier."""
+        return self.TRANSPORT_ID
+
+    @property
+    def target_id(self) -> str:
+        """Return the robot control-part destination."""
+        return self.control_part
+
+    @property
+    def address_fingerprint(self) -> Hashable:
+        """Return the destination plus the joints that must remain holdable."""
+        return (
+            type(self),
+            self.transport_id,
+            self.target_id,
+            self.joint_ids,
         )
 
+
+TargetT = TypeVar("TargetT", bound=RuntimeEndpointTarget)
+
+
+@dataclass(frozen=True, slots=True)
+class EndpointBinding:
+    """One action-local endpoint resolved to a runtime controller target."""
+
+    slot_id: str
+    endpoint_id: str
+    resource_id: str
+    adapter_id: str
+    target: RuntimeEndpointTarget
+    task_state_key: str | None = None
+    """Symbolic task-state key; defaults to ``target.target_id``."""
+
+    tracking_channels: Mapping[str, EndpointTrackingChannelBinding] = field(
+        default_factory=dict
+    )
+    capabilities: frozenset[str] = frozenset()
+    commands: Mapping[str, ControlCommand] = field(default_factory=dict)
+    claim_tokens: frozenset[str] = frozenset()
+    joint_ids: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.slot_id, field_name="EndpointBinding.slot_id")
+        _validate_identifier(
+            self.endpoint_id,
+            field_name="EndpointBinding.endpoint_id",
+        )
+        _validate_identifier(
+            self.resource_id,
+            field_name="EndpointBinding.resource_id",
+        )
+        _validate_identifier(self.adapter_id, field_name="EndpointBinding.adapter_id")
+        if not isinstance(self.target, RuntimeEndpointTarget):
+            raise TypeError("EndpointBinding.target must be a RuntimeEndpointTarget.")
+        target = self.target.snapshot()
+        if type(target) is not type(self.target) or target is self.target:
+            raise TypeError(
+                "RuntimeEndpointTarget.snapshot() must return an independently "
+                "owned value of the same target type."
+            )
+        _validate_identifier(
+            target.transport_id,
+            field_name="RuntimeEndpointTarget.transport_id",
+        )
+        _validate_identifier(
+            target.target_id,
+            field_name="RuntimeEndpointTarget.target_id",
+        )
+        source_fingerprint = _validate_target_fingerprint(
+            self.target,
+            field_name="RuntimeEndpointTarget.address_fingerprint",
+        )
+        target_fingerprint = _validate_target_fingerprint(
+            target,
+            field_name="RuntimeEndpointTarget.snapshot().address_fingerprint",
+        )
+        if target_fingerprint != source_fingerprint:
+            raise ValueError(
+                "RuntimeEndpointTarget.snapshot() must preserve its address "
+                "fingerprint."
+            )
+        object.__setattr__(self, "target", target)
+        task_state_key = (
+            target.target_id if self.task_state_key is None else self.task_state_key
+        )
+        _validate_identifier(
+            task_state_key,
+            field_name="EndpointBinding.task_state_key",
+        )
+        object.__setattr__(self, "task_state_key", task_state_key)
+        object.__setattr__(
+            self,
+            "tracking_channels",
+            _snapshot_tracking_channels(self.tracking_channels, target=target),
+        )
+        object.__setattr__(
+            self,
+            "capabilities",
+            _normalize_identifiers(
+                self.capabilities,
+                field_name="EndpointBinding.capabilities",
+            ),
+        )
+        object.__setattr__(self, "commands", _snapshot_commands(self.commands))
+        object.__setattr__(
+            self,
+            "claim_tokens",
+            _normalize_identifiers(
+                self.claim_tokens,
+                field_name="EndpointBinding.claim_tokens",
+            ),
+        )
+        joint_ids = tuple(self.joint_ids)
+        if not all(
+            isinstance(joint_id, int)
+            and not isinstance(joint_id, bool)
+            and joint_id >= 0
+            for joint_id in joint_ids
+        ):
+            raise ValueError(
+                "EndpointBinding.joint_ids must contain non-negative integers."
+            )
+        if len(set(joint_ids)) != len(joint_ids):
+            raise ValueError("EndpointBinding.joint_ids must be unique.")
+        if isinstance(target, JointPositionTarget):
+            if joint_ids and joint_ids != target.joint_ids:
+                raise ValueError(
+                    "EndpointBinding.joint_ids must match its JointPositionTarget."
+                )
+            joint_ids = target.joint_ids
+        object.__setattr__(self, "joint_ids", joint_ids)
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """Return the action-local ``(slot, endpoint)`` key."""
+        return self.slot_id, self.endpoint_id
+
+    @property
+    def destination_key(self) -> tuple[str, str]:
+        """Return the transport-scoped physical destination key."""
+        return self.target.transport_id, self.target.target_id
+
+    def require_target(self, target_type: type[TargetT]) -> TargetT:
+        """Return the runtime target after an explicit type check."""
+        if not isinstance(target_type, type) or not issubclass(
+            target_type, RuntimeEndpointTarget
+        ):
+            raise TypeError("target_type must be a RuntimeEndpointTarget subclass.")
+        if not isinstance(self.target, target_type):
+            raise TypeError(
+                f"Endpoint {self.slot_id}.{self.endpoint_id} uses "
+                f"{type(self.target).__name__}, expected {target_type.__name__}."
+            )
+        return self.target.snapshot()
+
     def command(self, name: str) -> ControlCommand:
-        """Return an owned semantic command snapshot.
-
-        Args:
-            name: Semantic command name, for example ``open`` or ``grasp``.
-
-        Raises:
-            KeyError: If this control part does not define ``name``.
-        """
+        """Return one owned semantic-command snapshot."""
         try:
             command = self.commands[name]
         except KeyError as exc:
             raise KeyError(
-                f"Control part {self.name!r} has no command {name!r}. "
-                f"Available commands: {sorted(self.commands)}."
+                f"Endpoint {self.slot_id}.{self.endpoint_id} has no command "
+                f"{name!r}; available commands are {sorted(self.commands)}."
             ) from exc
         return command.snapshot()
+
+    def tracking_channel(self, channel_id: str) -> EndpointTrackingChannelBinding:
+        """Return one independently owned typed tracking-channel binding."""
+        try:
+            binding = self.tracking_channels[channel_id]
+        except KeyError as exc:
+            raise KeyError(
+                f"Endpoint {self.slot_id}.{self.endpoint_id} has no tracking "
+                f"channel {channel_id!r}; available channels are "
+                f"{sorted(self.tracking_channels)}."
+            ) from exc
+        return binding.snapshot()
 
     def joint_positions(
         self,
@@ -211,82 +393,145 @@ class ResolvedControlPart:
         dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
         """Resolve a named joint-position command for a planning batch."""
-        try:
-            command = self.commands[name]
-        except KeyError as exc:
-            raise KeyError(
-                f"Control part {self.name!r} has no command {name!r}. "
-                f"Available commands: {sorted(self.commands)}."
-            ) from exc
+        from .control import JointPositionCommand
+
+        target = self.require_target(JointPositionTarget)
+        command = self.command(name)
         if not isinstance(command, JointPositionCommand):
             raise TypeError(
-                f"Control command {name!r} on {self.name!r} is "
-                f"{type(command).__name__}, not JointPositionCommand."
+                f"Endpoint command {name!r} is {type(command).__name__}, not "
+                "JointPositionCommand."
             )
         return command.resolve(
             num_envs=num_envs,
-            control_dof=self.dof,
+            control_dof=len(target.joint_ids),
             device=device,
             dtype=dtype,
         )
 
+    def with_commands(
+        self,
+        overrides: Mapping[str, ControlCommand],
+    ) -> EndpointBinding:
+        """Return an endpoint snapshot with semantic-command overrides."""
+        merged = dict(self.commands)
+        merged.update(overrides)
+        return EndpointBinding(
+            slot_id=self.slot_id,
+            endpoint_id=self.endpoint_id,
+            resource_id=self.resource_id,
+            adapter_id=self.adapter_id,
+            target=self.target,
+            task_state_key=self.task_state_key,
+            tracking_channels=self.tracking_channels,
+            capabilities=self.capabilities,
+            commands=merged,
+            claim_tokens=self.claim_tokens,
+            joint_ids=self.joint_ids,
+        )
 
-def _normalize_resolved_map(
-    values: Mapping[str, ResolvedControlPart],
-    *,
-    field_name: str,
-) -> Mapping[str, ResolvedControlPart]:
-    """Validate and freeze a resolved semantic-role mapping."""
-    if not isinstance(values, Mapping):
-        raise TypeError(f"{field_name} must be a mapping.")
-    normalized: dict[str, ResolvedControlPart] = {}
-    for role, resource in values.items():
-        if not isinstance(role, str) or not role.strip():
-            raise ValueError(f"{field_name} roles must be non-empty strings.")
-        if not isinstance(resource, ResolvedControlPart):
-            raise TypeError(
-                f"{field_name} values must be ResolvedControlPart instances."
-            )
-        normalized[role] = resource
-    return MappingProxyType(normalized)
+    def snapshot(self) -> EndpointBinding:
+        """Return an independently owned endpoint-binding snapshot."""
+        return EndpointBinding(
+            slot_id=self.slot_id,
+            endpoint_id=self.endpoint_id,
+            resource_id=self.resource_id,
+            adapter_id=self.adapter_id,
+            target=self.target,
+            task_state_key=self.task_state_key,
+            tracking_channels=self.tracking_channels,
+            capabilities=self.capabilities,
+            commands=self.commands,
+            claim_tokens=self.claim_tokens,
+            joint_ids=self.joint_ids,
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class ResolvedActionBinding:
-    """Runtime control parts resolved from an :class:`ActionBinding`."""
+class ActionBinding:
+    """Engine-owned generic endpoint bindings for one atomic action call."""
 
-    manipulators: Mapping[str, ResolvedControlPart] = field(default_factory=dict)
-    end_effectors: Mapping[str, ResolvedControlPart] = field(default_factory=dict)
+    owner_id: str
+    endpoints: tuple[EndpointBinding, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "manipulators",
-            _normalize_resolved_map(
-                self.manipulators, field_name="resolved manipulators"
+        _validate_identifier(self.owner_id, field_name="ActionBinding.owner_id")
+        if isinstance(self.endpoints, (str, bytes)):
+            raise TypeError("ActionBinding.endpoints must be an iterable.")
+        try:
+            endpoints = tuple(self.endpoints)
+        except TypeError as exc:
+            raise TypeError("ActionBinding.endpoints must be an iterable.") from exc
+        if not all(isinstance(endpoint, EndpointBinding) for endpoint in endpoints):
+            raise TypeError(
+                "ActionBinding.endpoints values must be EndpointBinding instances."
+            )
+        keys = [endpoint.key for endpoint in endpoints]
+        if len(set(keys)) != len(keys):
+            raise ValueError("ActionBinding endpoint keys must be unique.")
+        snapshots = tuple(endpoint.snapshot() for endpoint in endpoints)
+        object.__setattr__(self, "endpoints", snapshots)
+
+    @property
+    def endpoint_keys(self) -> tuple[tuple[str, str], ...]:
+        """Return action-local endpoint keys in binding order."""
+        return tuple(endpoint.key for endpoint in self.endpoints)
+
+    @property
+    def targets(self) -> tuple[RuntimeEndpointTarget, ...]:
+        """Return unique owned runtime targets in binding order."""
+        targets: list[RuntimeEndpointTarget] = []
+        seen: set[tuple[str, str]] = set()
+        for endpoint in self.endpoints:
+            if endpoint.destination_key in seen:
+                continue
+            seen.add(endpoint.destination_key)
+            targets.append(endpoint.target.snapshot())
+        return tuple(targets)
+
+    def endpoint(
+        self,
+        slot_id: str,
+        endpoint_id: str,
+    ) -> EndpointBinding:
+        """Return one action-local resolved endpoint."""
+        key = (slot_id, endpoint_id)
+        for endpoint in self.endpoints:
+            if endpoint.key == key:
+                return endpoint.snapshot()
+        raise KeyError(
+            f"No endpoint is bound to {slot_id}.{endpoint_id}; available endpoints "
+            f"are {list(self.endpoint_keys)}."
+        )
+
+    def with_command_overrides(
+        self,
+        overrides: Mapping[tuple[str, str], Mapping[str, ControlCommand]],
+    ) -> ActionBinding:
+        """Return a binding snapshot with endpoint-scoped command overrides."""
+        if not isinstance(overrides, Mapping):
+            raise TypeError("overrides must be a mapping.")
+        unknown = set(overrides).difference(self.endpoint_keys)
+        if unknown:
+            raise KeyError(
+                f"Command overrides reference unbound endpoints {sorted(unknown)}."
+            )
+        return ActionBinding(
+            owner_id=self.owner_id,
+            endpoints=tuple(
+                (
+                    endpoint.with_commands(overrides[endpoint.key])
+                    if endpoint.key in overrides
+                    else endpoint
+                )
+                for endpoint in self.endpoints
             ),
         )
-        object.__setattr__(
-            self,
-            "end_effectors",
-            _normalize_resolved_map(
-                self.end_effectors, field_name="resolved end_effectors"
-            ),
-        )
-
-    def manipulator(self, role: str = "primary") -> ResolvedControlPart:
-        """Return the resolved manipulator for ``role``."""
-        try:
-            return self.manipulators[role]
-        except KeyError as exc:
-            raise KeyError(f"No manipulator is bound to role {role!r}.") from exc
-
-    def end_effector(self, role: str = "primary") -> ResolvedControlPart:
-        """Return the resolved tool/hand control part for ``role``."""
-        try:
-            return self.end_effectors[role]
-        except KeyError as exc:
-            raise KeyError(f"No end effector is bound to role {role!r}.") from exc
 
 
-__all__ = ["ActionBinding", "ResolvedActionBinding", "ResolvedControlPart"]
+__all__ = [
+    "ActionBinding",
+    "EndpointBinding",
+    "JointPositionTarget",
+    "RuntimeEndpointTarget",
+]

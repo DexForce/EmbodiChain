@@ -30,15 +30,13 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     EndEffectorPoseGoal,
     GraspGoal,
     HeldObjectPoseGoal,
-    PickUpOptions,
     MotionPolicy,
+    PickUpOptions,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -50,6 +48,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -122,20 +121,25 @@ def main() -> None:
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
                 grasp=hand_close,
             )
         },
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
+            )
+        },
     )
     semantics = create_antipodal_semantics(
         obj,
         label="paper_cup",
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
     )
     move_position = obj.get_local_pose(to_matrix=True)[0, :3, 3].clone()
     move_position[2] = 0.36
@@ -148,26 +152,24 @@ def main() -> None:
         sim, args, "Inspect the paper cup, then press Enter to plan..."
     )
 
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
-    )
+    motion_mapping = {"primary": {"motion": "arm"}}
+    manipulation_mapping = {"primary": {"motion": "arm", "grasp": "hand"}}
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "move_end_effector",
                 EndEffectorPoseGoal(move_target),
-                binding,
-                MotionPolicy(
+                control_parts=motion_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=MOVE_SAMPLE_INTERVAL,
                 ),
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(semantics),
-                binding,
-                MotionPolicy(
+                control_parts=manipulation_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICK_SAMPLE_INTERVAL,
                 ),
@@ -177,16 +179,17 @@ def main() -> None:
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "move_held_object",
                 HeldObjectPoseGoal(object_target),
-                binding,
-                MotionPolicy(
+                control_parts=manipulation_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
                 ),
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveHeldObject demo trajectory.")

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import select
 import sys
@@ -131,17 +132,20 @@ def _commit_pending_episode(
     env: Any,
     save_env_ids: Sequence[int] | torch.Tensor | None,
 ) -> None:
-    """Commit selected rows and discard unused rows from the same vector batch."""
+    """Commit selected dataset rows through one reset of the full vector batch."""
     selected = _normalize_save_env_ids(env, save_env_ids)
-    num_envs = int(getattr(_env_target(env), "num_envs", 1))
-    _reset_episode_rows(env, selected, save_data=True)
+    target = _env_target(env)
+    all_env_ids = tuple(range(int(getattr(target, "num_envs", 1))))
+    if selected == all_env_ids:
+        _reset_episode_rows(env, selected, save_data=True)
+        return
 
-    selected_set = set(selected)
-    discarded = tuple(
-        env_id for env_id in range(num_envs) if env_id not in selected_set
+    commit_env_ids = torch.tensor(
+        selected,
+        dtype=torch.int32,
+        device=getattr(target, "device", None),
     )
-    if discarded:
-        _reset_episode_rows(env, discarded, save_data=False)
+    env.reset(options={"save_data": False, "commit_env_ids": commit_env_ids})
 
 
 def _save_failed_episodes_enabled(env: Any) -> bool:
@@ -289,6 +293,16 @@ def generate_function(
             f"Episode {time_id} attempt {attempt}/{max_attempts} failed: "
             f"{result.terminal_reason}. Discarding {result.length} frames."
         )
+        if debug_mode:
+            log_warning(
+                "Failed demo trace: "
+                + json.dumps(
+                    result.to_metadata(),
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
 
     return False
 
@@ -740,6 +754,18 @@ def _create_parser() -> argparse.ArgumentParser:
 
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
     parser.set_defaults(viser_image_fps=None)
+
+    parser.add_argument(
+        "--task-program",
+        type=str,
+        default=None,
+        help="Path to a declarative Task Program (.json, .yaml, or .yml).",
+    )
+    parser.add_argument(
+        "--debug-mode",
+        action="store_true",
+        help="Log the structured trace for each failed demo attempt.",
+    )
 
     parser.add_argument(
         "--replay",

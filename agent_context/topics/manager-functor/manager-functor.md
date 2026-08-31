@@ -34,7 +34,7 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | `ObservationManager` | `ObservationCfg` | `modify`, `add` | `compute(obs) → EnvObs` |
 | `RewardManager` | `RewardCfg` | `add`, `replace` | `compute(obs, action, info) → (reward, info_dict)` |
 | `EventManager` | `EventCfg` | `startup`, `reset`, `interval`, user-defined | `apply(mode, env_ids)` |
-| `ActionManager` | `ActionTermCfg` | `pre`, `post` | `process_actions(actions) → EnvAction` |
+| `ActionManager` | `ActionTermCfg` | `pre`, `post` | `process_action(action, mode) → EnvAction` |
 | `DatasetManager` | `DatasetFunctorCfg` | `save` | `step(obs, action, done, info)` |
 
 ---
@@ -48,7 +48,7 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | `LeRobotRecorder` | `managers/datasets.py` | Synchronous. `__call__` runs convert + `add_frame` + `save_episode` inline, blocking `env.reset()`. Default; base class for the async variant. |
 | `AsyncLeRobotRecorder` | `managers/async_datasets.py` | Subclass. `__call__` clones the rollout-buffer slice (obs+actions) to CPU, enqueues it, and returns immediately. A single daemon worker thread drains the queue and runs the same `_save_single_episode` path. `finalize()` drains then calls `dataset.finalize()`. |
 
-**Save flow**: `env.step` writes each frame into `rollout_buffer` (`_hook_after_sim_step`). On truncation the caller does `env.reset(options={"save_data": True})` -> `_initialize_episode` -> `DatasetManager.apply("save", env_ids)`. `DatasetFunctorCfg.save_failed_episodes=True` saves every env on every reset (not only successes). `env.close()` -> `dataset_manager.finalize()` flushes any remaining buffer.
+**Save flow**: `env.step` writes each frame into `rollout_buffer` (`_hook_after_sim_step`). On truncation the caller does `env.reset(options={"save_data": True})` -> `_initialize_episode` -> `DatasetManager.apply("save", env_ids)`. For a final partial vector batch, `run-env` performs one full reset with `save_data=False` and `commit_env_ids`, so only selected **dataset** rows are persisted while whole-world reset events remain safe; camera and trajectory recorders retain their normal discard behavior. `DatasetFunctorCfg.save_failed_episodes=True` saves every env on every ordinary reset (not only successes). `env.close()` -> `dataset_manager.finalize()` flushes any remaining buffer.
 
 **Two independent speed levers** (both honor `image_writer_threads` / `image_writer_processes` in `params`, wired through to `LeRobotDataset.create()` -> lerobot `AsyncImageWriter`):
 - Opt A: `LeRobotRecorder` + `image_writer_threads=4` - per-frame PNG writes offloaded to a thread pool. ~2.5x faster, no background thread, bounded memory.
@@ -173,11 +173,18 @@ class compute_exteroception(Functor):
    - Groups functors by `mode` into `_mode_functor_names` / `_mode_functor_cfgs`.
 
 ### Per-step execution (env `step`)
-1. **Actions**: `ActionManager.process_actions(raw_actions)` → robot control commands.
+1. **Actions**: raw actions use `ActionManager.process_action(..., mode="pre")`;
+   explicit `ControllerAction` values skip `pre`. Both paths then pass through
+   `EmbodiedEnv._prepare_controller_action()` before robot control.
 2. **Sim step**: physics advances.
 3. **Observations**: `ObservationManager.compute(obs)` → updated obs dict.
 4. **Rewards**: `RewardManager.compute(obs, action, info)` → `(total_reward, reward_info)`.
 5. **Events**: `EventManager.apply("interval")` for interval-mode functors (step counter checked internally).
+
+After robot control and simulation, configured action terms in `post` mode run
+for both raw and `ControllerAction` inputs. `ControllerAction` is therefore not
+an alternate action manager; it marks that only the raw-policy preprocessing
+stage has already completed.
 
 ### On reset
 1. `EventManager.apply("reset", env_ids)` — domain randomization etc.
