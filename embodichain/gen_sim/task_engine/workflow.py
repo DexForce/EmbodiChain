@@ -48,7 +48,11 @@ from .config import (
 from .contracts import canonical_hash
 from .orchestration.artifacts import ArtifactTransaction
 from .orchestration.coordinator import PreparationResult, TaskEngineCoordinator
-from .orchestration.scene_adapter import CandidateSelection, SceneAdapter
+from .orchestration.scene_adapter import (
+    CandidateSelection,
+    SceneAdapter,
+    SceneAdapterProtocolError,
+)
 from .orchestration.scene_source import SceneSourceRef
 from .scene_backend import (
     SceneAnalysis,
@@ -441,6 +445,25 @@ class TaskEngineWorkflow:
                     self.scene_adapter,
                     force_most_likely=True,
                 )
+            except SceneAdapterProtocolError as exc:
+                state = fail_stage(
+                    state,
+                    WorkflowStage.CANDIDATE_SELECTION,
+                    reason=str(exc),
+                )
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status="failed",
+                    failure_class="candidate_selection",
+                )
             except Exception as exc:
                 state = fail_stage(
                     state,
@@ -457,8 +480,8 @@ class TaskEngineWorkflow:
                     run_metadata,
                     state,
                     attempts,
-                    status="input_conflict",
-                    failure_class="candidate_selection",
+                    status="failed",
+                    failure_class="internal_error",
                 )
             _write_json(
                 staging / "initial_binding_report.json", selection.binding_report

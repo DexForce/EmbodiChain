@@ -4350,6 +4350,71 @@ def test_turn_knob_requires_setting_map_and_reuses_twist() -> None:
         )
 
 
+def test_directional_spacing_accepts_articulation_reference() -> None:
+    moved = _FakeEntity("bowl", _pose(-0.3, 0.0, 0.75), _box_vertices(0.05))
+    reference = _FakeArticulation("microwave", 0.0)
+    reference.link_names = ["drawer_link"]
+    reference._pose = _pose(0.0, 0.0, 0.85)
+    reference._vertices = _rect_vertices(0.20, 0.15, 0.15)
+    program = load_execution_program(
+        compile_task_agent_v2(
+            _task_agent(
+                {
+                    "id": "place",
+                    "operator": "place_relative",
+                    "object": "bowl",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {
+                        "reference_object": "microwave",
+                        "relation": "left_of",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    env = _FakeEnv(
+        entities={"bowl": moved},
+        articulations={"microwave": reference},
+    )
+    grounder = ActionGrounder(program, env, lambda _uid: None)
+
+    spacing = grounder._relative_object_spacing(
+        "bowl",
+        "microwave",
+        axis=0,
+        nominal=0.0,
+        clearance=0.02,
+    )
+
+    assert spacing == pytest.approx(0.27)
+
+
+def test_relative_position_predicate_accepts_articulation_reference() -> None:
+    moved = _FakeEntity("bowl", _pose(-0.3, 0.0, 0.75), _box_vertices(0.05))
+    reference = _FakeArticulation("microwave", 0.0)
+    reference.link_names = ["drawer_link"]
+    reference._pose = _pose(0.0, 0.0, 0.85)
+    reference._vertices = _rect_vertices(0.20, 0.15, 0.15)
+    env = _FakeEnv(
+        entities={"bowl": moved},
+        articulations={"microwave": reference},
+    )
+
+    result = evaluate_predicate(
+        env,
+        {
+            "type": "object_relative_position",
+            "object": "bowl",
+            "reference_object": "microwave",
+            "relation": "left_of",
+            "minimum_distance": -1.0,
+        },
+    )
+
+    assert bool(result[0])
+
+
 def test_handover_clearance_verifier_checks_distance_and_transfer_side() -> None:
     entities = {
         "can": _FakeEntity("can", _pose(0.0, -0.2, 1.0), _box_vertices(0.03)),

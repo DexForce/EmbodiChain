@@ -69,6 +69,19 @@ _GENERATION_DEFAULTS = generation_defaults()
 _DEFAULT_TABLETOP_Z = float(_GENERATION_DEFAULTS["scene"]["default_tabletop_z"])
 _DEFAULT_GRIPPER_MODEL = str(_GENERATION_DEFAULTS["task"]["default_gripper_model"])
 _DEFAULT_IK_SOLVER = str(_GENERATION_DEFAULTS["task"]["default_ik_solver"])
+_USD_ARTICULATION_SUFFIXES = frozenset({".usd", ".usda", ".usdc"})
+_ARTICULATION_AUTHORING_KEYS = frozenset(
+    {
+        "attributes",
+        "category",
+        "description",
+        "is_articulated",
+        "name",
+        "proxy_body_scale",
+        "proxy_glb_fpath",
+        "role",
+    }
+)
 
 _ARM_SLOTS = {
     "left": {"arm": "left_arm", "eef": "left_eef"},
@@ -383,11 +396,7 @@ def build_fast_gym_config(
     }
     if scene.articulations:
         config["articulation"] = [
-            {
-                key: deepcopy(value)
-                for key, value in articulation.items()
-                if key not in {"attributes", "role"}
-            }
+            _runtime_articulation_config(articulation)
             for articulation in scene.articulations
         ]
     validate_fast_gym_config(config)
@@ -433,6 +442,17 @@ def validate_fast_gym_config(config: dict[str, Any]) -> None:
                 f"existing absolute file: {path}"
             )
 
+    for articulation in config.get("articulation", []):
+        path = Path(str(articulation.get("fpath", "")))
+        if (
+            path.suffix.lower() in _USD_ARTICULATION_SUFFIXES
+            and articulation.get("build_pk_chain") is not False
+        ):
+            raise ValueError(
+                f"USD articulation {articulation.get('uid')!r} must set "
+                "build_pk_chain=false."
+            )
+
     action_engine = config.get("env", {}).get("extensions", {}).get("action_engine", {})
     if action_engine.get("defaults_schema_version") != ACTION_ENGINE_DEFAULTS_SCHEMA:
         raise ValueError("Gym config has an unexpected defaults schema version.")
@@ -455,7 +475,6 @@ def validate_fast_gym_config(config: dict[str, Any]) -> None:
         or Path(graph_path).name != EXECUTION_PROGRAM_FILENAME
     ):
         raise ValueError("Gym config points to an unexpected SeedGraph artifact.")
-
     planning_mode = action_engine.get("planning_mode", "offline")
     _validate_planning_mode(planning_mode)
     if planning_mode == "ab":
@@ -481,6 +500,19 @@ def validate_fast_gym_config(config: dict[str, Any]) -> None:
     rigid_uids = {obj["uid"] for obj in config.get("rigid_object", [])}
     if registered != rigid_uids:
         raise ValueError("Every rigid object must have one live-pose registry entry.")
+
+
+def _runtime_articulation_config(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Reduce one source articulation to the simulator-facing config contract."""
+    result = {
+        key: deepcopy(item)
+        for key, item in value.items()
+        if key not in _ARTICULATION_AUTHORING_KEYS
+    }
+    path = Path(str(result.get("fpath", "")))
+    if path.suffix.lower() in _USD_ARTICULATION_SUFFIXES:
+        result["build_pk_chain"] = False
+    return result
 
 
 def _make_robot(

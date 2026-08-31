@@ -300,7 +300,10 @@ def _relocate_json_paths(staging: Path, destination: Path) -> None:
         if isinstance(value, list):
             return [relocate(item) for item in value]
         if isinstance(value, dict):
-            return {key: relocate(item) for key, item in value.items()}
+            return {
+                relocate(key) if isinstance(key, str) else key: relocate(item)
+                for key, item in value.items()
+            }
         return value
 
     for path in staging.rglob("*.json"):

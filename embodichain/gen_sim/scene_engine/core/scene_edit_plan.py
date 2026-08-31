@@ -47,8 +47,8 @@ class SceneEditOperation:
         name: Human-readable name required for an added object.
         description: Generation prompt and semantic description required for
             an added object.
-        orientation_state: Optional standing or lying intent for an added
-            object. Move operations may only preserve the existing state.
+        pose_description: Optional free-form pose intent for an added or moved
+            object.
     """
 
     op: SceneEditOperationType

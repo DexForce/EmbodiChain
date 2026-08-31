@@ -25,6 +25,9 @@ import json
 from pathlib import Path
 from typing import Any, Final
 
+from embodichain.gen_sim.scene_engine.clients.articulated_generation import (
+    ArticulatedGenerationClient,
+)
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
@@ -73,14 +76,15 @@ __all__ = [
     "materialize_edit",
 ]
 
-SCENE_BLUEPRINT_SCHEMA: Final = "embodichain.scene-blueprint/v1"
-SCENE_EDIT_BLUEPRINT_SCHEMA: Final = "embodichain.scene-edit-blueprint/v1"
+SCENE_BLUEPRINT_SCHEMA: Final = "embodichain.scene-blueprint/v2"
+SCENE_EDIT_BLUEPRINT_SCHEMA: Final = "embodichain.scene-edit-blueprint/v2"
 
 
 @dataclass(frozen=True)
 class SceneBlueprintPackage:
     """In-process scene semantics plus their persisted audit document."""
 
+    schema_version: str
     blueprint_id: str
     image_path: Path
     output_root: Path
@@ -88,17 +92,32 @@ class SceneBlueprintPackage:
     scene: Scene
     scene_graph: SceneGraph
 
+    def __post_init__(self) -> None:
+        if self.schema_version != SCENE_BLUEPRINT_SCHEMA:
+            raise ValueError(
+                "SceneBlueprintPackage schema_version must be "
+                f"{SCENE_BLUEPRINT_SCHEMA!r}."
+            )
+
 
 @dataclass(frozen=True)
 class SceneEditBlueprintPackage:
     """Validated edit intent before added assets and layout are materialized."""
 
+    schema_version: str
     blueprint_id: str
     edit_prompt: str
     output_root: Path
     manifest_path: Path
     scene_edit_plan: SceneEditPlan
     updated_scene_graph: SceneGraph
+
+    def __post_init__(self) -> None:
+        if self.schema_version != SCENE_EDIT_BLUEPRINT_SCHEMA:
+            raise ValueError(
+                "SceneEditBlueprintPackage schema_version must be "
+                f"{SCENE_EDIT_BLUEPRINT_SCHEMA!r}."
+            )
 
 
 @dataclass(frozen=True)
@@ -152,6 +171,7 @@ def analyze_image(
     manifest_path = resolved_output / "scene_blueprint.json"
     _write_json(manifest_path, document)
     return SceneBlueprintPackage(
+        schema_version=SCENE_BLUEPRINT_SCHEMA,
         blueprint_id=blueprint_id,
         image_path=resolved_image,
         output_root=resolved_output,
@@ -166,17 +186,24 @@ def materialize_blueprint(
     *,
     vlm_client: OpenAICompatibleVLM | None = None,
     geometry_generation_client: GeometryGenerationClient | None = None,
-    seed: int | None = None,
+    articulated_generation_client: ArticulatedGenerationClient | None = None,
 ) -> SceneMaterialization:
     """Generate assets and layout for one image-derived blueprint."""
     scene = deepcopy(blueprint.scene)
     scene_graph = deepcopy(blueprint.scene_graph)
     effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
     geometry = geometry_generation_client or GeometryGenerationClient.from_dotenv()
-    owns_geometry = geometry_generation_client is None
+    has_articulated_objects = any(item.is_articulated for item in scene.objects)
+    articulated = articulated_generation_client if has_articulated_objects else None
+    owns_articulated = False
     log_info("Starting Objects + Coarse Layout Generation")
     try:
+        if has_articulated_objects and articulated is None:
+            articulated = ArticulatedGenerationClient.from_dotenv()
+            owns_articulated = True
         geometry.check_health()
+        if articulated is not None:
+            articulated.check_health()
         scene = generate_scene_and_refine(
             image_path=blueprint.image_path,
             output_root=blueprint.output_root,
@@ -184,10 +211,12 @@ def materialize_blueprint(
             scene_graph=scene_graph,
             geometry_generation_client=geometry,
             vlm_client=effective_vlm,
-            seed=seed,
+            articulated_generation_client=articulated,
         )
     finally:
-        if owns_geometry:
+        if owns_articulated and articulated is not None:
+            articulated.close()
+        if geometry_generation_client is None:
             geometry.close()
     log_info("Completed Objects + Coarse Layout Generation")
     return _export_materialization(
@@ -230,6 +259,7 @@ def analyze_edit(
     manifest_path = resolved_output / "scene_edit" / "scene_edit_blueprint.json"
     _write_json(manifest_path, {**payload, "blueprint_id": blueprint_id})
     return SceneEditBlueprintPackage(
+        schema_version=SCENE_EDIT_BLUEPRINT_SCHEMA,
         blueprint_id=blueprint_id,
         edit_prompt=normalized_prompt,
         output_root=resolved_output,
@@ -246,7 +276,6 @@ def materialize_edit(
     image_generation_client: ImageGenerationClient | None = None,
     geometry_generation_client: GeometryGenerationClient | None = None,
     image_segmentation_client: ImageSegmentationClient | None = None,
-    seed: int | None = None,
 ) -> SceneMaterialization:
     """Generate added assets, apply layout edits, and export the new revision."""
     scene_edit_plan = deepcopy(blueprint.scene_edit_plan)
@@ -271,7 +300,6 @@ def materialize_edit(
             geometry_generation_client=geometry,
             image_segmentation_client=segmentation,
             vlm_client=effective_vlm,
-            seed=seed,
         )
     finally:
         for client, owned in owned_clients:

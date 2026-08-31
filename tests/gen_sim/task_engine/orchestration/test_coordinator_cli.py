@@ -313,6 +313,34 @@ def test_artifact_transaction_rolls_back_and_preserves_existing_output(
     assert not (output / "partial.txt").exists()
 
 
+def test_artifact_transaction_relocates_paths_in_json_mapping_keys(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "bundle"
+    with ArtifactTransaction(output) as transaction:
+        assert transaction.staging_dir is not None
+        staging = transaction.staging_dir.resolve().as_posix()
+        (transaction.staging_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "config_path": f"{staging}/scene/scene_config.json",
+                    "asset_sha256": {f"{staging}/scene/asset.usdc": "hash"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        transaction.commit()
+
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert (
+        manifest["config_path"]
+        == f"{output.resolve().as_posix()}/scene/scene_config.json"
+    )
+    assert list(manifest["asset_sha256"]) == [
+        f"{output.resolve().as_posix()}/scene/asset.usdc"
+    ]
+
+
 def test_prepare_rejects_output_overlapping_read_only_source(tmp_path: Path) -> None:
     source = tmp_path / "gym_project"
     source.mkdir()
@@ -765,6 +793,60 @@ def test_private_bundle_runner_forwards_arguments_without_leaking_sys_argv(
     assert sys.argv is original
     assert captured[0][-2:] == ["--seed", "7"]
     assert str(bundle / AGENT_CONFIG_FILENAME) in captured[0]
+
+
+def test_private_bundle_runner_normalizes_legacy_usdc_config(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / FAST_GYM_CONFIG_FILENAME
+    original = {
+        "articulation": [
+            {
+                "uid": "microwave",
+                "category": "microwave",
+                "is_articulated": True,
+                "fpath": "/scene/microwave.usdc",
+                "proxy_glb_fpath": "microwave.glb",
+            }
+        ]
+    }
+    source.write_text(json.dumps(original), encoding="utf-8")
+
+    with bundle_runner._runtime_gym_config(source) as runtime_path:
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+        assert runtime_path != source
+        assert runtime["articulation"] == [
+            {
+                "uid": "microwave",
+                "fpath": "/scene/microwave.usdc",
+                "build_pk_chain": False,
+            }
+        ]
+        temporary_path = runtime_path
+
+    assert not temporary_path.exists()
+    assert json.loads(source.read_text(encoding="utf-8")) == original
+
+
+def test_private_bundle_runner_reuses_normalized_gym_config(tmp_path: Path) -> None:
+    source = tmp_path / FAST_GYM_CONFIG_FILENAME
+    source.write_text(
+        json.dumps(
+            {
+                "articulation": [
+                    {
+                        "uid": "microwave",
+                        "fpath": "/scene/microwave.usdc",
+                        "build_pk_chain": False,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with bundle_runner._runtime_gym_config(source) as runtime_path:
+        assert runtime_path == source
 
 
 @pytest.mark.parametrize(

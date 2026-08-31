@@ -90,7 +90,9 @@ def _batched_pose(value: Any, env: Any) -> torch.Tensor:
 def _object(env: Any, uid: str) -> Any:
     entity = env.sim.get_rigid_object(uid)
     if entity is None:
-        raise ValueError(f"Unknown rigid object {uid!r}.")
+        entity = getattr(env.sim, "get_articulation", lambda _uid: None)(uid)
+    if entity is None:
+        raise ValueError(f"Unknown scene entity {uid!r}.")
     return entity
 
 
@@ -129,9 +131,35 @@ def _local_vertices(entity: Any, env: Any, env_id: int = 0) -> torch.Tensor:
 
 
 def _world_vertices(entity: Any, env: Any, env_id: int) -> torch.Tensor:
-    vertices = _local_vertices(entity, env, env_id)
-    pose = _batched_pose(entity.get_local_pose(to_matrix=True), env)[env_id]
-    return vertices @ pose[:3, :3].transpose(0, 1) + pose[:3, 3]
+    get_vertices = getattr(entity, "get_vertices", None)
+    if callable(get_vertices):
+        vertices = _local_vertices(entity, env, env_id)
+        pose = _batched_pose(entity.get_local_pose(to_matrix=True), env)[env_id]
+        return vertices @ pose[:3, :3].transpose(0, 1) + pose[:3, 3]
+
+    get_link_vertices = getattr(entity, "get_link_vert_face", None)
+    get_link_pose = getattr(entity, "get_link_pose", None)
+    link_names = getattr(entity, "link_names", ())
+    if not callable(get_link_vertices) or not callable(get_link_pose) or not link_names:
+        raise ValueError("Scene entity exposes no usable collision geometry.")
+    world_vertices = []
+    for link_name in link_names:
+        vertices, _ = get_link_vertices(link_name)
+        vertices = torch.as_tensor(
+            vertices,
+            dtype=torch.float32,
+            device=env.device,
+        )
+        if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+            continue
+        pose = _batched_pose(
+            get_link_pose(link_name, to_matrix=True),
+            env,
+        )[env_id]
+        world_vertices.append(vertices @ pose[:3, :3].transpose(0, 1) + pose[:3, 3])
+    if not world_vertices:
+        raise ValueError("Scene articulation exposes no usable link geometry.")
+    return torch.cat(world_vertices, dim=0)
 
 
 @dataclass(frozen=True)

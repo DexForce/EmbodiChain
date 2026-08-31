@@ -77,10 +77,17 @@ def _constant(env: Any, value: bool) -> torch.Tensor:
     )
 
 
-def _pose(env: Any, uid: str) -> torch.Tensor:
+def _entity(env: Any, uid: str) -> Any:
     entity = env.sim.get_rigid_object(uid)
     if entity is None:
-        raise ValueError(f"Unknown rigid object {uid!r}.")
+        entity = getattr(env.sim, "get_articulation", lambda _uid: None)(uid)
+    if entity is None:
+        raise ValueError(f"Unknown scene entity {uid!r}.")
+    return entity
+
+
+def _pose(env: Any, uid: str) -> torch.Tensor:
+    entity = _entity(env, uid)
     pose = torch.as_tensor(
         entity.get_local_pose(to_matrix=True),
         dtype=torch.float32,
@@ -96,9 +103,7 @@ def _position(env: Any, uid: str) -> torch.Tensor:
 
 
 def _world_vertices(env: Any, uid: str, env_id: int) -> torch.Tensor:
-    entity = env.sim.get_rigid_object(uid)
-    if entity is None:
-        raise ValueError(f"Unknown rigid object {uid!r}.")
+    entity = _entity(env, uid)
     value = entity.get_vertices(env_ids=[env_id], scale=True)
     if isinstance(value, (tuple, list)):
         value = value[0]
@@ -118,7 +123,7 @@ def _projected_center_of_mass(
     world_vertices: torch.Tensor,
 ) -> torch.Tensor:
     """Return the live COM projection, with a geometry-center fallback."""
-    entity = env.sim.get_rigid_object(uid)
+    entity = _entity(env, uid)
     body_data = None if entity is None else getattr(entity, "body_data", None)
     com_pose = None if body_data is None else getattr(body_data, "com_pose", None)
     if callable(com_pose):
@@ -244,9 +249,7 @@ def _local_axis_index(env: Any, uid: str, axis: Any) -> int:
     }.get(name)
     if geometry_axis is None:
         raise ValueError(f"Unsupported upright local axis {axis!r}.")
-    entity = env.sim.get_rigid_object(uid)
-    if entity is None:
-        raise ValueError(f"Unknown rigid object {uid!r}.")
+    entity = _entity(env, uid)
     vertices = entity.get_vertices(env_ids=[0], scale=True)
     if isinstance(vertices, (tuple, list)):
         vertices = vertices[0]

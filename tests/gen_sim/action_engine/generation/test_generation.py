@@ -48,6 +48,7 @@ from embodichain.gen_sim.action_engine.generation import (
 from embodichain.gen_sim.action_engine.generation.config_builder import (
     build_agent_config,
     build_fast_gym_config,
+    validate_fast_gym_config,
 )
 from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
 from embodichain.gen_sim.action_engine.generation.generator import (
@@ -393,6 +394,80 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
     assert config["env"]["observations"]["norm_robot_eef_joint"]["params"][
         "joint_ids"
     ] == [14, 16]
+
+
+def test_fast_gym_config_normalizes_usdc_articulation_runtime_fields(
+    gym_export: Path,
+) -> None:
+    usdc_path = gym_export / "microwave.usdc"
+    usdc_path.write_bytes(b"PXR-USDC")
+    source_path = gym_export / "gym_config.json"
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["articulation"] = [
+        {
+            "uid": "microwave_001",
+            "category": "microwave",
+            "name": "silver microwave",
+            "description": "A countertop microwave.",
+            "is_articulated": True,
+            "fpath": usdc_path.name,
+            "proxy_glb_fpath": "mesh_assets/can.glb",
+            "proxy_body_scale": [1.0, 1.0, 1.0],
+            "init_pos": [0.2, 0.0, 0.7],
+            "init_rot": [0.0, 0.0, 0.0],
+            "body_scale": [1.0, 1.0, 1.0],
+            "fix_base": True,
+        }
+    ]
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    config = build_fast_gym_config(
+        prepare_scene(gym_export),
+        task_name="microwave_reference",
+        task_description="Place the can beside the microwave.",
+        robot_profile="franka",
+        execution_program_hash="a" * 64,
+        max_episodes=1,
+        max_episode_steps=2000,
+    )
+
+    articulation = config["articulation"][0]
+    assert articulation["fpath"] == usdc_path.resolve().as_posix()
+    assert articulation["build_pk_chain"] is False
+    assert (
+        not {
+            "category",
+            "name",
+            "is_articulated",
+            "proxy_glb_fpath",
+            "proxy_body_scale",
+        }
+        & articulation.keys()
+    )
+
+
+def test_fast_gym_config_rejects_usdc_with_pk_chain(gym_export: Path) -> None:
+    config = build_fast_gym_config(
+        prepare_scene(gym_export),
+        task_name="invalid_usdc",
+        task_description="Reject an invalid runtime articulation.",
+        robot_profile="franka",
+        execution_program_hash="a" * 64,
+        max_episodes=1,
+        max_episode_steps=2000,
+    )
+    usdc_path = gym_export / "invalid.usdc"
+    usdc_path.write_bytes(b"PXR-USDC")
+    config["articulation"] = [
+        {
+            "uid": "microwave_001",
+            "fpath": usdc_path.resolve().as_posix(),
+            "build_pk_chain": True,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="must set build_pk_chain=false"):
+        validate_fast_gym_config(config)
 
 
 def test_offline_recording_can_be_disabled_but_ab_keeps_audience_recorder(
