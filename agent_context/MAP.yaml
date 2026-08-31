@@ -530,8 +530,11 @@ topics:
       - embodichain_tasks/configs/tasks/
       - embodichain_tasks/configs/tasks/classic_control/
       - embodichain_tasks/configs/tasks/manipulation/push_cube/
+      - embodichain_tasks/configs/tasks/manipulation/franka_waypoint/
       - embodichain_tasks/embodichain_tasks/classic_control/
+      - embodichain_tasks/embodichain_tasks/manipulation/franka_waypoint.py
       - embodichain_tasks/embodichain_tasks/manipulation/push_cube.py
+      - scripts/tools/rl/validate_franka_waypoint_nmg.py
     related_topics:
       - simulation-system
       - env-framework

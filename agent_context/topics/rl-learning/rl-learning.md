@@ -198,11 +198,15 @@ currently support this distributed path.
 | PushCube | registered simulator Gym env | `embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
 | PointMass PPO | registered lightweight env, standard rollout | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
 | PointMass APG | differentiable lightweight env | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
+| Franka waypoint NMG | Newton FK, scheduled complete-rollout APG | `embodichain_tasks/configs/tasks/manipulation/franka_waypoint/agents/apg.yaml` |
 | Newton planar reach | experimental differentiable FK reference | `embodichain/learning/rl/experimental/newton/` |
 
 `PointMassRL` is the reference environment for comparing standard and
 differentiable training over the same task dynamics. The Newton planar-reach
 example is an experimental gradient reference, not a general simulator task.
+The Franka waypoint task is registered as `FrankaWaypointNMG-v0`; use
+`scripts/tools/rl/validate_franka_waypoint_nmg.py` to compare its generated
+tasks, differentiable step, and one full APG update against the PR #6 checkout.
 
 ## Extension Points
 

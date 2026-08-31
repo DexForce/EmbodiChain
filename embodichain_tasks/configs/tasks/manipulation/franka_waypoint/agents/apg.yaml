@@ -1,0 +1,91 @@
+# Franka waypoint NMG training parity with neural_motion_generator PR #6.
+trainer:
+  exp_name: franka_waypoint_nmg_apg
+  learning_env:
+    name: FrankaWaypointNMG-v0
+    cfg:
+      action_scale: 0.2
+      num_waypoints: 8
+      waypoint_min_num_waypoints: 1
+      waypoint_fixed_num_waypoints: 0
+      waypoint_pos_threshold: 0.01
+      waypoint_pos_weight: 0.0
+      waypoint_rot_threshold: 0.1
+      waypoint_rot_weight: 0.1
+      waypoint_rot_precision_weight: 0.02
+      waypoint_pose_constraint_weight: 0.002
+      waypoint_pose_constraint_aggregation: max
+      waypoint_pose_feasibility_weight: 0.0
+      waypoint_pose_feasibility_beta: 4.0
+      waypoint_pose_violation_weight: 0.0
+      waypoint_pose_violation_beta: 4.0
+      waypoint_space: cartesian
+      waypoint_joint_weight: 0.1
+      waypoint_joint_threshold: 0.02
+      waypoint_joint_exp_scale: 0.7
+      waypoint_joint_dense_peak: 0.2
+      waypoint_joint_precision_exp_scale: 0.01
+      waypoint_joint_precision_dense_peak: 0.1
+      waypoint_joint_fraction: 0.5
+      waypoint_distance_bucket_lowers: [0.25, 1.0, 2.0, 4.0, 8.0]
+      waypoint_joint_limit_margin: 0.05
+      waypoint_sampling_max_retries: 64
+      waypoint_se3_translation_range: [0.03, 0.20]
+      waypoint_se3_rotation_range: [0.15, 1.50]
+      waypoint_se3_ik_iterations: 24
+      waypoint_se3_ik_max_retries: 10
+      waypoint_intermediate_orientation: true
+      waypoint_bonus: 1.0
+      waypoint_use_relative_obs: true
+      waypoint_steps_per_waypoint: 30
+      canonicalize_quat_obs: true
+      headless: true
+  seed: 1
+  torch_deterministic: true
+  device: cuda:0
+  num_envs: 512
+  # 544 complete K=1..8 cycles, eight optimizer updates per cycle.
+  total_timesteps: 300810240
+  iterations: 4352
+  rollout_mode: complete
+  segment_length: 240
+  update_horizon: 240
+  gradient_accumulation_steps: 1
+  deterministic_actions: true
+  clip_actions_to_space: true
+  action_adjoint_max_norm: 1.0
+  normalize_observations: true
+  # Reference-parity validation is run separately on fixed tasks so evaluation
+  # cannot perturb the training task RNG stream.
+  enable_eval: false
+  save_frequency_updates: 544
+  use_wandb: false
+  wandb_project_name: neural_motion_generator
+
+policy:
+  name: actor_only
+  initial_log_std: -2.0
+  actor:
+    type: waypoint_transformer
+    network_cfg:
+      num_waypoints: 8
+      joint_dim: 7
+      use_relative_observations: true
+      hidden_dim: 128
+      num_attention_heads: 4
+      num_layers: 2
+      feedforward_dim: 0
+
+algorithm:
+  name: apg
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.00025
+      kwargs:
+        eps: 0.00001
+    gamma: 1.0
+    max_grad_norm: 0.5
+    ent_coef: 0.0
+    skip_nonfinite_updates: true
+    max_grad_norm_before_clip: 10000.0

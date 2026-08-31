@@ -2113,6 +2113,17 @@ embodichain_tasks.configs
 
    get_config_path
 
+embodichain_tasks.manipulation.franka_waypoint
+-----------------------------------------------
+
+Newton FK Franka waypoint task aligned with the full-horizon NMG APG contract.
+
+.. currentmodule:: embodichain_tasks.manipulation.franka_waypoint
+
+.. autosummary::
+
+   FrankaWaypointNMGEnv
+
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
 
