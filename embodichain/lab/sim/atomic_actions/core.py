@@ -545,13 +545,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             raise ValueError("Trajectory and planning context batch sizes must match.")
         if timed.robot_dof != context.robot.robot_dof:
             raise ValueError("Trajectory robot_dof must match the planning context.")
+        planner = (
+            None
+            if self._planning_services is None
+            else self._planning_services.motion_generator.planner
+        )
         preserve_failed_positions = (
-            getattr(
-                self.motion_generator.planner,
-                "preserve_failed_plan_positions",
-                False,
-            )
-            is True
+            getattr(planner, "preserve_failed_plan_positions", False) is True
         )
         if not preserve_failed_positions:
             timed = timed.hold_rows(success_mask, context.robot.qpos)

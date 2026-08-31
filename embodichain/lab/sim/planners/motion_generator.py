@@ -213,6 +213,11 @@ class MotionGenerator:
         )
 
     @property
+    def supports_heterogeneous_waypoints(self) -> bool:
+        """Whether the selected backend accepts mixed waypoint movement types."""
+        return getattr(self.planner, "supports_heterogeneous_waypoints", False) is True
+
+    @property
     def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
         """Return canonical dynamic-obstacle IDs declared by the planner."""
         info = self.collision_world_info
@@ -488,11 +493,19 @@ class MotionGenerator:
             )
 
         move_types = {state.move_type for state in target_states}
-        if len(move_types) != 1:
+        heterogeneous = len(move_types) > 1
+        if heterogeneous and not self.supports_heterogeneous_waypoints:
             names = sorted(move_type.name for move_type in move_types)
-            raise ValueError(f"All target states must share move_type; got {names}.")
+            raise ValueError(
+                f"{type(self.planner).__name__} does not support heterogeneous "
+                f"waypoints; got {names}."
+            )
+        if heterogeneous and options.strategy == "ik_interp":
+            raise ValueError(
+                "strategy='ik_interp' does not support heterogeneous waypoints."
+            )
         move_type = target_states[0].move_type
-        use_interpolation = (
+        use_interpolation = not heterogeneous and (
             options.preserve_cartesian_samples
             or options.strategy == "ik_interp"
             or (
@@ -512,9 +525,11 @@ class MotionGenerator:
         options: MotionGenOptions,
     ) -> PlanResult:
         """Dispatch batched targets through the configured planner backend."""
+        move_types = {state.move_type for state in target_states}
         move_type = target_states[0].move_type
         should_preinterpolate = (
-            options.is_interpolate
+            len(move_types) == 1
+            and options.is_interpolate
             and not self.planner.supports_move_type(MoveType.EEF_MOVE)
             and self.planner.supports_move_type(MoveType.JOINT_MOVE)
         )
@@ -566,9 +581,11 @@ class MotionGenerator:
         else:
             target_plan_states = target_states
 
-        unsupported_move_types = (
-            set() if self.planner.supports_move_type(move_type) else {move_type}
-        )
+        unsupported_move_types = {
+            candidate
+            for candidate in move_types
+            if not self.planner.supports_move_type(candidate)
+        }
         if not should_preinterpolate and unsupported_move_types:
             unsupported_names = sorted(
                 move_type.name for move_type in unsupported_move_types

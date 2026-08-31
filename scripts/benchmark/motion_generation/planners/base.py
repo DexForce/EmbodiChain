@@ -68,12 +68,14 @@ class PlannerAdapter(ABC):
             adapter=self.spec.adapter,
             config_hash=stable_hash(self.spec.config),
             capabilities=self.capabilities,
-            model_revision=str(
-                self.spec.config.get("model_revision", self.model_revision)
-            ),
+            model_revision=self._resolved_model_revision(),
             supported_robots=(self.context.robot_id,),
             parameters=dict(self.spec.config),
         )
+
+    def _resolved_model_revision(self) -> str:
+        """Resolve the recorded model identity for this planner instance."""
+        return str(self.spec.config.get("model_revision", self.model_revision))
 
     def availability(self) -> tuple[bool, str | None]:
         """Return whether this adapter can run in the current process."""

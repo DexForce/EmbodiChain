@@ -381,6 +381,46 @@ def test_neural_planner_builds_joint_constraint_observation(tmp_path, monkeypatc
     assert obs[0, waypoint_type_start].item() == pytest.approx(2.0)
 
 
+def test_neural_planner_parses_ordered_pose_then_joint_sequence(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+    pose = torch.eye(4).unsqueeze(0)
+    joint = torch.tensor([[0.1, -0.2, 0.3, 0.0, 0.2, -0.1, 0.4]])
+
+    (
+        _,
+        _,
+        parsed_joint,
+        valid,
+        pos_mask,
+        rot_mask,
+        joint_mask,
+        episode_k,
+    ) = planner._parse_waypoints(
+        [
+            PlanState.from_xpos(pose, move_type=MoveType.EEF_MOVE),
+            PlanState.from_qpos(joint, move_type=MoveType.JOINT_MOVE),
+        ]
+    )
+
+    assert episode_k == 2
+    assert torch.equal(valid[0, :2], torch.ones(2))
+    assert torch.equal(pos_mask[0, :2], torch.tensor([1.0, 0.0]))
+    assert torch.equal(rot_mask[0, :2], torch.tensor([1.0, 0.0]))
+    assert torch.equal(joint_mask[0, :2], torch.tensor([0.0, 1.0]))
+    assert torch.allclose(parsed_joint[0, 1], joint[0])
+
+
 def test_neural_planner_accepts_joint_move_goal(tmp_path, monkeypatch):
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()

@@ -208,6 +208,7 @@ class NeuralPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    supports_heterogeneous_waypoints = True
     preserve_plan_samples = True
     """Keep native closed-loop states instead of distance-resampling them."""
     preserve_failed_plan_positions = True
@@ -600,8 +601,19 @@ class NeuralPlanner(BasePlanner):
             active_rel_quat = _quat_mul_xyzw(active_quat, inv_eef)
             if getattr(self, "_canonicalize_quat_obs", False):
                 active_rel_quat = _canonicalize_quat_xyzw(active_rel_quat)
+            active_pos_mask = pos_mask[idx, active_idx_clamped].unsqueeze(-1)
+            active_rot_mask = rot_mask[idx, active_idx_clamped].unsqueeze(-1)
+            active_rel_quat = torch.where(
+                active_rot_mask > 0.5,
+                active_rel_quat,
+                identity.view(1, 4),
+            )
             active_cart_rel = torch.cat(
-                [active_pos - ee_pose[:, :3], active_rel_quat], dim=-1
+                [
+                    (active_pos - ee_pose[:, :3]) * active_pos_mask,
+                    active_rel_quat,
+                ],
+                dim=-1,
             )
             active_rel = torch.where(
                 (joint_mask[idx, active_idx_clamped] > 0.5).unsqueeze(-1),

@@ -32,6 +32,8 @@ class TestNeuralParseWaypoints:
         planner = NeuralPlanner.__new__(NeuralPlanner)
         planner.device = torch.device("cpu")
         planner._num_waypoints = 4
+        planner._action_dim = 7
+        planner._intermediate_orientation = True
         _set_identity_policy_frames(planner)
         B = 3
         states = [
@@ -41,10 +43,16 @@ class TestNeuralParseWaypoints:
             )
             for _ in range(2)
         ]
-        pos, quat, mask, k = planner._parse_waypoints(states)
+        pos, quat, joint, mask, pos_mask, rot_mask, joint_mask, k = (
+            planner._parse_waypoints(states)
+        )
         assert pos.shape == (B, 4, 3)
         assert quat.shape == (B, 4, 4)
+        assert joint.shape == (B, 4, 7)
         assert mask.shape == (B, 4)
+        assert torch.equal(pos_mask, mask)
+        assert torch.equal(rot_mask, mask)
+        assert torch.count_nonzero(joint_mask) == 0
         assert k == 2
 
 
@@ -63,6 +71,7 @@ class TestNeuralPlanBatched:
         planner._max_steps = 5
         planner._pos_eps = 1e9  # always reached
         planner._rot_eps = 1e9
+        planner._joint_eps = 1e9
         planner._intermediate_orientation = True
         planner._use_relative_obs = False
         planner._obs_dim = 101
@@ -130,6 +139,7 @@ class TestNeuralEarlyConvergenceHold:
         planner._max_steps = 5
         planner._pos_eps = 1e9
         planner._rot_eps = 1e9
+        planner._joint_eps = 1e9
         planner._intermediate_orientation = True
         planner._use_relative_obs = False
         planner._obs_dim = 101
@@ -172,7 +182,17 @@ class TestNeuralEarlyConvergenceHold:
         # episode_k = 2 (2 waypoints). Env 0: reached=True every step ->
         #   active_idx 0->1 (step0), 1->2 (step1) => converges after step 1.
         # Envs 1,2: reached=False always -> never converge within max_steps.
-        def fake_reach(ee_pose, wp_pos, wp_quat, active_idx, episode_k):
+        def fake_reach(
+            joint_pos,
+            ee_pose,
+            wp_pos,
+            wp_quat,
+            wp_joint,
+            pos_mask,
+            rot_mask,
+            joint_mask,
+            active_idx,
+        ):
             r = torch.zeros(ee_pose.shape[0], dtype=torch.bool, device=ee_pose.device)
             r[0] = True
             return r

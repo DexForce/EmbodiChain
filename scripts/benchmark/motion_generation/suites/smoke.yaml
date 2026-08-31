@@ -42,7 +42,6 @@ planners:
     role: candidate
     enabled: false
     config:
-      model_revision: nmg-onnx-v1
       onnx_model_path: null
       num_waypoints: 8
       max_steps: 240

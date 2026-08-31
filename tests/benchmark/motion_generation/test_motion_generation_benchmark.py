@@ -368,6 +368,29 @@ def test_nmg_precision_and_external_accuracy_are_independently_configurable():
     assert nmg.config["rot_eps"] == pytest.approx(0.20)
 
 
+def test_nmg_model_revision_is_derived_from_runtime_model_path():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"onnx_model_path": "/models/unified-k3.onnx"},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+
+    assert adapter.metadata.model_revision == "unified-k3"
+
+
 def test_seed_override_applies_to_atomic_tracks():
     suite = load_suite("atomic_franka_pgi_curobo_randomized")
 

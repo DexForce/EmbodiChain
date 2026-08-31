@@ -51,11 +51,20 @@ class NmgOnnxAdapter(PlannerAdapter):
             "atomic_action",
         }
     )
-    model_revision = "nmg-onnx-v1"
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)
         self.motion_generator: MotionGenerator | None = None
+
+    def _resolved_model_revision(self) -> str:
+        """Use an explicit revision or derive one from the runtime ONNX path."""
+        configured = self.spec.config.get("model_revision")
+        if configured:
+            return str(configured)
+        model_path = self.spec.config.get("onnx_model_path")
+        if model_path:
+            return Path(str(model_path)).expanduser().stem
+        return super()._resolved_model_revision()
 
     def availability(self) -> tuple[bool, str | None]:
         """Require ONNX Runtime and a resolved standalone policy path."""

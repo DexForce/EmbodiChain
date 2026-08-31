@@ -162,6 +162,56 @@ def test_direct_cartesian_planner_requires_joint_fallback_inputs():
         )
 
 
+def test_motion_generator_dispatches_heterogeneous_waypoints_by_capability():
+    planner = Mock()
+    planner.supports_heterogeneous_waypoints = True
+    planner.supports_move_type.side_effect = lambda move_type: move_type in {
+        MoveType.EEF_MOVE,
+        MoveType.JOINT_MOVE,
+    }
+    planner.preserve_plan_samples = True
+    planner.default_plan_options.return_value = PlanOptions()
+    planner.with_motion_context.side_effect = (
+        lambda options, *, start_qpos, control_part: options
+    )
+    planner.plan.return_value = PlanResult(
+        success=torch.ones(1, dtype=torch.bool),
+        positions=torch.zeros(1, 5, 2),
+        dt=torch.full((1, 5), 0.01),
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = torch.device("cpu")
+    targets = [
+        PlanState.from_xpos(torch.eye(4).unsqueeze(0)),
+        PlanState.from_qpos(torch.zeros(1, 2)),
+    ]
+
+    result = generator.generate(
+        targets,
+        MotionGenOptions(start_qpos=torch.zeros(1, 2), control_part="arm"),
+    )
+
+    assert result.success.all().item()
+    assert planner.plan.call_args.kwargs["target_states"] is targets
+
+
+def test_motion_generator_rejects_heterogeneous_waypoints_without_capability():
+    planner = _DirectCartesianPlanner()
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = torch.device("cpu")
+
+    with pytest.raises(ValueError, match="does not support heterogeneous"):
+        generator.generate(
+            [
+                PlanState.from_xpos(torch.eye(4).unsqueeze(0)),
+                PlanState.from_qpos(torch.zeros(1, 2)),
+            ],
+            MotionGenOptions(start_qpos=torch.zeros(1, 2), control_part="arm"),
+        )
+
+
 def test_bind_collision_world_copies_caller_options() -> None:
     planner = Mock()
     planner.collision_world_info = _collision_world_info(("obstacle",))

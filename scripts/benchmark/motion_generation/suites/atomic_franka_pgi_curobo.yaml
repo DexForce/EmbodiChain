@@ -14,7 +14,6 @@ planners:
     role: candidate
     enabled: false
     config:
-      model_revision: nmg-cartesian-k1-3-900m
       onnx_model_path: null
       num_waypoints: 3
       max_steps: 240
