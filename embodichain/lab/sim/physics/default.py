@@ -59,15 +59,13 @@ class DefaultPhysicsBackend(PhysicsBackend):
         return self._manager._world.get_physics_scene()
 
     # -- capabilities --------------------------------------------------- #
-    # The default backend supports deformables on GPU; the GPU
-    # precondition itself is enforced separately in SimulationManager.
     @property
     def supports_volume_deformables(self) -> bool:
-        return True
+        return False
 
     @property
     def supports_surface_deformables(self) -> bool:
-        return True
+        return False
 
     @property
     def supports_rigid_object_group(self) -> bool:

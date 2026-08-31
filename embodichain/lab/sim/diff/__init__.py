@@ -13,24 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Differentiable Newton stepping for EmbodiChain.
+"""Differentiable Newton kinematics for EmbodiChain.
 
-Bridges DexSim's manager-owned differentiable trajectory transaction into
-PyTorch autograd via a :class:`torch.autograd.Function`, and exposes a
-:class:`tape_context` manager for advanced users who want to compose their
-own Warp kernels.
+Bridges task-defined Warp kinematics into PyTorch autograd and exposes a
+:class:`tape_context` manager for advanced users composing their own kernels.
+The package does not advance the Newton dynamics solver.
 """
 
 from __future__ import annotations
 
 from .bridge import (
     NewtonStepFunc,
-    differentiable_step,
     tape_context,
 )
 
 __all__ = [
     "NewtonStepFunc",
-    "differentiable_step",
     "tape_context",
 ]

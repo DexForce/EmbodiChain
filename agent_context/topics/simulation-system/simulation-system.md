@@ -117,21 +117,25 @@ Deformables use the same public hierarchy for both topologies:
 `DeformableObjectCfg` is specialized by `VolumeDeformableObjectCfg` and
 `SurfaceDeformableObjectCfg`; `SoftObjectCfg` and `ClothObjectCfg` remain
 compatibility subclasses. `objects/deformable/` owns the common
-`DeformableObject`/`DeformableObjectData` contract and the DexSim volume and
-surface implementations. Consumers should use `data.nodal_pos_w`,
+`DeformableObject`/`DeformableObjectData` contract and the Newton particle-set
+volume and surface implementations. Consumers should use `data.nodal_pos_w`,
 `data.nodal_vel_w`, `data.nodal_state_w`, `get_surface_vertices()`, and
 `get_surface_triangles()`. Legacy soft/cloth methods delegate to that contract.
 At the Spawn boundary, volume and surface configs translate to DexSim's typed
-`SoftBodyDesc` and `ClothDesc` particle-set descriptors. Their Default-native
-attributes are carried by `DexsimSoftBodyPhysicsDesc` and
-`DexsimClothPhysicsDesc`; volume voxel settings use `SoftBodyMeshingDesc`.
+`SoftBodyDesc` and `ClothDesc` particle-set descriptors; volume voxel
+settings use `SoftBodyMeshingDesc`.
 
 `SimulationManager` stores both topologies once in `_deformable_objects` and
 exposes `add/get_deformable_object()` plus filtered legacy soft/cloth APIs.
-Only the Default backend is registered today and still requires CUDA.
-Backend capability flags and `_DEFORMABLE_BACKEND_IMPLEMENTATIONS` reserve the
-Newton integration boundary; Newton volume/surface support must remain disabled
-until native object and data adapters are implemented and validated.
+Only the Newton backend is registered; the Default backend intentionally
+reports both deformable capabilities as unsupported. Declaration requires CUDA
+and a particle-capable Newton solver (`xpbd`, `semi_implicit`, `vbd`, or
+`mjvbd`), rejects gradient mode and post-finalization additions, and compiles
+directly to DexSim 0.5 `SoftBodyDesc` or `ClothDesc`. Runtime state is fetched
+and applied through `Scene.create_particle_set_batch()`; direct DexSim
+`SoftBody`/`ClothBody` buffers and the old utility loaders are not supported.
+Volume collision topology comes from the typed particle-set handle, while
+render topology and vertices remain a separate visualization surface.
 
 `BaseEnv._setup_scene()` temporarily constructs the manager headlessly so
 the scene can be assembled before a native window is opened. It sets
@@ -193,7 +197,7 @@ readiness path defensively before advancing the requested physics steps.
 | Backend-neutral batched state/property access | `objects/backends/spawn.py` | `simulation-system` |
 | Shared object, render, physics, drive, and URDF configs | `cfg/` domain modules; `cfg/__init__.py` preserves the public import surface | `configclass-pattern` for config mechanics |
 | Rigid, articulation, robot, light, constraint, gizmo | `objects/` | `robot-system` for robots |
-| Common deformable contract and DexSim volume/surface adapters | `objects/deformable/` | `sim-visualization` for export |
+| Common deformable contract and Newton particle-set adapters | `objects/deformable/` | `sim-visualization` for export |
 | Camera, stereo camera, contact sensor | `sensors/` | `sensor-system` |
 | Robot-specific configuration | `robots/` | `robot-system` |
 | Inverse kinematics | `solvers/` | `ik-solvers` |
@@ -249,9 +253,13 @@ module or the corresponding robot/sensor module. Scene composition belongs in
 Deformable configs use an explicit `deformable_type: volume|surface`
 discriminator. Common source mesh and pose fields stay on
 `DeformableObjectCfg`; tetrahedral voxelization/soft-body attributes stay on
-the volume subclass, and cloth attributes stay on the surface subclass. Do not
-add backend conditionals to one monolithic deformable config. Add a backend
-implementation at the manager dispatch boundary when its runtime exists.
+the volume subclass, and Newton triangle/edge/spring attributes stay on the
+surface subclass. `particle_radius` and `validate_mesh` are common particle-set
+options. The volume descriptor converts Young's modulus and Poisson's ratio to
+Newton Lamé coefficients. Removed Default-only fields are deliberately not
+translated or silently ignored. Do not add backend conditionals to one
+monolithic deformable config; a future implementation belongs at the manager
+dispatch boundary.
 
 New rigid-body configs use `RigidBodyPhysicsCfg`. Portable intent is organized
 by physical concept:
@@ -465,6 +473,12 @@ legacy layer can eventually be removed as one unit.
 - Treat resource UIDs as registry identities; retrieve and mutate resources
   through the manager instead of maintaining a parallel scene registry.
 - Keep batched object and sensor state aligned with the manager's arena count.
+- Create deformables only with the Newton backend on CUDA and a supported
+  particle solver; Default-backend soft/cloth compatibility is intentionally
+  absent.
+- Treat deformable render meshes and physical particle topology as distinct;
+  state mutation uses the particle batch and never writes renderer/native
+  soft-body buffers directly.
 - Add the initial physical scene before `prepare()`. Calls to the legacy
   `init_gpu_physics()` and `finalize_newton_physics()` aliases are equivalent to
   `prepare()` and do not cause a second build.
@@ -496,6 +510,8 @@ legacy layer can eventually be removed as one unit.
 | Scene resource cannot be found or the wrong object is returned | UID mismatch or code bypassed the manager registry |
 | Link/joint metadata is empty or state access fails after `add_*()` | The declared facade has not crossed `SimulationManager.prepare()` yet |
 | CUDA/Newton physics data is stale after a topology or descriptor mutation | Call `prepare()` so the dirty Spawn result can rebuild and rebind runtime views |
+| Adding a soft or cloth object fails immediately on the Default backend | Deformables are Newton-only; select a supported Newton particle solver on CUDA |
+| A replicated file-backed soft body fails render upload because clone vertex counts differ | DexSim's cloned render mesh does not match the template embedding topology; use a compatible mesh/single environment while the DexSim 0.5 clone path is corrected |
 | Warp module compile/load lines appear during Newton initialization | `NewtonPhysicsCfg.suppress_warp_kernel_logs` was explicitly disabled, or compilation happened outside the managed preparation scope |
 | Native window does not open | `headless=True`, often forced by the Viser backend |
 | Device and renderer use the wrong GPU | `sim_device` and `gpu_id` disagree; the device index takes precedence for CUDA simulation |

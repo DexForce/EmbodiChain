@@ -500,7 +500,7 @@ class ArticulationCfg(ObjectBaseCfg):
 
     compute_uv: bool = False
     """Whether to compute the UV mapping for the articulation link.
-    
+
     Currently, the uv mapping is computed for each link with projection uv mapping method.
     """
 

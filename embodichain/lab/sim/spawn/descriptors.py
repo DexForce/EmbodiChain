@@ -45,11 +45,9 @@ from dexsim.spawn import (
     ClothPhysicsDesc,
     CollisionApproximation,
     CollisionDesc,
-    DexsimClothPhysicsDesc,
     DexsimCollisionDesc,
     DexsimJointDesc,
     DexsimPhysicsDesc,
-    DexsimSoftBodyPhysicsDesc,
     GeometryDesc,
     MaterialDesc,
     NewtonCollisionDesc,
@@ -496,7 +494,7 @@ def volume_deformable_desc_from_cfg(
     *,
     per_env: bool = True,
 ) -> tuple[SoftBodyDesc, dict[str, MaterialDesc]]:
-    """Translate a volume-deformable config into a DexSim descriptor."""
+    """Translate a volume deformable into a Newton particle-set descriptor."""
     uid = _required_uid(cfg.uid, "Volume deformable")
     if _is_missing(cfg.shape.fpath) or not str(cfg.shape.fpath).strip():
         raise ValueError(
@@ -509,6 +507,23 @@ def volume_deformable_desc_from_cfg(
     physical_attr = cfg.physical_attr
     youngs = float(physical_attr.youngs)
     poissons = float(physical_attr.poissons)
+    density = float(physical_attr.density)
+    particle_radius = (
+        None if cfg.particle_radius is None else float(cfg.particle_radius)
+    )
+    if not math.isfinite(youngs) or youngs < 0.0:
+        raise ValueError("Soft-body youngs must be a finite non-negative value.")
+    if not math.isfinite(poissons) or not -1.0 < poissons < 0.5:
+        raise ValueError("Soft-body poissons must be finite and lie in (-1, 0.5).")
+    if not math.isfinite(density) or density <= 0.0:
+        raise ValueError("Soft-body density must be a finite positive value.")
+    if particle_radius is not None and (
+        not math.isfinite(particle_radius) or particle_radius <= 0.0
+    ):
+        raise ValueError(
+            "Soft-body particle_radius must be finite and positive when set."
+        )
+
     descriptor = SoftBodyDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
@@ -518,18 +533,30 @@ def volume_deformable_desc_from_cfg(
             material_ref=material_ref,
         ),
         physics=SoftBodyPhysicsDesc(
-            volume_density=float(physical_attr.density),
+            volume_density=density,
             k_mu=youngs / (2.0 * (1.0 + poissons)),
             k_lambda=(youngs * poissons / ((1.0 + poissons) * (1.0 - 2.0 * poissons))),
-            dexsim=DexsimSoftBodyPhysicsDesc(**_configured_values(physical_attr)),
+            k_damp=float(physical_attr.elasticity_damping),
+            surface_tri_ke=float(physical_attr.surface_tri_ke),
+            surface_tri_ka=float(physical_attr.surface_tri_ka),
+            surface_tri_kd=float(physical_attr.surface_tri_kd),
+            surface_tri_drag=float(physical_attr.surface_tri_drag),
+            surface_tri_lift=float(physical_attr.surface_tri_lift),
+            add_surface_edges=bool(physical_attr.add_surface_edges),
+            surface_edge_ke=float(physical_attr.surface_edge_ke),
+            surface_edge_kd=float(physical_attr.surface_edge_kd),
         ),
-        # DexSim's typed meshing contract currently exposes these three
-        # source-mesh controls; maximal_edge_length has no Spawn equivalent.
         meshing=SoftBodyMeshingDesc(
             proxy_simplify_target=cfg.voxel_attr.triangle_simplify_target,
             proxy_remesh_resolution=cfg.voxel_attr.triangle_remesh_resolution,
             voxel_resolution=cfg.voxel_attr.simulation_mesh_resolution,
+            voxel_num_relaxation_iters=cfg.voxel_attr.voxel_num_relaxation_iters,
+            voxel_rel_min_tet_volume=cfg.voxel_attr.voxel_rel_min_tet_volume,
+            voxel_surface_dist_ratio=cfg.voxel_attr.voxel_surface_dist_ratio,
+            embedding_impl=cfg.voxel_attr.embedding_impl,
         ),
+        particle_radius=particle_radius,
+        validate_mesh=cfg.validate_mesh,
         per_env=per_env,
     )
     materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
@@ -541,7 +568,7 @@ def surface_deformable_desc_from_cfg(
     *,
     per_env: bool = True,
 ) -> tuple[ClothDesc, dict[str, MaterialDesc]]:
-    """Translate a surface-deformable config into a DexSim descriptor."""
+    """Translate a surface deformable into a Newton particle-set descriptor."""
     uid = _required_uid(cfg.uid, "Surface deformable")
     if _is_missing(cfg.shape.fpath) or not str(cfg.shape.fpath).strip():
         raise ValueError(
@@ -551,6 +578,17 @@ def surface_deformable_desc_from_cfg(
     material_ref, material_entry = _compile_visual_material(
         uid, cfg.shape.visual_material
     )
+    physical_attr = cfg.physical_attr
+    density = float(physical_attr.density)
+    particle_radius = (
+        None if cfg.particle_radius is None else float(cfg.particle_radius)
+    )
+    if not math.isfinite(density) or density <= 0.0:
+        raise ValueError("Cloth density must be a finite positive value.")
+    if particle_radius is not None and (
+        not math.isfinite(particle_radius) or particle_radius <= 0.0
+    ):
+        raise ValueError("Cloth particle_radius must be finite and positive when set.")
     descriptor = ClothDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
@@ -560,9 +598,20 @@ def surface_deformable_desc_from_cfg(
             material_ref=material_ref,
         ),
         physics=ClothPhysicsDesc(
-            surface_density=float(cfg.physical_attr.density),
-            dexsim=DexsimClothPhysicsDesc(**_configured_values(cfg.physical_attr)),
+            surface_density=density,
+            tri_ke=physical_attr.tri_ke,
+            tri_ka=physical_attr.tri_ka,
+            tri_kd=physical_attr.tri_kd,
+            tri_drag=physical_attr.tri_drag,
+            tri_lift=physical_attr.tri_lift,
+            edge_ke=physical_attr.edge_ke,
+            edge_kd=physical_attr.edge_kd,
+            add_springs=bool(physical_attr.add_springs),
+            spring_ke=physical_attr.spring_ke,
+            spring_kd=physical_attr.spring_kd,
         ),
+        particle_radius=particle_radius,
+        validate_mesh=cfg.validate_mesh,
         per_env=per_env,
     )
     materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}

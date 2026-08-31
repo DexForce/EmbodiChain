@@ -127,19 +127,19 @@ class RigidObjectGroupCfg:
 
     folder_path: str | None = None
     """Path to the folder containing the rigid object assets.
-    
+
     This is used to initialize multiple rigid object configurations from a folder.
     """
 
     max_num: int = 1
     """Maximum number of rigid objects to initialize from the folder.
-    
+
     This is only used when `folder_path` is specified.
     """
 
     ext: str = ".obj"
     """File extension for the rigid object assets.
-    
+
     This is only used when `folder_path` is specified.
     """
 

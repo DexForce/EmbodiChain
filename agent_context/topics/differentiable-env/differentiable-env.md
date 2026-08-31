@@ -1,114 +1,95 @@
 # differentiable-env
 
-> Topic: Differentiable environment for analytic policy gradient (APG) —
-> `DifferentiableEmbodiedEnv` + the `embodichain.lab.sim.diff` Warp-tape
-> ↔ PyTorch-autograd bridge.
+> Topic: Newton-backed kinematic environments for analytic policy gradient
+> (APG) through the Warp-tape ↔ PyTorch-autograd bridge.
 
-## Overview
+## Public entry point
 
-EmbodiChain supports analytic policy gradient (APG) via
-`embodichain.lab.gym.envs.differentiable_env.DifferentiableEmbodiedEnv`.
-The bridge wraps a Warp tape around one EmbodiChain physics step and
-exposes a `torch.autograd.Function`
-(`embodichain.lab.sim.diff.NewtonStepFunc`) so PyTorch-side `action`
-tensors get a gradient from `tape.backward()`.
+Use
+`embodichain.lab.gym.envs.differentiable_env.DifferentiableEnv`.
+It inherits `EmbodiedEnv`, preserves its scene lifecycle, and replaces the
+normal physics step with a task-defined kinematics callback recorded on a
+Warp tape.
 
-## Required configuration
+The resolution path is:
 
-- `NewtonPhysicsCfg(requires_grad=True, solver_cfg={"solver_type": "semi_implicit"})`
-- `use_cuda_graph=False` (forced by dexsim when grad mode is on)
+    DifferentiableEnv.step(action)
+      → NewtonStepFunc.apply(action, sim_state)
+      → _apply_action_kernel(action_wp, tape)
+      → _make_kinematic_step_fn()()
+      → _read_outputs(final_state)
+      → Warp tape backward → action.grad
 
-The default backend and any other Newton solver are rejected at
-construction time by `DifferentiableEmbodiedEnv._validate_diff_cfg`.
+## Invariants
 
-Newton/Warp `body_q` transforms contain position followed by a native `xyzw`
-quaternion. This already matches EmbodiChain's quaternion convention, so the
-differentiable bridge and FK reward path must not reorder those four
-components. The Franka target pose likewise uses `xyz + xyzw`, with identity
-orientation `(0, 0, 0, 1)`.
+- The configured physics backend must be `NewtonPhysicsCfg`.
+- `NewtonPhysicsCfg.requires_grad` must be `True`.
+- Default physics and other backends fail during `DifferentiableEnv`
+  construction.
+- `DifferentiableEnv` always supplies a named kinematics callback; its bridge
+  contract has no dynamics mode, solver substeps, or control buffer.
+- The environment never invokes the configured Newton solver or collision
+  pipeline.
+- Newton gradient configuration still selects the semi-implicit solver, but
+  `DifferentiableEnv` never advances it.
+- Gradient mode disables Newton CUDA graph capture.
 
 ## Subclass contract
 
-Task authors implement two methods on `DifferentiableEmbodiedEnv`:
+Task authors implement three hooks:
 
-- `_apply_action_kernel(action_wp, tape)` — launch a Warp kernel that
-  writes joint/body targets into `nm._control` while the tape is open.
-  The `action_wp` argument is a `wp.array(dtype=wp.float32,
-  requires_grad=True)` of shape `[num_envs * action_dim]`.
-- `_read_outputs(final_state)` — build the `obs` / `reward` /
-  `terminated` / `truncated` outputs as torch tensors via `wp.to_torch`
-  so the tape can record the dependency. Must return a dict with
-  `_order` (tuple of output keys) and `_grad_track` (mapping from output
-  key to the Warp array that backs its gradient, or `None` for outputs
-  that don't need grad).
+- `_apply_action_kernel(action_wp, tape)` launches Warp work that maps the
+  PyTorch action bridge array into task-owned kinematic state.
+- `_make_kinematic_step_fn()` returns a zero-argument callback such as
+  `newton.eval_fk(...)`. The callback returns the state consumed by the output
+  hook.
+- `_read_outputs(final_state)` returns `obs`, `reward`, `terminated`, and
+  `truncated`, plus `_order` and `_grad_track` metadata used by
+  `NewtonStepFunc`.
 
-Optionally override `_make_step_fn()` to swap the per-substep advance
-function. The default uses `dexsim.engine.newton_physics.DifferentiableStepper.step`;
-the Franka APG example overrides it to call `newton.eval_fk` directly
-(see "FK bypass" below).
+There is no public `_apply_dynamics_action_kernel` or
+`differentiable_step_mode` extension point. Differentiable dynamics are a
+future feature, not a `DifferentiableEnv` capability.
 
-See `embodichain_tasks.special.franka_reach_apg` for
-the canonical example.
+## Autograd and reset rules
 
-## Why reward must be computed inside the tape
+Action, kinematics, and gradient-producing output kernels must execute while
+the Warp tape is open. Each tracked output names its backing Warp array in
+`_grad_track`; an output mapped to `None` does not seed Warp backward.
 
-`NewtonStepFunc.forward` keeps the `wp.Tape` open while
-`obs_reward_fn(final_state)` runs. Reward must be computed by a Warp
-kernel that writes into a `wp.zeros(..., requires_grad=True)` array
-inside the tape; `wp.to_torch(reward_wp)` then returns a torch tensor
-that carries the tape's gradient. Computing reward in pure torch *after*
-the tape closes would detach it from the autograd graph and
-`action.grad` would come back as `None`.
+A grad-tracked terminal step returns the terminal observation and exposes
+`requires_reset_after_backward` plus `deferred_reset_ids` in `info`. Reset
+those rows only after backward. A no-grad terminal step resets them
+synchronously.
 
-The same rule applies to any observation that needs to be
-grad-tracked: build it from `wp.to_torch` of a tape-tracked Warp array.
+## Franka reference task
 
-## FK bypass for the Franka task
+`embodichain_tasks.special.franka_reach_apg.FrankaReachApgEnv` is the canonical
+example. Its path is:
 
-The `semi_implicit` Newton solver does not propagate gradient through
-`joint_target_pos` to `body_q` (verified empirically; the reference
-implementation at `/root/sources/analytic_policy_gradients/envs/franka_reach_env.py`
-hits the same limitation and uses the same workaround). The Franka APG
-example overrides `_make_step_fn()` to call `newton.eval_fk(model,
-new_joint_q, joint_qd, fk_state)` directly, bypassing the dynamics
-solver. The grad path is then:
+    action → new_joint_q → newton.eval_fk → body_q → reward kernel → action.grad
 
-    action → new_joint_q (action kernel) → eval_fk → body_q → reward kernel → reward_wp → tape.backward → action.grad
+The task snapshots live joint positions before opening the tape and writes the
+detached next joint state back after the bridge returns. It does not exercise
+Newton dynamics.
 
-The default `_make_step_fn` still uses the differentiable stepper, so
-envs whose reward depends on dynamics (not just FK) can use it — but
-they should verify the solver actually propagates grad for their
-control inputs before relying on it.
+## Dynamics boundary
 
-## Functor autograd compatibility
-
-Reward/observation functors that compose torch operations on tensors
-obtained via `wp.to_torch` are automatically autograd-compatible.
-Functors that detour through CPU / NumPy break the graph; those need
-torch-only reimplementations for the differentiable path. For now, the
-differentiable env computes reward via a dedicated Warp kernel rather
-than reusing the standard reward-manager functors — a future task can
-audit and port functors as needed.
-
-## Memory
-
-Each step records `sim_steps_per_control` substeps into the tape. For
-long horizons or large `num_envs`, pass `truncate_backward_at=K` on the
-env config to split the tape and detach at chunk boundaries.
+The public differentiable package exposes no solver stepper, trajectory, or
+gradient-rollout API. Add those capabilities as a separate future design when
+Newton dynamics are ready for end-to-end validation.
 
 ## Source of truth
 
-- `embodichain/lab/gym/envs/differentiable_env.py` —
-  `DifferentiableEmbodiedEnv` base class.
-- `embodichain/lab/sim/diff/bridge.py` — `NewtonStepFunc`,
-  `tape_context`, `differentiable_step`.
-- `embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py` —
-  example task.
-- `embodichain/lab/sim/sim_manager.py` —
-  `SimulationManager.create_differentiable_stepper` /
-  `create_gradient_rollout` delegators.
-- `/root/sources/dexsim/python/dexsim/engine/newton_physics/differentiable_stepper.py`
-  — the underlying dexsim primitive.
+- `embodichain/lab/gym/envs/differentiable_env.py`
+- `embodichain/lab/sim/cfg/simulation.py`
+- `embodichain/lab/sim/diff/`
+- `embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py`
+
+## Focused validation
+
+- `tests/gym/envs/test_differentiable_embodied_env.py`
+- `tests/sim/test_sim_manager_cfg.py`
 
 ## Related topics
 

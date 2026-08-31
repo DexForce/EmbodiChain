@@ -206,8 +206,8 @@ Deformable vertices are stored relative to the corresponding arena node.
 | `RigidObjectGroup` | One node and pose per constituent object |
 | `Robot` | One mesh node per non-empty link |
 | `Articulation` | One mesh node per non-empty link |
-| Volume `DeformableObject` (`SoftObject`) | Live collision vertices with a cached convex-hull surface |
-| Surface `DeformableObject` (`ClothObject`) | Live physical vertices with render triangles mapped onto the welded physical vertex buffer |
+| Volume `DeformableObject` (`SoftObject`) | Live Newton render-surface vertices and triangles |
+| Surface `DeformableObject` (`ClothObject`) | Live Newton render-surface vertices and triangles |
 | `Camera` | Frustum plus optional low-frequency RGB preview |
 | Default ground | 1000 m × 1000 m XY grid, 1 m cells, 10 m sections |
 | `SceneOverlays` | Frames, targets, trajectories, and point clouds |
@@ -235,21 +235,28 @@ slow rendering or clients cannot accumulate an image backlog.
 
 ## Deformables
 
-Volume and surface deformables currently require Default-backend GPU physics.
-Their live vertices are sampled at `soft_body_fps`, independently from
-`scene_fps`. `SceneExporter` enumerates the manager's single deformable
-registry and reads both topologies through `get_surface_vertices()` and
-`get_surface_triangles()`; it does not branch on legacy buffer APIs. The
-`deformable_type` discriminator only selects the existing soft/cloth browser
-node kind, path, and color.
+Volume and surface deformables require the Newton backend, CUDA, and a
+particle-capable solver. Their live vertices are sampled at `soft_body_fps`,
+independently from `scene_fps`. `SceneExporter` enumerates the manager's single
+deformable registry and reads render topology through
+`get_surface_vertices()` and `get_surface_triangles()`; it does not branch on
+legacy buffer APIs. The facade returns world-frame render vertices, and the
+exporter subtracts the arena offset before publishing them below the arena
+node. The `deformable_type` discriminator only selects the existing
+soft/cloth browser node kind, path, and color.
 
-- DexSim does not expose soft-body collision triangle connectivity.
-  `VolumeDeformableData.collision_surface_triangles` therefore caches a SciPy
-  `ConvexHull` over rest collision vertices. The preview follows deformation
-  but cannot preserve concave render detail.
-- Cloth maps all render-mesh triangles onto DexSim's welded rest-vertex buffer
-  with `cKDTree`. Construction raises `RuntimeError` if the mapping distance
-  exceeds the scale-relative tolerance.
+- Both soft bodies and cloth publish the live render surface exposed by their
+  DexSim 0.5 typed Newton particle-set handles. No convex-hull reconstruction
+  or nearest-neighbor welding is performed in the visualization path.
+- A volume deformable separately exposes its tetrahedral collision surface
+  through `get_collision_surface_triangles()` for consumers that need physical
+  rather than render topology. `SceneExporter` intentionally uses render
+  topology.
+- Spawn binding validates that every replicated instance has the same render
+  vertex and triangle counts. A file-backed soft body whose DexSim clones have
+  a render topology different from the source fails during scene preparation;
+  use one environment or a compatible mesh until DexSim replication preserves
+  the source topology.
 - Viser does not update mesh vertices in place. `ViserBackend` removes and
   recreates a deformable mesh handle only when a dynamic vertex sample arrives.
   Pose-only frames reuse the current handle.
@@ -318,8 +325,7 @@ payload bytes plus capture/upload time.
 | Startup timeout or address-in-use error | The Viser worker did not become ready or the configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
 | Asset added after startup is missing | Step once, call `refresh_visualization()`, or mark topology dirty if the change bypassed manager APIs. |
 | Browser stops updating after an exporter/backend exception | `capture_visualization_safely()` latches the first error to protect simulation. Inspect health/logs, then stop and restart after fixing the cause. |
-| Soft body looks inflated or loses cavities | The surface is a collision-vertex convex hull, not the render topology. |
-| Cloth construction raises a mapping error | Render vertices do not match the welded physical rest vertices within tolerance. |
+| Replicated soft body fails with a render-vertex-count mismatch | DexSim produced clone render topology different from the source. Use one environment or a compatible mesh until DexSim replication preserves the topology. |
 | Camera frustum exists but preview is blank | Color capture is disabled, no image has been captured yet, or the selected camera/environment is hidden. |
 | Stereo/contact sensor is absent | Current camera export accepts only `sensor_type == "Camera"`; non-mesh sensors are not exported. |
 | Browser lags or upload cost is high | Reduce scene/image/deformable FPS, select fewer environments, or lower point-cloud limits. |

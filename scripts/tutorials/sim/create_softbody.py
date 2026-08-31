@@ -28,8 +28,8 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
+    NewtonPhysicsCfg,
     RenderCfg,
-    physics_cfg_for_backend,
     SoftbodyVoxelAttributesCfg,
     SoftbodyPhysicalAttributesCfg,
 )
@@ -49,6 +49,8 @@ def main():
     )
     add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
+    if args.physics != "newton":
+        parser.error("Soft bodies require --physics newton.")
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
@@ -61,7 +63,7 @@ def main():
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
-        physics_cfg=physics_cfg_for_backend(args.physics),
+        physics_cfg=NewtonPhysicsCfg(solver_cfg={"solver_type": "vbd"}),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -80,14 +82,12 @@ def main():
             init_pos=[0.0, 0.0, 3.0],
             voxel_attr=SoftbodyVoxelAttributesCfg(
                 simulation_mesh_resolution=8,
-                maximal_edge_length=0.5,
             ),
             physical_attr=SoftbodyPhysicalAttributesCfg(
                 youngs=1e6,
                 poissons=0.45,
                 density=100,
-                dynamic_friction=0.1,
-                min_position_iters=30,
+                elasticity_damping=0.1,
             ),
         ),
     )

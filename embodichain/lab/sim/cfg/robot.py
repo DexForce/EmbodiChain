@@ -84,13 +84,13 @@ class RobotCfg(ArticulationCfg):
     For example, {'left_arm': ['joint1', 'joint2'], 'right_arm': ['joint3', 'joint4']}
     If no control part is specified, the robot will use all joints as a single control part.
 
-    Note: 
+    Note:
         - if `control_parts` is specified, `solver_cfg` must be a dict with part names as
             keys corresponding to the control parts name.
         - The joint names in the control parts support regular expressions, e.g., 'joint[1-6]'.
             After initialization of robot, the names will be expanded to a list of full joint names.
         - `Robot` is a derived class of `Articulation`, with control parts support. So the `drive_pros`
-            in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties, 
+            in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties,
             which will be overridden if these joint names are already specified.
     """
 

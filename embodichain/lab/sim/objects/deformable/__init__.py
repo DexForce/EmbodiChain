@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Unified deformable-object API with DexSim volume/surface specializations."""
+"""Unified deformable-object API over Newton particle-set specializations."""
 
 from __future__ import annotations
 

@@ -151,13 +151,11 @@ class NewtonPhysicsBackend(PhysicsBackend):
     # -- capabilities --------------------------------------------------- #
     @property
     def supports_volume_deformables(self) -> bool:
-        # Reserved entry point: add a Newton volume adapter before enabling.
-        return False
+        return True
 
     @property
     def supports_surface_deformables(self) -> bool:
-        # Reserved entry point: add a Newton surface adapter before enabling.
-        return False
+        return True
 
     @property
     def supports_robot(self) -> bool:

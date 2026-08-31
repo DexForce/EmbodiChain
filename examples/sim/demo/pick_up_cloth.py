@@ -27,23 +27,20 @@ import time
 import open3d as o3d
 import torch
 
-from dexsim.utility.path import get_resources_data_path
-
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.objects import Robot, SoftObject
+from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
-from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
-from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    NewtonPhysicsCfg,
     RenderCfg,
-    physics_cfg_for_backend,
-    RigidObjectCfg,
-    RigidBodyAttributesCfg,
-    LightCfg,
     ClothObjectCfg,
     ClothPhysicalAttributesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+    RigidObjectCfg,
 )
 from embodichain.lab.sim.robots import URRobotCfg
 import os
@@ -113,13 +110,13 @@ def create_padding_box(sim: SimulationManager):
         shape=CubeCfg(
             size=[0.02, 0.07, 0.05],
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            static_friction=0.01,
-            dynamic_friction=0.00,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=1.0),
+            material_props=RigidBodyMaterialCfg(
+                static_friction=0.01,
+                dynamic_friction=0.00,
+                restitution=0.01,
+            ),
         ),
         body_type="kinematic",
         init_pos=[0.5, 0.0, 0.026],
@@ -145,7 +142,7 @@ def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
     # Vectorized vertex positions using PyTorch
     x_lin = torch.linspace(-w / 2.0, w / 2.0, steps=nx + 1, dtype=torch.float64)
     y_lin = torch.linspace(-h / 2.0, h / 2.0, steps=ny + 1, dtype=torch.float64)
-    yy, xx = torch.meshgrid(y_lin, x_lin)  # shapes: (ny+1, nx+1)
+    yy, xx = torch.meshgrid(y_lin, x_lin, indexing="ij")
     xx_flat = xx.reshape(-1)
     yy_flat = yy.reshape(-1)
     zz_flat = torch.full_like(xx_flat, 0, dtype=torch.float64)
@@ -179,14 +176,12 @@ def create_cloth(sim: SimulationManager):
             init_pos=[0.5, 0.0, 0.3],
             init_rot=[0, 0, 0],
             physical_attr=ClothPhysicalAttributesCfg(
-                mass=0.01,
-                youngs=1e10,
-                poissons=0.4,
-                thickness=0.06,
-                bending_stiffness=0.01,
-                bending_damping=0.1,
-                dynamic_friction=0.95,
-                min_position_iters=30,
+                density=1.0,
+                tri_ke=1.0e4,
+                tri_ka=1.0e4,
+                tri_kd=10.0,
+                edge_ke=100.0,
+                edge_kd=1.0,
             ),
         )
     )
@@ -251,6 +246,8 @@ def main():
     )
     add_env_launcher_args_to_parser(parser)
     args = parser.parse_args()
+    if args.physics != "newton":
+        parser.error("Cloth requires --physics newton.")
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
         width=1920,
@@ -262,7 +259,7 @@ def main():
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
-        physics_cfg=physics_cfg_for_backend(args.physics),
+        physics_cfg=NewtonPhysicsCfg(solver_cfg={"solver_type": "mjvbd"}),
         visualization=visualization_cfg_from_args(args),
     )
 

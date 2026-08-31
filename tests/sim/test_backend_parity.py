@@ -46,10 +46,10 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 # feature -> {backend -> supported}
 BACKEND_CAPABILITIES: dict[str, dict[str, bool]] = {
     "robot": {"default": True, "newton": True},
-    "volume_deformables": {"default": True, "newton": False},
-    "surface_deformables": {"default": True, "newton": False},
-    "soft_bodies": {"default": True, "newton": False},
-    "cloth": {"default": True, "newton": False},
+    "volume_deformables": {"default": False, "newton": True},
+    "surface_deformables": {"default": False, "newton": True},
+    "soft_bodies": {"default": False, "newton": True},
+    "cloth": {"default": False, "newton": True},
     "rigid_object_group": {"default": True, "newton": True},
     "can_disable_manual_update": {"default": True, "newton": False},
 }

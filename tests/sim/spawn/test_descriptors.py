@@ -34,10 +34,8 @@ from dexsim.spawn import (
     CollisionDesc,
     CollisionApproximation,
     DexsimCollisionDesc,
-    DexsimClothPhysicsDesc,
     DexsimJointDesc,
     DexsimPhysicsDesc,
-    DexsimSoftBodyPhysicsDesc,
     JointDesc,
     LinkDesc,
     NewtonCollisionDesc,
@@ -96,29 +94,30 @@ RESTITUTION = 0.25
 DEFORMABLE_MESH_PATH = "/assets/deformable.obj"
 
 
-def test_soft_descriptor_projects_current_dexsim_particle_schema() -> None:
+def test_soft_descriptor_uses_newton_particle_schema() -> None:
     youngs = 1.0e5
     poissons = 0.4
-    density = 75.0
-    dynamic_friction = 0.2
-    min_position_iters = 8
-    simplify_target = 40
-    remesh_resolution = 12
-    voxel_resolution = 16
     cfg = SoftObjectCfg(
         uid="soft",
         shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
+        particle_radius=0.02,
+        validate_mesh=True,
         voxel_attr=SoftbodyVoxelAttributesCfg(
-            triangle_remesh_resolution=remesh_resolution,
-            triangle_simplify_target=simplify_target,
-            simulation_mesh_resolution=voxel_resolution,
+            triangle_remesh_resolution=12,
+            triangle_simplify_target=40,
+            simulation_mesh_resolution=16,
+            voxel_num_relaxation_iters=7,
+            voxel_rel_min_tet_volume=0.08,
+            voxel_surface_dist_ratio=0.3,
+            embedding_impl="dexsim_exact_cpu",
         ),
         physical_attr=SoftbodyPhysicalAttributesCfg(
             youngs=youngs,
             poissons=poissons,
-            density=density,
-            dynamic_friction=dynamic_friction,
-            min_position_iters=min_position_iters,
+            density=75.0,
+            elasticity_damping=0.2,
+            surface_tri_ke=1.0,
+            surface_edge_ke=2.0,
         ),
     )
 
@@ -126,35 +125,44 @@ def test_soft_descriptor_projects_current_dexsim_particle_schema() -> None:
 
     assert isinstance(descriptor, SoftBodyDesc)
     assert descriptor.mesh.file_path == DEFORMABLE_MESH_PATH
+    assert descriptor.particle_radius == pytest.approx(0.02)
+    assert descriptor.validate_mesh is True
     assert descriptor.per_env is False
-    assert descriptor.meshing is not None
-    assert descriptor.meshing.proxy_simplify_target == simplify_target
-    assert descriptor.meshing.proxy_remesh_resolution == remesh_resolution
-    assert descriptor.meshing.voxel_resolution == voxel_resolution
-    assert descriptor.physics.volume_density == density
+    assert descriptor.physics.volume_density == pytest.approx(75.0)
     assert descriptor.physics.k_mu == pytest.approx(youngs / (2.0 * (1.0 + poissons)))
     assert descriptor.physics.k_lambda == pytest.approx(
         youngs * poissons / ((1.0 + poissons) * (1.0 - 2.0 * poissons))
     )
-    assert isinstance(descriptor.physics.dexsim, DexsimSoftBodyPhysicsDesc)
-    assert descriptor.physics.dexsim.dynamic_friction == dynamic_friction
-    assert descriptor.physics.dexsim.min_position_iters == min_position_iters
+    assert descriptor.physics.k_damp == pytest.approx(0.2)
+    assert descriptor.physics.surface_tri_ke == pytest.approx(1.0)
+    assert descriptor.physics.surface_edge_ke == pytest.approx(2.0)
+    assert descriptor.physics.dexsim is None
+    assert descriptor.meshing.proxy_simplify_target == 40
+    assert descriptor.meshing.proxy_remesh_resolution == 12
+    assert descriptor.meshing.voxel_resolution == 16
+    assert descriptor.meshing.voxel_num_relaxation_iters == 7
+    assert descriptor.meshing.voxel_rel_min_tet_volume == pytest.approx(0.08)
+    assert descriptor.meshing.voxel_surface_dist_ratio == pytest.approx(0.3)
+    assert descriptor.meshing.embedding_impl == "dexsim_exact_cpu"
     assert materials == {}
 
 
-def test_cloth_descriptor_projects_current_dexsim_particle_schema() -> None:
-    density = 2.5
-    mass = 0.05
-    thickness = 0.02
-    bending_stiffness = 0.1
+def test_cloth_descriptor_uses_newton_particle_schema() -> None:
     cfg = ClothObjectCfg(
         uid="cloth",
         shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
+        particle_radius=0.01,
+        validate_mesh=True,
         physical_attr=ClothPhysicalAttributesCfg(
-            density=density,
-            mass=mass,
-            thickness=thickness,
-            bending_stiffness=bending_stiffness,
+            density=2.5,
+            tri_ke=100.0,
+            tri_ka=90.0,
+            tri_kd=5.0,
+            edge_ke=20.0,
+            edge_kd=2.0,
+            add_springs=True,
+            spring_ke=30.0,
+            spring_kd=3.0,
         ),
     )
 
@@ -162,13 +170,45 @@ def test_cloth_descriptor_projects_current_dexsim_particle_schema() -> None:
 
     assert isinstance(descriptor, ClothDesc)
     assert descriptor.mesh.file_path == DEFORMABLE_MESH_PATH
+    assert descriptor.particle_radius == pytest.approx(0.01)
+    assert descriptor.validate_mesh is True
     assert descriptor.per_env is False
-    assert descriptor.physics.surface_density == density
-    assert isinstance(descriptor.physics.dexsim, DexsimClothPhysicsDesc)
-    assert descriptor.physics.dexsim.mass == mass
-    assert descriptor.physics.dexsim.thickness == thickness
-    assert descriptor.physics.dexsim.bending_stiffness == bending_stiffness
+    assert descriptor.physics.surface_density == pytest.approx(2.5)
+    assert descriptor.physics.tri_ke == pytest.approx(100.0)
+    assert descriptor.physics.tri_ka == pytest.approx(90.0)
+    assert descriptor.physics.tri_kd == pytest.approx(5.0)
+    assert descriptor.physics.edge_ke == pytest.approx(20.0)
+    assert descriptor.physics.edge_kd == pytest.approx(2.0)
+    assert descriptor.physics.add_springs is True
+    assert descriptor.physics.spring_ke == pytest.approx(30.0)
+    assert descriptor.physics.spring_kd == pytest.approx(3.0)
+    assert descriptor.physics.dexsim is None
     assert materials == {}
+
+
+def test_soft_descriptor_rejects_invalid_poisson_ratio() -> None:
+    cfg = SoftObjectCfg(
+        uid="soft",
+        shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
+        physical_attr=SoftbodyPhysicalAttributesCfg(poissons=0.5),
+    )
+
+    with pytest.raises(ValueError, match="poissons"):
+        soft_desc_from_cfg(cfg)
+
+
+@pytest.mark.parametrize("particle_radius", [0.0, float("nan")])
+def test_cloth_descriptor_rejects_invalid_particle_radius(
+    particle_radius: float,
+) -> None:
+    cfg = ClothObjectCfg(
+        uid="cloth",
+        shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
+        particle_radius=particle_radius,
+    )
+
+    with pytest.raises(ValueError, match="particle_radius"):
+        cloth_desc_from_cfg(cfg)
 
 
 def _resolved_articulation_desc() -> ArticulationDesc:

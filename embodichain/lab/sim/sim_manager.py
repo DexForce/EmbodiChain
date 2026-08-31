@@ -179,11 +179,11 @@ def _initialize_warp_runtime(physics_cfg: PhysicsBackendCfg) -> None:
         wp.init()
 
 
-# Deformable implementations remain backend-specific even though their public
-# object/data contract is shared. Newton is an explicit empty placeholder until
-# its native object adapters are integrated and validated.
+# Deformable objects are Newton particle sets. The Default implementation is
+# deliberately absent so stale soft/cloth configurations fail at declaration.
 _DEFORMABLE_BACKEND_IMPLEMENTATIONS = {
-    "default": {
+    "default": {},
+    "newton": {
         "volume": (
             VolumeDeformableObjectCfg,
             VolumeDeformableObject,
@@ -197,7 +197,6 @@ _DEFORMABLE_BACKEND_IMPLEMENTATIONS = {
             "cloth_object",
         ),
     },
-    "newton": {},
 }
 
 
@@ -1111,55 +1110,6 @@ class SimulationManager:
         """
         self.prepare()
 
-    def create_differentiable_stepper(self):
-        """Create a single-step differentiable physics primitive (Newton-only).
-
-        Requires the Newton backend with ``requires_grad=True`` and
-        ``solver_type="semi_implicit"``. Delegates to
-        :meth:`dexsim.engine.newton_physics.NewtonManager.create_differentiable_stepper`.
-
-        Raises:
-            RuntimeError: If the active backend is not Newton or if the
-                Newton manager is not ready / not in grad mode.
-        """
-        if not self.is_newton_backend:
-            logger.log_error(
-                "create_differentiable_stepper requires the Newton backend."
-            )
-        return self.differentiable_runtime.create_differentiable_stepper()
-
-    def create_gradient_rollout(
-        self,
-        record_steps: int,
-        substeps_per_record: int | None = None,
-        record_dt: float | None = None,
-    ):
-        """Create a gradient rollout buffer (Newton-only).
-
-        Delegates to
-        :meth:`dexsim.engine.newton_physics.NewtonManager.create_gradient_rollout`.
-
-        Args:
-            record_steps: Number of record points to capture in the rollout
-                buffer.
-            substeps_per_record: Newton substeps between successive record
-                points. Defaults to the Newton manager's configured
-                ``num_substeps``.
-            record_dt: Time interval between successive record points.
-                Defaults to the Newton manager's configured ``dt``.
-
-        Raises:
-            RuntimeError: If the active backend is not Newton or if the
-                Newton manager is not ready / not in grad mode.
-        """
-        if not self.is_newton_backend:
-            logger.log_error("create_gradient_rollout requires the Newton backend.")
-        return self.differentiable_runtime.create_gradient_rollout(
-            record_steps=record_steps,
-            substeps_per_record=substeps_per_record,
-            record_dt=record_dt,
-        )
-
     def render_camera_group(self, group_ids: list[int]) -> None:
         """Render all camera group in the simulation.
 
@@ -1881,10 +1831,8 @@ class SimulationManager:
     def add_deformable_object(self, cfg: DeformableObjectCfg) -> DeformableObject:
         """Declare a volume or surface deformable in the scene.
 
-        DexSim is the only deformable implementation currently registered.
-        Backend capability flags and the dispatch boundary are intentionally
-        explicit so a future Newton adapter can be added without changing this
-        public method or its callers.
+        Deformables are DexSim 0.5 typed particle sets owned by the Newton
+        Spawn scene. The Default backend is intentionally unsupported.
 
         Args:
             cfg: Volume- or surface-deformable configuration.
@@ -1909,12 +1857,26 @@ class SimulationManager:
             )
         if not supported:
             raise NotImplementedError(
-                f"The {self.physics.name} backend does not yet provide a "
-                f"{deformable_type}-deformable object adapter."
+                "EmbodiChain deformable objects require the Newton backend; "
+                f"the {self.physics.name} backend does not support them."
             )
         if self.device.type != "cuda":
             raise NotImplementedError(
-                "DexSim deformable objects currently require a CUDA device."
+                "Newton deformable particle sets currently require a CUDA device."
+            )
+        solver_type = self._active_newton_solver_type
+        supported_solvers = {"xpbd", "semi_implicit", "vbd", "mjvbd"}
+        if solver_type not in supported_solvers:
+            raise NotImplementedError(
+                f"Newton solver {solver_type!r} does not support deformable "
+                "particle sets; select one of 'xpbd', 'semi_implicit', 'vbd', "
+                "or 'mjvbd'."
+            )
+        physics_cfg = self.sim_config.physics_cfg
+        if isinstance(physics_cfg, NewtonPhysicsCfg) and physics_cfg.requires_grad:
+            raise NotImplementedError(
+                "Newton deformable state mutation is unavailable when "
+                "requires_grad=True."
             )
         if self.spawn_result is not None:
             raise NotImplementedError(
