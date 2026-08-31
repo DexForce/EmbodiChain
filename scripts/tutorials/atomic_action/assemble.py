@@ -174,7 +174,6 @@ def create_assemble_object(sim: SimulationManager) -> RigidObject:
             shape=MeshCfg(
                 fpath=OBJECT_MESH_PATH,
                 compute_uv=False,
-                max_convex_hull_num=1,
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,

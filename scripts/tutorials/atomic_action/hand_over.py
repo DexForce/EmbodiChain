@@ -39,7 +39,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.scenario_utils import (
     add_dual_tutorial_robot,
@@ -159,7 +159,10 @@ def create_handover_object(
             shape=MeshCfg(
                 fpath=mesh_path,
                 compute_uv=False,
-                max_convex_hull_num=16,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=16,
+                ),
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,

@@ -41,9 +41,9 @@ topics:
       - asset_physics_mode
       - RigidBodyPhysicsCfg
       - recompute_inertia
-      - MeshCollisionPropertiesCfg
-      - default_props
-      - newton_props
+      - MeshCollisionCfg
+      - mesh collision approximation
+      - shape.collision
       - target_mode
       - drive_type
       - mimic joint

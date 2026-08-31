@@ -101,7 +101,10 @@ METADATA = {
             "shape": {
                 "shape_type": "Mesh",
                 "fpath": "ShopTableSimple/shop_table_simple.ply",
-                "max_convex_hull_num": 2,
+                "collision": {
+                    "approximation": "convex_decomposition",
+                    "max_hulls": 2,
+                },
             },
             "attrs": {"mass_props": {"mass": 10.0}},
             "body_scale": (2, 1.6, 1),

@@ -258,29 +258,29 @@ by physical concept:
 
 - `mass_props`: `MassPropertiesCfg` (`mass`, `density`, inertia, COM, and the
   source-inertia recomputation policy);
-- `rigid_props`: the common `RigidBodyPropertiesCfg` root or a
-  `DefaultRigidBodyPropertiesCfg` / `NewtonRigidBodyPropertiesCfg` subclass;
+- `rigid_props`: `DefaultRigidBodyPropertiesCfg`; Newton currently exposes no
+  additional body-level property group beyond common mass properties;
 - `collision_props`: common collision enablement and the portable
-  `contact_offset/rest_offset` envelope;
-- `mesh_collision_props`: mesh approximation/cooking settings such as convex
-  decomposition and SDF resolution, independent of render `MeshCfg`;
+  `contact_offset/rest_offset` envelope, optionally specialized by
+  `DefaultCollisionPropertiesCfg` or `NewtonCollisionPropertiesCfg`;
 - `material_props`: common friction/restitution or a backend material subclass.
 
-Native properties live in the simultaneously usable `default_props` and
-`newton_props` blocks (`DefaultRigidBodyPhysicsCfg` and
-`NewtonRigidBodyPhysicsCfg`). Each block groups the backend's rigid, collision,
-material, and—in Newton's case—mesh/SDF extensions. If a native value is also
-provided through the older polymorphic common-slot subtype, the explicit
-backend block wins. Portable inherited fields are rejected inside explicit
-backend blocks and must remain in the common slots.
-
-This follows the IsaacLab property-group pattern while matching DexSim Spawn's
-actual ownership. `NewtonRigidBodyPropertiesCfg` is intentionally empty until
-DexSim Spawn exposes a Newton-only body property. Every grouped field defaults
-to `None`, meaning “do not author this field”; source USD/URDF values and
-backend defaults therefore survive partial overlays. Dynamic and kinematic
-mass priority is explicit inertia with positive mass, then mass, then density;
+Each concept has exactly one slot. Backend-native fields are represented by the
+slot's concrete subclass or its local `backend: default|newton` discriminator;
+`default_props` and `newton_props` were removed. Every grouped field defaults to
+`None`, meaning “do not author this field”; source USD/URDF values and backend
+defaults therefore survive partial overlays. Dynamic and kinematic mass
+priority is explicit inertia with positive mass, then mass, then density;
 static descriptors omit mass properties.
+
+Mesh collision construction is geometry-owned. `MeshCfg.collision` contains a
+`MeshCollisionCfg` with an explicit `convex_hull`, `convex_decomposition`,
+`triangle_mesh`, or `sdf` approximation. Strategy-specific fields are validated
+when the config is constructed; numerical values never infer the strategy in
+the canonical schema. Newton SDF and hydroelastic mesh settings share this
+single owner. `RigidBodyPhysicsCfg` and articulation link overlays do not carry
+mesh cooking. An imported articulation retains its source mesh approximation
+until a named source-shape overlay API is introduced.
 
 `MassPropertiesCfg.recompute_inertia=True` discards source-authored inertia so
 the backend derives it from collision geometry and the effective mass or
@@ -290,12 +290,14 @@ exclusive. The policy lives with mass properties so global articulation,
 per-link articulation, and rigid USD overlays share the same behavior;
 `LinkPhysicsOverrideCfg` only selects links and carries their partial `attrs`.
 
-The polymorphic slots and their local `backend: common|default|newton`
-discriminator remain a compatibility input. New Dict/YAML definitions should
-use common slots plus `default_props`/`newton_props`; all forms round-trip
-through `to_dict()`. `MeshCfg.max_convex_hull_num`, `acd_method`, and
-`sdf_resolution`, plus the SDF fields on `NewtonCollisionPropertiesCfg`, are
-compatibility aliases. Explicit mesh-collision configs take precedence.
+Polymorphic collision and material slots use a local
+`backend: common|default|newton` discriminator; a unique native field may infer
+the subtype. `rigid_props` currently accepts only `backend: default`.
+`MeshCfg.from_dict()` temporarily normalizes the deprecated flat
+`max_convex_hull_num`, `acd_method`, and `sdf_resolution` inputs to
+`MeshCfg.collision` with a deprecation warning. `RigidObjectCfg.from_dict()`
+also migrates the former `attrs.mesh_collision_props` input when it has the
+owning mesh shape. Serialization emits only the new nested geometry form.
 
 `RigidBodyPhysicsCfg` is the only user-facing rigid-body physics schema.
 Flat `attrs` keys such as `mass`, `dynamic_friction`, and `enable_collision`

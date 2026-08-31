@@ -41,7 +41,7 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
 )
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -197,7 +197,10 @@ def create_table(sim: SimulationManager) -> RigidObject:
         uid="table",
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/table_a.obj"),
-            max_convex_hull_num=8,
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=8,
+            ),
         ),
         attrs=RigidBodyPhysicsCfg(
             mass_props=MassPropertiesCfg(mass=0.5),
@@ -254,7 +257,6 @@ def create_cup(sim: SimulationManager) -> RigidObject:
         uid="cup",
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/paper_cup_2.obj"),
-            max_convex_hull_num=1,
         ),
         attrs=RigidBodyPhysicsCfg(
             mass_props=MassPropertiesCfg(mass=0.3),

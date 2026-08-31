@@ -510,13 +510,15 @@ class RigidObject(BatchEntity):
         else:
             parent_str = super().__str__()
         max_hull = (
-            self.cfg.shape.max_convex_hull_num
+            self.cfg.shape.collision.max_hulls
             if isinstance(self.cfg.shape, MeshCfg)
+            and self.cfg.shape.collision is not None
+            and self.cfg.shape.collision.max_hulls is not None
             else 1
         )
         return (
             parent_str
-            + f" | body type: {self.body_type} | max_convex_hull_num: {max_hull}"
+            + f" | body type: {self.body_type} | collision max_hulls: {max_hull}"
         )
 
     @cached_property

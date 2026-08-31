@@ -68,15 +68,14 @@ _ASSET_PHYSICS_ATTRS = {
     "material_props": {
         "restitution": 0.01,  # Prevent generated assets from bouncing on the table.
     },
-    "default_props": {
-        "rigid_props": {
-            "max_depenetration_velocity": 10.0,  # Cap corrective separation speed.
-            "min_position_iters": 32,  # Use extra position iterations for stable contacts.
-            "min_velocity_iters": 8,  # Use extra velocity iterations for stable contacts.
-        }
+    "rigid_props": {
+        "backend": "default",
+        "max_depenetration_velocity": 10.0,  # Cap corrective separation speed.
+        "min_position_iters": 32,  # Use extra position iterations for stable contacts.
+        "min_velocity_iters": 8,  # Use extra velocity iterations for stable contacts.
     },
 }
-_FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VHACD hull budget for settling and export.
+_FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared decomposition hull budget for settling/export.
 
 
 @dataclass(frozen=True)

@@ -88,18 +88,7 @@ class MassPropertiesCfg:
 
 
 @configclass
-class RigidBodyPropertiesCfg:
-    """Common root for backend-specific rigid-body properties.
-
-    Actor type and mass properties already live in backend-neutral descriptors,
-    and no additional body-level field currently has identical semantics in
-    both backends.  The root is therefore intentionally empty and serves as the
-    typed extension/serialization boundary.
-    """
-
-
-@configclass
-class DefaultRigidBodyPropertiesCfg(RigidBodyPropertiesCfg):
+class DefaultRigidBodyPropertiesCfg:
     """Rigid-body properties consumed only by the Default backend.
 
     Every field defaults to ``None`` so a partial overlay preserves an authored
@@ -144,32 +133,21 @@ class DefaultRigidBodyPropertiesCfg(RigidBodyPropertiesCfg):
 
 
 @configclass
-class NewtonRigidBodyPropertiesCfg(RigidBodyPropertiesCfg):
-    """Newton rigid-body extension point.
-
-    Newton currently consumes common mass properties and per-shape settings,
-    but DexSim Spawn exposes no additional Newton-native body-level field.  The
-    class remains as a stable extension and serialization point.
-    """
-
-
-@configclass
 class CollisionPropertiesCfg:
     """Collision-shape properties with identical intent across both backends.
 
     ``None`` leaves the corresponding source/backend value unchanged.  The
     contact envelope is expressed once with Default-backend terminology and is
     compiled to Newton's ``margin``/``gap`` representation at the Spawn
-    boundary. Backend-native filtering lives in the Newton extension, while
-    mesh SDF settings use :class:`NewtonMeshCollisionPropertiesCfg`.
+    boundary. Mesh approximation and SDF cooking belong to
+    :class:`~embodichain.lab.sim.shapes.MeshCollisionCfg`.
     """
 
     collision_enabled: bool | None = None
     """Whether the shape participates in rigid shape-shape collision.
 
-    On Newton this maps to ``ShapeConfig.has_shape_collision``;
-    :attr:`NewtonCollisionPropertiesCfg.has_particle_collision` remains an
-    independent flag.  ``None`` preserves the source/backend value.
+    On Newton this maps to ``ShapeConfig.has_shape_collision``. ``None``
+    preserves the source/backend value.
     """
 
     contact_offset: float | None = None
@@ -193,26 +171,28 @@ class CollisionPropertiesCfg:
 
 @configclass
 class DefaultCollisionPropertiesCfg(CollisionPropertiesCfg):
-    """Default-native collision-property extension point.
+    """Collision-solver properties consumed only by the Default backend.
 
     ``contact_offset`` and ``rest_offset`` now live on
     :class:`CollisionPropertiesCfg` because both backends consume their intent.
     """
 
+    torsional_patch_radius: float | None = None
+    """Contact-patch radius used to approximate torsional friction [m]."""
+
+    min_torsional_patch_radius: float | None = None
+    """Minimum contact-patch radius used for torsional friction [m]."""
+
+    disable_strong_friction: bool | None = None
+    """Whether to disable Default-backend strong-friction contact anchoring."""
+
 
 @configclass
 class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
-    """Newton-native shape geometry, filtering, and visibility properties.
+    """Newton-native contact-envelope properties.
 
-    Fields map by name to ``newton.ModelBuilder.ShapeConfig`` through DexSim
-    Spawn.  They are shape-level settings; scene-wide pair generation belongs
-    to :class:`NewtonCollisionPipelineCfg`, and contact coefficients belong to
-    :class:`NewtonRigidBodyMaterialCfg`.
-
-    The SDF/hydroelastic fields remain here as compatibility aliases. New
-    configurations should use :class:`NewtonMeshCollisionPropertiesCfg` in
-    ``newton_props.mesh_collision_props``; that explicit block takes
-    precedence when both forms are present.
+    Mesh construction belongs to ``MeshCfg.collision``; filtering, visual, and
+    semantic-site policies are deliberately not part of rigid-body physics.
 
     See `Newton Shape Configuration
     <https://newton-physics.github.io/newton/latest/concepts/collisions.html#shape-configuration>`_.
@@ -231,121 +211,6 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     Gaps from both shapes are added.  Broad phase expands each shape by
     ``margin + gap``; increasing the gap detects approaching contact earlier.
     """
-
-    is_solid: bool | None = None
-    """Whether the shape represents a solid volume rather than a hollow shell."""
-
-    collision_group: int | None = None
-    """Newton collision-group identifier.
-
-    Group ``0`` disables collisions.  Equal positive groups collide; a negative
-    group collides with positive and different negative groups.  Spawn may
-    replace this value when replicated arenas use isolated collision groups.
-    """
-
-    collision_filter_parent: bool | None = None
-    """Whether to filter collision with the adjacent parent body of a joint."""
-
-    has_particle_collision: bool | None = None
-    """Whether this shape collides with Newton particles/soft bodies."""
-
-    is_visible: bool | None = None
-    """Whether Newton exposes the shape to its render/sensor visibility path.
-
-    This flag does not enable or disable physical collision.
-    """
-
-    is_site: bool | None = None
-    """Whether Newton treats the shape as a reference site.
-
-    This is an expert pass-through.  Setting it does not automatically reconcile
-    ``collision_enabled``, particle collision, density, or collision group in
-    EmbodiChain; those values must be configured consistently.
-    """
-
-    is_hydroelastic: bool | None = None
-    """Whether the shape opts into SDF-based hydroelastic contact.
-
-    Both shapes in a pair must opt in and have SDF data.  Plane, heightfield,
-    and other non-volumetric shapes cannot use hydroelastic contact.
-    """
-
-    sdf_narrow_band_range: tuple[float, float] | None = None
-    """Inner and outer signed-distance limits of the generated SDF band [m]."""
-
-    sdf_target_voxel_size: float | None = None
-    """Target sparse-SDF voxel size [m].
-
-    This enables SDF generation, requires CUDA, and takes precedence over
-    :attr:`sdf_max_resolution`; configure only one resolution policy.
-    """
-
-    sdf_max_resolution: int | None = None
-    """Maximum sparse-SDF grid dimension.
-
-    The value must be divisible by eight, requires CUDA, and is used only when
-    :attr:`sdf_target_voxel_size` is ``None``.
-    """
-
-    sdf_texture_format: str | None = None
-    """SDF voxel storage format: ``"uint16"``, ``"float32"``, or ``"uint8"``."""
-
-    force_sdf: bool | None = None
-    """Whether to build an SDF at Newton's default resolution when none is set."""
-
-    sdf_padding: float | None = None
-    """Extra construction padding used while building a mesh SDF [m].
-
-    Hydroelastic SDF coverage must include at least the configured contact
-    envelope.  When omitted, the DexSim adapter chooses its fallback padding.
-
-    This field is a compatibility alias. New configurations should place it in
-    :class:`NewtonMeshCollisionPropertiesCfg`.
-    """
-
-
-@configclass
-class MeshCollisionPropertiesCfg:
-    """Backend-neutral mesh collision approximation and cooking settings.
-
-    These values describe collision geometry, not render geometry. ``None``
-    falls back to the deprecated fields on :class:`~embodichain.lab.sim.shapes.MeshCfg`.
-    """
-
-    max_convex_hull_num: int | None = None
-    """Maximum number of convex hulls produced for convex decomposition."""
-
-    acd_method: str | None = None
-    """Approximate-convex-decomposition method, currently ``coacd`` or ``vhacd``."""
-
-    sdf_resolution: int | None = None
-    """Uniform SDF cooking resolution; zero disables SDF approximation."""
-
-
-@configclass
-class NewtonMeshCollisionPropertiesCfg:
-    """Newton-native mesh SDF and hydroelastic collision properties."""
-
-    is_hydroelastic: bool | None = None
-    """Whether the mesh opts into SDF-based hydroelastic contact."""
-
-    sdf_narrow_band_range: tuple[float, float] | None = None
-    """Inner and outer signed-distance limits of the generated SDF band [m]."""
-
-    sdf_target_voxel_size: float | None = None
-    """Target sparse-SDF voxel size [m]."""
-
-    sdf_max_resolution: int | None = None
-    """Maximum sparse-SDF grid dimension."""
-
-    sdf_texture_format: str | None = None
-    """SDF voxel storage format."""
-
-    force_sdf: bool | None = None
-    """Whether to build an SDF when no explicit resolution is configured."""
-
-    sdf_padding: float | None = None
-    """Extra construction padding used while building the mesh SDF [m]."""
 
 
 @configclass
@@ -377,23 +242,6 @@ class RigidBodyMaterialCfg:
 
     The active backend/solver may further restrict or ignore restitution.
     """
-
-
-@configclass
-class DefaultRigidBodyMaterialCfg(RigidBodyMaterialCfg):
-    """Contact-material extensions consumed only by the Default backend."""
-
-    torsional_patch_radius: float | None = None
-    """Contact-patch radius used to approximate torsional friction [m].
-
-    Zero disables the approximation.
-    """
-
-    min_torsional_patch_radius: float | None = None
-    """Minimum contact-patch radius used for torsional friction [m]."""
-
-    disable_strong_friction: bool | None = None
-    """Whether to disable Default-backend strong-friction contact anchoring."""
 
 
 @configclass
@@ -430,137 +278,57 @@ class NewtonRigidBodyMaterialCfg(RigidBodyMaterialCfg):
     """Rolling friction coefficient resisting rolling motion."""
 
 
-def _nested_cfg_from_dict(
-    value: Mapping[str, Any] | object | None,
-    *,
-    config_type: type,
-    field_name: str,
-) -> object | None:
-    """Parse one optional, statically typed nested config."""
-    if value is None or isinstance(value, config_type):
-        return value
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{field_name} must be a mapping or {config_type.__name__}.")
-    try:
-        return config_type(**dict(value))
-    except TypeError as exc:
-        raise TypeError(f"Invalid {field_name} configuration: {exc}") from exc
-
-
-@configclass
-class DefaultRigidBodyPhysicsCfg:
-    """Default-only extension block for one rigid-body configuration.
-
-    Portable inherited fields must remain in the common slots on
-    :class:`RigidBodyPhysicsCfg`; this block is reserved for native fields.
-    """
-
-    rigid_props: DefaultRigidBodyPropertiesCfg | None = None
-    collision_props: DefaultCollisionPropertiesCfg | None = None
-    material_props: DefaultRigidBodyMaterialCfg | None = None
-
-    @classmethod
-    def from_dict(cls, init_dict: Mapping[str, Any]) -> DefaultRigidBodyPhysicsCfg:
-        """Parse a Default backend extension block."""
-        unknown = set(init_dict) - {
-            "rigid_props",
-            "collision_props",
-            "material_props",
-        }
-        if unknown:
-            raise KeyError(
-                f"Unknown DefaultRigidBodyPhysicsCfg fields: {sorted(unknown)}"
-            )
-        return cls(
-            rigid_props=_nested_cfg_from_dict(
-                init_dict.get("rigid_props"),
-                config_type=DefaultRigidBodyPropertiesCfg,
-                field_name="default_props.rigid_props",
-            ),
-            collision_props=_nested_cfg_from_dict(
-                init_dict.get("collision_props"),
-                config_type=DefaultCollisionPropertiesCfg,
-                field_name="default_props.collision_props",
-            ),
-            material_props=_nested_cfg_from_dict(
-                init_dict.get("material_props"),
-                config_type=DefaultRigidBodyMaterialCfg,
-                field_name="default_props.material_props",
-            ),
-        )
-
-
-@configclass
-class NewtonRigidBodyPhysicsCfg:
-    """Newton-only extension block for one rigid-body configuration."""
-
-    rigid_props: NewtonRigidBodyPropertiesCfg | None = None
-    collision_props: NewtonCollisionPropertiesCfg | None = None
-    mesh_collision_props: NewtonMeshCollisionPropertiesCfg | None = None
-    material_props: NewtonRigidBodyMaterialCfg | None = None
-
-    @classmethod
-    def from_dict(cls, init_dict: Mapping[str, Any]) -> NewtonRigidBodyPhysicsCfg:
-        """Parse a Newton backend extension block."""
-        unknown = set(init_dict) - {
-            "rigid_props",
-            "collision_props",
-            "mesh_collision_props",
-            "material_props",
-        }
-        if unknown:
-            raise KeyError(
-                f"Unknown NewtonRigidBodyPhysicsCfg fields: {sorted(unknown)}"
-            )
-        return cls(
-            rigid_props=_nested_cfg_from_dict(
-                init_dict.get("rigid_props"),
-                config_type=NewtonRigidBodyPropertiesCfg,
-                field_name="newton_props.rigid_props",
-            ),
-            collision_props=_nested_cfg_from_dict(
-                init_dict.get("collision_props"),
-                config_type=NewtonCollisionPropertiesCfg,
-                field_name="newton_props.collision_props",
-            ),
-            mesh_collision_props=_nested_cfg_from_dict(
-                init_dict.get("mesh_collision_props"),
-                config_type=NewtonMeshCollisionPropertiesCfg,
-                field_name="newton_props.mesh_collision_props",
-            ),
-            material_props=_nested_cfg_from_dict(
-                init_dict.get("material_props"),
-                config_type=NewtonRigidBodyMaterialCfg,
-                field_name="newton_props.material_props",
-            ),
-        )
-
-
 _RIGID_PHYSICS_GROUP_FIELDS = frozenset(
     {
         "mass_props",
         "rigid_props",
         "collision_props",
-        "mesh_collision_props",
         "material_props",
-        "default_props",
-        "newton_props",
     }
 )
+
+_REMOVED_RIGID_PHYSICS_GROUP_FIELDS = {
+    "default_props": "the corresponding polymorphic property slot",
+    "newton_props": "the corresponding polymorphic property slot",
+    "mesh_collision_props": "MeshCfg.collision",
+}
+
+
+def _default_rigid_props_from_dict(
+    value: Mapping[str, Any] | object | None,
+) -> DefaultRigidBodyPropertiesCfg | None:
+    """Parse the currently Default-only rigid-body property slot."""
+    if value is None or isinstance(value, DefaultRigidBodyPropertiesCfg):
+        return value
+    if not isinstance(value, Mapping):
+        raise TypeError(
+            "rigid_props must be a mapping or DefaultRigidBodyPropertiesCfg."
+        )
+    data = dict(value)
+    backend = str(data.pop("backend", "default")).replace("-", "_").lower()
+    if backend != "default":
+        raise ValueError(
+            "rigid_props.backend must be 'default'; Newton currently exposes no "
+            "body-level property config."
+        )
+    try:
+        return DefaultRigidBodyPropertiesCfg(**data)
+    except TypeError as exc:
+        raise TypeError(f"Invalid rigid_props configuration: {exc}") from exc
 
 
 def _physics_property_cfg_from_dict(
     value: Mapping[str, Any] | object | None,
     *,
     common_type: type,
-    default_type: type,
-    newton_type: type,
+    backend_types: Mapping[str, type],
     field_name: str,
 ) -> object | None:
     """Parse one polymorphic rigid-physics property slot."""
     if value is None:
         return None
-    if isinstance(value, common_type):
+    supported_types = (common_type, *backend_types.values())
+    if isinstance(value, supported_types):
         return value
     if not isinstance(value, Mapping):
         raise TypeError(f"{field_name} must be a mapping or {common_type.__name__}.")
@@ -568,31 +336,27 @@ def _physics_property_cfg_from_dict(
     configured_backend = data.pop("backend", None)
     if configured_backend is None:
         common_fields = {item.name for item in fields(common_type)}
-        default_fields = {item.name for item in fields(default_type)} - common_fields
-        newton_fields = {item.name for item in fields(newton_type)} - common_fields
-        has_default_fields = bool(default_fields.intersection(data))
-        has_newton_fields = bool(newton_fields.intersection(data))
-        if has_default_fields and has_newton_fields:
+        matching_backends = [
+            backend
+            for backend, config_type in backend_types.items()
+            if (
+                {item.name for item in fields(config_type)} - common_fields
+            ).intersection(data)
+        ]
+        if len(matching_backends) > 1:
             raise ValueError(
                 f"{field_name} mixes Default and Newton-only fields; select one "
                 "backend-specific property config."
             )
-        backend = (
-            "default"
-            if has_default_fields
-            else "newton" if has_newton_fields else "common"
-        )
+        backend = matching_backends[0] if matching_backends else "common"
     else:
         backend = str(configured_backend).replace("-", "_").lower()
-    config_type = {
-        "common": common_type,
-        "default": default_type,
-        "newton": newton_type,
-    }.get(backend)
+    config_type = common_type if backend == "common" else backend_types.get(backend)
     if config_type is None:
+        supported_backends = ("common", *backend_types)
         raise ValueError(
-            f"{field_name}.backend must be 'common', 'default', or 'newton', "
-            f"got {backend!r}."
+            f"{field_name}.backend must be one of {supported_backends}, got "
+            f"{backend!r}."
         )
     try:
         return config_type(**data)
@@ -604,20 +368,21 @@ def _physics_property_cfg_to_dict(
     value: object | None,
     *,
     common_type: type,
-    default_type: type,
-    newton_type: type,
+    backend_types: Mapping[str, type],
     field_name: str,
 ) -> dict[str, Any] | None:
     """Serialize one polymorphic property slot with a stable discriminator."""
     if value is None:
         return None
-    if isinstance(value, newton_type):
-        backend = "newton"
-    elif isinstance(value, default_type):
-        backend = "default"
-    elif type(value) is common_type:
-        backend = None
-    else:
+    backend = next(
+        (
+            name
+            for name, config_type in backend_types.items()
+            if isinstance(value, config_type)
+        ),
+        None,
+    )
+    if backend is None and type(value) is not common_type:
         raise TypeError(
             f"Unsupported {field_name} config type {type(value).__name__!r}."
         )
@@ -649,53 +414,41 @@ def _copy_dexsim_physical_attr(source: PhysicalAttr) -> PhysicalAttr:
 class RigidBodyPhysicsCfg:
     """Grouped rigid-body physics configuration used by Spawn.
 
-    Common slots carry backend-neutral values. :attr:`default_props` and
-    :attr:`newton_props` carry native extensions and may be configured at the
-    same time. The older polymorphic subclasses in the common slots remain
-    accepted as compatibility input; an explicit backend block takes
-    precedence for duplicate native fields.
-
     Every nested field defaults to ``None``.  With
     ``asset_physics_mode="overlay"``, Spawn therefore changes only explicitly
     configured values and preserves all other USD/URDF or backend defaults.
-    Dict/YAML input for compatibility slots selects a subclass with a local
-    ``backend: common|default|newton`` discriminator; a unique native field may
-    also infer the subclass. New definitions should keep those slots common
-    and place backend-native values in the explicit backend blocks.
-
-    .. attention::
-        Portable fields inherited by a backend subtype still belong in the
-        common slot. Explicit backend blocks accept native fields only.
+    Each physical concept has exactly one slot. Dict/YAML input selects a
+    backend subclass with a local discriminator, while a unique native field
+    may infer that subclass. Mesh collision construction belongs to
+    :class:`~embodichain.lab.sim.shapes.MeshCfg`, not this body-physics schema.
     """
 
     mass_props: MassPropertiesCfg | None = None
     """Backend-neutral mass, inertia, COM, and recomputation overrides."""
 
-    rigid_props: RigidBodyPropertiesCfg | None = None
-    """Optional body-level backend properties.
+    rigid_props: DefaultRigidBodyPropertiesCfg | None = None
+    """Optional Default-native body properties.
 
-    Use :class:`DefaultRigidBodyPropertiesCfg` for Default-backend fields or the
-    currently empty :class:`NewtonRigidBodyPropertiesCfg` extension point.
+    Newton currently exposes no body-level property group beyond common mass
+    properties, so there is no empty Newton marker config.
     """
 
     collision_props: CollisionPropertiesCfg | None = None
-    """Portable collision envelope plus optional backend-native shape properties."""
-
-    mesh_collision_props: MeshCollisionPropertiesCfg | None = None
-    """Mesh collision approximation/cooking settings independent of render geometry."""
+    """Portable collision envelope plus one optional backend-specific subtype."""
 
     material_props: RigidBodyMaterialCfg | None = None
     """Portable contact material values plus optional backend-native coefficients."""
 
-    default_props: DefaultRigidBodyPhysicsCfg | None = None
-    """Default-only native property extensions."""
-
-    newton_props: NewtonRigidBodyPhysicsCfg | None = None
-    """Newton-only native property extensions, including mesh SDF settings."""
-
     @classmethod
     def from_dict(cls, init_dict: Mapping[str, Any]) -> RigidBodyPhysicsCfg:
         """Parse grouped physics properties from a YAML/JSON-style mapping."""
+        removed = _REMOVED_RIGID_PHYSICS_GROUP_FIELDS.keys() & init_dict.keys()
+        if removed:
+            replacements = ", ".join(
+                f"{name} -> {_REMOVED_RIGID_PHYSICS_GROUP_FIELDS[name]}"
+                for name in sorted(removed)
+            )
+            raise ValueError(f"Removed RigidBodyPhysicsCfg fields: {replacements}.")
         unknown = set(init_dict) - _RIGID_PHYSICS_GROUP_FIELDS
         if unknown:
             raise KeyError(f"Unknown RigidBodyPhysicsCfg fields: {sorted(unknown)}")
@@ -713,61 +466,24 @@ class RigidBodyPhysicsCfg:
                     else MassPropertiesCfg(**value)
                 )
         if "rigid_props" in init_dict:
-            cfg.rigid_props = _physics_property_cfg_from_dict(
-                init_dict["rigid_props"],
-                common_type=RigidBodyPropertiesCfg,
-                default_type=DefaultRigidBodyPropertiesCfg,
-                newton_type=NewtonRigidBodyPropertiesCfg,
-                field_name="rigid_props",
-            )
+            cfg.rigid_props = _default_rigid_props_from_dict(init_dict["rigid_props"])
         if "collision_props" in init_dict:
             cfg.collision_props = _physics_property_cfg_from_dict(
                 init_dict["collision_props"],
                 common_type=CollisionPropertiesCfg,
-                default_type=DefaultCollisionPropertiesCfg,
-                newton_type=NewtonCollisionPropertiesCfg,
+                backend_types={
+                    "default": DefaultCollisionPropertiesCfg,
+                    "newton": NewtonCollisionPropertiesCfg,
+                },
                 field_name="collision_props",
-            )
-        if "mesh_collision_props" in init_dict:
-            cfg.mesh_collision_props = _nested_cfg_from_dict(
-                init_dict["mesh_collision_props"],
-                config_type=MeshCollisionPropertiesCfg,
-                field_name="mesh_collision_props",
             )
         if "material_props" in init_dict:
             cfg.material_props = _physics_property_cfg_from_dict(
                 init_dict["material_props"],
                 common_type=RigidBodyMaterialCfg,
-                default_type=DefaultRigidBodyMaterialCfg,
-                newton_type=NewtonRigidBodyMaterialCfg,
+                backend_types={"newton": NewtonRigidBodyMaterialCfg},
                 field_name="material_props",
             )
-        if "default_props" in init_dict:
-            value = init_dict["default_props"]
-            if value is not None:
-                if not isinstance(value, (DefaultRigidBodyPhysicsCfg, Mapping)):
-                    raise TypeError(
-                        "default_props must be a mapping or "
-                        "DefaultRigidBodyPhysicsCfg."
-                    )
-                cfg.default_props = (
-                    value
-                    if isinstance(value, DefaultRigidBodyPhysicsCfg)
-                    else DefaultRigidBodyPhysicsCfg.from_dict(value)
-                )
-        if "newton_props" in init_dict:
-            value = init_dict["newton_props"]
-            if value is not None:
-                if not isinstance(value, (NewtonRigidBodyPhysicsCfg, Mapping)):
-                    raise TypeError(
-                        "newton_props must be a mapping or "
-                        "NewtonRigidBodyPhysicsCfg."
-                    )
-                cfg.newton_props = (
-                    value
-                    if isinstance(value, NewtonRigidBodyPhysicsCfg)
-                    else NewtonRigidBodyPhysicsCfg.from_dict(value)
-                )
         return cfg
 
     def to_dict(self) -> dict[str, Any]:
@@ -776,37 +492,25 @@ class RigidBodyPhysicsCfg:
             "mass_props": (
                 None if self.mass_props is None else self.mass_props.to_dict()
             ),
-            "rigid_props": _physics_property_cfg_to_dict(
-                self.rigid_props,
-                common_type=RigidBodyPropertiesCfg,
-                default_type=DefaultRigidBodyPropertiesCfg,
-                newton_type=NewtonRigidBodyPropertiesCfg,
-                field_name="rigid_props",
+            "rigid_props": (
+                None
+                if self.rigid_props is None
+                else {**self.rigid_props.to_dict(), "backend": "default"}
             ),
             "collision_props": _physics_property_cfg_to_dict(
                 self.collision_props,
                 common_type=CollisionPropertiesCfg,
-                default_type=DefaultCollisionPropertiesCfg,
-                newton_type=NewtonCollisionPropertiesCfg,
+                backend_types={
+                    "default": DefaultCollisionPropertiesCfg,
+                    "newton": NewtonCollisionPropertiesCfg,
+                },
                 field_name="collision_props",
-            ),
-            "mesh_collision_props": (
-                None
-                if self.mesh_collision_props is None
-                else self.mesh_collision_props.to_dict()
             ),
             "material_props": _physics_property_cfg_to_dict(
                 self.material_props,
                 common_type=RigidBodyMaterialCfg,
-                default_type=DefaultRigidBodyMaterialCfg,
-                newton_type=NewtonRigidBodyMaterialCfg,
+                backend_types={"newton": NewtonRigidBodyMaterialCfg},
                 field_name="material_props",
-            ),
-            "default_props": (
-                None if self.default_props is None else self.default_props.to_dict()
-            ),
-            "newton_props": (
-                None if self.newton_props is None else self.newton_props.to_dict()
             ),
         }
 
@@ -842,26 +546,6 @@ class RigidBodyPhysicsCfg:
             (self.rigid_props, {}),
             (self.collision_props, {"collision_enabled": "enable_collision"}),
             (self.material_props, {}),
-            (
-                None if self.default_props is None else self.default_props.rigid_props,
-                {},
-            ),
-            (
-                (
-                    None
-                    if self.default_props is None
-                    else self.default_props.collision_props
-                ),
-                {"collision_enabled": "enable_collision"},
-            ),
-            (
-                (
-                    None
-                    if self.default_props is None
-                    else self.default_props.material_props
-                ),
-                {},
-            ),
         )
         for cfg, field_map in configs:
             if cfg is None:
@@ -917,10 +601,15 @@ class RigidBodyPhysicsCfg:
                 max_angular_velocity=getattr(attr, "max_angular_velocity", None),
                 enable_ccd=getattr(attr, "enable_ccd", None),
             ),
-            collision_props=CollisionPropertiesCfg(
+            collision_props=DefaultCollisionPropertiesCfg(
                 collision_enabled=getattr(attr, "enable_collision", None),
                 contact_offset=getattr(attr, "contact_offset", None),
                 rest_offset=getattr(attr, "rest_offset", None),
+                torsional_patch_radius=getattr(attr, "torsional_patch_radius", None),
+                min_torsional_patch_radius=getattr(
+                    attr, "min_torsional_patch_radius", None
+                ),
+                disable_strong_friction=getattr(attr, "disable_strong_friction", None),
             ),
             material_props=RigidBodyMaterialCfg(
                 restitution=getattr(attr, "restitution", None),

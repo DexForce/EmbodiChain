@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import LightCfg, MeshCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import LightCfg, MeshCfg, MeshCollisionCfg, RigidObjectCfg
 from embodichain.lab.visualization import (
     VisualizationCfg,
     add_viser_args_to_parser,
@@ -184,14 +184,22 @@ def _add_objects(
             field_name=f"{uid}.body_scale",
         )
         max_convex_hull_num = max(1, int(entry.get("max_convex_hull_num", 32)))
+        mesh_collision = MeshCollisionCfg(approximation="convex_hull")
+        if max_convex_hull_num > 1:
+            # The exported preview schema still carries the legacy hull budget;
+            # normalize it at this input boundary into the explicit Lab schema.
+            mesh_collision = MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=max_convex_hull_num,
+                acd_method="coacd",
+            )
 
         sim.add_rigid_object(
             RigidObjectCfg(
                 uid=uid,
                 shape=MeshCfg(
                     fpath=str(mesh_path),
-                    max_convex_hull_num=max_convex_hull_num,
-                    acd_method="vhacd",  # Use VHACD by default.
+                    collision=mesh_collision,
                 ),
                 # Keep every preview body static: exported poses are already the
                 # final gravity-settled poses and should not be simulated again.

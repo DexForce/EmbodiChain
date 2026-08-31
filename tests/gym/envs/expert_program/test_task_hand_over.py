@@ -191,7 +191,7 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     )
     assert [item.uid for item in cfg.background] == [_SUPPORT_SURFACE_UID]
     assert [item.uid for item in cfg.rigid_object] == [_CAN_SIMULATION_UID]
-    assert cfg.rigid_object[0].shape.max_convex_hull_num == 16
+    assert cfg.rigid_object[0].shape.collision.max_hulls == 16
     assert cfg.expert_program is not None
     assert cfg.expert_program.program_id == "dual_ur5_hand_over"
 
@@ -215,8 +215,8 @@ def test_hand_over_config_owns_tuned_can_and_pgi_physics() -> None:
             )
             assert values[f"{side}_gripper_finger2_joint_1"] == pytest.approx(0.0)
     finger_attrs = cfg.robot.link_attrs["gripper_fingers"].attrs
-    assert finger_attrs.dynamic_friction == pytest.approx(2.0)
-    assert finger_attrs.static_friction == pytest.approx(2.0)
+    assert finger_attrs.material_props.dynamic_friction == pytest.approx(2.0)
+    assert finger_attrs.material_props.static_friction == pytest.approx(2.0)
 
 
 def test_hand_over_runtime_owns_scene_pose_and_evidence_services() -> None:

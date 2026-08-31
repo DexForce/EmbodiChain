@@ -115,11 +115,18 @@ use DexSim's per-entity metadata hook when a Newton body ID is not available.
 
 `RigidBodyPhysicsCfg` is the single public schema for rigid-object and
 articulation link physics. It separates portable values into `mass_props`,
-`rigid_props`, `collision_props`, and `material_props`, while
-`default_props` and `newton_props` carry backend-native extensions. Every
-field is optional, so source-authored values survive sparse USD/URDF overlays.
-The same partial schema is used by `LinkPhysicsOverrideCfg`, eliminating the
-former flat compatibility/override type pair.
+`rigid_props`, `collision_props`, and `material_props`. Each concept has one
+slot, and backend-native values use that slot's concrete subtype; parallel
+`default_props`/`newton_props` blocks are not supported. Every field is
+optional, so source-authored values survive sparse USD/URDF overlays. The same
+partial schema is used by `LinkPhysicsOverrideCfg`, eliminating the former flat
+compatibility/override type pair.
+
+Mesh collision construction is owned by `MeshCfg.collision`, whose explicit
+approximation selects convex hull, convex decomposition, triangle mesh, or SDF.
+Newton SDF/hydroelastic cooking fields live there rather than in rigid-body
+physics. Imported articulation links keep their source mesh approximation until
+a named source-shape overlay is available.
 
 Spawn compiles these groups into its backend-neutral rigid-body and shape
 descriptors, then projects Default- or Newton-specific values at the selected
@@ -193,8 +200,8 @@ Newton kinematic pose locking is not complete. The rigid-object test suite keeps
 a Newton-specific allowance for kinematic bodies changing after stepping.
 
 Newton SDF rigid mesh support is not validated in EmbodiChain. The SDF rigid
-object test is skipped for Newton. CoACD-decomposed meshes keep the legacy attr
-path on Newton (no `attrs.newton` desc-native routing yet).
+object test is skipped for Newton. Procedural SDF and CoACD geometry is compiled
+from `MeshCfg.collision` through the Spawn descriptor path.
 
 Articulation Newton-native **per-link** contact/shape params (`ke`/`kd`/`margin`/
 ...) are accepted in config but not applied (dexsim `NewtonArticulation` exposes
@@ -245,8 +252,7 @@ default-backend rigid suite (CPU+CUDA) passes with no regression.
 ### RigidObject
 
 - Implement force-at-position when DexSim Newton exposes the needed API.
-- Validate SDF rigid mesh creation and collision behavior on Newton; route SDF
-  and CoACD through the desc-native path when `attrs.newton` is set.
+- Validate SDF rigid mesh creation and collision behavior on Newton.
 - Fix or document kinematic pose-lock semantics.
 
 ### Object Groups, Soft, Cloth
@@ -377,11 +383,9 @@ Simulation:
 
 Newton-native attributes (`test_physics_attrs.py`, headless):
 
-- `from_dict` parses nested `newton`; `resolve_newton_shape` projects common
-  fields (`friction→mu`, `restitution`, `enable_collision→has_shape_collision`,
-  `density`); `merged_cfg` propagates `newton`; per-solver warnings
-  (`xpbd` ignores `ke`/`kd`; `mujoco_warp` ignores `restitution`) and
-  backend-mismatch warnings fire correctly.
+- `from_dict` parses local property-slot discriminators; the Spawn compiler
+  projects common and Newton-native fields; per-solver warnings (`xpbd` ignores
+  `ke`/`kd`; `mujoco_warp` ignores `restitution`) fire correctly.
 
 Rigid object:
 
@@ -389,8 +393,9 @@ Rigid object:
 - Pose, velocity, acceleration, force/torque, reset, COM pose, mass, friction,
   inertia, restitution, contact offset, collision filters, geometry APIs behave
   consistently with the documented support matrix.
-- `attrs.newton` set spawns via the desc-native path; body registers with the
-  Newton manager after finalize; common fields round-trip via the batch view.
+- Single-slot physics properties and `MeshCfg.collision` spawn through the
+  descriptor path; the body registers with the Newton manager after finalize;
+  common fields round-trip via the batch view.
 - `set_attrs`/`set_damping`/`set_body_type` produce the documented behavior
   (live subset / meta no-op / no-op).
 
@@ -418,10 +423,10 @@ Gradient:
   (`_joint_metas_from_ids` active-joint indexing, dexsim
   `yueci/adapt-embodichain` `d0e86bb02`). If dexsim is rebuilt from a different
   ref, `supports_robot` would need re-gating.
-- dexsim's Newton path hardcodes `density=0.0` in its desc resolver; EmbodiChain's
-  `resolve_newton_shape` sets `density` from the cfg (positive) to avoid the
-  desc-path mass gap where dynamic bodies without explicit mass+inertia fail to
-  compute a positive body mass. Watch for dexsim changing this.
+- dexsim's Newton path hardcodes `density=0.0` in its desc resolver;
+  EmbodiChain's Spawn compiler authors a positive configured density on the
+  rigid-body descriptor to avoid the mass gap for dynamic bodies without an
+  explicit mass and inertia. Watch for dexsim changing this.
 - DexSim Newton monkey-patches global classes. Global teardown can affect other
   worlds if used at the wrong time.
 - Public body/articulation ID mapping APIs may still need DexSim improvements.

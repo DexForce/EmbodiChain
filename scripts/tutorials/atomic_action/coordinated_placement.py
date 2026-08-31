@@ -51,7 +51,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.scenario_utils import (
     add_dual_tutorial_robot,
@@ -250,7 +250,10 @@ def create_bread(sim: SimulationManager) -> RigidObject:
             shape=MeshCfg(
                 fpath=resolve_cached_data_path(BREAD_MESH_PATH),
                 compute_uv=False,
-                max_convex_hull_num=8,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=8,
+                ),
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
@@ -276,7 +279,10 @@ def create_pan(sim: SimulationManager) -> RigidObject:
             shape=MeshCfg(
                 fpath=resolve_cached_data_path(PAN_MESH_PATH),
                 compute_uv=False,
-                max_convex_hull_num=16,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=16,
+                ),
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,

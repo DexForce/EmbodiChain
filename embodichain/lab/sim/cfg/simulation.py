@@ -313,8 +313,8 @@ class NewtonCollisionPipelineCfg:
     """Optional Newton ``HydroelasticSDF.Config``-compatible object.
 
     ``None`` disables the hydroelastic pipeline.  Individual participating
-    shapes must also opt in through
-    :attr:`NewtonCollisionPropertiesCfg.is_hydroelastic`.
+    procedural meshes must also opt in through
+    :attr:`~embodichain.lab.sim.shapes.MeshCollisionCfg.is_hydroelastic`.
     """
 
 

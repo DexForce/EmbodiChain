@@ -76,8 +76,8 @@ class ArticulationRootPropertiesCfg:
     self_collision_enabled: bool | None = None
     """Whether non-filtered link pairs in the articulation may self-collide.
 
-    Newton may still filter adjacent parent-child bodies through
-    :attr:`NewtonCollisionPropertiesCfg.collision_filter_parent`.
+    Newton may still apply source-authored or Spawn-owned filtering to adjacent
+    parent-child bodies.
     """
 
     sleep_threshold: float | None = None

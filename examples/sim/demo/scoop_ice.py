@@ -43,7 +43,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
-from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -184,7 +184,10 @@ def create_scoop(sim: SimulationManager):
         uid="scoop",
         shape=MeshCfg(
             fpath=get_data_path("ScoopIceNewEnv/scoop.ply"),
-            max_convex_hull_num=12,
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=12,
+            ),
         ),
         attrs=RigidBodyPhysicsCfg.from_dict(
             {

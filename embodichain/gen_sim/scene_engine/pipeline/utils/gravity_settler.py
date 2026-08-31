@@ -33,7 +33,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
 )
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils.logger import log_info
 
 
@@ -276,8 +276,7 @@ class GravitySettler:
                 uid=object_id,
                 shape=MeshCfg(
                     fpath=str(body_info["mesh_path"]),
-                    max_convex_hull_num=self._max_convex_hull_num(physics),
-                    acd_method="vhacd",
+                    collision=self._mesh_collision_cfg(physics),
                 ),
                 init_pos=tuple(
                     self._three_floats(rigid_layout.get("pos"), field_name="pos")
@@ -299,11 +298,17 @@ class GravitySettler:
         return RigidBodyPhysicsCfg.from_dict(physics.attrs)
 
     @staticmethod
-    def _max_convex_hull_num(physics: ObjectPhysics | None) -> int:
-        """Read the persisted collision-hull budget after validating physics."""
+    def _mesh_collision_cfg(physics: ObjectPhysics | None) -> MeshCollisionCfg:
+        """Normalize the persisted legacy hull budget into the Lab schema."""
         if physics is None:
             raise ValueError("Gravity settling requires SimReady physics settings.")
-        return physics.max_convex_hull_num
+        if physics.max_convex_hull_num == 1:
+            return MeshCollisionCfg(approximation="convex_hull")
+        return MeshCollisionCfg(
+            approximation="convex_decomposition",
+            max_hulls=physics.max_convex_hull_num,
+            acd_method="coacd",
+        )
 
     @staticmethod
     def _require_body_layout_id(body: GravitySettleBody, *, name: str) -> str:

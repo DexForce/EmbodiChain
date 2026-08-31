@@ -112,7 +112,7 @@ Use these shapes when collecting vectorized observations for multi-environment t
 
 - Groups are convenient for batch operations: resetting, setting visibility, and applying transforms to multiple objects together.
 - Use `obj_ids` parameter in `set_local_pose()` to control specific objects within the group rather than all members.
-- Prefer providing simplified collision meshes or enabling convex decomposition (`max_convex_hull_num` > 1) for complex visual meshes to improve physics stability.
+- Prefer simplified collision meshes or an explicit `MeshCfg.collision` convex-decomposition strategy with a bounded `max_hulls` for complex visual meshes.
 - `RigidObjectGroup` only supports `dynamic` and `kinematic` body types (not `static`).
 - When teleporting many members, batch pose updates and call `sim.update()` once to avoid synchronization overhead.
 - For GPU physics, set `SimulationManagerCfg.device` to `cuda` and call `sim.init_gpu_physics()` before running simulations.

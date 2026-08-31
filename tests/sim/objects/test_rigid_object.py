@@ -36,7 +36,7 @@ from embodichain.lab.sim.cfg import (
     physics_cfg_for_backend,
 )
 from embodichain.lab.sim.objects import RigidObject
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.utils.math import matrix_from_quat
 
 DUCK_PATH = "ToyDuck/toy_duck.glb"
@@ -415,7 +415,13 @@ class BaseRigidObjectTest:
         sdf = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid="duck_sdf",
-                shape=MeshCfg(fpath=duck_path, sdf_resolution=128),
+                shape=MeshCfg(
+                    fpath=duck_path,
+                    collision=MeshCollisionCfg(
+                        approximation="sdf",
+                        sdf_resolution=128,
+                    ),
+                ),
                 body_type="dynamic",
             )
         )

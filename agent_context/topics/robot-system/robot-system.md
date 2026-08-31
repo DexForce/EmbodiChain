@@ -102,8 +102,9 @@ Default-only articulation sleep and solver iterations belong directly in
 articulation root before the first reset, while Newton ignores them. Use
 `DefaultRigidBodyPropertiesCfg` under `attrs` or
 `link_attrs` only when the intended target is an individual rigid body/link.
-Keep portable rigid-body values in the common `RigidBodyPhysicsCfg` slots and
-place native tuning in its coexisting `default_props`/`newton_props` blocks.
+Keep portable rigid-body values and one selected backend subtype in the single
+matching `RigidBodyPhysicsCfg` slot. Backend-specific whole-robot alternatives
+belong in `RobotPresetCfg`; there are no coexisting per-property backend blocks.
 
 When a backend truly needs a different asset or complete actuator/physics
 definition, subclass `RobotPresetCfg` and declare complete alternatives. The

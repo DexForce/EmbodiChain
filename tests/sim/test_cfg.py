@@ -35,27 +35,21 @@ from embodichain.lab.sim.cfg import (
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
     DefaultPhysicsCfg,
-    DefaultRigidBodyPhysicsCfg,
-    DefaultRigidBodyMaterialCfg,
     DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
-    MeshCollisionPropertiesCfg,
+    MeshCollisionCfg,
     NewtonCollisionPipelineCfg,
     NewtonCollisionPropertiesCfg,
-    NewtonMeshCollisionPropertiesCfg,
     NewtonJointDrivePropertiesCfg,
     NewtonPhysicsCfg,
     NewtonRigidBodyMaterialCfg,
-    NewtonRigidBodyPhysicsCfg,
-    NewtonRigidBodyPropertiesCfg,
     PhysicsBackendCfg,
     PhysicsCfg,
     RenderCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
-    RigidBodyPropertiesCfg,
     RigidObjectCfg,
     RobotCfg,
     RobotPresetCfg,
@@ -276,14 +270,25 @@ def test_robot_cfg_merge_preserves_typed_backend_property_configs() -> None:
     assert merged.attrs.material_props.kd == 50.0
 
 
-def test_rigid_physics_property_groups_have_single_backend_roots() -> None:
-    """Backend configs extend one logical property root without duplication."""
-    assert issubclass(DefaultRigidBodyPropertiesCfg, RigidBodyPropertiesCfg)
-    assert issubclass(NewtonRigidBodyPropertiesCfg, RigidBodyPropertiesCfg)
+def test_rigid_physics_uses_one_slot_per_physical_concept() -> None:
+    """Backend blocks and geometry cooking are not parallel physics owners."""
+    assert {item.name for item in fields(RigidBodyPhysicsCfg)} == {
+        "mass_props",
+        "rigid_props",
+        "collision_props",
+        "material_props",
+    }
     assert issubclass(DefaultCollisionPropertiesCfg, CollisionPropertiesCfg)
     assert issubclass(NewtonCollisionPropertiesCfg, CollisionPropertiesCfg)
     assert issubclass(NewtonRigidBodyMaterialCfg, RigidBodyMaterialCfg)
     assert issubclass(NewtonJointDrivePropertiesCfg, JointDrivePropertiesCfg)
+    for removed_name in (
+        "DefaultRigidBodyPhysicsCfg",
+        "NewtonRigidBodyPhysicsCfg",
+        "MeshCollisionPropertiesCfg",
+        "NewtonMeshCollisionPropertiesCfg",
+    ):
+        assert not hasattr(sim_cfg, removed_name)
 
 
 def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
@@ -291,17 +296,44 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         return {item.name for item in fields(config_type)}
 
     assert names(DefaultRigidBodyPropertiesCfg) == names(DexsimPhysicsDesc)
-    assert (names(DefaultCollisionPropertiesCfg) - {"collision_enabled"}) | names(
-        DefaultRigidBodyMaterialCfg
-    ) == names(DexsimCollisionDesc)
+    default_collision_fields = (
+        (names(CollisionPropertiesCfg) - {"collision_enabled"})
+        | (names(DefaultCollisionPropertiesCfg) - names(CollisionPropertiesCfg))
+        | names(RigidBodyMaterialCfg)
+    )
+    assert default_collision_fields == names(DexsimCollisionDesc)
 
     newton_fields = (
         names(NewtonCollisionPropertiesCfg) - names(CollisionPropertiesCfg)
     ) | (names(NewtonRigidBodyMaterialCfg) - names(RigidBodyMaterialCfg))
     newton_fields.remove("torsional_friction")
     newton_fields.remove("rolling_friction")
-    newton_fields.update({"mu", "restitution", "mu_torsional", "mu_rolling"})
-    assert newton_fields == names(NewtonCollisionDesc)
+    newton_fields.update(
+        {
+            "mu",
+            "restitution",
+            "mu_torsional",
+            "mu_rolling",
+            "is_hydroelastic",
+            "sdf_narrow_band_range",
+            "sdf_target_voxel_size",
+            "sdf_max_resolution",
+            "sdf_texture_format",
+            "force_sdf",
+            "sdf_padding",
+        }
+    )
+    intentionally_unowned_shape_fields = {
+        "is_solid",
+        "collision_group",
+        "collision_filter_parent",
+        "has_particle_collision",
+        "is_visible",
+        "is_site",
+    }
+    assert (
+        newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
+    )
 
     assert names(NewtonCollisionPipelineCfg) == names(
         SpawnNewtonCollisionPipelineCfg
@@ -356,35 +388,20 @@ def test_recompute_inertia_is_a_mass_property() -> None:
         )
 
 
-def test_rigid_physics_explicit_backend_blocks_can_coexist_and_round_trip() -> None:
-    cfg = RigidBodyPhysicsCfg.from_dict(
-        {
-            "collision_props": {"contact_offset": 0.02, "rest_offset": 0.01},
-            "mesh_collision_props": {"max_convex_hull_num": 4},
-            "default_props": {
-                "rigid_props": {"linear_damping": 0.2},
-                "material_props": {"disable_strong_friction": True},
-            },
-            "newton_props": {
-                "collision_props": {"margin": 0.005},
-                "mesh_collision_props": {"force_sdf": True},
-                "material_props": {"ke": 1000.0},
-            },
-        }
-    )
-
-    restored = RigidBodyPhysicsCfg.from_dict(cfg.to_dict())
-
-    assert isinstance(restored.mesh_collision_props, MeshCollisionPropertiesCfg)
-    assert isinstance(restored.default_props, DefaultRigidBodyPhysicsCfg)
-    assert isinstance(restored.newton_props, NewtonRigidBodyPhysicsCfg)
-    assert isinstance(
-        restored.newton_props.mesh_collision_props,
-        NewtonMeshCollisionPropertiesCfg,
-    )
-    assert restored.default_props.rigid_props.linear_damping == pytest.approx(0.2)
-    assert restored.newton_props.collision_props.margin == pytest.approx(0.005)
-    assert restored.newton_props.mesh_collision_props.force_sdf is True
+@pytest.mark.parametrize(
+    ("removed_field", "replacement"),
+    [
+        ("default_props", "polymorphic property slot"),
+        ("newton_props", "polymorphic property slot"),
+        ("mesh_collision_props", "MeshCfg.collision"),
+    ],
+)
+def test_rigid_physics_rejects_removed_parallel_owners(
+    removed_field: str,
+    replacement: str,
+) -> None:
+    with pytest.raises(ValueError, match=replacement):
+        RigidBodyPhysicsCfg.from_dict({removed_field: {}})
 
 
 def test_articulation_cfg_parses_joint_drive_and_dynamics() -> None:
@@ -403,15 +420,10 @@ def test_articulation_cfg_parses_joint_drive_and_dynamics() -> None:
     assert cfg.joint_drive_props.friction == {"arm_.*": 0.2}
 
 
-def test_robot_cfg_merge_composes_backend_blocks_and_joint_drive_properties() -> None:
+def test_robot_cfg_merge_composes_single_slot_and_joint_drive_properties() -> None:
     base = RobotCfg(
         attrs=RigidBodyPhysicsCfg(
-            default_props=DefaultRigidBodyPhysicsCfg(
-                rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.1)
-            ),
-            newton_props=NewtonRigidBodyPhysicsCfg(
-                mesh_collision_props=NewtonMeshCollisionPropertiesCfg(sdf_padding=0.01)
-            ),
+            rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.1),
         ),
         joint_drive_props=JointDrivePropertiesCfg(
             max_effort={"arm": 10.0},
@@ -423,11 +435,9 @@ def test_robot_cfg_merge_composes_backend_blocks_and_joint_drive_properties() ->
         base,
         {
             "attrs": {
-                "default_props": {
-                    "rigid_props": {"angular_damping": 0.2},
-                },
-                "newton_props": {
-                    "mesh_collision_props": {"force_sdf": True},
+                "rigid_props": {
+                    "backend": "default",
+                    "angular_damping": 0.2,
                 },
             },
             "joint_drive_props": {
@@ -437,12 +447,8 @@ def test_robot_cfg_merge_composes_backend_blocks_and_joint_drive_properties() ->
         },
     )
 
-    assert merged.attrs.default_props.rigid_props.linear_damping == pytest.approx(0.1)
-    assert merged.attrs.default_props.rigid_props.angular_damping == pytest.approx(0.2)
-    assert merged.attrs.newton_props.mesh_collision_props.sdf_padding == pytest.approx(
-        0.01
-    )
-    assert merged.attrs.newton_props.mesh_collision_props.force_sdf is True
+    assert merged.attrs.rigid_props.linear_damping == pytest.approx(0.1)
+    assert merged.attrs.rigid_props.angular_damping == pytest.approx(0.2)
     assert merged.joint_drive_props.max_effort == {"arm": 10.0, "wrist": 20.0}
     assert merged.joint_drive_props.friction == pytest.approx(0.1)
     assert merged.joint_drive_props.armature == pytest.approx(0.3)
@@ -525,7 +531,6 @@ def test_robot_preset_rejects_noncanonical_backend_names() -> None:
 
 def test_backend_property_configs_round_trip_without_losing_subclasses() -> None:
     cfg = RigidBodyPhysicsCfg(
-        rigid_props=NewtonRigidBodyPropertiesCfg(),
         collision_props=NewtonCollisionPropertiesCfg(margin=0.01),
         material_props=NewtonRigidBodyMaterialCfg(ke=1000.0),
     )
@@ -533,10 +538,9 @@ def test_backend_property_configs_round_trip_without_losing_subclasses() -> None
     serialized = cfg.to_dict()
     restored = RigidBodyPhysicsCfg.from_dict(serialized)
 
-    assert serialized["rigid_props"]["backend"] == "newton"
+    assert serialized["rigid_props"] is None
     assert serialized["collision_props"]["backend"] == "newton"
     assert serialized["material_props"]["backend"] == "newton"
-    assert isinstance(restored.rigid_props, NewtonRigidBodyPropertiesCfg)
     assert isinstance(restored.collision_props, NewtonCollisionPropertiesCfg)
     assert isinstance(restored.material_props, NewtonRigidBodyMaterialCfg)
 
@@ -544,8 +548,11 @@ def test_backend_property_configs_round_trip_without_losing_subclasses() -> None
 def test_default_property_configs_use_the_default_discriminator() -> None:
     cfg = RigidBodyPhysicsCfg(
         rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.2),
-        collision_props=DefaultCollisionPropertiesCfg(contact_offset=0.01),
-        material_props=DefaultRigidBodyMaterialCfg(disable_strong_friction=True),
+        collision_props=DefaultCollisionPropertiesCfg(
+            contact_offset=0.01,
+            disable_strong_friction=True,
+        ),
+        material_props=RigidBodyMaterialCfg(dynamic_friction=0.5),
     )
 
     serialized = cfg.to_dict()
@@ -553,10 +560,10 @@ def test_default_property_configs_use_the_default_discriminator() -> None:
 
     assert serialized["rigid_props"]["backend"] == "default"
     assert serialized["collision_props"]["backend"] == "default"
-    assert serialized["material_props"]["backend"] == "default"
+    assert "backend" not in serialized["material_props"]
     assert isinstance(restored.rigid_props, DefaultRigidBodyPropertiesCfg)
     assert isinstance(restored.collision_props, DefaultCollisionPropertiesCfg)
-    assert isinstance(restored.material_props, DefaultRigidBodyMaterialCfg)
+    assert type(restored.material_props) is RigidBodyMaterialCfg
 
 
 def test_backend_property_parser_infers_unique_fields_without_discriminator() -> None:
@@ -571,6 +578,135 @@ def test_backend_property_parser_infers_unique_fields_without_discriminator() ->
     assert isinstance(cfg.rigid_props, DefaultRigidBodyPropertiesCfg)
     assert isinstance(cfg.collision_props, NewtonCollisionPropertiesCfg)
     assert isinstance(cfg.material_props, NewtonRigidBodyMaterialCfg)
+
+
+def test_mesh_collision_cfg_requires_explicit_strategy_fields() -> None:
+    collision = MeshCollisionCfg(
+        approximation="convex_decomposition",
+        max_hulls=8,
+        acd_method="coacd",
+    )
+
+    assert collision.max_hulls == 8
+    with pytest.raises(ValueError, match="valid only for convex_decomposition"):
+        MeshCollisionCfg(approximation="convex_hull", acd_method="coacd")
+    with pytest.raises(ValueError, match="only one"):
+        MeshCollisionCfg(
+            approximation="sdf",
+            sdf_resolution=64,
+            sdf_target_voxel_size=0.005,
+        )
+
+
+@pytest.mark.parametrize(
+    ("legacy_max_hulls", "expected_approximation", "expected_max_hulls"),
+    [
+        (1, "convex_hull", None),
+        (4, "convex_decomposition", 4),
+    ],
+)
+def test_mesh_collision_cfg_accepts_deprecated_hull_count_alias(
+    legacy_max_hulls: int,
+    expected_approximation: str,
+    expected_max_hulls: int | None,
+) -> None:
+    with pytest.warns(DeprecationWarning):
+        collision = MeshCollisionCfg(max_convex_hull_num=legacy_max_hulls)
+
+    assert collision.approximation == expected_approximation
+    assert collision.max_hulls == expected_max_hulls
+    assert "max_convex_hull_num" not in collision.to_dict()
+
+
+def test_mesh_collision_cfg_deprecated_hull_count_view_uses_canonical_value() -> None:
+    collision = MeshCollisionCfg(
+        approximation="convex_decomposition",
+        max_hulls=4,
+    )
+
+    assert collision.max_convex_hull_num == 4
+
+
+def test_mesh_collision_cfg_rejects_both_hull_count_names() -> None:
+    with (
+        pytest.warns(DeprecationWarning),
+        pytest.raises(ValueError, match="cannot both be configured"),
+    ):
+        MeshCollisionCfg(
+            approximation="convex_decomposition",
+            max_hulls=4,
+            max_convex_hull_num=8,
+        )
+
+
+@pytest.mark.parametrize(
+    "collision_kwargs",
+    [
+        {"approximation": "convex_decomposition", "max_hulls": 2.5},
+        {"approximation": "sdf", "sdf_resolution": 64.5},
+        {"approximation": "sdf", "sdf_padding": float("nan")},
+        {"approximation": "sdf", "sdf_texture_format": "invalid"},
+    ],
+)
+def test_mesh_collision_cfg_rejects_invalid_numeric_types_and_values(
+    collision_kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        MeshCollisionCfg(**collision_kwargs)
+
+
+def test_mesh_cfg_legacy_collision_fields_normalize_to_nested_config() -> None:
+    with pytest.warns(DeprecationWarning):
+        cfg = RigidObjectCfg.from_dict(
+            {
+                "uid": "mesh",
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": "mesh.obj",
+                    "max_convex_hull_num": 4,
+                    "acd_method": "coacd",
+                },
+            }
+        )
+
+    assert cfg.shape.collision == MeshCollisionCfg(
+        approximation="convex_decomposition",
+        max_hulls=4,
+        acd_method="coacd",
+    )
+    serialized_shape = cfg.shape.to_dict()
+    assert "max_convex_hull_num" not in serialized_shape
+    assert serialized_shape["collision"]["approximation"] == "convex_decomposition"
+
+
+def test_rigid_object_legacy_physics_mesh_collision_moves_to_shape() -> None:
+    with pytest.warns(DeprecationWarning):
+        cfg = RigidObjectCfg.from_dict(
+            {
+                "uid": "mesh",
+                "shape": {"shape_type": "Mesh", "fpath": "mesh.obj"},
+                "attrs": {
+                    "mesh_collision_props": {"max_convex_hull_num": 4},
+                },
+            }
+        )
+
+    assert cfg.shape.collision.approximation == "convex_decomposition"
+    assert cfg.shape.collision.max_hulls == 4
+    assert "mesh_collision_props" not in cfg.attrs.to_dict()
+
+
+def test_legacy_mesh_collision_physics_rejects_non_mesh_shape() -> None:
+    with pytest.raises(ValueError, match="only to a MeshCfg"):
+        RigidObjectCfg.from_dict(
+            {
+                "uid": "cube",
+                "shape": {"shape_type": "Cube", "size": [1.0, 1.0, 1.0]},
+                "attrs": {
+                    "mesh_collision_props": {"max_convex_hull_num": 4},
+                },
+            }
+        )
 
 
 def test_backend_joint_and_articulation_configs_round_trip() -> None:

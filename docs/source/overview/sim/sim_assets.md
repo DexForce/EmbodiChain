@@ -100,8 +100,7 @@ Configured via {class}`~cfg.RigidObjectCfg`.
 | `shape` | `ShapeCfg` | `ShapeCfg()` | Shape configuration (e.g., Mesh, Box). |
 | `attrs` | `RigidBodyPhysicsCfg` | `RigidBodyPhysicsCfg()` | Grouped physical attributes. |
 | `body_type` | `Literal` | `"dynamic"` | "dynamic", "kinematic", or "static". |
-| `max_convex_hull_num` | `int` | `1` | Max convex hulls for decomposition (CoACD). |
-| `sdf_resolution` | `int` | `0` | Resolution for signed distance field. In most cases, a resolution of around 250 produces good results; resolutions exceeding 1000 are rarely necessary.|
+| `shape.collision` | `MeshCollisionCfg \| None` | `None` | Explicit mesh collision geometry: convex hull, convex decomposition, triangle mesh, or SDF. `None` uses one convex hull. |
 | `body_scale` | `tuple` | `(1.0, 1.0, 1.0)` | Scale of the rigid body. |
 
 ### Rigid Body Physics
@@ -114,13 +113,16 @@ sparse USD/URDF overlay.
 | Group | Type | Contents |
 | :--- | :--- | :--- |
 | `mass_props` | `MassPropertiesCfg` | Mass, density, inertia, and COM pose. |
-| `rigid_props` | `RigidBodyPropertiesCfg` | Portable/default rigid-body behavior such as damping and CCD. |
-| `collision_props` | `CollisionPropertiesCfg` | Collision enablement and contact/rest offsets. |
-| `material_props` | `RigidBodyMaterialCfg` | Restitution and friction. |
-| `default_props` / `newton_props` | backend-specific grouped cfg | Backend-native extensions when their semantics are not portable. |
+| `rigid_props` | `DefaultRigidBodyPropertiesCfg` | Rigid-body behavior such as damping, CCD, and solver iterations. |
+| `collision_props` | `CollisionPropertiesCfg` | Collision enablement, contact/rest offsets, and concrete-backend contact properties. |
+| `material_props` | `RigidBodyMaterialCfg` | Restitution, friction, and concrete-backend material properties. |
 
 COM quaternions in configuration use `xyzw`. The Spawn adapter converts to the
 native backend order only when it writes an engine descriptor.
+
+Mesh cooking is owned by `MeshCfg.collision`, not by rigid-body physics. Its
+`approximation` field selects the representation explicitly; strategy-specific
+fields such as `max_hulls` and `sdf_resolution` are validated against it.
 
 For a runnable rigid-object example, see the {doc}`Create Scene </tutorial/create_scene>` tutorial.
 

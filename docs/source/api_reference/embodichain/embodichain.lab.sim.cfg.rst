@@ -29,6 +29,7 @@ DexSim names belong to the runtime and Spawn SDK adapter boundary.
 .. autosummary::
 
    AssetPhysicsMode
+   MeshCollisionApproximation
 
 .. rubric:: Classes
 
@@ -45,15 +46,13 @@ DexSim names belong to the runtime and Spawn SDK adapter boundary.
    WindowCameraPoseCfg
    GPUMemoryCfg
    MassPropertiesCfg
-   RigidBodyPropertiesCfg
    DefaultRigidBodyPropertiesCfg
-   NewtonRigidBodyPropertiesCfg
    CollisionPropertiesCfg
    DefaultCollisionPropertiesCfg
    NewtonCollisionPropertiesCfg
    RigidBodyMaterialCfg
-   DefaultRigidBodyMaterialCfg
    NewtonRigidBodyMaterialCfg
+   MeshCollisionCfg
    RigidBodyPhysicsCfg
    ArticulationRootPropertiesCfg
    LinkPhysicsOverrideCfg

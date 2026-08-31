@@ -40,7 +40,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_tutorial_robot,
@@ -85,7 +85,11 @@ def create_pick_object(sim) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="paper_cup",
             shape=MeshCfg(
-                fpath=get_data_path(OBJECT_MESH_PATH), max_convex_hull_num=16
+                fpath=get_data_path(OBJECT_MESH_PATH),
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=16,
+                ),
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,

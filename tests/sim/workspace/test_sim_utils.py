@@ -16,8 +16,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from embodichain.lab.sim.cfg import RigidObjectCfg
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.utility.sim_utils import _load_rigid_mesh_prototype
 
 
@@ -61,8 +63,11 @@ def test_load_rigid_mesh_forwards_shape_acd_method() -> None:
         uid="mesh",
         shape=MeshCfg(
             fpath="mesh.obj",
-            max_convex_hull_num=2,
-            acd_method="vhacd",
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=2,
+                acd_method="vhacd",
+            ),
         ),
     )
 
@@ -75,3 +80,22 @@ def test_load_rigid_mesh_forwards_shape_acd_method() -> None:
     )
 
     assert arena.acd_method == "vhacd"
+
+
+def test_load_rigid_mesh_rejects_dynamic_triangle_mesh_collision() -> None:
+    cfg = RigidObjectCfg(
+        uid="mesh",
+        shape=MeshCfg(
+            fpath="mesh.obj",
+            collision=MeshCollisionCfg(approximation="triangle_mesh"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="only for static"):
+        _load_rigid_mesh_prototype(
+            _FakeArena(),
+            cfg,
+            cache_dir=None,
+            body_type=None,
+            is_newton_backend=False,
+        )

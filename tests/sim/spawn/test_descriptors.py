@@ -54,15 +54,12 @@ from embodichain.lab.sim.cfg import (
     ClothPhysicalAttributesCfg,
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
-    DefaultRigidBodyPhysicsCfg,
     DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
-    MeshCollisionPropertiesCfg,
+    MeshCollisionCfg,
     NewtonCollisionPropertiesCfg,
-    NewtonMeshCollisionPropertiesCfg,
-    NewtonRigidBodyPhysicsCfg,
     NewtonJointDrivePropertiesCfg,
     NewtonRigidBodyMaterialCfg,
     RigidBodyMaterialCfg,
@@ -670,13 +667,13 @@ def test_rigid_usd_preserves_asset_physics_by_default(
 
 def test_rigid_descriptor_forwards_newton_sdf_options() -> None:
     cfg = RigidObjectCfg(
-        uid="cube",
-        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
-        attrs=RigidBodyPhysicsCfg(
-            collision_props=NewtonCollisionPropertiesCfg(
-                force_sdf=True,
+        uid="mesh",
+        shape=MeshCfg(
+            fpath="mesh.glb",
+            collision=MeshCollisionCfg(
+                approximation="sdf",
                 sdf_padding=0.02,
-            )
+            ),
         ),
     )
 
@@ -686,34 +683,20 @@ def test_rigid_descriptor_forwards_newton_sdf_options() -> None:
     assert descriptor.collisions[0].newton.sdf_padding == pytest.approx(0.02)
 
 
-def test_explicit_backend_and_mesh_collision_blocks_take_precedence() -> None:
+def test_mesh_collision_and_backend_property_slots_compile_independently() -> None:
     cfg = RigidObjectCfg(
         uid="mesh",
         shape=MeshCfg(
             fpath="mesh.glb",
-            max_convex_hull_num=2,
-            sdf_resolution=8,
+            collision=MeshCollisionCfg(
+                approximation="sdf",
+                sdf_target_voxel_size=0.005,
+                sdf_padding=0.02,
+            ),
         ),
         attrs=RigidBodyPhysicsCfg(
-            rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.9),
-            collision_props=NewtonCollisionPropertiesCfg(
-                margin=0.03,
-                sdf_padding=0.01,
-            ),
-            mesh_collision_props=MeshCollisionPropertiesCfg(
-                max_convex_hull_num=4,
-                sdf_resolution=32,
-            ),
-            default_props=DefaultRigidBodyPhysicsCfg(
-                rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.2)
-            ),
-            newton_props=NewtonRigidBodyPhysicsCfg(
-                collision_props=NewtonCollisionPropertiesCfg(margin=0.04),
-                mesh_collision_props=NewtonMeshCollisionPropertiesCfg(
-                    sdf_target_voxel_size=0.005,
-                    sdf_padding=0.02,
-                ),
-            ),
+            rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.2),
+            collision_props=NewtonCollisionPropertiesCfg(margin=0.04),
         ),
     )
 
@@ -722,22 +705,26 @@ def test_explicit_backend_and_mesh_collision_blocks_take_precedence() -> None:
 
     assert descriptor.physics.dexsim.linear_damping == pytest.approx(0.2)
     assert collision.approximation == CollisionApproximation.SDF
-    assert collision.decomp_max_hulls == 4
+    assert collision.decomp_max_hulls == 1
     assert collision.newton.margin == pytest.approx(0.04)
     assert collision.newton.sdf_target_voxel_size == pytest.approx(0.005)
     assert collision.newton.sdf_max_resolution is None
     assert collision.newton.sdf_padding == pytest.approx(0.02)
 
 
-def test_mesh_cfg_collision_fields_remain_compatibility_fallbacks() -> None:
-    cfg = RigidObjectCfg(
-        uid="mesh",
-        shape=MeshCfg(
-            fpath="mesh.glb",
-            max_convex_hull_num=3,
-            acd_method="coacd",
-        ),
-    )
+def test_mesh_cfg_legacy_collision_fields_normalize_before_compilation() -> None:
+    with pytest.warns(DeprecationWarning):
+        cfg = RigidObjectCfg.from_dict(
+            {
+                "uid": "mesh",
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": "mesh.glb",
+                    "max_convex_hull_num": 3,
+                    "acd_method": "coacd",
+                },
+            }
+        )
 
     descriptor, _ = rigid_desc_from_cfg(cfg)
 
@@ -748,19 +735,72 @@ def test_mesh_cfg_collision_fields_remain_compatibility_fallbacks() -> None:
     assert descriptor.collisions[0].decomp_max_hulls == 3
 
 
-def test_backend_blocks_reject_portable_fields() -> None:
+def test_static_triangle_mesh_collision_compiles_without_convex_cooking() -> None:
+    cfg = RigidObjectCfg(
+        uid="mesh",
+        body_type="static",
+        shape=MeshCfg(
+            fpath="mesh.glb",
+            collision=MeshCollisionCfg(approximation="triangle_mesh"),
+        ),
+    )
+
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+
+    assert descriptor.collisions[0].approximation == CollisionApproximation.NONE
+
+
+def test_dynamic_triangle_mesh_collision_is_rejected_before_spawn() -> None:
+    cfg = RigidObjectCfg(
+        uid="mesh",
+        shape=MeshCfg(
+            fpath="mesh.glb",
+            collision=MeshCollisionCfg(approximation="triangle_mesh"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="only for static"):
+        rigid_desc_from_cfg(cfg)
+
+
+def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
+    cfg = RigidObjectCfg(
+        uid="mesh",
+        shape=MeshCfg(
+            fpath="mesh.glb",
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=4,
+                acd_method="vhacd",
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="only acd_method='coacd'"):
+        rigid_desc_from_cfg(cfg)
+
+
+def test_default_collision_solver_fields_compile_from_collision_slot() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
         attrs=RigidBodyPhysicsCfg(
-            default_props=DefaultRigidBodyPhysicsCfg(
-                collision_props=DefaultCollisionPropertiesCfg(contact_offset=0.01)
+            collision_props=DefaultCollisionPropertiesCfg(
+                contact_offset=0.01,
+                torsional_patch_radius=0.02,
+                min_torsional_patch_radius=0.005,
+                disable_strong_friction=True,
             )
         ),
     )
 
-    with pytest.raises(ValueError, match="place them in the common"):
-        rigid_desc_from_cfg(cfg)
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+
+    default_collision = descriptor.collisions[0].dexsim
+    assert default_collision.contact_offset == pytest.approx(0.01)
+    assert default_collision.torsional_patch_radius == pytest.approx(0.02)
+    assert default_collision.min_torsional_patch_radius == pytest.approx(0.005)
+    assert default_collision.disable_strong_friction is True
 
 
 def test_mesh_descriptor_passes_load_options_to_spawn() -> None:

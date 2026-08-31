@@ -47,7 +47,7 @@ from embodichain.lab.sim.cfg import (
     ClothObjectCfg,
 )
 from embodichain.utils.string import resolve_matching_names
-from embodichain.lab.sim.shapes import MeshCfg, CubeCfg, SphereCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
 from embodichain.utils import logger
 from dexsim.kit.meshproc import get_mesh_auto_uv
 import numpy as np
@@ -94,13 +94,9 @@ def get_dexsim_arena_num() -> int:
 
 def _resolve_mesh_collision_params(
     cfg: RigidObjectCfg,
-) -> tuple[int, str, int]:
+) -> MeshCollisionCfg:
     """Resolve mesh collision parameters from the shape configuration."""
-    return (
-        cfg.shape.max_convex_hull_num,
-        cfg.shape.acd_method,
-        cfg.shape.sdf_resolution,
-    )
+    return cfg.shape.collision or MeshCollisionCfg()
 
 
 def get_dexsim_drive_type(drive_type: str) -> DriveType:
@@ -572,11 +568,9 @@ def _load_rigid_mesh_prototype(
         )
     option = _mesh_load_option_from_cfg(cfg)
     fpath = cfg.shape.fpath
-    max_convex_hull_num, acd_method, sdf_resolution = _resolve_mesh_collision_params(
-        cfg
-    )
+    collision_cfg = _resolve_mesh_collision_params(cfg)
 
-    if max_convex_hull_num > 1:
+    if collision_cfg.approximation == "convex_decomposition":
         obj = env.load_actor_with_acd(
             fpath,
             duplicate=True,
@@ -584,10 +578,15 @@ def _load_rigid_mesh_prototype(
             option=option,
             cache_path=cache_dir,
             actor_type=body_type,
-            max_convex_hull_num=max_convex_hull_num,
-            method=acd_method,
+            max_convex_hull_num=collision_cfg.max_hulls,
+            method=collision_cfg.acd_method or "coacd",
         )
-    elif sdf_resolution > 0:
+    elif collision_cfg.approximation == "sdf":
+        if collision_cfg.sdf_resolution is None:
+            raise ValueError(
+                "The deprecated raw Default path requires sdf_resolution for "
+                "MeshCollisionCfg(approximation='sdf')."
+            )
         if cfg.body_scale not in [
             (1.0, 1.0, 1.0),
             [1.0, 1.0, 1.0],
@@ -598,7 +597,7 @@ def _load_rigid_mesh_prototype(
                 "collision."
             )
         obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
-        sdf_cfg = SDFConfig(resolution=sdf_resolution)
+        sdf_cfg = SDFConfig(resolution=collision_cfg.sdf_resolution)
         obj.add_physical_body(
             body_type,
             RigidBodyShape.SDF,
@@ -606,10 +605,19 @@ def _load_rigid_mesh_prototype(
             attr=cfg.attrs.to_dexsim_physical_attr(),
         )
     else:
+        if collision_cfg.approximation == "triangle_mesh" and cfg.body_type != "static":
+            raise ValueError(
+                "triangle_mesh collision is supported only for static rigid objects."
+            )
         obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
+        shape_type = (
+            RigidBodyShape.MESH
+            if collision_cfg.approximation == "triangle_mesh"
+            else RigidBodyShape.CONVEX
+        )
         obj.add_rigidbody(
             body_type,
-            RigidBodyShape.CONVEX,
+            shape_type,
             cfg.attrs.to_dexsim_physical_attr(),
         )
 

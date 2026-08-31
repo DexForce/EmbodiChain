@@ -35,7 +35,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     ArticulationCfg,
 )
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
@@ -182,7 +182,10 @@ def create_table(sim: SimulationManager) -> RigidObject:
         uid="table",
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/table_a.obj"),
-            max_convex_hull_num=8,
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=8,
+            ),
         ),
         attrs=RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 0.5}}),
         body_type="kinematic",
@@ -233,7 +236,6 @@ def create_cup(sim: SimulationManager) -> RigidObject:
         uid="cup",
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/paper_cup_2.obj"),
-            max_convex_hull_num=1,
         ),
         attrs=RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 0.3}}),
         body_type="dynamic",

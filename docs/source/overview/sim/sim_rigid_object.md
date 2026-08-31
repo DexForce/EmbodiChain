@@ -30,10 +30,10 @@ means that a source asset or the active backend keeps ownership of that value.
 | `rigid_props` | `linear_damping`, `angular_damping`, `enable_ccd` |
 | `collision_props` | `collision_enabled`, `contact_offset`, `rest_offset` |
 | `material_props` | `dynamic_friction`, `static_friction`, `restitution` |
-| `default_props` / `newton_props` | Explicit backend-native extensions |
 
 COM quaternions are always authored in `xyzw` order. Native engine attributes
-are an internal adapter detail; callers should retain the grouped configuration.
+are an internal adapter detail. Backend-specific values use the concrete type in
+the corresponding property slot rather than a second backend block.
 
 ## Setup & Initialization
 
@@ -203,7 +203,7 @@ N denotes the number of parallel environments when using vectorized simulation (
 - When moving objects programmatically via `set_local_pose`, call `sim.update()` (or step the sim) to ensure transforms and collision state are synchronized.
 - Use `static` body type for fixed obstacles or environment pieces (they do not consume dynamic simulation resources).
 - Use `kinematic` for objects whose pose is driven by code (teleporting or animation) but still interact with dynamic objects.
-- For complex meshes, enabling convex decomposition (`RigidObjectCfg.max_convex_hull_num`) or providing a simplified collision mesh improves stability and performance.
+- For complex meshes, configure `MeshCfg.collision` with `approximation="convex_decomposition"` and a bounded `max_hulls`, or provide a simplified collision mesh.
 - To use GPU physics, ensure `SimulationManagerCfg.device` is set to `cuda` and call `sim.init_gpu_physics()` before large-batch simulations.
 
 ## Example: Applying Force and Torque

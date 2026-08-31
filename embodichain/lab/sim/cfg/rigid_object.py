@@ -18,8 +18,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import MISSING
 import os
+import warnings
 from typing import Any, Dict, Literal
 
 from dexsim.types import ActorType
@@ -66,6 +68,41 @@ class RigidObjectCfg(ObjectBaseCfg):
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""
         return _resolve_asset_physics_mode(self.asset_physics_mode)
+
+    @classmethod
+    def from_dict(cls, init_dict: Dict[str, Any]) -> RigidObjectCfg:
+        """Parse a rigid object and normalize legacy mesh collision ownership."""
+        data = dict(init_dict)
+        attrs_value = data.get("attrs")
+        if isinstance(attrs_value, Mapping) and "mesh_collision_props" in attrs_value:
+            shape_value = data.get("shape")
+            if not isinstance(shape_value, Mapping):
+                raise ValueError(
+                    "Legacy attrs.mesh_collision_props requires a mapping-valued "
+                    "MeshCfg shape so it can migrate to shape.collision."
+                )
+            shape_data = dict(shape_value)
+            if shape_data.get("shape_type") != "Mesh":
+                raise ValueError(
+                    "Legacy attrs.mesh_collision_props can migrate only to a "
+                    "MeshCfg shape."
+                )
+            if shape_data.get("collision") is not None:
+                raise ValueError(
+                    "attrs.mesh_collision_props cannot be combined with "
+                    "shape.collision."
+                )
+            attrs_data = dict(attrs_value)
+            shape_data["collision"] = attrs_data.pop("mesh_collision_props")
+            data["shape"] = shape_data
+            data["attrs"] = attrs_data
+            warnings.warn(
+                "RigidBodyPhysicsCfg.mesh_collision_props is deprecated; use "
+                "MeshCfg.collision.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return super().from_dict(data)
 
     def to_dexsim_body_type(self) -> ActorType:
         """Convert the body type to dexsim ActorType."""
