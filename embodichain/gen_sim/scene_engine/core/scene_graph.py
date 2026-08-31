@@ -54,23 +54,22 @@ SupportRelationType = Literal["on"]
 # A PlanarRelation with B, then A and B must have the same parent node.
 PlanarRelationType = Literal["left_of", "right_of", "in_front_of", "behind"]
 SceneConstraintType = SupportRelationType | PlanarRelationType
-OrientationState = Literal["standing", "lying"]
 
 
 @dataclass
 class SceneGraphNode:
     """One object node in the edit-time scene hierarchy.
 
-    ``orientation_state`` is an image-derived placement semantic, rather than
-    an edge to the node itself or an exact three-dimensional transform.
+    ``pose_description`` records the object's desired pose relative to its
+    direct support, rather than an exact three-dimensional transform.
     """
 
     object_id: str
     parent_id: str | None
     parent_relation: SupportRelationType | None = None
     table_region: TableRegion | None = None
-    # Preserves image-observed placement semantics for later pose refinement.
-    orientation_state: OrientationState | None = None
+    # Preserves image-observed or user-requested pose semantics for refinement.
+    pose_description: str | None = None
 
     def __post_init__(self) -> None:
         """Validate local node fields before graph-level checks."""
@@ -78,16 +77,20 @@ class SceneGraphNode:
             raise ValueError("object_id must be non-empty.")
         if self.table_region not in {None, *TABLE_REGIONS}:
             raise ValueError("table_region is invalid.")
-        if self.orientation_state not in {None, "standing", "lying"}:
-            raise ValueError("orientation_state is invalid.")
+        if self.pose_description is not None and (
+            not isinstance(self.pose_description, str)
+            or not self.pose_description.strip()
+            or len(self.pose_description) > 240
+        ):
+            raise ValueError("pose_description is invalid.")
         # If the node is the table.
         if self.object_id == TABLE_OBJECT_ID:
             if self.parent_id is not None:
                 raise ValueError("table must not have a parent.")
             if self.parent_relation is not None:
                 raise ValueError("table must not have a parent relation.")
-            if self.orientation_state is not None:
-                raise ValueError("table must not have an orientation state.")
+            if self.pose_description is not None:
+                raise ValueError("table must not have a pose description.")
         # If the node is not the table.
         elif self.parent_id is None:
             raise ValueError("non-table nodes must have a parent.")
@@ -101,7 +104,7 @@ class SceneGraphNode:
             "parent_id": self.parent_id,
             "parent_relation": self.parent_relation,
             "table_region": self.table_region,
-            "orientation_state": self.orientation_state,
+            "pose_description": self.pose_description,
         }
 
 
@@ -193,7 +196,8 @@ class SceneGraph:
         *,
         deleted_object_ids: set[str],
         added_object_ids: list[str],
-        added_orientation_states_by_id: dict[str, OrientationState | None],
+        added_pose_descriptions_by_id: dict[str, str | None],
+        pose_description_updates_by_id: dict[str, str],
         on_parent_updates: list[tuple[str, str, TableRegion | None]],
         planar_relation_updates: list[tuple[str, PlanarRelationType, str]],
     ) -> None:
@@ -227,8 +231,8 @@ class SceneGraph:
             raise ValueError(
                 f"Duplicate scene graph nodes: {sorted(duplicate_object_ids)}"
             )
-        if set(added_orientation_states_by_id) != set(added_object_ids):
-            raise ValueError("Added orientation states must match added node ids.")
+        if set(added_pose_descriptions_by_id) != set(added_object_ids):
+            raise ValueError("Added pose descriptions must match added node ids.")
 
         # New nodes default to the table; later updates replace that parent when needed.
         self.nodes.extend(
@@ -236,10 +240,16 @@ class SceneGraph:
                 object_id=object_id,
                 parent_id=TABLE_OBJECT_ID,
                 parent_relation="on",
-                orientation_state=added_orientation_states_by_id[object_id],
+                pose_description=added_pose_descriptions_by_id[object_id],
             )
             for object_id in added_object_ids
         )
+
+        for object_id, pose_description in pose_description_updates_by_id.items():
+            node = self.node_by_id().get(object_id)
+            if node is None or object_id == TABLE_OBJECT_ID:
+                raise ValueError("Pose descriptions may update only existing assets.")
+            node.pose_description = pose_description
 
         # Apply support-parent changes before planar updates need the final parent.
         for object_id, parent_id, table_region in on_parent_updates:

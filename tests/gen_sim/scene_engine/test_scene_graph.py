@@ -34,7 +34,7 @@ def test_scene_graph_accepts_layered_on_relations() -> None:
                 parent_id="table",
                 parent_relation="on",
                 table_region="center",
-                orientation_state="standing",
+                pose_description="Stand upright on its base.",
             ),
             SceneGraphNode(
                 object_id="cup",
@@ -302,7 +302,8 @@ def test_scene_graph_batch_planar_updates_preserve_chained_constraints() -> None
     graph.apply_updates(
         deleted_object_ids=set(),
         added_object_ids=[],
-        added_orientation_states_by_id={},
+        added_pose_descriptions_by_id={},
+        pose_description_updates_by_id={},
         on_parent_updates=[],
         planar_relation_updates=[
             ("plate", "left_of", "cup"),
@@ -330,7 +331,7 @@ def test_scene_graph_to_dict_serializes_graph_state() -> None:
                 parent_id="table",
                 parent_relation="on",
                 table_region="center",
-                orientation_state="standing",
+                pose_description="Stand upright on its base.",
             ),
         ],
     )
@@ -344,14 +345,14 @@ def test_scene_graph_to_dict_serializes_graph_state() -> None:
                 "parent_id": None,
                 "parent_relation": None,
                 "table_region": None,
-                "orientation_state": None,
+                "pose_description": None,
             },
             {
                 "object_id": "plate",
                 "parent_id": "table",
                 "parent_relation": "on",
                 "table_region": "center",
-                "orientation_state": "standing",
+                "pose_description": "Stand upright on its base.",
             },
         ],
         "relations": [],

@@ -57,7 +57,9 @@ debugging.
 ## Configuration
 
 Scene Engine reads the LLM, segmentation, image-generation, and
-geometry-generation settings from `embodichain/gen_sim/.env`:
+geometry-generation settings from `embodichain/gen_sim/.env`. The same file
+also contains the optional articulation-server connection used by the
+articulated-asset generation client:
 
 ```bash
 OPENAI_API_KEY="your-api-key"
@@ -83,6 +85,12 @@ SCENE_ENGINE_GEOMETRY_GENERATION_TIMEOUT_S=600
 SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS=3
 SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH="/health"
 SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH="/generate_multiple_objects"
+
+SCENE_ENGINE_ARTICULATED_GENERATION_BASE_URL="http://host:port"
+SCENE_ENGINE_ARTICULATED_GENERATION_TIMEOUT_S=7200
+SCENE_ENGINE_ARTICULATED_GENERATION_MAX_ATTEMPTS=3
+SCENE_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH="/health"
+SCENE_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH="/generate_articulation"
 ```
 
 ## Processing Flow

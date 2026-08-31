@@ -50,8 +50,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessorConfig,
 )
 
-__all__ = ["prepare_scene_edit_assets"]
-
 
 @dataclass(frozen=True)
 class _AddedAssetInfo:
@@ -152,13 +150,15 @@ def prepare_scene_edit_assets(
         config=SimReadyProcessorConfig(
             use_vlm_scale=vlm_client is not None,
             use_vlm_rotation=vlm_client is not None,
-            # An explicit edit state overrides the default stable tabletop pose.
-            orientation_states_by_id={
-                operation.object_id: operation.orientation_state
+            # Explicit edit pose descriptions override the default stable pose.
+            pose_descriptions_by_id={
+                operation.object_id: operation.pose_description
                 for operation in scene_edit_plan.operations
-                if operation.op == "add"
-                and operation.object_id is not None
-                and operation.orientation_state is not None
+                if (
+                    operation.op == "add"
+                    and operation.object_id is not None
+                    and operation.pose_description is not None
+                )
             },
         ),
         vlm_client=vlm_client,

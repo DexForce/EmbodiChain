@@ -25,7 +25,6 @@ from scipy.spatial.transform import Rotation
 import trimesh
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.core.scene_graph import OrientationState
 from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
@@ -35,11 +34,11 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
     DEFAULT_NEEDED_LAYOUT,
-    LYING_NEEDED_LAYOUT,
-    STANDING_NEEDED_LAYOUT,
     compute_uniform_xy_scale_for_target,
-    query_vlm_object_rotation_and_target_size,
+    query_vlm_pose_switch_candidate,
+    query_vlm_object_pose_and_target_size,
     render_object_front_top_views,
+    render_object_pose_switch_candidates,
     rotate_glb_about_x_axis,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
@@ -71,8 +70,8 @@ class SimReadyProcessorConfig:
 
     use_vlm_scale: bool = False  # Use the VLM-selected asset scale.
     use_vlm_rotation: bool = False  # Use the VLM-selected asset rotation.
-    # Explicit graph orientation overrides the default stable tabletop pose.
-    orientation_states_by_id: dict[str, OrientationState] = field(default_factory=dict)
+    # Explicit graph pose descriptions override the default stable tabletop pose.
+    pose_descriptions_by_id: dict[str, str | None] = field(default_factory=dict)
 
 
 class SimReadyProcessor:
@@ -108,7 +107,7 @@ class SimReadyProcessor:
         if (
             self.config.use_vlm_scale
             or self.config.use_vlm_rotation
-            or self.config.orientation_states_by_id
+            or self.config.pose_descriptions_by_id
         ) and vlm_client is None:
             raise ValueError("vlm_client is required when VLM transforms are enabled.")
 
@@ -205,35 +204,63 @@ class SimReadyProcessor:
     ) -> tuple[Path, list[float] | None]:
         """Render, query, and optionally bake the VLM-selected x-axis rotation."""
         coarse_path = self.coarse_geometry_root / f"{scene_object.id}.glb"
-        orientation_state = self._orientation_state_for_object(scene_object.id)
-        orientation_pose_required = orientation_state is not None
+        # Only an explicit graph pose description requests a VLM pose check.
+        pose_description_required = (
+            scene_object.id in self.config.pose_descriptions_by_id
+        )
         if not (
             self.config.use_vlm_scale
             or self.config.use_vlm_rotation
-            or orientation_pose_required
+            or pose_description_required
         ):
             return coarse_path, None
         decision = self._vlm_transform_for_object(
             scene_object,
             needed_layout=self._needed_layout_for_object(scene_object.id),
         )
-        rotate_about_x = bool(decision["rotate_about_x"])
-        vlm_scale = None
-        if self.config.use_vlm_scale:
-            # The VLM target describes the final, post-rotation z-up XY footprint.
-            vlm_scale = compute_uniform_xy_scale_for_target(
+        pose_action = decision["pose_action"]
+        if pose_action not in {"keep_current", "rotate_to_required_pose"}:
+            raise ValueError("VLM pose_action is not a supported semantic action.")
+        selected_x_rotation_degrees = 0.0
+        if pose_action == "rotate_to_required_pose":
+            # The temporary A/B renders resolve the otherwise ambiguous flip direction.
+            assert self.vlm_client is not None
+            candidate_views_path = render_object_pose_switch_candidates(
                 glb_path=coarse_path,
-                target_xy_size_cm=decision["target_xy_size_cm"],
-                rotate_about_x=rotate_about_x,
+                output_path=(
+                    self.debug_output_root
+                    or self.simready_geometry_root.parent / "debug"
+                )
+                / "vlm_pose_candidates"
+                / f"{scene_object.id}.png",
+            )
+            selected_x_rotation_degrees, _ = query_vlm_pose_switch_candidate(
+                scene_object_description=scene_object.description,
+                needed_layout=self._needed_layout_for_object(scene_object.id),
+                rendered_candidates_path=candidate_views_path,
+                vlm_client=self.vlm_client,
+                debug_output_path=(
+                    self.debug_output_root
+                    or self.simready_geometry_root.parent / "debug"
+                )
+                / "vlm_pose_candidates"
+                / f"{scene_object.id}.json",
             )
         rotated_path = rotate_glb_about_x_axis(
             input_path=coarse_path,
             output_path=self.simready_geometry_root
             / "vlm_rotated"
             / f"{scene_object.id}.glb",
-            rotate=rotate_about_x
-            and (orientation_pose_required or self.config.use_vlm_rotation),
+            rotation_degrees=selected_x_rotation_degrees,
         )
+        vlm_scale = None
+        if self.config.use_vlm_scale:
+            # Measure the selected pose because the VLM target is its final XY footprint.
+            vlm_scale = compute_uniform_xy_scale_for_target(
+                glb_path=rotated_path,
+                target_xy_size_cm=decision["target_xy_size_cm"],
+                rotate_about_x=False,
+            )
         # The scale flag controls whether this VLM-derived isotropic scale is used.
         # Apply the same factor on x, y, and z to preserve the asset's proportions.
         return (
@@ -241,20 +268,10 @@ class SimReadyProcessor:
             [vlm_scale, vlm_scale, vlm_scale] if self.config.use_vlm_scale else None,
         )
 
-    def _orientation_state_for_object(self, object_id: str) -> OrientationState | None:
-        """Return the explicit graph orientation requested for one object."""
-        return self.config.orientation_states_by_id.get(object_id)
-
     def _needed_layout_for_object(self, object_id: str) -> str:
         """Return the VLM layout instruction for one object's graph semantics."""
         return (
-            STANDING_NEEDED_LAYOUT
-            if self._orientation_state_for_object(object_id) == "standing"
-            else (
-                LYING_NEEDED_LAYOUT
-                if self._orientation_state_for_object(object_id) == "lying"
-                else DEFAULT_NEEDED_LAYOUT
-            )
+            self.config.pose_descriptions_by_id.get(object_id) or DEFAULT_NEEDED_LAYOUT
         )
 
     def _vlm_transform_for_object(
@@ -274,7 +291,7 @@ class SimReadyProcessor:
             output_path=debug_root / "vlm_views" / f"{scene_object.id}.png",
         )
         # Both semantic questions are always answered in one multimodal call.
-        return query_vlm_object_rotation_and_target_size(
+        return query_vlm_object_pose_and_target_size(
             scene_object_description=scene_object.description,
             needed_layout=needed_layout,
             rendered_views_path=rendered_path,
