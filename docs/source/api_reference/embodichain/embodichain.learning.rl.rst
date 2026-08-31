@@ -27,12 +27,18 @@ collection logic, policy/model builders, and training entry points.
 
       DifferentiableTrainer
       DifferentiableTrainerCfg
+      DifferentiableRolloutSpec
       DifferentiableVecEnv
       LearningVecEnv
+      ScheduledDifferentiableVecEnv
+      RunningObservationNormalizer
+      BatchedGradientNormStats
       build_learning_env
+      clip_batched_gradient_norm
       evaluate_episodes
       get_trainer_class
       register_learning_env
+      stratified_rollout_value
 
 Algorithms
 ----------
@@ -54,6 +60,22 @@ Evaluation
 ----------
 
 .. automodule:: embodichain.learning.rl.evaluation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Gradient Stabilization
+----------------------
+
+.. automodule:: embodichain.learning.rl.gradients
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Observation Normalization
+-------------------------
+
+.. automodule:: embodichain.learning.rl.normalization
    :members:
    :undoc-members:
    :show-inheritance:

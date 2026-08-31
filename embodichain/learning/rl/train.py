@@ -28,8 +28,11 @@ import wandb
 from torch.utils.tensorboard import SummaryWriter
 from copy import deepcopy
 
-from embodichain.learning.rl.models import build_policy, get_registered_policy_names
-from embodichain.learning.rl.models import build_mlp_from_cfg
+from embodichain.learning.rl.models import (
+    build_model_from_cfg,
+    build_policy,
+    get_registered_policy_names,
+)
 from embodichain.learning.rl.algo import (
     RolloutKind,
     build_algo,
@@ -125,12 +128,14 @@ def _build_learning_policy(
     actor_cfg = policy_block.get("actor")
     critic_cfg = policy_block.get("critic")
     actor = (
-        build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+        build_model_from_cfg(actor_cfg, obs_dim, action_dim, role="actor")
         if actor_cfg is not None
         else None
     )
     critic = (
-        build_mlp_from_cfg(critic_cfg, obs_dim, 1) if critic_cfg is not None else None
+        build_model_from_cfg(critic_cfg, obs_dim, 1, role="critic")
+        if critic_cfg is not None
+        else None
     )
     policy = build_policy(
         policy_block,
@@ -241,9 +246,23 @@ def _train_learning_env(
             diff_cfg = DifferentiableTrainerCfg(
                 segment_length=segment_length,
                 update_horizon=update_horizon,
+                rollout_mode=str(trainer_cfg.get("rollout_mode", "segmented")),
+                gradient_accumulation_steps=int(
+                    trainer_cfg.get("gradient_accumulation_steps", 1)
+                ),
                 deterministic_actions=bool(
                     trainer_cfg.get("deterministic_actions", False)
                 ),
+                clip_actions_to_space=bool(
+                    trainer_cfg.get("clip_actions_to_space", False)
+                ),
+                action_adjoint_max_norm=float(
+                    trainer_cfg.get("action_adjoint_max_norm", 0.0)
+                ),
+                normalize_observations=bool(
+                    trainer_cfg.get("normalize_observations", False)
+                ),
+                rollout_seed=seed,
                 checkpoint_dir=str(checkpoint_dir),
                 experiment_name=exp_name,
                 save_frequency_updates=int(
@@ -264,7 +283,12 @@ def _train_learning_env(
                 writer=writer,
                 eval_env=eval_env,
             )
-            default_steps = iterations * update_horizon * num_envs
+            default_steps = (
+                iterations
+                * update_horizon
+                * num_envs
+                * diff_cfg.gradient_accumulation_steps
+            )
         else:
             buffer_size = int(
                 trainer_cfg.get("buffer_size", trainer_cfg.get("rollout_steps", 256))
@@ -288,8 +312,15 @@ def _train_learning_env(
                 best_eval_mode=trainer_cfg.get("best_eval_mode", "max"),
             )
             default_steps = iterations * buffer_size * num_envs
-        total_timesteps = int(trainer_cfg.get("total_timesteps", default_steps))
-        trainer.train(total_timesteps)
+        if (
+            trainer_class is DifferentiableTrainer
+            and diff_cfg.rollout_mode == "complete"
+            and "total_timesteps" not in trainer_cfg
+        ):
+            trainer.train(total_updates=iterations)
+        else:
+            total_timesteps = int(trainer_cfg.get("total_timesteps", default_steps))
+            trainer.train(total_timesteps)
         trainer.save_checkpoint()
         return trainer.get_summary()
     finally:

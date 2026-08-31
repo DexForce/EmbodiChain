@@ -1748,6 +1748,7 @@ embodichain.learning.rl.algo.apg
 
    APG
    APGCfg
+   complete_discounted_return
    segmented_discounted_return
 
 embodichain.learning.rl.algo.base
@@ -1848,6 +1849,18 @@ embodichain.learning.rl.experimental.newton.train_planar_reach
    NewtonPlanarReachTrainingCfg
    train_planar_reach
 
+embodichain.learning.rl.gradients
+---------------------------------
+
+Row-wise action-adjoint clipping and its rollout-level diagnostics.
+
+.. currentmodule:: embodichain.learning.rl.gradients
+
+.. autosummary::
+
+   BatchedGradientNormStats
+   clip_batched_gradient_norm
+
 embodichain.learning.rl.models.actor_critic
 -------------------------------------------
 
@@ -1874,6 +1887,32 @@ embodichain.learning.rl.models.policy
 .. autosummary::
 
    Policy
+
+embodichain.learning.rl.models.waypoint_transformer
+---------------------------------------------------
+
+Unified tokenization and full-context models for ordered Cartesian, joint, and
+mixed-modality waypoint policies.
+
+.. currentmodule:: embodichain.learning.rl.models.waypoint_transformer
+
+.. autosummary::
+
+   WaypointTransformerActor
+   WaypointTransformerCritic
+   WaypointTransformerEncoder
+   parse_waypoint_observation
+   waypoint_observation_dim
+   waypoint_observation_normalize_mask
+
+embodichain.learning.rl.normalization
+-------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.normalization
+
+.. autosummary::
+
+   RunningObservationNormalizer
 
 embodichain.learning.rl.utils.optimizer
 ---------------------------------------

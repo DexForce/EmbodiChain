@@ -87,8 +87,20 @@ def evaluate_episodes(
     device: torch.device | str,
     seed: int | None = None,
     on_step: Callable[[dict[str, Any]], None] | None = None,
+    observation_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
 ) -> dict[str, float]:
-    """Evaluate exactly ``num_episodes`` completed asynchronous episodes."""
+    """Evaluate exactly ``num_episodes`` completed asynchronous episodes.
+
+    Args:
+        policy: Policy evaluated with deterministic actions.
+        env: Vector environment with automatic row reset.
+        num_episodes: Exact number of completed episodes to collect.
+        device: Policy device.
+        seed: Optional environment reset seed.
+        on_step: Optional callback for raw step info.
+        observation_transform: Optional frozen preprocessing transform, such as
+            a running observation normalizer.
+    """
     if num_episodes <= 0:
         raise ValueError("num_episodes must be positive.")
     device = torch.device(device)
@@ -107,6 +119,8 @@ def evaluate_episodes(
         observation, _ = env.reset(seed=seed)
         while len(returns) < num_episodes:
             flat_observation = _flat_observation(observation, device)
+            if observation_transform is not None:
+                flat_observation = observation_transform(flat_observation)
             policy_input = TensorDict(
                 {"obs": flat_observation},
                 batch_size=[num_envs],
