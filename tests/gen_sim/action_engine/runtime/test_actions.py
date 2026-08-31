@@ -1377,7 +1377,7 @@ def test_curobo_generator_sizes_collision_cache_for_large_scene(
     assert planner.world.collision_cache == {"cuboid": 13, "mesh": 2}
 
 
-def test_dynamic_scene_parks_contact_target_and_held_rows() -> None:
+def test_dynamic_scene_separates_live_semantic_and_parked_collision_poses() -> None:
     actual = torch.eye(4).repeat(2, 1, 1)
     actual[:, 2, 3] = torch.tensor([0.7, 0.8])
     entities = {uid: _PoseEntity(actual.clone()) for uid in ("target", "held", "other")}
@@ -1414,16 +1414,24 @@ def test_dynamic_scene_parks_contact_target_and_held_rows() -> None:
     )
 
     scene = adapter._scene_snapshot(grounded, state)
+    collision_poses = scene.collision_obstacle_poses(
+        batch_size=2,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
 
+    assert torch.equal(scene.entities["target"].pose, actual)
+    assert torch.equal(scene.entities["held"].pose, actual)
+    assert torch.equal(scene.entities["other"].pose, actual)
     assert torch.equal(
-        scene.entities["target"].pose[:, 2, 3],
+        collision_poses["target"][:, 2, 3],
         actual[:, 2, 3] + actions._COLLISION_PARKING_Z_OFFSET,
     )
-    assert scene.entities["held"].pose[0, 2, 3] == (
+    assert collision_poses["held"][0, 2, 3] == (
         actual[0, 2, 3] + actions._COLLISION_PARKING_Z_OFFSET
     )
-    assert scene.entities["held"].pose[1, 2, 3] == actual[1, 2, 3]
-    assert torch.equal(scene.entities["other"].pose, actual)
+    assert collision_poses["held"][1, 2, 3] == actual[1, 2, 3]
+    assert torch.equal(collision_poses["other"], actual)
 
 
 def test_released_object_returns_to_live_dynamic_collision_pose() -> None:
@@ -1553,7 +1561,7 @@ def test_start_session_delegates_to_shared_atomic_engine(monkeypatch: Any) -> No
     assert captured == {"invocations": ("invocation",), "context": "context"}
 
 
-def test_retreat_parks_intentional_contact_objects() -> None:
+def test_retreat_parks_only_collision_poses_for_contact_objects() -> None:
     actual = torch.eye(4).repeat(2, 1, 1)
     entities = {
         uid: _PoseEntity(actual.clone()) for uid in ("released", "container", "other")
@@ -1581,11 +1589,19 @@ def test_retreat_parks_intentional_contact_objects() -> None:
         grounded,
         ExecutionState(last_qpos=torch.zeros(2, 8)),
     )
+    collision_poses = scene.collision_obstacle_poses(
+        batch_size=2,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
 
     parked_z = actual[:, 2, 3] + actions._COLLISION_PARKING_Z_OFFSET
-    assert torch.equal(scene.entities["released"].pose[:, 2, 3], parked_z)
-    assert torch.equal(scene.entities["container"].pose[:, 2, 3], parked_z)
+    assert torch.equal(scene.entities["released"].pose, actual)
+    assert torch.equal(scene.entities["container"].pose, actual)
     assert torch.equal(scene.entities["other"].pose, actual)
+    assert torch.equal(collision_poses["released"][:, 2, 3], parked_z)
+    assert torch.equal(collision_poses["container"][:, 2, 3], parked_z)
+    assert torch.equal(collision_poses["other"], actual)
 
 
 def test_action_outcome_commits_state_delta_only_for_verified_rows() -> None:

@@ -100,6 +100,7 @@ class GripperProfile:
     drive_stiffness: float
     drive_damping: float
     drive_max_effort: float
+    release_open_fraction_tolerance: float
     grasp_model: GraspModelSpec
 
     def __post_init__(self) -> None:
@@ -117,6 +118,8 @@ class GripperProfile:
             raise ValueError(
                 "Gripper control states and limits must match control joints."
             )
+        if not 0.0 < self.release_open_fraction_tolerance <= 1.0:
+            raise ValueError("release_open_fraction_tolerance must be in (0, 1].")
         mimic_count = len(self.left_mimic_joints)
         if not (
             len(self.right_mimic_joints)
@@ -212,6 +215,7 @@ class GripperProfile:
             "open_positions": list(self.open_positions),
             "close_positions": list(self.close_positions),
             "control_limits": [list(limit) for limit in self.control_limits],
+            "release_open_fraction_tolerance": (self.release_open_fraction_tolerance),
             "tcp": {
                 "parent_frames": dict(tcp_parent_frames),
                 "transform_direction": "parent_link_to_tcp",
@@ -253,6 +257,7 @@ _PGI_PROFILE = GripperProfile(
     drive_stiffness=1.0e3,
     drive_damping=1.0e2,
     drive_max_effort=1.0e4,
+    release_open_fraction_tolerance=0.03,
     grasp_model=GraspModelSpec(
         model_id="dh_pgi_140_80",
         min_opening_width=0.003,
@@ -324,6 +329,7 @@ _ROBOTIQ_PROFILE = GripperProfile(
     drive_stiffness=50.0,
     drive_damping=5.0,
     drive_max_effort=500.0,
+    release_open_fraction_tolerance=0.03,
     grasp_model=GraspModelSpec(
         model_id="robotiq_arg2f_140",
         min_opening_width=0.01,

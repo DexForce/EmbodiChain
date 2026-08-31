@@ -85,7 +85,7 @@ from .body_grasp import AxisAlignBodyGraspAdapter
 from .coordinated_safety import _trajectory_safety_report
 from .grasp_diagnostics import _TracingAntipodalGraspPoseGenerator
 from .models import ActionOutcome, GroundedAction
-from .state import ExecutionState
+from .state import _CollisionOverrideSceneSnapshot, ExecutionState
 
 __all__ = ["AtomicActionAdapter"]
 
@@ -456,12 +456,23 @@ class AtomicActionAdapter:
                 candidate,
                 context,
             )
+            upright_context = self._upright_grasp_selection_context(
+                candidate_engine,
+                candidate,
+                capability,
+            )
             with (
                 seed_context,
                 pair_context,
+                upright_context,
                 _capture_retreat_warnings(capture_warnings) as warnings,
             ):
                 candidate_plan = candidate_engine.plan(candidate_invocation, context)
+            self._record_selected_upright_grasp(
+                candidate,
+                candidate_plan,
+                context,
+            )
             coordinated_trace = candidate.motion_policy.get("coordinated_grasp")
             if isinstance(coordinated_trace, dict):
                 grasp_stages = (
@@ -1506,6 +1517,102 @@ class AtomicActionAdapter:
         )
 
     @contextmanager
+    def _upright_grasp_selection_context(
+        self,
+        engine: AtomicActionEngine,
+        candidate: GroundedAction,
+        capability: AtomicCapability,
+    ) -> Iterator[None]:
+        """Apply the E2 side-grasp policy only to upright pickup."""
+        local_axis = candidate.cfg.get("obj_upright_direction")
+        if (
+            capability.target_materializer != "object_grasp"
+            or candidate.cfg.get("rotate_upright") is None
+            or local_axis is None
+        ):
+            yield
+            return
+        _, hand_part, _ = self._parts(candidate.arm)
+        if hand_part is None:
+            yield
+            return
+        generator = engine.grasp_pose_generators.get(hand_part)
+        if not isinstance(generator, _TracingAntipodalGraspPoseGenerator):
+            yield
+            return
+        with generator.upright_selection_context(
+            local_axis=torch.as_tensor(
+                local_axis,
+                dtype=torch.float32,
+                device=self.device,
+            )
+        ):
+            yield
+        trace = generator.last_upright_trace
+        if trace is not None:
+            candidate.motion_policy["upright_grasp"] = trace
+
+    def _record_selected_upright_grasp(
+        self,
+        candidate: GroundedAction,
+        plan: ActionPlan,
+        context: PlanningContext,
+    ) -> None:
+        """Record the grasp actually selected after IK and downstream screening."""
+        trace = candidate.motion_policy.get("upright_grasp")
+        local_axis = candidate.cfg.get("obj_upright_direction")
+        if not isinstance(trace, dict) or local_axis is None:
+            return
+        held = next(
+            (
+                value
+                for value in plan.expected_effects.held_object_updates.values()
+                if value is not None
+            ),
+            None,
+        )
+        if held is None or held.semantics.entity_id is None:
+            return
+        entity = context.scene.entities.get(held.semantics.entity_id)
+        vertices = held.semantics.geometry.get("mesh_vertices")
+        if entity is None or vertices is None:
+            return
+        grasp_pose = held.grasp_xpos.to(device=self.device, dtype=torch.float32)
+        object_pose = entity.pose.to(device=self.device, dtype=torch.float32)
+        if object_pose.shape == (4, 4):
+            object_pose = object_pose.unsqueeze(0).expand(self.num_envs, -1, -1)
+        axis = torch.as_tensor(
+            local_axis,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        axis = axis / torch.linalg.vector_norm(axis)
+        vertices = torch.as_tensor(
+            vertices,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        vertex_positions = torch.matmul(vertices, axis)
+        axis_min = vertex_positions.min()
+        axis_extent = vertex_positions.max() - axis_min
+        world_axis = torch.matmul(object_pose[:, :3, :3], axis)
+        relative_centers = grasp_pose[:, :3, 3] - object_pose[:, :3, 3]
+        axis_positions = torch.sum(relative_centers * world_axis, dim=1)
+        axis_fractions = (axis_positions - axis_min) / axis_extent
+        closing_axes = torch.nn.functional.normalize(
+            grasp_pose[:, :3, 0],
+            dim=1,
+        )
+        axis_alignment = torch.abs(torch.sum(closing_axes * world_axis, dim=1))
+        trace.update(
+            {
+                "selected_axis_fraction": axis_fractions.detach().cpu().tolist(),
+                "selected_axis_alignment": axis_alignment.detach().cpu().tolist(),
+                "selected_grasp_pose": grasp_pose.detach().cpu().tolist(),
+            }
+        )
+
+    @contextmanager
     def _coordinated_pair_selection_context(
         self,
         engine: AtomicActionEngine,
@@ -1973,6 +2080,9 @@ class AtomicActionAdapter:
         body_grasp = grounded.motion_policy.get("body_grasp")
         if isinstance(body_grasp, Mapping):
             trace["body_grasp"] = deepcopy(dict(body_grasp))
+        upright_grasp = grounded.motion_policy.get("upright_grasp")
+        if isinstance(upright_grasp, Mapping):
+            trace["upright_grasp"] = deepcopy(dict(upright_grasp))
         coordinated_grasp = grounded.motion_policy.get("coordinated_grasp")
         if isinstance(coordinated_grasp, Mapping):
             trace["coordinated_grasp"] = deepcopy(dict(coordinated_grasp))
@@ -2139,6 +2249,7 @@ class AtomicActionAdapter:
             return base
         exclusion_masks = self._collision_exclusion_masks(grounded, state)
         entities = dict(base.entities)
+        collision_pose_overrides: dict[str, torch.Tensor] = {}
         for uid in dynamic_uids:
             entity_state = entities.get(uid)
             if entity_state is None:
@@ -2155,18 +2266,20 @@ class AtomicActionAdapter:
                 )
             excluded = exclusion_masks.get(uid)
             if excluded is not None and bool(excluded.any()):
-                pose = pose.clone()
-                pose[excluded, 2, 3] += _COLLISION_PARKING_Z_OFFSET
+                collision_pose = pose.clone()
+                collision_pose[excluded, 2, 3] += _COLLISION_PARKING_Z_OFFSET
+                collision_pose_overrides[uid] = collision_pose
             entities[uid] = EntityState(
                 pose=pose,
                 confidence=entity_state.confidence,
             )
-        return SceneSnapshot(
+        return _CollisionOverrideSceneSnapshot(
             timestamp=base.timestamp,
             version=base.version,
             entities=entities,
             collision_world_revision=base.collision_world_revision,
             collision_entity_ids=dynamic_uids,
+            collision_pose_overrides=collision_pose_overrides,
         )
 
     def _collision_exclusion_masks(

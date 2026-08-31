@@ -35,6 +35,17 @@ from .coordinated_safety import (
 
 __all__: list[str] = []
 
+_UPRIGHT_SIDE_GRASP_MAX_AXIS_ALIGNMENT = 0.65
+_UPRIGHT_SIDE_GRASP_MIN_AXIS_FRACTION = 0.35
+_UPRIGHT_SIDE_GRASP_MAX_AXIS_FRACTION = 0.75
+_UPRIGHT_SIDE_GRASP_HEIGHT_COST_WEIGHT = 2.0
+_UPRIGHT_SIDE_GRASP_CANDIDATE_LIMIT = 50
+
+
+@dataclass(frozen=True, slots=True)
+class _UprightGraspSelectionContext:
+    local_axis: torch.Tensor
+
 
 @dataclass(frozen=True, slots=True)
 class _DualGraspSelectionContext:
@@ -54,12 +65,41 @@ class _TracingAntipodalGraspPoseGenerator(AntipodalGraspPoseGenerator):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._last_dual_trace: dict[str, Any] | None = None
+        self._last_upright_trace: dict[str, Any] | None = None
         self._selection_context: _DualGraspSelectionContext | None = None
+        self._upright_selection_context: _UprightGraspSelectionContext | None = None
 
     @property
     def last_dual_trace(self) -> dict[str, Any] | None:
         """Return an owned snapshot of the most recent dual-grasp trace."""
         return deepcopy(self._last_dual_trace)
+
+    @property
+    def last_upright_trace(self) -> dict[str, Any] | None:
+        """Return an owned snapshot of the most recent upright-grasp trace."""
+        return deepcopy(self._last_upright_trace)
+
+    @contextmanager
+    def upright_selection_context(
+        self,
+        *,
+        local_axis: torch.Tensor,
+    ) -> Iterator[None]:
+        """Install one invocation-local side-grasp selection policy."""
+        if self._upright_selection_context is not None:
+            raise RuntimeError("Upright grasp selection context cannot be nested.")
+        axis = torch.as_tensor(local_axis, dtype=torch.float32).reshape(-1)
+        norm = torch.linalg.vector_norm(axis)
+        if axis.shape != (3,) or not torch.isfinite(axis).all() or norm <= 1.0e-6:
+            raise ValueError("Upright grasp local_axis must be one finite 3-vector.")
+        self._last_upright_trace = None
+        self._upright_selection_context = _UprightGraspSelectionContext(
+            local_axis=(axis / norm).clone()
+        )
+        try:
+            yield
+        finally:
+            self._upright_selection_context = None
 
     @contextmanager
     def dual_arm_selection_context(
@@ -262,6 +302,121 @@ class _TracingAntipodalGraspPoseGenerator(AntipodalGraspPoseGenerator):
         if not result.get("is_success", False) or not isinstance(poses, torch.Tensor):
             return 0
         return int(poses.shape[0]) if poses.ndim == 3 else 0
+
+    def get_valid_grasp_poses(
+        self,
+        **kwargs: Any,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Apply v14's side and mid-body preference for upright pickup."""
+        results = super().get_valid_grasp_poses(**kwargs)
+        context = self._upright_selection_context
+        if context is None:
+            return results
+
+        vertices = torch.as_tensor(kwargs["mesh_vertices"], dtype=torch.float32)
+        object_poses = torch.as_tensor(kwargs["obj_poses"], dtype=torch.float32)
+        local_axis = context.local_axis.to(
+            device=vertices.device,
+            dtype=vertices.dtype,
+        )
+        vertex_positions = torch.matmul(vertices, local_axis)
+        axis_min = vertex_positions.min()
+        axis_extent = vertex_positions.max() - axis_min
+        if float(axis_extent) <= 1.0e-6:
+            raise ValueError("Upright grasp axis must span non-zero object geometry.")
+
+        ranked_results: list[tuple[torch.Tensor, torch.Tensor]] = []
+        row_traces: list[dict[str, Any]] = []
+        for row_index, (result, object_pose) in enumerate(
+            zip(results, object_poses, strict=True)
+        ):
+            grasp_poses, costs = result
+            grasp_poses = torch.as_tensor(grasp_poses, dtype=torch.float32)
+            costs = torch.as_tensor(
+                costs,
+                device=grasp_poses.device,
+                dtype=torch.float32,
+            )
+            if grasp_poses.ndim == 2:
+                grasp_poses = grasp_poses.unsqueeze(0)
+            object_pose = object_pose.to(
+                device=grasp_poses.device,
+                dtype=grasp_poses.dtype,
+            )
+            axis = local_axis.to(
+                device=grasp_poses.device,
+                dtype=grasp_poses.dtype,
+            )
+            world_upright = torch.matmul(object_pose[:3, :3], axis)
+            closing_axes = F.normalize(grasp_poses[:, :3, 0], dim=1)
+            axis_alignment = torch.abs(
+                torch.sum(closing_axes * world_upright[None], dim=1)
+            )
+            side_compatible = axis_alignment <= _UPRIGHT_SIDE_GRASP_MAX_AXIS_ALIGNMENT
+            relative_centers = grasp_poses[:, :3, 3] - object_pose[None, :3, 3]
+            center_axis_positions = torch.sum(
+                relative_centers * world_upright[None],
+                dim=1,
+            )
+            center_fractions = (
+                center_axis_positions - axis_min.to(grasp_poses.device)
+            ) / axis_extent.to(grasp_poses.device)
+            central_band = (
+                center_fractions >= _UPRIGHT_SIDE_GRASP_MIN_AXIS_FRACTION
+            ) & (center_fractions <= _UPRIGHT_SIDE_GRASP_MAX_AXIS_FRACTION)
+            interval = (
+                _UPRIGHT_SIDE_GRASP_MAX_AXIS_FRACTION
+                - _UPRIGHT_SIDE_GRASP_MIN_AXIS_FRACTION
+            )
+            height_penalty = (
+                torch.clamp(
+                    _UPRIGHT_SIDE_GRASP_MIN_AXIS_FRACTION - center_fractions,
+                    min=0.0,
+                )
+                + torch.clamp(
+                    center_fractions - _UPRIGHT_SIDE_GRASP_MAX_AXIS_FRACTION,
+                    min=0.0,
+                )
+            ) / interval
+            adjusted_costs = (
+                torch.where(
+                    side_compatible,
+                    costs,
+                    torch.full_like(costs, torch.inf),
+                )
+                + _UPRIGHT_SIDE_GRASP_HEIGHT_COST_WEIGHT * height_penalty
+            )
+            ranked = torch.argsort(adjusted_costs)[:_UPRIGHT_SIDE_GRASP_CANDIDATE_LIMIT]
+            ranked_results.append((grasp_poses[ranked], adjusted_costs[ranked]))
+            finite_ranked = torch.isfinite(adjusted_costs[ranked])
+            best_index = int(ranked[0].item()) if bool(finite_ranked.any()) else None
+            row_traces.append(
+                {
+                    "environment_index": row_index,
+                    "local_axis": axis.detach().cpu().tolist(),
+                    "candidate_count": int(grasp_poses.shape[0]),
+                    "side_compatible_count": int(side_compatible.sum().item()),
+                    "central_band_count": int(central_band.sum().item()),
+                    "side_and_central_count": int(
+                        (side_compatible & central_band).sum().item()
+                    ),
+                    "retained_count": int(finite_ranked.sum().item()),
+                    "best_candidate_axis_alignment": (
+                        None
+                        if best_index is None
+                        else float(axis_alignment[best_index].item())
+                    ),
+                    "best_candidate_axis_fraction": (
+                        None
+                        if best_index is None
+                        else float(center_fractions[best_index].item())
+                    ),
+                }
+            )
+        self._last_upright_trace = (
+            row_traces[0] if len(row_traces) == 1 else {"environment_rows": row_traces}
+        )
+        return ranked_results
 
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> list[dict | None]:
         """Run the standard generator while observing its NMS/collision boundary."""

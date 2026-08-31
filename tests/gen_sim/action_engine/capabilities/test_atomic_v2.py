@@ -20,6 +20,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from embodichain.gen_sim.action_engine.capabilities import (
@@ -183,6 +184,7 @@ def test_single_arm_release_verifies_the_selected_gripper_is_open() -> None:
             device=torch.device("cpu"),
             num_envs=2,
             open_state=(0.0, 0.0),
+            close_state=(1.0, 1.0),
             get_current_gripper_state_agent=lambda: (
                 torch.tensor([[0.0, 0.0], [0.1, 0.1]]),
                 torch.ones(2, 2),
@@ -205,6 +207,100 @@ def test_single_arm_release_verifies_the_selected_gripper_is_open() -> None:
     )
 
     assert verified.tolist() == [True, False]
+
+
+def test_single_arm_release_ignores_passive_mimic_joint_residuals() -> None:
+    capability = build_atomic_capability_registry().get("MoveJoints")
+    executor = SimpleNamespace(
+        env=SimpleNamespace(
+            device=torch.device("cpu"),
+            num_envs=2,
+            open_state=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            close_state=(0.7, -0.7, 0.7, -0.7, -0.7, 0.7),
+            agent_gripper_model="robotiq",
+            agent_gripper_state_joint_indices={"left": (0,), "right": (0,)},
+            get_current_gripper_state_agent=lambda: (
+                torch.tensor(
+                    [
+                        [0.0, 0.01, -0.02, 0.03, -0.01, 0.02],
+                        [0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    ]
+                ),
+                torch.zeros(2, 6),
+            ),
+        ),
+        runtime_policy=SimpleNamespace(
+            predicate_fallbacks={"gripper_state_tolerance": 1.0e-3}
+        ),
+    )
+    outcome = SimpleNamespace(
+        grounded=SimpleNamespace(motion_policy={"single_release": True})
+    )
+
+    verified = capability.verifier_hook(
+        executor=executor,
+        step=SimpleNamespace(),
+        arm="left_arm",
+        outcome=outcome,
+        attempted=torch.tensor([True, True]),
+    )
+
+    assert verified.tolist() == [True, False]
+
+
+def test_single_arm_release_uses_normalized_opening_and_physical_support() -> None:
+    capability = build_atomic_capability_registry().get("MoveJoints")
+    executor = SimpleNamespace(
+        env=SimpleNamespace(
+            device=torch.device("cpu"),
+            num_envs=2,
+            open_state=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            close_state=(0.7, -0.7, 0.7, -0.7, -0.7, 0.7),
+            agent_gripper_model="robotiq",
+            agent_gripper_state_joint_indices={"left": (0,), "right": (0,)},
+            get_current_gripper_state_agent=lambda: (
+                torch.tensor(
+                    [
+                        [0.015, 0.2, -0.2, 0.2, -0.2, 0.2],
+                        [0.015, 0.2, -0.2, 0.2, -0.2, 0.2],
+                    ]
+                ),
+                torch.zeros(2, 6),
+            ),
+        ),
+        _support_reference_uid=lambda _step: "table",
+        _support_stable_for=lambda _step, _support, _active: torch.tensor(
+            [True, False]
+        ),
+        _entity_pose=lambda _uid: torch.eye(4).repeat(2, 1, 1),
+        _placement_orientation_satisfied=lambda _step, _pose: torch.tensor(
+            [False, False]
+        ),
+        runtime_policy=SimpleNamespace(
+            predicate_fallbacks={"gripper_state_tolerance": 1.0e-3}
+        ),
+    )
+    planner_trace: dict[str, object] = {}
+    outcome = SimpleNamespace(
+        grounded=SimpleNamespace(motion_policy={"single_release": True}),
+        planner_trace=planner_trace,
+    )
+
+    verified = capability.verifier_hook(
+        executor=executor,
+        step=SimpleNamespace(object_uid="can"),
+        arm="left_arm",
+        outcome=outcome,
+        attempted=torch.tensor([True, True]),
+    )
+
+    assert verified.tolist() == [True, False]
+    release = planner_trace["release_verification"]
+    assert release["open_error_fraction"] == pytest.approx([0.015 / 0.7] * 2)
+    assert release["gripper_open"] == [True, True]
+    assert release["support_stable"] == [True, False]
+    assert release["upright"] == [False, False]
+    assert release["accepted"] == [True, False]
 
 
 def test_explicit_required_home_is_safety_required_for_any_task_type() -> None:

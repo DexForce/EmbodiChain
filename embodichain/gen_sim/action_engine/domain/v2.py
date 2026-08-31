@@ -673,7 +673,9 @@ def _validate_task_group_semantics(
                 if precondition.get("type") != "object_held":
                     missing = {"PickUp|object_held precondition"}
         if contract.success_type == "object_upright" and "AxisAlign" not in actions:
-            missing = {"MoveHeldObject", "Place"} - actions
+            missing = {"MoveHeldObject"} - actions
+            if not _has_single_object_release_effect(group_nodes):
+                missing.add("object release effect")
             if "PickUp" not in actions:
                 first = group_nodes[0]
                 precondition = first.get("precondition", {})
@@ -699,6 +701,25 @@ def _validate_task_group_semantics(
                 f"SeedGraph TaskGroup {group['id']!r} is missing {task_type} "
                 f"core actions: {sorted(missing)}."
             )
+
+
+def _has_single_object_release_effect(nodes: Sequence[Mapping[str, Any]]) -> bool:
+    """Return whether one node releases a single-arm held object by contract."""
+    for node in nodes:
+        effects = node.get("contract", {}).get("effects", ())
+        deleted_held = any(
+            effect.get("op") == "delete"
+            and effect.get("atom", {}).get("predicate") == "object_held"
+            for effect in effects
+        )
+        added_free = any(
+            effect.get("op") == "add"
+            and effect.get("atom", {}).get("predicate") == "object_free"
+            for effect in effects
+        )
+        if deleted_held and added_free:
+            return True
+    return False
 
 
 def _validate_ownership_transitions(
