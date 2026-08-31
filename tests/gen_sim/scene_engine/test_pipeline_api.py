@@ -20,6 +20,8 @@ from copy import deepcopy
 import json
 from pathlib import Path
 
+import pytest
+
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
@@ -36,6 +38,15 @@ class _HealthyClient:
 
     def check_health(self) -> None:
         self.health_checks += 1
+
+
+class _OwnedClient(_HealthyClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 def _materialization(
@@ -93,6 +104,8 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
     document = json.loads(package.manifest_path.read_text(encoding="utf-8"))
 
     assert segmentation.health_checks == 1
+    assert package.schema_version == api.SCENE_BLUEPRINT_SCHEMA
+    assert document["schema_version"] == "embodichain.scene-blueprint/v2"
     assert document["blueprint_id"] == package.blueprint_id
     assert document["scene_graph"] == graph.to_dict()
     assert document["artifacts"][0]["path"].endswith("table-mask.png")
@@ -126,6 +139,8 @@ def test_analyze_edit_persists_post_edit_blueprint(
     )
     document = json.loads(package.manifest_path.read_text(encoding="utf-8"))
 
+    assert package.schema_version == api.SCENE_EDIT_BLUEPRINT_SCHEMA
+    assert document["schema_version"] == "embodichain.scene-edit-blueprint/v2"
     assert document["blueprint_id"] == package.blueprint_id
     assert document["scene_edit_plan"] == plan.to_dict()
     assert document["updated_scene_graph"] == graph.to_dict()
@@ -139,6 +154,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     manifest_path = tmp_path / "scene_blueprint.json"
     manifest_path.write_text("audited blueprint\n", encoding="utf-8")
     package = api.SceneBlueprintPackage(
+        schema_version=api.SCENE_BLUEPRINT_SCHEMA,
         blueprint_id="blueprint",
         image_path=tmp_path / "input.png",
         output_root=tmp_path,
@@ -150,7 +166,8 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     original_graph = deepcopy(graph.to_dict())
 
     def fake_generate_scene_and_refine(**kwargs):
-        assert kwargs["seed"] == 31
+        assert "seed" not in kwargs
+        assert kwargs["articulated_generation_client"] is None
         assert kwargs["scene"] is not package.scene
         assert kwargs["scene_graph"] is not package.scene_graph
         kwargs["scene"].objects[0].name = "materialized table"
@@ -175,7 +192,6 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
         package,
         vlm_client=object(),
         geometry_generation_client=_HealthyClient(),
-        seed=31,
     )
 
     assert result.scene.objects[0].name == "materialized table"
@@ -193,6 +209,7 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
     manifest_path = tmp_path / "scene_edit_blueprint.json"
     manifest_path.write_text("audited edit blueprint\n", encoding="utf-8")
     package = api.SceneEditBlueprintPackage(
+        schema_version=api.SCENE_EDIT_BLUEPRINT_SCHEMA,
         blueprint_id="edit-blueprint",
         edit_prompt="Keep the scene unchanged.",
         output_root=tmp_path,
@@ -204,7 +221,7 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
     original_graph = deepcopy(graph.to_dict())
 
     def fake_prepare_scene_edit_assets(**kwargs):
-        assert kwargs["seed"] == 32
+        assert "seed" not in kwargs
         return []
 
     monkeypatch.setattr(
@@ -235,10 +252,106 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
         image_generation_client=clients[0],
         geometry_generation_client=clients[1],
         image_segmentation_client=clients[2],
-        seed=32,
     )
 
     assert result.scene.objects[0].name == "edited table"
     assert package.scene_edit_plan.to_dict() == original_plan
     assert package.updated_scene_graph.to_dict() == original_graph
     assert manifest_path.read_text(encoding="utf-8") == "audited edit blueprint\n"
+
+
+def test_scene_blueprint_package_rejects_v1_schema(tmp_path: Path) -> None:
+    scene, graph = _table_scene()
+
+    with pytest.raises(ValueError, match="scene-blueprint/v2"):
+        api.SceneBlueprintPackage(
+            schema_version="embodichain.scene-blueprint/v1",
+            blueprint_id="legacy",
+            image_path=tmp_path / "input.png",
+            output_root=tmp_path,
+            manifest_path=tmp_path / "scene_blueprint.json",
+            scene=scene,
+            scene_graph=graph,
+        )
+
+
+def test_scene_edit_blueprint_package_rejects_v1_schema(tmp_path: Path) -> None:
+    scene, graph = _table_scene()
+    plan = SceneEditPlan(scene=scene, scene_graph=graph, operations=[])
+
+    with pytest.raises(ValueError, match="scene-edit-blueprint/v2"):
+        api.SceneEditBlueprintPackage(
+            schema_version="embodichain.scene-edit-blueprint/v1",
+            blueprint_id="legacy-edit",
+            edit_prompt="Keep the scene unchanged.",
+            output_root=tmp_path,
+            manifest_path=tmp_path / "scene_edit_blueprint.json",
+            scene_edit_plan=plan,
+            updated_scene_graph=graph,
+        )
+
+
+def test_materialize_blueprint_owns_articulated_client_lifecycle(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scene, graph = _table_scene()
+    scene.objects.append(
+        SceneObject(
+            id="microwave_001",
+            kind="asset",
+            category="microwave",
+            name="microwave",
+            description="An articulated microwave.",
+            is_articulated=True,
+        )
+    )
+    graph.nodes.append(
+        SceneGraphNode(
+            object_id="microwave_001",
+            parent_id="table",
+            parent_relation="on",
+            pose_description="Stand upright on its base.",
+        )
+    )
+    package = api.SceneBlueprintPackage(
+        schema_version=api.SCENE_BLUEPRINT_SCHEMA,
+        blueprint_id="articulated",
+        image_path=tmp_path / "input.png",
+        output_root=tmp_path,
+        manifest_path=tmp_path / "scene_blueprint.json",
+        scene=scene,
+        scene_graph=graph,
+    )
+    articulated = _OwnedClient()
+    monkeypatch.setattr(
+        api.ArticulatedGenerationClient,
+        "from_dotenv",
+        lambda: articulated,
+    )
+
+    def fake_generate_scene_and_refine(**kwargs):
+        assert kwargs["articulated_generation_client"] is articulated
+        return kwargs["scene"]
+
+    monkeypatch.setattr(
+        api, "generate_scene_and_refine", fake_generate_scene_and_refine
+    )
+    monkeypatch.setattr(
+        api,
+        "_export_materialization",
+        lambda *, scene, scene_graph, output_root: _materialization(
+            scene=scene,
+            scene_graph=scene_graph,
+            output_root=output_root,
+        ),
+    )
+
+    api.materialize_blueprint(
+        package,
+        vlm_client=object(),
+        geometry_generation_client=_HealthyClient(),
+    )
+
+    assert articulated.health_checks == 1
+    assert articulated.close_calls == 1

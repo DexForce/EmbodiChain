@@ -282,7 +282,7 @@ class SceneAdapter:
         candidate_set: TaskCandidateSet | Sequence[Mapping[str, Any]],
         scene_objects: Sequence[Mapping[str, Any]],
         *,
-        source_format: str = "embodichain.scene-blueprint/v1",
+        source_format: str = "embodichain.scene-blueprint/v2",
         robot_profile: str | None = None,
         grounding_caller: GroundingCaller | None = None,
         adjudicator: Adjudicator | None = None,

@@ -20,12 +20,17 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from copy import deepcopy
 import json
 from pathlib import Path
 import sys
+import tempfile
 from typing import Any, Iterator, Sequence
 
 from embodichain.gen_sim.action_engine.agent import ActionAgent
+from embodichain.gen_sim.action_engine.generation.config_builder import (
+    _runtime_articulation_config,
+)
 from embodichain.gen_sim.action_engine.protocol import (
     AGENT_CONFIG_FILENAME,
     EXECUTION_PROGRAM_FILENAME,
@@ -81,20 +86,21 @@ def execute_bundle(
         write_execution_report(root, rejection)
         _print_json(rejection.as_mapping())
         return 2
-    legacy_argv = [
-        "--task_name",
-        task_id,
-        "--gym_config",
-        str(gym_config),
-        "--agent_config",
-        str(agent_config),
-        "--task-engine-report",
-        *run_args,
-    ]
     from embodichain.gen_sim.action_engine.cli import run_agent
 
-    with _temporary_argv(["run_agent", *legacy_argv]):
-        return int(run_agent.cli() or 0)
+    with _runtime_gym_config(gym_config) as runtime_gym_config:
+        legacy_argv = [
+            "--task_name",
+            task_id,
+            "--gym_config",
+            str(runtime_gym_config),
+            "--agent_config",
+            str(agent_config),
+            "--task-engine-report",
+            *run_args,
+        ]
+        with _temporary_argv(["run_agent", *legacy_argv]):
+            return int(run_agent.cli() or 0)
 
 
 def _preflight_bundle(
@@ -177,6 +183,40 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"JSON artifact must contain an object: {path}")
     return value
+
+
+@contextmanager
+def _runtime_gym_config(source: Path) -> Iterator[Path]:
+    """Yield a simulator-only config without modifying a prepared bundle."""
+    original = _read_json(source)
+    normalized = deepcopy(original)
+    articulations = normalized.get("articulation")
+    if isinstance(articulations, list):
+        normalized["articulation"] = [
+            _runtime_articulation_config(item) if isinstance(item, dict) else item
+            for item in articulations
+        ]
+    if normalized == original:
+        yield source
+        return
+
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=".task-engine-runtime-",
+            suffix=".json",
+            dir=source.parent,
+            delete=False,
+        ) as stream:
+            json.dump(normalized, stream, ensure_ascii=False, indent=2, allow_nan=False)
+            stream.write("\n")
+            temporary_path = Path(stream.name)
+        yield temporary_path
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 @contextmanager

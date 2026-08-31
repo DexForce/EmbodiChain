@@ -40,6 +40,7 @@ from embodichain.gen_sim.task_engine.config import (
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
     CandidateSelection,
+    SceneAdapterProtocolError,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_source import SceneSourceRef
 from embodichain.gen_sim.task_engine.scene_backend import SceneAnalysis, SceneRevision
@@ -150,12 +151,14 @@ class _SceneBackend:
         input_barrier: Barrier | None = None,
         materialize_barrier: Barrier | None = None,
         materialize_failures: int = 0,
+        selection_error: Exception | None = None,
     ) -> None:
         self.selection = selection
         self.input_kind = input_kind
         self.input_barrier = input_barrier
         self.materialize_barrier = materialize_barrier
         self.materialize_failures = materialize_failures
+        self.selection_error = selection_error
         self.seeds: list[int] = []
 
     def analyze(self, request, output_root) -> SceneAnalysis:
@@ -169,6 +172,8 @@ class _SceneBackend:
         )
 
     def select(self, *_args, **_kwargs) -> CandidateSelection:
+        if self.selection_error is not None:
+            raise self.selection_error
         return self.selection
 
     def materialize(
@@ -364,6 +369,54 @@ def test_parallel_workflow_supports_all_four_scene_inputs(
     )
 
     assert result.succeeded
+
+
+def test_candidate_selection_programming_error_is_internal_failure(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    scene = _SceneBackend(
+        _selection(candidates),
+        selection_error=AttributeError("stale cross-engine field"),
+    )
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=scene,
+        action_agent=_ActionAgent(),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor([[True]]),
+    )
+
+    result = workflow.run(_request(tmp_path))
+
+    assert result.status == "failed"
+    assert result.failure_class == "internal_error"
+    state = json.loads(
+        (result.output_dir / "workflow_state.json").read_text(encoding="utf-8")
+    )
+    assert state["events"][-1]["reason"] == "stale cross-engine field"
+
+
+def test_candidate_selection_protocol_error_is_not_input_conflict(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    scene = _SceneBackend(
+        _selection(candidates),
+        selection_error=SceneAdapterProtocolError("invalid grounding response"),
+    )
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=scene,
+        action_agent=_ActionAgent(),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor([[True]]),
+    )
+
+    result = workflow.run(_request(tmp_path))
+
+    assert result.status == "failed"
+    assert result.failure_class == "candidate_selection"
 
 
 def test_parallel_workflow_preserves_requested_robot_profile(tmp_path: Path) -> None:

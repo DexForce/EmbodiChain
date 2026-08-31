@@ -29,11 +29,13 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.api import (
+    SCENE_BLUEPRINT_SCHEMA,
     SceneBlueprintPackage,
     SceneMaterialization,
 )
 import embodichain.gen_sim.task_engine.scene_backend as scene_backend_module
 from embodichain.gen_sim.task_engine.scene_backend import (
+    SceneAnalysis,
     SceneEngineBackend,
     scene_blueprint_objects,
 )
@@ -88,7 +90,9 @@ def _scene_export(tmp_path: Path) -> Path:
     return export.parent
 
 
-def test_blueprint_objects_preserve_semantics_without_geometry(tmp_path: Path) -> None:
+def test_blueprint_objects_keep_pose_description_orientation_unknown(
+    tmp_path: Path,
+) -> None:
     scene = Scene(
         objects=[
             SceneObject("table", "table", "table", "table", "A table."),
@@ -98,10 +102,16 @@ def test_blueprint_objects_preserve_semantics_without_geometry(tmp_path: Path) -
     graph = SceneGraph(
         nodes=[
             SceneGraphNode("table", None),
-            SceneGraphNode("cup", "table", "on", orientation_state="lying"),
+            SceneGraphNode(
+                "cup",
+                "table",
+                "on",
+                pose_description="Lie flat on the support surface.",
+            ),
         ]
     )
     package = SceneBlueprintPackage(
+        schema_version=SCENE_BLUEPRINT_SCHEMA,
         blueprint_id="blueprint",
         image_path=tmp_path / "input.png",
         output_root=tmp_path,
@@ -114,9 +124,49 @@ def test_blueprint_objects_preserve_semantics_without_geometry(tmp_path: Path) -
 
     cup = next(item for item in objects if item["uid"] == "cup")
     assert cup["description"] == "A red cup."
-    assert cup["initial_state"] == {"orientation": "fallen"}
+    assert cup["initial_state"] == {}
     assert cup["affordances"] == []
     assert cup["init_pos"] == [0.0, 0.0, 0.0]
+
+
+def test_backend_select_passes_v2_blueprint_contract(tmp_path: Path) -> None:
+    scene = Scene(objects=[SceneObject("table", "table", "table", "table", "A table.")])
+    graph = SceneGraph(nodes=[SceneGraphNode("table", None)])
+    package = SceneBlueprintPackage(
+        schema_version=SCENE_BLUEPRINT_SCHEMA,
+        blueprint_id="blueprint",
+        image_path=tmp_path / "input.png",
+        output_root=tmp_path,
+        manifest_path=tmp_path / "scene_blueprint.json",
+        scene=scene,
+        scene_graph=graph,
+    )
+    analysis = SceneAnalysis(
+        input_kind="image",
+        source=package.image_path,
+        blueprint=package,
+        source_fingerprint=None,
+    )
+    captured = {}
+    marker = object()
+
+    class CapturingAdapter:
+        def select_objects(self, candidate_set, scene_objects, **kwargs):
+            captured["candidate_set"] = candidate_set
+            captured["scene_objects"] = scene_objects
+            captured.update(kwargs)
+            return marker
+
+    result = SceneEngineBackend().select(
+        analysis,
+        {"candidate": "value"},
+        CapturingAdapter(),
+        force_most_likely=True,
+    )
+
+    assert result is marker
+    assert captured["source_format"] == "embodichain.scene-blueprint/v2"
+    assert captured["scene_objects"][0]["uid"] == "table"
 
 
 def test_existing_scene_edit_creates_revision_and_never_writes_source(
@@ -153,8 +203,7 @@ def test_existing_scene_edit_creates_revision_and_never_writes_source(
             ),
         )
 
-    def fake_materialize_edit(blueprint, *, seed=None):
-        assert seed == 7
+    def fake_materialize_edit(blueprint):
         return SceneMaterialization(
             scene=Scene(),
             scene_graph=SceneGraph(nodes=[SceneGraphNode("table", None)]),

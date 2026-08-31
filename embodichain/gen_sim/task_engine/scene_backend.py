@@ -30,6 +30,7 @@ from embodichain.gen_sim.action_engine.generation.source_scene import (
     resolve_source_scene,
 )
 from embodichain.gen_sim.scene_engine.pipeline import (
+    SCENE_BLUEPRINT_SCHEMA,
     SceneBlueprintPackage,
     SceneMaterialization,
     analyze_edit,
@@ -147,6 +148,7 @@ class SceneEngineBackend:
             return scene_adapter.select_objects(
                 candidate_set,
                 scene_blueprint_objects(analysis.blueprint),
+                source_format=analysis.blueprint.schema_version,
                 force_most_likely=force_most_likely,
             )
         adaptation = scene_adapter.adapt(
@@ -187,7 +189,7 @@ class SceneEngineBackend:
             assert analysis.blueprint is not None
             root.mkdir(parents=True, exist_ok=False)
             blueprint = replace(analysis.blueprint, output_root=root)
-            materialization = materialize_blueprint(blueprint, seed=seed)
+            materialization = materialize_blueprint(blueprint)
             edit_plan = None
             if edit_prompt is not None:
                 edit_blueprint = analyze_edit(
@@ -195,7 +197,7 @@ class SceneEngineBackend:
                     edit_prompt=str(edit_prompt),
                 )
                 edit_plan = edit_blueprint.scene_edit_plan.to_dict()
-                materialization = materialize_edit(edit_blueprint, seed=seed)
+                materialization = materialize_edit(edit_blueprint)
             revision = _revision(materialization, seed=seed, edit_plan=edit_plan)
             _write_revision_audit(
                 root,
@@ -229,7 +231,7 @@ class SceneEngineBackend:
             edit_prompt=str(edit_prompt),
         )
         edit_plan = edit_blueprint.scene_edit_plan.to_dict()
-        materialization = materialize_edit(edit_blueprint, seed=seed)
+        materialization = materialize_edit(edit_blueprint)
         if resolved.source_format == "legacy_gym_config":
             restore_locked_scene_entities(editable_root)
         else:
@@ -301,16 +303,13 @@ def scene_blueprint_objects(blueprint: SceneBlueprintPackage) -> list[dict[str, 
     Returns:
         Semantic objects with unknown physical fields represented conservatively.
     """
-    nodes = blueprint.scene_graph.node_by_id()
+    if blueprint.schema_version != SCENE_BLUEPRINT_SCHEMA:
+        raise ValueError(
+            "Unsupported Scene Blueprint schema_version "
+            f"{blueprint.schema_version!r}; expected {SCENE_BLUEPRINT_SCHEMA!r}."
+        )
     result = []
     for item in blueprint.scene.objects:
-        node = nodes.get(item.id)
-        orientation = None if node is None else node.orientation_state
-        initial_state = {}
-        if orientation == "lying":
-            initial_state["orientation"] = "fallen"
-        elif orientation == "standing":
-            initial_state["orientation"] = "upright"
         result.append(
             {
                 "uid": item.id,
@@ -322,7 +321,9 @@ def scene_blueprint_objects(blueprint: SceneBlueprintPackage) -> list[dict[str, 
                 "color": None,
                 "init_pos": [0.0, 0.0, 0.0],
                 "affordances": [],
-                "initial_state": initial_state,
+                # Free-form pose descriptions are authoring intent, not measured
+                # orientation evidence. Final inspection publishes physical state.
+                "initial_state": {},
                 "attributes": {},
             }
         )
