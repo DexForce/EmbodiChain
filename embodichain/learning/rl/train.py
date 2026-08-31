@@ -46,7 +46,7 @@ from embodichain.learning.rl.env import build_learning_env
 from embodichain.learning.rl.routing import get_trainer_class
 from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.learning.rl.utils.trainer import Trainer
-from embodichain.utils import logger
+from embodichain.utils import logger, set_seed
 from embodichain.lab.gym.utils.registration import (
     build_env,
     discover_task_packages,
@@ -183,9 +183,10 @@ def _train_learning_env(
         raise ValueError("CUDA was requested but is not available.")
     if device.type == "cuda":
         torch.cuda.set_device(device)
-        torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    set_seed(
+        seed,
+        deterministic=bool(trainer_cfg.get("torch_deterministic", False)),
+    )
 
     env_block = trainer_cfg["learning_env"]
     if isinstance(env_block, str):

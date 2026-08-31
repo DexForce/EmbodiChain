@@ -90,6 +90,9 @@ per-environment objective scale, and scalar rollout metadata.
 
 This path supports both standard algorithms and differentiable algorithms,
 but currently rejects distributed training and environment profiling.
+`trainer.seed` seeds Python, NumPy, Torch, CUDA, and Warp before environment
+construction. Set `trainer.torch_deterministic: true` when a reference run
+requires PyTorch deterministic algorithms in addition to seeded sampling.
 
 ## Rollout and Trainer Routing
 
