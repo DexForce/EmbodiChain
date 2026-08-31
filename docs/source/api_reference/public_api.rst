@@ -821,15 +821,14 @@ embodichain.lab.sim.atomic_actions.transports
 embodichain.lab.sim.diff
 ------------------------
 
-Public differentiable-stepping bridge from manager-owned Newton trajectories
-and Warp tapes into PyTorch autograd.
+Public bridge from task-defined Newton kinematics and Warp tapes into PyTorch
+autograd. It does not advance the Newton dynamics solver.
 
 .. currentmodule:: embodichain.lab.sim.diff
 
 .. autosummary::
 
    NewtonStepFunc
-   differentiable_step
    tape_context
 
 embodichain.lab.sim.diff.bridge
@@ -840,7 +839,6 @@ embodichain.lab.sim.diff.bridge
 .. autosummary::
 
    NewtonStepFunc
-   differentiable_step
    tape_context
 
 embodichain.lab.sim.diff.runtime

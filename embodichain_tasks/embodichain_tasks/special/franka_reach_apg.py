@@ -13,14 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Franka FR3 reach task with differentiable Newton physics (APG).
+"""Franka FR3 reach task with differentiable Newton kinematics (APG).
 
-Built on :class:`DifferentiableEmbodiedEnv`. The Warp-tape bridge
+Built on :class:`DifferentiableEnv`. The Warp-tape bridge
 produces ``action.grad`` that flows back through a differentiable
-forward-kinematics path (``newton.eval_fk``). The semi_implicit
-solver does not propagate grad through ``joint_target_pos`` to
-``body_q`` (the grad path is zero), so this task explicitly selects
-the kinematics route and runs FK directly, matching the reference APG
+forward-kinematics path (``newton.eval_fk``). The configured semi-implicit
+solver is not advanced; the task runs FK directly, matching the reference APG
 implementation in
 ``/root/sources/analytic_policy_gradients/envs/franka_reach_env.py``.
 """
@@ -35,7 +33,7 @@ import warp as wp
 import newton
 import newton.utils
 
-from embodichain.lab.gym.envs.differentiable_env import DifferentiableEmbodiedEnv
+from embodichain.lab.gym.envs.differentiable_env import DifferentiableEnv
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim.cfg import (
@@ -102,7 +100,7 @@ def _reach_reward_kernel(
 
 
 @register_env("FrankaReachApg-v0")
-class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
+class FrankaReachApgEnv(DifferentiableEnv):
     """Differentiable Franka FR3 reach task for analytic policy gradients.
 
     The environment resolves the Franka FR3 URDF via
@@ -116,16 +114,12 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
         action -> new_joint_q (action kernel) -> eval_fk -> body_q
                 -> reward kernel -> reward_wp -> tape.backward -> action.grad
 
-    This task explicitly uses the ``kinematics`` route because the
-    semi_implicit dynamics solver does not propagate gradient through
-    ``joint_target_pos`` to ``body_q`` (the stiffness-driven grad path
-    evaluates to zero in practice). This matches the reference APG env's
-    FK-only workaround without changing the default route for other
-    differentiable environments.
+    The configured semi-implicit solver is part of Newton scene setup but is
+    never advanced. This matches the current kinematics-only
+    :class:`DifferentiableEnv` contract.
     """
 
     metadata = {"render_modes": ["human"], "default_num_envs": 4}
-    differentiable_step_mode = "kinematics"
 
     def __init__(
         self,
@@ -278,7 +272,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
             n, -1
         )
 
-    # -- DifferentiableEmbodiedEnv contract ------------------------------ #
+    # -- DifferentiableEnv contract -------------------------------------- #
 
     def _build_sim_state_dict(self, action: torch.Tensor) -> dict:
         """Detach FK primal buffers before the parent opens a Warp tape."""
@@ -290,10 +284,8 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
     def _make_kinematic_step_fn(self) -> Callable[[], Any]:
         """Explicit FK hook: compute body_q from new_joint_q via ``eval_fk``.
 
-        The semi_implicit solver does not propagate grad through
-        ``joint_target_pos`` to ``body_q`` (the grad path is zero), so
-        this kinematics-mode task runs forward kinematics directly
-        inside the tape. ``self._new_joint_q`` is populated by
+        The environment intentionally bypasses its configured solver and runs
+        forward kinematics directly inside the tape. ``self._new_joint_q`` is populated by
         :meth:`_apply_action_kernel` before this callable runs.
         """
         env = self
@@ -413,7 +405,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
     def step(self, action: torch.Tensor):
         """Step the env, then advance the cached joint_q for the next call.
 
-        The parent :meth:`DifferentiableEmbodiedEnv.step` runs the
+        The parent :meth:`DifferentiableEnv.step` runs the
         differentiable bridge. After it returns, we update
         both Spawn live states for non-terminal envs so the next step starts
         from the new configuration. The tape reads a per-forward detached

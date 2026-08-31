@@ -601,6 +601,7 @@ topics:
     title: Differentiable Environment (APG)
     aliases:
       - differentiable env
+      - DifferentiableEnv
       - apg
       - analytic policy gradient
       - differentiable rl
@@ -615,7 +616,7 @@ topics:
       - warp tape
       - requires_grad
       - semi_implicit
-      - DifferentiableEmbodiedEnv
+      - DifferentiableEnv
       - NewtonStepFunc
       - quaternion
       - xyzw
@@ -623,6 +624,7 @@ topics:
       - topics/differentiable-env/differentiable-env.md
     source_of_truth:
       - embodichain/lab/gym/envs/differentiable_env.py
+      - embodichain/lab/sim/cfg/simulation.py
       - embodichain/lab/sim/diff/
       - embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py
     related_topics:

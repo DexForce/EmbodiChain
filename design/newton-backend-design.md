@@ -337,26 +337,22 @@ Done:
     `docs/superpowers/plans/2026-06-22-newton-backend-pr.md`.
 14. Differentiable env for APG — implemented.
     `embodichain.lab.sim.diff` provides `NewtonStepFunc`
-    (`torch.autograd.Function`) bridging a `wp.Tape` around
-    `DifferentiableStepper` into PyTorch autograd, plus `tape_context`
-    and `differentiable_step` helpers. `SimulationManager` gains
-    `create_differentiable_stepper` / `create_gradient_rollout`
-    delegators. `DifferentiableEmbodiedEnv` validates
-    `NewtonPhysicsCfg(requires_grad=True, solver_type="semi_implicit")`
-    and overrides `step()` to call `NewtonStepFunc.apply`. The Franka
-    FR3 reach APG example (`franka_reach_apg.py`) exercises the bridge
-    end-to-end with a Warp action kernel and a Warp reward kernel
-    computed inside the tape; `test_franka_apg_smoke_backward` and
-    `test_franka_apg_one_iter_loss_reduces` are green. Agent context:
+    (`torch.autograd.Function`) bridging task-defined Newton kinematics
+    recorded on a `wp.Tape` into PyTorch autograd. `DifferentiableEnv`
+    validates `NewtonPhysicsCfg(requires_grad=True)` and never advances the
+    configured semi-implicit solver. The Franka FR3
+    reach APG example (`franka_reach_apg.py`) exercises the bridge end-to-end
+    with `newton.eval_fk`, a Warp action kernel, and a Warp reward kernel
+    computed inside the tape. Solver steppers, differentiable trajectories,
+    and gradient rollouts are not part of this kinematics-only stage; they need
+    a separate future dynamics design. Agent context:
     `agent_context/topics/differentiable-env/`.
 
     .. note::
-        The Franka task uses an FK-bypass step function
-        (``newton.eval_fk``) because the ``semi_implicit`` solver does
-        not propagate gradient through ``joint_target_pos`` to
-        ``body_q``. The default ``_make_step_fn`` still uses the
-        differentiable stepper for envs that want the dynamics-grad
-        path; see the differentiable-env topic for details.
+        The Franka task uses a task-defined FK callback
+        (``newton.eval_fk``). This is the only supported differentiable
+        environment route in the current stage; the configured
+        ``semi_implicit`` solver is not advanced.
 
 Remaining:
 
