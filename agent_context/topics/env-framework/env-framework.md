@@ -212,8 +212,15 @@ Or via gymnasium: `gym.make("MyTask-v1")`.
 
 `embodichain list-task` calls `discover_task_packages()` and prints a stable
 table whose `Task` column is a directory tree derived from task-first modules
-and packaged `configs/tasks/` paths. The other columns show the environment ID
-and supported use:
+and packaged `configs/tasks/` paths. Deployments for the same logical task are
+kept together, with one divider between task groups; the title reports both
+logical-task and environment counts. The other columns show the environment ID,
+selected embodiment, supported use, and runnable config filename:
+
+- the embodiment is the selected component filename without its extension, or
+  an inline robot's `robot_type` with `uid` as the fallback;
+- `Config` lists every top-level runnable config that declares the environment
+  ID; `-` means that metadata does not come from a Gym deployment config;
 
 - `[Expert Demo: Task Program]` comes from a task-local Gym config declaring
   the `task_program` component mapping;
