@@ -38,6 +38,15 @@ topics:
       - collision_policy
       - collision isolation
       - arena isolation
+      - JointDrivePropertiesCfg
+      - JointDynamicsPropertiesCfg
+      - RigidBodyPhysicsCfg
+      - MeshCollisionPropertiesCfg
+      - default_props
+      - newton_props
+      - target_mode
+      - drive_type
+      - mimic joint
       - ArticulationJointKinematics
       - get_parent_joint_chain
       - quaternion
@@ -48,11 +57,12 @@ topics:
     source_of_truth:
       - embodichain/lab/sim/__init__.py
       - embodichain/lab/sim/sim_manager.py
-      - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/cfg/
       - embodichain/lab/sim/_legacy_cfg.py
       - embodichain/lab/sim/common.py
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
+      - embodichain/lab/sim/spawn/descriptors.py
       - embodichain/lab/sim/spawn/scene.py
       - embodichain/lab/sim/objects/__init__.py
       - embodichain/lab/sim/objects/articulation.py
@@ -250,10 +260,17 @@ topics:
     keywords:
       - robot
       - RobotCfg
+      - RobotPresetCfg
       - Robot
       - control
       - drive
+      - JointDrivePropertiesCfg
+      - JointDynamicsPropertiesCfg
+      - joint_props
+      - target_mode
+      - drive_type
       - joint
+      - mimic joint
       - urdf
       - cobotmagic
       - dexforce_w1
@@ -264,9 +281,11 @@ topics:
     paths:
       - topics/robot-system/robot-system.md
     source_of_truth:
+      - embodichain/lab/gym/envs/embodied_env.py
       - embodichain/lab/sim/objects/robot.py
+      - embodichain/lab/sim/sim_manager.py
       - embodichain/lab/sim/robots/
-      - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/cfg/
       - embodichain/lab/sim/_legacy_cfg.py
     related_topics:
       - simulation-system
@@ -668,6 +687,7 @@ topics:
       - SceneSnapshotSupplier
       - SceneProvider
       - RigidObjectSceneProvider
+      - create_simulation_atomic_action_engine
       - SceneRegistry
       - RegistrySceneProvider
       - SceneEntityRef

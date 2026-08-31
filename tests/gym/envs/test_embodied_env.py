@@ -101,8 +101,8 @@ METADATA = {
             "shape": {
                 "shape_type": "Mesh",
                 "fpath": "ShopTableSimple/shop_table_simple.ply",
+                "max_convex_hull_num": 2,
             },
-            "max_convex_hull_num": 2,
             "attrs": {"mass": 10.0},
             "body_scale": (2, 1.6, 1),
         }

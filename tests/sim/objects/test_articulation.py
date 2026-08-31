@@ -44,6 +44,9 @@ from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
+NEWTON_EFFORT_TARGET_MODE = 4
+DRIVE_TEST_STIFFNESS = 12.0
+DRIVE_TEST_DAMPING = 4.0
 
 
 def _teardown_newton_physics() -> None:
@@ -1238,6 +1241,34 @@ class TestArticulationNewton(BaseArticulationTest):
         self.art.clear_dynamics()
         assert torch.allclose(self.art.body_data.qvel, qpos_zero, atol=1e-5)
         assert torch.allclose(self.art.body_data.qf, qpos_zero, atol=1e-5)
+
+    @pytest.mark.gpu
+    def test_runtime_effort_drive_mode(self):
+        """Newton authors effort mode and removes effective PD gains."""
+        shape = (NUM_ARENAS, self.art.dof)
+        self.art.set_joint_drive(
+            stiffness=torch.full(
+                shape,
+                DRIVE_TEST_STIFFNESS,
+                dtype=torch.float32,
+                device=self.sim.device,
+            ),
+            damping=torch.full(
+                shape,
+                DRIVE_TEST_DAMPING,
+                dtype=torch.float32,
+                device=self.sim.device,
+            ),
+            drive_type="force",
+            target_mode="effort",
+        )
+
+        assert self.art.get_joint_target_mode() == [
+            [NEWTON_EFFORT_TARGET_MODE] * self.art.dof for _ in range(NUM_ARENAS)
+        ]
+        stiffness, damping, *_ = self.art.get_joint_drive()
+        assert torch.count_nonzero(stiffness) == 0
+        assert torch.count_nonzero(damping) == 0
 
     @pytest.mark.skip(
         reason="DexSim Newton articulation visual-material helpers are render-Skeleton only."

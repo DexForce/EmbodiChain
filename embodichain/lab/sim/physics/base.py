@@ -15,8 +15,8 @@
 # ----------------------------------------------------------------------------
 """Spawn-aware physics-backend abstraction for :class:`SimulationManager`.
 
-This module defines the contract that every physics backend (DexSim default,
-Newton/Warp, ...) satisfies. The owning :class:`SimulationManager`
+This module defines the contract that every physics backend (Default, Newton,
+...) satisfies. The owning :class:`SimulationManager`
 holds a single :class:`PhysicsBackend` instance as ``self.physics`` and
 delegates backend-specific world configuration, compatibility scene access,
 and capability queries to it. Scene topology and runtime readiness are owned
@@ -94,6 +94,28 @@ class PhysicsBackend(ABC):
         Default configures the native DexSim globals. Newton is already
         registered from ``WorldConfig.newton_cfg`` and therefore has no
         additional activation work.
+        """
+
+    def sync_render_state(self, result: "dexsim.spawn.SpawnResult") -> None:
+        """Publish the current physics state to render resources without stepping.
+
+        Backends whose physics and render state share native storage require no
+        work. Backends with a separate render bridge override this hook.
+
+        Args:
+            result: The finalized Spawn result whose state should be published.
+        """
+        del result
+
+    def prepare_for_teardown(self) -> None:
+        """Release backend-owned views before Spawn releases their parents.
+
+        :class:`SimulationManager` calls this during deferred destruction,
+        after render workers stop and before it closes the Spawn result. A
+        backend can use this boundary to synchronize device work and release
+        borrowed render or physics views while their World-owned native
+        parents are still alive. Backends without such views keep the default
+        no-op implementation.
         """
 
     # ------------------------------------------------------------------ #

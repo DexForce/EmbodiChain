@@ -21,7 +21,10 @@ import numpy as np
 import pytest
 
 from embodichain.lab.sim.cfg import (
+    ArticulationRootPropertiesCfg,
+    CollisionPropertiesCfg,
     JointDrivePropertiesCfg,
+    RigidBodyPhysicsCfg,
     RobotCfg,
 )
 from embodichain.lab.sim.workspace import RobotWorkspaceCfg
@@ -64,11 +67,15 @@ def _mock_w1_asset_paths(monkeypatch, tmp_path):
 
 def test_dexforce_w1_roundtrip():
     cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
+    assert type(cfg.articulation_props) is ArticulationRootPropertiesCfg
+    assert cfg.articulation_props.min_position_iters == 32
+    assert cfg.articulation_props.min_velocity_iters == 8
     d = cfg.to_dict()
     assert d["uid"] == "dexforce_w1"
     cfg2 = DexforceW1Cfg.from_dict(d)
     assert cfg2.uid == "dexforce_w1"
     assert cfg2.version == DexforceW1Version.V021
+    assert type(cfg2.articulation_props) is ArticulationRootPropertiesCfg
 
 
 def test_dexforce_w1_solver_cfg_is_srs_and_set_once():
@@ -430,6 +437,8 @@ def test_robotcfg_to_dict_roundtrip():
 
 
 from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
+from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from embodichain.lab.sim.robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.solvers import OPWSolverCfg
 
 
@@ -444,6 +453,13 @@ def test_cobotmagic_from_dict_and_roundtrip():
     }
     assert isinstance(cfg.solver_cfg["left_arm"], OPWSolverCfg)
     assert isinstance(cfg.solver_cfg["right_arm"], OPWSolverCfg)
+    assert isinstance(cfg.attrs, RigidBodyPhysicsCfg)
+    assert type(cfg.attrs.collision_props) is CollisionPropertiesCfg
+    assert cfg.attrs.collision_props.contact_offset == pytest.approx(0.001)
+    assert cfg.attrs.collision_props.rest_offset == pytest.approx(0.0)
+    assert type(cfg.articulation_props) is ArticulationRootPropertiesCfg
+    assert cfg.articulation_props.min_position_iters == 8
+    assert cfg.articulation_props.min_velocity_iters == 2
 
     d = cfg.to_dict()
     assert d["uid"] == "CobotMagic"
@@ -451,6 +467,27 @@ def test_cobotmagic_from_dict_and_roundtrip():
     assert cfg2.uid == "CobotMagic"
     assert cfg2.control_parts == cfg.control_parts
     assert isinstance(cfg2.solver_cfg["left_arm"], OPWSolverCfg)
+
+
+@pytest.mark.parametrize(
+    ("cfg_type", "init_dict"),
+    [
+        (CobotMagicCfg, {}),
+        (FrankaPandaCfg, {}),
+        (URRobotCfg, {}),
+        (DexforceW1Cfg, {}),
+    ],
+)
+def test_specified_robots_use_portable_joint_drive_semantics(
+    cfg_type: type[RobotCfg],
+    init_dict: dict,
+) -> None:
+    cfg = cfg_type.from_dict(init_dict)
+
+    assert type(cfg.drive_pros) is JointDrivePropertiesCfg
+    assert cfg.drive_pros.drive_type == "force"
+    assert cfg.drive_pros.target_mode is None
+    assert cfg.drive_pros._resolve_modes() == ("position_velocity", "force")
 
 
 def test_robotcfg_save_to_file(tmp_path):
@@ -523,7 +560,6 @@ def test_cobotmagic_pk_dof_matches_control_parts():
 # URRobotCfg -- UR family (ur3 / ur3e / ur5 / ur5e / ur10 / ur10e)
 # --------------------------------------------------------------------------- #
 
-from embodichain.lab.sim.robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.solvers import URSolverCfg
 
 UR_TYPES = ["ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"]

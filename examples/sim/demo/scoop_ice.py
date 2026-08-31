@@ -184,6 +184,7 @@ def create_scoop(sim: SimulationManager):
         uid="scoop",
         shape=MeshCfg(
             fpath=get_data_path("ScoopIceNewEnv/scoop.ply"),
+            max_convex_hull_num=12,
         ),
         attrs=RigidBodyAttributesCfg(
             mass=0.5,
@@ -193,7 +194,6 @@ def create_scoop(sim: SimulationManager):
             min_position_iters=32,
             min_velocity_iters=8,
         ),
-        max_convex_hull_num=12,
         body_type="dynamic",
         init_pos=[0.6, 0.0, 0.09],
         init_rot=[0.0, 0.0, 0.0],

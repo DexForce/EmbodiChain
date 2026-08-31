@@ -170,7 +170,7 @@ class BaseUsdTest:
         body0 = sugar_box._entities[0].get_physical_body()
         print(sugar_box._entities[0].get_physical_attr())
         assert pytest.approx(body0.get_mass(), 0.001) == 0.514
-        # TODO: nvidia physx attrs in usd currently are not fully suported
+        # TODO: vendor-specific rigid-body attributes in USD are not fully supported.
         # assert(body0.get_linear_damping()==0)
         # assert(body0.get_angular_damping()==0.05)
         # assert(body0.get_solver_iteration_counts()==(4, 1))

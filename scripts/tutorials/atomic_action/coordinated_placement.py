@@ -38,8 +38,8 @@ from scipy.spatial.transform import Rotation as SciRotation
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     CoordinatedPlacementOptions,
     CoordinatedPlacementGoal,
     GraspGoal,
@@ -248,7 +248,9 @@ def create_bread(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="bread",
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(BREAD_MESH_PATH), compute_uv=False
+                fpath=resolve_cached_data_path(BREAD_MESH_PATH),
+                compute_uv=False,
+                max_convex_hull_num=8,
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
@@ -260,7 +262,6 @@ def create_bread(sim: SimulationManager) -> RigidObject:
                 max_depenetration_velocity=10.0,
             ),
             body_scale=(1.75, 1.75, 1.75),
-            max_convex_hull_num=8,
             init_pos=list(BREAD_INIT_POS),
             init_rot=list(BREAD_INIT_ROT),
         )
@@ -273,7 +274,9 @@ def create_pan(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="pan",
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(PAN_MESH_PATH), compute_uv=False
+                fpath=resolve_cached_data_path(PAN_MESH_PATH),
+                compute_uv=False,
+                max_convex_hull_num=16,
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
@@ -289,7 +292,6 @@ def create_pan(sim: SimulationManager) -> RigidObject:
                 max_depenetration_velocity=2.0,
             ),
             body_scale=(1.75, 1.75, 1.75),
-            max_convex_hull_num=16,
             init_pos=list(PAN_INIT_POS),
             init_rot=list(PAN_INIT_ROT),
         )
@@ -580,8 +582,9 @@ def run_coordinated_placement_demo(
         hold_steps=6,
         retreat_steps=18,
     )
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(bread, pan),
         control_profiles={
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,

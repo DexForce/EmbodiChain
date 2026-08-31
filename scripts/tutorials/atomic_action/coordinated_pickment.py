@@ -41,9 +41,7 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     CoordinatedPickGoal,
     CoordinatedPickmentOptions,
-    EntityState,
     MotionPolicy,
-    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
@@ -222,7 +220,9 @@ def create_pickment_object(
         cfg=RigidObjectCfg(
             uid=preset.label,
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(preset.mesh_path), compute_uv=False
+                fpath=resolve_cached_data_path(preset.mesh_path),
+                compute_uv=False,
+                max_convex_hull_num=16,
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
@@ -237,7 +237,6 @@ def create_pickment_object(
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=16,
             init_pos=[preset.init_xy[0], preset.init_xy[1], SUPPORT_SURFACE_Z],
             init_rot=list(preset.init_rot),
             body_scale=preset.body_scale,
@@ -467,14 +466,7 @@ def run_coordinated_pickment_demo(
                 skill_options=pickment_options,
             ),
         ),
-        engine.initial_context(
-            scene=SceneSnapshot(
-                timestamp=0.0,
-                version=0,
-                entities={obj.uid: EntityState(object_pose_batch)},
-            ),
-            control_dt=sim.sim_config.physics_dt,
-        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions

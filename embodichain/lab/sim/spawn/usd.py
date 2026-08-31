@@ -33,7 +33,7 @@ from dexsim.types import ActorType
 
 from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
 from embodichain.lab.sim.spawn.descriptors import (
-    _compile_dexsim_collision,
+    _compile_default_collision,
     _compile_newton_collision,
     _compile_rigid_physics,
     _compile_visual_material,
@@ -139,7 +139,7 @@ def rigid_desc_from_usd(
             collision,
             CollisionDesc(
                 enable_collision=physics.collision_enabled,
-                dexsim=_compile_dexsim_collision(physics),
+                dexsim=_compile_default_collision(physics),
                 newton=_compile_newton_collision(
                     physics,
                     newton_solver_type=newton_solver_type,
@@ -187,12 +187,14 @@ def articulation_desc_from_usd(
     materials = _namespace_materials(renders, scene.materials, uid)
 
     if preserve_asset_physics:
-        cfg.fix_base = bool(desc.fixed_base)
-        cfg.disable_self_collision = not desc.enable_self_collision
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
     else:
-        desc.fixed_base, desc.enable_self_collision = _articulation_root_values(cfg)
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
+    desc.fixed_base, desc.enable_self_collision = _articulation_root_values(
+        cfg,
+        fixed_base_default=bool(desc.fixed_base),
+        self_collision_default=desc.enable_self_collision,
+    )
     return desc, materials
 
 

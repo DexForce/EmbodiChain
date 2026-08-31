@@ -31,15 +31,13 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import Affordance, ObjectSemantics
 from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
     RigidObjectCfg,
     RobotCfg,
-    URDFCfg,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.robots import build_dual_arm_cfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg, SolverCfg, URSolverCfg
+from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     ROBOTIQ_2F_140_TCP,
@@ -48,10 +46,6 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_tutorial_robot_cfg,
 )
 
-ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
-GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
-LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
-RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
 DUAL_UR5_INIT_POS = (1.95, 0.0, 0.1)
 DUAL_UR5_INIT_ROT = (0.0, 0.0, -90.0)
 
@@ -88,132 +82,6 @@ def make_yaw_transform(xyz: tuple[float, float, float], yaw: float) -> np.ndarra
     )
     transform[:3, 3] = np.asarray(xyz, dtype=np.float32)
     return transform
-
-
-def make_dual_ur5_solver_cfg(
-    tcp_z: float,
-    *,
-    solver: Literal["pytorch", "ur"] = "ur",
-    ur_ik_nearest_weight: Sequence[float] | None = None,
-    clear_urdf_path: bool = False,
-    pytorch_num_samples: int = 30,
-) -> dict[str, SolverCfg]:
-    """Build matching left/right solver configs for dual-UR5 tutorials."""
-    tcp = [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, tcp_z],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
-    configs: dict[str, SolverCfg] = {}
-    for prefix in ("left", "right"):
-        if solver == "pytorch":
-            config = PytorchSolverCfg(
-                end_link_name=f"{prefix}_ee_link",
-                root_link_name=f"{prefix}_base_link",
-                tcp=tcp,
-                num_samples=pytorch_num_samples,
-            )
-        else:
-            config = URSolverCfg(
-                ur_type="ur5",
-                end_link_name=f"{prefix}_ee_link",
-                root_link_name=f"{prefix}_base_link",
-                tcp=tcp,
-                ik_nearest_weight=ur_ik_nearest_weight,
-            )
-            if clear_urdf_path:
-                config.urdf_path = None
-        configs[f"{prefix}_arm"] = config
-    return configs
-
-
-def add_dual_ur5_robot(
-    sim: SimulationManager,
-    *,
-    uid: str,
-    urdf_name: str,
-    solver_cfg: Mapping[str, SolverCfg],
-    init_pos: Sequence[float] = DUAL_UR5_INIT_POS,
-    init_rot: Sequence[float] = DUAL_UR5_INIT_ROT,
-    left_arm_home: Sequence[float] = LEFT_ARM_HOME,
-    right_arm_home: Sequence[float] = RIGHT_ARM_HOME,
-    arm_urdf_path: str = ARM_URDF_PATH,
-    gripper_urdf_path: str = GRIPPER_URDF_PATH,
-    joint_name_case: str = "upper",
-    set_urdf_name_case: bool = True,
-    hand_stiffness: float = 1e3,
-    hand_damping: float = 1e2,
-    hand_max_effort: float = 1e4,
-) -> Robot:
-    """Add the common dual-UR5 and dual-gripper tutorial embodiment."""
-    if joint_name_case not in {"lower", "upper"}:
-        raise ValueError("joint_name_case must be 'lower' or 'upper'.")
-    prefix = str.upper if joint_name_case == "upper" else str.lower
-    left_joint = prefix("left_joint[0-9]")
-    right_joint = prefix("right_joint[0-9]")
-    left_hand = prefix("left_gripper_finger[1-2]_joint_1")
-    right_hand = prefix("right_gripper_finger[1-2]_joint_1")
-    left_hand_control = prefix("left_gripper_finger1_joint_1")
-    right_hand_control = prefix("right_gripper_finger1_joint_1")
-
-    urdf_cfg = URDFCfg(
-        components=[
-            {
-                "component_type": "left_arm",
-                "urdf_path": arm_urdf_path,
-                "transform": make_yaw_transform((-0.3, -1.45, 0.4), np.pi / 2),
-            },
-            {
-                "component_type": "right_arm",
-                "urdf_path": arm_urdf_path,
-                "transform": make_yaw_transform((0.3, -1.45, 0.4), np.pi / 2),
-            },
-            {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
-            {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
-        ],
-        fname=urdf_name,
-    )
-    if set_urdf_name_case:
-        urdf_cfg.name_case = {"joint": joint_name_case, "link": "lower"}
-
-    cfg = RobotCfg(
-        uid=uid,
-        urdf_cfg=urdf_cfg,
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={
-                left_joint: 1e4,
-                right_joint: 1e4,
-                left_hand: hand_stiffness,
-                right_hand: hand_stiffness,
-            },
-            damping={
-                left_joint: 1e3,
-                right_joint: 1e3,
-                left_hand: hand_damping,
-                right_hand: hand_damping,
-            },
-            max_effort={
-                left_joint: 1e5,
-                right_joint: 1e5,
-                left_hand: hand_max_effort,
-                right_hand: hand_max_effort,
-            },
-            drive_type="force",
-        ),
-        control_parts={
-            "left_arm": [left_joint],
-            "right_arm": [right_joint],
-            "dual_arm": [left_joint, right_joint],
-            "left_hand": [left_hand_control],
-            "right_hand": [right_hand_control],
-        },
-        solver_cfg=dict(solver_cfg),
-        init_pos=list(init_pos),
-        init_rot=list(init_rot),
-        init_qpos=list(left_arm_home) + list(right_arm_home) + [0.0, 0.0, 0.0, 0.0],
-    )
-    return sim.add_robot(cfg=cfg)
 
 
 def create_dual_tutorial_robot_cfg(
@@ -523,14 +391,9 @@ def log_action_plan(
 
 
 __all__ = [
-    "ARM_URDF_PATH",
     "DUAL_UR5_INIT_POS",
     "DUAL_UR5_INIT_ROT",
-    "GRIPPER_URDF_PATH",
-    "LEFT_ARM_HOME",
-    "RIGHT_ARM_HOME",
     "add_dual_tutorial_robot",
-    "add_dual_ur5_robot",
     "add_support_surface",
     "compute_local_bounds",
     "compute_world_bounds",
@@ -539,7 +402,6 @@ __all__ = [
     "get_local_vertices",
     "invert_pose",
     "log_action_plan",
-    "make_dual_ur5_solver_cfg",
     "make_yaw_transform",
     "normalize_vector",
     "resolve_cached_data_path",

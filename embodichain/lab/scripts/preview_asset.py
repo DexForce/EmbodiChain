@@ -113,6 +113,7 @@ def load_assets(
     """
     from embodichain.lab.sim.cfg import (
         ArticulationCfg,
+        ArticulationRootPropertiesCfg,
         LightCfg,
         RigidObjectCfg,
     )
@@ -165,7 +166,9 @@ def load_assets(
                 fpath=asset_path,
                 init_pos=asset_init_pos,
                 init_rot=init_rot,
-                fix_base=args.fix_base,
+                articulation_props=ArticulationRootPropertiesCfg(
+                    fixed_base=args.fix_base,
+                ),
                 asset_physics_mode=asset_physics_mode,
                 # The auxiliary pytorch-kinematics chain only accepts URDF XML.
                 build_pk_chain=asset_suffix not in {".usd", ".usda", ".usdc"},

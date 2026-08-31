@@ -30,13 +30,13 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     EndEffectorPoseGoal,
     GraspGoal,
     HeldObjectPoseGoal,
-    PickUpOptions,
     MotionPolicy,
+    PickUpOptions,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -84,13 +84,14 @@ def create_pick_object(sim) -> RigidObject:
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="paper_cup",
-            shape=MeshCfg(fpath=get_data_path(OBJECT_MESH_PATH)),
+            shape=MeshCfg(
+                fpath=get_data_path(OBJECT_MESH_PATH), max_convex_hull_num=16
+            ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,
             ),
-            max_convex_hull_num=16,
             init_pos=[*OBJECT_XY, 0.0],
             body_scale=(0.75, 0.75, 1.0),
         )
@@ -124,8 +125,9 @@ def main() -> None:
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,

@@ -39,6 +39,20 @@ if TYPE_CHECKING:
 
 __all__ = ["SpawnArticulationView", "SpawnRigidBodyView"]
 
+_NEWTON_ROOT_POSE_ATOL = 1.0e-6
+
+
+def _create_newton_standalone_state_sync(
+    model: Any,
+    body_ids: Sequence[int],
+) -> Any:
+    """Create DexSim's reusable FREE-joint synchronization selection."""
+    from dexsim.engine.newton_physics.rigid_body.state_sync import (
+        StandaloneRigidStateSync,
+    )
+
+    return StandaloneRigidStateSync.from_body_ids(model, body_ids)
+
 
 def _checked_batch_call(
     batch: Any,
@@ -156,6 +170,7 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
         self._body_ids_tensor = torch.arange(
             len(batch), dtype=torch.int32, device=device
         )
+        self._newton_pose_sync: tuple[int, Any, Any] | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -190,6 +205,40 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             body_ids,
             (7,),
         )
+        if self.is_newton_backend and len(body_ids):
+            self._synchronize_newton_standalone_pose()
+
+    def _synchronize_newton_standalone_pose(self) -> None:
+        """Keep Newton standalone-body FREE joints coherent after batch writes.
+
+        DexSim 0.4.3's device ``RigidBodyBatch.apply_pose`` updates maximal
+        ``body_q`` state, while MuJoCo-Warp advances standalone rigid bodies
+        from their reduced FREE-joint state. Cache one selection for this
+        stable batch and project both state buffers after each pose write.
+        """
+        topology_revision = int(self.result.topology_revision)
+        cached = self._newton_pose_sync
+        if cached is None or cached[0] != topology_revision:
+            # Accessing ``_binding`` refreshes a stale stable batch. DexSim
+            # currently exposes neither the Newton runtime nor this required
+            # synchronization through the public Batch API.
+            binding = self.batch._binding
+            runtime = getattr(binding, "_runtime", None)
+            indices = getattr(binding, "_indices", None)
+            if runtime is None or indices is None:
+                raise RuntimeError(
+                    "Newton rigid-body batch has no finalized runtime selection."
+                )
+            selected_body_ids = indices.detach().cpu().tolist()
+            state_sync = _create_newton_standalone_state_sync(
+                runtime.model,
+                selected_body_ids,
+            )
+            cached = (topology_revision, runtime, state_sync)
+            self._newton_pose_sync = cached
+
+        _, runtime, state_sync = cached
+        state_sync.synchronize((runtime.current_state, runtime.other_state))
 
     def fetch_com_local_pose(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
@@ -499,10 +548,35 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
     def apply_root_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
     ) -> None:
+        rows = _rows(env_ids, self._row_count, self.device)
+        spawn_pose = _spawn_articulation_pose(pose.to(self.device, torch.float32))
+        if self.is_newton_backend and len(rows):
+            current_pose = torch.empty_like(spawn_pose)
+            self._fetch_rows(
+                "fetch_root_pose",
+                current_pose,
+                rows,
+                (7,),
+            )
+            translation_matches = torch.all(
+                torch.abs(current_pose[:, 4:7] - spawn_pose[:, 4:7])
+                <= _NEWTON_ROOT_POSE_ATOL,
+                dim=1,
+            )
+            quaternion_delta = torch.minimum(
+                torch.amax(torch.abs(current_pose[:, 0:4] - spawn_pose[:, 0:4]), dim=1),
+                torch.amax(torch.abs(current_pose[:, 0:4] + spawn_pose[:, 0:4]), dim=1),
+            )
+            changed = ~(
+                translation_matches & (quaternion_delta <= _NEWTON_ROOT_POSE_ATOL)
+            )
+            rows = rows[changed]
+            spawn_pose = spawn_pose[changed]
+
         self._apply_rows(
             "apply_root_pose",
-            _spawn_articulation_pose(pose.to(self.device, torch.float32)),
-            env_ids,
+            spawn_pose,
+            rows,
             (7,),
         )
 

@@ -42,6 +42,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
+    RobotPresetCfg,
     RigidObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
@@ -109,8 +110,9 @@ class EmbodiedEnvCfg(EnvCfg):
     instance as attributes during initialization.
 
     Key fields
-    - **robot**: `RobotCfg` (required) — the agent definition (URDF/MJCF, initial
-        state, control mode, etc.).
+    - **robot**: `RobotCfg | RobotPresetCfg` (required) — one portable robot
+        definition or replace-only complete alternatives selected by the active
+        physics backend.
     - **control_parts**: Optional[List[str]] — named robot parts to control. If
         `None`, all controllable joints are used.
     - **active_joint_ids**: List[int] — explicit joint indices to use for
@@ -148,7 +150,7 @@ class EmbodiedEnvCfg(EnvCfg):
         # TODO: support more types of indirect light in the future.
         indirect: dict[str, Any] | None = None
 
-    robot: RobotCfg = MISSING
+    robot: RobotCfg | RobotPresetCfg = MISSING
 
     control_parts: list[str] | None = None
     """List of robot parts to control. If None, all controllable joints will be used. 
@@ -553,7 +555,8 @@ class EmbodiedEnv(BaseEnv):
         Args:
             seed: Optional random seed forwarded to :class:`BaseEnv`.
             options: Reset options. ``reset_ids`` may select only some vector
-                environment rows.
+                environment rows. ``commit_env_ids`` may select a subset of
+                the reset rows whose pending dataset episodes are persisted.
 
         Returns:
             The reset observation and info dictionary.
@@ -884,11 +887,36 @@ class EmbodiedEnv(BaseEnv):
                 list(env_ids), device=status_device, dtype=torch.long
             )
 
-        # Save dataset before clearing buffers for environments that are being reset
-        if save_data and self.dataset_manager:
-            if "save" in self.dataset_manager.available_modes:
+        commit_env_ids = kwargs.get("commit_env_ids")
+        if commit_env_ids is None:
+            env_ids_to_commit = (
+                env_ids_to_process
+                if save_data
+                else torch.empty(0, device=status_device, dtype=torch.long)
+            )
+        elif isinstance(commit_env_ids, torch.Tensor):
+            env_ids_to_commit = commit_env_ids.to(
+                device=status_device, dtype=torch.long
+            ).reshape(-1)
+        else:
+            env_ids_to_commit = torch.tensor(
+                list(commit_env_ids), device=status_device, dtype=torch.long
+            )
 
-                if self.dataset_manager.save_failed_episodes:
+        if commit_env_ids is not None and env_ids_to_commit.numel() > 0:
+            if torch.unique(env_ids_to_commit).numel() != env_ids_to_commit.numel():
+                raise ValueError("commit_env_ids must not contain duplicate rows.")
+            if not bool(torch.isin(env_ids_to_commit, env_ids_to_process).all().item()):
+                raise ValueError(
+                    "commit_env_ids must be a subset of the rows being reset."
+                )
+
+        # Save dataset before clearing buffers for environments that are being reset
+        if env_ids_to_commit.numel() > 0 and self.dataset_manager:
+            if "save" in self.dataset_manager.available_modes:
+                if commit_env_ids is not None:
+                    env_ids_to_save = env_ids_to_commit
+                elif self.dataset_manager.save_failed_episodes:
                     env_ids_to_save = env_ids_to_process
                 else:
                     successful_envs = self.episode_success_status | self._task_success

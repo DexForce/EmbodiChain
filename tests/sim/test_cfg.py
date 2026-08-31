@@ -21,8 +21,10 @@ from dataclasses import fields
 import dexsim
 import pytest
 
+import embodichain.lab.sim.cfg as sim_cfg
+
 from dexsim.engine.newton_physics import (
-    NewtonCollisionPipelineCfg as DexsimNewtonCollisionPipelineCfg,
+    NewtonCollisionPipelineCfg as SpawnNewtonCollisionPipelineCfg,
 )
 from dexsim.spawn import DexsimCollisionDesc, DexsimPhysicsDesc, NewtonCollisionDesc
 from dexsim.types import DenoiserType, Renderer, ToneMappingType
@@ -31,17 +33,22 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     ArticulationRootPropertiesCfg,
     CollisionPropertiesCfg,
-    DexsimCollisionPropertiesCfg,
-    DexsimRigidBodyMaterialCfg,
-    DexsimRigidBodyPropertiesCfg,
+    DefaultCollisionPropertiesCfg,
+    DefaultPhysicsCfg,
+    DefaultRigidBodyPhysicsCfg,
+    DefaultRigidBodyMaterialCfg,
+    DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
+    JointDynamicsPropertiesCfg,
     MassPropertiesCfg,
-    NewtonArticulationRootPropertiesCfg,
+    MeshCollisionPropertiesCfg,
     NewtonCollisionPipelineCfg,
     NewtonCollisionPropertiesCfg,
+    NewtonMeshCollisionPropertiesCfg,
     NewtonJointDrivePropertiesCfg,
     NewtonPhysicsCfg,
     NewtonRigidBodyMaterialCfg,
+    NewtonRigidBodyPhysicsCfg,
     NewtonRigidBodyPropertiesCfg,
     PhysicsBackendCfg,
     PhysicsCfg,
@@ -52,8 +59,22 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPropertiesCfg,
     RigidObjectCfg,
     RobotCfg,
+    RobotPresetCfg,
+    physics_cfg_for_backend,
 )
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+from embodichain.utils import configclass
+
+
+def test_cfg_package_preserves_the_public_facade() -> None:
+    from embodichain.lab.sim.cfg.rigid import (
+        RigidBodyPhysicsCfg as LeafRigidBodyPhysicsCfg,
+    )
+    from embodichain.lab.sim.cfg.robot import RobotCfg as LeafRobotCfg
+
+    assert hasattr(sim_cfg, "__path__")
+    assert sim_cfg.RigidBodyPhysicsCfg is LeafRigidBodyPhysicsCfg
+    assert sim_cfg.RobotCfg is LeafRobotCfg
 
 
 def test_articulation_cfg_defaults_to_preserving_asset_physics() -> None:
@@ -62,6 +83,44 @@ def test_articulation_cfg_defaults_to_preserving_asset_physics() -> None:
 
     assert articulation_cfg.drive_pros is None
     assert articulation_cfg.resolve_asset_physics_mode() == "preserve"
+
+
+def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
+    field_names = {item.name for item in fields(ArticulationCfg)}
+
+    assert {
+        "fix_base",
+        "disable_self_collision",
+        "sleep_threshold",
+        "min_position_iters",
+        "min_velocity_iters",
+    }.isdisjoint(field_names)
+    assert ArticulationCfg().articulation_props == ArticulationRootPropertiesCfg()
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "fix_base",
+        "disable_self_collision",
+        "sleep_threshold",
+        "min_position_iters",
+        "min_velocity_iters",
+    ],
+)
+def test_removed_articulation_fields_fail_with_migration_target(
+    field_name: str,
+) -> None:
+    with pytest.raises(ValueError, match=f"{field_name} ->"):
+        ArticulationCfg.from_dict({field_name: True})
+
+    with pytest.raises(ValueError, match=f"{field_name} ->"):
+        merge_robot_cfg(RobotCfg(), {field_name: True})
+
+
+def test_physics_cfg_factory_rejects_noncanonical_backend_names() -> None:
+    with pytest.raises(ValueError, match="expected 'default' or 'newton'"):
+        physics_cfg_for_backend("alternate")  # type: ignore[arg-type]
 
 
 def test_articulation_cfg_parses_sparse_drive_overrides() -> None:
@@ -76,19 +135,49 @@ def test_articulation_cfg_parses_sparse_drive_overrides() -> None:
     assert articulation_cfg.drive_pros.max_effort is None
 
 
-def test_robot_cfg_defaults_to_force_joint_drive() -> None:
-    """Robots retain force-based joint drives by default."""
+def test_robot_cfg_defaults_to_portable_position_velocity_drive() -> None:
+    """The original force drive resolves to position+velocity targets."""
     robot_cfg = RobotCfg()
 
     assert robot_cfg.drive_pros.drive_type == "force"
+    assert robot_cfg.drive_pros.target_mode is None
+    assert robot_cfg.drive_pros._resolve_modes() == ("position_velocity", "force")
     assert robot_cfg.resolve_asset_physics_mode() == "overlay"
 
 
-def test_robot_cfg_partial_drive_properties_preserve_force_drive() -> None:
-    """Partial robot drive overrides retain the force-drive default."""
+def test_robot_cfg_partial_drive_properties_preserve_portable_drive() -> None:
+    """Partial robot drive overrides retain the original force mode."""
     robot_cfg = RobotCfg.from_dict({"drive_pros": {"stiffness": 0.0, "damping": 0.0}})
 
     assert robot_cfg.drive_pros.drive_type == "force"
+    assert robot_cfg.drive_pros.target_mode is None
+    assert robot_cfg.drive_pros._resolve_modes() == ("position_velocity", "force")
+
+
+def test_drive_type_override_replaces_robot_force_default() -> None:
+    override = {"drive_pros": {"drive_type": "none"}}
+    robot_cfg = RobotCfg.from_dict(override)
+    merged_cfg = merge_robot_cfg(RobotCfg(), override)
+
+    for cfg in (robot_cfg, merged_cfg):
+        assert cfg.drive_pros.target_mode is None
+        assert cfg.drive_pros.drive_type == "none"
+        assert cfg.drive_pros._resolve_modes() == ("none", "none")
+
+
+def test_common_target_mode_does_not_require_newton_subclass() -> None:
+    articulation_cfg = ArticulationCfg.from_dict(
+        {
+            "drive_pros": {
+                "target_mode": "effort",
+                "drive_type": "force",
+            }
+        }
+    )
+
+    assert type(articulation_cfg.drive_pros) is JointDrivePropertiesCfg
+    assert articulation_cfg.drive_pros.target_mode == "effort"
+    assert articulation_cfg.drive_pros.drive_type == "force"
 
 
 def test_asset_physics_policy_supports_legacy_alias_and_conflict_checks() -> None:
@@ -177,37 +266,33 @@ def test_robot_cfg_merge_preserves_typed_backend_property_configs() -> None:
 
 def test_rigid_physics_property_groups_have_single_backend_roots() -> None:
     """Backend configs extend one logical property root without duplication."""
-    assert issubclass(DexsimRigidBodyPropertiesCfg, RigidBodyPropertiesCfg)
+    assert issubclass(DefaultRigidBodyPropertiesCfg, RigidBodyPropertiesCfg)
     assert issubclass(NewtonRigidBodyPropertiesCfg, RigidBodyPropertiesCfg)
-    assert issubclass(DexsimCollisionPropertiesCfg, CollisionPropertiesCfg)
+    assert issubclass(DefaultCollisionPropertiesCfg, CollisionPropertiesCfg)
     assert issubclass(NewtonCollisionPropertiesCfg, CollisionPropertiesCfg)
     assert issubclass(NewtonRigidBodyMaterialCfg, RigidBodyMaterialCfg)
     assert issubclass(NewtonJointDrivePropertiesCfg, JointDrivePropertiesCfg)
-    assert issubclass(
-        NewtonArticulationRootPropertiesCfg,
-        ArticulationRootPropertiesCfg,
-    )
 
 
 def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
     def names(config_type: type) -> set[str]:
         return {item.name for item in fields(config_type)}
 
-    assert names(DexsimRigidBodyPropertiesCfg) == names(DexsimPhysicsDesc)
-    assert (names(DexsimCollisionPropertiesCfg) - {"collision_enabled"}) | names(
-        DexsimRigidBodyMaterialCfg
+    assert names(DefaultRigidBodyPropertiesCfg) == names(DexsimPhysicsDesc)
+    assert (names(DefaultCollisionPropertiesCfg) - {"collision_enabled"}) | names(
+        DefaultRigidBodyMaterialCfg
     ) == names(DexsimCollisionDesc)
 
-    newton_fields = (names(NewtonCollisionPropertiesCfg) - {"collision_enabled"}) | (
-        names(NewtonRigidBodyMaterialCfg) - names(RigidBodyMaterialCfg)
-    )
+    newton_fields = (
+        names(NewtonCollisionPropertiesCfg) - names(CollisionPropertiesCfg)
+    ) | (names(NewtonRigidBodyMaterialCfg) - names(RigidBodyMaterialCfg))
     newton_fields.remove("torsional_friction")
     newton_fields.remove("rolling_friction")
     newton_fields.update({"mu", "restitution", "mu_torsional", "mu_rolling"})
     assert newton_fields == names(NewtonCollisionDesc)
 
     assert names(NewtonCollisionPipelineCfg) == names(
-        DexsimNewtonCollisionPipelineCfg
+        SpawnNewtonCollisionPipelineCfg
     ) - {"requires_grad"}
 
 
@@ -215,7 +300,7 @@ def test_rigid_physics_from_dict_selects_backend_subclasses() -> None:
     cfg = RigidBodyPhysicsCfg.from_dict(
         {
             "mass_props": {"mass": 2.0},
-            "rigid_props": {"backend": "dexsim", "has_gravity": False},
+            "rigid_props": {"backend": "default", "has_gravity": False},
             "collision_props": {"backend": "newton", "margin": 0.01},
             "material_props": {
                 "backend": "newton",
@@ -226,9 +311,177 @@ def test_rigid_physics_from_dict_selects_backend_subclasses() -> None:
     )
 
     assert isinstance(cfg.mass_props, MassPropertiesCfg)
-    assert isinstance(cfg.rigid_props, DexsimRigidBodyPropertiesCfg)
+    assert isinstance(cfg.rigid_props, DefaultRigidBodyPropertiesCfg)
     assert isinstance(cfg.collision_props, NewtonCollisionPropertiesCfg)
     assert isinstance(cfg.material_props, NewtonRigidBodyMaterialCfg)
+
+
+def test_rigid_physics_explicit_backend_blocks_can_coexist_and_round_trip() -> None:
+    cfg = RigidBodyPhysicsCfg.from_dict(
+        {
+            "collision_props": {"contact_offset": 0.02, "rest_offset": 0.01},
+            "mesh_collision_props": {"max_convex_hull_num": 4},
+            "default_props": {
+                "rigid_props": {"linear_damping": 0.2},
+                "material_props": {"disable_strong_friction": True},
+            },
+            "newton_props": {
+                "collision_props": {"margin": 0.005},
+                "mesh_collision_props": {"force_sdf": True},
+                "material_props": {"ke": 1000.0},
+            },
+        }
+    )
+
+    restored = RigidBodyPhysicsCfg.from_dict(cfg.to_dict())
+
+    assert isinstance(restored.mesh_collision_props, MeshCollisionPropertiesCfg)
+    assert isinstance(restored.default_props, DefaultRigidBodyPhysicsCfg)
+    assert isinstance(restored.newton_props, NewtonRigidBodyPhysicsCfg)
+    assert isinstance(
+        restored.newton_props.mesh_collision_props,
+        NewtonMeshCollisionPropertiesCfg,
+    )
+    assert restored.default_props.rigid_props.linear_damping == pytest.approx(0.2)
+    assert restored.newton_props.collision_props.margin == pytest.approx(0.005)
+    assert restored.newton_props.mesh_collision_props.force_sdf is True
+
+
+def test_articulation_cfg_parses_independent_joint_dynamics() -> None:
+    cfg = ArticulationCfg.from_dict(
+        {
+            "drive_pros": {"stiffness": 12.0},
+            "joint_props": {
+                "max_effort": 20.0,
+                "friction": {"arm_.*": 0.2},
+            },
+        }
+    )
+
+    assert cfg.drive_pros.stiffness == pytest.approx(12.0)
+    assert isinstance(cfg.joint_props, JointDynamicsPropertiesCfg)
+    assert cfg.joint_props.max_effort == pytest.approx(20.0)
+    assert cfg.joint_props.friction == {"arm_.*": 0.2}
+
+
+def test_robot_cfg_merge_composes_backend_blocks_and_joint_dynamics() -> None:
+    base = RobotCfg(
+        attrs=RigidBodyPhysicsCfg(
+            default_props=DefaultRigidBodyPhysicsCfg(
+                rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.1)
+            ),
+            newton_props=NewtonRigidBodyPhysicsCfg(
+                mesh_collision_props=NewtonMeshCollisionPropertiesCfg(sdf_padding=0.01)
+            ),
+        ),
+        joint_props=JointDynamicsPropertiesCfg(
+            max_effort={"arm": 10.0},
+            friction=0.1,
+        ),
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "attrs": {
+                "default_props": {
+                    "rigid_props": {"angular_damping": 0.2},
+                },
+                "newton_props": {
+                    "mesh_collision_props": {"force_sdf": True},
+                },
+            },
+            "joint_props": {
+                "max_effort": {"wrist": 20.0},
+                "armature": 0.3,
+            },
+        },
+    )
+
+    assert merged.attrs.default_props.rigid_props.linear_damping == pytest.approx(0.1)
+    assert merged.attrs.default_props.rigid_props.angular_damping == pytest.approx(0.2)
+    assert merged.attrs.newton_props.mesh_collision_props.sdf_padding == pytest.approx(
+        0.01
+    )
+    assert merged.attrs.newton_props.mesh_collision_props.force_sdf is True
+    assert merged.joint_props.max_effort == {"arm": 10.0, "wrist": 20.0}
+    assert merged.joint_props.friction == pytest.approx(0.1)
+    assert merged.joint_props.armature == pytest.approx(0.3)
+
+
+def test_portable_collision_envelope_round_trips_as_common_config() -> None:
+    cfg = RigidBodyPhysicsCfg.from_dict(
+        {
+            "collision_props": {
+                "collision_enabled": True,
+                "contact_offset": 0.01,
+                "rest_offset": 0.002,
+            }
+        }
+    )
+
+    assert type(cfg.collision_props) is CollisionPropertiesCfg
+    assert cfg.to_dict()["collision_props"] == {
+        "collision_enabled": True,
+        "contact_offset": 0.01,
+        "rest_offset": 0.002,
+    }
+
+
+@configclass
+class _RobotPhysicsPresetCfg(RobotPresetCfg):
+    default: RobotCfg = RobotCfg(uid="default")
+    newton: RobotCfg = RobotCfg(uid="newton")
+    newton_xpbd: RobotCfg = RobotCfg(uid="newton_xpbd")
+
+
+def test_robot_preset_selects_complete_backend_and_solver_variants() -> None:
+    preset = _RobotPhysicsPresetCfg()
+
+    default_cfg = preset.resolve(DefaultPhysicsCfg())
+    newton_cfg = preset.resolve(NewtonPhysicsCfg())
+    xpbd_cfg = preset.resolve(NewtonPhysicsCfg(solver_cfg={"solver_type": "xpbd"}))
+
+    assert default_cfg.uid == "default"
+    assert newton_cfg.uid == "newton"
+    assert xpbd_cfg.uid == "newton_xpbd"
+    assert default_cfg is not preset.default
+
+
+@configclass
+class _CommonRobotPresetCfg(RobotPresetCfg):
+    default: RobotCfg = RobotCfg(uid="portable")
+
+
+def test_robot_preset_falls_back_to_one_portable_definition() -> None:
+    preset = _CommonRobotPresetCfg()
+
+    assert preset.resolve(DefaultPhysicsCfg()).uid == "portable"
+    assert preset.resolve(NewtonPhysicsCfg()).uid == "portable"
+
+
+@configclass
+class _NewtonSolverAliasRobotPresetCfg(RobotPresetCfg):
+    default: RobotCfg = RobotCfg(uid="fallback")
+    newton_mjwarp: RobotCfg = RobotCfg(uid="mjwarp")
+
+
+def test_robot_preset_accepts_newton_solver_alias() -> None:
+    preset = _NewtonSolverAliasRobotPresetCfg()
+
+    assert preset.resolve(DefaultPhysicsCfg()).uid == "fallback"
+    assert preset.resolve(NewtonPhysicsCfg()).uid == "mjwarp"
+
+
+@configclass
+class _UnsupportedRobotPresetCfg(RobotPresetCfg):
+    default: RobotCfg = RobotCfg(uid="default")
+    alternate: RobotCfg = RobotCfg(uid="alternate")
+
+
+def test_robot_preset_rejects_noncanonical_backend_names() -> None:
+    with pytest.raises(TypeError, match="unsupported preset name"):
+        _UnsupportedRobotPresetCfg().resolve(DefaultPhysicsCfg())
 
 
 def test_backend_property_configs_round_trip_without_losing_subclasses() -> None:
@@ -249,6 +502,24 @@ def test_backend_property_configs_round_trip_without_losing_subclasses() -> None
     assert isinstance(restored.material_props, NewtonRigidBodyMaterialCfg)
 
 
+def test_default_property_configs_use_the_default_discriminator() -> None:
+    cfg = RigidBodyPhysicsCfg(
+        rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.2),
+        collision_props=DefaultCollisionPropertiesCfg(contact_offset=0.01),
+        material_props=DefaultRigidBodyMaterialCfg(disable_strong_friction=True),
+    )
+
+    serialized = cfg.to_dict()
+    restored = RigidBodyPhysicsCfg.from_dict(serialized)
+
+    assert serialized["rigid_props"]["backend"] == "default"
+    assert serialized["collision_props"]["backend"] == "default"
+    assert serialized["material_props"]["backend"] == "default"
+    assert isinstance(restored.rigid_props, DefaultRigidBodyPropertiesCfg)
+    assert isinstance(restored.collision_props, DefaultCollisionPropertiesCfg)
+    assert isinstance(restored.material_props, DefaultRigidBodyMaterialCfg)
+
+
 def test_backend_property_parser_infers_unique_fields_without_discriminator() -> None:
     cfg = RigidBodyPhysicsCfg.from_dict(
         {
@@ -258,20 +529,54 @@ def test_backend_property_parser_infers_unique_fields_without_discriminator() ->
         }
     )
 
-    assert isinstance(cfg.rigid_props, DexsimRigidBodyPropertiesCfg)
+    assert isinstance(cfg.rigid_props, DefaultRigidBodyPropertiesCfg)
     assert isinstance(cfg.collision_props, NewtonCollisionPropertiesCfg)
     assert isinstance(cfg.material_props, NewtonRigidBodyMaterialCfg)
 
 
 def test_backend_joint_and_articulation_configs_round_trip() -> None:
     drive = NewtonJointDrivePropertiesCfg(target_mode=None)
-    root = NewtonArticulationRootPropertiesCfg(fixed_base=False)
+    root = ArticulationRootPropertiesCfg(fixed_base=False)
 
     restored_drive = JointDrivePropertiesCfg.from_dict(drive.to_dict())
     restored_root = ArticulationRootPropertiesCfg.from_dict(root.to_dict())
 
     assert isinstance(restored_drive, NewtonJointDrivePropertiesCfg)
-    assert isinstance(restored_root, NewtonArticulationRootPropertiesCfg)
+    assert root.to_dict() == {
+        "fixed_base": False,
+        "self_collision_enabled": None,
+        "sleep_threshold": None,
+        "min_position_iters": None,
+        "min_velocity_iters": None,
+    }
+    assert type(restored_root) is ArticulationRootPropertiesCfg
+
+
+def test_articulation_root_config_rejects_backend_discriminator() -> None:
+    with pytest.raises(TypeError, match="backend"):
+        ArticulationRootPropertiesCfg.from_dict(
+            {"backend": "newton", "fixed_base": False}
+        )
+
+
+def test_articulation_root_config_round_trip() -> None:
+    root = ArticulationRootPropertiesCfg(
+        fixed_base=True,
+        sleep_threshold=0.005,
+        min_position_iters=8,
+        min_velocity_iters=2,
+    )
+
+    restored = ArticulationRootPropertiesCfg.from_dict(root.to_dict())
+
+    assert type(restored) is ArticulationRootPropertiesCfg
+    assert restored == root
+    assert "backend" not in root.to_dict()
+
+
+def test_articulation_root_requires_both_solver_iteration_counts() -> None:
+    with pytest.raises(ValueError, match="must be configured together"):
+        ArticulationRootPropertiesCfg(min_position_iters=8)
 
 
 def test_robot_cfg_round_trip_preserves_grouped_backend_types() -> None:
@@ -281,7 +586,7 @@ def test_robot_cfg_round_trip_preserves_grouped_backend_types() -> None:
             material_props=NewtonRigidBodyMaterialCfg(ke=1000.0),
         ),
         drive_pros=NewtonJointDrivePropertiesCfg(target_mode="position"),
-        articulation_props=NewtonArticulationRootPropertiesCfg(fixed_base=False),
+        articulation_props=ArticulationRootPropertiesCfg(fixed_base=False),
     )
 
     restored = RobotCfg.from_dict(cfg.to_dict())
@@ -290,10 +595,7 @@ def test_robot_cfg_round_trip_preserves_grouped_backend_types() -> None:
     assert isinstance(restored.attrs.collision_props, NewtonCollisionPropertiesCfg)
     assert isinstance(restored.attrs.material_props, NewtonRigidBodyMaterialCfg)
     assert isinstance(restored.drive_pros, NewtonJointDrivePropertiesCfg)
-    assert isinstance(
-        restored.articulation_props,
-        NewtonArticulationRootPropertiesCfg,
-    )
+    assert type(restored.articulation_props) is ArticulationRootPropertiesCfg
 
 
 def test_rigid_physics_from_dict_rejects_unknown_fields() -> None:
@@ -360,7 +662,7 @@ def test_physics_cfg_does_not_expose_fixed_solver_options() -> None:
 
 
 def test_physics_cfg_applies_fixed_solver_defaults() -> None:
-    """Removed solver options retain their established DexSim defaults."""
+    """Removed solver options retain the Default backend's established values."""
     physics_args = PhysicsCfg(enable_ccd=True).to_dexsim_args()
 
     assert physics_args["enable_ccd"] is True

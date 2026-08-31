@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
@@ -26,6 +26,7 @@ import torch
 from embodichain.lab.sim.atomic_actions.plans import normalize_success_mask
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     resolve_object_target,
+    split_joint_trajectory_at_pose,
 )
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     axis_translation_keyframes,
@@ -299,6 +300,35 @@ class TestSplitThreeSegments:
         first, hand, third = split_three_segments(10, 2)
 
         assert (first, hand, third) == (5, 2, 3)
+
+
+def test_split_joint_trajectory_uses_per_environment_target_pose_boundary():
+    trajectory = torch.arange(5, dtype=torch.float32).reshape(1, 5, 1).repeat(2, 1, 1)
+    trajectory_xpos = torch.eye(4).reshape(1, 1, 4, 4).repeat(2, 5, 1, 1)
+    trajectory_xpos[:, :, 0, 3] = trajectory[:, :, 0]
+    trajectory_xpos[0, 0, 0, 3] = 2.0  # Same pose at start; prefer expected progress.
+    split_pose = torch.eye(4).repeat(2, 1, 1)
+    split_pose[:, 0, 3] = torch.tensor([2.0, 3.0])
+    robot = Mock()
+    robot.compute_batch_fk.return_value = trajectory_xpos
+
+    with patch(
+        "embodichain.lab.sim.atomic_actions.primitives._helpers.resample_with_distance",
+        side_effect=lambda trajectory, interp_num, device: trajectory[:, :interp_num],
+    ) as resample:
+        split_joint_trajectory_at_pose(
+            trajectory,
+            split_pose,
+            robot=robot,
+            control_part="arm",
+            first_sample_count=5,
+            second_sample_count=5,
+        )
+
+    first_input = resample.call_args_list[0].args[0]
+    second_input = resample.call_args_list[1].args[0]
+    assert first_input[:, :, 0].tolist() == [[0, 1, 2, 2, 2], [0, 1, 2, 3, 3]]
+    assert second_input[:, :, 0].tolist() == [[2, 3, 4, 4, 4], [3, 4, 4, 4, 4]]
 
 
 class TestTranslatePoseWorld:

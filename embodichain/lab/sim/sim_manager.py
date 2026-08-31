@@ -99,7 +99,9 @@ from embodichain.lab.sim.cfg import (
     ClothObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     RobotCfg,
+    RobotPresetCfg,
     RigidConstraintCfg,
 )
 from embodichain.lab.sim.physics import NewtonPhysicsBackend, make_physics_backend
@@ -560,6 +562,7 @@ class SimulationManager:
         )
         self._arenas = list(self._spawn_scene.builder.prepare_arenas())
         self._prepared_spawn_topology_revision = -1
+        self._synced_spawn_render_topology_revision = -1
 
         self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
@@ -709,12 +712,12 @@ class SimulationManager:
 
     @property
     def is_default_backend(self) -> bool:
-        """Whether the existing DexSim default physics backend is active."""
+        """Whether the Default physics backend is active."""
         return self.physics.name == "default"
 
     @property
     def is_newton_backend(self) -> bool:
-        """Whether the DexSim Newton physics backend is active."""
+        """Whether the Newton physics backend is active."""
         return self.physics.name == "newton"
 
     @property
@@ -1017,7 +1020,7 @@ class SimulationManager:
         self._default_resources = SimResources()
 
     def prepare(self) -> None:
-        """Materialize physical declarations, then resolve sensor parents."""
+        """Materialize declarations, bind state, and resolve sensor parents."""
         scene = self._spawn_scene
         result = scene.builder.result
         if (
@@ -1036,12 +1039,14 @@ class SimulationManager:
         # Runtime readiness belongs to the SimulationManager. Keep this and
         # facade binding outside the topology-change branch so a failed call
         # remains retryable without rematerializing the scene.
+        scene.prepare_runtime_config(result)
         self._prepare_spawn_runtime(result)
         scene.bind()
+        self._sync_spawn_render_state(result)
 
         while self._pending_sensor_attachments:
             sensor = self._pending_sensor_attachments[0]
-            sensor.attach_to_parent()
+            self._attach_camera_parent(sensor)
             self._pending_sensor_attachments.pop(0)
 
     def _prepare_spawn_runtime(self, result: dexsim.spawn.SpawnResult) -> None:
@@ -1052,6 +1057,17 @@ class SimulationManager:
         if self.is_default_backend and self.device.type == "cuda":
             self._world.init_gpu_physics()
         self._prepared_spawn_topology_revision = topology_revision
+
+    def _sync_spawn_render_state(self, result: dexsim.spawn.SpawnResult) -> None:
+        """Publish newly bound state once for each Spawn topology revision."""
+        topology_revision = int(result.topology_revision)
+        if (
+            getattr(self, "_synced_spawn_render_topology_revision", -1)
+            == topology_revision
+        ):
+            return
+        self.physics.sync_render_state(result)
+        self._synced_spawn_render_topology_revision = topology_revision
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -1773,8 +1789,14 @@ class SimulationManager:
                 cfg.init_local_pose = descriptor.pose.copy()
                 cfg.asset_physics_mode = "preserve"
                 cfg.use_usd_properties = None
-                cfg.fix_base = bool(descriptor.fixed_base)
-                cfg.disable_self_collision = not descriptor.enable_self_collision
+                if robot_cfg is None:
+                    cfg.articulation_props = ArticulationRootPropertiesCfg()
+                else:
+                    cfg.articulation_props = cfg.articulation_props.copy()
+                cfg.articulation_props.fixed_base = bool(descriptor.fixed_base)
+                cfg.articulation_props.self_collision_enabled = (
+                    descriptor.enable_self_collision
+                )
                 cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
                 cfg.build_pk_chain = False
                 facade = facade_type(
@@ -2444,11 +2466,13 @@ class SimulationManager:
         """
         return list(self._articulations.keys())
 
-    def add_robot(self, cfg: RobotCfg) -> Robot | None:
+    def add_robot(self, cfg: RobotCfg | RobotPresetCfg) -> Robot | None:
         """Add a Robot to the scene.
 
         Args:
-            cfg (RobotCfg): Configuration for the robot.
+            cfg: A concrete robot configuration or a replace-only backend
+                preset. Presets are resolved from ``physics_cfg`` before the
+                robot is declared.
 
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
@@ -2458,6 +2482,12 @@ class SimulationManager:
                 f"Robot support is not enabled for the "
                 f"{self.physics.name} backend yet.",
                 error_type=NotImplementedError,
+            )
+
+        if isinstance(cfg, RobotPresetCfg):
+            cfg = cfg.resolve(
+                self.sim_config.physics_cfg,
+                newton_solver_type=self._active_newton_solver_type,
             )
 
         uid = cfg.uid
@@ -2860,15 +2890,12 @@ class SimulationManager:
             sensor = sensor_factory(
                 sensor_cfg,
                 self.device,
-                world=self._world,
-                arenas=self._arenas,
-                parent_node_resolver=self._resolve_spawn_sensor_parent_nodes,
-                defer_parent_attachment=True,
+                owner=self,
             )
             if sensor_cfg.extrinsics.parent is not None:
                 scene = self._spawn_scene
                 if scene.builder.result is not None:
-                    sensor.attach_to_parent()
+                    self._attach_camera_parent(sensor)
                 else:
                     self._pending_sensor_attachments.append(sensor)
         else:
@@ -2882,6 +2909,14 @@ class SimulationManager:
         self._sensors[uid] = sensor
         self.notify_visualization_topology_changed()
         return sensor
+
+    def _attach_camera_parent(self, sensor: Camera) -> None:
+        """Resolve and attach one camera to its configured parent nodes."""
+        parent = sensor.cfg.extrinsics.parent
+        if parent is None:
+            return
+        parent_nodes = self._resolve_spawn_sensor_parent_nodes(parent)
+        sensor.attach_to_parent_nodes(parent_nodes)
 
     def _resolve_spawn_sensor_parent_nodes(self, parent: str) -> list[object]:
         """Resolve one canonical articulation link to a render node per Arena.
@@ -3854,6 +3889,13 @@ class SimulationManager:
             self.close_window()
 
         import sys, gc
+
+        # Release backend-owned views before SpawnResult closes the native
+        # resources that back them. Newton also synchronizes its device here.
+        self.physics.prepare_for_teardown()
+        # Run wrapper destructors while their World is still alive. The later
+        # collections continue to break cycles left by the native teardown.
+        gc.collect()
 
         # Render-only cameras may be attached to Spawn articulation link
         # nodes. Remove their Arena views before closing SpawnResult, which

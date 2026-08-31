@@ -228,6 +228,27 @@ class BaseRigidObjectTest:
             ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
         # Newton: kinematic bodies are not pose-locked yet (DexSim TODO).
 
+    def test_dynamic_pose_write_persists_across_physics_step(self):
+        """A dynamic pose reset must update Newton's FREE-joint state too."""
+        target_xy = torch.tensor(
+            [[0.31, -0.27], [-0.42, 0.36]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        pose = torch.eye(4, device=self.sim.device).repeat(NUM_ARENAS, 1, 1)
+        pose[:, :2, 3] = target_xy
+        pose[:, 2, 3] = Z_TRANSLATION
+
+        self.duck.set_local_pose(pose)
+        self.sim.update(step=1)
+
+        torch.testing.assert_close(
+            self.duck.get_local_pose()[:, :2],
+            target_xy,
+            atol=1.0e-4,
+            rtol=0.0,
+        )
+
     def test_add_force_torque(self):
         """Test that add_force applies force correctly to the duck object."""
 

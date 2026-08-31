@@ -48,7 +48,8 @@ from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
 )
 from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 from embodichain.lab.sim.cfg import (
-    DexsimCollisionPropertiesCfg,
+    ArticulationRootPropertiesCfg,
+    CollisionPropertiesCfg,
     RobotCfg,
     JointDrivePropertiesCfg,
     RigidBodyMaterialCfg,
@@ -283,7 +284,10 @@ class DexforceW1Cfg(RobotCfg):
             "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e3},
             "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10, HEAD_JOINTS: 1e5},
         }
-        drive_pros = JointDrivePropertiesCfg(drive_type="force", **joint_params)
+        drive_pros = JointDrivePropertiesCfg(
+            drive_type="force",
+            **joint_params,
+        )
 
         if with_default_eef:
             eef_joint_names = DEFAULT_EEF_HAND_JOINT_NAMES
@@ -298,11 +302,16 @@ class DexforceW1Cfg(RobotCfg):
             )
 
         return {
-            "min_position_iters": 32,
-            "min_velocity_iters": 8,
             "drive_pros": drive_pros,
+            "articulation_props": ArticulationRootPropertiesCfg(
+                min_position_iters=32,
+                min_velocity_iters=8,
+            ),
             "attrs": RigidBodyPhysicsCfg(
-                collision_props=DexsimCollisionPropertiesCfg(contact_offset=0.001),
+                collision_props=CollisionPropertiesCfg(
+                    contact_offset=0.001,
+                    rest_offset=0.0,
+                ),
                 material_props=RigidBodyMaterialCfg(
                     static_friction=0.95,
                     dynamic_friction=0.9,
@@ -342,15 +351,26 @@ class DexforceW1Cfg(RobotCfg):
 
 
 if __name__ == "__main__":
-    # Example usage
-    import numpy as np
+    import argparse
 
     np.set_printoptions(precision=5, suppress=True)
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+    from embodichain.lab.sim.cfg import physics_cfg_for_backend
+
+    parser = argparse.ArgumentParser(description="Launch the Dexforce W1 robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="newton",
+        help="Physics backend to launch (default: newton).",
+    )
+    args = parser.parse_args()
 
     config = SimulationManagerCfg(
-        headless=True, device="cpu", num_envs=4, physics_cfg=NewtonPhysicsCfg()
+        headless=True,
+        device="cpu",
+        num_envs=4,
+        physics_cfg=physics_cfg_for_backend(args.physics),
     )
     sim = SimulationManager(config)
 

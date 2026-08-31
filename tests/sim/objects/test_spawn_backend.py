@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import embodichain.lab.sim.objects.backends.spawn as spawn_backend
 from embodichain.lab.sim.objects.backends.spawn import (
     SpawnArticulationView,
     SpawnRigidBodyView,
@@ -52,6 +53,10 @@ class _SelectedRigidBatch:
         self.owner.force[self.rows] = values
         return len(self.rows)
 
+    def apply_pose(self, values: torch.Tensor) -> int:
+        self.owner.pose[self.rows] = values
+        return len(self.rows)
+
     def apply_friction(self, values: torch.Tensor) -> int:
         self.owner.friction[self.rows] = values
         return len(self.rows)
@@ -64,6 +69,13 @@ class _SelectedRigidBatch:
 class _RigidBatch:
     def __init__(self) -> None:
         self.force = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+        self.pose = torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0],
+            ]
+        )
         self.friction = torch.tensor([[0.1], [0.2], [0.3]])
         self.selections: list[tuple[int, ...]] = []
 
@@ -92,6 +104,16 @@ class _SelectedArticulationBatch:
         self.owner.last_dof_ids = tuple(columns.tolist())
         return len(self.rows)
 
+    def fetch_root_pose(self, out: torch.Tensor) -> int:
+        self.owner.root_pose_fetch_rows.append(tuple(self.rows.tolist()))
+        out.copy_(self.owner.root_pose[self.rows])
+        return len(self.rows)
+
+    def apply_root_pose(self, values: torch.Tensor) -> int:
+        self.owner.root_pose_apply_rows.append(tuple(self.rows.tolist()))
+        self.owner.root_pose[self.rows] = values
+        return len(self.rows)
+
 
 class _ArticulationBatch:
     def __init__(self) -> None:
@@ -107,7 +129,16 @@ class _ArticulationBatch:
         self.dof_width = 3
         self.link_width = 1
         self.force = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        # Spawn articulation poses use xyzw + xyz layout.
+        self.root_pose = torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 1.0],
+            ]
+        )
         self.last_dof_ids: tuple[int, ...] | None = None
+        self.root_pose_fetch_rows: list[tuple[int, ...]] = []
+        self.root_pose_apply_rows: list[tuple[int, ...]] = []
         self.selections: list[tuple[int, ...]] = []
 
     def __len__(self) -> int:
@@ -168,6 +199,66 @@ def test_rigid_batch_failure_status_is_not_silently_ignored() -> None:
         view.fetch_friction(torch.empty((1, 1)), torch.tensor([0]))
 
 
+def test_newton_rigid_pose_write_synchronizes_free_joint_state(monkeypatch) -> None:
+    batch = _RigidBatch()
+    current_state = object()
+    other_state = object()
+    runtime = SimpleNamespace(
+        model=object(),
+        current_state=current_state,
+        other_state=other_state,
+    )
+    batch._binding = SimpleNamespace(
+        _runtime=runtime,
+        _indices=torch.tensor([10, 11, 12]),
+    )
+    synchronized_states: list[tuple[object, object]] = []
+    created_body_ids: list[tuple[int, ...]] = []
+
+    class _StateSync:
+        def synchronize(self, states: tuple[object, object]) -> None:
+            synchronized_states.append(states)
+
+    def _create_state_sync(_model: object, body_ids: list[int]) -> _StateSync:
+        created_body_ids.append(tuple(body_ids))
+        return _StateSync()
+
+    monkeypatch.setattr(
+        spawn_backend,
+        "_create_newton_standalone_state_sync",
+        _create_state_sync,
+    )
+    view = SpawnRigidBodyView(
+        SimpleNamespace(backend="newton", topology_revision=3),
+        batch,
+        torch.device("cpu"),
+    )
+
+    view.apply_pose(
+        torch.tensor([[4.0, 5.0, 6.0, 0.0, 0.0, 0.0, 1.0]]),
+        torch.tensor([1]),
+    )
+    view.apply_pose(
+        torch.tensor([[7.0, 8.0, 9.0, 0.0, 0.0, 0.0, 1.0]]),
+        torch.tensor([2]),
+    )
+
+    assert created_body_ids == [(10, 11, 12)]
+    assert synchronized_states == [
+        (current_state, other_state),
+        (current_state, other_state),
+    ]
+    assert torch.equal(
+        batch.pose[1:],
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 1.0, 4.0, 5.0, 6.0],
+                [0.0, 0.0, 0.0, 1.0, 7.0, 8.0, 9.0],
+            ]
+        ),
+    )
+
+
 def test_articulation_partial_force_preserves_other_rows_and_dofs() -> None:
     batch = _ArticulationBatch()
     view = SpawnArticulationView(
@@ -188,3 +279,52 @@ def test_articulation_partial_force_preserves_other_rows_and_dofs() -> None:
     )
     assert batch.selections == [(1,)]
     assert batch.last_dof_ids == (1,)
+
+
+def test_newton_idempotent_root_pose_write_is_skipped() -> None:
+    batch = _ArticulationBatch()
+    view = SpawnArticulationView(
+        SimpleNamespace(backend="newton"),
+        batch,
+        torch.device("cpu"),
+    )
+    current_pose = torch.tensor(
+        [
+            [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            [2.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0],
+        ]
+    )
+
+    view.apply_root_pose(current_pose, env_ids=torch.tensor([0, 1]))
+
+    assert batch.root_pose_fetch_rows == [(0, 1)]
+    assert batch.root_pose_apply_rows == []
+
+
+def test_newton_root_pose_write_keeps_only_changed_rows() -> None:
+    batch = _ArticulationBatch()
+    view = SpawnArticulationView(
+        SimpleNamespace(backend="newton"),
+        batch,
+        torch.device("cpu"),
+    )
+    target_pose = torch.tensor(
+        [
+            [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            [3.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+
+    view.apply_root_pose(target_pose, env_ids=torch.tensor([0, 1]))
+
+    assert batch.root_pose_fetch_rows == [(0, 1)]
+    assert batch.root_pose_apply_rows == [(1,)]
+    assert torch.equal(
+        batch.root_pose,
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0, 1.0, 3.0, 0.0, 1.0],
+            ]
+        ),
+    )

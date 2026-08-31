@@ -21,11 +21,14 @@ import torch
 import dexsim.render as dr
 
 from functools import cached_property
-from typing import Callable, List, Literal, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
 from embodichain.utils import logger, configclass
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.sim_manager import SimulationManager
 
 __all__ = ["Camera", "CameraCfg"]
 
@@ -138,27 +141,17 @@ class Camera(BaseSensor):
         config: CameraCfg,
         device: torch.device = torch.device("cpu"),
         *,
-        world: dexsim.World | None = None,
-        arenas: Sequence[dexsim.environment.Arena] | None = None,
-        parent_node_resolver: Callable[[str], Sequence[object]] | None = None,
-        defer_parent_attachment: bool = False,
+        owner: SimulationManager,
     ) -> None:
-        if world is None or arenas is None:
-            raise ValueError(
-                "Camera render resources must be supplied explicitly; construct "
-                "cameras through SimulationManager.add_sensor()."
-            )
-        self._world = world
-        self._arenas = list(arenas)
+        self._world = owner.get_world()
+        self._arenas = [owner.get_env(i) for i in range(owner.num_envs)]
         if len(self._arenas) == 0:
             raise ValueError("Camera requires at least one materialized Arena.")
-        self._parent_node_resolver = parent_node_resolver
         self._camera_names: list[tuple[dexsim.environment.Arena, str]] = []
+        self._is_attached = False
         self._is_destroyed = False
         super().__init__(config, device, num_instances=len(self._arenas))
         self.reset()
-        if config.extrinsics.parent is not None and not defer_parent_attachment:
-            self.attach_to_parent()
 
     def _build_sensor_from_config(
         self, config: CameraCfg, device: torch.device
@@ -230,12 +223,12 @@ class Camera(BaseSensor):
 
     @property
     def is_attached(self) -> bool:
-        """Check if the camera is attached to a parent entity.
+        """Return whether all camera views are attached to parent nodes.
 
         Returns:
-            bool: True if the camera is attached to a parent entity, False otherwise.
+            True after parent attachment and extrinsics application succeed.
         """
-        return self.cfg.extrinsics.parent is not None
+        return self._is_attached
 
     def update(self, **kwargs) -> None:
         """Update the sensor data.
@@ -282,31 +275,28 @@ class Camera(BaseSensor):
                 self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
             )
 
-    def _attach_to_entity(self) -> None:
-        """Attach the sensor to the parent entity in each environment."""
-        if self._parent_node_resolver is None:
+    def attach_to_parent_nodes(self, parent_nodes: Sequence[object]) -> None:
+        """Attach camera views to one resolved parent node per environment.
+
+        Args:
+            parent_nodes: Parent render nodes ordered by environment index.
+
+        Raises:
+            RuntimeError: If the number of parent nodes does not match the
+                number of camera instances.
+        """
+        nodes = list(parent_nodes)
+        if len(nodes) != self.num_instances:
             raise RuntimeError(
-                f"Camera {self.cfg.uid!r} has parent "
-                f"{self.cfg.extrinsics.parent!r}, but no Spawn parent resolver "
-                "was supplied."
-            )
-        parents = list(self._parent_node_resolver(self.cfg.extrinsics.parent))
-        if len(parents) != self.num_instances:
-            raise RuntimeError(
-                f"Camera parent resolver returned {len(parents)} nodes for "
+                f"Camera attachment received {len(nodes)} parent nodes for "
                 f"{self.num_instances} camera instances."
             )
-        for entity, parent in zip(self._entities, parents):
+        for entity, parent in zip(self._entities, nodes, strict=True):
             entity.attach_node(parent)
-
-    def attach_to_parent(self) -> None:
-        """Resolve and attach a deferred parent after Spawn materialization."""
-        if self.cfg.extrinsics.parent is None:
-            return
-        self._attach_to_entity()
         # Extrinsics are expressed in the parent frame. Reapply them after
         # reparenting because the camera was initially reset in Arena space.
         self.reset()
+        self._is_attached = True
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -403,7 +393,7 @@ class Camera(BaseSensor):
         # World-owned; dropping this borrowed facade after removing all views
         # is the narrowest safe lifetime boundary available to EmbodiChain.
         self._frame_buffer = None
-        self._parent_node_resolver = None
+        self._is_attached = False
         self._arenas = []
         self._world = None
 

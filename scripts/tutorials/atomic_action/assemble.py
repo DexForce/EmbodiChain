@@ -40,15 +40,13 @@ from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     AssembleAffordance,
     AssembleGoal,
-    AtomicActionEngine,
     ControlPartCommandProfile,
-    EntityState,
+    create_simulation_atomic_action_engine,
     GraspGoal,
     PickUpOptions,
     PlaceOptions,
     MotionPolicy,
     SceneEntityPose,
-    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.data import get_data_path
@@ -173,7 +171,11 @@ def create_assemble_object(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="assemble_object",
-            shape=MeshCfg(fpath=OBJECT_MESH_PATH, compute_uv=False),
+            shape=MeshCfg(
+                fpath=OBJECT_MESH_PATH,
+                compute_uv=False,
+                max_convex_hull_num=1,
+            ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
@@ -187,7 +189,6 @@ def create_assemble_object(sim: SimulationManager) -> RigidObject:
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=1,
             init_pos=[
                 OBJECT_A_XY[0],
                 OBJECT_A_XY[1],
@@ -306,8 +307,9 @@ def run_assemble_demo(
         lift_height=PLACE_LIFT_HEIGHT,
         hand_interp_steps=PLACE_HAND_INTERP_STEPS,
     )
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(can, cube),
         control_profiles={
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,
@@ -330,14 +332,6 @@ def run_assemble_demo(
 
     assemble_affordance = AssembleAffordance(
         assemble_to_base_pose=assemble_to_base,
-    )
-    scene = SceneSnapshot(
-        timestamp=0.0,
-        version=0,
-        entities={
-            can.uid: EntityState(can.get_local_pose(to_matrix=True)),
-            cube.uid: EntityState(cube.get_local_pose(to_matrix=True)),
-        },
     )
     endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_hand"}}
     compiled = engine.compile(
@@ -366,10 +360,7 @@ def run_assemble_demo(
                 skill_options=place_options,
             ),
         ),
-        engine.initial_context(
-            scene=scene,
-            control_dt=sim.sim_config.physics_dt,
-        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions

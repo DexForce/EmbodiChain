@@ -48,9 +48,14 @@ sim_config = SimulationManagerCfg(
 
 ### Physics Configuration
 
-Use {class}`~cfg.DefaultPhysicsCfg` for the default DexSim backend or {class}`~cfg.NewtonPhysicsCfg` for Newton. GPU memory settings are on {class}`~cfg.DefaultPhysicsCfg` as ``gpu_memory``.
+Use {class}`~cfg.DefaultPhysicsCfg` for the Default backend or {class}`~cfg.NewtonPhysicsCfg` for the Newton backend. Both are integrated through the DexSim runtime. GPU memory settings are on {class}`~cfg.DefaultPhysicsCfg` as ``gpu_memory``.
 
-All physics backends inherit these base parameters from {class}`~cfg.PhysicsCfg`:
+`default` and `newton` are the only public physics-backend identifiers.
+Backend-neutral nested property groups may additionally use `common`. DexSim
+is the runtime and Spawn SDK integration layer, not another selectable physics
+backend; SDK-native `Dexsim*Desc` names remain confined to that adapter boundary.
+
+All physics backends inherit these base parameters from {class}`~cfg.PhysicsBackendCfg`:
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -69,7 +74,7 @@ The {class}`~cfg.DefaultPhysicsCfg` class controls the global default-backend ph
 
 PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
 is evaluated on every solver iteration. These solver implementation details use
-fixed defaults and are not exposed by `PhysicsCfg`.
+fixed defaults and are not exposed by `DefaultPhysicsCfg`.
 
 ### Render Configuration
 

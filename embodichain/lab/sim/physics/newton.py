@@ -21,9 +21,13 @@ import importlib
 from typing import TYPE_CHECKING
 import weakref
 
+import warp as wp
+
 from .base import PhysicsBackend
 
 if TYPE_CHECKING:
+    import dexsim
+
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
 
 __all__ = ["NewtonPhysicsBackend"]
@@ -45,7 +49,7 @@ def is_newton_gradient_mode(result) -> bool:
 
 
 class NewtonPhysicsBackend(PhysicsBackend):
-    """The DexSim Newton physics backend (Warp-based)."""
+    """The Warp-based Newton physics backend integrated through DexSim."""
 
     name = "newton"
 
@@ -55,6 +59,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
     def __init__(self, manager) -> None:
         super().__init__(manager)
         self._differentiable_runtime = None
+        self._runtime_device: str | None = None
 
     # -- construction / world-config activation ------------------------- #
     def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
@@ -65,6 +70,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
             gpu_id=sim_config.gpu_id,
         )
         self.solver_type = newton_cfg.solver_cfg.solver_type
+        self._runtime_device = str(newton_cfg.device)
         world_config.newton_cfg = newton_cfg
 
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
@@ -72,6 +78,36 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # WorldConfig.newton_cfg registers the World-owned NewtonBackend.
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
+
+    def sync_render_state(self, result: "dexsim.spawn.SpawnResult") -> None:
+        """Publish Newton state through DexSim's render bridge without stepping."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(result.world)
+        if backend is None:
+            raise RuntimeError(
+                "Newton backend is unavailable for render-state synchronization."
+            )
+        backend.sync_to_dexsim(result.world)
+        backend.sync_particle_fluids(result.world)
+
+    def prepare_for_teardown(self) -> None:
+        """Release Newton render views while Spawn still owns their parents."""
+        if self._runtime_device is not None and self._runtime_device.startswith("cuda"):
+            wp.synchronize_device(self._runtime_device)
+
+        world = getattr(self._manager, "_world", None)
+        if world is None:
+            return
+
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(world)
+        if backend is not None:
+            # NewtonRenderSync retains native link-node wrappers. They must be
+            # released before SpawnResult.close() drops the owning skeletons;
+            # otherwise pybind can destruct a child after its native parent.
+            backend.render_sync.clear()
 
     @property
     def newton_manager(self):

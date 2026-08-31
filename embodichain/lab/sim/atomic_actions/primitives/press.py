@@ -67,8 +67,6 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 class PressGoal(ObjectActionGoal):
     """Target object described by a press affordance."""
 
-    goal_kind: ClassVar[str] = "press"
-
     target_pose: PoseGoalValue
     """Target pose snapshot or late-bound stable scene-entity reference."""
 
@@ -136,9 +134,6 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             ),
         ),
     )
-
-    def __init__(self, default_options: PressOptions | None = None) -> None:
-        super().__init__(default_options)
 
     def _on_bind(self) -> None:
         """Resolve dimensions owned by the engine's robot."""

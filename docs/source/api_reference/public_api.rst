@@ -766,6 +766,7 @@ embodichain.lab.sim.atomic_actions.sim_adapter
 
 .. autosummary::
 
+   create_simulation_atomic_action_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    SceneSnapshotSupplier
@@ -945,7 +946,7 @@ embodichain.lab.sim.physics
 ---------------------------
 
 Manager-level physics backend selection and lifecycle contracts for the
-default DexSim and Warp-based Newton implementations.
+Default and Newton implementations integrated through DexSim.
 
 .. currentmodule:: embodichain.lab.sim.physics
 
@@ -1351,6 +1352,25 @@ embodichain.lab.sim.solvers.neural_ik_solver
 
    NeuralIKSolverCfg
    NeuralIKSolver
+
+embodichain.lab.sim.solvers.null_space_posture_task
+---------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.null_space_posture_task
+
+.. autosummary::
+
+   NullSpacePostureTask
+
+embodichain.lab.sim.solvers.pink_solver
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.pink_solver
+
+.. autosummary::
+
+   PinkSolver
+   PinkSolverCfg
 
 embodichain.lab.sim.solvers.srs_solver
 --------------------------------------

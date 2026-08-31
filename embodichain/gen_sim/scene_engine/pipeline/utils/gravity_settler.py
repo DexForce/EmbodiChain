@@ -274,7 +274,11 @@ class GravitySettler:
         return sim.add_rigid_object(
             RigidObjectCfg(
                 uid=object_id,
-                shape=MeshCfg(fpath=str(body_info["mesh_path"])),
+                shape=MeshCfg(
+                    fpath=str(body_info["mesh_path"]),
+                    max_convex_hull_num=self._max_convex_hull_num(physics),
+                    acd_method="vhacd",
+                ),
                 init_pos=tuple(
                     self._three_floats(rigid_layout.get("pos"), field_name="pos")
                 ),
@@ -284,8 +288,6 @@ class GravitySettler:
                 ),
                 attrs=self._rigid_body_attrs(physics),
                 body_type=body_type,
-                max_convex_hull_num=self._max_convex_hull_num(physics),
-                acd_method="vhacd",
             )
         )
 

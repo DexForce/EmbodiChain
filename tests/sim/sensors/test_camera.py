@@ -20,6 +20,9 @@ import pytest
 import torch
 import os
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 from tensordict import TensorDict
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -27,6 +30,7 @@ from embodichain.lab.sim.sensors import Camera, SensorCfg, CameraCfg
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
 from embodichain.data import get_data_path
+from scripts.tutorials.sim.create_sensor import create_sensor as create_tutorial_sensor
 
 FULL_NUM_ENVS = 4
 FULL_WIDTH = 640
@@ -147,6 +151,7 @@ class CameraTest:
                 uid="test", extrinsics=CameraCfg.ExtrinsicsCfg(parent="handle_xpos")
             )
         )
+        assert self.camera.is_attached
 
     def test_set_intrinsics(self):
         # Define new intrinsic parameters
@@ -186,6 +191,30 @@ class TestCameraHybridCUDA(CameraTest):
         self.setup_simulation("cuda", renderer="hybrid")
 
 
+def test_create_sensor_tutorial_preserves_attached_camera_view() -> None:
+    """Keep the wrist-camera view stable after the xyzw convention migration."""
+    sim = MagicMock()
+
+    create_tutorial_sensor(sim, SimpleNamespace(attach_sensor=True))
+
+    cfg = sim.add_sensor.call_args.kwargs["sensor_cfg"]
+    expected_rotation = torch.tensor(
+        [
+            [0.579228, 0.573576, 0.579228],
+            [0.405580, -0.819152, 0.405580],
+            [0.707107, 0.0, -0.707107],
+        ],
+        dtype=torch.float32,
+    )
+    assert cfg.extrinsics.parent == "ee_link"
+    torch.testing.assert_close(
+        cfg.extrinsics.transformation[:3, :3],
+        expected_rotation,
+        atol=1.0e-6,
+        rtol=1.0e-6,
+    )
+
+
 @pytest.mark.parametrize(
     ("sim_device", "renderer"),
     [("cpu", "hybrid"), ("cpu", "fast-rt"), ("cuda", "fast-rt")],
@@ -205,6 +234,23 @@ def test_camera_backend_smoke(sim_device, renderer):
         test.camera.update()
         data = test.camera.get_data()
         assert data["color"].shape == (SMOKE_NUM_ENVS, SMOKE_HEIGHT, SMOKE_WIDTH, 4)
+    finally:
+        test.teardown_method()
+
+
+def test_camera_parent_attachment_cpu() -> None:
+    """Attach a camera to a materialized articulation link on the CPU backend."""
+    test = CameraTest()
+    test.setup_simulation(
+        "cpu",
+        renderer="hybrid",
+        num_envs=SMOKE_NUM_ENVS,
+        width=SMOKE_WIDTH,
+        height=SMOKE_HEIGHT,
+        enable_auxiliary_data=False,
+    )
+    try:
+        test.test_attach_to_parent()
     finally:
         test.teardown_method()
 

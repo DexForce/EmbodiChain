@@ -29,8 +29,8 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
     GraspGoal,
     PickUpOptions,
     PlaceGoal,
@@ -91,7 +91,6 @@ def create_pick_object(sim) -> RigidObject:
                 static_friction=0.99,
                 enable_ccd=True,
             ),
-            max_convex_hull_num=16,
             init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2]],
         )
     )
@@ -125,15 +124,16 @@ def main() -> None:
     """Plan and replay PickUp followed by a multi-waypoint Place."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot)
+    robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
     sim.prepare()
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,

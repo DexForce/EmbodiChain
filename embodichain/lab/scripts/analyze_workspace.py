@@ -297,7 +297,7 @@ def _build_asset_robot_cfg(
         ValueError: If ``--ee-link`` is missing, or a USD/non-URDF asset is
             given without ``--urdf``.
     """
-    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RobotCfg
     from embodichain.lab.sim.solvers import (
         PinkSolverCfg,
         PinocchioSolverCfg,
@@ -344,7 +344,9 @@ def _build_asset_robot_cfg(
     cfg.fpath = asset
     cfg.init_pos = tuple(args.init_pos)
     cfg.init_rot = tuple(args.init_rot)
-    cfg.fix_base = args.fix_base
+    cfg.articulation_props = ArticulationRootPropertiesCfg(
+        fixed_base=args.fix_base,
+    )
     cfg.asset_physics_mode = getattr(args, "asset_physics_mode", None)
     if cfg.asset_physics_mode is None:
         cfg.asset_physics_mode = (

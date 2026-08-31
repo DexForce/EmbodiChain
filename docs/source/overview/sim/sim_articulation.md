@@ -8,19 +8,19 @@ The {class}`~objects.Articulation` class represents the fundamental physics enti
 ## Configuration
 
 Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
+
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `fpath` | `str` | `None` | Path to the asset file (URDF/USD). |
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
-| `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
-| `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
+| `articulation_props` | `ArticulationRootPropertiesCfg` | all fields `None` | Fixed-base/self-collision are portable; root sleep and paired solver iterations are Default-only and ignored by Newton. `None` preserves source/backend values. |
+| `asset_physics_mode` | `"preserve" \| "overlay"` | `"preserve"` | Preserve source link/joint physics, or apply explicitly configured overlays after source resolution. |
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
-| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override joint position limits. Replaces asset limits and may either tighten or expand the range. |
+| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override limits by flattened source-resolved DOF order or joint-name/regex rules before backend build. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
-| `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
-| `drive_pros` | `JointDrivePropertiesCfg` | `drive_type="none"` | Default drive properties. |
-| `attrs` | `RigidBodyAttributesCfg` | `...` | Default rigid body attributes applied to all links. |
+| `drive_pros` | `JointDrivePropertiesCfg` | `None` | Optional sparse joint-drive overlay. |
+| `attrs` | `RigidBodyPhysicsCfg` | empty groups | Grouped rigid-body physics applied to all links. |
 | `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
 
@@ -117,7 +117,8 @@ articulation layer.
 ```python
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Articulation, ArticulationCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, ArticulationRootPropertiesCfg
+from embodichain.lab.sim.objects import Articulation
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -128,7 +129,7 @@ sim = SimulationManager(sim_config=sim_cfg)
 art_cfg = ArticulationCfg(
     fpath="assets/robots/franka/franka.urdf",
     init_pos=(0, 0, 0.5),
-    fix_base=True
+    articulation_props=ArticulationRootPropertiesCfg(fixed_base=True),
 )
 
 # 3. Spawn Articulation

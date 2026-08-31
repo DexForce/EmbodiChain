@@ -223,7 +223,6 @@ def _create_moving_target(sim: SimulationManager) -> RigidObject:
                 enable_ccd=True,
             ),
             body_type="kinematic" if sim.is_newton_backend else "dynamic",
-            max_convex_hull_num=16,
             init_pos=INITIAL_TARGET_POSITION,
         )
     )

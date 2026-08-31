@@ -232,6 +232,10 @@ def _torch_interpolation(monkeypatch: pytest.MonkeyPatch) -> None:
         "embodichain.lab.sim.planners.motion_generator.interpolate_with_distance",
         interpolate,
     )
+    monkeypatch.setattr(
+        "embodichain.lab.sim.atomic_actions.primitives._helpers.resample_with_distance",
+        interpolate,
+    )
 
 
 def _robot() -> Mock:
@@ -276,10 +280,20 @@ def _robot() -> Mock:
         count = NUM_ENVS if qpos is None else qpos.shape[0]
         return torch.eye(4).repeat(count, 1, 1)
 
+    def compute_batch_fk(
+        qpos: torch.Tensor,
+        name: str | None = None,
+        to_matrix: bool = True,
+    ) -> torch.Tensor:
+        return (
+            torch.eye(4).reshape(1, 1, 4, 4).repeat(qpos.shape[0], qpos.shape[1], 1, 1)
+        )
+
     robot.get_qpos.side_effect = get_qpos
     robot.get_joint_ids.side_effect = get_joint_ids
     robot.compute_ik.side_effect = compute_ik
     robot.compute_fk.side_effect = compute_fk
+    robot.compute_batch_fk.side_effect = compute_batch_fk
     return robot
 
 
@@ -974,6 +988,7 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
 
 def test_place_holds_fully_open_before_retracting_when_configured() -> None:
     generator = _motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
     action = _bind_action(generator, Place())
     task = TaskState(
         batch_size=NUM_ENVS,
@@ -1004,10 +1019,20 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
             -1,
         ),
     )
+    generator.generate.assert_called_once()
+    target_states = generator.generate.call_args.args[0]
+    assert len(target_states) == 3
+    assert [state.xpos[0, 2, 3].item() for state in target_states] == pytest.approx(
+        [0.1, 0.0, 0.1]
+    )
+    assert generator.generate.call_args.kwargs["options"].sample_count == (
+        sample_count - PlaceOptions().hand_interp_steps
+    )
 
 
 def test_pick_holds_fully_closed_before_lifting_when_configured() -> None:
     generator = _motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
     action = _bind_action(generator, PickUp())
     sample_count = 20
     settle_steps = 3
@@ -1046,6 +1071,51 @@ def test_pick_holds_fully_closed_before_lifting_when_configured() -> None:
             -1,
         ),
     )
+    generator.generate.assert_called_once()
+    target_states = generator.generate.call_args.args[0]
+    assert len(target_states) == 3
+    assert [state.xpos[0, 2, 3].item() for state in target_states] == pytest.approx(
+        [0.15, 0.0, 0.1]
+    )
+    assert generator.generate.call_args.kwargs["options"].sample_count == (
+        sample_count - PickUpOptions().hand_interp_steps
+    )
+
+
+def test_pick_combined_motion_gen_preserves_backend_samples_before_split() -> None:
+    sample_count = 20
+    backend_sample_count = 6
+    generator = _motion_generator()
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=torch.zeros(NUM_ENVS, backend_sample_count, ARM_DOF),
+            dt=torch.zeros(NUM_ENVS, backend_sample_count),
+        )
+    )
+    action = _bind_action(generator, PickUp())
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="pick_up",
+            goal=GraspGoal(
+                semantics=_semantics(entity_id="target"),
+                grasp_xpos=torch.eye(4),
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(
+                strategy="motion_gen",
+                sample_count=sample_count,
+            ),
+        ),
+        _context(scene=_target_scene(object_pose, timestamp=0.0, version=0)),
+    )
+
+    generator.generate.assert_called_once()
+    assert generator.generate.call_args.kwargs["options"].sample_count is None
+    assert plan.commands.frame_count == sample_count
 
 
 def test_place_releases_only_exclusively_held_rows() -> None:
@@ -1694,7 +1764,6 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
             skill_options=AxisAlignOptions(
                 target_axis=torch.tensor([1.0, 0.0, 0.0]),
                 lift_height=0.1,
-                lower_distance=0.03,
             ),
         ),
         context,
@@ -1709,11 +1778,15 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
         "approach",
         "close",
         "manipulate",
-        "open",
     ]
     assert generator.generate.call_count == 2
-    assert len(solved_poses) == 5
-    assert plan.expected_effects.is_empty
+    assert len(solved_poses) == 4
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+    held = projected.get_held_object("arm")
+    assert held is not None
+    assert held.semantics.entity_id == semantics.entity_id
+    torch.testing.assert_close(held.object_to_eef, object_pose)
+    torch.testing.assert_close(held.grasp_xpos, solved_poses[-1])
     assert context.task is original_task
     assert plan.scene_dependencies == ("target",)
     final_object_rotation = solved_poses[-1][:, :3, :3]
@@ -1726,7 +1799,8 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
         torch.tensor([1.0, 0.0, 0.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
-    assert solved_poses[-1][:, 2, 3].tolist() == pytest.approx([0.07, 0.07])
+    assert solved_poses[-1][:, 2, 3].tolist() == pytest.approx([0.1, 0.1])
+    assert torch.all(trajectory.positions[:, -1, ARM_DOF:] == 1.0)
 
 
 def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> None:

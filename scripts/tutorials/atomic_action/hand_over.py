@@ -30,13 +30,11 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     ControlPartCommandProfile,
-    EntityState,
+    create_simulation_atomic_action_engine,
     HandOverGoal,
     HandOverOptions,
     MotionPolicy,
-    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.data import get_data_path
@@ -71,7 +69,7 @@ HORIZONTAL_OBJECT_MESH_PATH = get_data_path(
 )
 VERTICAL_OBJECT_SCALE = (0.56, 0.56, 0.56)
 HORIZONTAL_OBJECT_SCALE = (2.0, 2.0, 2.0)
-GRIPPER_TCP_Z = 0.155
+GRIPPER_TCP_Z = 0.17
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
 SUPPORT_SURFACE_CENTER = (
@@ -158,7 +156,11 @@ def create_handover_object(
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="handover_object",
-            shape=MeshCfg(fpath=mesh_path, compute_uv=False),
+            shape=MeshCfg(
+                fpath=mesh_path,
+                compute_uv=False,
+                max_convex_hull_num=16,
+            ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
@@ -172,7 +174,6 @@ def create_handover_object(
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            max_convex_hull_num=16,
             init_pos=[OBJECT_INIT_XY[0], OBJECT_INIT_XY[1], SUPPORT_SURFACE_Z + 0.12],
             init_rot=(OBJECT_ROT_HORIZONTAL if is_horizontal else OBJECT_ROT_VERTICAL),
             body_scale=body_scale,
@@ -215,8 +216,9 @@ def run_handover_demo(
         n_sample=10_000,
         force_refresh=False,
     )
-    engine = AtomicActionEngine(
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
+        scene_entities=(obj,),
         control_profiles={
             "left_hand": ControlPartCommandProfile.joint_positions(
                 open=left_open,
@@ -260,14 +262,7 @@ def run_handover_demo(
                 skill_options=handover_options,
             ),
         ),
-        engine.initial_context(
-            scene=SceneSnapshot(
-                timestamp=0.0,
-                version=0,
-                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
-            ),
-            control_dt=sim.sim_config.physics_dt,
-        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions
