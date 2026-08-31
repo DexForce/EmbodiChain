@@ -3849,7 +3849,7 @@ def test_handover_defers_clearance_verification_to_retreat_action() -> None:
     assert adapter.capabilities.get("MoveEndEffector").verifier_hook is not None
 
 
-def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -> None:
+def test_e2_then_handover_reacquires_with_a_separate_transfer_policy() -> None:
     entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _rect_vertices(0.10, 0.03, 0.03))
     env = _FakeEnv(
         {
@@ -3899,17 +3899,25 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
     handover_step = next(
         candidate for candidate in program.semantic_steps if candidate.id == "task_02"
     )
-    orient_edge = next(
+    orient_pickup_edge = next(
         candidate
         for candidate in program.edges
         if candidate.id in orient_step.edge_ids
-        and candidate.actions[0]["atomic_action_class"] == "AxisAlign"
+        and candidate.actions[0]["atomic_action_class"] == "PickUp"
+    )
+    orient_staging_edge = next(
+        candidate
+        for candidate in program.edges
+        if candidate.id in orient_step.edge_ids
+        and candidate.actions[0]["atomic_action_class"] == "MoveHeldObject"
+        and candidate.actions[0]["target_binding"].get("phase") == "staging"
     )
     orient_descend_edge = next(
         candidate
         for candidate in program.edges
         if candidate.id in orient_step.edge_ids
         and candidate.actions[0]["atomic_action_class"] == "MoveHeldObject"
+        and candidate.actions[0]["target_binding"].get("phase") == "final"
     )
     orient_release_edge = next(
         candidate
@@ -3958,8 +3966,14 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
     )
     grounder = ActionGrounder(program, env, lambda _uid: semantics)
 
-    orient_alignment = grounder.ground(
-        orient_edge.actions[0],
+    orient_pickup = grounder.ground(
+        orient_pickup_edge.actions[0],
+        orient_step,
+        arm="right_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+    )
+    orient_staging = grounder.ground(
+        orient_staging_edge.actions[0],
         orient_step,
         arm="right_arm",
         state=ExecutionState(last_qpos=env.robot.get_qpos()),
@@ -4012,16 +4026,31 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
         state=ExecutionState(last_qpos=env.robot.get_qpos()),
     )
 
-    assert "approach_direction_mode" not in orient_alignment.cfg
+    assert "approach_direction_mode" not in orient_pickup.cfg
     assert "approach_direction_mode" not in handover_pickup.cfg
     assert handover_pickup.cfg["pick_object_part"] == "top"
-    assert isinstance(orient_alignment.target, AxisAlignGoal)
+    assert orient_pickup.target.grasp_xpos is None
+    assert isinstance(
+        orient_pickup.target.semantics.affordance,
+        AntipodalAffordance,
+    )
+    assert torch.equal(
+        orient_pickup.cfg["obj_upright_direction"],
+        torch.tensor([1.0, 0.0, 0.0]),
+    )
+    assert isinstance(orient_staging.target, HeldObjectPoseGoal)
     assert isinstance(orient_descend.target, HeldObjectPoseGoal)
     assert torch.equal(
         orient_descend.target.object_target_pose[:, :2, 3],
-        orient_alignment.target_object_pose[:, :2, 3],
+        orient_staging.target.object_target_pose[:, :2, 3],
     )
-    assert orient_descend.motion_policy["surface_clearance"] == pytest.approx(0.005)
+    assert bool(
+        (
+            orient_staging.target.object_target_pose[:, 2, 3]
+            > orient_descend.target.object_target_pose[:, 2, 3]
+        ).all()
+    )
+    assert orient_descend.motion_policy["surface_clearance"] == pytest.approx(0.05)
     assert isinstance(orient_release.target, JointPositionGoal)
     assert orient_release.control == "hand"
     assert orient_release.cfg["single_release"] is True
@@ -4080,18 +4109,6 @@ def test_axis_align_then_handover_reacquires_with_a_separate_transfer_policy() -
             != orient_post_reorient_lift.target.xpos[:, :2, 3]
         ).any()
     )
-    assert orient_alignment.target.grasp_xpos is None
-    assert not hasattr(orient_alignment.target, "object_target_pose")
-    assert orient_alignment.target_object_pose is not None
-    assert isinstance(
-        orient_alignment.target.semantics.affordance,
-        AxisAlignAffordance,
-    )
-    assert torch.equal(
-        orient_alignment.target.semantics.affordance.internal_axis,
-        torch.tensor([0.0, 0.0, 1.0]),
-    )
-    assert orient_alignment.cfg["target_axis"] == (0.0, 0.0, 1.0)
     assert handover_pickup.target.grasp_xpos is None
     assert isinstance(
         handover_pickup.target.semantics.affordance,

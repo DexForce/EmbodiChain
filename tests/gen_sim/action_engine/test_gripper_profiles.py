@@ -56,6 +56,7 @@ def test_pgi_profile_owns_asset_control_mimic_tcp_and_grasp_geometry() -> None:
     assert profile.grasp_model.max_opening_width == pytest.approx(0.100)
     assert profile.grasp_model.finger_length == pytest.approx(0.10)
     assert profile.grasp_model.opening_margin == pytest.approx(0.03)
+    assert profile.release_open_fraction_tolerance == pytest.approx(0.03)
 
 
 def test_robotiq_profile_separates_commanded_mimics_from_state_joint() -> None:
@@ -88,6 +89,7 @@ def test_robotiq_profile_separates_commanded_mimics_from_state_joint() -> None:
     assert profile.state_joint_names("left") == ("left_finger_joint",)
     assert profile.state_joint_names("right") == ("right_finger_joint",)
     assert profile.state_joint_indices("left") == (0,)
+    assert profile.release_open_fraction_tolerance == pytest.approx(0.03)
     assert profile.state_joint_indices("right") == (0,)
     assert set(profile.state_joint_names("left")).isdisjoint(
         profile.mimic_joint_names("left")

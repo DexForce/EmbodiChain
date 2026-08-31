@@ -26,6 +26,8 @@ from typing import Any
 
 import torch
 
+from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
+
 __all__ = [
     "ACTION_CONTRACT_VERSION",
     "AtomicCapability",
@@ -434,7 +436,7 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
             "control_part",
             "preserve",
             "joint_state",
-            verifier_hook=_verify_required_home,
+            verifier_hook=_verify_move_joints,
             contract_resolver_hook=_resolve_joints_contract,
         ),
         AtomicCapability(
@@ -1073,7 +1075,7 @@ def _verify_arm_clearance(
     return attempted & clear
 
 
-def _verify_required_home(
+def _verify_move_joints(
     *,
     executor: Any,
     step: Any,
@@ -1081,42 +1083,144 @@ def _verify_required_home(
     outcome: Any,
     attempted: torch.Tensor,
 ) -> torch.Tensor:
-    """Verify explicit release or required cleanup against live joint state."""
-    del step
+    """Route joint effects to their dedicated physical verifier."""
     policy = outcome.grounded.motion_policy
     if bool(policy.get("single_release", False)):
-        getter = getattr(executor.env, "get_current_gripper_state_agent", None)
-        if not callable(getter) or arm not in {"left_arm", "right_arm"}:
-            return torch.zeros_like(attempted)
-        values = getter()
-        index = 0 if arm == "left_arm" else 1
-        if not isinstance(values, (tuple, list)) or len(values) <= index:
-            return torch.zeros_like(attempted)
-        current = torch.as_tensor(
-            values[index],
-            dtype=torch.float32,
-            device=executor.env.device,
+        return _verify_single_release(
+            executor=executor,
+            step=step,
+            arm=arm,
+            outcome=outcome,
+            attempted=attempted,
         )
-        if current.ndim == 1:
-            current = current.unsqueeze(0).repeat(int(executor.env.num_envs), 1)
-        expected = torch.as_tensor(
-            executor.env.open_state,
-            dtype=current.dtype,
-            device=current.device,
-        ).flatten()
-        repeats = (current.shape[-1] + expected.numel() - 1) // expected.numel()
-        expected = expected.repeat(repeats)[: current.shape[-1]]
-        tolerance = float(
-            policy.get(
-                "release_gripper_tolerance",
-                executor.runtime_policy.predicate_fallbacks["gripper_state_tolerance"],
-            )
+    return _verify_required_home(
+        executor=executor,
+        arm=arm,
+        outcome=outcome,
+        attempted=attempted,
+    )
+
+
+def _verify_single_release(
+    *,
+    executor: Any,
+    step: Any,
+    arm: str,
+    outcome: Any,
+    attempted: torch.Tensor,
+) -> torch.Tensor:
+    """Verify normalized hand opening plus stable object support."""
+    env = executor.env
+    stable_support = attempted.clone()
+    support_reference = getattr(executor, "_support_reference_uid", None)
+    support_stable_for = getattr(executor, "_support_stable_for", None)
+    if callable(support_reference) and callable(support_stable_for):
+        support_uid = support_reference(step)
+        if not isinstance(support_uid, str) or not support_uid:
+            stable_support &= False
+        else:
+            stable_support &= torch.as_tensor(
+                support_stable_for(step, support_uid, attempted),
+                dtype=torch.bool,
+                device=env.device,
+            ).reshape(-1)
+
+    upright = attempted.clone()
+    entity_pose = getattr(executor, "_entity_pose", None)
+    orientation_satisfied = getattr(
+        executor,
+        "_placement_orientation_satisfied",
+        None,
+    )
+    if callable(entity_pose) and callable(orientation_satisfied):
+        upright &= torch.as_tensor(
+            orientation_satisfied(step, entity_pose(step.object_uid)),
+            dtype=torch.bool,
+            device=env.device,
+        ).reshape(-1)
+
+    getter = getattr(env, "get_current_gripper_state_agent", None)
+    if not callable(getter) or arm not in {"left_arm", "right_arm"}:
+        return torch.zeros_like(attempted)
+    values = getter()
+    index = 0 if arm == "left_arm" else 1
+    if not isinstance(values, (tuple, list)) or len(values) <= index:
+        return torch.zeros_like(attempted)
+    current = torch.as_tensor(
+        values[index],
+        dtype=torch.float32,
+        device=env.device,
+    )
+    if current.ndim == 1:
+        current = current.unsqueeze(0).repeat(int(env.num_envs), 1)
+    expected_open = torch.as_tensor(
+        env.open_state,
+        dtype=current.dtype,
+        device=current.device,
+    ).flatten()
+    expected_close = torch.as_tensor(
+        env.close_state,
+        dtype=current.dtype,
+        device=current.device,
+    ).flatten()
+    configured = getattr(env, "agent_gripper_state_joint_indices", {})
+    side = "left" if arm == "left_arm" else "right"
+    indices = configured.get(side) if isinstance(configured, Mapping) else None
+    if indices is not None:
+        indices = list(indices)
+        current = current[:, indices]
+        expected_open = expected_open[indices]
+        expected_close = expected_close[indices]
+    else:
+        repeats = (
+            current.shape[-1] + expected_open.numel() - 1
+        ) // expected_open.numel()
+        expected_open = expected_open.repeat(repeats)[: current.shape[-1]]
+        expected_close = expected_close.repeat(repeats)[: current.shape[-1]]
+    stroke = torch.linalg.vector_norm(expected_close - expected_open)
+    if not torch.isfinite(stroke) or stroke <= 1.0e-6:
+        return torch.zeros_like(attempted)
+    open_error_fraction = (
+        torch.linalg.vector_norm(
+            current - expected_open.unsqueeze(0),
+            dim=1,
         )
-        opened = (
-            torch.linalg.vector_norm(current - expected.unsqueeze(0), dim=1)
-            <= tolerance
+        / stroke
+    )
+    gripper_profile = get_gripper_profile(getattr(env, "agent_gripper_model", "pgi"))
+    tolerance = float(
+        outcome.grounded.motion_policy.get(
+            "release_open_fraction_tolerance",
+            gripper_profile.release_open_fraction_tolerance,
         )
-        return attempted & opened
+    )
+    opened = open_error_fraction <= tolerance
+    accepted = attempted & opened & stable_support
+    planner_trace = getattr(outcome, "planner_trace", None)
+    if isinstance(planner_trace, dict):
+        planner_trace["release_verification"] = {
+            "state_joint_indices": None if indices is None else indices,
+            "current_state": current.detach().cpu().tolist(),
+            "expected_open_state": expected_open.detach().cpu().tolist(),
+            "open_error_fraction": open_error_fraction.detach().cpu().tolist(),
+            "open_fraction_tolerance": tolerance,
+            "gripper_open": opened.detach().cpu().tolist(),
+            "support_stable": stable_support.detach().cpu().tolist(),
+            "upright": upright.detach().cpu().tolist(),
+            "accepted": accepted.detach().cpu().tolist(),
+        }
+    return accepted
+
+
+def _verify_required_home(
+    *,
+    executor: Any,
+    arm: str,
+    outcome: Any,
+    attempted: torch.Tensor,
+) -> torch.Tensor:
+    """Verify an explicit required-home effect against live arm joints."""
+    policy = outcome.grounded.motion_policy
     if not bool(policy.get("verify_required_home", False)):
         return attempted
     env = executor.env

@@ -21,6 +21,7 @@ import torch
 from embodichain.gen_sim.action_engine.runtime.grasp_diagnostics import (
     _TracingAntipodalGraspPoseGenerator,
 )
+from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 
 
@@ -169,6 +170,55 @@ def test_generator_context_selects_non_crossing_pair_and_canonical_half_turn() -
         selected["left"]["grasp_poses"][0, :3, :3],
         torch.eye(3),
     )
+
+
+def test_upright_context_rejects_end_clamps_and_ranks_mid_body_grasps(
+    monkeypatch,
+) -> None:
+    generator = _TracingAntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(model_id="upright_test")
+    )
+    poses = torch.eye(4).repeat(4, 1, 1)
+    poses[:, 1, 3] = torch.tensor([0.5, 0.05, 0.5, 0.7])
+    poses[0, :3, 0] = torch.tensor([0.0, 1.0, 0.0])
+    poses[0, :3, 1] = torch.tensor([-1.0, 0.0, 0.0])
+
+    monkeypatch.setattr(
+        AntipodalGraspPoseGenerator,
+        "get_valid_grasp_poses",
+        lambda _self, **_kwargs: [(poses, torch.tensor([0.0, 0.01, 0.2, 0.3]))],
+    )
+    vertices = torch.tensor(
+        [
+            [-0.1, 0.0, -0.1],
+            [0.1, 0.0, 0.1],
+            [-0.1, 1.0, 0.1],
+            [0.1, 1.0, -0.1],
+        ]
+    )
+
+    with generator.upright_selection_context(local_axis=torch.tensor([0.0, 1.0, 0.0])):
+        result = generator.get_valid_grasp_poses(
+            mesh_vertices=vertices,
+            mesh_triangles=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+            obj_poses=torch.eye(4).unsqueeze(0),
+            approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+        )
+
+    ranked_poses, ranked_costs = result[0]
+    assert ranked_poses[0, 1, 3] == 0.5
+    assert torch.isfinite(ranked_costs[:3]).all()
+    assert torch.isinf(ranked_costs[-1])
+    trace = generator.last_upright_trace
+    assert trace is not None
+    assert trace["local_axis"] == [0.0, 1.0, 0.0]
+    assert trace["candidate_count"] == 4
+    assert trace["side_compatible_count"] == 3
+    assert trace["central_band_count"] == 3
+    assert trace["side_and_central_count"] == 2
+    assert trace["retained_count"] == 3
+    assert trace["best_candidate_axis_alignment"] == 0.0
+    assert trace["best_candidate_axis_fraction"] == 0.5
 
 
 def _pose_with_y(y: float) -> torch.Tensor:

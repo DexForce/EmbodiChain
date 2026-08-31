@@ -413,7 +413,7 @@ def _recipe(
             "orientation_axis": str(params.get("orientation_axis", "none")),
             "position_anchor": "initial_xy",
             "support_object": str(params.get("support_role", "table")),
-            "upright_local_axis": str(params.get("upright_local_axis", "z")),
+            "upright_local_axis": str(params.get("upright_local_axis", "auto")),
             **_orientation_extensions(params),
         }
         if terminal_behavior == "hold":
@@ -424,10 +424,11 @@ def _recipe(
             "local_axis": goal["upright_local_axis"],
         }
         if incoming_held_arm is None and terminal_behavior == "place":
-            alignment = _node(
+            upright_policy = motion_policy(("orientation", "upright"))
+            pickup = _node(
                 group_id,
                 1,
-                "AxisAlign",
+                "PickUp",
                 task_type,
                 object_uid,
                 actor,
@@ -436,9 +437,9 @@ def _recipe(
                 dependencies,
                 role,
                 {},
-                motion_policy(),
+                upright_policy,
             )
-            descend = _node(
+            staging = _node(
                 group_id,
                 2,
                 "MoveHeldObject",
@@ -449,16 +450,34 @@ def _recipe(
                 {
                     "kind": "semantic_goal",
                     "semantic_step": group_id,
-                    "phase": "final",
+                    "phase": "staging",
                 },
-                [alignment["id"]],
+                [pickup["id"]],
                 role,
                 {},
-                motion_policy(),
+                upright_policy,
+            )
+            descend = _node(
+                group_id,
+                3,
+                "MoveHeldObject",
+                task_type,
+                object_uid,
+                actor,
+                "arm",
+                {
+                    "kind": "semantic_goal",
+                    "semantic_step": group_id,
+                    "phase": "final",
+                },
+                [staging["id"]],
+                role,
+                {},
+                upright_policy,
             )
             release = _node(
                 group_id,
-                3,
+                4,
                 "MoveJoints",
                 task_type,
                 object_uid,
@@ -476,7 +495,7 @@ def _recipe(
             )
             lift_clear = _node(
                 group_id,
-                4,
+                5,
                 "MoveEndEffector",
                 task_type,
                 object_uid,
@@ -494,7 +513,7 @@ def _recipe(
             )
             reorient = _node(
                 group_id,
-                5,
+                6,
                 "MoveEndEffector",
                 task_type,
                 object_uid,
@@ -512,7 +531,7 @@ def _recipe(
             )
             post_reorient_lift = _node(
                 group_id,
-                6,
+                7,
                 "MoveEndEffector",
                 task_type,
                 object_uid,
@@ -531,7 +550,7 @@ def _recipe(
             )
             retreat = _node(
                 group_id,
-                7,
+                8,
                 "MoveEndEffector",
                 task_type,
                 object_uid,
@@ -549,7 +568,7 @@ def _recipe(
             )
             home = _node(
                 group_id,
-                8,
+                9,
                 "MoveJoints",
                 task_type,
                 object_uid,
@@ -568,7 +587,8 @@ def _recipe(
             )
             return (
                 [
-                    alignment,
+                    pickup,
+                    staging,
                     descend,
                     release,
                     lift_clear,

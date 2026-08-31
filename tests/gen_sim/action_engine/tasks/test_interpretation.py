@@ -311,7 +311,8 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
         "object_02": "orange_can",
     }
     assert (
-        grounded.task_spec["task_instances"][0]["params"]["upright_local_axis"] == "z"
+        grounded.task_spec["task_instances"][0]["params"]["upright_local_axis"]
+        == "auto"
     )
     placement_actions = [
         node["atomic_action"] for node in graph["nodes"] if node["task_type"] == "E1"
@@ -321,7 +322,8 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
     ]
     handover_nodes = [node for node in graph["nodes"] if node["task_type"] == "E4"]
     assert orient_actions == [
-        "AxisAlign",
+        "PickUp",
+        "MoveHeldObject",
         "MoveHeldObject",
         "MoveJoints",
         "MoveEndEffector",
