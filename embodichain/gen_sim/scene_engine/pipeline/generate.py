@@ -25,6 +25,9 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
+from embodichain.gen_sim.scene_engine.clients.articulated_generation import (
+    ArticulatedGenerationClient,
+)
 from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
     ImageSegmentationClient,
 )
@@ -73,18 +76,26 @@ def generate_scene_from_image(
     log_info("Starting Objects + Coarse Layout Generation")
     # Load .env settings and fail if the Geometry Generation Server is unavailable.
     geometry_generation_client = GeometryGenerationClient.from_dotenv()
+    articulated_generation_client: ArticulatedGenerationClient | None = None
+    if any(scene_object.is_articulated for scene_object in scene.objects):
+        articulated_generation_client = ArticulatedGenerationClient.from_dotenv()
     try:
         geometry_generation_client.check_health()  # Error raising will happen internally.
+        if articulated_generation_client is not None:
+            articulated_generation_client.check_health()
         scene = generate_scene_and_refine(
             image_path=image_path,
             output_root=resolved_output_root,
             scene=scene,
             scene_graph=scene_graph,
             geometry_generation_client=geometry_generation_client,
+            articulated_generation_client=articulated_generation_client,
             vlm_client=vlm_client,
         )
     finally:
         geometry_generation_client.close()  # Kill the session to avoid resource leaks.
+        if articulated_generation_client is not None:
+            articulated_generation_client.close()
     log_info("Completed Objects + Coarse Layout Generation")
 
     # 3. Scene Export

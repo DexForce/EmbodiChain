@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +183,66 @@ def save_binary_mask(
     resolved_output_path = Path(output_path).expanduser().resolve()
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
     mask.save(resolved_output_path)
+    return resolved_output_path
+
+
+def save_visible_rgba_crop(
+    *,
+    image_path: str | Path,
+    mask_path: str | Path,
+    output_path: str | Path,
+    output_size: tuple[int, int] = (512, 512),
+    padding_ratio: float = 0.1,
+) -> Path:
+    """Save a fixed-size RGBA crop of one object's visible source-image pixels."""
+    if len(output_size) != 2 or not all(
+        isinstance(value, int) and value > 0 for value in output_size
+    ):
+        raise ValueError("RGBA crop output_size must contain two positive integers.")
+    if padding_ratio < 0:
+        raise ValueError("RGBA crop padding_ratio must be non-negative.")
+
+    with Image.open(image_path) as loaded_image:
+        image = loaded_image.convert("RGB")
+    with Image.open(mask_path) as loaded_mask:
+        mask = loaded_mask.convert("L")
+    _require_image_size(mask, image.size)
+    bbox = mask.getbbox()
+    if bbox is None:
+        raise ValueError("Cannot save an RGBA crop for an empty binary mask.")
+
+    left, top, right, bottom = bbox
+    padding = math.ceil(max(right - left, bottom - top) * padding_ratio)
+    crop_bounds = (
+        max(0, left - padding),
+        max(0, top - padding),
+        min(image.width, right + padding),
+        min(image.height, bottom + padding),
+    )
+    image_crop = image.crop(crop_bounds)
+    mask_crop = mask.crop(crop_bounds)
+    scale = min(
+        output_size[0] / image_crop.width,
+        output_size[1] / image_crop.height,
+    )
+    resized_size = (
+        max(1, round(image_crop.width * scale)),
+        max(1, round(image_crop.height * scale)),
+    )
+    rgba_crop = image_crop.resize(resized_size, Image.Resampling.LANCZOS).convert(
+        "RGBA"
+    )
+    rgba_crop.putalpha(mask_crop.resize(resized_size, Image.Resampling.NEAREST))
+
+    rgba_canvas = Image.new("RGBA", output_size, (0, 0, 0, 0))
+    paste_xy = (
+        (output_size[0] - resized_size[0]) // 2,
+        (output_size[1] - resized_size[1]) // 2,
+    )
+    rgba_canvas.alpha_composite(rgba_crop, dest=paste_xy)
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    rgba_canvas.save(resolved_output_path)
     return resolved_output_path
 
 

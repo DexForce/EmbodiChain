@@ -55,6 +55,7 @@ def _write_scene_export(
                 "init_pos": [0.0, 0.0, 0.0],
                 "init_rot": [0.0, 0.0, 0.0],
                 "body_scale": [1.0, 1.0, 1.0],
+                "is_articulated": False,
                 "max_convex_hull_num": 16,
             }
         )
@@ -72,6 +73,7 @@ def _write_scene_export(
                 "init_pos": [1.0, -3.0, 2.0],
                 "init_rot": [0.0, 0.0, 0.0],
                 "body_scale": [1.0, 2.0, 3.0],
+                "is_articulated": False,
                 "center_xy": [1.0, -3.0],
                 "max_convex_hull_num": 32,
             }
