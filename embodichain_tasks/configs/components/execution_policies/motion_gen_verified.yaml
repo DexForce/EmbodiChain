@@ -2,7 +2,7 @@ policy_id: motion_gen_verified_v1
 preset_id: safe
 
 requires:
-  embodiment_contract: dual_arm_parallel_gripper_handover
+  embodiment_contract: dual_arm_parallel_gripper
 
 motion:
   strategy: motion_gen

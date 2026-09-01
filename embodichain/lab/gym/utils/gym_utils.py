@@ -403,20 +403,23 @@ def config_to_cfg(
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
-    Any config may select reusable ``embodiment.component`` and
-    ``scene.component`` files before the remaining environment values parse.
-    Inline ``robot``, ``sensor``, and scene fields remain valid when their
-    corresponding component selector is absent. A config containing
-    ``task_program`` additionally composes its program, task integration, and
-    execution-policy components. The existing
+    Any config may select reusable ``environment.component``,
+    ``embodiment.component``, and ``scene.component`` files before the remaining
+    environment values parse. An environment component owns only reusable Gym
+    and physical-scene values. A runnable deployment independently selects its
+    embodiment and, when used, its Task Program components and execution
+    policy. Inline ``robot``, ``sensor``, and scene fields remain valid when
+    their corresponding component selector is absent. A resolved config
+    containing ``task_program`` composes its semantic and policy components.
+    The existing
     :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class is registered under
     the config's ``id`` with the decoded integration factory.
     Re-loading an identical declaration is idempotent; an ID collision with a
     different declaration fails closed.
 
     Args:
-        config (dict): The configuration dictionary containing an embodiment
-            component or inline robot plus optional scene values.
+        config (dict): The configuration dictionary containing an optional
+            environment component plus an embodiment component or inline robot.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
         source_path: Optional path of the Gym configuration source file.
@@ -465,12 +468,6 @@ def config_to_cfg(
 
     env_cfg = EmbodiedEnvCfg()
 
-    # check all necessary keys
-    required_keys = ["id", "env"]
-    for key in required_keys:
-        if key not in config:
-            log_error(f"Missing required config key: {key}")
-
     removed_task_program_fields = sorted(
         field
         for field in (
@@ -488,6 +485,7 @@ def config_to_cfg(
 
     from embodichain.lab.gym.utils._component_composition import (
         _resolve_gym_components,
+        _validate_scene_binding_targets,
     )
 
     base_dir = (
@@ -495,6 +493,12 @@ def config_to_cfg(
     )
     component_resolution = _resolve_gym_components(config, base_dir=base_dir)
     config = component_resolution.config
+
+    # Check required fields after reusable task expansion.
+    required_keys = ["id", "env"]
+    for key in required_keys:
+        if key not in config:
+            log_error(f"Missing required config key: {key}")
 
     configured_task_program_integration = None
     configured_task_program_selection = None
@@ -513,12 +517,13 @@ def config_to_cfg(
             )
         if not component_resolution.scene_selected:
             raise ValueError(
-                "A configured Task Program environment must declare scene.component."
+                "A configured Task Program deployment must declare a physical "
+                "environment."
             )
-        if component_resolution.scene_task_program is None:
+        if component_resolution.scene_config is None:
             raise ValueError(
-                "A configured Task Program scene component must declare "
-                "task_program metadata."
+                "A configured Task Program deployment must resolve a physical "
+                "environment."
             )
         from embodichain.lab.task_program.integrations._configured_composition import (
             _load_configured_task_program_deployment,
@@ -527,8 +532,11 @@ def config_to_cfg(
         deployment = _load_configured_task_program_deployment(
             task_program=config["task_program"],
             skill_profile=component_resolution.embodiment_skill_profile,
-            scene=component_resolution.scene_task_program,
             base_dir=base_dir,
+        )
+        _validate_scene_binding_targets(
+            deployment.scene_binding,
+            simulation=component_resolution.scene_config,
         )
         configured_task_program_integration = deployment.integration
         configured_task_program_selection = deployment.selection
@@ -1178,6 +1186,15 @@ def build_env_cfg_from_args(
 
     gym_config_source_path = resolve_config_path(args.gym_config)
     gym_config = load_config(gym_config_source_path)
+    if "environment" in gym_config:
+        from embodichain.lab.gym.utils._component_composition import (
+            _resolve_environment_component,
+        )
+
+        gym_config = _resolve_environment_component(
+            gym_config,
+            base_dir=gym_config_source_path.parent,
+        )
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
@@ -1313,6 +1330,21 @@ def init_rollout_buffer_from_gym_space(
             ),
             "segment_end": torch.zeros(
                 (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_accepted": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_attempt_id": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "continuity_id": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
             ),
             "terminated": torch.zeros(
                 (num_envs, max_episode_steps), dtype=torch.bool, device=device
@@ -1539,6 +1571,21 @@ def init_rollout_buffer_from_config(
             ),
             "segment_end": torch.zeros(
                 (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_accepted": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_attempt_id": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "continuity_id": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
             ),
             "terminated": torch.zeros(
                 (batch_size, max_episode_steps), dtype=torch.bool, device=device

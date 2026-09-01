@@ -5,6 +5,18 @@ requires:
   scene_contract: repeated_pick_place_scene_v1
   embodiment_contract: single_arm_parallel_gripper
 
+scene_binding:
+  contract_id: repeated_pick_place_scene_v1
+  registry_id: task_program_repeated_pick_place
+  rigid_objects:
+    - entity_id: cube
+      simulation_uid: cube
+      dynamics: dynamic
+      semantic_type: cube
+      affordances:
+        - entity_id: cube_grasp
+          kind: antipodal_grasp
+
 profile:
   defaults:
     pick_up:

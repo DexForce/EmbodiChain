@@ -144,16 +144,36 @@ def test_list_task_discovers_and_prints_task_tree(
                 "CartPoleRL",
                 ("classic_control", "cart_pole"),
                 {list_task._RL},
+                {"Cart"},
+                {"env.json", "env.yaml"},
             ),
             list_task._EnvironmentListEntry(
                 "HandOver-v1",
                 ("manipulation", "hand_over"),
                 {list_task._TASK_PROGRAM},
+                {"dual_ur5_dh_pgi_140_80"},
+                {"task.dual_ur5_dh_pgi_140_80.yaml"},
+            ),
+            list_task._EnvironmentListEntry(
+                "TaskProgramOpenDrawer-Franka-v1",
+                ("manipulation", "open_drawer"),
+                {list_task._TASK_PROGRAM},
+                {"franka_panda"},
+                {"task.franka.yaml"},
+            ),
+            list_task._EnvironmentListEntry(
+                "TaskProgramOpenDrawer-v1",
+                ("manipulation", "open_drawer"),
+                {list_task._TASK_PROGRAM},
+                {"ur5_dh_pgi_140_80"},
+                {"task.ur5.yaml"},
             ),
             list_task._EnvironmentListEntry(
                 "BlocksRankingRGB-v1",
                 ("manipulation", "tableware", "blocks_ranking_rgb"),
                 {list_task._HANDWRITTEN_DEMO},
+                {"cobotmagic"},
+                {"env.json"},
             ),
             list_task._EnvironmentListEntry(
                 "StackCups-v1",
@@ -167,19 +187,25 @@ def test_list_task_discovers_and_prints_task_tree(
 
     assert discovery_calls == [None]
     assert capsys.readouterr().out == """\
-+------------------------------------------------------------------------------------+
-|                                     Tasks (4)                                      |
-+------------------------+---------------------+-------------------------------------+
-| Task                   | Environment ID      | Capability                          |
-+------------------------+---------------------+-------------------------------------+
-| classic_control/       |                     |                                     |
-|   cart_pole            | CartPoleRL          | RL                                  |
-| manipulation/          |                     |                                     |
-|   hand_over            | HandOver-v1         | Expert Demo: Task Program           |
-|   tableware/           |                     |                                     |
-|     blocks_ranking_rgb | BlocksRankingRGB-v1 | Expert Demo: Handwritten Trajectory |
-|     stack_cups         | StackCups-v1        | Environment Only                    |
-+------------------------+---------------------+-------------------------------------+
++------------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                Tasks (5) / Environments (6)                                                                |
++------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
+| Task                   | Environment ID                  | Embodiment             | Capability                          | Config                           |
++------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
+| classic_control/       |                                 |                        |                                     |                                  |
+|   cart_pole            | CartPoleRL                      | Cart                   | RL                                  | env.json, env.yaml               |
++------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
+| manipulation/          |                                 |                        |                                     |                                  |
+|   hand_over            | HandOver-v1                     | dual_ur5_dh_pgi_140_80 | Expert Demo: Task Program           | task.dual_ur5_dh_pgi_140_80.yaml |
++------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
+|   open_drawer          | TaskProgramOpenDrawer-Franka-v1 | franka_panda           | Expert Demo: Task Program           | task.franka.yaml                 |
+|                        | TaskProgramOpenDrawer-v1        | ur5_dh_pgi_140_80      | Expert Demo: Task Program           | task.ur5.yaml                    |
++------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
+|   tableware/           |                                 |                        |                                     |                                  |
+|     blocks_ranking_rgb | BlocksRankingRGB-v1             | cobotmagic             | Expert Demo: Handwritten Trajectory | env.json                         |
++------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
+|     stack_cups         | StackCups-v1                    | -                      | Environment Only                    | -                                |
++------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
 """
 
 
@@ -200,7 +226,7 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
     """Task-local configs provide hierarchy and explicit capabilities."""
     expert_task = tmp_path / "manipulation" / "pick_place"
     expert_task.mkdir(parents=True)
-    (expert_task / "env.json").write_text(
+    (expert_task / "task.ur5.yaml").write_text(
         json.dumps(
             {
                 "id": "PickPlace-v1",
@@ -209,9 +235,19 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
                     "integration": "task_program/integration.yaml",
                     "execution_policy": "policies/trajectory.yaml",
                 },
+                "embodiment": {
+                    "component": "../../../components/embodiments/ur5.yaml",
+                },
             }
         ),
         encoding="utf-8",
+    )
+    (expert_task / "env.yaml").write_text(
+        "environment_id: pick_place\nsimulation: {}\nenv: {}\n",
+        encoding="utf-8",
+    )
+    (expert_task / "notes.yaml").write_text(
+        "- reusable\n- metadata\n", encoding="utf-8"
     )
 
     rl_task = tmp_path / "classic_control" / "point_mass"
@@ -233,9 +269,40 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
     expert = entries["pickplace-v1"]
     assert expert.task_path == ("manipulation", "pick_place")
     assert expert.capabilities == {list_task._TASK_PROGRAM}
+    assert expert.embodiments == {"ur5"}
+    assert expert.config_names == {"task.ur5.yaml"}
+    assert "pick_place" not in entries
     learning = entries["pointmassrl"]
     assert learning.task_path == ("classic_control", "point_mass")
     assert learning.capabilities == {list_task._RL}
+    assert learning.embodiments == set()
+    assert learning.config_names == set()
+
+
+def test_config_environment_entries_infer_inline_robot_embodiments(
+    tmp_path: Path,
+) -> None:
+    """Inline robot configs expose their type or UID as the embodiment name."""
+    task = tmp_path / "special" / "inline_robot"
+    task.mkdir(parents=True)
+    (task / "typed.json").write_text(
+        json.dumps(
+            {
+                "id": "TypedRobot-v1",
+                "robot": {"robot_type": "URRobot", "uid": "Manipulator"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (task / "uid.json").write_text(
+        json.dumps({"id": "UidRobot-v1", "robot": {"uid": "UR10"}}),
+        encoding="utf-8",
+    )
+
+    entries = list_task._config_environment_entries([tmp_path])
+
+    assert entries["typedrobot-v1"].embodiments == {"URRobot"}
+    assert entries["uidrobot-v1"].embodiments == {"UR10"}
 
 
 def test_handwritten_demo_detection_uses_environment_hooks() -> None:

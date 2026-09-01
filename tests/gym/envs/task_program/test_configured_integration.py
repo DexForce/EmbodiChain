@@ -58,6 +58,7 @@ from embodichain.lab.sim.atomic_actions import (
     PourGoal,
     PourOptions,
 )
+from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.task_program.semantics import (
     RegisteredSemanticCall,
     SceneObjectRef,
@@ -89,7 +90,7 @@ _TASKS = {
     ),
     "hand_over": (
         "dual_ur5_handover_v1",
-        "dual_ur5_handover",
+        "dual_ur5_dh_pgi_140_80",
         frozenset({"pick", "place", "hand_over"}),
     ),
 }
@@ -97,7 +98,7 @@ _TEST_ENV_ID = "ConfiguredTaskProgramIntegrationTest-v1"
 _TABLEWARE_TASKS = {
     "pour_water": (
         "task_program_pour_water",
-        "cobotmagic_right_arm",
+        "cobotmagic",
         frozenset(
             {
                 "pick",
@@ -113,7 +114,11 @@ _TABLEWARE_TASKS = {
 
 def _config_path(task_name: str) -> Path:
     """Return one official task's Gym config path."""
-    filename = "env.yaml" if task_name == "hand_over" else "env.ur5.yaml"
+    filename = (
+        "task.dual_ur5_dh_pgi_140_80.yaml"
+        if task_name == "hand_over"
+        else "task.ur5.yaml"
+    )
     return _CONFIG_DIRECTORY / task_name / filename
 
 
@@ -136,17 +141,18 @@ def _integration_payload(task_name: str) -> dict[str, object]:
     """Compose one production integration into its strict decoder payload."""
     path = _config_path(task_name)
     config = _gym_config(task_name)
-    _, task, policy = _resolve_task_program_components(
-        config["task_program"], base_dir=path.parent
-    )
     physical = _physical_components(path, config)
+    _, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
+    scene_binding = task["scene_binding"]
+    assert type(scene_binding) is dict
     return _compose_integration_payload(
         task=task,
         policy=policy,
         skill_profile=physical.embodiment_skill_profile,
-        scene=physical.scene_task_program,
+        scene=scene_binding,
     )
 
 
@@ -155,18 +161,16 @@ def _deployment_from_path(path: Path):
     config = load_config(path)
     physical = _physical_components(path, config)
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
     return _load_configured_task_program_deployment(
-        task_program=config["task_program"],
+        task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
-        scene=physical.scene_task_program,
         base_dir=path.parent,
     )
 
 
 def _tableware_config_path(task_name: str) -> Path:
     """Return one config-defined tableware task's Gym config path."""
-    return _TABLEWARE_CONFIG_DIRECTORY / task_name / "env.yaml"
+    return _TABLEWARE_CONFIG_DIRECTORY / task_name / "task.cobotmagic.yaml"
 
 
 def _tableware_gym_config(task_name: str) -> dict[str, object]:
@@ -180,17 +184,18 @@ def _tableware_integration_payload(task_name: str) -> dict[str, object]:
     """Return one tableware task's independently owned integration."""
     path = _tableware_config_path(task_name)
     config = _tableware_gym_config(task_name)
-    _, task, policy = _resolve_task_program_components(
-        config["task_program"], base_dir=path.parent
-    )
     physical = _physical_components(path, config)
+    _, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
+    scene_binding = task["scene_binding"]
+    assert type(scene_binding) is dict
     return _compose_integration_payload(
         task=task,
         policy=policy,
         skill_profile=physical.embodiment_skill_profile,
-        scene=physical.scene_task_program,
+        scene=scene_binding,
     )
 
 
@@ -200,11 +205,9 @@ def _tableware_deployment(task_name: str):
     config = _tableware_gym_config(task_name)
     physical = _physical_components(path, config)
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
     return _load_configured_task_program_deployment(
-        task_program=config["task_program"],
+        task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
-        scene=physical.scene_task_program,
         base_dir=path.parent,
     )
 
@@ -250,8 +253,10 @@ def test_single_task_program_composes_with_ur5_and_franka(
 ) -> None:
     """Changing only the embodiment selects a second valid deployment."""
     task_dir = _CONFIG_DIRECTORY / task_name
-    ur5 = _deployment_from_path(task_dir / "env.ur5.yaml")
-    franka = _deployment_from_path(task_dir / "env.franka.yaml")
+    ur5_config = load_config(task_dir / "task.ur5.yaml")
+    franka_config = load_config(task_dir / "task.franka.yaml")
+    ur5 = _deployment_from_path(task_dir / "task.ur5.yaml")
+    franka = _deployment_from_path(task_dir / "task.franka.yaml")
 
     ur5_program = load_task_program(
         ur5.program_path,
@@ -264,6 +269,12 @@ def test_single_task_program_composes_with_ur5_and_franka(
         validation_context=franka.integration.registration.catalog,
     )
 
+    assert (
+        ur5_config["environment"]
+        == franka_config["environment"]
+        == {"component": "env.yaml"}
+    )
+    assert ur5_config["task_program"] == franka_config["task_program"]
     assert ur5.program_path == franka.program_path
     assert ur5.program_id == franka.program_id == ur5_program.program_id
     assert franka_program.program_id == ur5_program.program_id
@@ -274,12 +285,28 @@ def test_single_task_program_composes_with_ur5_and_franka(
 
 def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     """Drawer-specific clearance does not mutate the shared embodiment."""
+    repeated_config = _gym_config("repeated_pick_place")
+    drawer_config = _gym_config("open_drawer")
     repeated = _integration_payload("repeated_pick_place")
     drawer = _integration_payload("open_drawer")
 
     repeated_generator = repeated["runtime_services"]["grasp_pose_generators"]["hand"]
     drawer_generator = drawer["runtime_services"]["grasp_pose_generators"]["hand"]
 
+    repeated_embodiment = repeated_config["embodiment"]
+    drawer_embodiment = drawer_config["embodiment"]
+    assert type(repeated_embodiment) is dict
+    assert type(drawer_embodiment) is dict
+    assert repeated_embodiment["component"] == drawer_embodiment["component"]
+    repeated_environment = load_config(
+        _config_path("repeated_pick_place").parent / "env.yaml"
+    )
+    drawer_environment = load_config(_config_path("open_drawer").parent / "env.yaml")
+    assert (
+        repeated_environment["environment_id"] != drawer_environment["environment_id"]
+    )
+    assert "task_program" not in repeated_environment
+    assert "task_program" not in drawer_environment
     assert repeated_generator["opening_margin"] == pytest.approx(0.002)
     assert drawer_generator["opening_margin"] == pytest.approx(0.03)
 
@@ -288,12 +315,13 @@ def test_task_rejects_embodiment_with_an_incompatible_contract() -> None:
     """Composition fails before program decoding when capabilities differ."""
     path = _config_path("repeated_pick_place")
     config = _gym_config("repeated_pick_place")
-    _, task, policy = _resolve_task_program_components(
-        config["task_program"], base_dir=path.parent
-    )
     physical = _physical_components(path, config)
+    _, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
+    scene_binding = task["scene_binding"]
+    assert type(scene_binding) is dict
     incompatible_skill_profile = dict(physical.embodiment_skill_profile)
     incompatible_skill_profile["contract_id"] = "dual_arm_only_v1"
 
@@ -302,7 +330,7 @@ def test_task_rejects_embodiment_with_an_incompatible_contract() -> None:
             task=task,
             policy=policy,
             skill_profile=incompatible_skill_profile,
-            scene=physical.scene_task_program,
+            scene=scene_binding,
         )
 
 
@@ -319,11 +347,22 @@ def test_embodiment_owns_the_deployed_sensor_suite(
     assert type(sensor_config[0]) is dict
     cfg = config_to_cfg(config, source_path=path)
 
-    assert len(sensor_config) == 1
-    assert sensor_config[0]["sensor_type"] == "Camera"
-    assert sensor_config[0]["uid"] == "cam_high"
-    assert len(cfg.sensor) == 1
-    assert cfg.sensor[0].uid == "cam_high"
+    assert [sensor["sensor_type"] for sensor in sensor_config] == [
+        "Camera",
+        "Camera",
+        "Camera",
+    ]
+    assert [sensor["uid"] for sensor in sensor_config] == [
+        "cam_high",
+        "cam_right_wrist",
+        "cam_left_wrist",
+    ]
+    assert [sensor.uid for sensor in cfg.sensor] == [
+        "cam_high",
+        "cam_right_wrist",
+        "cam_left_wrist",
+    ]
+    assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
 
 
 @pytest.mark.parametrize(
@@ -529,7 +568,7 @@ def test_all_examples_register_plain_embodied_env_under_config_selected_ids(
     spec = REGISTERED_ENVS[env_id]
 
     assert spec.cls is EmbodiedEnv
-    assert spec.max_episode_steps == config["max_episode_steps"]
+    assert spec.max_episode_steps == cfg.max_episode_steps
     assert spec.task_program_adapter_factory is not None
     assert spec.task_program_registration is not None
     assert spec.task_program_adapter_factory.registration is (
@@ -887,7 +926,7 @@ def test_invalid_config_does_not_leave_an_integration_registration(
     config["id"] = _TEST_ENV_ID
     task_program = config["task_program"]
     assert type(task_program) is dict
-    task_program["integration"] = "missing-task-program.yaml"
+    task_program["execution_policy"] = "missing-execution-policy.yaml"
 
     with pytest.raises(FileNotFoundError):
         config_to_cfg(config, source_path=_config_path("repeated_pick_place"))

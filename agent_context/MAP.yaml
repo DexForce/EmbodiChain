@@ -91,8 +91,11 @@ topics:
       - task listing
       - supports_rl
       - gym
+      - environment.component
+      - reusable physical environment
       - embodiment.component
       - reusable embodiment
+      - scene_binding
       - handwritten trajectory config
       - componentized Gym config
       - task
@@ -118,7 +121,8 @@ topics:
       - embodichain_tasks/embodichain_tasks/
       - embodichain/lab/gym/utils/
       - embodichain/lab/gym/utils/_component_composition.py
-      - embodichain_tasks/configs/components/embodiments/cobotmagic_tabletop_stereo.yaml
+      - embodichain_tasks/configs/components/embodiments/cobotmagic.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.yaml
       - embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json
     related_topics:
       - simulation-system
@@ -415,15 +419,16 @@ topics:
       - embodichain/lab/gym/envs/task_program/registration.py
       - embodichain/lab/task_program/integrations/_configured_services.py
       - embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml
+      - embodichain_tasks/configs/components/embodiments/dual_ur5_dh_pgi_140_80.yaml
       - embodichain_tasks/configs/components/embodiments/franka_panda.yaml
       - embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml
-      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.ur5.yaml
-      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.franka.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+      - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
       - embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/integration.yaml
-      - embodichain_tasks/configs/tasks/manipulation/open_drawer/env.ur5.yaml
-      - embodichain_tasks/configs/tasks/manipulation/open_drawer/env.franka.yaml
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml
+      - embodichain_tasks/configs/tasks/manipulation/open_drawer/task.franka.yaml
       - embodichain_tasks/configs/tasks/manipulation/open_drawer/task_program/integration.yaml
-      - embodichain_tasks/configs/tasks/manipulation/hand_over/env.yaml
+      - embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml
       - embodichain_tasks/configs/tasks/manipulation/hand_over/task_program/integration.yaml
     related_topics:
       - simulation-system
@@ -807,10 +812,15 @@ topics:
       - decode_task_program
       - task_program component
       - Task Program deployment
+      - environment.component
+      - reusable physical environment
       - embodiment.component
       - embodiment skill_profile
       - skill_profile
       - scene.component
+      - scene_binding
+      - integration scene_binding
+      - physical scene
       - execution_policy
       - integration.yaml
       - configured Task Program integration

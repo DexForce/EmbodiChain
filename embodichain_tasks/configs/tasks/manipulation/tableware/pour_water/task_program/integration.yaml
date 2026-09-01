@@ -5,6 +5,23 @@ requires:
   scene_contract: pour_water_scene_v1
   embodiment_contract: single_arm_parallel_gripper
 
+scene_binding:
+  contract_id: pour_water_scene_v1
+  registry_id: task_program_pour_water
+  rigid_objects:
+    - entity_id: cup
+      simulation_uid: cup
+      dynamics: dynamic
+      semantic_type: cup
+    - entity_id: bottle
+      simulation_uid: bottle
+      dynamics: dynamic
+      semantic_type: bottle
+      affordances:
+        - entity_id: bottle_grasp
+          kind: antipodal_grasp
+          internal_axis: [1.0, 0.0, 0.0]
+
 profile:
   defaults:
     pick_up:

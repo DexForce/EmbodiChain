@@ -17,6 +17,26 @@ requirements, while a robot resource may expose any endpoints appropriate to
 that embodiment: manipulation motion and grasping, a mobile base, a torso, or a
 whole-body controller.
 
+## Configured ownership
+
+Componentized deployments build the in-memory profile from three explicit
+owners:
+
+- `configs/components/embodiments/<embodiment>.yaml` owns the simulation
+  robot, sensor suite, and optional `skill_profile` resources, endpoints,
+  command presets, and embodiment-specific services;
+- task-local `task_program/integration.yaml` owns semantic defaults, action
+  options, effect-monitor mappings, and task-specific services; and
+- `configs/components/execution_policies/<policy>.yaml` owns motion, tracking,
+  recovery, runner, and effect-assurance settings.
+
+The runnable `task.<embodiment>.yaml` selects these components. Composition
+checks their embodiment contracts and produces the exact
+{class}`RobotSkillProfile` and {class}`SkillPolicyPreset` values described
+below. The reusable physical `env.yaml` owns none of this Task Program metadata,
+so changing environments does not copy the robot profile and changing a
+compatible embodiment does not rewrite the source program.
+
 ## Contracts on the two sides
 
 An atomic action owns a

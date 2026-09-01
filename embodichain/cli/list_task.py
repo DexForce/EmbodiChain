@@ -23,7 +23,9 @@ import importlib.metadata
 import importlib.resources
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import groupby
+from pathlib import PurePosixPath
 from typing import Any
 
 try:
@@ -45,6 +47,8 @@ class _EnvironmentListEntry:
     env_id: str
     task_path: tuple[str, ...]
     capabilities: set[str]
+    embodiments: set[str] = field(default_factory=set)
+    config_names: set[str] = field(default_factory=set)
 
 
 def _task_package_module_names() -> tuple[str, ...]:
@@ -129,21 +133,38 @@ def _iter_task_directories(
     """Yield task directories and their paths below a config root."""
     children = sorted(root.iterdir(), key=lambda child: child.name.casefold())
     child_by_name = {child.name: child for child in children}
-    env_configs = [
+    config_resources = [
         child
         for child in children
-        if child.is_file()
-        and child.name.startswith("env")
-        and child.name.endswith((".json", ".yaml", ".yml"))
+        if child.is_file() and child.name.endswith((".json", ".yaml", ".yml"))
     ]
     agents = child_by_name.get("agents")
-    if env_configs or (agents is not None and agents.is_dir()):
-        yield relative_path, env_configs, agents
+    if config_resources or (agents is not None and agents.is_dir()):
+        yield relative_path, config_resources, agents
 
     for child in children:
         if not child.is_dir() or child.name in {"agents", "task_program"}:
             continue
         yield from _iter_task_directories(child, (*relative_path, child.name))
+
+
+def _config_embodiment_names(config: Mapping[str, Any]) -> tuple[str, ...]:
+    """Infer display names for the embodiment selected by a task config."""
+    embodiment = config.get("embodiment")
+    if isinstance(embodiment, Mapping):
+        component = embodiment.get("component")
+        if type(component) is str and component and component == component.strip():
+            component_name = PurePosixPath(component).stem
+            if component_name:
+                return (component_name,)
+
+    robot = config.get("robot")
+    if isinstance(robot, Mapping):
+        for field_name in ("robot_type", "uid"):
+            value = robot.get(field_name)
+            if type(value) is str and value and value == value.strip():
+                return (value,)
+    return ()
 
 
 def _merge_environment_entry(
@@ -152,6 +173,8 @@ def _merge_environment_entry(
     env_id: str,
     task_path: tuple[str, ...],
     capabilities: Sequence[str] = (),
+    embodiments: Sequence[str] = (),
+    config_names: Sequence[str] = (),
 ) -> _EnvironmentListEntry:
     """Merge one catalog source into a case-insensitive environment record."""
     key = env_id.casefold()
@@ -160,6 +183,8 @@ def _merge_environment_entry(
         entry = _EnvironmentListEntry(env_id, task_path, set())
         entries[key] = entry
     entry.capabilities.update(capabilities)
+    entry.embodiments.update(embodiments)
+    entry.config_names.update(config_names)
     return entry
 
 
@@ -169,12 +194,15 @@ def _config_environment_entries(
     """Collect environment metadata encoded by task-local configs."""
     entries: dict[str, _EnvironmentListEntry] = {}
     for root in config_roots:
-        for task_path, env_resources, agents in _iter_task_directories(root):
+        for task_path, config_resources, agents in _iter_task_directories(root):
             env_ids: list[str] = []
-            for resource in env_resources:
-                config = _load_mapping(resource)
+            for resource in config_resources:
+                try:
+                    config = _load_mapping(resource)
+                except TypeError:
+                    continue
                 env_id = config.get("id")
-                if not isinstance(env_id, str) or not env_id:
+                if type(env_id) is not str or not env_id or env_id != env_id.strip():
                     continue
                 capabilities = []
                 if "task_program" in config:
@@ -184,6 +212,8 @@ def _config_environment_entries(
                     env_id=env_id,
                     task_path=task_path,
                     capabilities=capabilities,
+                    embodiments=_config_embodiment_names(config),
+                    config_names=(resource.name,),
                 )
                 env_ids.append(env_id)
 
@@ -289,36 +319,58 @@ def _print_environment_entries(entries: Sequence[_EnvironmentListEntry]) -> None
     """Print environment entries as a table with a task-directory tree."""
     from prettytable import PrettyTable
 
+    task_groups = [
+        (task_path, list(task_entries))
+        for task_path, task_entries in groupby(
+            entries,
+            key=lambda entry: entry.task_path,
+        )
+    ]
     table = PrettyTable()
-    table.title = f"Tasks ({len(entries)})"
-    table.field_names = ["Task", "Environment ID", "Capability"]
+    table.title = f"Tasks ({len(task_groups)}) / Environments ({len(entries)})"
+    table.field_names = [
+        "Task",
+        "Environment ID",
+        "Embodiment",
+        "Capability",
+        "Config",
+    ]
     table.align = "l"
     active_categories: tuple[str, ...] = ()
-    for entry in entries:
-        categories = entry.task_path[:-1]
+    for group_index, (task_path, task_entries) in enumerate(task_groups):
+        categories = task_path[:-1]
         shared_depth = 0
         for active, category in zip(active_categories, categories):
             if active != category:
                 break
             shared_depth += 1
         for depth in range(shared_depth, len(categories)):
-            table.add_row([f"{'  ' * depth}{categories[depth]}/", "", ""])
+            table.add_row([f"{'  ' * depth}{categories[depth]}/", "", "", "", ""])
 
-        task_name = entry.task_path[-1]
-        labels = [
-            capability
-            for capability in _CAPABILITY_ORDER
-            if capability in entry.capabilities
-        ]
-        if not labels:
-            labels.append("Environment Only")
-        table.add_row(
-            [
-                f"{'  ' * len(categories)}{task_name}",
-                entry.env_id,
-                ", ".join(labels),
+        task_name = task_path[-1]
+        for entry_index, entry in enumerate(task_entries):
+            labels = [
+                capability
+                for capability in _CAPABILITY_ORDER
+                if capability in entry.capabilities
             ]
-        )
+            if not labels:
+                labels.append("Environment Only")
+            table.add_row(
+                [
+                    (
+                        f"{'  ' * len(categories)}{task_name}"
+                        if entry_index == 0
+                        else ""
+                    ),
+                    entry.env_id,
+                    ", ".join(sorted(entry.embodiments, key=str.casefold)) or "-",
+                    ", ".join(labels),
+                    ", ".join(sorted(entry.config_names, key=str.casefold)) or "-",
+                ]
+            )
+        if group_index < len(task_groups) - 1:
+            table.add_divider()
         active_categories = categories
     print(table)
 
@@ -331,7 +383,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(
         prog="embodichain list-task",
-        description="List tasks by category and capability.",
+        description="List tasks by category, deployment, and capability.",
         epilog=(
             "Environment Only means the task currently exposes neither an "
             "Expert Demo entry point nor a supported RL configuration."
