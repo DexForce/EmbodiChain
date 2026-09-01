@@ -102,7 +102,7 @@ def _identifier(value: object, *, field_name: str) -> str:
 
 
 def _axis(value: tuple[float, float, float]) -> tuple[float, float, float]:
-    """Validate one finite non-zero three-dimensional axis."""
+    """Validate one legacy finite non-zero three-dimensional axis fallback."""
     if type(value) is not tuple or len(value) != 3:
         raise TypeError("translation_axis must be an exact three-value tuple.")
     normalized = tuple(float(item) for item in value)
@@ -289,16 +289,18 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
 
 @dataclass(frozen=True, slots=True)
 class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
-    """Create Slide semantics from one configured articulation-link mesh."""
+    """Create Slide semantics from one configured articulation-link geometry."""
 
     call_id: ClassVar[str] = _ARTICULATION_LINK_SLIDE_CALL_ID
-    revision: ClassVar[str] = "2"
+    revision: ClassVar[str] = "3"
     target_descriptor: ClassVar[SkillDescriptor] = Slide.descriptor()
 
     articulation_id: str
     articulation_simulation_uid: str
     link_entity_id: str
-    translation_axis: tuple[float, float, float]
+    translation_axis: tuple[float, float, float] | None = None
+    """Optional compatibility fallback superseded by complete point-cloud geometry."""
+
     target_pose_mode: str = "live"
 
     def __post_init__(self) -> None:
@@ -308,7 +310,8 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
             "link_entity_id",
         ):
             _identifier(getattr(self, field_name), field_name=field_name)
-        object.__setattr__(self, "translation_axis", _axis(self.translation_axis))
+        if self.translation_axis is not None:
+            object.__setattr__(self, "translation_axis", _axis(self.translation_axis))
         _slide_target_pose_mode(self.target_pose_mode)
 
     def create(
@@ -356,10 +359,27 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         if not callable(get_link_vert_face):
             raise TypeError("Articulation must provide get_link_vert_face().")
         vertices, triangles = get_link_vert_face(native_link_name)
+        sample_initial_point_clouds = getattr(
+            articulation,
+            "sample_initial_point_clouds",
+            None,
+        )
+        if not callable(sample_initial_point_clouds):
+            raise TypeError("Articulation must provide sample_initial_point_clouds().")
+        geometry = sample_initial_point_clouds(native_link_name)
+        if not isinstance(geometry, dict):
+            raise TypeError("Articulation point-cloud geometry must be a dict.")
+        affordance_kwargs: dict[str, object] = {}
+        if self.translation_axis is not None:
+            affordance_kwargs["translation_axis"] = torch.tensor(
+                self.translation_axis,
+                dtype=torch.float32,
+                device=engine.device,
+            )
         semantics = ObjectSemantics(
             label="articulation_link",
             entity_id=self.link_entity_id,
-            geometry={},
+            geometry=geometry,
             affordance=SlideAffordance(
                 mesh_vertices=torch.as_tensor(
                     vertices,
@@ -371,11 +391,7 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
                     dtype=torch.long,
                     device=engine.device,
                 ),
-                translation_axis=torch.tensor(
-                    self.translation_axis,
-                    dtype=torch.float32,
-                    device=engine.device,
-                ),
+                **affordance_kwargs,
             ),
         )
         return _ArticulationLinkSlideLowerer(

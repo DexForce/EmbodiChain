@@ -21,6 +21,7 @@ import math
 import torch
 import dexsim
 import numpy as np
+import open3d as o3d
 
 from dataclasses import dataclass
 from functools import cached_property
@@ -1196,6 +1197,276 @@ class Articulation(BatchEntity):
 
         verts, faces = self.body_data.link_vert_face[link_name]
         return verts, faces
+
+    def sample_initial_point_clouds(
+        self,
+        target_link_name: str,
+        *,
+        articulation_point_count: int = 100_000,
+        target_point_count: int = 5_000,
+    ) -> dict[str, torch.Tensor]:
+        """Sample initial articulation geometry in a target-link frame.
+
+        All link meshes are transformed with forward kinematics evaluated at
+        :attr:`ArticulationCfg.init_qpos`, merged into one triangle mesh, and
+        sampled proportionally to triangle area. The target link is sampled
+        separately so consumers can derive a target-centered neighborhood.
+        Both returned clouds use the target link's initial local frame.
+
+        Args:
+            target_link_name: Link whose initial local frame defines the output.
+            articulation_point_count: Number of points sampled from the merged
+                articulation surface.
+            target_point_count: Number of points sampled from the target-link
+                surface.
+
+        Returns:
+            Geometry metadata containing ``articulation_point_cloud`` with
+            shape ``(articulation_point_count, 3)`` and
+            ``target_link_point_cloud`` with shape
+            ``(target_point_count, 3)``.
+
+        Raises:
+            TypeError: If a name or point count has the wrong type.
+            ValueError: If the target link, point counts, initial joint state,
+                FK output, or mesh geometry is invalid.
+            RuntimeError: If the articulation has no kinematic chain.
+        """
+        if type(target_link_name) is not str:
+            raise TypeError("target_link_name must be a string.")
+        if not target_link_name or target_link_name != target_link_name.strip():
+            raise ValueError("target_link_name must be non-empty.")
+        if target_link_name not in self.link_names:
+            raise ValueError(
+                f"Unknown articulation link {target_link_name!r}. Available "
+                f"links: {list(self.link_names)}."
+            )
+        for value, field_name in (
+            (articulation_point_count, "articulation_point_count"),
+            (target_point_count, "target_point_count"),
+        ):
+            if type(value) is not int:
+                raise TypeError(f"{field_name} must be an integer.")
+            if value <= 0:
+                raise ValueError(f"{field_name} must be positive.")
+        if self.pk_chain is None:
+            raise RuntimeError(
+                "Initial point-cloud sampling requires cfg.build_pk_chain=True."
+            )
+        body_scale = torch.as_tensor(self.cfg.body_scale, dtype=torch.float32)
+        if body_scale.shape != (3,) or not torch.allclose(
+            body_scale,
+            torch.ones(3, dtype=torch.float32),
+        ):
+            raise ValueError(
+                "Initial point-cloud sampling currently requires unit body_scale."
+            )
+
+        initial_qpos = torch.as_tensor(
+            self.cfg.init_qpos,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if initial_qpos.shape != (self.dof,) or not torch.isfinite(initial_qpos).all():
+            raise ValueError(
+                "ArticulationCfg.init_qpos must be a finite vector matching "
+                f"the articulation DoF ({self.dof})."
+            )
+        backend_joint_names = list(self.joint_names)
+        kinematic_joint_names = list(self.pk_chain.get_joint_parameter_names())
+        if backend_joint_names != kinematic_joint_names:
+            if len(backend_joint_names) != len(kinematic_joint_names) or set(
+                backend_joint_names
+            ) != set(kinematic_joint_names):
+                raise ValueError(
+                    "Initial point-cloud sampling requires matching simulator "
+                    "and kinematic-chain joint names."
+                )
+            qpos_by_name = dict(zip(backend_joint_names, initial_qpos))
+            initial_qpos = torch.stack(
+                [qpos_by_name[name] for name in kinematic_joint_names]
+            )
+        link_names = list(self.link_names)
+        initial_link_poses = self.compute_fk(
+            initial_qpos.unsqueeze(0),
+            link_names=link_names,
+        )
+        if (
+            initial_link_poses.shape != (1, len(link_names), 4, 4)
+            or not torch.isfinite(initial_link_poses).all()
+        ):
+            raise ValueError(
+                "Initial FK must return finite poses with shape "
+                f"(1, {len(link_names)}, 4, 4)."
+            )
+        initial_link_poses = initial_link_poses[0].to(
+            device=self.device,
+            dtype=torch.float32,
+        )
+        target_index = link_names.index(target_link_name)
+        target_from_root = torch.linalg.inv(initial_link_poses[target_index])
+
+        merged_vertices: list[torch.Tensor] = []
+        merged_triangles: list[torch.Tensor] = []
+        vertex_offset = 0
+        target_vertices: torch.Tensor | None = None
+        target_triangles: torch.Tensor | None = None
+        for link_index, link_name in enumerate(link_names):
+            vertices, triangles = self.get_link_vert_face(link_name)
+            vertices = torch.as_tensor(
+                vertices,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            triangles = torch.as_tensor(
+                triangles,
+                dtype=torch.long,
+                device=self.device,
+            )
+            self._validate_point_cloud_mesh(vertices, triangles, link_name=link_name)
+            if vertices.shape[0] == 0:
+                continue
+
+            target_from_link = torch.matmul(
+                target_from_root,
+                initial_link_poses[link_index],
+            )
+            transformed_vertices = (
+                torch.matmul(
+                    vertices,
+                    target_from_link[:3, :3].transpose(0, 1),
+                )
+                + target_from_link[:3, 3]
+            )
+            merged_vertices.append(transformed_vertices)
+            if triangles.shape[0] > 0:
+                merged_triangles.append(triangles + vertex_offset)
+            if link_name == target_link_name:
+                target_vertices = transformed_vertices
+                target_triangles = triangles
+            vertex_offset += vertices.shape[0]
+
+        if target_vertices is None or target_vertices.shape[0] == 0:
+            raise ValueError(
+                f"Target link {target_link_name!r} has no point-cloud geometry."
+            )
+        if not merged_vertices:
+            raise ValueError("Articulation has no point-cloud geometry.")
+        articulation_vertices = torch.cat(merged_vertices, dim=0)
+        articulation_triangles = (
+            torch.cat(merged_triangles, dim=0)
+            if merged_triangles
+            else torch.empty((0, 3), dtype=torch.long, device=self.device)
+        )
+        assert target_triangles is not None
+        return {
+            "target_link_point_cloud": self._sample_mesh_surface_points(
+                target_vertices,
+                target_triangles,
+                target_point_count,
+            ),
+            "articulation_point_cloud": self._sample_mesh_surface_points(
+                articulation_vertices,
+                articulation_triangles,
+                articulation_point_count,
+            ),
+        }
+
+    @staticmethod
+    def _validate_point_cloud_mesh(
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        *,
+        link_name: str,
+    ) -> None:
+        """Validate one link-local mesh used for surface sampling."""
+        if vertices.dim() != 2 or vertices.shape[1:] != (3,):
+            raise ValueError(f"Link {link_name!r} vertices must have shape (N, 3).")
+        if not torch.isfinite(vertices).all():
+            raise ValueError(f"Link {link_name!r} vertices must be finite.")
+        if triangles.dim() != 2 or triangles.shape[1:] != (3,):
+            raise ValueError(f"Link {link_name!r} triangles must have shape (M, 3).")
+        if triangles.shape[0] == 0:
+            return
+        if vertices.shape[0] == 0:
+            raise ValueError(
+                f"Link {link_name!r} triangles cannot reference an empty mesh."
+            )
+        if bool((triangles < 0).any().item()) or int(triangles.max().item()) >= len(
+            vertices
+        ):
+            raise ValueError(
+                f"Link {link_name!r} triangles reference invalid vertices."
+            )
+
+    @staticmethod
+    def _sample_mesh_surface_points(
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        point_count: int,
+    ) -> torch.Tensor:
+        """Uniformly sample a triangle mesh with Open3D's CPU sampler."""
+        if vertices.shape[0] == 0:
+            raise ValueError("Cannot sample an empty mesh.")
+        if triangles.shape[0] == 0:
+            indices = (
+                torch.linspace(
+                    0,
+                    vertices.shape[0] - 1,
+                    point_count,
+                    device=vertices.device,
+                )
+                .round()
+                .to(torch.long)
+            )
+            return vertices[indices]
+
+        face_vertices = vertices[triangles]
+        face_areas = 0.5 * torch.linalg.vector_norm(
+            torch.cross(
+                face_vertices[:, 1] - face_vertices[:, 0],
+                face_vertices[:, 2] - face_vertices[:, 0],
+                dim=1,
+            ),
+            dim=1,
+        )
+        valid_faces = face_areas > torch.finfo(vertices.dtype).eps
+        if not bool(valid_faces.any().item()):
+            indices = (
+                torch.linspace(
+                    0,
+                    vertices.shape[0] - 1,
+                    point_count,
+                    device=vertices.device,
+                )
+                .round()
+                .to(torch.long)
+            )
+            return vertices[indices]
+
+        mesh = o3d.geometry.TriangleMesh(
+            vertices=o3d.utility.Vector3dVector(
+                vertices.detach().to(device="cpu", dtype=torch.float64).numpy()
+            ),
+            triangles=o3d.utility.Vector3iVector(
+                triangles[valid_faces]
+                .detach()
+                .to(device="cpu", dtype=torch.int32)
+                .numpy()
+            ),
+        )
+        point_cloud = mesh.sample_points_uniformly(number_of_points=point_count)
+        sampled_points = np.asarray(point_cloud.points).copy()
+        if sampled_points.shape != (point_count, 3):
+            raise RuntimeError(
+                "Open3D surface sampling returned an unexpected point-cloud shape "
+                f"{sampled_points.shape}; expected ({point_count}, 3)."
+            )
+        return torch.tensor(
+            sampled_points,
+            device=vertices.device,
+            dtype=vertices.dtype,
+        )
 
     def get_link_pose(
         self, link_name: str, env_ids: Sequence[int] | None = None, to_matrix=False

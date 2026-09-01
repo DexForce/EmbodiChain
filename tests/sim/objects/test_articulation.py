@@ -41,6 +41,66 @@ from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
+POINT_CLOUD_TOLERANCE = 1.0e-6
+
+
+def _make_point_cloud_articulation(
+    *,
+    initial_qpos: tuple[float, ...] = (0.25,),
+    backend_joint_names: tuple[str, ...] = ("joint",),
+    kinematic_joint_names: tuple[str, ...] | None = None,
+    link_meshes: dict[str, tuple[torch.Tensor, torch.Tensor]] | None = None,
+    link_poses: torch.Tensor | None = None,
+    body_scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+) -> tuple[Articulation, list[tuple[torch.Tensor, list[str]]]]:
+    """Build a pure-Python articulation double for point-cloud sampling."""
+    if link_meshes is None:
+        link_meshes = {
+            "target": (
+                torch.tensor(
+                    ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                    dtype=torch.float32,
+                ),
+                torch.tensor(((0, 1, 2),), dtype=torch.long),
+            )
+        }
+    link_names = list(link_meshes)
+    if link_poses is None:
+        link_poses = torch.eye(4, dtype=torch.float32).repeat(1, len(link_names), 1, 1)
+    if kinematic_joint_names is None:
+        kinematic_joint_names = backend_joint_names
+
+    articulation = object.__new__(Articulation)
+    articulation.device = torch.device("cpu")
+    articulation.cfg = SimpleNamespace(
+        init_qpos=initial_qpos,
+        body_scale=body_scale,
+    )
+    articulation._data = SimpleNamespace(
+        dof=len(backend_joint_names),
+        link_names=link_names,
+        link_vert_face=link_meshes,
+    )
+    articulation._entities = [
+        SimpleNamespace(
+            get_actived_joint_names=lambda: list(backend_joint_names),
+        )
+    ]
+    articulation.pk_chain = SimpleNamespace(
+        get_joint_parameter_names=lambda: list(kinematic_joint_names),
+    )
+    fk_calls: list[tuple[torch.Tensor, list[str]]] = []
+
+    def compute_fk(
+        qpos: torch.Tensor,
+        *,
+        link_names: list[str],
+    ) -> torch.Tensor:
+        fk_calls.append((qpos.clone(), list(link_names)))
+        return link_poses.clone()
+
+    articulation.compute_fk = compute_fk  # type: ignore[method-assign]
+    return articulation, fk_calls
 
 
 def test_get_qf_returns_all_articulation_joint_efforts():
@@ -94,6 +154,302 @@ def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values():
     assert [joint.joint_type for joint in chain] == ["fixed", "revolute"]
     assert chain[1].joint_limits == (0.0, 2.0)
     assert chain[0].origin_pose[0, 3].item() == 0.0
+
+
+@pytest.mark.no_sim
+class TestInitialPointCloudSampling:
+    """Pure CPU coverage for initial articulation surface sampling."""
+
+    def test_reorders_initial_qpos_into_kinematic_joint_order(self):
+        articulation, fk_calls = _make_point_cloud_articulation(
+            initial_qpos=(2.0, 1.0),
+            backend_joint_names=("joint_b", "joint_a"),
+            kinematic_joint_names=("joint_a", "joint_b"),
+        )
+
+        articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=5,
+            target_point_count=3,
+        )
+
+        assert len(fk_calls) == 1
+        fk_qpos, fk_link_names = fk_calls[0]
+        assert torch.equal(fk_qpos, torch.tensor(((1.0, 2.0),)))
+        assert fk_link_names == ["target"]
+
+    def test_returns_both_clouds_in_target_link_initial_frame(self):
+        triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        link_meshes = {
+            "body": (
+                torch.tensor(
+                    ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                    dtype=torch.float32,
+                ),
+                triangle,
+            ),
+            "target": (
+                torch.tensor(
+                    ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                    dtype=torch.float32,
+                ),
+                triangle,
+            ),
+        }
+        initial_link_poses = torch.eye(4, dtype=torch.float32).repeat(1, 2, 1, 1)
+        initial_link_poses[0, 0, :3, 3] = torch.tensor((4.0, 0.0, 0.0))
+        initial_link_poses[0, 1, :3, :3] = torch.tensor(
+            ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+        )
+        initial_link_poses[0, 1, :3, 3] = torch.tensor((1.0, 2.0, 0.0))
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes=link_meshes,
+            link_poses=initial_link_poses,
+        )
+
+        geometry = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=256,
+            target_point_count=32,
+        )
+
+        assert set(geometry) == {
+            "target_link_point_cloud",
+            "articulation_point_cloud",
+        }
+        target_points = geometry["target_link_point_cloud"]
+        assert target_points.shape == (32, 3)
+        assert torch.allclose(
+            target_points[:, 2],
+            torch.zeros(32),
+            atol=POINT_CLOUD_TOLERANCE,
+        )
+        assert bool((target_points[:, :2] >= -POINT_CLOUD_TOLERANCE).all())
+        assert bool(
+            (
+                target_points[:, 0] + target_points[:, 1] <= 1.0 + POINT_CLOUD_TOLERANCE
+            ).all()
+        )
+
+        articulation_points = geometry["articulation_point_cloud"]
+        assert articulation_points.shape == (256, 3)
+        body_mask = articulation_points[:, 0] < -0.5
+        assert bool(body_mask.any())
+        assert bool((~body_mask).any())
+        body_points = articulation_points[body_mask]
+        assert bool(
+            (
+                (body_points[:, 0] >= -2.0 - POINT_CLOUD_TOLERANCE)
+                & (body_points[:, 0] <= -1.0 + POINT_CLOUD_TOLERANCE)
+                & (body_points[:, 1] >= -4.0 - POINT_CLOUD_TOLERANCE)
+                & (body_points[:, 1] <= -3.0 + POINT_CLOUD_TOLERANCE)
+            ).all()
+        )
+        sampled_target_points = articulation_points[~body_mask]
+        assert bool((sampled_target_points[:, :2] >= -POINT_CLOUD_TOLERANCE).all())
+        assert bool(
+            (
+                sampled_target_points[:, 0] + sampled_target_points[:, 1]
+                <= 1.0 + POINT_CLOUD_TOLERANCE
+            ).all()
+        )
+
+    def test_sampling_consumes_open3d_rng_without_resetting_it(self):
+        import open3d as o3d
+
+        articulation, _ = _make_point_cloud_articulation()
+        o3d.utility.random.seed(7)
+
+        first = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=23,
+            target_point_count=17,
+        )
+        second = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=23,
+            target_point_count=17,
+        )
+
+        assert not torch.equal(
+            first["target_link_point_cloud"],
+            second["target_link_point_cloud"],
+        )
+        assert not torch.equal(
+            first["articulation_point_cloud"],
+            second["articulation_point_cloud"],
+        )
+
+    def test_surface_sampling_preserves_torch_dtype_and_owns_its_data(self):
+        vertices = torch.tensor(
+            ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+            dtype=torch.float64,
+        )
+        triangles = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        original_vertices = vertices.clone()
+
+        points = Articulation._sample_mesh_surface_points(vertices, triangles, 11)
+
+        assert points.device == vertices.device
+        assert points.dtype == vertices.dtype
+        assert points.shape == (11, 3)
+        points.zero_()
+        assert torch.equal(vertices, original_vertices)
+
+    @pytest.mark.parametrize(
+        "triangles",
+        (
+            torch.empty((0, 3), dtype=torch.long),
+            torch.tensor(((0, 1, 2),), dtype=torch.long),
+        ),
+    )
+    def test_surface_sampling_falls_back_to_vertices_without_valid_faces(
+        self,
+        triangles: torch.Tensor,
+    ):
+        vertices = torch.tensor(
+            ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)),
+            dtype=torch.float32,
+        )
+
+        points = Articulation._sample_mesh_surface_points(vertices, triangles, 7)
+
+        assert points.shape == (7, 3)
+        assert set(points[:, 0].tolist()) <= {0.0, 1.0, 2.0}
+
+    def test_merged_surface_sampling_is_weighted_by_face_area(self):
+        triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes={
+                "small": (
+                    torch.tensor(
+                        ((-10.0, 0.0, 0.0), (-9.0, 0.0, 0.0), (-10.0, 1.0, 0.0)),
+                        dtype=torch.float32,
+                    ),
+                    triangle,
+                ),
+                "target": (
+                    torch.tensor(
+                        ((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, 2.0, 0.0)),
+                        dtype=torch.float32,
+                    ),
+                    triangle,
+                ),
+            }
+        )
+
+        geometry = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=5_000,
+            target_point_count=3,
+        )
+
+        articulation_points = geometry["articulation_point_cloud"]
+        small_face_fraction = float((articulation_points[:, 0] < -9.0).float().mean())
+        assert small_face_fraction == pytest.approx(0.2, abs=0.03)
+
+    @pytest.mark.parametrize(
+        ("target_link_name", "error_type", "message"),
+        (
+            (None, TypeError, "target_link_name must be a string"),
+            (" ", ValueError, "target_link_name must be non-empty"),
+            ("missing", ValueError, "Unknown articulation link"),
+        ),
+    )
+    def test_rejects_invalid_target_link_names(
+        self,
+        target_link_name: object,
+        error_type: type[Exception],
+        message: str,
+    ):
+        articulation, _ = _make_point_cloud_articulation()
+
+        with pytest.raises(error_type, match=message):
+            articulation.sample_initial_point_clouds(target_link_name)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        ("field_name", "value", "error_type", "message"),
+        (
+            (
+                "articulation_point_count",
+                True,
+                TypeError,
+                "articulation_point_count must be an integer",
+            ),
+            (
+                "target_point_count",
+                0,
+                ValueError,
+                "target_point_count must be positive",
+            ),
+        ),
+    )
+    def test_rejects_invalid_point_counts(
+        self,
+        field_name: str,
+        value: object,
+        error_type: type[Exception],
+        message: str,
+    ):
+        articulation, _ = _make_point_cloud_articulation()
+
+        with pytest.raises(error_type, match=message):
+            articulation.sample_initial_point_clouds(
+                "target",
+                **{field_name: value},  # type: ignore[arg-type]
+            )
+
+    def test_requires_a_kinematic_chain(self):
+        articulation, _ = _make_point_cloud_articulation()
+        articulation.pk_chain = None
+
+        with pytest.raises(RuntimeError, match="cfg.build_pk_chain=True"):
+            articulation.sample_initial_point_clouds("target")
+
+    def test_rejects_non_unit_body_scale(self):
+        articulation, _ = _make_point_cloud_articulation(
+            body_scale=(1.0, 2.0, 1.0),
+        )
+
+        with pytest.raises(ValueError, match="requires unit body_scale"):
+            articulation.sample_initial_point_clouds("target")
+
+    def test_rejects_mismatched_joint_name_sets(self):
+        articulation, _ = _make_point_cloud_articulation(
+            backend_joint_names=("backend_joint",),
+            kinematic_joint_names=("kinematic_joint",),
+        )
+
+        with pytest.raises(ValueError, match="matching simulator and kinematic-chain"):
+            articulation.sample_initial_point_clouds("target")
+
+    @pytest.mark.parametrize(
+        "initial_qpos",
+        (
+            (),
+            (float("nan"),),
+        ),
+    )
+    def test_rejects_invalid_initial_qpos(self, initial_qpos: tuple[float, ...]):
+        articulation, _ = _make_point_cloud_articulation(
+            initial_qpos=initial_qpos,
+        )
+
+        with pytest.raises(ValueError, match="finite vector matching"):
+            articulation.sample_initial_point_clouds("target")
+
+    def test_rejects_invalid_mesh_indices(self):
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes={
+                "target": (
+                    torch.zeros((3, 3), dtype=torch.float32),
+                    torch.tensor(((0, 1, 3),), dtype=torch.long),
+                )
+            }
+        )
+
+        with pytest.raises(ValueError, match="triangles reference invalid vertices"):
+            articulation.sample_initial_point_clouds("target")
 
 
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:

@@ -124,10 +124,36 @@ CONTROL_DT = 1.0 / 60.0
 DUAL_ARM_DOF = 2 * ARM_DOF
 DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
 DOOR_ENTITY_ID = "door"
+AUTOMATIC_TWIST_AXIS_ORIGIN = torch.tensor([1.0, 0.0, 0.0])
+AUTOMATIC_TWIST_TARGET_OFFSETS = torch.tensor(
+    [
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ]
+)
 
 ActionT = TypeVar("ActionT", bound=AtomicAction)
 _ACTION_ENGINES: dict[int, AtomicActionEngine] = {}
 _GRASP_GENERATORS: dict[int, _StubGraspPoseGenerator] = {}
+
+
+def _automatic_twist_geometry() -> dict[str, torch.Tensor]:
+    """Build target-local geometry with a non-origin center and +Z neighbor."""
+    target_points = AUTOMATIC_TWIST_AXIS_ORIGIN + AUTOMATIC_TWIST_TARGET_OFFSETS
+    articulation_neighbor = AUTOMATIC_TWIST_AXIS_ORIGIN + torch.tensor(
+        [0.25, -0.125, 1.5]
+    )
+    return {
+        "target_link_point_cloud": target_points,
+        "articulation_point_cloud": torch.cat(
+            (target_points, articulation_neighbor.unsqueeze(0)),
+            dim=0,
+        ),
+    }
 
 
 class _StubGraspPoseGenerator(ParallelJawGraspPoseGenerator):
@@ -2388,13 +2414,11 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
 
 def test_twist_plans_six_segments_from_articulation_link() -> None:
     affordance = TwistAffordance(
-        grasp_position=(0.0, 0.0, 0.0),
-        axis_origin=(0.0, 0.0, 0.0),
-        twist_axis=torch.tensor([0.0, 1.0, 0.0]),
+        grasp_position=(2.0, 0.0, 0.0),
     )
     semantics = ObjectSemantics(
         affordance=affordance,
-        geometry={},
+        geometry=_automatic_twist_geometry(),
         label="knob",
         entity_id="knob",
     )
@@ -2429,6 +2453,10 @@ def test_twist_plans_six_segments_from_articulation_link() -> None:
     )
     assert torch.all(
         trajectory.positions[:, plan.segment("open").stop - 1, ARM_DOF:] == 0.0
+    )
+    assert torch.equal(affordance.twist_axis, torch.tensor([0.0, 0.0, 1.0]))
+    assert affordance.require_axis_origin() == pytest.approx(
+        tuple(float(value) for value in AUTOMATIC_TWIST_AXIS_ORIGIN)
     )
     first_target = generator.robot.compute_ik.call_args_list[0].kwargs["pose"]
     grasp_pose = affordance.get_grasp_pose(torch.eye(4).repeat(NUM_ENVS, 1, 1))
@@ -2466,8 +2494,15 @@ def test_twist_plans_from_explicit_rigid_object_pose_snapshot() -> None:
     assert plan.plan_success.tolist() == [True, True]
 
 
-def test_twist_rotates_grasp_about_explicit_axis_origin() -> None:
+def test_twist_rotates_grasp_about_geometry_derived_axis_origin() -> None:
     action = _bind_action(_motion_generator(), Twist())
+    affordance = TwistAffordance(grasp_position=(2.0, 0.0, 0.0))
+    ObjectSemantics(
+        affordance=affordance,
+        geometry=_automatic_twist_geometry(),
+        label="knob",
+        entity_id="knob",
+    )
     target_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     grasp_pose = target_pose.clone()
     grasp_pose[:, 0, 3] = 2.0
@@ -2475,8 +2510,8 @@ def test_twist_rotates_grasp_about_explicit_axis_origin() -> None:
     twisted = action._twisted_grasp_poses(
         target_pose,
         grasp_pose,
-        torch.tensor([0.0, 0.0, 1.0]),
-        (1.0, 0.0, 0.0),
+        affordance.twist_axis,
+        affordance.require_axis_origin(),
         math.pi / 2,
         4,
     )

@@ -677,10 +677,13 @@ migration.
 ## `Press`
 
 Plans **close hand -> approach target -> contact -> press along axis -> return
-to the approach pose**. `PressAffordance` is entity-free and stores an explicit
-target-local surface `press_position` and `press_axis`. `PressGoal.target_pose`
-is either a pose snapshot or `SceneEntityPose`, which resolves through the
-current `PlanningContext.scene` and participates in dynamic-goal recovery.
+to the approach pose**. For an articulation link,
+`Articulation.sample_initial_point_clouds()` stores target-link-local target and
+whole-articulation clouds in `ObjectSemantics.geometry`. `PressAffordance`
+derives `press_axis` from that geometry and can derive the outer-surface
+`press_position` when it is omitted. `PressGoal.target_pose` is either a pose
+snapshot or `SceneEntityPose`, which resolves through the current
+`PlanningContext.scene` and participates in dynamic-goal recovery.
 
 The contact, press, and retract segments use axis-aligned Cartesian keyframes;
 each output sample is grounded with IK instead of being interpolated only in
@@ -698,7 +701,7 @@ right-handed orthonormal rotation even for vertical or oblique press axes.
 
 `PressOptions` controls hand-close interpolation, approach distance,
 press distance, and an optional target-local `press_position`. An options-level
-position overrides the affordance's explicit surface point. The bound
+position overrides the affordance's resolved surface point. The bound
 `primary.grasp` endpoint must provide `grasp`; both endpoints come from the
 generic `ActionBinding`, and the action keeps the gripper closed for all arm
 motion segments. Applications that require force/contact confirmation must
@@ -711,13 +714,25 @@ verify it externally.
 ## `Slide`
 
 Plans a grasped linear interaction for one articulation link. The entity-free
-`SlideAffordance` stores the link-local grasp mesh, `translation_axis`, and
+`SlideAffordance` stores the link-local grasp mesh and resolves its
+`translation_axis` from initial articulation point-cloud geometry, plus
 optional joint name/limits. `SlideGoal.target_pose` supplies the link pose as a
 snapshot or `SceneEntityPose`. The positive axis direction means approach and
 push/close; pull/open uses its negative direction. The affordance inherits
-`AntipodalAffordance` and selects a grasp with `get_best_grasp_poses()`. The grasp
-approach direction is the link-frame translation axis transformed by the
-current link rotation.
+`AntipodalAffordance` and selects a grasp with `get_best_grasp_poses()`. The
+grasp approach direction is the resolved link-frame translation axis
+transformed by the current link rotation.
+
+Axis inference samples the target link and the merged articulation surface at
+`ArticulationCfg.init_qpos`, expressed in the target link's initial local frame.
+Both clouds use Open3D uniform surface sampling. Sampling the whole articulation
+as one merged mesh preserves triangle-area weighting instead of giving every
+link an equal point budget, which would over-represent tiny decorative links.
+The target cloud center and twice its distribution radius define a spherical
+neighborhood in the full cloud. The largest signed component of the
+neighborhood-center offset selects exactly one of `+X`, `-X`, `+Y`, `-Y`, `+Z`,
+or `-Z`. A complete point-cloud geometry snapshot overrides any legacy explicit
+axis fallback.
 
 With `direction="pull"`, the sequence is **approach -> reach -> close -> pull ->
 open**. With `direction="push"`, it is **approach -> reach -> close -> push -> open
@@ -806,8 +821,13 @@ normalized against the resolved hinge limits and passed as the goal's
 
 Plans **approach -> reach -> close -> twist -> open -> retract** for an
 articulation link or a rigid object. The entity-free `TwistAffordance` stores an
-explicit local `grasp_position`, `twist_axis`, and `axis_origin`, plus optional
-joint name/limits. `TwistGoal.target_pose` supplies the grounded target pose.
+explicit local `grasp_position`, plus optional joint name/limits. For an
+articulation link, the same initial target-neighborhood geometry used by
+`Slide` and `Press` resolves `twist_axis` and sets `axis_origin` to the sampled
+target-link cloud centroid. Complete point-cloud geometry overrides both legacy
+fallback values, including when the centroid is not the link-frame origin. A
+rigid object without articulation context may still provide explicit
+compatibility values. `TwistGoal.target_pose` supplies the grounded target pose.
 
 The grasp frame's z-axis follows the world-transformed twist axis; an adaptive
 reference completes a right-handed orthonormal frame. Twist keyframes rotate

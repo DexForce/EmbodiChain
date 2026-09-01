@@ -36,6 +36,81 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     SlideAffordance,
     TwistAffordance,
 )
+from embodichain.lab.sim.atomic_actions.core import ObjectSemantics
+
+POINT_CLOUD_CENTER = torch.tensor([2.0, -3.0, 4.0])
+TARGET_POINT_OFFSETS = torch.tensor(
+    [
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ]
+)
+TARGET_LINK_POINT_CLOUD_KEY = "target_link_point_cloud"
+ARTICULATION_POINT_CLOUD_KEY = "articulation_point_cloud"
+
+
+def _axis_geometry(neighbor_offset: tuple[float, float, float]) -> dict[str, object]:
+    """Build target-local clouds with one neighbor and one distant outlier."""
+    target_points = POINT_CLOUD_CENTER + TARGET_POINT_OFFSETS
+    neighbor = POINT_CLOUD_CENTER + torch.tensor(neighbor_offset)
+    distant_outlier = POINT_CLOUD_CENTER + torch.tensor([8.0, 8.0, 8.0])
+    return {
+        TARGET_LINK_POINT_CLOUD_KEY: target_points.clone(),
+        ARTICULATION_POINT_CLOUD_KEY: torch.cat(
+            (
+                target_points,
+                neighbor.unsqueeze(0),
+                distant_outlier.unsqueeze(0),
+            ),
+            dim=0,
+        ),
+    }
+
+
+def _axis_affordance(
+    kind: str,
+    *,
+    fallback_axis: torch.Tensor,
+    press_position: tuple[float, float, float] | None = (0.0, 0.0, 0.0),
+) -> tuple[Affordance, str]:
+    """Construct one axis-bearing affordance with a legacy fallback axis."""
+    if kind == "slide":
+        return (
+            SlideAffordance(
+                mesh_vertices=torch.tensor(
+                    [
+                        [-0.1, -0.1, 0.0],
+                        [0.1, -0.1, 0.0],
+                        [0.0, 0.1, 0.0],
+                    ]
+                ),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+                translation_axis=fallback_axis,
+            ),
+            "translation_axis",
+        )
+    if kind == "press":
+        return (
+            PressAffordance(
+                press_axis=fallback_axis,
+                press_position=press_position,
+            ),
+            "press_axis",
+        )
+    if kind == "twist":
+        return (
+            TwistAffordance(
+                grasp_position=(0.0, 0.0, 0.0),
+                axis_origin=(0.0, 0.0, 0.0),
+                twist_axis=fallback_axis,
+            ),
+            "twist_axis",
+        )
+    raise ValueError(f"Unsupported affordance kind: {kind!r}.")
 
 
 class TestAffordance:
@@ -155,10 +230,228 @@ class TestAxisAlignAffordance:
             AxisAlignAffordance(internal_axis=internal_axis)
 
 
+class TestArticulationGeometryAxisInference:
+    @pytest.mark.parametrize(
+        ("kind", "axis_field"),
+        (
+            ("slide", "translation_axis"),
+            ("press", "press_axis"),
+            ("twist", "twist_axis"),
+        ),
+    )
+    @pytest.mark.parametrize(
+        ("neighbor_offset", "expected_axis"),
+        (
+            ((1.5, 0.25, -0.125), (1.0, 0.0, 0.0)),
+            ((-1.5, 0.25, -0.125), (-1.0, 0.0, 0.0)),
+            ((0.25, 1.5, -0.125), (0.0, 1.0, 0.0)),
+            ((0.25, -1.5, -0.125), (0.0, -1.0, 0.0)),
+            ((0.25, -0.125, 1.5), (0.0, 0.0, 1.0)),
+            ((0.25, -0.125, -1.5), (0.0, 0.0, -1.0)),
+        ),
+        ids=(
+            "positive_x",
+            "negative_x",
+            "positive_y",
+            "negative_y",
+            "positive_z",
+            "negative_z",
+        ),
+    )
+    def test_object_geometry_ignores_outlier_and_quantizes_offset_to_signed_axis(
+        self,
+        kind: str,
+        axis_field: str,
+        neighbor_offset: tuple[float, float, float],
+        expected_axis: tuple[float, float, float],
+    ) -> None:
+        affordance, actual_axis_field = _axis_affordance(
+            kind,
+            fallback_axis=torch.tensor([1.0, 1.0, 1.0]),
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=_axis_geometry(neighbor_offset),
+            entity_id=f"{kind}-target",
+        )
+
+        assert actual_axis_field == axis_field
+        actual_axis = getattr(affordance, axis_field)
+        assert torch.equal(actual_axis, torch.tensor(expected_axis))
+        assert torch.count_nonzero(actual_axis).item() == 1
+        assert actual_axis.abs().sum().item() == pytest.approx(1.0)
+
+    @pytest.mark.parametrize("kind", ("slide", "press", "twist"))
+    def test_complete_geometry_overrides_explicit_fallback_axis(
+        self, kind: str
+    ) -> None:
+        affordance, axis_field = _axis_affordance(
+            kind,
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=_axis_geometry((0.25, -0.125, -1.5)),
+            entity_id=f"{kind}-target",
+        )
+
+        assert torch.equal(
+            getattr(affordance, axis_field),
+            torch.tensor([0.0, 0.0, -1.0]),
+        )
+
+    @pytest.mark.parametrize("kind", ("slide", "press", "twist"))
+    def test_empty_geometry_preserves_explicit_fallback_axis(self, kind: str) -> None:
+        fallback_axis = torch.tensor([-1.0, 0.0, 0.0])
+        affordance, axis_field = _axis_affordance(
+            kind,
+            fallback_axis=fallback_axis,
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            entity_id=f"rigid-{kind}-target",
+        )
+
+        assert torch.equal(getattr(affordance, axis_field), fallback_axis)
+
+    @pytest.mark.parametrize(
+        "geometry",
+        (
+            {TARGET_LINK_POINT_CLOUD_KEY: POINT_CLOUD_CENTER.unsqueeze(0)},
+            {ARTICULATION_POINT_CLOUD_KEY: POINT_CLOUD_CENTER.unsqueeze(0)},
+        ),
+    )
+    def test_partial_point_cloud_geometry_is_rejected(
+        self,
+        geometry: dict[str, object],
+    ) -> None:
+        affordance, _ = _axis_affordance(
+            "slide",
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        with pytest.raises(ValueError, match="requires both"):
+            ObjectSemantics(
+                affordance=affordance,
+                geometry=geometry,
+                entity_id="partial-geometry-target",
+            )
+
+    def test_degenerate_target_point_cloud_is_rejected(self) -> None:
+        geometry = {
+            TARGET_LINK_POINT_CLOUD_KEY: POINT_CLOUD_CENTER.repeat(3, 1),
+            ARTICULATION_POINT_CLOUD_KEY: POINT_CLOUD_CENTER.unsqueeze(0),
+        }
+        affordance, _ = _axis_affordance(
+            "twist",
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        with pytest.raises(ValueError, match="degenerate target-link"):
+            ObjectSemantics(
+                affordance=affordance,
+                geometry=geometry,
+                entity_id="degenerate-geometry-target",
+            )
+
+    def test_centered_articulation_neighborhood_is_rejected(self) -> None:
+        target_points = POINT_CLOUD_CENTER + TARGET_POINT_OFFSETS
+        geometry = {
+            TARGET_LINK_POINT_CLOUD_KEY: target_points,
+            ARTICULATION_POINT_CLOUD_KEY: target_points.clone(),
+        }
+        affordance, _ = _axis_affordance(
+            "press",
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        with pytest.raises(ValueError, match="centered on the target link"):
+            ObjectSemantics(
+                affordance=affordance,
+                geometry=geometry,
+                entity_id="centered-geometry-target",
+            )
+
+    def test_press_without_position_uses_outer_surface_opposite_inferred_axis(
+        self,
+    ) -> None:
+        affordance = PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=None,
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=_axis_geometry((0.25, -0.125, -1.5)),
+            entity_id="automatic-press-target",
+        )
+
+        assert torch.equal(
+            affordance.press_axis,
+            torch.tensor([0.0, 0.0, -1.0]),
+        )
+        expected_surface_center = POINT_CLOUD_CENTER + torch.tensor([0.0, 0.0, 1.0])
+        assert affordance.press_position == pytest.approx(
+            tuple(float(value) for value in expected_surface_center)
+        )
+
+    def test_twist_geometry_uses_non_origin_target_center_as_axis_origin(self) -> None:
+        affordance = TwistAffordance(
+            grasp_position=(0.0, 0.0, 0.0),
+            axis_origin=(9.0, 8.0, 7.0),
+            twist_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=_axis_geometry((0.25, -0.125, -1.5)),
+            entity_id="automatic-twist-target",
+        )
+
+        assert torch.equal(
+            affordance.twist_axis,
+            torch.tensor([0.0, 0.0, -1.0]),
+        )
+        assert affordance.axis_origin == pytest.approx(
+            tuple(float(value) for value in POINT_CLOUD_CENTER)
+        )
+
+    def test_twist_without_point_cloud_geometry_preserves_axis_origin_fallback(
+        self,
+    ) -> None:
+        affordance = TwistAffordance(
+            grasp_position=(0.0, 0.0, 0.0),
+            axis_origin=(9.0, 8.0, 7.0),
+            twist_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            entity_id="rigid-twist-target",
+        )
+
+        assert torch.equal(
+            affordance.twist_axis,
+            torch.tensor([1.0, 0.0, 0.0]),
+        )
+        assert affordance.axis_origin == pytest.approx((9.0, 8.0, 7.0))
+
+
 class TestTwistAffordance:
-    def test_requires_explicit_grasp_position_and_axis_origin(self):
+    def test_requires_explicit_grasp_position(self):
         with pytest.raises(TypeError, match="grasp_position"):
             TwistAffordance()  # type: ignore[call-arg]
+
+    def test_requires_axis_origin_before_use_without_point_cloud_geometry(self):
+        affordance = TwistAffordance(grasp_position=(0.0, 0.0, 0.0))
+
+        with pytest.raises(ValueError, match="provided explicitly or resolved"):
+            affordance.require_axis_origin()
 
     @pytest.mark.parametrize(
         "twist_axis",
@@ -402,9 +695,11 @@ class TestOpenDoorAffordance:
 
 
 class TestPressAffordance:
-    def test_requires_explicit_surface_press_position(self):
-        with pytest.raises(TypeError, match="press_position"):
-            PressAffordance()  # type: ignore[call-arg]
+    def test_requires_surface_position_before_pose_without_point_cloud_geometry(self):
+        affordance = PressAffordance()
+
+        with pytest.raises(ValueError, match="provided explicitly or resolved"):
+            affordance.get_press_pose(torch.eye(4).unsqueeze(0))
 
     @pytest.mark.parametrize(
         "press_axis",

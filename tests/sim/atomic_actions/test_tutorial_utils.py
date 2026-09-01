@@ -132,6 +132,71 @@ SCENE_FREE_TUTORIAL_MODULES = (
 )
 
 
+def _tutorial_axis_geometry(
+    neighbor_offset: tuple[float, float, float],
+) -> dict[str, torch.Tensor]:
+    """Build non-origin target-local geometry for tutorial semantics tests."""
+    center = torch.tensor([2.0, -3.0, 4.0])
+    target_points = center + torch.tensor(
+        [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ]
+    )
+    return {
+        "target_link_point_cloud": target_points,
+        "articulation_point_cloud": torch.cat(
+            (
+                target_points,
+                (center + torch.tensor(neighbor_offset)).unsqueeze(0),
+            )
+        ),
+    }
+
+
+class _TutorialArticulation:
+    """Minimal articulation surface used by automatic-axis tutorial tests."""
+
+    def __init__(self, geometry: dict[str, torch.Tensor]) -> None:
+        self.device = torch.device("cpu")
+        self.geometry = geometry
+        self.sampled_link_name: str | None = None
+
+    def get_link_vert_face(self, link_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        del link_name
+        return (
+            self.geometry["target_link_point_cloud"],
+            torch.tensor(
+                [
+                    [0, 2, 4],
+                    [2, 1, 4],
+                    [1, 3, 4],
+                    [3, 0, 4],
+                    [2, 0, 5],
+                    [1, 2, 5],
+                    [3, 1, 5],
+                    [0, 3, 5],
+                ]
+            ),
+        )
+
+    def get_link_pose(self, link_name: str, *, to_matrix: bool) -> torch.Tensor:
+        del link_name
+        assert to_matrix is True
+        return torch.eye(4).unsqueeze(0)
+
+    def sample_initial_point_clouds(
+        self,
+        target_link_name: str,
+    ) -> dict[str, torch.Tensor]:
+        self.sampled_link_name = target_link_name
+        return self.geometry
+
+
 def _run_obstacle_animation(*, pace_wall_time: bool) -> tuple[MagicMock, MagicMock]:
     obstacle = MagicMock()
     adapter = MagicMock()
@@ -153,6 +218,70 @@ def _run_obstacle_animation(*, pace_wall_time: bool) -> tuple[MagicMock, MagicMo
     assert torch.equal(result, target_pose)
     assert result.data_ptr() != target_pose.data_ptr()
     return obstacle, adapter
+
+
+@pytest.mark.parametrize(
+    (
+        "module_name",
+        "factory_name",
+        "link_name",
+        "axis_field",
+        "neighbor_offset",
+        "expected_axis",
+    ),
+    (
+        (
+            "slide",
+            "create_drawer_semantics",
+            "large_handle_bar",
+            "translation_axis",
+            (0.25, 1.5, -0.125),
+            (0.0, 1.0, 0.0),
+        ),
+        (
+            "press",
+            "create_button_semantics",
+            "button_cap",
+            "press_axis",
+            (0.25, -0.125, -1.5),
+            (0.0, 0.0, -1.0),
+        ),
+        (
+            "twist",
+            "create_knob_semantics",
+            "cap_1",
+            "twist_axis",
+            (0.25, -0.125, -1.5),
+            (0.0, 0.0, -1.0),
+        ),
+    ),
+)
+def test_articulation_tutorial_semantics_resolve_axis_from_initial_point_clouds(
+    module_name: str,
+    factory_name: str,
+    link_name: str,
+    axis_field: str,
+    neighbor_offset: tuple[float, float, float],
+    expected_axis: tuple[float, float, float],
+) -> None:
+    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    geometry = _tutorial_axis_geometry(neighbor_offset)
+    articulation = _TutorialArticulation(geometry)
+
+    with patch.object(module, "Articulation", _TutorialArticulation):
+        result = getattr(module, factory_name)(articulation)
+
+    semantics = result[0] if isinstance(result, tuple) else result
+    assert articulation.sampled_link_name == link_name
+    assert semantics.geometry is geometry
+    assert torch.equal(
+        getattr(semantics.affordance, axis_field),
+        torch.tensor(expected_axis),
+    )
+    if module_name == "press":
+        assert semantics.affordance.press_position == pytest.approx((2.0, -3.0, 5.0))
+    elif module_name == "twist":
+        assert semantics.affordance.axis_origin == pytest.approx((2.0, -3.0, 4.0))
 
 
 def test_should_wait_for_tutorial_input_is_disabled_for_headless_modes() -> None:

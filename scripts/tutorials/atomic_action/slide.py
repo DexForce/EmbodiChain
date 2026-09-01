@@ -65,7 +65,6 @@ DRAWER_ASSET = "Drawer/model_split_links_with_inertials.urdf"
 HANDLE_LINK_NAME = "large_handle_bar"
 DRAWER_POSITION = (-1.1, 0.0, 0.0)
 DRAWER_ORIENTATION = (0.0, 0.0, 90.0)  # degrees
-TRANSLATION_AXIS = (0.0, 1.0, 0.0)  # handle-link frame, approach/push direction
 TRAJECTORY_SAMPLE_COUNT = 140
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
@@ -115,18 +114,14 @@ def create_drawer_semantics(drawer: Articulation) -> ObjectSemantics:
         Pure target-local semantics for the handle's pull/push affordance.
     """
     vertices, triangles = drawer.get_link_vert_face(HANDLE_LINK_NAME)
+    geometry = drawer.sample_initial_point_clouds(HANDLE_LINK_NAME)
     return ObjectSemantics(
         label="drawer_large_handle",
-        geometry={},
+        geometry=geometry,
         entity_id=HANDLE_SCENE_ENTITY_ID,
         affordance=SlideAffordance(
             mesh_vertices=torch.as_tensor(vertices),
             mesh_triangles=torch.as_tensor(triangles),
-            translation_axis=torch.tensor(
-                TRANSLATION_AXIS,
-                dtype=torch.float32,
-                device=drawer.device,
-            ),
         ),
     )
 

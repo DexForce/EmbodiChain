@@ -67,7 +67,6 @@ POST_TRAJECTORY_STEPS = 240
 RIGID_KNOB_POSITION = (-0.7, -0.00, 0.70)
 RIGID_KNOB_SIZE = (0.05, 0.05, 0.05)
 KNOB_SCENE_ENTITY_ID = "twist-target"
-KNOB_AXIS_ORIGIN = (0.0, 0.0, 0.0)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -124,26 +123,26 @@ def create_knob_semantics(
     if isinstance(target, Articulation):
         vertices, _ = target.get_link_vert_face(KNOB_LINK_NAME)
         target_pose = target.get_link_pose(KNOB_LINK_NAME, to_matrix=True)
+        geometry = target.sample_initial_point_clouds(KNOB_LINK_NAME)
         affordance = TwistAffordance(
             grasp_position=_mesh_center(vertices),
-            # The cap_1 revolute axis passes through its link-frame origin.
-            axis_origin=KNOB_AXIS_ORIGIN,
-            twist_axis=torch.tensor([0.0, 0.0, -1.0], device=target.device),
         )
         label = "microwave_power_knob"
     else:
         vertices = target.get_vertices(env_ids=[0], scale=True)[0]
         target_pose = target.get_local_pose(to_matrix=True)
+        geometry = {}
+        mesh_center = _mesh_center(vertices)
         affordance = TwistAffordance(
-            grasp_position=_mesh_center(vertices),
-            axis_origin=KNOB_AXIS_ORIGIN,
+            grasp_position=mesh_center,
+            axis_origin=mesh_center,
             twist_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
         )
         label = "rigid_knob"
     return (
         ObjectSemantics(
             label=label,
-            geometry={},
+            geometry=geometry,
             entity_id=KNOB_SCENE_ENTITY_ID,
             affordance=affordance,
         ),

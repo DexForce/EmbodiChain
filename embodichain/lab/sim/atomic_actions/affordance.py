@@ -16,10 +16,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import torch
+
+_TARGET_LINK_POINT_CLOUD_KEY = "target_link_point_cloud"
+_ARTICULATION_POINT_CLOUD_KEY = "articulation_point_cloud"
 
 
 @dataclass
@@ -48,6 +52,17 @@ class Affordance:
     def get_batch_size(self) -> int:
         """Return the batch size of this affordance data."""
         return 1
+
+    def resolve_from_object_geometry(self, geometry: Mapping[str, Any]) -> None:
+        """Resolve geometry-derived fields after object semantics are assembled.
+
+        Subclasses may override this hook when their derived semantic values
+        require metadata owned by ``ObjectSemantics.geometry``.
+
+        Args:
+            geometry: Non-affordance object geometry metadata.
+        """
+        del geometry
 
 
 @dataclass
@@ -243,18 +258,21 @@ class AxisAlignAffordance(AntipodalAffordance):
 
 @dataclass
 class TwistAffordance(Affordance):
-    """Target-local grasp point and rotation-axis geometry for twisting."""
+    """Target-local grasp point and inferred rotation-axis geometry."""
 
     grasp_position: tuple[float, float, float] = field(kw_only=True)
     """Explicit target-local center of the gripper contact region."""
 
-    axis_origin: tuple[float, float, float] = field(kw_only=True)
-    """Explicit point on the rotation axis in the target-local frame."""
+    axis_origin: tuple[float, float, float] | None = field(
+        default=None,
+        kw_only=True,
+    )
+    """Fallback axis point, overridden by the target point-cloud centroid."""
 
     twist_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
     )
-    """Twist axis expressed in the target object's local frame."""
+    """Twist axis in the target frame, overridden by articulation geometry."""
 
     joint_name: str | None = None
     """Optional stable articulation-joint name associated with the axis."""
@@ -275,10 +293,40 @@ class TwistAffordance(Affordance):
         self.grasp_position = _validate_local_point(
             self.grasp_position, "TwistAffordance.grasp_position"
         )
-        self.axis_origin = _validate_local_point(
-            self.axis_origin, "TwistAffordance.axis_origin"
-        )
+        if self.axis_origin is not None:
+            self.axis_origin = _validate_local_point(
+                self.axis_origin, "TwistAffordance.axis_origin"
+            )
         _validate_joint_metadata(self.joint_name, self.joint_limits)
+
+    def resolve_from_object_geometry(self, geometry: Mapping[str, Any]) -> None:
+        """Infer the twist axis and its target-local origin from point clouds."""
+        resolved = _infer_articulation_neighborhood_axis(
+            geometry,
+            field_name="TwistAffordance.twist_axis",
+        )
+        if resolved is not None:
+            self.twist_axis, target_points = resolved
+            self.axis_origin = tuple(
+                float(component) for component in target_points.mean(dim=0)
+            )
+
+    def require_axis_origin(self) -> tuple[float, float, float]:
+        """Return the explicit or geometry-derived local rotation-axis point.
+
+        Returns:
+            Resolved target-local rotation-axis origin.
+
+        Raises:
+            ValueError: If neither a fallback nor articulation geometry supplied
+                the rotation-axis origin.
+        """
+        if self.axis_origin is None:
+            raise ValueError(
+                "TwistAffordance.axis_origin must be provided explicitly or "
+                "resolved from articulation point-cloud geometry."
+            )
+        return self.axis_origin
 
     def get_grasp_pose(self, target_pose: torch.Tensor) -> torch.Tensor:
         """Construct a deterministic world grasp pose from local geometry.
@@ -320,7 +368,7 @@ class TwistAffordance(Affordance):
 
 @dataclass
 class SlideAffordance(AntipodalAffordance):
-    """Target-local antipodal grasp and translation-axis geometry.
+    """Target-local antipodal grasp and inferred translation-axis geometry.
 
     The positive translation-axis direction denotes approaching and pushing
     the articulated part closed. Pulling moves in the opposite direction.
@@ -337,7 +385,7 @@ class SlideAffordance(AntipodalAffordance):
     translation_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
     )
-    """Approach and push/close direction in the articulation-link frame."""
+    """Approach/push axis, overridden by articulation point-cloud geometry."""
 
     joint_name: str | None = None
     """Optional stable prismatic-joint name associated with the link."""
@@ -359,6 +407,15 @@ class SlideAffordance(AntipodalAffordance):
             raise ValueError("SlideAffordance.translation_axis must be non-zero.")
         self.translation_axis = self.translation_axis.clone()
         _validate_joint_metadata(self.joint_name, self.joint_limits)
+
+    def resolve_from_object_geometry(self, geometry: Mapping[str, Any]) -> None:
+        """Infer the signed Cartesian translation axis from local point clouds."""
+        resolved = _infer_articulation_neighborhood_axis(
+            geometry,
+            field_name="SlideAffordance.translation_axis",
+        )
+        if resolved is not None:
+            self.translation_axis = resolved[0]
 
 
 @dataclass
@@ -558,15 +615,18 @@ class OpenDoorAffordance(AntipodalAffordance):
 
 @dataclass
 class PressAffordance(Affordance):
-    """Explicit target-local contact point and pressing direction."""
+    """Target-local contact point and inferred pressing direction."""
 
     press_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 0.0, 1.0])
     )
-    """Press direction expressed in the target object's local frame."""
+    """Press direction in the target frame, overridden by point-cloud geometry."""
 
-    press_position: tuple[float, float, float] = field(kw_only=True)
-    """Explicit local-frame point on the pressable contact surface."""
+    press_position: tuple[float, float, float] | None = field(
+        default=None,
+        kw_only=True,
+    )
+    """Local contact point; inferred from articulation geometry when omitted."""
 
     def __post_init__(self) -> None:
         if (
@@ -578,9 +638,25 @@ class PressAffordance(Affordance):
         if torch.linalg.vector_norm(self.press_axis) <= 1.0e-6:
             raise ValueError("PressAffordance.press_axis must be non-zero.")
         self.press_axis = self.press_axis.clone()
-        self.press_position = _validate_local_point(
-            self.press_position, "PressAffordance.press_position"
+        if self.press_position is not None:
+            self.press_position = _validate_local_point(
+                self.press_position, "PressAffordance.press_position"
+            )
+
+    def resolve_from_object_geometry(self, geometry: Mapping[str, Any]) -> None:
+        """Infer the press axis and optional outer-surface contact point."""
+        resolved = _infer_articulation_neighborhood_axis(
+            geometry,
+            field_name="PressAffordance.press_axis",
         )
+        if resolved is None:
+            return
+        self.press_axis, target_points = resolved
+        if self.press_position is None:
+            self.press_position = _outer_surface_center(
+                target_points,
+                self.press_axis,
+            )
 
     def get_press_pose(
         self,
@@ -616,6 +692,11 @@ class PressAffordance(Affordance):
         configured_position = (
             self.press_position if configured_position is None else configured_position
         )
+        if configured_position is None:
+            raise ValueError(
+                "PressAffordance.press_position must be provided explicitly or "
+                "resolved from articulation point-cloud geometry."
+            )
         local_press_position = torch.tensor(
             configured_position,
             dtype=torch.float32,
@@ -651,6 +732,133 @@ class PressAffordance(Affordance):
         if position.shape != (3,) or not torch.isfinite(position).all():
             raise ValueError(f"{field_name} must be a finite (x, y, z) tuple.")
         return tuple(float(component) for component in position)
+
+
+def _infer_articulation_neighborhood_axis(
+    geometry: Mapping[str, Any],
+    *,
+    field_name: str,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    """Infer one signed Cartesian axis from target-centered local geometry.
+
+    The target-link point-cloud center defines a spherical neighborhood in the
+    complete articulation cloud. Its radius is twice the target cloud's maximum
+    distance from that center. The largest signed component of the neighborhood
+    center offset selects exactly one of ``+/-X``, ``+/-Y``, or ``+/-Z``.
+
+    Args:
+        geometry: Object geometry containing both point-cloud entries.
+        field_name: Affordance field name used in validation errors.
+
+    Returns:
+        ``(axis, target_points)`` when point-cloud geometry is present, otherwise
+        ``None`` for legacy or non-articulation affordances.
+
+    Raises:
+        TypeError: If geometry or a point cloud has an invalid type.
+        ValueError: If point-cloud metadata is incomplete, malformed, or
+            geometrically degenerate.
+    """
+    if not isinstance(geometry, Mapping):
+        raise TypeError("geometry must be a mapping.")
+    has_target = _TARGET_LINK_POINT_CLOUD_KEY in geometry
+    has_articulation = _ARTICULATION_POINT_CLOUD_KEY in geometry
+    if not has_target and not has_articulation:
+        return None
+    if not has_target or not has_articulation:
+        raise ValueError(
+            f"{field_name} inference requires both "
+            f"{_TARGET_LINK_POINT_CLOUD_KEY!r} and "
+            f"{_ARTICULATION_POINT_CLOUD_KEY!r}."
+        )
+
+    target_points = _validate_local_point_cloud(
+        geometry[_TARGET_LINK_POINT_CLOUD_KEY],
+        field_name=f"geometry[{_TARGET_LINK_POINT_CLOUD_KEY!r}]",
+    )
+    articulation_points = _validate_local_point_cloud(
+        geometry[_ARTICULATION_POINT_CLOUD_KEY],
+        field_name=f"geometry[{_ARTICULATION_POINT_CLOUD_KEY!r}]",
+    )
+    if target_points.device != articulation_points.device:
+        raise ValueError(
+            "Articulation and target-link point clouds must share a device."
+        )
+    target_points = target_points.to(dtype=torch.float32)
+    articulation_points = articulation_points.to(dtype=torch.float32)
+
+    target_center = target_points.mean(dim=0)
+    target_distances = torch.linalg.vector_norm(
+        target_points - target_center,
+        dim=1,
+    )
+    target_radius = target_distances.max()
+    if float(target_radius.item()) <= 1.0e-8:
+        raise ValueError(
+            f"{field_name} cannot be inferred from a degenerate target-link "
+            "point cloud."
+        )
+
+    neighborhood_radius = target_radius * 2.0
+    neighborhood_mask = (
+        torch.linalg.vector_norm(
+            articulation_points - target_center,
+            dim=1,
+        )
+        <= neighborhood_radius
+    )
+    if not bool(neighborhood_mask.any().item()):
+        raise ValueError(f"{field_name} point-cloud neighborhood is empty.")
+    neighborhood_center = articulation_points[neighborhood_mask].mean(dim=0)
+    center_offset = neighborhood_center - target_center
+    axis_index = int(torch.argmax(torch.abs(center_offset)).item())
+    dominant_offset = center_offset[axis_index]
+    offset_tolerance = max(1.0e-8, float(target_radius.item()) * 1.0e-6)
+    if abs(float(dominant_offset.item())) <= offset_tolerance:
+        raise ValueError(
+            f"{field_name} cannot be inferred because the articulation "
+            "neighborhood is centered on the target link."
+        )
+
+    axis = torch.zeros(3, dtype=torch.float32, device=target_points.device)
+    axis[axis_index] = 1.0 if float(dominant_offset.item()) > 0.0 else -1.0
+    return axis, target_points
+
+
+def _validate_local_point_cloud(value: Any, *, field_name: str) -> torch.Tensor:
+    """Validate one non-empty finite floating point cloud."""
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{field_name} must be a torch.Tensor.")
+    if (
+        not value.is_floating_point()
+        or value.dim() != 2
+        or value.shape[1:] != (3,)
+        or value.shape[0] == 0
+        or not bool(torch.isfinite(value).all().item())
+    ):
+        raise ValueError(
+            f"{field_name} must be a non-empty finite floating tensor with "
+            "shape (N, 3)."
+        )
+    return value
+
+
+def _outer_surface_center(
+    target_points: torch.Tensor,
+    inward_axis: torch.Tensor,
+) -> tuple[float, float, float]:
+    """Return the sampled outer-surface center opposite an inward axis."""
+    axis = inward_axis.to(device=target_points.device, dtype=torch.float32)
+    projections = torch.matmul(target_points, axis)
+    minimum = projections.min()
+    radius = torch.linalg.vector_norm(
+        target_points - target_points.mean(dim=0),
+        dim=1,
+    ).max()
+    tolerance = max(1.0e-5, float(radius.item()) * 1.0e-4)
+    surface_points = target_points[projections <= minimum + tolerance]
+    center = surface_points.mean(dim=0)
+    return tuple(float(component) for component in center)
 
 
 def _orthogonal_xy_from_z(z_axis: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

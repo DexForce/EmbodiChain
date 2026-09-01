@@ -101,6 +101,32 @@ _EXPECTED_TRAJECTORY_SAMPLE_COUNT = 40
 _EXPECTED_GRASP_SAMPLES = 1_000
 
 
+def _drawer_handle_point_cloud_geometry() -> dict[str, torch.Tensor]:
+    """Return target-local clouds whose articulation neighborhood lies along +Y."""
+    target_points = torch.tensor(
+        [
+            [-0.10, 0.0, 0.0],
+            [0.10, 0.0, 0.0],
+            [0.0, 0.0, -0.05],
+            [0.0, 0.0, 0.05],
+        ],
+        dtype=torch.float32,
+    )
+    body_points = torch.tensor(
+        [
+            [-0.05, 0.15, -0.05],
+            [0.05, 0.15, -0.05],
+            [-0.05, 0.15, 0.05],
+            [0.05, 0.15, 0.05],
+        ],
+        dtype=torch.float32,
+    )
+    return {
+        "target_link_point_cloud": target_points,
+        "articulation_point_cloud": torch.cat((target_points, body_points), dim=0),
+    }
+
+
 class _NeverObserveProvider:
     """Reject dynamic observations during configuration decoding/compilation."""
 
@@ -533,6 +559,11 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
                 torch.tensor([[0, 1, 2]]),
             )
 
+        @staticmethod
+        def sample_initial_point_clouds(name: str) -> dict[str, torch.Tensor]:
+            assert name == _OPEN_DRAWER_HANDLE_LINK_NAME
+            return _drawer_handle_point_cloud_geometry()
+
     drawer_ref = SceneArticulationRef(_OPEN_DRAWER_ENTITY_ID)
     registry = SceneRegistry(
         (
@@ -576,6 +607,35 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
     assert type(first[0]) is type(second[0])
     assert type(first[0]).call_id == _OPEN_DRAWER_CALL_ID
     assert first[0] is not second[0]
+    first_affordance = first[0]._semantics.affordance
+    assert isinstance(first_affordance, SlideAffordance)
+    assert torch.equal(
+        first_affordance.translation_axis,
+        torch.tensor([0.0, 1.0, 0.0]),
+    )
+
+
+def test_open_drawer_lowerer_keeps_optional_legacy_axis_compatibility() -> None:
+    """Configured Slide accepts an old axis while new deployments omit it."""
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    config = {
+        "kind": "articulation_link_slide",
+        "articulation_id": _OPEN_DRAWER_ENTITY_ID,
+        "articulation_simulation_uid": _OPEN_DRAWER_ENTITY_ID,
+        "link_entity_id": _OPEN_DRAWER_HANDLE_ID,
+    }
+    automatic = _decode_registered_lowerer(config, path="runtime_services.lowerer")
+    legacy = _decode_registered_lowerer(
+        {**config, "translation_axis": [0.0, 1.0, 0.0]},
+        path="runtime_services.lowerer",
+    )
+
+    assert automatic.revision == "3"
+    assert automatic.translation_axis is None
+    assert legacy.translation_axis == (0.0, 1.0, 0.0)
 
 
 def test_open_drawer_lowerer_accepts_only_canonical_payload() -> None:
@@ -594,13 +654,13 @@ def test_open_drawer_lowerer_accepts_only_canonical_payload() -> None:
         ObjectSemantics(
             label="drawer_handle",
             entity_id=_OPEN_DRAWER_HANDLE_ID,
-            geometry={},
+            geometry=_drawer_handle_point_cloud_geometry(),
             affordance=SlideAffordance(
                 mesh_vertices=torch.tensor(
                     [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]
                 ),
                 mesh_triangles=torch.tensor([[0, 1, 2]]),
-                translation_axis=torch.tensor([0.0, 1.0, 0.0]),
+                translation_axis=torch.tensor([-1.0, 0.0, 0.0]),
             ),
         ),
         _OPEN_DRAWER_HANDLE_ID,
@@ -640,13 +700,13 @@ def test_open_drawer_lowerer_owns_a_snapshot_of_the_current_target_pose() -> Non
         ObjectSemantics(
             label="drawer_handle",
             entity_id=_OPEN_DRAWER_HANDLE_ID,
-            geometry={},
+            geometry=_drawer_handle_point_cloud_geometry(),
             affordance=SlideAffordance(
                 mesh_vertices=torch.tensor(
                     [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]
                 ),
                 mesh_triangles=torch.tensor([[0, 1, 2]]),
-                translation_axis=torch.tensor([0.0, 1.0, 0.0]),
+                translation_axis=torch.tensor([-1.0, 0.0, 0.0]),
             ),
         ),
         _OPEN_DRAWER_HANDLE_ID,

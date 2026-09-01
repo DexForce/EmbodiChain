@@ -181,6 +181,7 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 | :--- | :--- | :--- |
 | `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
 | `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
+| `sample_initial_point_clouds(target_link_name)` | `Dict[str, Tensor]` | Uniformly sample the target link and merged articulation surface at `init_qpos`, both in the target link's initial local frame. |
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
 | `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
@@ -192,6 +193,34 @@ print(f"Degrees of freedom: {articulation.dof}")
 print(f"Current Joint Positions: {articulation.get_qpos()}")
 print(f"End Effector Pose: {articulation.get_link_pose('ee_link')}")
 ```
+
+### Initial Link-Local Point Clouds
+
+`sample_initial_point_clouds()` uses the configured initial joint positions and
+forward kinematics, rather than the articulation's mutable runtime state. It
+transforms every link mesh into the requested target link's initial frame,
+merges the meshes, and uses Open3D uniform surface sampling on the combined
+triangle mesh. Sampling the merged mesh makes each surface's representation
+proportional to triangle area instead of assigning the same point count to
+every link. The returned float32 tensors are moved back to the articulation
+device and are ready to store in an atomic action's `ObjectSemantics.geometry`:
+
+```python
+geometry = articulation.sample_initial_point_clouds(
+    "button_cap",
+    articulation_point_count=100_000,
+    target_point_count=5_000,
+)
+target_points = geometry["target_link_point_cloud"]
+articulation_points = geometry["articulation_point_cloud"]
+```
+
+The shown point counts are the defaults. Open3D draws random uniform samples
+from the target mesh and merged articulation mesh independently, so repeated
+calls are not expected to be bitwise identical and consumers should rely on
+the spatial distribution rather than point-for-point correspondence. The
+method requires a built kinematic chain and currently supports unit
+`body_scale`.
 
 ### Visual Appearance
 
