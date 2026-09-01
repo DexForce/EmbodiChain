@@ -1121,7 +1121,7 @@ def test_public_cli_exposes_prepare_run_and_run_all_modes() -> None:
     assert arguments.show_grasp_poses is False
 
 
-def test_run_all_cli_accepts_grasp_pose_visualization() -> None:
+def test_run_all_cli_accepts_execution_visualization_options() -> None:
     arguments = cli.build_parser().parse_args(
         [
             "run-all",
@@ -1136,10 +1136,59 @@ def test_run_all_cli_accepts_grasp_pose_visualization() -> None:
             "--output-root",
             "history",
             "--show-grasp-poses",
+            "--open-window",
         ]
     )
 
     assert arguments.show_grasp_poses is True
+    assert arguments.open_window is True
+
+
+def test_run_all_cli_forwards_open_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    class FakeWorkflow:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def run(self, request, **kwargs):
+            captured.update(kwargs)
+            output = Path(request["output_dir"])
+            return SimpleNamespace(
+                status="succeeded",
+                succeeded=True,
+                failure_class=None,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=output / "final" / "bundle",
+            )
+
+    monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", FakeWorkflow)
+
+    result = cli.main(
+        [
+            "run-all",
+            "--mode",
+            "image",
+            "--task-id",
+            "task",
+            "--instruction",
+            "place the cup",
+            "--image",
+            str(tmp_path / "input.png"),
+            "--output-root",
+            str(tmp_path / "history"),
+            "--open-window",
+        ]
+    )
+
+    assert result == 0
+    assert captured["execute"] is True
+    assert captured["open_window"] is True
 
 
 def test_prepare_cli_stops_before_simulator_execution(
@@ -1199,6 +1248,7 @@ def test_run_cli_executes_an_existing_bundle(
             Path(output).mkdir()
             assert kwargs["num_envs"] == 2
             assert kwargs["failure_policy"] == "continue"
+            assert kwargs["open_window"] is True
             return {
                 "status": "failed",
                 "environments": [
@@ -1220,6 +1270,7 @@ def test_run_cli_executes_an_existing_bundle(
             "2",
             "--failure-policy",
             "continue",
+            "--open-window",
         ]
     )
 

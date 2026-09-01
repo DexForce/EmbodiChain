@@ -69,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
         "run-all", help="Prepare and execute one complete workflow."
     )
     _add_workflow_arguments(run_all_parser)
+    _add_open_window_argument(run_all_parser)
     run_parser = subparsers.add_parser(
         "run", help="Execute an already prepared Task Engine bundle."
     )
@@ -79,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--num-envs", type=int, default=None)
     run_parser.add_argument("--dataset-saving", action="store_true")
     run_parser.add_argument("--show-grasp-poses", action="store_true")
+    _add_open_window_argument(run_parser)
     _add_failure_policy_argument(run_parser)
     return parser
 
@@ -142,6 +144,14 @@ def _add_failure_policy_argument(parser: argparse.ArgumentParser) -> None:
             "Whether dependency failures stop affected downstream execution or "
             "allow diagnostic continuation."
         ),
+    )
+
+
+def _add_open_window_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--open-window",
+        action="store_true",
+        help="Open the native DexSim window during simulator execution.",
     )
 
 
@@ -218,6 +228,7 @@ def _run_workflow(
             dataset_saving=args.dataset_saving,
             failure_policy=args.failure_policy,
             show_grasp_poses=args.show_grasp_poses,
+            open_window=bool(getattr(args, "open_window", False)),
             run_id=allocation.run_id,
             created_at=allocation.created_at,
             execute=execute,
@@ -252,6 +263,7 @@ def _run_prepared_bundle(args: argparse.Namespace) -> int:
             dataset_saving=bool(args.dataset_saving),
             failure_policy=args.failure_policy,
             show_grasp_poses=bool(args.show_grasp_poses),
+            open_window=bool(args.open_window),
         )
     environments = report.get("environments", ())
     successes = [

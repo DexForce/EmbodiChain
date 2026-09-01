@@ -279,10 +279,12 @@ class _Executor:
         *,
         expected_dataset_saving: bool = False,
         expected_show_grasp_poses: bool = False,
+        expected_open_window: bool = False,
     ) -> None:
         self.successes = successes
         self.expected_dataset_saving = expected_dataset_saving
         self.expected_show_grasp_poses = expected_show_grasp_poses
+        self.expected_open_window = expected_open_window
         self.calls = 0
 
     def __call__(
@@ -295,12 +297,14 @@ class _Executor:
         dataset_saving: bool = False,
         failure_policy: str = "stop",
         show_grasp_poses: bool = False,
+        open_window: bool = False,
     ):
         values = self.successes[min(self.calls, len(self.successes) - 1)]
         self.calls += 1
         assert len(values) == num_envs
         assert dataset_saving is self.expected_dataset_saving
         assert show_grasp_poses is self.expected_show_grasp_poses
+        assert open_window is self.expected_open_window
         assert failure_policy == "stop"
         return {
             "status": "succeeded" if all(values) else "failed",
@@ -333,6 +337,30 @@ def test_parallel_workflow_propagates_grasp_pose_visualization(
         planning_cfg=TaskEnginePlanningCfg(),
         execution_cfg=TaskEngineExecutionCfg(num_envs=1),
         show_grasp_poses=True,
+    )
+
+    assert result.succeeded
+
+
+def test_parallel_workflow_propagates_open_window(tmp_path: Path) -> None:
+    candidates = _candidate_set()
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        action_agent=_ActionAgent(),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor(
+            [[True]],
+            expected_open_window=True,
+        ),
+    )
+
+    result = workflow.run(
+        _request(tmp_path),
+        workflow_cfg=TaskEngineWorkflowCfg(),
+        planning_cfg=TaskEnginePlanningCfg(),
+        execution_cfg=TaskEngineExecutionCfg(num_envs=1),
+        open_window=True,
     )
 
     assert result.succeeded
@@ -576,11 +604,17 @@ def test_final_candidate_rebinding_updates_attempt_unbound_audit(
     ("dataset_saving", "expects_filter"),
     [(False, True), (True, False)],
 )
-def test_subprocess_executor_controls_dataset_saving_and_copies_trajectory(
+@pytest.mark.parametrize(
+    ("open_window", "expects_headless"),
+    [(False, True), (True, False)],
+)
+def test_subprocess_executor_controls_launch_options_and_copies_trajectory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     dataset_saving: bool,
     expects_filter: bool,
+    open_window: bool,
+    expects_headless: bool,
 ) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
@@ -640,6 +674,7 @@ def test_subprocess_executor_controls_dataset_saving_and_copies_trajectory(
         dataset_saving=dataset_saving,
         failure_policy="continue",
         show_grasp_poses=True,
+        open_window=open_window,
     )
 
     assert report["status"] == "succeeded"
@@ -652,6 +687,7 @@ def test_subprocess_executor_controls_dataset_saving_and_copies_trajectory(
     assert " prepare" not in " ".join(captured["command"])
     assert " workflow" not in " ".join(captured["command"])
     assert ("--filter_dataset_saving" in captured["command"]) is expects_filter
+    assert ("--headless" in captured["command"]) is expects_headless
     assert "--show-grasp-poses" in captured["command"]
     assert captured["command"][-2:] == ["--failure-policy", "continue"]
     assert captured["log_path"] == attempt / "action.log"

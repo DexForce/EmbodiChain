@@ -112,6 +112,7 @@ class SubprocessActionExecutor:
         dataset_saving: bool = False,
         failure_policy: str = "stop",
         show_grasp_poses: bool = False,
+        open_window: bool = False,
     ) -> Mapping[str, Any]:
         """Run one simulator attempt and preserve its report and trajectory.
 
@@ -124,6 +125,7 @@ class SubprocessActionExecutor:
             failure_policy: Whether failed dependencies stop or permit downstream
                 diagnostic execution.
             show_grasp_poses: Whether to write the valid E5 grasp pair as a PNG.
+            open_window: Whether to open the native DexSim execution window.
 
         Returns:
             Validated Action Engine execution report.
@@ -134,6 +136,8 @@ class SubprocessActionExecutor:
             raise ValueError("failure_policy must be 'stop' or 'continue'.")
         if not isinstance(show_grasp_poses, bool):
             raise TypeError("show_grasp_poses must be a boolean.")
+        if not isinstance(open_window, bool):
+            raise TypeError("open_window must be a boolean.")
         attempt_root.mkdir(parents=True, exist_ok=False)
         command = [
             sys.executable,
@@ -146,8 +150,9 @@ class SubprocessActionExecutor:
             str(num_envs),
             "--seed",
             str(seed),
-            "--headless",
         ]
+        if not open_window:
+            command.append("--headless")
         if not dataset_saving:
             command.append("--filter_dataset_saving")
         if show_grasp_poses:
@@ -157,7 +162,8 @@ class SubprocessActionExecutor:
         print(
             "[Task Engine] Starting "
             f"{attempt_root.name}: seed={seed}, num_envs={num_envs}, "
-            f"dataset_saving={dataset_saving}, failure_policy={failure_policy}",
+            f"dataset_saving={dataset_saving}, open_window={open_window}, "
+            f"failure_policy={failure_policy}",
             flush=True,
         )
         completed = _run_streaming_process(command, log_path)
@@ -307,6 +313,7 @@ class TaskEngineWorkflow:
         dataset_saving: bool = False,
         failure_policy: str = "stop",
         show_grasp_poses: bool = False,
+        open_window: bool = False,
         run_id: str | None = None,
         created_at: datetime | None = None,
         overwrite: bool = False,
@@ -327,6 +334,7 @@ class TaskEngineWorkflow:
             failure_policy: Whether failed dependencies stop or permit downstream
                 diagnostic execution.
             show_grasp_poses: Whether to write the valid E5 grasp pair as a PNG.
+            open_window: Whether simulator attempts open the native DexSim window.
             run_id: Optional externally allocated run identifier.
             created_at: Optional timezone-aware run creation timestamp.
             overwrite: Whether to atomically replace an existing run directory.
@@ -340,6 +348,8 @@ class TaskEngineWorkflow:
             raise TypeError("dataset_saving must be a boolean.")
         if not isinstance(show_grasp_poses, bool):
             raise TypeError("show_grasp_poses must be a boolean.")
+        if not isinstance(open_window, bool):
+            raise TypeError("open_window must be a boolean.")
         if failure_policy not in {"stop", "continue"}:
             raise ValueError("failure_policy must be 'stop' or 'continue'.")
         if workflow_cfg is None or planning_cfg is None or execution_cfg is None:
@@ -902,6 +912,8 @@ class TaskEngineWorkflow:
                     }
                     if show_grasp_poses:
                         execution_options["show_grasp_poses"] = True
+                    if open_window:
+                        execution_options["open_window"] = True
                     report = self.action_executor(
                         preparation.output_dir,
                         action_root,
