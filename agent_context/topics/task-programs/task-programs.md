@@ -198,6 +198,25 @@ Keep these boundaries separate:
 reward, reset, and persistence. Final success is published only after every
 segment lifecycle completes normally.
 
+## Demonstration outcome and persistence
+
+The bridge's accepted mask remains the sole segment-quality authority. The
+common demo executor records it in `DemoSegmentResult.successes`, classifies the
+first authoritative failure phase in `outcome_kinds`, and writes
+`segment_accepted`, `segment_attempt_id`, and `continuity_id` for every real
+rollout frame. Task Program segment metadata uses `task_program_id`; LeRobot
+fragment sidecars copy it to the provider-neutral `source_program_id` field.
+
+`DemoExecutionCfg` is collector-owned, not part of the Task Program language.
+Its default `continuous` mode preserves episode semantics. Its
+`segment_fragments` mode persists eligible naturally executed segments as
+independent LeRobot episodes, with failed fragments requiring explicit opt-in.
+Current execution remains fail-closed and every frame has `continuity_id == 0`;
+checkpoint capture, state restore, and suffix resume are deferred. Fragment
+commits are individually durable and recorder-locally idempotent by stable
+`fragment_id`, so a later write failure does not duplicate an earlier fragment
+on retry.
+
 ## Parallel and registered calls
 
 Parallel execution requires disjoint resource claims and runtime targets,
@@ -245,6 +264,8 @@ language.
 | Live simulation binding | `integrations/simulation/` |
 | Gym action/segment lifecycle | `gym/envs/task_program/bridge.py` |
 | Episode program selection/final success | `gym/envs/embodied_env.py` |
+| Outcome annotations and persistence mode | `gym/envs/demo.py`, `gym/envs/embodied_env.py` |
+| LeRobot fragment slicing/idempotency | `gym/envs/managers/datasets.py`, `async_datasets.py` |
 
 ## Focused validation
 
@@ -252,6 +273,7 @@ language.
 pytest -q tests/lab/task_program
 pytest -q tests/gym/envs/task_program
 pytest -q tests/gym/envs/test_embodied_env_task_program.py
+pytest -q tests/gym/envs/test_demo.py tests/gym/envs/managers
 pytest -q tests/agents/mllm/test_task_program.py
 pytest -q tests/sim/atomic_actions
 python docs/scripts/check_api_docs.py

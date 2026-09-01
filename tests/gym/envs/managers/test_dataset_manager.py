@@ -210,6 +210,32 @@ def test_initialize_episode_saves_failed_reset_envs_when_enabled() -> None:
     assert torch.equal(manager.saved_env_ids, torch.tensor([1, 2]))
 
 
+def test_initialize_episode_saves_row_with_accepted_segment_fragment() -> None:
+    """Fragment eligibility is independent of whole-episode success."""
+    env, manager = make_env_for_episode_selection(
+        save_failed_episodes=False,
+        successful_env_ids=[],
+    )
+    env._demo_episode_metadata = [
+        {"output_mode": "continuous", "segments": []},
+        {
+            "output_mode": "segment_fragments",
+            "save_failed_fragments": False,
+            "segments": [{"start_step": 0, "end_step": 2, "success": True}],
+        },
+        {"output_mode": "continuous", "segments": []},
+    ]
+    env._new_demo_episode_metadata = lambda env_id: {
+        "output_mode": "continuous",
+        "env_id": env_id,
+        "segments": [],
+    }
+
+    EmbodiedEnv._initialize_episode(env, env_ids=[1, 2])
+
+    assert torch.equal(manager.saved_env_ids, torch.tensor([1]))
+
+
 def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
     """An explicit commit subset persists only requested dataset rows."""
     env, manager = make_env_for_episode_selection(

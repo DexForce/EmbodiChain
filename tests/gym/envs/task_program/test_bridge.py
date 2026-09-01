@@ -1428,6 +1428,7 @@ def test_zero_command_terminal_runtime_failure_preserves_trace_and_validates_onc
     assert len(result.segments) == 1
     segment_result = result.segments[0]
     assert segment_result.failure_reason == "segment_validation_failed"
+    assert segment_result.outcome_kinds == ("runtime_failed", "runtime_failed")
     runtime_trace = segment_result.metadata["runtime"]
     assert runtime_trace["status"] == "failed"
     assert (
@@ -1540,6 +1541,10 @@ def test_post_policy_timeout_is_row_local_and_preserved_in_segment_result() -> N
     assert result.segments[0].failure_reasons == (
         None,
         "segment_validation_failed",
+    )
+    assert result.segments[0].outcome_kinds == (
+        "succeeded",
+        "post_policy_failed",
     )
     assert result.segments[0].metadata["post_policies"][0]["result_mask"] == [
         True,

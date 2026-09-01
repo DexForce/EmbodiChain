@@ -13,6 +13,8 @@
 | `embodichain/lab/gym/envs/base_env.py` | `BaseEnv(gym.Env)` + `EnvCfg` — low-level env loop |
 | `embodichain/lab/gym/envs/types.py` | `ControllerAction` — owned controller-ready action boundary |
 | `embodichain/lab/gym/envs/embodied_env.py` | `EmbodiedEnv(BaseEnv)` + `EmbodiedEnvCfg` — modular task base class |
+| `embodichain/lab/gym/envs/demo.py` | Segment-aware demonstration execution, result, and persistence-mode contracts |
+| `embodichain/lab/scripts/run_env.py` | Offline collection retries and explicit dataset commit/abort boundaries |
 | `embodichain/lab/gym/utils/registration.py` | `@register_env` decorator + `REGISTERED_ENVS` registry + `make()` |
 | `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing and config-owned runtime registration |
 | `embodichain/lab/gym/utils/_component_composition.py` | Reusable physical environment, embodiment, and standalone scene resolution |
@@ -74,6 +76,8 @@ gym.Env
   dataset save, and manager resets.
 - Overrides `_update_sim_state()` to run event-manager `interval` mode.
 - Manages rollout buffer (expert or RL mode) via `_hook_after_sim_step()`.
+- Owns per-row demonstration metadata and dense segment acceptance, attempt,
+  and causal-continuity annotations.
 - `extensions` dict entries are set as attributes on both cfg and env instance.
 
 ### Action boundary (`types.py`, `embodied_env.py`)
@@ -109,6 +113,10 @@ gym.Env
   results.
 - `reset()` lets `BaseEnv` read that final mask before clearing the active
   bridge, preventing completed state from leaking into the next episode.
+- `DemoSegmentResult.successes` is the persisted segment acceptance authority.
+  `DemoExecutionCfg` keeps continuous episodes as the default and can instead
+  make each eligible natural segment an independent dataset fragment. This
+  mode does not restore state or resume after failure.
 - Environments without a Task Program keep the ordinary `BaseEnv.is_task_success()`
   behavior and task-specific overrides.
 
@@ -279,9 +287,9 @@ reset(options)
   ├── is_task_success() → save status before resetting
   ├── sim.reset_objects_state(env_ids, excluded_uids)
   ├── _initialize_episode(env_ids)
-  │     ├── dataset_manager.apply("save") for successful episodes (or an
-  │     │   explicit dataset-only ``commit_env_ids`` subset during a final
-  │     │   vector batch)
+  │     ├── dataset_manager.apply("save") for successful episodes, eligible
+  │     │   segment-fragment rows, or an explicit dataset-only
+  │     │   ``commit_env_ids`` subset during a final vector batch
   │     ├── event_manager.apply("reset", env_ids)
   │     ├── observation_manager.reset(env_ids)
   │     └── reward_manager.reset(env_ids)
