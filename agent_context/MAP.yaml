@@ -21,7 +21,12 @@ topics:
       - simulation
       - SimulationManager
       - SimulationManagerCfg
+      - PhysicsBackendCfg
+      - DefaultPhysicsCfg
       - DexSim
+      - AutoSolverCfg
+      - Newton AutoSolver
+      - solver_cfg
       - world
       - arena
       - physics step
@@ -58,6 +63,7 @@ topics:
       - embodichain/lab/sim/__init__.py
       - embodichain/lab/sim/sim_manager.py
       - embodichain/lab/sim/cfg/
+      - embodichain/lab/sim/physics/
       - embodichain/lab/sim/common.py
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py

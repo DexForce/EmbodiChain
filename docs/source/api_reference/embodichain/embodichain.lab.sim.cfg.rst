@@ -36,7 +36,6 @@ DexSim names belong to the runtime and Spawn SDK adapter boundary.
 .. autosummary::
 
    RenderCfg
-   PhysicsCfg
    PhysicsBackendCfg
    DefaultPhysicsCfg
    NewtonPhysicsCfg

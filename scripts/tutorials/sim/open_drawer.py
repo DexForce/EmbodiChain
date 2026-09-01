@@ -28,6 +28,7 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
     NewtonPhysicsCfg,
     RenderCfg,
@@ -122,7 +123,7 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
             asset_physics_mode="overlay",
             init_pos=(0.72, 0.0, 0.42),
             init_rot=(0.0, 0.0, 180.0),
-            fix_base=True,
+            root_props=ArticulationRootPropertiesCfg(fixed_base=True),
             joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
             attrs=RigidBodyPhysicsCfg.from_dict(
                 {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}}

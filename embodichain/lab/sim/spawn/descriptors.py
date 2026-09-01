@@ -819,7 +819,7 @@ def _compile_joint_properties(
         if newton_solver_type is None
         else newton_solver_type.replace("-", "_").lower()
     )
-    if normalized_solver not in {None, "mujoco_warp", "mjwarp"} and any(
+    if normalized_solver not in {None, "auto", "mujoco_warp", "mjwarp"} and any(
         mode == 1 for mode in joint_target_modes.values()
     ):
         warnings.warn(

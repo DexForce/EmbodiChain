@@ -82,7 +82,6 @@ from embodichain.lab.sim.sensors import (
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     PhysicsBackendCfg,
-    PhysicsCfg,
     GPUMemoryCfg,
     DefaultPhysicsCfg,
     NewtonPhysicsCfg,
@@ -220,7 +219,7 @@ class SimulationManagerCfg:
         device: str | torch.device | None = None,
         physics_cfg: PhysicsBackendCfg | None = None,
         sim_device: str | torch.device | None = None,
-        physics_config: PhysicsCfg | None = None,
+        physics_config: DefaultPhysicsCfg | None = None,
         gpu_memory_config: GPUMemoryCfg | None = None,
         profiler: ProfilerCfg | None = None,
         visualization: VisualizationCfg | None = None,
@@ -242,7 +241,7 @@ class SimulationManagerCfg:
             )
         self.physics_cfg = physics_cfg
         if gpu_memory_config is not None:
-            if not isinstance(self.physics_cfg, PhysicsCfg):
+            if not isinstance(self.physics_cfg, DefaultPhysicsCfg):
                 logger.log_error(
                     "gpu_memory_config is only supported by the default physics backend.",
                     ValueError,
@@ -381,13 +380,13 @@ class SimulationManagerCfg:
     @property
     def gpu_memory_config(self) -> GPUMemoryCfg | None:
         """Legacy alias for the default backend GPU-memory configuration."""
-        if not isinstance(self.physics_cfg, PhysicsCfg):
+        if not isinstance(self.physics_cfg, DefaultPhysicsCfg):
             return None
         return self.physics_cfg.gpu_memory
 
     @gpu_memory_config.setter
     def gpu_memory_config(self, value: GPUMemoryCfg) -> None:
-        if not isinstance(self.physics_cfg, PhysicsCfg):
+        if not isinstance(self.physics_cfg, DefaultPhysicsCfg):
             raise AttributeError(
                 "gpu_memory_config is unavailable for the Newton physics backend."
             )

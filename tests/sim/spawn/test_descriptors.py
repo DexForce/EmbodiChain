@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import copy
+import warnings
 from dataclasses import fields, is_dataclass
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -922,7 +923,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
     assert descriptor.enable_self_collision is False
 
 
-def test_unset_root_properties_preserve_usd_values() -> None:
+def test_default_root_properties_override_usd_values() -> None:
     source = ArticulationDesc(
         name="source",
         fixed_base=False,
@@ -932,6 +933,32 @@ def test_unset_root_properties_preserve_usd_values() -> None:
         uid="robot",
         fpath="robot.usd",
         asset_physics_mode="preserve",
+    )
+
+    with patch(
+        "embodichain.lab.sim.spawn.usd._parse_singleton",
+        return_value=(SimpleNamespace(materials={}), source),
+    ):
+        descriptor, _ = articulation_desc_from_usd(cfg)
+
+    assert descriptor.fixed_base is True
+    assert descriptor.enable_self_collision is False
+
+
+def test_explicit_none_root_properties_preserve_usd_values() -> None:
+    source = ArticulationDesc(
+        name="source",
+        fixed_base=False,
+        enable_self_collision=True,
+    )
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.usd",
+        asset_physics_mode="preserve",
+        root_props=ArticulationRootPropertiesCfg(
+            fixed_base=None,
+            self_collision_enabled=None,
+        ),
     )
 
     with patch(
@@ -1084,6 +1111,26 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
 
     with pytest.warns(UserWarning, match="POSITION is emulated"):
         configure_articulation_desc(descriptor, cfg, newton_solver_type="xpbd")
+
+
+def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        joint_drive_props=JointDrivePropertiesCfg(
+            target_mode="position",
+            stiffness=12.0,
+            damping=4.0,
+        ),
+    )
+    descriptor = _resolved_articulation_desc()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="auto")
+
+    assert not caught
 
 
 def test_default_articulation_body_properties_compile_per_link() -> None:

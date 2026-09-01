@@ -119,7 +119,8 @@ class DefaultRigidBodyPropertiesCfg:
     enable_ccd: bool | None = None
     """Whether continuous collision detection is enabled for this body.
 
-    Scene-level CCD must also be enabled through :attr:`PhysicsCfg.enable_ccd`.
+    Scene-level CCD must also be enabled through
+    :attr:`DefaultPhysicsCfg.enable_ccd`.
     """
 
     min_position_iters: int | None = None

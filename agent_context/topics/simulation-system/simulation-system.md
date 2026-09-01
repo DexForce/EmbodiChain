@@ -189,6 +189,7 @@ readiness path defensively before advancing the requested physics steps.
 | Area | Owner | Routed topic |
 |------|-------|--------------|
 | World, arenas, asset registries, physics update, cleanup | `sim_manager.py` | `simulation-system` |
+| Backend activation and configured/resolved solver state | `physics/` | `simulation-system` |
 | Spawn declaration, source resolution, commit/rebuild, and facade binding | `spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` | `simulation-system` |
 | Backend-neutral batched state/property access | `objects/backends/spawn.py` | `simulation-system` |
 | Shared object, render, physics, drive, and URDF configs | `cfg/` domain modules; `cfg/__init__.py` preserves the public import surface | `configclass-pattern` for config mechanics |
@@ -217,10 +218,25 @@ origin, axis, and optional limits. Consumers must not reach into
 
 `SimulationManagerCfg.physics_cfg` is the backend selector as well as the
 backend config. `PhysicsBackendCfg` owns common timing, device, and gravity;
-`DefaultPhysicsCfg`/the compatibility name `PhysicsCfg` add default-backend
-scene settings, while `NewtonPhysicsCfg` adds the Newton solver, substeps,
-gradient/CUDA-graph behavior, and a grouped `NewtonCollisionPipelineCfg`.
+`DefaultPhysicsCfg` adds default-backend scene settings, while
+`NewtonPhysicsCfg` adds the Newton solver, substeps, gradient/CUDA-graph
+behavior, and a grouped `NewtonCollisionPipelineCfg`.
 Do not add a second backend string that can disagree with the config type.
+Leaving `NewtonPhysicsCfg.solver_cfg=None` preserves DexSim's
+`AutoSolverCfg` default. A DexSim build exporting `AutoSolverCfg` is required;
+EmbodiChain does not substitute a concrete solver. DexSim resolves that
+placeholder from the complete Spawn scene during finalization: rigid-only
+scenes select XPBD, scenes with an articulation select MuJoCo Warp, and
+supported particle families select their matching particle/deformable solver.
+A mapping with `solver_type: auto` or
+`class_type: AutoSolverCfg` is the explicit equivalent. Gradient mode must
+still select `semi_implicit` explicitly because AutoSolver does not choose a
+differentiable solver. Before finalization, EmbodiChain treats `auto` as
+unresolved; after finalization, `NewtonPhysicsBackend.solver_type` reads the
+concrete type from DexSim's World-owned backend.
+The package dependency must identify the exact DexSim dev build containing
+this API; a base `==0.4.3` requirement also accepts older local-version wheels
+that do not export `AutoSolverCfg` and is therefore insufficient.
 Newton's `suppress_warp_kernel_logs=True` suppresses Warp's one-time runtime
 banner plus module compile/load chatter during manager startup, build, facade
 initialization, and physics updates, then restores the process-wide setting.
@@ -313,8 +329,11 @@ For a genuine backend-specific asset or actuator difference, subclass
 `newton_<solver>` alternatives.
 `SimulationManager.add_robot()` derives the
 selection from its existing `physics_cfg`, deep-copies the selected complete
-robot config, and never merges alternatives. This is the only robot preset
-selection boundary; do not add a second backend selector to robot configs.
+robot config, and never merges alternatives. While AutoSolver is unresolved,
+only the generic `newton` and `default` alternatives are eligible; do not guess
+a solver-specific preset before DexSim has inspected the complete scene. This
+is the only robot preset selection boundary; do not add a second backend
+selector to robot configs.
 
 File-backed rigid objects and articulations share one source-independent
 physics policy: `asset_physics_mode="preserve"` keeps properties resolved from
@@ -328,8 +347,11 @@ If an articulation in preserve mode contains explicit `attrs`, `link_attrs`,
 naming the ignored overlay fields instead of silently discarding them.
 Import concerns that the source format does not author, such as URDF root
 fixation and body scale, remain controlled by their dedicated fields. An
-explicit `root_props` value also overrides the corresponding USD root
-property; `None` preserves USD and selects the established URDF import default.
+articulation defaults to `root_props.fixed_base=True` and
+`root_props.self_collision_enabled=False`, so both URDF and USD assets are
+fixed to the world with self-collision disabled unless configured otherwise.
+Setting either field explicitly to `None` preserves the corresponding USD
+property and selects the established URDF import default.
 
 `ArticulationRootPropertiesCfg` is the single root-property definition. Spawn
 consumes its portable fixed-base and self-collision intent through common

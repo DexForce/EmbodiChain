@@ -34,8 +34,8 @@ EmbodiChain configs form a nested hierarchy:
 EmbodiedEnvCfg
 ├── sim_cfg: SimulationManagerCfg
 │   ├── render_cfg: RenderCfg
-│   ├── physics_config: PhysicsCfg
-│   ├── gpu_memory_config: GPUMemoryCfg
+│   ├── physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg
+│   │   └── gpu_memory: GPUMemoryCfg  # Default backend only
 │   └── visualization: VisualizationCfg
 ├── robot: RobotCfg
 │   ├── urdf_cfg: URDFCfg

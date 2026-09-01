@@ -46,7 +46,6 @@ from embodichain.lab.sim.cfg import (
     NewtonPhysicsCfg,
     NewtonRigidBodyMaterialCfg,
     PhysicsBackendCfg,
-    PhysicsCfg,
     RenderCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -66,6 +65,7 @@ def test_cfg_package_preserves_the_public_facade() -> None:
     from embodichain.lab.sim.cfg.robot import RobotCfg as LeafRobotCfg
 
     assert hasattr(sim_cfg, "__path__")
+    assert not hasattr(sim_cfg, "PhysicsCfg")
     assert sim_cfg.RigidBodyPhysicsCfg is LeafRigidBodyPhysicsCfg
     assert sim_cfg.RobotCfg is LeafRobotCfg
 
@@ -80,6 +80,7 @@ def test_articulation_cfg_defaults_to_preserving_asset_physics() -> None:
 
 def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
     field_names = {item.name for item in fields(ArticulationCfg)}
+    root_props = ArticulationCfg().root_props
 
     assert {
         "fix_base",
@@ -91,7 +92,9 @@ def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
         "drive_pros",
         "joint_props",
     }.isdisjoint(field_names)
-    assert ArticulationCfg().root_props == ArticulationRootPropertiesCfg()
+    assert root_props == ArticulationRootPropertiesCfg()
+    assert root_props.fixed_base is True
+    assert root_props.self_collision_enabled is False
 
 
 @pytest.mark.parametrize(
@@ -515,7 +518,11 @@ def test_robot_preset_accepts_newton_solver_alias() -> None:
     preset = _NewtonSolverAliasRobotPresetCfg()
 
     assert preset.resolve(DefaultPhysicsCfg()).uid == "fallback"
-    assert preset.resolve(NewtonPhysicsCfg()).uid == "mjwarp"
+    assert preset.resolve(NewtonPhysicsCfg()).uid == "fallback"
+    assert (
+        preset.resolve(NewtonPhysicsCfg(solver_cfg={"solver_type": "mjwarp"})).uid
+        == "mjwarp"
+    )
 
 
 @configclass
@@ -719,7 +726,7 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
     assert isinstance(restored_drive, NewtonJointDrivePropertiesCfg)
     assert root.to_dict() == {
         "fixed_base": False,
-        "self_collision_enabled": None,
+        "self_collision_enabled": False,
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
@@ -819,26 +826,26 @@ def test_newton_physics_normalizes_mapping_collision_config() -> None:
 
 
 def test_default_physics_accepts_the_same_gravity_input_shape() -> None:
-    cfg = PhysicsCfg(gravity=[0.0, 0.0, -1.5])
+    cfg = DefaultPhysicsCfg(gravity=[0.0, 0.0, -1.5])
 
     assert cfg.to_dexsim_args()["gravity"] == [0.0, 0.0, -1.5]
-    assert PhysicsCfg().to_dexsim_args()["gravity"] == [0.0, 0.0, -9.81]
+    assert DefaultPhysicsCfg().to_dexsim_args()["gravity"] == [0.0, 0.0, -9.81]
 
     with pytest.raises(ValueError, match="three finite values"):
-        PhysicsCfg(gravity=[0.0, -9.81]).to_dexsim_args()
+        DefaultPhysicsCfg(gravity=[0.0, -9.81]).to_dexsim_args()
 
 
-def test_physics_cfg_does_not_expose_fixed_solver_options() -> None:
+def test_default_physics_cfg_does_not_expose_fixed_solver_options() -> None:
     """Fixed solver implementation details are not part of the public config."""
-    physics_cfg = PhysicsCfg()
+    physics_cfg = DefaultPhysicsCfg()
 
     assert not hasattr(physics_cfg, "enable_enhanced_determinism")
     assert not hasattr(physics_cfg, "enable_friction_every_iteration")
 
 
-def test_physics_cfg_applies_fixed_solver_defaults() -> None:
+def test_default_physics_cfg_applies_fixed_solver_defaults() -> None:
     """Removed solver options retain the Default backend's established values."""
-    physics_args = PhysicsCfg(enable_ccd=True).to_dexsim_args()
+    physics_args = DefaultPhysicsCfg(enable_ccd=True).to_dexsim_args()
 
     assert physics_args["enable_ccd"] is True
     assert physics_args["enable_enhanced_determinism"] is False

@@ -66,18 +66,23 @@ class ArticulationRootPropertiesCfg:
 
     ``fixed_base`` and ``self_collision_enabled`` are consumed by both
     backends. ``sleep_threshold`` and the solver-iteration fields are supported
-    only by the Default backend and are ignored by Newton. ``None`` preserves
-    the source value or backend/import default.
+    only by the Default backend and are ignored by Newton. By default, the
+    articulation root is fixed and self-collision is disabled. Explicit
+    ``None`` values preserve the source value or backend/import default.
     """
 
-    fixed_base: bool | None = None
-    """Whether the articulation root is rigidly fixed to the world frame."""
+    fixed_base: bool | None = True
+    """Whether the articulation root is rigidly fixed to the world frame.
 
-    self_collision_enabled: bool | None = None
+    Set to ``None`` to preserve the source value or backend/import default.
+    """
+
+    self_collision_enabled: bool | None = False
     """Whether non-filtered link pairs in the articulation may self-collide.
 
     Newton may still apply source-authored or Spawn-owned filtering to adjacent
-    parent-child bodies.
+    parent-child bodies. Set to ``None`` to preserve the source value or
+    backend/import default.
     """
 
     sleep_threshold: float | None = None
@@ -427,9 +432,10 @@ class ArticulationCfg(ObjectBaseCfg):
     """Grouped articulation-root properties.
 
     Fixed-base and self-collision intent is portable. Root sleep and solver
-    iterations are Default-only fields and are ignored by Newton. ``None``
-    preserves an authored USD/backend value. For URDF imports, unset portable
-    fields use the established fixed-base, self-collision-off defaults.
+    iterations are Default-only fields and are ignored by Newton. The portable
+    fields default to a fixed base with self-collision disabled. Set either
+    field to ``None`` to preserve an authored USD/backend value; URDF imports
+    then use the established fixed-base, self-collision-off defaults.
     """
 
     joint_drive_props: JointDrivePropertiesCfg | None = None

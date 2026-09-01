@@ -805,6 +805,10 @@ structured invalidation/replan events, and requires terminal completion. The
 dynamic-obstacle example additionally uses dense `morphit` robot collision
 spheres, proves that the moved cuboid intersects the original TCP path, and
 requires the replanned TCP path to retain a positive minimum clearance.
+The `place.py` tutorial authors matching Newton contact stiffness and damping
+on the cube and gripper collision links before `prepare()`. MuJoCo-Warp's
+default response is too compliant for this force-closure replay and otherwise
+lets the cube slip near its pickup pose instead of reaching the place target.
 
 Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
 Both examples separate `create_*_application()` (scene/profile/runtime and

@@ -53,13 +53,25 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     name = "newton"
 
-    #: Resolved Newton solver type after world configuration.
-    solver_type: str | None = None
-
     def __init__(self, manager) -> None:
         super().__init__(manager)
         self._differentiable_runtime = None
         self._runtime_device: str | None = None
+        self._configured_solver_type: str | None = None
+
+    @property
+    def solver_type(self) -> str | None:
+        """Return the configured or scene-resolved Newton solver type."""
+        world = getattr(self._manager, "_world", None)
+        if world is not None:
+            from dexsim.engine.newton_physics.backend_registry import (
+                get_newton_backend,
+            )
+
+            backend = get_newton_backend(world)
+            if backend is not None:
+                return str(backend.solver_type)
+        return self._configured_solver_type
 
     # -- construction / world-config activation ------------------------- #
     def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
@@ -69,7 +81,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         newton_cfg = newton_physics_cfg.to_dexsim_cfg(
             gpu_id=sim_config.gpu_id,
         )
-        self.solver_type = newton_cfg.solver_cfg.solver_type
+        self._configured_solver_type = str(newton_cfg.solver_cfg.solver_type)
         self._runtime_device = str(newton_cfg.device)
         world_config.newton_cfg = newton_cfg
 

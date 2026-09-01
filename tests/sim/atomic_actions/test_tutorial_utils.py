@@ -31,6 +31,10 @@ import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import TimedTrajectory
+from embodichain.lab.sim.cfg import (
+    NewtonRigidBodyMaterialCfg,
+    RigidBodyMaterialCfg,
+)
 from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
     _animate_obstacle_to_pose,
     _blocking_obstacle_pose,
@@ -603,6 +607,7 @@ def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -
     )
     sim = MagicMock()
     sim.device = torch.device("cpu")
+    sim.is_newton_backend = False
     sim.sim_config.physics_dt = PHYSICS_DT
     robot = MagicMock()
     robot.get_qpos.return_value = torch.zeros(1, 8)
@@ -640,6 +645,68 @@ def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -
 
     assert engine_factory.call_args.kwargs["scene_entities"] == (obj,)
     engine.initial_context.assert_called_once_with(control_dt=PHYSICS_DT)
+
+
+def test_place_tutorial_tunes_both_newton_grasp_contact_surfaces() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.place")
+    sim = SimpleNamespace(is_newton_backend=True)
+    robot = SimpleNamespace(cfg=SimpleNamespace(link_attrs=None))
+
+    module._configure_newton_grasp_contacts(sim, robot)
+
+    override = robot.cfg.link_attrs["newton_gripper_contacts"]
+    material = override.attrs.material_props
+    assert isinstance(material, NewtonRigidBodyMaterialCfg)
+    assert material.ke == pytest.approx(module.NEWTON_GRASP_CONTACT_STIFFNESS)
+    assert material.kd == pytest.approx(module.NEWTON_GRASP_CONTACT_DAMPING)
+    assert re.fullmatch(
+        override.link_names_expr[0],
+        "gripper_finger1_link_1",
+    )
+
+
+def test_place_tutorial_preserves_default_gripper_contact_config() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.place")
+    existing_link_attrs = {"existing": MagicMock()}
+    sim = SimpleNamespace(is_newton_backend=False)
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(link_attrs=existing_link_attrs),
+    )
+
+    module._configure_newton_grasp_contacts(sim, robot)
+
+    assert robot.cfg.link_attrs is existing_link_attrs
+
+
+@pytest.mark.parametrize(
+    ("is_newton_backend", "expected_material_type"),
+    (
+        (False, RigidBodyMaterialCfg),
+        (True, NewtonRigidBodyMaterialCfg),
+    ),
+)
+def test_place_cube_uses_backend_scoped_contact_material(
+    is_newton_backend: bool,
+    expected_material_type: type[RigidBodyMaterialCfg],
+) -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.place")
+    sim = MagicMock()
+    sim.is_newton_backend = is_newton_backend
+    obj = MagicMock()
+    sim.add_rigid_object.return_value = obj
+
+    with patch.object(module, "clone_local_pose_from_first_env"):
+        result = module.create_pick_object(sim)
+
+    cfg = sim.add_rigid_object.call_args.kwargs["cfg"]
+    material = cfg.attrs.material_props
+    assert type(material) is expected_material_type
+    assert material.dynamic_friction == pytest.approx(0.97)
+    assert material.static_friction == pytest.approx(0.99)
+    if is_newton_backend:
+        assert material.ke == pytest.approx(module.NEWTON_GRASP_CONTACT_STIFFNESS)
+        assert material.kd == pytest.approx(module.NEWTON_GRASP_CONTACT_DAMPING)
+    result.clear_dynamics.assert_called_once_with()
 
 
 def test_atomic_action_tutorial_scene_strategies_cover_every_entry_point() -> None:

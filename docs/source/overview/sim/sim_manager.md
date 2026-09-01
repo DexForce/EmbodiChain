@@ -62,6 +62,8 @@ All physics backends inherit these base parameters from {class}`~cfg.PhysicsBack
 | `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
 | `device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
 
+#### Default Backend
+
 The {class}`~cfg.DefaultPhysicsCfg` class controls the global default-backend physics simulation parameters.
 
 | Parameter | Type | Default | Description |
@@ -75,6 +77,97 @@ The {class}`~cfg.DefaultPhysicsCfg` class controls the global default-backend ph
 PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
 is evaluated on every solver iteration. These solver implementation details use
 fixed defaults and are not exposed by `DefaultPhysicsCfg`.
+
+#### Newton Backend and Automatic Solver Selection
+
+Use {class}`~cfg.NewtonPhysicsCfg` to enable the Newton backend. Its
+`solver_cfg` defaults to `None` intentionally: EmbodiChain leaves the
+`solver_cfg` argument unset when it creates DexSim's `NewtonCfg`, preserving
+DexSim's `AutoSolverCfg` default.
+
+```python
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+sim_config = SimulationManagerCfg(
+    physics_cfg=NewtonPhysicsCfg(
+        device="cuda:0",
+        physics_dt=0.01,
+        num_substeps=10,
+    )
+)
+```
+
+AutoSolver is resolved when DexSim finalizes the complete Spawn scene during
+{meth}`SimulationManager.prepare`. Add all initial robots and objects before
+calling `prepare()` so the selection sees the complete scene. An explicit
+`{"solver_type": "auto"}` or `{"class_type": "AutoSolverCfg"}` mapping has
+the same effect as leaving `solver_cfg` unset.
+
+:::{important}
+This integration requires a DexSim build that exports `AutoSolverCfg`.
+EmbodiChain does not fall back to a hard-coded concrete solver when that API is
+unavailable.
+:::
+
+DexSim applies the following scene-content rules. Independent rigid objects and
+articulation links are classified separately.
+
+| Finalized scene contents | Selected configuration | Solver type | Active collision path |
+| :--- | :--- | :--- | :--- |
+| Empty scene or independent rigid bodies only | `XPBDSolverCfg` | `xpbd` | Newton collision pipeline |
+| Articulations, with or without independent rigid bodies | `MJWarpSolverCfg` | `mujoco_warp` | MuJoCo Warp collision pipeline |
+| Cloth or soft bodies, optionally with rigid bodies | `VBDSolverCfg` | `vbd` | Newton collision pipeline; VBD may handle deformable self-contact |
+| Cloth or soft bodies with articulations, optionally with rigid bodies | `MJVBDSolverCfg` | `mjvbd` | Newton particle-shape soft contacts; MuJoCo rigid collision is disabled |
+| Fluid particles, optionally with rigid SDF boundaries | `SPHSolverCfg` | `sph` | SPH one-way SDF boundary handling; rigid contacts are not consumed |
+| MPM particles, optionally with rigid colliders | `ImplicitMPMSolverCfg` | `implicit_mpm` | Implicit-MPM collider projection; the rigid collision pipeline is not stepped |
+
+The current MJVBD path does not generate rigid-rigid or rigid-ground contacts.
+MuJoCo Warp still advances rigid bodies and articulations, while Newton's soft
+contact kernels handle deformable particle-shape contacts.
+
+:::{note}
+The table documents DexSim's resolver. EmbodiChain currently exposes Newton
+runtime adapters for rigid bodies and articulations. Newton soft-body and cloth
+adapters remain disabled, and fluid/MPM assets do not yet have public
+EmbodiChain APIs; those rows describe upstream selection behavior rather than
+an EmbodiChain support guarantee.
+:::
+
+AutoSolver rejects scene combinations for which one solver cannot represent
+all coupled systems:
+
+- more than one particle family among deformable, fluid, and MPM;
+- fluid particles combined with articulations;
+- MPM particles combined with articulations.
+
+Selection is based on scene contents, not the configured device. DexSim reports
+device incompatibility after resolution; cloth, soft-body, fluid, and MPM
+solvers currently require CUDA. The selected type is also written to the
+DexSim log, for example `Newton AutoSolver selected 'mujoco_warp'.`
+
+Pass a concrete solver configuration when an algorithm or solver-specific
+parameter must be fixed:
+
+```python
+sim_config = SimulationManagerCfg(
+    physics_cfg=NewtonPhysicsCfg(
+        device="cpu",
+        solver_cfg={
+            "solver_type": "xpbd",
+            "iterations": 8,
+        },
+    )
+)
+```
+
+EmbodiChain mapping configs recognize `auto`, `mujoco_warp` (or `mjwarp`),
+`xpbd`, `semi_implicit`, `featherstone`, and `vbd`. A DexSim
+`NewtonSolverCfg` object may also be assigned directly when another explicit
+solver class is required. AutoSolver never selects `DFSPHSolverCfg`,
+`FeatherstoneSolverCfg`, or `SemiImplicitSolverCfg`. In particular,
+`requires_grad=True` requires an explicit `semi_implicit` configuration;
+automatic selection is rejected for differentiable simulation.
 
 ### Render Configuration
 

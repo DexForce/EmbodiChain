@@ -344,19 +344,21 @@ class RobotPresetCfg:
             if solver_type is None:
                 solver_cfg = physics_cfg.solver_cfg
                 if solver_cfg is None:
-                    solver_type = "mujoco_warp"
+                    solver_type = "auto"
                 elif isinstance(solver_cfg, Mapping):
                     solver_type = str(
                         solver_cfg.get("solver_type")
                         or solver_cfg.get("class_type")
-                        or "mujoco_warp"
+                        or "auto"
                     )
                 else:
                     solver_type = str(getattr(solver_cfg, "solver_type"))
             solver_type = _normalize_newton_solver_type(solver_type)
-            solver_candidates = [f"newton_{solver_type}"]
-            if solver_type == "mujoco_warp":
-                solver_candidates.append("newton_mjwarp")
+            solver_candidates = []
+            if solver_type != "auto":
+                solver_candidates.append(f"newton_{solver_type}")
+                if solver_type == "mujoco_warp":
+                    solver_candidates.append("newton_mjwarp")
             candidates = (*solver_candidates, "newton", "default")
 
         for candidate in candidates:
