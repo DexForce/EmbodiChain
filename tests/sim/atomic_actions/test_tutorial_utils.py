@@ -833,6 +833,10 @@ def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
     assert configured_args.rotate_angle == pytest.approx(-1.25)
     assert module.APPROACH_DIRECTION == pytest.approx((-0.707, 0.0, -0.707))
     assert module.POUR_INTERNAL_AXIS == (1.0, 0.0, 0.0)
+    pick_policy = module._create_pick_motion_policy()
+    assert pick_policy.sample_count == module.PICK_SAMPLE_INTERVAL
+    assert pick_policy.plan_opts.sample_method is module.TrajectorySampleMethod.QUANTITY
+    assert pick_policy.plan_opts.sample_interval == module.PICK_MOTION_SAMPLE_COUNT
 
 
 def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
