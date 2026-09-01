@@ -170,7 +170,7 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
         self._body_ids_tensor = torch.arange(
             len(batch), dtype=torch.int32, device=device
         )
-        self._newton_pose_sync: tuple[int, Any, Any] | None = None
+        self._newton_state_sync: tuple[int, Any, Any] | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -206,18 +206,18 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             (7,),
         )
         if self.is_newton_backend and len(body_ids):
-            self._synchronize_newton_standalone_pose()
+            self._synchronize_newton_standalone_state()
 
-    def _synchronize_newton_standalone_pose(self) -> None:
-        """Keep Newton standalone-body FREE joints coherent after batch writes.
+    def _synchronize_newton_standalone_state(self) -> None:
+        """Keep Newton standalone-body FREE joints coherent after state writes.
 
-        DexSim 0.4.3's device ``RigidBodyBatch.apply_pose`` updates maximal
-        ``body_q`` state, while MuJoCo-Warp advances standalone rigid bodies
-        from their reduced FREE-joint state. Cache one selection for this
-        stable batch and project both state buffers after each pose write.
+        DexSim 0.4.3's device ``RigidBodyBatch`` state writes update maximal
+        ``body_q`` or ``body_qd`` state, while MuJoCo-Warp advances standalone
+        rigid bodies from their reduced FREE-joint state. Cache one selection
+        for this stable batch and project both state buffers after each write.
         """
         topology_revision = int(self.result.topology_revision)
-        cached = self._newton_pose_sync
+        cached = self._newton_state_sync
         if cached is None or cached[0] != topology_revision:
             # Accessing ``_binding`` refreshes a stale stable batch. DexSim
             # currently exposes neither the Newton runtime nor this required
@@ -235,7 +235,7 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
                 selected_body_ids,
             )
             cached = (topology_revision, runtime, state_sync)
-            self._newton_pose_sync = cached
+            self._newton_state_sync = cached
 
         _, runtime, state_sync = cached
         state_sync.synchronize((runtime.current_state, runtime.other_state))
@@ -272,6 +272,8 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             body_ids,
             (3,),
         )
+        if self.is_newton_backend and len(body_ids):
+            self._synchronize_newton_standalone_state()
 
     def apply_angular_velocity(
         self, data: torch.Tensor, body_ids: torch.Tensor
@@ -282,6 +284,8 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
             body_ids,
             (3,),
         )
+        if self.is_newton_backend and len(body_ids):
+            self._synchronize_newton_standalone_state()
 
     def fetch_linear_acceleration(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None

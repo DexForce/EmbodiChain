@@ -234,6 +234,21 @@ still select `semi_implicit` explicitly because AutoSolver does not choose a
 differentiable solver. Before finalization, EmbodiChain treats `auto` as
 unresolved; after finalization, `NewtonPhysicsBackend.solver_type` reads the
 concrete type from DexSim's World-owned backend.
+MuJoCo-Warp mappings may set `enable_multiccd: true`; EmbodiChain forwards it
+to DexSim's `MJWarpSolverCfg`, which passes it to Newton `SolverMuJoCo`.
+Enabling it changes contact generation (up to four contacts per geometry pair)
+without changing the collision geometry authored by EmbodiChain. DexSim must
+export an `MJWarpSolverCfg` version that declares the field.
+The `open_drawer.py` tutorial combines this option with 20 Newton substeps per
+10 ms control step, while keeping its authored robot gains, collision geometry,
+pull trajectory, success criteria, and push trajectory identical to Default.
+Atomic-action tutorials configure their shared Newton simulation in
+`scripts/tutorials/atomic_action/tutorial_utils.py`: they retain 20 substeps
+while following Newton's brick-stacking contact profile (`solver=newton`,
+`integrator=implicitfast`, 15 solver iterations, 100 line-search iterations,
+an elliptic friction cone, `impratio=50`, and the Newton collision pipeline
+with contact reduction and an `nxn` broad phase). The shared factory leaves
+the Default backend configuration unchanged.
 The package dependency must identify the exact DexSim dev build containing
 this API; a base `==0.4.3` requirement also accepts older local-version wheels
 that do not export `AutoSolverCfg` and is therefore insufficient.

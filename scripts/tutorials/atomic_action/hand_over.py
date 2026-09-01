@@ -176,6 +176,7 @@ def create_handover_object(
                 min_position_iters=32,
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
+                newton_contact=sim.is_newton_backend,
             ),
             init_pos=[OBJECT_INIT_XY[0], OBJECT_INIT_XY[1], SUPPORT_SURFACE_Z + 0.12],
             init_rot=(OBJECT_ROT_HORIZONTAL if is_horizontal else OBJECT_ROT_VERTICAL),

@@ -57,6 +57,14 @@ class _SelectedRigidBatch:
         self.owner.pose[self.rows] = values
         return len(self.rows)
 
+    def apply_linear_velocity(self, values: torch.Tensor) -> int:
+        self.owner.linear_velocity[self.rows] = values
+        return len(self.rows)
+
+    def apply_angular_velocity(self, values: torch.Tensor) -> int:
+        self.owner.angular_velocity[self.rows] = values
+        return len(self.rows)
+
     def apply_friction(self, values: torch.Tensor) -> int:
         self.owner.friction[self.rows] = values
         return len(self.rows)
@@ -77,6 +85,8 @@ class _RigidBatch:
             ]
         )
         self.friction = torch.tensor([[0.1], [0.2], [0.3]])
+        self.linear_velocity = torch.zeros((3, 3))
+        self.angular_velocity = torch.zeros((3, 3))
         self.selections: list[tuple[int, ...]] = []
 
     def __len__(self) -> int:
@@ -257,6 +267,61 @@ def test_newton_rigid_pose_write_synchronizes_free_joint_state(monkeypatch) -> N
             ]
         ),
     )
+
+
+def test_newton_rigid_velocity_writes_synchronize_free_joint_state(
+    monkeypatch,
+) -> None:
+    batch = _RigidBatch()
+    current_state = object()
+    other_state = object()
+    runtime = SimpleNamespace(
+        model=object(),
+        current_state=current_state,
+        other_state=other_state,
+    )
+    batch._binding = SimpleNamespace(
+        _runtime=runtime,
+        _indices=torch.tensor([10, 11, 12]),
+    )
+    synchronized_states: list[tuple[object, object]] = []
+    created_body_ids: list[tuple[int, ...]] = []
+
+    class _StateSync:
+        def synchronize(self, states: tuple[object, object]) -> None:
+            synchronized_states.append(states)
+
+    def _create_state_sync(_model: object, body_ids: list[int]) -> _StateSync:
+        created_body_ids.append(tuple(body_ids))
+        return _StateSync()
+
+    monkeypatch.setattr(
+        spawn_backend,
+        "_create_newton_standalone_state_sync",
+        _create_state_sync,
+    )
+    view = SpawnRigidBodyView(
+        SimpleNamespace(backend="newton", topology_revision=3),
+        batch,
+        torch.device("cpu"),
+    )
+
+    view.apply_linear_velocity(
+        torch.tensor([[1.0, 2.0, 3.0]]),
+        torch.tensor([1]),
+    )
+    view.apply_angular_velocity(
+        torch.tensor([[4.0, 5.0, 6.0]]),
+        torch.tensor([2]),
+    )
+
+    assert created_body_ids == [(10, 11, 12)]
+    assert synchronized_states == [
+        (current_state, other_state),
+        (current_state, other_state),
+    ]
+    assert torch.equal(batch.linear_velocity[1], torch.tensor([1.0, 2.0, 3.0]))
+    assert torch.equal(batch.angular_velocity[2], torch.tensor([4.0, 5.0, 6.0]))
 
 
 def test_articulation_partial_force_preserves_other_rows_and_dofs() -> None:

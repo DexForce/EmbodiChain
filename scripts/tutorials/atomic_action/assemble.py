@@ -187,6 +187,7 @@ def create_assemble_object(sim: SimulationManager) -> RigidObject:
                 min_position_iters=32,
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
+                newton_contact=sim.is_newton_backend,
             ),
             init_pos=[
                 OBJECT_A_XY[0],

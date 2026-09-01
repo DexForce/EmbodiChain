@@ -37,11 +37,16 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
     CollisionPropertiesCfg,
     DefaultRigidBodyPropertiesCfg,
     LightCfg,
+    LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
     MarkerCfg,
+    NewtonPhysicsCfg,
+    NewtonRigidBodyMaterialCfg,
+    PhysicsBackendCfg,
     RenderCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -99,9 +104,15 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
+NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
+NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
 DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _DEFAULT_GRIPPER_TCP_Z = 0.17
+_GRIPPER_CONTACT_LINK_PATTERN = (
+    r"(?:.*_)?(?:gripper_finger[12]_link_1|"
+    r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
+)
 _GRIPPER_TCP = (
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 1.0, 0.0, 0.0),
@@ -188,6 +199,32 @@ def create_tutorial_argument_parser(
     return parser
 
 
+def _tutorial_physics_cfg(
+    backend: Literal["default", "newton"],
+) -> PhysicsBackendCfg:
+    """Build the shared physics configuration for atomic-action tutorials."""
+    physics_cfg = physics_cfg_for_backend(backend)
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        # Follow Newton's brick-stacking grasp profile. Keep the tutorial's
+        # smaller 0.5 ms solver step, but align the contact path, nonlinear
+        # solver, friction cone, impedance ratio, and contact capacities.
+        contact_max = 16_384
+        physics_cfg.num_substeps = 10
+        physics_cfg.collision_cfg.reduce_contacts = True
+        physics_cfg.collision_cfg.rigid_contact_max = contact_max
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 15,
+            "ls_iterations": 100,
+            "nconmax": contact_max,
+            "njmax": contact_max * 2,
+            "use_mujoco_contacts": False,
+        }
+    return physics_cfg
+
+
 def create_tutorial_simulation(
     args: argparse.Namespace,
     *,
@@ -212,7 +249,7 @@ def create_tutorial_simulation(
             headless=True,
             num_envs=args.num_envs,
             device=args.device,
-            physics_cfg=physics_cfg_for_backend(args.physics),
+            physics_cfg=_tutorial_physics_cfg(args.physics),
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,
@@ -282,13 +319,13 @@ def add_ur5_gripper_robot(
     Returns:
         The added robot instance.
     """
-    return sim.add_robot(
-        cfg=create_ur5_gripper_robot_cfg(
-            init_pos=init_pos,
-            init_qpos=init_qpos,
-            tcp_z=tcp_z,
-        )
+    robot_cfg = create_ur5_gripper_robot_cfg(
+        init_pos=init_pos,
+        init_qpos=init_qpos,
+        tcp_z=tcp_z,
     )
+    # configure_newton_gripper_contacts(sim, robot_cfg)
+    return sim.add_robot(cfg=robot_cfg)
 
 
 def add_tutorial_robot(
@@ -312,14 +349,13 @@ def add_tutorial_robot(
     Raises:
         ValueError: If ``robot_type`` is not supported.
     """
-    return sim.add_robot(
-        cfg=create_tutorial_robot_cfg(
-            robot_type,
-            init_pos=init_pos,
-            init_qpos=init_qpos,
-            **kwargs,
-        )
+    robot_cfg = create_tutorial_robot_cfg(
+        robot_type,
+        init_pos=init_pos,
+        init_qpos=init_qpos,
+        **kwargs,
     )
+    return sim.add_robot(cfg=robot_cfg)
 
 
 def create_toppra_motion_generator(robot: Robot) -> MotionGenerator:
@@ -350,12 +386,19 @@ def create_tutorial_rigid_body_physics(
     min_velocity_iters: int | None = None,
     contact_offset: float | None = None,
     rest_offset: float | None = None,
+    newton_contact: bool = False,
 ) -> RigidBodyPhysicsCfg:
     """Create portable rigid-body physics for an atomic-action tutorial.
 
     Material and mass values apply to both physics backends. The remaining
     values are retained in the Default-backend configuration group; Newton
     safely ignores those properties because it has no equivalent controls.
+    Set ``newton_contact`` only for a manipulation contact surface in a Newton
+    scene to use the same less-compliant response as the drawer tutorial.
+
+    Args:
+        newton_contact: Whether to add the Newton-only contact stiffness and
+            damping used on grasped or directly manipulated objects.
 
     Returns:
         Grouped physics configuration accepted by both tutorial backends.
@@ -393,12 +436,22 @@ def create_tutorial_rigid_body_physics(
             else None
         ),
         material_props=(
-            RigidBodyMaterialCfg(
-                static_friction=static_friction,
-                dynamic_friction=dynamic_friction,
-                restitution=restitution,
+            (
+                NewtonRigidBodyMaterialCfg(
+                    static_friction=static_friction,
+                    dynamic_friction=dynamic_friction,
+                    restitution=restitution,
+                    ke=NEWTON_GRASP_CONTACT_STIFFNESS,
+                    kd=NEWTON_GRASP_CONTACT_DAMPING,
+                )
+                if newton_contact
+                else RigidBodyMaterialCfg(
+                    static_friction=static_friction,
+                    dynamic_friction=dynamic_friction,
+                    restitution=restitution,
+                )
             )
-            if any(value is not None for value in material_values)
+            if newton_contact or any(value is not None for value in material_values)
             else None
         ),
     )
@@ -1209,6 +1262,8 @@ __all__ = [
     "ROBOTIQ_2F_140_TCP",
     "ROBOTIQ_2F_140_URDF_PATH",
     "ROBOTIQ_HAND_JOINT_PATTERN",
+    "NEWTON_GRASP_CONTACT_DAMPING",
+    "NEWTON_GRASP_CONTACT_STIFFNESS",
     "TOP_DOWN_EEF_ROTATION",
     "TutorialCliFeature",
     "TutorialRobot",
@@ -1218,6 +1273,8 @@ __all__ = [
     "broadcast_pose_batch",
     "broadcast_waypoint_pose_batch",
     "clone_local_pose_from_first_env",
+    "configure_newton_gripper_contacts",
+    "configure_newton_link_contacts",
     "create_antipodal_semantics",
     "create_parallel_jaw_grasp_pose_generator",
     "create_curobo_motion_generator",

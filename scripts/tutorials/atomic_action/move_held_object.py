@@ -63,6 +63,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 
 OBJECT_MESH_PATH = "PaperCup/paper_cup.ply"
 OBJECT_XY = (-0.42, -0.08)
+OBJECT_INITIAL_Z = 0.05
 MOVE_SAMPLE_INTERVAL = 60
 PICK_SAMPLE_INTERVAL = 120
 MOVE_HELD_OBJECT_SAMPLE_INTERVAL = 120
@@ -95,8 +96,9 @@ def create_pick_object(sim) -> RigidObject:
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,
+                newton_contact=sim.is_newton_backend,
             ),
-            init_pos=[*OBJECT_XY, 0.0],
+            init_pos=[*OBJECT_XY, OBJECT_INITIAL_Z],
             body_scale=(0.75, 0.75, 1.0),
         )
     )

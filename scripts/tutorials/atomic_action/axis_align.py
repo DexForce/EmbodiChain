@@ -37,7 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
 )
-from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
@@ -48,6 +48,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -105,14 +106,11 @@ def create_align_object(
         cfg=RigidObjectCfg(
             uid="cube",
             shape=CubeCfg(size=list(OBJECT_SIZE)),
-            attrs=RigidBodyPhysicsCfg.from_dict(
-                {
-                    "mass_props": {"mass": 0.05},
-                    "material_props": {
-                        "dynamic_friction": 0.97,
-                        "static_friction": 0.99,
-                    },
-                }
+            attrs=create_tutorial_rigid_body_physics(
+                mass=0.05,
+                dynamic_friction=0.97,
+                static_friction=0.99,
+                newton_contact=sim.is_newton_backend,
             ),
             init_pos=init_pos,
         )

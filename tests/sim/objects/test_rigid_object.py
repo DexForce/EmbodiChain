@@ -1213,6 +1213,72 @@ class TestRigidObjectNewton(BaseRigidObjectTest):
         super().test_add_sdf_mesh()
 
 
+@pytest.mark.gpu
+class TestRigidObjectNewtonMujoco:
+    """Focused standalone-rigid state synchronization on MuJoCo-Warp."""
+
+    def setup_method(self):
+        physics_cfg = physics_cfg_for_backend("newton")
+        physics_cfg.gravity = (0.0, 0.0, 0.0)
+        physics_cfg.solver_cfg = {"solver_type": "mujoco_warp"}
+        self.sim = SimulationManager(
+            SimulationManagerCfg(
+                headless=True,
+                device="cuda",
+                num_envs=1,
+                physics_cfg=physics_cfg,
+            )
+        )
+        self.obj = self.sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="free_body",
+                shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+                attrs=RigidBodyPhysicsCfg(
+                    mass_props=MassPropertiesCfg(mass=1.0),
+                ),
+                init_pos=(0.0, 0.0, Z_TRANSLATION),
+            )
+        )
+        self.sim.prepare()
+
+    def teardown_method(self):
+        self.sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+        _teardown_newton_physics()
+
+    def test_clear_dynamics_persists_across_mujoco_step(self):
+        """Clearing body velocity also clears its reduced FREE-joint velocity."""
+        linear_velocity = torch.tensor(
+            [[0.4, -0.2, 0.3]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        angular_velocity = torch.tensor(
+            [[0.1, 0.2, -0.3]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        self.obj.set_velocity(
+            lin_vel=linear_velocity,
+            ang_vel=angular_velocity,
+        )
+        self.sim.update(step=1)
+        assert not torch.allclose(
+            self.obj.body_data.vel,
+            torch.zeros((1, 6), device=self.sim.device),
+        )
+
+        self.obj.clear_dynamics()
+        self.sim.update(step=1)
+
+        torch.testing.assert_close(
+            self.obj.body_data.vel,
+            torch.zeros((1, 6), device=self.sim.device),
+            atol=1.0e-5,
+            rtol=0.0,
+        )
+
+
 if __name__ == "__main__":
     # pytest.main(["-s", __file__])
     test = TestRigidObjectCPU()

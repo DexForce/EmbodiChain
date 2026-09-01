@@ -49,6 +49,7 @@ from embodichain.lab.sim.objects import Articulation
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
+    configure_newton_link_contacts,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
@@ -91,19 +92,24 @@ def parse_arguments() -> argparse.Namespace:
 
 def create_microwave(sim: SimulationManager) -> Articulation:
     """Create the fixed-base microwave with an unactuated door hinge."""
-    microwave = sim.add_articulation(
-        cfg=ArticulationCfg(
-            uid="microwave",
-            fpath=get_data_path(MICROWAVE_ASSET),
-            init_pos=MICROWAVE_POSITION,
-            init_rot=MICROWAVE_ORIENTATION,
-            joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
-            attrs=RigidBodyPhysicsCfg.from_dict(
-                {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}}
-            ),
-            fix_base=True,
-        )
+    microwave_cfg = ArticulationCfg(
+        uid="microwave",
+        fpath=get_data_path(MICROWAVE_ASSET),
+        asset_physics_mode="overlay",
+        init_pos=MICROWAVE_POSITION,
+        init_rot=MICROWAVE_ORIENTATION,
+        joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}}
+        ),
     )
+    configure_newton_link_contacts(
+        sim,
+        microwave_cfg,
+        group_name="newton_handle_contacts",
+        link_names_expr=[HANDLE_LINK_NAME],
+    )
+    microwave = sim.add_articulation(cfg=microwave_cfg)
     sim.update(step=10)
     return microwave
 

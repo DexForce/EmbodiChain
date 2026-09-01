@@ -338,6 +338,7 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
             "iterations": 12,
             "ls_iterations": 4,
             "use_mujoco_contacts": False,
+            "enable_multiccd": True,
         },
     )
 
@@ -348,6 +349,7 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
     assert dexsim_cfg.solver_cfg.iterations == 12
     assert dexsim_cfg.solver_cfg.ls_iterations == 4
     assert dexsim_cfg.solver_cfg.use_mujoco_contacts is False
+    assert dexsim_cfg.solver_cfg.enable_multiccd is True
 
 
 @pytest.mark.no_sim

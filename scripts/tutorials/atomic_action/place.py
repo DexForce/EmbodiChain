@@ -28,7 +28,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     create_simulation_atomic_action_engine,
@@ -38,13 +37,8 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import (
-    LinkPhysicsOverrideCfg,
-    NewtonRigidBodyMaterialCfg,
-    RigidBodyPhysicsCfg,
-    RigidObjectCfg,
-)
-from embodichain.lab.sim.objects import RigidObject, Robot
+from embodichain.lab.sim.cfg import RigidObjectCfg
+from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
@@ -74,14 +68,6 @@ PLACE_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
 PLACE_LIFT_HEIGHT = 0.14
-# MuJoCo-Warp maps this pair to solref ~= (0.005 s, 1.0), keeping the
-# contact critically damped while reducing the default contact deflection.
-NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
-NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
-_GRIPPER_CONTACT_LINK_PATTERN = (
-    r"(?:gripper_finger[12]_link_1|"
-    r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
-)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -93,59 +79,19 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _configure_newton_grasp_contacts(
-    sim: SimulationManager,
-    robot: Robot,
-) -> None:
-    """Apply the Newton contact response needed for stable force closure.
-
-    This runs before ``sim.prepare()`` so the deferred Newton articulation
-    build receives the gripper-side material. The cube receives the matching
-    contact response in :func:`create_pick_object`.
-    """
-    if not sim.is_newton_backend:
-        return
-
-    link_attrs = dict(robot.cfg.link_attrs or {})
-    link_attrs["newton_gripper_contacts"] = LinkPhysicsOverrideCfg(
-        link_names_expr=[_GRIPPER_CONTACT_LINK_PATTERN],
-        attrs=RigidBodyPhysicsCfg(
-            material_props=NewtonRigidBodyMaterialCfg(
-                ke=NEWTON_GRASP_CONTACT_STIFFNESS,
-                kd=NEWTON_GRASP_CONTACT_DAMPING,
-            )
-        ),
-    )
-    robot.cfg.link_attrs = link_attrs
-
-
 def create_pick_object(sim) -> RigidObject:
     """Create a settled cube for the PickUp and Place sequence."""
-    object_physics = create_tutorial_rigid_body_physics(
-        mass=0.05,
-        dynamic_friction=0.97,
-        static_friction=0.99,
-        enable_ccd=True,
-    )
-    if sim.is_newton_backend:
-        material = object_physics.material_props
-        assert material is not None
-        # MuJoCo-Warp combines the two contacting shape materials. Author the
-        # response on the cube as well as the gripper links so neither surface
-        # leaves the force-closure contact at the overly compliant default.
-        object_physics.material_props = NewtonRigidBodyMaterialCfg(
-            static_friction=material.static_friction,
-            dynamic_friction=material.dynamic_friction,
-            restitution=material.restitution,
-            ke=NEWTON_GRASP_CONTACT_STIFFNESS,
-            kd=NEWTON_GRASP_CONTACT_DAMPING,
-        )
-
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube",
             shape=CubeCfg(size=list(OBJECT_SIZE)),
-            attrs=object_physics,
+            attrs=create_tutorial_rigid_body_physics(
+                mass=0.05,
+                dynamic_friction=0.97,
+                static_friction=0.99,
+                enable_ccd=True,
+                newton_contact=sim.is_newton_backend,
+            ),
             init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2]],
         )
     )
@@ -180,7 +126,6 @@ def main() -> None:
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
-    _configure_newton_grasp_contacts(sim, robot)
     obj = create_pick_object(sim)
     sim.prepare()
     motion_gen = create_curobo_motion_generator(robot)
