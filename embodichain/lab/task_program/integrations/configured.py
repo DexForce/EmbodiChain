@@ -1865,11 +1865,11 @@ def _decode_control_part_evidence(
             {
                 "kind",
                 "control_parts",
-                "object_ids",
                 "open_qpos",
                 "minimum_displacement",
             }
         ),
+        optional=frozenset({"object_ids"}),
     )
     kind = _identifier(config["kind"], path=f"{path}.kind")
     if kind != "joint_position_constraint":
@@ -1882,9 +1882,13 @@ def _decode_control_part_evidence(
             config["control_parts"],
             path=f"{path}.control_parts",
         ),
-        object_ids=_identifier_tuple(
-            config["object_ids"],
-            path=f"{path}.object_ids",
+        object_ids=(
+            None
+            if "object_ids" not in config
+            else _identifier_tuple(
+                config["object_ids"],
+                path=f"{path}.object_ids",
+            )
         ),
         open_qpos=_finite_tuple(config["open_qpos"], path=f"{path}.open_qpos"),
         minimum_displacement=_real(

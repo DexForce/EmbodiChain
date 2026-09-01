@@ -72,7 +72,7 @@ COMMANDS = (
     Command(
         name="list-task",
         target="embodichain.cli.list_task:main",
-        help="List tasks by category and capability.",
+        help="List tasks by category, deployment, and capability.",
     ),
     Command(
         name="preview_lerobot_data",

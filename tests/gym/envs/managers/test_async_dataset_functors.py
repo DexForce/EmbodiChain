@@ -114,6 +114,9 @@ class _MockEnv:
                 "segment_step": episode_step.clone(),
                 "segment_start": episode_step == 0,
                 "segment_end": torch.zeros(num_envs, steps, dtype=torch.bool),
+                "segment_accepted": torch.ones(num_envs, steps, dtype=torch.bool),
+                "segment_attempt_id": torch.zeros(num_envs, steps, dtype=torch.long),
+                "continuity_id": torch.zeros(num_envs, steps, dtype=torch.long),
                 "terminated": torch.zeros(num_envs, steps, dtype=torch.bool),
                 "truncated": torch.zeros(num_envs, steps, dtype=torch.bool),
             },
@@ -199,6 +202,87 @@ class TestAsyncLeRobotRecorder:
         # 2 envs x 4 steps = 8 frames, 2 episodes.
         assert mock_ds.save_episode_calls == 2
         assert len(mock_ds.add_frame_calls) == 8
+
+    def test_call_enqueues_each_accepted_segment_as_independent_fragment(self):
+        env = _MockEnv(num_envs=1, steps=4)
+        env.rollout_buffer["segment_id"][0] = torch.tensor([0, 0, 1, 1])
+        env.rollout_buffer["segment_step"][0] = torch.tensor([0, 1, 0, 1])
+        env.rollout_buffer["segment_start"][0] = torch.tensor(
+            [True, False, True, False]
+        )
+        env.rollout_buffer["segment_end"][0] = torch.tensor([False, True, False, True])
+        env.rollout_buffer["segment_accepted"][0] = torch.tensor(
+            [True, True, False, False]
+        )
+        env.episode_metadata = {
+            "output_mode": "segment_fragments",
+            "save_failed_fragments": False,
+            "episode_index": 4,
+            "attempt_id": 0,
+            "program_run_id": "4:0",
+            "segments": [
+                {
+                    "segment_id": 0,
+                    "start_step": 0,
+                    "end_step": 2,
+                    "success": True,
+                    "instruction": "pick task",
+                    "metadata": {},
+                },
+                {
+                    "segment_id": 1,
+                    "start_step": 2,
+                    "end_step": 4,
+                    "success": False,
+                    "instruction": "place task",
+                    "metadata": {},
+                },
+            ],
+        }
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(env, mock_ds)
+
+        recorder(env, env_ids=torch.tensor([0]))
+        env.current_rollout_step = 0
+        recorder.finalize()
+
+        assert mock_ds.save_episode_calls == 1
+        assert len(mock_ds.add_frame_calls) == 2
+        assert {frame["task"] for frame in mock_ds.add_frame_calls} == {"pick task"}
+        assert all(
+            frame["annotation.segment_accepted"].tolist() == [1]
+            for frame in mock_ds.add_frame_calls
+        )
+
+    def test_duplicate_fragment_enqueue_is_idempotent(self):
+        """The worker writes one stable fragment id at most once."""
+        env = _MockEnv(num_envs=1, steps=2)
+        env.episode_metadata = {
+            "output_mode": "segment_fragments",
+            "save_failed_fragments": False,
+            "episode_index": 4,
+            "attempt_id": 0,
+            "program_run_id": "4:0",
+            "segments": [
+                {
+                    "segment_id": 0,
+                    "start_step": 0,
+                    "end_step": 2,
+                    "success": True,
+                    "instruction": "pick task",
+                    "metadata": {},
+                }
+            ],
+        }
+        recorder = _make_recorder(env, _MockDataset())
+        recorder._save_single_episode = Mock(return_value=True)
+
+        recorder(env, env_ids=torch.tensor([0]))
+        recorder(env, env_ids=torch.tensor([0]))
+        env.current_rollout_step = 0
+        recorder.finalize()
+
+        recorder._save_single_episode.assert_called_once()
 
     def test_worker_operates_on_clone_not_live_buffer(self):
         """Mutating the rollout buffer after __call__ must not corrupt the save.

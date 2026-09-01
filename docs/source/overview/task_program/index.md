@@ -73,12 +73,13 @@ program payload, owns the corresponding lowerer. See {doc}`scene_registry` and
 
 ## Program schema
 
-An {class}`TaskProgramCfg` contains:
-
-- one `program_id`;
-- exact scene, robot-profile, and policy-preset IDs;
-- optional named targets; and
-- one bounded program tree.
+An in-memory {class}`TaskProgramCfg` contains one `program_id`, an exact trusted
+{class}`TaskProgramIntegrationCfg` selection, optional named targets, and one
+bounded program tree. A program authored for a componentized deployment omits
+the integration selection from its serialized YAML. The deployment injects
+the selected scene-registry, robot-profile, and policy-preset IDs before strict
+decoding, which keeps the source program portable across compatible
+embodiments.
 
 Supported program nodes are {class}`SequenceCfg`, {class}`RepeatCfg`,
 {class}`SegmentCfg`, {class}`InvokeCfg`, and {class}`ParallelCfg`. A
@@ -90,10 +91,6 @@ Example:
 
 ```yaml
 program_id: repeated_cube_pick_place
-integration:
-  robot_profile: task_program_ur5_pick_place
-  scene_registry: task_program_repeated_pick_place
-  runtime_preset: trajectory
 targets:
   drop_pose:
     kind: cyclic_pose
@@ -115,13 +112,11 @@ program:
           call:
             kind: pick
             object: cube
-            resources: {primary: manipulator}
         - kind: invoke
           call:
             kind: place
             object: cube
             at: {kind: target_ref, target: drop_pose}
-            resources: {primary: manipulator}
 ```
 
 Serialized input is strict: unknown fields, duplicate keys, non-finite values,
@@ -135,11 +130,19 @@ Use the provider-independent package for both file and programmatic input:
 
 ```python
 from embodichain.lab.task_program import (
+    TaskProgramIntegrationCfg,
     TaskProgramCompiler,
     load_task_program,
 )
 
-program = load_task_program("task_program/program.yaml")
+program = load_task_program(
+    "task_program/program.yaml",
+    integration=TaskProgramIntegrationCfg(
+        robot_profile="ur5_dh_pgi_140_80",
+        scene_registry="task_program_repeated_pick_place",
+        runtime_preset="trajectory",
+    ),
+)
 compiled = TaskProgramCompiler(scene_manifest).compile(program)
 ```
 
@@ -154,52 +157,83 @@ registration still matches the compiled scene/profile/catalog snapshots.
 
 ## Configure a simulation environment
 
-A task-local Gym configuration selects the program and its trusted integration
-without embedding Task Program assembly details:
-
-```json
-{
-  "id": "TaskProgramRepeatedPickPlace-v1",
-  "task_program_dir": "task_program"
-}
-```
-
-The referenced directory has a fixed two-file contract:
+Configuration-defined Task Programs separate the reusable physical environment
+from the runnable task deployment:
 
 ```text
-task_program/
-├── program.yaml
-└── integration.yaml
+repeated_pick_place/
+├── env.yaml
+├── task.franka.yaml
+├── task.ur5.yaml
+└── task_program/
+    ├── integration.yaml
+    └── program.yaml
 ```
 
-`integration.yaml` contains the callable-free provider assembly:
+`env.yaml` owns the physical scene and ordinary environment values. It has an
+`environment_id` for component identity but deliberately has no runnable `id`,
+robot, sensor, or Task Program selection:
 
 ```yaml
-scene:
+environment_id: repeated_pick_place
+max_episode_steps: 1200
+simulation:
+  rigid_object:
+    - uid: cube
+      # Physical shape, dynamics, and initial pose.
+env:
+  sim_steps_per_control: 4
+  events: {}
+  dataset: {}
+```
+
+A runnable `task.<embodiment>.yaml` selects the environment, all three Task
+Program components, and one reusable embodiment:
+
+```yaml
+id: TaskProgramRepeatedPickPlace-v1
+environment:
+  component: env.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+```
+
+The callable-free `integration.yaml` owns the semantic scene binding and
+task-specific profile additions. Its canonical identities map explicitly to
+UIDs in the physical environment:
+
+```yaml
+integration_id: repeated_pick_place_v1
+program_id: repeated_cube_pick_place
+requires:
+  scene_contract: repeated_pick_place_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: repeated_pick_place_scene_v1
   registry_id: task_program_repeated_pick_place
   rigid_objects:
     - entity_id: cube
+      simulation_uid: cube
       dynamics: dynamic
       semantic_type: cube
       affordances:
         - entity_id: cube_grasp
           kind: antipodal_grasp
-robot_profile:
-  profile_id: task_program_ur5_pick_place
-  resources: []
-  command_presets: []
+profile:
   defaults: {}
-  presets: []
-  default_preset: null
+  action_options: {}
+  effect_monitors: {}
 ```
 
-This schematic snippet names the integration boundaries but is intentionally
-not loadable: the empty arrays and mappings must be populated with the
-resources, command presets, defaults, and policy presets required by the
-program. See the sibling `env.json` and
+The abbreviated profile mappings above must be populated for the calls used by
+the program. See `env.yaml`, `task.ur5.yaml`, and
 `task_program/integration.yaml` under
 `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` for the
-complete pair.
+complete reference composition.
 
 Scene affordances are authored as children of their owning entry in
 `rigid_objects`, `articulations`, or `links`. The parent's `entity_id` names the
@@ -211,28 +245,33 @@ default. Nesting is the only way to declare ownership: scene-level
 relation from the YAML structure and normalizes the declarations into the flat,
 globally indexed Scene Registry.
 
-The integration file accepts only allowlisted scene bindings, robot resources,
-policies, monitors, and runtime-service kinds. It does not accept dotted
+The task integration accepts only closed scene bindings, profile additions,
+monitor mappings, and allowlisted runtime-service kinds. Robot resources come
+from the embodiment component, while motion and runner policy come from the
+execution-policy component. Their composed integration does not accept dotted
 imports or arbitrary callables. The configured integration loader lives in
 `task_program/integrations/configured.py`; Gym registration remains the small
 concern of `gym/envs/task_program/registration.py`.
 
-When a supported config defines `task_program_dir`, `config_to_cfg()` resolves
-it relative to the Gym config, loads `integration.yaml` first, uses its
-immutable catalog to validate `program.yaml`, and registers the common
-`EmbodiedEnv` under the config-owned ID. A task-specific Python environment
-module is not required. Alternate filenames are not accepted.
+`config_to_cfg()` resolves every component reference relative to the runnable
+deployment, expands the physical environment and embodiment, validates each
+semantic `simulation_uid` against the physical scene, composes the immutable
+integration catalog, validates the program, and registers the common
+`EmbodiedEnv` under the deployment-owned ID. A task-specific Python environment
+module is not required. The pure `env.yaml` can also be selected by a
+handwritten task because it contains no Task Program fields.
 
 Run a selected program with:
 
 ```bash
-python -m embodichain.lab.scripts.run_env \
-  --gym_config path/to/env.json \
+embodichain run-env \
+  --gym_config path/to/task.ur5.yaml \
   --task-program path/to/program.yaml
 ```
 
-The CLI override changes the program only. It cannot replace the trusted
-integration selected by `task_program_dir`.
+The CLI override changes the program only. It cannot replace the integration,
+execution policy, environment, or embodiment selected by the runnable task
+deployment.
 
 ## Runtime lifecycle
 
@@ -355,4 +394,5 @@ completion metadata.
 - {doc}`robot_profiles` — robot resources, Atomic Skill bindings, and assurance
 - {doc}`../sim/atomic_actions/index` — direct typed atomic-action planning and
   execution
+- {doc}`/tutorial/task_program_python` — author and compile a Task Program in Python
 - {doc}`/tutorial/task_program` — configure and run an embodied Task Program

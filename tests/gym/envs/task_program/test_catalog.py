@@ -106,7 +106,7 @@ _REPOSITORY_ROOT = Path(__file__).parents[4]
 _CUBE_ENV_PATH = (
     _REPOSITORY_ROOT
     / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
-    / "env.ur5.yaml"
+    / "task.ur5.yaml"
 )
 
 
@@ -115,11 +115,9 @@ def _cube_integration():
     config = load_config(_CUBE_ENV_PATH)
     physical = _resolve_gym_components(config, base_dir=_CUBE_ENV_PATH.parent)
     assert physical.embodiment_skill_profile is not None
-    assert physical.scene_task_program is not None
     return _load_configured_task_program_deployment(
-        task_program=config["task_program"],
+        task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
-        scene=physical.scene_task_program,
         base_dir=_CUBE_ENV_PATH.parent,
     ).integration
 

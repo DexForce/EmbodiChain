@@ -33,7 +33,7 @@ from scripts.benchmark.task_program.demo_success import (
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
 _OPEN_DRAWER_GYM_CONFIG = (
-    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/env.ur5.yaml"
+    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task.ur5.yaml"
 )
 _OPEN_DRAWER_TASK_PROGRAM = (
     _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task_program/program.yaml"
@@ -53,7 +53,14 @@ def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
     payload = load_config(_OPEN_DRAWER_GYM_CONFIG)
     if type(payload) is not dict:
         raise TypeError("The packaged OpenDrawer Gym config must be a mapping.")
-    env_config = payload.get("env")
+    environment_selection = payload["environment"]
+    assert type(environment_selection) is dict
+    environment_path = (
+        _OPEN_DRAWER_GYM_CONFIG.parent / environment_selection["component"]
+    ).resolve()
+    environment = load_config(environment_path)
+    assert type(environment) is dict
+    env_config = environment.get("env")
     if type(env_config) is not dict:
         raise TypeError("The packaged OpenDrawer env config must be a mapping.")
 
@@ -66,15 +73,13 @@ def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
         task_program[field_name] = str(
             (_OPEN_DRAWER_GYM_CONFIG.parent / task_program[field_name]).resolve()
         )
+    environment_output = tmp_path / "env.yaml"
+    save_config(environment_output, environment)
+    environment_selection["component"] = str(environment_output)
     embodiment = payload["embodiment"]
-    scene = payload["scene"]
     assert type(embodiment) is dict
-    assert type(scene) is dict
     embodiment["component"] = str(
         (_OPEN_DRAWER_GYM_CONFIG.parent / embodiment["component"]).resolve()
-    )
-    scene["component"] = str(
-        (_OPEN_DRAWER_GYM_CONFIG.parent / scene["component"]).resolve()
     )
 
     output = tmp_path / "open_drawer_headless_cpu.yaml"

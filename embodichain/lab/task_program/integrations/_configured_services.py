@@ -835,25 +835,30 @@ class _JointPositionConstraintObserver:
 class _JointPositionConstraintEvidenceProviderFactory(
     ControlPartEvidenceProviderFactory
 ):
-    """Create built-in control-part evidence from configured joint positions."""
+    """Create control-part evidence scoped to graspable scene objects."""
 
     provider_id: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_ID
     revision: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_REVISION
 
     control_parts: tuple[str, ...]
-    object_ids: tuple[str, ...]
+    object_ids: tuple[str, ...] | None
     open_qpos: tuple[float, ...]
     minimum_displacement: float
 
     def __post_init__(self) -> None:
-        for field_name in ("control_parts", "object_ids"):
-            values = getattr(self, field_name)
-            if type(values) is not tuple or not values:
-                raise ValueError(f"{field_name} must be a non-empty exact tuple.")
-            for value in values:
-                _identifier(value, field_name=field_name)
-            if len(set(values)) != len(values):
-                raise ValueError(f"{field_name} must not contain duplicates.")
+        if type(self.control_parts) is not tuple or not self.control_parts:
+            raise ValueError("control_parts must be a non-empty exact tuple.")
+        for control_part in self.control_parts:
+            _identifier(control_part, field_name="control_parts")
+        if len(set(self.control_parts)) != len(self.control_parts):
+            raise ValueError("control_parts must not contain duplicates.")
+        if self.object_ids is not None:
+            if type(self.object_ids) is not tuple or not self.object_ids:
+                raise ValueError("object_ids must be a non-empty exact tuple or None.")
+            for object_id in self.object_ids:
+                _identifier(object_id, field_name="object_ids")
+            if len(set(self.object_ids)) != len(self.object_ids):
+                raise ValueError("object_ids must not contain duplicates.")
         if type(self.open_qpos) is not tuple or not self.open_qpos:
             raise ValueError("open_qpos must be a non-empty exact tuple.")
         if not all(math.isfinite(value) for value in self.open_qpos):
@@ -863,6 +868,48 @@ class _JointPositionConstraintEvidenceProviderFactory(
             or self.minimum_displacement <= 0.0
         ):
             raise ValueError("minimum_displacement must be finite and positive.")
+
+    def _resolve_object_ids(self, scene_registry: SceneRegistry) -> tuple[str, ...]:
+        """Resolve an optional allowlist against graspable scene objects."""
+        if type(scene_registry) is not SceneRegistry:
+            raise TypeError("scene_registry must be exactly SceneRegistry.")
+        object_ids = self.object_ids
+        if object_ids is None:
+            object_ids = tuple(
+                ref.entity_id
+                for ref in scene_registry.entity_refs
+                if type(ref) is SceneObjectRef
+                and scene_registry.affordances(
+                    ref,
+                    capability=GRASP_AFFORDANCE_CAPABILITY,
+                )
+            )
+        if not object_ids:
+            raise ValueError(
+                "Joint-position constraint evidence requires at least one "
+                "graspable scene object."
+            )
+        resolved_object_ids: list[str] = []
+        for object_id in object_ids:
+            object_ref = scene_registry.resolve(
+                object_id,
+                expected_type=SceneObjectRef,
+            )
+            if not scene_registry.affordances(
+                object_ref,
+                capability=GRASP_AFFORDANCE_CAPABILITY,
+            ):
+                raise ValueError(
+                    "Joint-position constraint evidence object "
+                    f"{object_id!r} must expose a grasp affordance."
+                )
+            resolved_object_ids.append(object_ref.entity_id)
+        if len(set(resolved_object_ids)) != len(resolved_object_ids):
+            raise ValueError(
+                "Joint-position constraint evidence object_ids must resolve to "
+                "distinct scene objects."
+            )
+        return tuple(resolved_object_ids)
 
     def create(
         self,
@@ -876,18 +923,19 @@ class _JointPositionConstraintEvidenceProviderFactory(
         """Bind a fresh evidence provider to the exact assembled robot."""
         from embodichain.lab.sim.objects import Robot
 
-        del simulation, scene_registry
+        del simulation
         if not isinstance(robot, Robot):
             raise TypeError("Constraint evidence requires a simulation Robot.")
         if engine.robot is not robot:
             raise ValueError("Constraint evidence requires the engine's exact robot.")
+        object_ids = self._resolve_object_ids(scene_registry)
         return ControlPartSimulationEvidenceProvider(
             robot,
             scene_provider=scene_provider,
             constraint_observer=_JointPositionConstraintObserver(
                 robot,
                 control_parts=self.control_parts,
-                object_ids=self.object_ids,
+                object_ids=object_ids,
                 open_qpos=self.open_qpos,
                 minimum_displacement=self.minimum_displacement,
             ),

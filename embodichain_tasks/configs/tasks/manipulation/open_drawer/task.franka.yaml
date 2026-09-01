@@ -1,8 +1,7 @@
 id: TaskProgramOpenDrawer-Franka-v1
-max_episodes: 1
-max_episode_steps: 600
-num_envs: 1
-arena_space: 3.0
+
+environment:
+  component: env.yaml
 
 task_program:
   program: task_program/program.yaml
@@ -14,11 +13,3 @@ embodiment:
   overrides:
     init_pos: [-0.3, 0.0, 0.0]
     init_rot: [0.0, 0.0, 180.0]
-
-scene:
-  component: task_program/scene.yaml
-
-env:
-  sim_steps_per_control: 4
-  events: {}
-  dataset: {}
