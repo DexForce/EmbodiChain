@@ -25,7 +25,16 @@ descriptor revisions, native materialization, replicated arenas, and backend
 handles. `SimulationManager` owns the readiness boundary for each committed
 Spawn topology revision. EmbodiChain registry objects are stable facades:
 `add_*()` returns a declared facade and `prepare()` binds that same object in
-place.
+place. Newton kinematic trajectory controls are registered through
+`SimulationManager.register_kinematic_joint_trajectory()` and
+`SimulationManager.register_kinematic_nodal_trajectory()`; the manager expands
+the arena batch to concrete Spawn paths without exposing its private
+`SpawnScene` or `SceneBuilder`. Nodal trajectories move configured inactive
+deformable particles relative to their finalized initial positions at every
+Newton substep. Time-varying rigid/articulation and scene-wide particle contact
+properties use `register_contact_material_schedule()` and
+`register_particle_contact_material_schedule()` at the same pre-`prepare()`
+boundary.
 
 The registries cover:
 
@@ -53,6 +62,7 @@ EnvCfg.sim_cfg
   → EmbodiedEnv declares robot, objects, lights, and physical sensors
        → Default may materialize native handles eagerly
        → Newton keeps physical descriptors deferred
+  → optionally register Newton trajectory or contact-material controls on the manager
   → SimulationManager.prepare()
        → for Newton, resolve source metadata and configure exact-name overlays
        → finalize/rebuild pending Spawn descriptors once
@@ -183,10 +193,39 @@ reconfigured or rebound. `init_gpu_physics()` and
 call `prepare()`.
 
 Standalone callers must call `prepare()` after their last `add_*()` and before
-reading link/joint metadata, object state, or advancing physics. `BaseEnv`
-provides this boundary automatically between `_setup_scene()` and
-metadata-dependent setup. `SimulationManager.update()` still calls the
-readiness path defensively before advancing the requested physics steps.
+reading link/joint metadata, object state, or advancing physics. A Newton
+caller that needs a substep-interpolated kinematic articulation must call
+`register_kinematic_joint_trajectory(uid, joint_positions, ...)` after
+declaring that robot/articulation and before `prepare()`. Its public trajectory
+layout is `[num_envs, frames, dof]` in the articulation's public qpos order;
+the optional root-pose layout is
+`[num_envs, frames, 4, 4]`. `BaseEnv` provides the readiness boundary
+automatically between `_setup_scene()` and metadata-dependent setup.
+`SimulationManager.update()` still calls the readiness path defensively before
+advancing the requested physics steps.
+
+A caller that needs selected deformable nodes to follow a kinematic path must
+clear the Newton `ACTIVE` bit for those nodes through
+`DeformableObjectCfg.particle_flags`, then call
+`register_kinematic_nodal_trajectory(uid, node_indices, position_offsets, ...)`
+before `prepare()`. Offsets use the batched layout
+`[num_envs, samples, selected_nodes, 3]` and are relative to the world positions
+captured when the finalized runtime control initializes. With `fps`, targets
+are linearly interpolated at substep times; without it, each substep consumes
+one sample. Surface indices can follow an array-backed source mesh directly.
+Volume indices address the generated tetrahedral simulation particles and do
+not correspond to source-mesh vertices. The host-side particle writes
+intentionally disable CUDA Graph replay for that scene.
+
+Time-varying Newton shape contact properties belong on
+`register_contact_material_schedule(uid, keyframes, ...)`; valid targets are a
+declared rigid object, robot, or articulation. The manager creates one control
+per Arena and accepts piecewise-constant `dynamic_friction`, `stiffness`, and
+`damping` tracks. Scene-wide particle-versus-rigid values use
+`register_particle_contact_material_schedule(keyframes)`. That control performs
+host-side writes and disables CUDA Graph replay, while shape-material and joint
+trajectory controls remain graph-compatible. Register all controls before
+`prepare()` and never reach into `_spawn_scene.builder` from a task or demo.
 
 ## Module Boundaries
 
@@ -255,9 +294,23 @@ discriminator. Common source mesh and pose fields stay on
 `DeformableObjectCfg`; tetrahedral voxelization/soft-body attributes stay on
 the volume subclass, and Newton triangle/edge/spring attributes stay on the
 surface subclass. `particle_radius` and `validate_mesh` are common particle-set
-options. The volume descriptor converts Young's modulus and Poisson's ratio to
-Newton Lamé coefficients. Removed Default-only fields are deliberately not
-translated or silently ignored. Do not add backend conditionals to one
+options. `particle_flags` accepts one Newton bitmask or a
+simulation-particle-order array; nodes driven by a kinematic nodal trajectory
+must have their `ACTIVE` bit cleared before the immutable solver model is
+constructed. `MeshCfg` accepts either a file path or explicit vertex/triangle
+arrays. For surface deformables, use the array-backed form when flags or
+trajectories require stable source node indices: native file importers may
+reorder vertices, while array-backed descriptors preserve the supplied order
+through Newton model construction. A surface deformable may additionally set
+`visual_shape` to an independently indexed render mesh and choose
+`visual_binding_mode="auto"` or `"nearest_vertex"`; physics always follows
+`shape`, and visual material/UV configuration belongs on `visual_shape` when it
+is present. This supports seam-duplicated textured meshes without changing
+particle topology. Volume deformables are voxelized into a
+separate tetrahedral simulation mesh, so their particle indices are not source
+mesh indices. The volume descriptor converts Young's modulus and Poisson's
+ratio to Newton Lamé coefficients. Removed Default-only fields are deliberately
+not translated or silently ignored. Do not add backend conditionals to one
 monolithic deformable config; a future implementation belongs at the manager
 dispatch boundary.
 
@@ -482,6 +535,18 @@ legacy layer can eventually be removed as one unit.
 - Add the initial physical scene before `prepare()`. Calls to the legacy
   `init_gpu_physics()` and `finalize_newton_physics()` aliases are equivalent to
   `prepare()` and do not cause a second build.
+- Register Newton kinematic joint trajectories through
+  `SimulationManager.register_kinematic_joint_trajectory()` before `prepare()`;
+  callers must not access `SimulationManager._spawn_scene` or its builder.
+- Register deformable kinematic-node trajectories through
+  `SimulationManager.register_kinematic_nodal_trajectory()` before `prepare()`;
+  mark every selected node inactive in `particle_flags` before model
+  construction, and keep Spawn/runtime-control access inside the manager.
+- Register rigid/articulation contact schedules through
+  `SimulationManager.register_contact_material_schedule()` and scene-wide
+  particle schedules through
+  `SimulationManager.register_particle_contact_material_schedule()` before
+  `prepare()`; account for the latter disabling CUDA Graph replay.
 - Delegate environment and DOF selections to DexSim Spawn batches instead of
   full-batch read/modify/write loops in object facades.
 - Newton descriptor or topology mutations that cannot update the immutable

@@ -23,6 +23,9 @@ backend-specific asset or actuator definition is unavoidable.
 Public backend selectors use only ``default`` and ``newton``. Nested physical
 property groups may additionally use ``common`` for backend-neutral intent;
 DexSim names belong to the runtime and Spawn SDK adapter boundary.
+Surface deformables may keep a stable low-resolution simulation topology in
+``shape`` while binding an independently indexed ``visual_shape`` for authored
+UV seams and render detail.
 
 .. rubric:: Classes
 

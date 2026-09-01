@@ -19,12 +19,16 @@
 from __future__ import annotations
 
 from dataclasses import MISSING
-from typing import Literal
+from typing import Literal, Sequence
+
+import numpy as np
 
 from embodichain.utils import configclass
 
 from ..shapes import MeshCfg
 from .asset import ObjectBaseCfg
+
+__all__: list[str] = []
 
 
 @configclass
@@ -150,6 +154,17 @@ class DeformableObjectCfg(ObjectBaseCfg):
     particle_radius: float | None = None
     """Newton particle radius; ``None`` uses the active solver default."""
 
+    particle_flags: int | Sequence[int] | np.ndarray | None = None
+    """Newton particle flags, provided as one broadcast value or one value per node.
+
+    Clear the Newton ``ACTIVE`` bit for nodes that will be driven kinematically.
+    Per-node arrays must follow the resolved simulation-particle order. For a
+    surface deformable, an array-backed
+    :class:`~embodichain.lab.sim.shapes.MeshCfg` preserves this order. A volume
+    deformable is voxelized into a separate tetrahedral simulation mesh, so its
+    particle indices do not correspond to source-mesh vertex indices.
+    """
+
     validate_mesh: bool = False
     """Whether Newton reports source-mesh quality validation warnings."""
 
@@ -177,6 +192,21 @@ class SurfaceDeformableObjectCfg(DeformableObjectCfg):
     """Configuration for a Newton surface-deformable particle set."""
 
     deformable_type: Literal["surface"] = "surface"
+
+    visual_shape: MeshCfg | None = None
+    """Optional render mesh driven by the simulation surface.
+
+    When omitted, :attr:`shape` supplies both simulation topology and rendering.
+    Use a separately indexed mesh here when the visual asset needs authored UVs,
+    seam vertices, or other detail that should not change the simulation mesh.
+    """
+
+    visual_binding_mode: Literal["auto", "nearest_vertex"] = "auto"
+    """Binding used to drive :attr:`visual_shape` from simulation particles.
+
+    ``"auto"`` uses DexSim's surface embedding. ``"nearest_vertex"`` is useful
+    when the render mesh duplicates simulation vertices along texture seams.
+    """
 
     physical_attr: ClothPhysicalAttributesCfg = ClothPhysicalAttributesCfg()
     """Newton surface-deformable physical attributes."""

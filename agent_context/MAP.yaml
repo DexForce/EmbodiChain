@@ -26,6 +26,16 @@ topics:
       - arena
       - physics step
       - sim update
+      - runtime control
+      - kinematic joint trajectory
+      - register_kinematic_joint_trajectory
+      - kinematic nodal trajectory
+      - register_kinematic_nodal_trajectory
+      - KinematicJointTrajectoryControl
+      - contact material schedule
+      - register_contact_material_schedule
+      - particle contact material schedule
+      - register_particle_contact_material_schedule
       - scene object
       - asset registry
       - manual update
@@ -34,6 +44,11 @@ topics:
       - particle set
       - Newton soft body
       - Newton cloth
+      - array-backed mesh
+      - stable node indices
+      - tetrahedral particle order
+      - independent visual mesh
+      - visual binding mode
       - simulation lifecycle
       - collision_policy
       - collision isolation
@@ -57,10 +72,12 @@ topics:
     source_of_truth:
       - embodichain/lab/sim/__init__.py
       - embodichain/lab/sim/sim_manager.py
+      - embodichain/lab/sim/_runtime_controls.py
       - embodichain/lab/sim/cfg/
       - embodichain/lab/sim/_legacy_cfg.py
       - embodichain/lab/sim/common.py
       - embodichain/lab/sim/material.py
+      - embodichain/lab/sim/shapes.py
       - embodichain/lab/sim/profiler.py
       - embodichain/lab/sim/spawn/descriptors.py
       - embodichain/lab/sim/spawn/scene.py

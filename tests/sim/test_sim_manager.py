@@ -28,6 +28,7 @@ import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
 from embodichain.lab.sim.cfg import (
+    ClothObjectCfg,
     DefaultPhysicsCfg,
     RobotCfg,
     RobotPresetCfg,
@@ -235,6 +236,30 @@ def _make_visualization_sim_manager() -> (
     sim._visualization_sim_time = 0.0
     sim._visualization_error_reported = False
     return sim, runtime
+
+
+def _make_runtime_control_sim_manager(
+    *,
+    num_envs: int = 2,
+    backend: str = "newton",
+) -> tuple[SimulationManager, MagicMock]:
+    """Create a manager stub at the pre-prepare runtime-control boundary."""
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(num_envs=num_envs)
+    sim.physics = SimpleNamespace(name=backend)
+    sim._robots = {"robot": object()}
+    sim._articulations = {}
+    sim._rigid_objects = {"table": object()}
+    sim._deformable_objects = {
+        "cloth": SimpleNamespace(
+            cfg=ClothObjectCfg(uid="cloth", particle_flags=[0, 1, 0])
+        )
+    }
+    spawn_scene = MagicMock()
+    spawn_scene.arena_names = tuple(f"arena_{index}" for index in range(num_envs))
+    spawn_scene.builder.is_finalized = False
+    sim._spawn_scene = spawn_scene
+    return sim, spawn_scene.builder
 
 
 def test_flush_cleanup_queue_returns_immediately_when_no_destroy_is_pending(
@@ -604,6 +629,207 @@ def test_constructor_only_declares_spawn_scene(monkeypatch) -> None:
     ]
     assert sim._spawn_scene is spawn_scene
     assert sim._arenas == []
+
+
+def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    frame_count = 3
+    dof_count = 2
+    positions = torch.arange(
+        sim.num_envs * frame_count * dof_count,
+        dtype=torch.float32,
+    ).reshape(sim.num_envs, frame_count, dof_count)
+    root_poses = np.tile(
+        np.eye(4, dtype=np.float32),
+        (sim.num_envs, frame_count, 1, 1),
+    )
+
+    sim.register_kinematic_joint_trajectory(
+        "robot",
+        positions,
+        fps=50.0,
+        root_poses=root_poses,
+    )
+
+    assert builder.add_runtime_control.call_count == sim.num_envs
+    for env_index, control_call in enumerate(
+        builder.add_runtime_control.call_args_list
+    ):
+        control = control_call.args[0]
+        assert control.target == f"arena_{env_index}/robot"
+        assert control.fps == 50.0
+        np.testing.assert_array_equal(
+            control.joint_positions,
+            positions[env_index].numpy(),
+        )
+        np.testing.assert_array_equal(
+            control.root_poses,
+            root_poses[env_index],
+        )
+
+
+def test_register_kinematic_joint_trajectory_rejects_non_newton_backend() -> None:
+    sim, builder = _make_runtime_control_sim_manager(backend="default")
+    positions = np.zeros((sim.num_envs, 2, 1), dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match="require the Newton backend"):
+        sim.register_kinematic_joint_trajectory("robot", positions)
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_register_kinematic_joint_trajectory_rejects_unknown_asset() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    positions = np.zeros((sim.num_envs, 2, 1), dtype=np.float32)
+
+    with pytest.raises(KeyError, match="missing"):
+        sim.register_kinematic_joint_trajectory("missing", positions)
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_register_kinematic_joint_trajectory_rejects_wrong_arena_batch() -> None:
+    sim, builder = _make_runtime_control_sim_manager(num_envs=2)
+    positions = np.zeros((1, 2, 1), dtype=np.float32)
+
+    with pytest.raises(ValueError, match=r"\(2, frames, dof\)"):
+        sim.register_kinematic_joint_trajectory("robot", positions)
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_register_kinematic_joint_trajectory_rejects_finalized_scene() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    builder.is_finalized = True
+    positions = np.zeros((sim.num_envs, 2, 1), dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
+        sim.register_kinematic_joint_trajectory("robot", positions)
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_register_contact_material_schedule_expands_each_arena() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    friction_track = ((0.0, 0.5), (1.0, 0.1))
+
+    sim.register_contact_material_schedule(
+        "robot",
+        {"dynamic_friction": friction_track},
+        link_names=("left_finger", "right_finger"),
+    )
+
+    assert builder.add_runtime_control.call_count == sim.num_envs
+    for env_index, control_call in enumerate(
+        builder.add_runtime_control.call_args_list
+    ):
+        control = control_call.args[0]
+        assert control.target == f"arena_{env_index}/robot"
+        assert control.link_names == ("left_finger", "right_finger")
+        assert control.property_names == ("dynamic_friction",)
+        np.testing.assert_allclose(control.keyframe_times, (0.0, 1.0))
+        np.testing.assert_allclose(control.keyframe_values, (0.5, 0.1))
+
+
+def test_register_contact_material_schedule_rejects_unknown_asset() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+
+    with pytest.raises(KeyError, match="missing"):
+        sim.register_contact_material_schedule(
+            "missing",
+            {"dynamic_friction": ((0.0, 0.5),)},
+        )
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_register_particle_contact_material_schedule_adds_global_control() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    friction_track = ((0.0, 0.5), (1.0, 1.2))
+
+    sim.register_particle_contact_material_schedule(
+        {"dynamic_friction": friction_track}
+    )
+
+    builder.add_runtime_control.assert_called_once()
+    control = builder.add_runtime_control.call_args.args[0]
+    np.testing.assert_allclose(
+        control.tracks["dynamic_friction"],
+        friction_track,
+    )
+
+
+def test_contact_material_schedules_reject_finalized_scene() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    builder.is_finalized = True
+    keyframes = {"dynamic_friction": ((0.0, 0.5),)}
+
+    with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
+        sim.register_contact_material_schedule("table", keyframes)
+    with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
+        sim.register_particle_contact_material_schedule(keyframes)
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_register_kinematic_nodal_trajectory_expands_each_arena() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    node_indices = np.asarray([0, 2], dtype=np.int32)
+    sample_count = 3
+    offsets = np.arange(
+        sim.num_envs * sample_count * len(node_indices) * 3,
+        dtype=np.float32,
+    ).reshape(sim.num_envs, sample_count, len(node_indices), 3)
+
+    sim.register_kinematic_nodal_trajectory(
+        "cloth",
+        node_indices,
+        offsets,
+        fps=60.0,
+        rebuild_self_contact_bvh=True,
+    )
+
+    assert builder.add_runtime_control.call_count == sim.num_envs
+    for env_index, control_call in enumerate(
+        builder.add_runtime_control.call_args_list
+    ):
+        control = control_call.args[0]
+        assert control.target == f"arena_{env_index}/cloth"
+        assert control.fps == pytest.approx(60.0)
+        assert control.rebuild_self_contact_bvh is True
+        np.testing.assert_array_equal(control.node_indices, node_indices)
+        np.testing.assert_array_equal(control.position_offsets, offsets[env_index])
+
+
+def test_register_kinematic_nodal_trajectory_rejects_active_nodes() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    offsets = np.zeros((sim.num_envs, 2, 1, 3), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="ACTIVE particle flag"):
+        sim.register_kinematic_nodal_trajectory("cloth", [1], offsets)
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_register_kinematic_nodal_trajectory_rejects_wrong_shape() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    offsets = np.zeros((sim.num_envs, 2, 3), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="position_offsets"):
+        sim.register_kinematic_nodal_trajectory("cloth", [0], offsets)
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_register_kinematic_nodal_trajectory_rejects_finalized_scene() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    builder.is_finalized = True
+    offsets = np.zeros((sim.num_envs, 2, 1, 3), dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
+        sim.register_kinematic_nodal_trajectory("cloth", [0], offsets)
+
+    builder.add_runtime_control.assert_not_called()
 
 
 def test_add_robot_resolves_backend_preset_before_declaration() -> None:

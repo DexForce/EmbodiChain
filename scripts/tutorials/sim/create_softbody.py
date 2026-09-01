@@ -23,24 +23,24 @@ from __future__ import annotations
 
 import argparse
 import time
+
 from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
+    NewtonCollisionPipelineCfg,
     NewtonPhysicsCfg,
     RenderCfg,
+    SoftObjectCfg,
     SoftbodyVoxelAttributesCfg,
     SoftbodyPhysicalAttributesCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.objects import (
-    SoftObject,
-    SoftObjectCfg,
-)
+from embodichain.lab.sim.objects import SoftObject
 
 
-def main():
+def main() -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
@@ -48,22 +48,44 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.set_defaults(device="cuda", physics="newton")
     args = parser.parse_args()
     if args.physics != "newton":
         parser.error("Soft bodies require --physics newton.")
+    if not str(args.device).startswith("cuda"):
+        parser.error("Soft bodies require a CUDA device.")
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
-        headless=True,
+        headless=args.headless,
         num_envs=args.num_envs,
+        arena_space=args.arena_space,
+        gpu_id=args.gpu_id,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        device="cuda",  # soft simulation only supports cuda device
+        device=args.device,
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
-        physics_cfg=NewtonPhysicsCfg(solver_cfg={"solver_type": "vbd"}),
+        physics_cfg=NewtonPhysicsCfg(
+            num_substeps=6,
+            solver_cfg={
+                "solver_type": "vbd",
+                "iterations": 8,
+                "particle_enable_self_contact": False,
+                "particle_self_contact_radius": 0.001,
+                "particle_self_contact_margin": 0.001,
+                "particle_topological_contact_filter_threshold": 3,
+                "particle_enable_tile_solve": True,
+                "soft_contact_ke": 5.0e4,
+                "soft_contact_kd": 1.0e-3,
+                "soft_contact_mu": 1.5,
+            },
+            collision_cfg=NewtonCollisionPipelineCfg(
+                soft_contact_margin=0.002,
+            ),
+        ),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -79,15 +101,19 @@ def main():
             shape=MeshCfg(
                 fpath=get_resources_data_path("Model", "cow", "cow.obj"),
             ),
-            init_pos=[0.0, 0.0, 3.0],
+            init_pos=[0.0, 5.0, 3.0],
+            particle_radius=0.01,
             voxel_attr=SoftbodyVoxelAttributesCfg(
-                simulation_mesh_resolution=8,
+                triangle_remesh_resolution=24,
+                simulation_mesh_resolution=16,
+                voxel_num_relaxation_iters=5,
             ),
             physical_attr=SoftbodyPhysicalAttributesCfg(
-                youngs=1e6,
-                poissons=0.45,
-                density=100,
-                elasticity_damping=0.1,
+                # Equivalent to the DexSim demo's k_mu=1e4 and k_lambda=5e4.
+                youngs=2.833333333e4,
+                poissons=5.0 / 12.0,
+                density=50.0,
+                elasticity_damping=2.0e-3,
             ),
         ),
     )

@@ -437,7 +437,11 @@ def rigid_desc_from_cfg(
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Translate a rigid-object config into a DexSim Spawn descriptor."""
     uid = _required_uid(cfg.uid, "Rigid object")
-    if isinstance(cfg.shape, MeshCfg) and _is_usd_path(cfg.shape.fpath):
+    if (
+        isinstance(cfg.shape, MeshCfg)
+        and not _is_missing(cfg.shape.fpath)
+        and _is_usd_path(cfg.shape.fpath)
+    ):
         raise NotImplementedError(
             "USD files describe typed scenes; use rigid_desc_from_usd() to "
             "select the sole rigid object."
@@ -489,6 +493,108 @@ def rigid_desc_from_cfg(
     return descriptor, materials
 
 
+def _particle_flags_from_cfg(
+    flags: int | Sequence[int] | np.ndarray | None,
+) -> int | np.ndarray | None:
+    """Validate and copy optional Newton particle flags."""
+    max_flag = int(np.iinfo(np.int32).max)
+    if flags is None:
+        return None
+    if np.isscalar(flags):
+        if isinstance(flags, (bool, np.bool_)) or not isinstance(
+            flags, numbers.Integral
+        ):
+            raise TypeError("particle_flags scalar must be an integer bitmask.")
+        value = int(flags)
+        if value < 0 or value > max_flag:
+            raise ValueError(f"particle_flags values must lie in [0, {max_flag}].")
+        return value
+
+    values = np.asarray(flags)
+    if values.ndim != 1 or values.size == 0:
+        raise ValueError("particle_flags must be a non-empty one-dimensional array.")
+    if values.dtype.kind not in "iu":
+        raise TypeError("particle_flags array must contain integer bitmasks.")
+    if np.any(values < 0) or np.any(values > max_flag):
+        raise ValueError(f"particle_flags values must lie in [0, {max_flag}].")
+    return values.astype(np.int32, copy=True)
+
+
+def _mesh_geometry_from_cfg(shape: MeshCfg, *, segment_name: str) -> GeometryDesc:
+    """Compile one file-backed or array-backed mesh configuration."""
+    has_file = (
+        not _is_missing(shape.fpath)
+        and shape.fpath is not None
+        and bool(str(shape.fpath).strip())
+    )
+    has_vertices = shape.vertices is not None
+    has_triangles = shape.triangles is not None
+
+    if has_vertices != has_triangles:
+        raise ValueError(
+            "MeshCfg.vertices and MeshCfg.triangles must be provided together."
+        )
+    if has_file and has_vertices:
+        raise ValueError(
+            "MeshCfg must provide either fpath or vertices/triangles, not both."
+        )
+    if not has_file and not has_vertices:
+        raise ValueError(
+            "MeshCfg must provide a non-empty fpath or vertices/triangles."
+        )
+    if has_file:
+        if shape.normals is not None or shape.uv_coords is not None:
+            raise ValueError(
+                "MeshCfg.normals and uv_coords require an array-backed mesh."
+            )
+        return GeometryDesc.mesh(file_path=str(shape.fpath), segment_name=segment_name)
+
+    vertices = np.asarray(shape.vertices, dtype=np.float32)
+    if vertices.ndim != 2 or vertices.shape[1:] != (3,) or len(vertices) == 0:
+        raise ValueError("MeshCfg.vertices must have non-empty shape (N, 3).")
+    if not np.isfinite(vertices).all():
+        raise ValueError("MeshCfg.vertices must contain only finite values.")
+
+    raw_triangles = np.asarray(shape.triangles)
+    if raw_triangles.dtype.kind not in "iu":
+        raise TypeError("MeshCfg.triangles must contain integer indices.")
+    if (
+        raw_triangles.ndim != 2
+        or raw_triangles.shape[1:] != (3,)
+        or len(raw_triangles) == 0
+    ):
+        raise ValueError("MeshCfg.triangles must have non-empty shape (M, 3).")
+    if np.any(raw_triangles < 0) or np.any(raw_triangles >= len(vertices)):
+        raise ValueError("MeshCfg.triangles contain an out-of-range vertex index.")
+    triangles = raw_triangles.astype(np.int32, copy=True)
+
+    normals = None
+    if shape.normals is not None:
+        normals = np.asarray(shape.normals, dtype=np.float32)
+        if normals.shape != vertices.shape or not np.isfinite(normals).all():
+            raise ValueError(
+                f"MeshCfg.normals must have finite shape {vertices.shape}."
+            )
+        normals = normals.copy()
+
+    uv_coords = None
+    if shape.uv_coords is not None:
+        uv_coords = np.asarray(shape.uv_coords, dtype=np.float32)
+        if uv_coords.shape != (len(vertices), 2) or not np.isfinite(uv_coords).all():
+            raise ValueError(
+                f"MeshCfg.uv_coords must have finite shape ({len(vertices)}, 2)."
+            )
+        uv_coords = uv_coords.copy()
+
+    return GeometryDesc.mesh(
+        vertices=vertices.copy(),
+        triangles=triangles,
+        normals=normals,
+        uv_coords=uv_coords,
+        segment_name=segment_name,
+    )
+
+
 def volume_deformable_desc_from_cfg(
     cfg: VolumeDeformableObjectCfg,
     *,
@@ -496,11 +602,7 @@ def volume_deformable_desc_from_cfg(
 ) -> tuple[SoftBodyDesc, dict[str, MaterialDesc]]:
     """Translate a volume deformable into a Newton particle-set descriptor."""
     uid = _required_uid(cfg.uid, "Volume deformable")
-    if _is_missing(cfg.shape.fpath) or not str(cfg.shape.fpath).strip():
-        raise ValueError(
-            "VolumeDeformableObjectCfg.shape.fpath must be a non-empty path."
-        )
-    geometry = GeometryDesc.mesh(file_path=str(cfg.shape.fpath), segment_name=uid)
+    geometry = _mesh_geometry_from_cfg(cfg.shape, segment_name=uid)
     material_ref, material_entry = _compile_visual_material(
         uid, cfg.shape.visual_material
     )
@@ -555,6 +657,7 @@ def volume_deformable_desc_from_cfg(
             voxel_surface_dist_ratio=cfg.voxel_attr.voxel_surface_dist_ratio,
             embedding_impl=cfg.voxel_attr.embedding_impl,
         ),
+        particle_flags=_particle_flags_from_cfg(cfg.particle_flags),
         particle_radius=particle_radius,
         validate_mesh=cfg.validate_mesh,
         per_env=per_env,
@@ -570,13 +673,23 @@ def surface_deformable_desc_from_cfg(
 ) -> tuple[ClothDesc, dict[str, MaterialDesc]]:
     """Translate a surface deformable into a Newton particle-set descriptor."""
     uid = _required_uid(cfg.uid, "Surface deformable")
-    if _is_missing(cfg.shape.fpath) or not str(cfg.shape.fpath).strip():
+    geometry = _mesh_geometry_from_cfg(cfg.shape, segment_name=uid)
+    if cfg.visual_binding_mode not in {"auto", "nearest_vertex"}:
         raise ValueError(
-            "SurfaceDeformableObjectCfg.shape.fpath must be a non-empty path."
+            "Surface deformable visual_binding_mode must be 'auto' or "
+            f"'nearest_vertex'; got {cfg.visual_binding_mode!r}."
         )
-    geometry = GeometryDesc.mesh(file_path=str(cfg.shape.fpath), segment_name=uid)
+    render_shape = cfg.shape if cfg.visual_shape is None else cfg.visual_shape
+    visual_geometry = (
+        None
+        if cfg.visual_shape is None
+        else _mesh_geometry_from_cfg(
+            cfg.visual_shape,
+            segment_name=f"{uid}_visual",
+        )
+    )
     material_ref, material_entry = _compile_visual_material(
-        uid, cfg.shape.visual_material
+        uid, render_shape.visual_material
     )
     physical_attr = cfg.physical_attr
     density = float(physical_attr.density)
@@ -592,11 +705,25 @@ def surface_deformable_desc_from_cfg(
     descriptor = ClothDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
-        mesh=RenderDesc.from_geometry(
-            geometry,
-            load_option=_compile_load_option(cfg.shape),
-            material_ref=material_ref,
+        mesh=(
+            RenderDesc.from_geometry(
+                geometry,
+                load_option=_compile_load_option(cfg.shape),
+                material_ref=material_ref,
+            )
+            if visual_geometry is None
+            else geometry
         ),
+        visual_mesh=(
+            None
+            if visual_geometry is None
+            else RenderDesc.from_geometry(
+                visual_geometry,
+                load_option=_compile_load_option(render_shape),
+                material_ref=material_ref,
+            )
+        ),
+        visual_binding_mode=cfg.visual_binding_mode,
         physics=ClothPhysicsDesc(
             surface_density=density,
             tri_ke=physical_attr.tri_ke,
@@ -610,6 +737,7 @@ def surface_deformable_desc_from_cfg(
             spring_ke=physical_attr.spring_ke,
             spring_kd=physical_attr.spring_kd,
         ),
+        particle_flags=_particle_flags_from_cfg(cfg.particle_flags),
         particle_radius=particle_radius,
         validate_mesh=cfg.validate_mesh,
         per_env=per_env,
@@ -1447,8 +1575,7 @@ def _compile_geometry(
 ) -> tuple[GeometryDesc, CollisionApproximation, int]:
     shape = cfg.shape
     if isinstance(shape, MeshCfg):
-        if _is_missing(shape.fpath) or not str(shape.fpath).strip():
-            raise ValueError("MeshCfg.fpath must be a non-empty path.")
+        geometry = _mesh_geometry_from_cfg(shape, segment_name=cfg.uid or "mesh")
         max_hulls, acd_method, sdf_resolution = _resolved_mesh_collision_settings(
             cfg,
             physics=physics,
@@ -1477,9 +1604,7 @@ def _compile_geometry(
                 "its cooking resolution."
             )
         return (
-            GeometryDesc.mesh(
-                file_path=str(shape.fpath), segment_name=cfg.uid or "mesh"
-            ),
+            geometry,
             approximation,
             max(1, max_hulls),
         )

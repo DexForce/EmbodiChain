@@ -32,7 +32,16 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property, partial
-from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Sequence, Union
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Sequence,
+    Union,
+)
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -1018,6 +1027,384 @@ class SimulationManager:
         from embodichain.data.assets import SimResources
 
         self._default_resources = SimResources()
+
+    def register_kinematic_joint_trajectory(
+        self,
+        uid: str,
+        joint_positions: torch.Tensor | np.ndarray,
+        *,
+        fps: float | None = None,
+        root_poses: torch.Tensor | np.ndarray | None = None,
+    ) -> None:
+        """Register a Newton kinematic joint trajectory for every arena.
+
+        The leading trajectory dimension follows EmbodiChain's batched arena
+        layout. Each arena row is lowered to one DexSim runtime control with
+        the corresponding concrete Spawn articulation path. Row zero is the
+        initial sample; when ``fps`` is omitted, each call to :meth:`update`
+        advances to the next sample.
+
+        .. attention::
+            Declare the target robot or articulation first, then call this
+            method before :meth:`prepare`. Runtime controls are part of the
+            finalized Newton simulation pipeline and cannot be added later.
+
+        Args:
+            uid: UID of a robot or articulation declared on this manager.
+            joint_positions: Batched positions in the articulation's public
+                qpos order with shape ``(num_envs, frames, dof)``.
+            fps: Optional trajectory sample rate. When omitted, samples advance
+                once per EmbodiChain physics frame.
+            root_poses: Optional batched world-space root transforms with shape
+                ``(num_envs, frames, 4, 4)``.
+
+        Raises:
+            RuntimeError: If the active backend is not Newton, the Spawn scene
+                is already finalized, or its arena count is inconsistent.
+            KeyError: If ``uid`` is not a declared robot or articulation.
+            ValueError: If an input has an invalid batch shape or non-finite
+                values.
+        """
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("uid must be a non-empty string.")
+        if not self.is_newton_backend:
+            raise RuntimeError(
+                "Kinematic joint trajectory controls require the Newton backend."
+            )
+        if uid not in self._robots and uid not in self._articulations:
+            raise KeyError(f"Robot or articulation {uid!r} is not declared.")
+
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Kinematic joint trajectories must be registered before "
+                "SimulationManager.prepare()."
+            )
+
+        if isinstance(joint_positions, torch.Tensor):
+            positions = joint_positions.detach().cpu().numpy()
+        else:
+            positions = np.asarray(joint_positions)
+        positions = np.asarray(positions, dtype=np.float32)
+        expected_prefix = (self.num_envs,)
+        if (
+            positions.ndim != 3
+            or positions.shape[:1] != expected_prefix
+            or positions.shape[1] == 0
+            or positions.shape[2] == 0
+        ):
+            raise ValueError(
+                "joint_positions must have non-empty shape "
+                f"({self.num_envs}, frames, dof); got {positions.shape}."
+            )
+        if not np.isfinite(positions).all():
+            raise ValueError("joint_positions must contain only finite values.")
+
+        poses: np.ndarray | None = None
+        if root_poses is not None:
+            if isinstance(root_poses, torch.Tensor):
+                poses = root_poses.detach().cpu().numpy()
+            else:
+                poses = np.asarray(root_poses)
+            poses = np.asarray(poses, dtype=np.float32)
+            expected_shape = (self.num_envs, positions.shape[1], 4, 4)
+            if poses.shape != expected_shape:
+                raise ValueError(
+                    f"root_poses must have shape {expected_shape}; got {poses.shape}."
+                )
+            if not np.isfinite(poses).all():
+                raise ValueError("root_poses must contain only finite values.")
+
+        arena_names = scene.arena_names
+        if len(arena_names) != self.num_envs:
+            raise RuntimeError(
+                "Spawn arena count does not match SimulationManager.num_envs: "
+                f"{len(arena_names)} != {self.num_envs}."
+            )
+
+        from dexsim.engine.newton_physics import KinematicJointTrajectoryControl
+
+        controls = tuple(
+            KinematicJointTrajectoryControl(
+                f"{arena_name}/{uid}",
+                positions[env_index],
+                fps=fps,
+                root_poses=None if poses is None else poses[env_index],
+            )
+            for env_index, arena_name in enumerate(arena_names)
+        )
+        for control in controls:
+            scene.builder.add_runtime_control(control)
+
+    def register_contact_material_schedule(
+        self,
+        uid: str,
+        keyframes: Mapping[str, Sequence[Sequence[float]]],
+        *,
+        link_names: Sequence[str] | None = None,
+    ) -> None:
+        """Register time-varying Newton contact properties for an asset.
+
+        The manager expands the declared UID to the concrete Spawn path in
+        every Arena. Supported keyframe tracks are ``dynamic_friction``,
+        ``stiffness``, and ``damping``; each track contains ``(time, value)``
+        pairs and is sampled piecewise-constantly in simulation time.
+
+        .. attention::
+            Declare the rigid object, robot, or articulation first and call
+            this method before :meth:`prepare`. Runtime controls are part of
+            the finalized Newton pipeline and cannot be added later.
+
+        Args:
+            uid: UID of a declared rigid object, robot, or articulation.
+            keyframes: Contact-property tracks keyed by property name.
+            link_names: Optional articulation-link names to update. ``None``
+                updates every collision shape belonging to the target.
+
+        Raises:
+            RuntimeError: If the backend is not Newton, the scene is already
+                finalized, or its Arena count is inconsistent.
+            KeyError: If ``uid`` does not identify a declared supported asset.
+            ValueError: If the UID or keyframes are invalid.
+        """
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("uid must be a non-empty string.")
+        if not self.is_newton_backend:
+            raise RuntimeError("Contact material schedules require the Newton backend.")
+        if (
+            uid not in self._rigid_objects
+            and uid not in self._robots
+            and uid not in self._articulations
+        ):
+            raise KeyError(
+                f"Rigid object, robot, or articulation {uid!r} is not declared."
+            )
+
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Contact material schedules must be registered before "
+                "SimulationManager.prepare()."
+            )
+        arena_names = scene.arena_names
+        if len(arena_names) != self.num_envs:
+            raise RuntimeError(
+                "Spawn arena count does not match SimulationManager.num_envs: "
+                f"{len(arena_names)} != {self.num_envs}."
+            )
+
+        from dexsim.engine.newton_physics import ContactMaterialSchedule
+
+        controls = tuple(
+            ContactMaterialSchedule(
+                f"{arena_name}/{uid}",
+                keyframes,
+                link_names=link_names,
+            )
+            for arena_name in arena_names
+        )
+        for control in controls:
+            scene.builder.add_runtime_control(control)
+
+    def register_particle_contact_material_schedule(
+        self,
+        keyframes: Mapping[str, Sequence[Sequence[float]]],
+    ) -> None:
+        """Register time-varying Newton particle contact properties.
+
+        Supported tracks are ``dynamic_friction``, ``stiffness``, and
+        ``damping``. Values apply scene-wide to particle-versus-rigid contacts
+        and are sampled piecewise-constantly in simulation time.
+
+        .. attention::
+            Register this control before :meth:`prepare`. This host-side
+            control requires direct Newton stepping and therefore disables
+            CUDA Graph replay for the finalized simulation.
+
+        Args:
+            keyframes: Particle contact-property tracks containing ``(time,
+                value)`` pairs.
+
+        Raises:
+            RuntimeError: If the backend is not Newton or the scene is already
+                finalized.
+            ValueError: If the keyframes are invalid.
+        """
+        if not self.is_newton_backend:
+            raise RuntimeError(
+                "Particle contact material schedules require the Newton backend."
+            )
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Particle contact material schedules must be registered before "
+                "SimulationManager.prepare()."
+            )
+
+        from dexsim.engine.newton_physics import ParticleContactMaterialSchedule
+
+        scene.builder.add_runtime_control(ParticleContactMaterialSchedule(keyframes))
+
+    def register_kinematic_nodal_trajectory(
+        self,
+        uid: str,
+        node_indices: torch.Tensor | np.ndarray | Sequence[int],
+        position_offsets: torch.Tensor | np.ndarray,
+        *,
+        fps: float | None = None,
+        rebuild_self_contact_bvh: bool = False,
+    ) -> None:
+        """Register a Newton trajectory for selected deformable nodes.
+
+        Each selected node is fixed during Newton model construction and then
+        moved relative to the world position captured when the runtime control
+        initializes. The manager expands the batched offsets to one control per
+        Arena without exposing the private Spawn scene.
+
+        When ``fps`` is provided, samples are linearly interpolated at Newton
+        substep times. Otherwise one sample is consumed per substep. The final
+        sample is held after the trajectory ends.
+
+        .. attention::
+            Declare the deformable first and clear the Newton ``ACTIVE`` bit in
+            its ``particle_flags`` for every selected node. Then register this
+            control before :meth:`prepare`. This host-side control makes Newton
+            use direct substep launches instead of CUDA Graph replay. Surface
+            node indices can follow an array-backed mesh directly; volume node
+            indices refer to the generated tetrahedral simulation particles,
+            not source-mesh vertices.
+
+        Args:
+            uid: UID of a deformable declared on this manager.
+            node_indices: Shared one-dimensional simulation-particle indices.
+            position_offsets: Batched world-frame position offsets with shape
+                ``(num_envs, samples, selected_nodes, 3)``.
+            fps: Optional trajectory sample rate in samples per second.
+            rebuild_self_contact_bvh: Whether to request a full solver BVH
+                rebuild at the start of every physics frame when supported.
+
+        Raises:
+            RuntimeError: If the active backend is not Newton, the Spawn scene
+                is already finalized, or its Arena count is inconsistent.
+            KeyError: If ``uid`` is not a declared deformable.
+            TypeError: If node indices, ``fps``, or the BVH option have invalid
+                types.
+            ValueError: If an input has an invalid shape or value, or selected
+                nodes were not configured as inactive particles.
+        """
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("uid must be a non-empty string.")
+        if not self.is_newton_backend:
+            raise RuntimeError(
+                "Kinematic nodal trajectory controls require the Newton backend."
+            )
+        if uid not in self._deformable_objects:
+            raise KeyError(f"Deformable object {uid!r} is not declared.")
+
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Kinematic nodal trajectories must be registered before "
+                "SimulationManager.prepare()."
+            )
+
+        if isinstance(node_indices, torch.Tensor):
+            raw_indices = node_indices.detach().cpu().numpy()
+        else:
+            raw_indices = np.asarray(node_indices)
+        if raw_indices.ndim != 1 or raw_indices.size == 0:
+            raise ValueError("node_indices must be a non-empty one-dimensional array.")
+        if raw_indices.dtype.kind not in "iu":
+            raise TypeError("node_indices must contain integers.")
+        if np.any(raw_indices < 0):
+            raise ValueError("node_indices must be non-negative.")
+        if np.any(raw_indices > np.iinfo(np.int32).max):
+            raise ValueError("node_indices exceed the supported int32 range.")
+        indices = np.asarray(raw_indices, dtype=np.int32)
+        if len(np.unique(indices)) != len(indices):
+            raise ValueError("node_indices must not contain duplicates.")
+
+        configured_flags = self._deformable_objects[uid].cfg.particle_flags
+        if configured_flags is None:
+            raise ValueError(
+                "Kinematic nodes require particle_flags with the Newton ACTIVE "
+                "bit cleared before model construction."
+            )
+        flags = np.asarray(configured_flags)
+        if flags.ndim == 0:
+            selected_flags = np.full(len(indices), int(flags), dtype=np.int64)
+        elif flags.ndim == 1:
+            if int(indices.max()) >= len(flags):
+                raise ValueError(
+                    "node_indices exceed the configured particle_flags length: "
+                    f"max index {int(indices.max())}, length {len(flags)}."
+                )
+            selected_flags = flags[indices]
+        else:
+            raise ValueError(
+                "Configured particle_flags must be scalar or one-dimensional."
+            )
+        newton_active_particle_flag = 1
+        if np.any(
+            np.asarray(selected_flags, dtype=np.int64) & newton_active_particle_flag
+        ):
+            raise ValueError(
+                "Every kinematic node must have the Newton ACTIVE particle flag cleared."
+            )
+
+        if isinstance(position_offsets, torch.Tensor):
+            offsets = position_offsets.detach().cpu().numpy()
+        else:
+            offsets = np.asarray(position_offsets)
+        offsets = np.asarray(offsets, dtype=np.float32)
+        if (
+            offsets.ndim != 4
+            or offsets.shape[0] != self.num_envs
+            or offsets.shape[1] == 0
+            or offsets.shape[2:] != (len(indices), 3)
+        ):
+            raise ValueError(
+                "position_offsets must have non-empty shape "
+                f"({self.num_envs}, samples, {len(indices)}, 3); got "
+                f"{offsets.shape}."
+            )
+        if not np.isfinite(offsets).all():
+            raise ValueError("position_offsets must contain only finite values.")
+
+        if fps is not None:
+            if isinstance(fps, bool) or not isinstance(
+                fps, (int, float, np.integer, np.floating)
+            ):
+                raise TypeError("fps must be a finite positive number or None.")
+            fps = float(fps)
+            if not np.isfinite(fps) or fps <= 0.0:
+                raise ValueError("fps must be a finite positive number.")
+        if not isinstance(rebuild_self_contact_bvh, bool):
+            raise TypeError("rebuild_self_contact_bvh must be a bool.")
+
+        arena_names = scene.arena_names
+        if len(arena_names) != self.num_envs:
+            raise RuntimeError(
+                "Spawn arena count does not match SimulationManager.num_envs: "
+                f"{len(arena_names)} != {self.num_envs}."
+            )
+
+        from embodichain.lab.sim._runtime_controls import (
+            _KinematicNodalTrajectoryControl,
+        )
+
+        controls = tuple(
+            _KinematicNodalTrajectoryControl(
+                f"{arena_name}/{uid}",
+                indices,
+                offsets[env_index],
+                fps=fps,
+                rebuild_self_contact_bvh=rebuild_self_contact_bvh,
+            )
+            for env_index, arena_name in enumerate(arena_names)
+        )
+        for control in controls:
+            scene.builder.add_runtime_control(control)
 
     def prepare(self) -> None:
         """Materialize declarations, bind state, and resolve sensor parents."""

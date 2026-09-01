@@ -22,6 +22,22 @@ decoding and compiling the constrained Expert Program schema surface.
    compile_mllm_expert_program
    decode_mllm_expert_program
 
+embodichain.data.assets.demo_assets
+-----------------------------------
+
+Downloadable bundles used by standalone manipulation and deformable-body
+demos. Each class resolves one versioned archive into the configured
+EmbodiChain data cache.
+
+.. currentmodule:: embodichain.data.assets.demo_assets
+
+.. autosummary::
+
+   CoordinatedPlacementAndPickment
+   DeformableDemoData
+   MultiW1Data
+   ScoopIceNewEnv
+
 embodichain.data.assets.planner_assets
 --------------------------------------
 

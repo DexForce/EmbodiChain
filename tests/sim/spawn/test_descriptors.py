@@ -101,6 +101,7 @@ def test_soft_descriptor_uses_newton_particle_schema() -> None:
         uid="soft",
         shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
         particle_radius=0.02,
+        particle_flags=0,
         validate_mesh=True,
         voxel_attr=SoftbodyVoxelAttributesCfg(
             triangle_remesh_resolution=12,
@@ -126,6 +127,7 @@ def test_soft_descriptor_uses_newton_particle_schema() -> None:
     assert isinstance(descriptor, SoftBodyDesc)
     assert descriptor.mesh.file_path == DEFORMABLE_MESH_PATH
     assert descriptor.particle_radius == pytest.approx(0.02)
+    assert descriptor.particle_flags == 0
     assert descriptor.validate_mesh is True
     assert descriptor.per_env is False
     assert descriptor.physics.volume_density == pytest.approx(75.0)
@@ -152,6 +154,7 @@ def test_cloth_descriptor_uses_newton_particle_schema() -> None:
         uid="cloth",
         shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
         particle_radius=0.01,
+        particle_flags=np.asarray([0, 1, 0], dtype=np.int32),
         validate_mesh=True,
         physical_attr=ClothPhysicalAttributesCfg(
             density=2.5,
@@ -171,6 +174,7 @@ def test_cloth_descriptor_uses_newton_particle_schema() -> None:
     assert isinstance(descriptor, ClothDesc)
     assert descriptor.mesh.file_path == DEFORMABLE_MESH_PATH
     assert descriptor.particle_radius == pytest.approx(0.01)
+    np.testing.assert_array_equal(descriptor.particle_flags, [0, 1, 0])
     assert descriptor.validate_mesh is True
     assert descriptor.per_env is False
     assert descriptor.physics.surface_density == pytest.approx(2.5)
@@ -184,6 +188,93 @@ def test_cloth_descriptor_uses_newton_particle_schema() -> None:
     assert descriptor.physics.spring_kd == pytest.approx(3.0)
     assert descriptor.physics.dexsim is None
     assert materials == {}
+
+
+def test_cloth_descriptor_preserves_array_mesh_vertex_order() -> None:
+    vertices = np.asarray(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float32,
+    )
+    triangles = np.asarray([[2, 0, 1]], dtype=np.int32)
+    uv_coords = np.asarray(
+        [[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]],
+        dtype=np.float32,
+    )
+    cfg = ClothObjectCfg(
+        uid="cloth",
+        shape=MeshCfg(
+            vertices=vertices,
+            triangles=triangles,
+            uv_coords=uv_coords,
+        ),
+        particle_flags=[0, 1, 1],
+    )
+
+    cfg.validate()
+    descriptor, _ = cloth_desc_from_cfg(cfg)
+
+    assert descriptor.mesh.file_path is None
+    np.testing.assert_array_equal(descriptor.mesh.vertices, vertices)
+    np.testing.assert_array_equal(descriptor.mesh.triangles, triangles)
+    np.testing.assert_array_equal(descriptor.mesh.uv_coords, uv_coords)
+    np.testing.assert_array_equal(descriptor.particle_flags, [0, 1, 1])
+
+
+def test_cloth_descriptor_supports_independent_visual_mesh() -> None:
+    visual_mesh_path = "/assets/deformable_visual.obj"
+    cfg = ClothObjectCfg(
+        uid="cloth",
+        shape=MeshCfg(
+            vertices=np.asarray(
+                [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+            triangles=np.asarray([[0, 1, 2]], dtype=np.int32),
+        ),
+        visual_shape=MeshCfg(fpath=visual_mesh_path),
+        visual_binding_mode="nearest_vertex",
+    )
+
+    descriptor, materials = cloth_desc_from_cfg(cfg)
+
+    assert descriptor.mesh.file_path is None
+    assert descriptor.visual_mesh is not None
+    assert descriptor.visual_mesh.file_path == visual_mesh_path
+    assert descriptor.visual_binding_mode == "nearest_vertex"
+    assert materials == {}
+
+
+def test_cloth_descriptor_rejects_unknown_visual_binding_mode() -> None:
+    cfg = ClothObjectCfg(
+        uid="cloth",
+        shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
+        visual_binding_mode="unsupported",
+    )
+
+    with pytest.raises(ValueError, match="visual_binding_mode"):
+        cloth_desc_from_cfg(cfg)
+
+
+def test_cloth_descriptor_rejects_multiple_mesh_sources() -> None:
+    cfg = ClothObjectCfg(
+        uid="cloth",
+        shape=MeshCfg(
+            fpath=DEFORMABLE_MESH_PATH,
+            vertices=np.zeros((3, 3), dtype=np.float32),
+            triangles=np.asarray([[0, 1, 2]], dtype=np.int32),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="either fpath or vertices/triangles"):
+        cloth_desc_from_cfg(cfg)
+
+
+def test_cloth_descriptor_rejects_missing_mesh_source_after_config_validation() -> None:
+    cfg = ClothObjectCfg(uid="cloth", shape=MeshCfg())
+
+    cfg.validate()
+    with pytest.raises(ValueError, match="non-empty fpath or vertices/triangles"):
+        cloth_desc_from_cfg(cfg)
 
 
 def test_soft_descriptor_rejects_invalid_poisson_ratio() -> None:
@@ -208,6 +299,30 @@ def test_cloth_descriptor_rejects_invalid_particle_radius(
     )
 
     with pytest.raises(ValueError, match="particle_radius"):
+        cloth_desc_from_cfg(cfg)
+
+
+@pytest.mark.parametrize(
+    "particle_flags",
+    [
+        True,
+        np.iinfo(np.int32).max + 1,
+        [0.0, 1.0],
+        [-1, 1],
+        [np.iinfo(np.int32).max + 1],
+        np.zeros((1, 2), dtype=np.int32),
+    ],
+)
+def test_cloth_descriptor_rejects_invalid_particle_flags(
+    particle_flags: object,
+) -> None:
+    cfg = ClothObjectCfg(
+        uid="cloth",
+        shape=MeshCfg(fpath=DEFORMABLE_MESH_PATH),
+        particle_flags=particle_flags,
+    )
+
+    with pytest.raises((TypeError, ValueError), match="particle_flags"):
         cloth_desc_from_cfg(cfg)
 
 
@@ -745,6 +860,25 @@ def test_mesh_cfg_collision_fields_remain_compatibility_fallbacks() -> None:
         == CollisionApproximation.CONVEX_DECOMPOSITION
     )
     assert descriptor.collisions[0].decomp_max_hulls == 3
+
+
+def test_rigid_descriptor_preserves_array_mesh_data() -> None:
+    vertices = np.asarray(
+        [[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]],
+        dtype=np.float32,
+    )
+    triangles = np.asarray([[2, 0, 1]], dtype=np.int32)
+    cfg = RigidObjectCfg(
+        uid="mesh",
+        shape=MeshCfg(vertices=vertices, triangles=triangles),
+    )
+
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+
+    np.testing.assert_array_equal(descriptor.renders[0].vertices, vertices)
+    np.testing.assert_array_equal(descriptor.renders[0].triangles, triangles)
+    np.testing.assert_array_equal(descriptor.collisions[0].vertices, vertices)
+    np.testing.assert_array_equal(descriptor.collisions[0].triangles, triangles)
 
 
 def test_backend_blocks_reject_portable_fields() -> None:
@@ -1564,9 +1698,14 @@ def test_spawn_post_config_only_applies_render_uv() -> None:
     render_body = Mock()
     entity = Mock()
     entity.get_render_body.return_value = render_body
+    entity.joint_dof_layout = []
     articulation = object.__new__(Articulation)
     articulation.cfg = SimpleNamespace(compute_uv=True)
     articulation._entities = [entity]
+    articulation._mimic_info = SimpleNamespace(
+        mimic_id=np.asarray([], dtype=np.int32),
+        mimic_parent=np.asarray([], dtype=np.int32),
+    )
     articulation.__dict__["link_names"] = ["base"]
     articulation._set_default_joint_drive = Mock()
 
@@ -1579,7 +1718,10 @@ def test_spawn_post_config_only_applies_render_uv() -> None:
 
 def test_spawn_post_config_applies_default_only_root_properties() -> None:
     native_articulation = Mock()
-    entity = SimpleNamespace(_physics_binding=native_articulation)
+    entity = SimpleNamespace(
+        _physics_binding=native_articulation,
+        joint_dof_layout=[],
+    )
     articulation = object.__new__(Articulation)
     articulation.cfg = ArticulationCfg(
         articulation_props=ArticulationRootPropertiesCfg(
@@ -1588,8 +1730,16 @@ def test_spawn_post_config_applies_default_only_root_properties() -> None:
             min_velocity_iters=2,
         )
     )
-    articulation._spawn_result = SimpleNamespace(backend="dexsim")
+    articulation._spawn_result = SimpleNamespace(
+        backend="dexsim",
+        topology_revision=1,
+    )
     articulation._entities = [entity]
+    articulation._prepared_default_root_topology_revision = -1
+    articulation._mimic_info = SimpleNamespace(
+        mimic_id=np.asarray([], dtype=np.int32),
+        mimic_parent=np.asarray([], dtype=np.int32),
+    )
 
     articulation._apply_spawn_config()
 
@@ -1602,7 +1752,10 @@ def test_spawn_post_config_applies_default_only_root_properties() -> None:
 
 def test_newton_skips_default_only_articulation_root_properties() -> None:
     native_articulation = Mock()
-    entity = SimpleNamespace(_physics_binding=native_articulation)
+    entity = SimpleNamespace(
+        _physics_binding=native_articulation,
+        joint_dof_layout=[],
+    )
     articulation = object.__new__(Articulation)
     articulation.cfg = ArticulationCfg(
         articulation_props=ArticulationRootPropertiesCfg(
@@ -1613,6 +1766,10 @@ def test_newton_skips_default_only_articulation_root_properties() -> None:
     )
     articulation._spawn_result = SimpleNamespace(backend="newton")
     articulation._entities = [entity]
+    articulation._mimic_info = SimpleNamespace(
+        mimic_id=np.asarray([], dtype=np.int32),
+        mimic_parent=np.asarray([], dtype=np.int32),
+    )
 
     articulation._apply_spawn_config()
 
