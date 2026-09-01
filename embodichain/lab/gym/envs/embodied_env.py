@@ -83,13 +83,12 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
-    from embodichain.lab.gym.envs.expert_program import (
-        CompiledProgram,
-        ExpertProgramAdapterFactory,
-        ExpertProgramCfg,
-        ExpertProgramEnvironmentAdapter,
+    from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
+    from embodichain.lab.task_program.integrations import (
+        TaskProgramAdapterFactory,
+        TaskProgramEnvironmentAdapter,
     )
-    from embodichain.lab.gym.envs.expert_program.bridge import AtomicDemoBridge
+    from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
@@ -262,8 +261,8 @@ class EmbodiedEnvCfg(EnvCfg):
     """If True (and record_trajectory is True), auto-save each env's trajectory to
     ``trajectory_save_dir`` at episode end and on close()."""
 
-    expert_program: ExpertProgramCfg | None = None
-    """Optional declarative Expert Program used to generate demo segments.
+    task_program: TaskProgramCfg | None = None
+    """Optional declarative Task Program used to generate demo segments.
 
     The program remains inert until :meth:`EmbodiedEnv.create_demo_segments`
     requests an explicit environment compiler and bridge through the dedicated
@@ -330,26 +329,26 @@ class EmbodiedEnv(BaseEnv):
         self,
         cfg: EmbodiedEnvCfg,
         *,
-        expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
+        task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         **kwargs,
     ):
-        if expert_program_adapter_factory is not None:
-            from embodichain.lab.gym.envs.expert_program import (
-                ExpertProgramAdapterFactory,
+        if task_program_adapter_factory is not None:
+            from embodichain.lab.task_program.integrations import (
+                TaskProgramAdapterFactory,
             )
 
             if not isinstance(
-                expert_program_adapter_factory,
-                ExpertProgramAdapterFactory,
+                task_program_adapter_factory,
+                TaskProgramAdapterFactory,
             ):
                 raise TypeError(
-                    "expert_program_adapter_factory must implement "
-                    "ExpertProgramAdapterFactory or be None."
+                    "task_program_adapter_factory must implement "
+                    "TaskProgramAdapterFactory or be None."
                 )
         self.affordance_datas = {}
         self.action_bank = None
-        self._expert_program_adapter: ExpertProgramEnvironmentAdapter | None = None
-        self._active_expert_program_bridge: AtomicDemoBridge | None = None
+        self._task_program_adapter: TaskProgramEnvironmentAdapter | None = None
+        self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -365,18 +364,18 @@ class EmbodiedEnv(BaseEnv):
 
         super().__init__(cfg, **kwargs)
 
-        if expert_program_adapter_factory is not None:
-            from embodichain.lab.gym.envs.expert_program import (
-                ExpertProgramEnvironmentAdapter,
+        if task_program_adapter_factory is not None:
+            from embodichain.lab.task_program.integrations import (
+                TaskProgramEnvironmentAdapter,
             )
 
-            adapter = expert_program_adapter_factory.create_adapter(self)
-            if type(adapter) is not ExpertProgramEnvironmentAdapter:
+            adapter = task_program_adapter_factory.create_adapter(self)
+            if type(adapter) is not TaskProgramEnvironmentAdapter:
                 raise TypeError(
-                    "ExpertProgramAdapterFactory.create_adapter() must return "
-                    "exactly ExpertProgramEnvironmentAdapter."
+                    "TaskProgramAdapterFactory.create_adapter() must return "
+                    "exactly TaskProgramEnvironmentAdapter."
                 )
-            self._expert_program_adapter = adapter
+            self._task_program_adapter = adapter
 
         dataset_terms = getattr(self.cfg.dataset, "__dict__", self.cfg.dataset)
         if dataset_terms and not self.cfg.filter_dataset_saving:
@@ -562,7 +561,7 @@ class EmbodiedEnv(BaseEnv):
             The reset observation and info dictionary.
         """
         obs, info = super().reset(seed=seed, options=options)
-        self._active_expert_program_bridge = None
+        self._active_task_program_bridge = None
         if options is None or "reset_ids" not in options:
             reset_ids = torch.arange(self.num_envs, device=self.device)
         else:
@@ -2025,82 +2024,81 @@ class EmbodiedEnv(BaseEnv):
         )
 
     @property
-    def expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
+    def task_program_adapter(self) -> TaskProgramEnvironmentAdapter:
         """Return the adapter injected after the environment built its scene.
 
         A registered environment normally receives an
-        :class:`ExpertProgramAdapterFactory` through its :class:`EnvSpec`.
+        :class:`TaskProgramAdapterFactory` through its :class:`EnvSpec`.
         Advanced integrations may still override this property.
         """
-        adapter = self._expert_program_adapter
+        adapter = self._task_program_adapter
         if adapter is None:
             raise NotImplementedError(
-                "An environment with an Expert Program must receive an "
-                "expert_program_adapter_factory or override "
-                "expert_program_adapter."
+                "An environment with an Task Program must receive an "
+                "task_program_adapter_factory or override "
+                "task_program_adapter."
             )
         return adapter
 
-    def _checked_expert_program_adapter(self) -> ExpertProgramEnvironmentAdapter:
+    def _checked_task_program_adapter(self) -> TaskProgramEnvironmentAdapter:
         """Return the exact configured adapter before touching live providers."""
-        from embodichain.lab.gym.envs.expert_program import (
-            ExpertProgramEnvironmentAdapter,
+        from embodichain.lab.task_program.integrations import (
+            TaskProgramEnvironmentAdapter,
         )
 
-        adapter = self.expert_program_adapter
-        if type(adapter) is not ExpertProgramEnvironmentAdapter:
+        adapter = self.task_program_adapter
+        if type(adapter) is not TaskProgramEnvironmentAdapter:
             raise TypeError(
-                "expert_program_adapter must be exactly "
-                "ExpertProgramEnvironmentAdapter."
+                "task_program_adapter must be exactly " "TaskProgramEnvironmentAdapter."
             )
         return adapter
 
-    def compile_expert_program(
+    def compile_task_program(
         self,
-        program: ExpertProgramCfg,
-    ) -> CompiledProgram:
-        """Compile a configured Expert Program through the explicit adapter.
+        program: TaskProgramCfg,
+    ) -> CompiledTaskProgram:
+        """Compile a configured Task Program through the explicit adapter.
 
         Args:
-            program: Strict Expert Program configuration attached to ``cfg``.
+            program: Strict Task Program configuration attached to ``cfg``.
 
         Returns:
             Provider-free compiled program ready for runtime assembly.
 
         """
-        return self._checked_expert_program_adapter().compile(program)
+        return self._checked_task_program_adapter().compile(program)
 
-    def create_expert_program_bridge(
+    def create_task_program_bridge(
         self,
-        program: CompiledProgram,
-    ) -> AtomicDemoBridge:
+        program: CompiledTaskProgram,
+    ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
         Args:
-            program: Compiled provider-free Expert Program.
+            program: Compiled provider-free Task Program.
 
         Returns:
             Atomic demo bridge whose segments are consumed lazily.
 
         """
-        return self._checked_expert_program_adapter().create_bridge(program)
+        return self._checked_task_program_adapter().create_bridge(program)
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
-        """Return completed Expert Program acceptance or legacy task success.
+        """Return completed Task Program acceptance or legacy task success.
 
-        Expert Program success is published only after its bridge has consumed
+        Task Program success is published only after its bridge has consumed
         every segment lifecycle, including post-policies and validators.
 
         Args:
-            **kwargs: Compatibility keywords forwarded for non-Expert tasks.
+            **kwargs: Compatibility keywords forwarded for tasks without a Task Program.
 
         Returns:
             Per-environment task-success mask.
         """
-        bridge = self._active_expert_program_bridge
-        expert_program = getattr(getattr(self, "cfg", None), "expert_program", None)
+        bridge = self._active_task_program_bridge
+        task_program = getattr(getattr(self, "cfg", None), "task_program", None)
         if bridge is None:
-            if expert_program is None:
+            if task_program is None:
                 return super().is_task_success(**kwargs)
             return torch.zeros(
                 self.num_envs,
@@ -2116,7 +2114,7 @@ class EmbodiedEnv(BaseEnv):
         completion = bridge.completion_mask
         if completion.dtype != torch.bool or completion.shape != (self.num_envs,):
             raise ValueError(
-                "Expert Program completion mask must be bool with one value per "
+                "Task Program completion mask must be bool with one value per "
                 "environment."
             )
         return completion.to(device=self.device)
@@ -2124,12 +2122,12 @@ class EmbodiedEnv(BaseEnv):
     def create_demo_segments(
         self,
         *args,
-        expert_program: ExpertProgramCfg | CompiledProgram | None = None,
+        task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
 
-        An episode-level ``expert_program`` takes precedence over the static
+        An episode-level ``task_program`` takes precedence over the static
         configuration. This lets trusted callers supply a model-produced,
         already compiled program without mutating :attr:`cfg`. Otherwise, a
         configured program is compiled through the injected adapter. With no
@@ -2137,30 +2135,30 @@ class EmbodiedEnv(BaseEnv):
 
         Args:
             *args: Positional arguments forwarded to the legacy planner.
-            expert_program: Optional episode-level program config or provider-free
+            task_program: Optional episode-level program config or provider-free
                 compiled program.
             **kwargs: Keyword arguments forwarded to the legacy planner.
 
         Returns:
             Segment sequence, or ``None`` when planning fails.
         """
-        selected_program = expert_program
+        selected_program = task_program
         if selected_program is None:
             selected_program = getattr(
                 getattr(self, "cfg", None),
-                "expert_program",
+                "task_program",
                 None,
             )
         if selected_program is not None:
-            from embodichain.lab.gym.envs.expert_program import CompiledProgram
+            from embodichain.lab.task_program import CompiledTaskProgram
 
             compiled_program = (
                 selected_program
-                if type(selected_program) is CompiledProgram
-                else self.compile_expert_program(selected_program)
+                if type(selected_program) is CompiledTaskProgram
+                else self.compile_task_program(selected_program)
             )
-            bridge = self.create_expert_program_bridge(compiled_program)
-            self._active_expert_program_bridge = bridge
+            bridge = self.create_task_program_bridge(compiled_program)
+            self._active_task_program_bridge = bridge
             return bridge.iter_segments()
 
         actions = self.create_demo_action_list(*args, **kwargs)

@@ -39,9 +39,9 @@ from dexsim.utility import log_warning
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnvCfg
-    from embodichain.lab.gym.envs.expert_program import (
-        ExpertProgramAdapterFactory,
-        SimulationExpertProgramRegistration,
+    from embodichain.lab.task_program.integrations import (
+        TaskProgramAdapterFactory,
+        SimulationTaskProgramRegistration,
     )
 
 _logger = logging.getLogger(__name__)
@@ -69,92 +69,84 @@ class EnvSpec:
         cls: Type[BaseEnv],
         max_episode_steps=None,
         default_kwargs: dict = None,
-        expert_program_registration: SimulationExpertProgramRegistration | None = None,
-        expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
+        task_program_registration: SimulationTaskProgramRegistration | None = None,
+        task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         supports_rl: bool = False,
     ):
         """A specification for a Embodied environment."""
         if type(supports_rl) is not bool:
             raise TypeError("supports_rl must be a bool.")
-        if expert_program_registration is not None:
-            from embodichain.lab.gym.envs.expert_program import (
-                SimulationExpertProgramRegistration,
+        if task_program_registration is not None:
+            from embodichain.lab.task_program.integrations import (
+                SimulationTaskProgramRegistration,
             )
 
-            if (
-                type(expert_program_registration)
-                is not SimulationExpertProgramRegistration
-            ):
+            if type(task_program_registration) is not SimulationTaskProgramRegistration:
                 raise TypeError(
-                    "expert_program_registration must be exactly "
-                    "SimulationExpertProgramRegistration or None."
+                    "task_program_registration must be exactly "
+                    "SimulationTaskProgramRegistration or None."
                 )
-        if expert_program_adapter_factory is not None:
-            from embodichain.lab.gym.envs.expert_program import (
-                ExpertProgramAdapterFactory,
+        if task_program_adapter_factory is not None:
+            from embodichain.lab.task_program.integrations import (
+                TaskProgramAdapterFactory,
             )
 
             if not isinstance(
-                expert_program_adapter_factory,
-                ExpertProgramAdapterFactory,
+                task_program_adapter_factory,
+                TaskProgramAdapterFactory,
             ):
                 raise TypeError(
-                    "expert_program_adapter_factory must implement "
-                    "ExpertProgramAdapterFactory or be None."
+                    "task_program_adapter_factory must implement "
+                    "TaskProgramAdapterFactory or be None."
                 )
             factory_registration = getattr(
-                expert_program_adapter_factory,
+                task_program_adapter_factory,
                 "registration",
                 None,
             )
             if factory_registration is not None:
-                from embodichain.lab.gym.envs.expert_program import (
-                    SimulationExpertProgramRegistration,
+                from embodichain.lab.task_program.integrations import (
+                    SimulationTaskProgramRegistration,
                 )
 
-                if (
-                    type(factory_registration)
-                    is not SimulationExpertProgramRegistration
-                ):
+                if type(factory_registration) is not SimulationTaskProgramRegistration:
                     raise TypeError(
-                        "expert_program_adapter_factory.registration must be "
-                        "exactly SimulationExpertProgramRegistration."
+                        "task_program_adapter_factory.registration must be "
+                        "exactly SimulationTaskProgramRegistration."
                     )
             if (
-                expert_program_registration is not None
+                task_program_registration is not None
                 and factory_registration is not None
-                and factory_registration is not expert_program_registration
+                and factory_registration is not task_program_registration
             ):
                 raise ValueError(
-                    "expert_program_adapter_factory must own the exact "
-                    "expert_program_registration."
+                    "task_program_adapter_factory must own the exact "
+                    "task_program_registration."
                 )
-            if expert_program_registration is None:
-                expert_program_registration = factory_registration
+            if task_program_registration is None:
+                task_program_registration = factory_registration
         self.uid = uid
         self.cls = cls
         self.max_episode_steps = max_episode_steps
         self.default_kwargs = {} if default_kwargs is None else default_kwargs
         self.supports_rl = supports_rl
-        self.expert_program_registration = expert_program_registration
-        self.expert_program_adapter_factory = expert_program_adapter_factory
+        self.task_program_registration = task_program_registration
+        self.task_program_adapter_factory = task_program_adapter_factory
 
     def make(self, **kwargs):
         _kwargs = self.default_kwargs.copy()
         _kwargs.update(kwargs)
-        if self.expert_program_adapter_factory is not None:
-            supplied_factory = _kwargs.get("expert_program_adapter_factory")
+        if self.task_program_adapter_factory is not None:
+            supplied_factory = _kwargs.get("task_program_adapter_factory")
             if (
                 supplied_factory is not None
-                and supplied_factory is not self.expert_program_adapter_factory
+                and supplied_factory is not self.task_program_adapter_factory
             ):
                 raise ValueError(
-                    "A registered Expert Program adapter factory cannot be "
+                    "A registered Task Program adapter factory cannot be "
                     "overridden at environment construction."
                 )
-            _kwargs["expert_program_adapter_factory"] = (
-                self.expert_program_adapter_factory
-            )
+            _kwargs["task_program_adapter_factory"] = self.task_program_adapter_factory
         return self.cls(**_kwargs)
 
     @property
@@ -177,8 +169,8 @@ def register(
     cls: Type[BaseEnv],
     max_episode_steps=None,
     default_kwargs: dict = None,
-    expert_program_registration: SimulationExpertProgramRegistration | None = None,
-    expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
+    task_program_registration: SimulationTaskProgramRegistration | None = None,
+    task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     supports_rl: bool = False,
 ):
     """Register a Embodied environment."""
@@ -196,8 +188,8 @@ def register(
         max_episode_steps=max_episode_steps,
         default_kwargs=default_kwargs,
         supports_rl=supports_rl,
-        expert_program_registration=expert_program_registration,
-        expert_program_adapter_factory=expert_program_adapter_factory,
+        task_program_registration=task_program_registration,
+        task_program_adapter_factory=task_program_adapter_factory,
     )
 
 
@@ -295,8 +287,8 @@ def register_env(
     override=False,
     *,
     supports_rl: bool = False,
-    expert_program_registration: SimulationExpertProgramRegistration | None = None,
-    expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
+    task_program_registration: SimulationTaskProgramRegistration | None = None,
+    task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     **kwargs,
 ):
     """A decorator to register Embodied environments.
@@ -326,8 +318,8 @@ def register_env(
             override,
             max_episode_steps,
             supports_rl=supports_rl,
-            expert_program_registration=expert_program_registration,
-            expert_program_adapter_factory=expert_program_adapter_factory,
+            task_program_registration=task_program_registration,
+            task_program_adapter_factory=task_program_adapter_factory,
             **kwargs,
         )
         return cls
@@ -342,8 +334,8 @@ def register_env_function(
     max_episode_steps=None,
     *,
     supports_rl: bool = False,
-    expert_program_registration: SimulationExpertProgramRegistration | None = None,
-    expert_program_adapter_factory: ExpertProgramAdapterFactory | None = None,
+    task_program_registration: SimulationTaskProgramRegistration | None = None,
+    task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     **kwargs,
 ):
     if uid in REGISTERED_ENVS:
@@ -363,8 +355,8 @@ def register_env_function(
         max_episode_steps=max_episode_steps,
         default_kwargs=deepcopy(kwargs),
         supports_rl=supports_rl,
-        expert_program_registration=expert_program_registration,
-        expert_program_adapter_factory=expert_program_adapter_factory,
+        task_program_registration=task_program_registration,
+        task_program_adapter_factory=task_program_adapter_factory,
     )
 
     # Register for gym

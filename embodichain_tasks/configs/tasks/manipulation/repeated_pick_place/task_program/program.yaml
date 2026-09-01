@@ -1,0 +1,29 @@
+program_id: repeated_cube_pick_place
+targets:
+  drop_pose:
+    kind: cyclic_pose
+    values:
+      - position: [-0.40, 0.48, 0.10]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - position: [-0.42, -0.08, 0.10]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+program:
+  kind: repeat
+  count: 3
+  body:
+    kind: segment
+    name: move_cube
+    steps:
+      kind: sequence
+      items:
+        - kind: invoke
+          call:
+            kind: pick
+            object: cube
+        - kind: invoke
+          call:
+            kind: place
+            object: cube
+            at:
+              kind: target_ref
+              target: drop_pose

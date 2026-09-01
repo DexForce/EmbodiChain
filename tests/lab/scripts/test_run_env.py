@@ -24,8 +24,8 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult
-from embodichain.lab.gym.envs.expert_program.loader import (
-    load_expert_program as _load_expert_program,
+from embodichain.lab.task_program.language.loader import (
+    load_task_program as _load_task_program,
 )
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
 from embodichain.lab.scripts import run_env
@@ -44,8 +44,8 @@ REPLAY_TARGET_STEP = 3
 VISER_POLL_INTERVAL = 0.05
 
 
-def _expert_program_payload() -> dict[str, object]:
-    """Return one minimal strict Expert Program payload."""
+def _task_program_payload() -> dict[str, object]:
+    """Return one minimal strict Task Program payload."""
     return {
         "program_id": "cli_pick",
         "integration": {
@@ -144,19 +144,19 @@ def test_run_env_preserves_configured_viser_image_fps() -> None:
     assert merged["visualization"]["sensor_image_fps"] == configured_fps
 
 
-def test_run_env_parser_accepts_expert_program_path() -> None:
+def test_run_env_parser_accepts_task_program_path() -> None:
     """The declarative program is an explicit, opt-in CLI input."""
     program_path = "program.yaml"
 
     args = _create_parser().parse_args(
-        ["--gym_config", GYM_CONFIG_PATH, "--expert-program", program_path]
+        ["--gym_config", GYM_CONFIG_PATH, "--task-program", program_path]
     )
 
-    assert args.expert_program == program_path
+    assert args.task_program == program_path
 
 
 def test_run_env_parser_accepts_debug_trace_mode() -> None:
-    """Failed Expert Program attempts can expose their structured trace."""
+    """Failed Task Program attempts can expose their structured trace."""
     args = _create_parser().parse_args(
         ["--gym_config", GYM_CONFIG_PATH, "--debug-mode"]
     )
@@ -165,13 +165,13 @@ def test_run_env_parser_accepts_debug_trace_mode() -> None:
 
 
 @pytest.mark.parametrize("suffix", [".json", ".yaml", ".yml"])
-def test_load_expert_program_safely_decodes_supported_files(
+def test_load_task_program_safely_decodes_supported_files(
     tmp_path,
     suffix: str,
 ) -> None:
     """JSON and safe YAML inputs share the same strict schema decoder."""
     path = tmp_path / f"program{suffix}"
-    payload = _expert_program_payload()
+    payload = _task_program_payload()
     if suffix == ".json":
         serialized = json.dumps(payload)
     else:
@@ -180,7 +180,7 @@ def test_load_expert_program_safely_decodes_supported_files(
         serialized = yaml.safe_dump(payload)
     path.write_text(serialized, encoding="utf-8")
 
-    program = _load_expert_program(path)
+    program = _load_task_program(path)
 
     assert program.program_id == "cli_pick"
     assert program.integration.scene_registry == "default_scene"
@@ -201,7 +201,7 @@ def test_load_expert_program_safely_decodes_supported_files(
         ),
     ],
 )
-def test_load_expert_program_rejects_duplicate_mapping_keys(
+def test_load_task_program_rejects_duplicate_mapping_keys(
     tmp_path,
     filename: str,
     serialized: str,
@@ -212,16 +212,16 @@ def test_load_expert_program_rejects_duplicate_mapping_keys(
     path.write_text(serialized, encoding="utf-8")
 
     with pytest.raises(ValueError, match=message):
-        _load_expert_program(path)
+        _load_task_program(path)
 
 
-def test_load_expert_program_rejects_unsupported_file_extension(tmp_path) -> None:
+def test_load_task_program_rejects_unsupported_file_extension(tmp_path) -> None:
     """Only explicit JSON and YAML file formats are accepted."""
     path = tmp_path / "program.toml"
     path.write_text('program_id = "cli_pick"', encoding="utf-8")
 
     with pytest.raises(ValueError, match=".json, .yaml, or .yml"):
-        _load_expert_program(path)
+        _load_task_program(path)
 
 
 def test_replay_restores_wrapper_state_without_closing_caller_env(monkeypatch) -> None:
@@ -555,13 +555,13 @@ def test_cli_uses_program_already_loaded_by_config_builder(
 ) -> None:
     """The CLI attaches the strict program config to the environment config."""
     env = _LifecycleTrackingEnv()
-    env_cfg = SimpleNamespace(expert_program=None)
+    env_cfg = SimpleNamespace(task_program=None)
     decoded_program = object()
     args = SimpleNamespace(
         replay=False,
         replay_mode="kinematic",
         preview=True,
-        expert_program="program.yaml",
+        task_program="program.yaml",
     )
     parser = MagicMock()
     parser.parse_args.return_value = args
@@ -573,7 +573,7 @@ def test_cli_uses_program_already_loaded_by_config_builder(
 
     def build(parsed_args):
         assert parsed_args is args
-        env_cfg.expert_program = decoded_program
+        env_cfg.task_program = decoded_program
         return env_cfg, {"id": GYM_ID}, {}
 
     monkeypatch.setattr(run_env, "build_env_cfg_from_args", build)
@@ -586,7 +586,7 @@ def test_cli_uses_program_already_loaded_by_config_builder(
 
     run_env.cli([])
 
-    assert env_cfg.expert_program is decoded_program
+    assert env_cfg.task_program is decoded_program
     make.assert_called_once_with(id=GYM_ID, cfg=env_cfg)
 
 

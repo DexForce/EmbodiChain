@@ -151,6 +151,7 @@ def create_dual_tutorial_robot_cfg(
             root_link_name=base_solver.root_link_name,
             tcp=tcp,
             num_samples=pytorch_num_samples,
+            user_qpos_limits=base_solver.user_qpos_limits,
         )
         base_cfg.solver_cfg["arm"] = base_solver
 

@@ -58,8 +58,16 @@ class SceneObject:
     category: str  # Semantic category identified by scene understanding.
     name: str  # Human-readable visual name.
     description: str  # Detailed semantic and spatial description.
+    is_articulated: bool = False  # Whether this object has movable links or joints.
     mask_path: str | None = None  # Absolute path to the validated binary image mask.
+    visible_rgba_path: str | None = None  # None for future unsegmented objects.
     simready_glb_path: str | None = None  # Absolute path to the canonical SimReady GLB.
+    articulated_usdc_path: str | None = (
+        None  # Generated articulation asset, unused by the GLB pipeline for now.
+    )
+    articulated_usdc_scale: list[float] | None = (
+        None  # Y-up runtime scale retained because the GLB pipeline bakes coarse scale.
+    )
     rot: list[float] | None = None  # Final y-up Euler XYZ rotation in degrees.
     pos: list[float] | None = None  # Final y-up world position in metres.
     scale: list[float] | None = None  # Final y-up object scale.
@@ -77,8 +85,12 @@ class SceneObject:
             "category": self.category,
             "name": self.name,
             "description": self.description,
+            "is_articulated": self.is_articulated,
             "mask_path": self.mask_path,
+            "visible_rgba_path": self.visible_rgba_path,
             "simready_glb_path": self.simready_glb_path,
+            "articulated_usdc_path": self.articulated_usdc_path,
+            "articulated_usdc_scale": self.articulated_usdc_scale,
             "rot": self.rot,
             "pos": self.pos,
             "scale": self.scale,

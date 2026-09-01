@@ -200,7 +200,7 @@ readiness path defensively before advancing the requested physics steps.
 | Inverse kinematics | `solvers/` | `ik-solvers` |
 | Trajectory and motion generation | `planners/` | `motion-planning` |
 | Typed action planning and execution | `atomic_actions/` | `atomic-actions` |
-| Semantic scene and robot skill bindings | `skills/` | `atomic-actions` |
+| Task Program Semantic Calls and robot profiles | `embodichain/lab/task_program/semantics/` | `task-programs` |
 | Reachability analysis and runtime workspace queries | `workspace/` | `robot-system` |
 | Browser scene export and Viser runtime | `embodichain/lab/visualization/` | `sim-visualization` |
 

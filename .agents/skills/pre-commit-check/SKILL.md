@@ -26,8 +26,9 @@ git status --short
 
 Collect all changed/added `.py` files.
 
-Classify the change by affected area: workflow, docs, packaging, isolated Python
-module, package-wide behavior, or cross-cutting infrastructure.
+Classify the change by affected area: workflow, docs, agent skill, packaged
+configuration, isolated Python module, package-wide behavior, or cross-cutting
+infrastructure.
 
 ### 2. Run Black Formatting Check
 
@@ -126,6 +127,9 @@ behavior:
 |---|---|
 | `.github/workflows/**` only | `actionlint` on changed workflows; run related script tests only when workflow scripts changed |
 | Docs content only | Relevant Sphinx build or docs-specific tests |
+| `.agents/skills/**` and thin adapters | Run `quick_validate.py` for each changed canonical skill; compile/run any bundled scripts |
+| Task Program components/deployments | Run the `$add-task-program` static deployment inspector plus the closest configured-integration/package-data tests |
+| Other packaged JSON/YAML | Parse through the production loader and run the closest config/layout tests |
 | One Python module | Matching `tests/**/test_<module>.py` |
 | One package/subsystem | Tests for that package plus focused integration tests |
 | Packaging/release code | Package build and artifact validation |
@@ -143,6 +147,17 @@ appropriate syntax or configuration validator. Run the full suite only when:
 Before starting a command likely to take more than two minutes, report the
 selected scope and why narrower validation is insufficient. Honor explicit user
 instructions to skip or narrow tests.
+
+For canonical skill directories, use:
+
+```bash
+python /root/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
+  .agents/skills/<skill>
+```
+
+Thin `.claude/skills/` and `.github/copilot/` adapters should point back to
+the canonical `.agents/skills/<skill>/SKILL.md`; do not duplicate the full
+instructions in adapters.
 
 ### 11. Check Test Coverage
 

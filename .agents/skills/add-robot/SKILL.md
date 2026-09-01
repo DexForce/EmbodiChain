@@ -118,6 +118,18 @@ must match the matching `control_parts` entry (the test stub asserts this).
 
 9. **Verify:** `preview-asset` CLI + `RobotCfg.from_dict(cfg.to_dict())` round-trip.
 
+## Reusable embodiment handoff
+
+`RobotCfg` owns simulation construction, control parts, solvers, and physical
+properties. It does not own a task, sensor suite, or Task Program skill
+profile.
+
+If the user also wants the robot selectable from task deployments, invoke
+`$add-embodiment-component` after the robot config passes its own tests. That
+component selects the robot, owns its sensors, and optionally maps stable
+logical resources/endpoints/capabilities/commands into `skill_profile`.
+Do not copy those semantic declarations into the robot class.
+
 ## Common Mistakes
 
 | Mistake | Fix |

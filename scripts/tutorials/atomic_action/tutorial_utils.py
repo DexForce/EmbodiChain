@@ -94,6 +94,12 @@ ROBOTIQ_2F_140_TCP = (
     (0.0, 0.0, 1.0, 0.21),
     (0.0, 0.0, 0.0, 1.0),
 )
+# DexSim canonicalizes the UR source URDF's rounded +/-6.2832 limits to +/-2*pi.
+# Configure the solver with that physical range up front to avoid a no-op limit-sync
+# warning during tutorial robot construction.
+_UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
+    (-2.0 * math.pi, 2.0 * math.pi) for _ in range(6)
+)
 TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgi_140_80",
     min_opening_width=0.003,
@@ -1079,7 +1085,8 @@ def create_ur5_gripper_robot_cfg(
                         [0.0, 1.0, 0.0, 0.0],
                         [0.0, 0.0, 1.0, tcp_z],
                         [0.0, 0.0, 0.0, 1.0],
-                    ]
+                    ],
+                    "user_qpos_limits": _UR_TUTORIAL_QPOS_LIMITS,
                 }
             },
             "init_qpos": qpos,
@@ -1201,7 +1208,12 @@ def create_ur10_robotiq_robot_cfg(
                 "damping": {ROBOTIQ_HAND_JOINT_PATTERN: 1e2},
                 "max_effort": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
             },
-            "solver_cfg": {"arm": {"tcp": ROBOTIQ_2F_140_TCP}},
+            "solver_cfg": {
+                "arm": {
+                    "tcp": ROBOTIQ_2F_140_TCP,
+                    "user_qpos_limits": _UR_TUTORIAL_QPOS_LIMITS,
+                }
+            },
             "init_qpos": qpos,
             "init_pos": init_pos,
         }

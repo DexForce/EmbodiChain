@@ -37,6 +37,7 @@ from embodichain.lab.sim.cfg import (
     NewtonRigidBodyMaterialCfg,
     RigidBodyMaterialCfg,
 )
+from embodichain.lab.sim.solvers import BaseSolver
 from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
     _animate_obstacle_to_pose,
     _blocking_obstacle_pose,
@@ -87,6 +88,7 @@ STRICT_RECOVERY_SPHERE_DENSITY = 0.3
 STRICT_RECOVERY_MINIMUM_CLEARANCE = 0.01
 FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 DUAL_FRANKA_MOUNT_X_AXIS = torch.tensor([0.0, -1.0, 0.0])
+UR_RUNTIME_QPOS_LIMITS = torch.tensor([[-2.0 * math.pi, 2.0 * math.pi]] * 6)
 PGI_TUTORIAL_TCP = torch.tensor(
     [
         [1.0, 0.0, 0.0, 0.0],
@@ -399,6 +401,37 @@ def test_ur10_robotiq_config_matches_six_active_hand_joints_and_tcp() -> None:
 
 
 @pytest.mark.parametrize(
+    "factory",
+    (create_ur5_gripper_robot_cfg, create_ur10_robotiq_robot_cfg),
+)
+def test_ur_tutorial_solvers_use_runtime_joint_limits(factory) -> None:
+    cfg = factory()
+
+    assert torch.allclose(
+        torch.as_tensor(cfg.solver_cfg["arm"].user_qpos_limits),
+        UR_RUNTIME_QPOS_LIMITS,
+    )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    (create_ur5_gripper_robot_cfg, create_ur10_robotiq_robot_cfg),
+)
+def test_ur_tutorial_solver_limits_skip_noop_hard_limit_warning(factory) -> None:
+    cfg = factory()
+    solver_limits = torch.as_tensor(cfg.solver_cfg["arm"].user_qpos_limits)
+    solver = SimpleNamespace(
+        lower_qpos_limits=solver_limits[:, 0].clone(),
+        upper_qpos_limits=solver_limits[:, 1].clone(),
+    )
+
+    with patch("embodichain.lab.sim.solvers.base_solver.logger.log_warning") as warning:
+        BaseSolver.update_with_robot_limit(solver, UR_RUNTIME_QPOS_LIMITS)
+
+    assert not warning.called
+
+
+@pytest.mark.parametrize(
     ("robot_type", "arm_dof", "solver_name", "hand_pattern", "expected_tcp"),
     (
         ("ur5", 6, "URSolverCfg", "gripper_finger1_joint_1", None),
@@ -450,10 +483,30 @@ def test_dual_tutorial_configs_share_hand_binding_contract(
         solver = dual_cfg.solver_cfg[f"{side}_arm"]
         assert type(solver).__name__ == solver_name
         assert torch.allclose(torch.as_tensor(solver.tcp), expected_tcp_tensor)
+        assert solver.user_qpos_limits == single_cfg.solver_cfg["arm"].user_qpos_limits
 
     if robot_type == "ur10":
         assert len(dual_cfg.init_qpos) == 24
         assert dual_cfg.init_qpos[-12:] == [0.0] * 12
+
+
+@pytest.mark.parametrize("robot_type", ("ur5", "ur10"))
+def test_dual_pytorch_ur_tutorial_solvers_preserve_runtime_joint_limits(
+    robot_type: str,
+) -> None:
+    cfg = create_dual_tutorial_robot_cfg(
+        robot_type=robot_type,
+        uid=f"test_{robot_type}_pytorch",
+        urdf_name=f"test_dual_{robot_type}_pytorch",
+        tcp_z=0.121,
+        solver="pytorch",
+    )
+
+    for side in ("left", "right"):
+        assert torch.allclose(
+            torch.as_tensor(cfg.solver_cfg[f"{side}_arm"].user_qpos_limits),
+            UR_RUNTIME_QPOS_LIMITS,
+        )
 
 
 def test_dual_franka_mount_preserves_single_arm_facing_direction() -> None:

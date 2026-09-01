@@ -32,7 +32,7 @@ Inspect only the files relevant to the requested skill:
 | Endpoint command transports | `embodichain/lab/sim/atomic_actions/transports.py` |
 | Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory_ops.py` |
 | Engine-owned planning resources | `embodichain/lab/sim/atomic_actions/runtime.py` |
-| Declarative robot resources and adapters | `embodichain/lab/sim/skills/profiles.py` |
+| Declarative robot resources and adapters | `embodichain/lab/task_program/semantics/profiles.py` |
 | Reference implementations | `embodichain/lab/sim/atomic_actions/primitives/` |
 | Static compiler and execution session | `engine.py`, `execution.py` |
 | Controller-facing execution ports | `runner.py`, `sim_adapter.py` |
@@ -333,6 +333,19 @@ Add the stable skill ID, goal, binding slots/endpoints, and effect to
 `docs/source/overview/sim/atomic_actions/builtin_actions.md`. Update API docs for
 new public classes. Do not create a compatibility re-export module or a closed
 built-in-goal union.
+
+### Task Program handoff
+
+An Atomic Skill is not automatically a Task Program Semantic Call. If the user
+also requests high-level declarative exposure, finish and test the Atomic Skill
+contract first, then invoke `$add-semantic-call`. Prefer a registered Semantic
+Call extension unless the concept is intentionally promoted to a stable
+built-in language primitive.
+
+If the new skill requires new logical resources, endpoints, capabilities, or
+commands on a reusable robot, update them through
+`$add-embodiment-component`; do not encode task or profile metadata in the
+Atomic Action.
 
 ## 7. Test behavior
 
