@@ -27,7 +27,7 @@ import pickle
 import open3d as o3d
 
 from typing import List, Tuple, Union
-from dexsim.kit.meshproc import convex_decomposition_coacd
+from dexsim.kit.meshproc import convex_decomposition_vhacd
 
 from embodichain.utils.warp import convex_signed_distance_kernel
 from embodichain.utils.device_utils import standardize_device_string
@@ -36,6 +36,8 @@ from embodichain.utils import configclass
 from embodichain.toolkits.graspkit._paths import CONVEX_DECOMPOSITION_CACHE_DIR
 
 __all__ = ["ConvexCollisionCheckerCfg", "ConvexCollisionChecker"]
+
+_CONVEX_DECOMPOSITION_CACHE_TAG = "vhacd_v1"
 
 
 @configclass
@@ -86,7 +88,10 @@ class ConvexCollisionChecker:
 
         self.cache_path = os.path.join(
             CONVEX_DECOMPOSITION_CACHE_DIR,
-            f"{mesh_hash}_{max_decomposition_hulls}.pkl",
+            (
+                f"{mesh_hash}_{max_decomposition_hulls}_"
+                f"{_CONVEX_DECOMPOSITION_CACHE_TAG}.pkl"
+            ),
         )
 
         if not os.path.isfile(self.cache_path):
@@ -299,9 +304,11 @@ class ConvexCollisionChecker:
         mesh = o3d.t.geometry.TriangleMesh()
         mesh.vertex.positions = o3d.core.Tensor(vertices, dtype=o3d.core.Dtype.Float32)
         mesh.triangle.indices = o3d.core.Tensor(faces, dtype=o3d.core.Dtype.Int32)
-        is_success, out_mesh_list = convex_decomposition_coacd(
+        is_success, out_mesh_list = convex_decomposition_vhacd(
             mesh, max_convex_hull_num=max_decomposition_hulls
         )
+        if not is_success or not out_mesh_list:
+            raise RuntimeError("V-HACD convex decomposition failed.")
         convex_vert_face_list = []
         for out_mesh in out_mesh_list:
             verts = out_mesh.vertex.positions.numpy()
