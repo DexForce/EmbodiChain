@@ -364,7 +364,7 @@ def _build_double_s_profile(
     acceleration_limit: torch.Tensor,
     jerk_limit: torch.Tensor,
 ) -> _ProfileBatch:
-    """Build HolisticMotion's rest-to-rest seven-phase Double-S profile.
+    """Build the rest-to-rest seven-phase Double-S profile.
 
     This follows ``TrajectoryDoubleS::_ComputeDoubleSProfile`` for zero path
     boundary velocities. In particular, a move without a constant-velocity
@@ -393,7 +393,7 @@ def _build_double_s_profile(
     cruise_time = 1.0 / safe_velocity - ta
     no_cruise = (~stationary) & (cruise_time <= 0.0)
 
-    # Match HolisticMotion's intentionally discrete feasibility search rather
+    # Use the intentionally discrete feasibility search required by the
     # than substituting an analytic triangular-jerk solution.
     candidate_acceleration = safe_acceleration.clone()
     for _ in range(1001):
@@ -415,9 +415,7 @@ def _build_double_s_profile(
             no_cruise, candidate_acceleration * 0.9, candidate_acceleration
         )
     if bool(no_cruise.any().item()):
-        raise RuntimeError(
-            "HolisticMotion Double-S acceleration search did not converge."
-        )
+        raise RuntimeError("Double-S acceleration search did not converge.")
     cruise_time = torch.clamp_min(cruise_time, 0.0)
     tj = torch.where(stationary, torch.zeros_like(tj), tj)
     ta = torch.where(stationary, torch.zeros_like(ta), ta)
@@ -496,7 +494,7 @@ def _build_scalar_profile(
         )
 
     if profile_name == "double_s":
-        # HolisticMotion's EnforceJointLimits leaves a 1% margin whenever a
+        # The joint-limit projection leaves a 1% margin whenever a
         # sampled derivative reaches a limit. Linear Double-S segments always
         # reach their projected jerk limit, so the resulting scale is 1.01.
         margin = torch.where(

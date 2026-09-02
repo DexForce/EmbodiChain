@@ -96,12 +96,12 @@ The trapezoidal planner is a dependency-free, batched Torch backend for
 piecewise-linear joint paths. Each input waypoint is a rest point. The default
 profile is acceleration-limited trapezoidal timing (with triangular fallback
 for short moves); ``profile="double_s"`` selects the rest-to-rest linear-path
-subset of HolisticMotion's seven-phase Double-S time law. It preserves that
+subset of the seven-phase Double-S time law. It preserves that
 implementation's discrete ``amax *= 0.9`` feasibility search for moves without
 a cruise phase and its 1% ``EnforceJointLimits`` margin. Scalar or per-joint
 velocity, acceleration, and jerk limits are projected onto each linear path
 segment. Golden tests cover durations and sampled position, velocity, and
-acceleration against the HolisticMotion Python binding. It supports fixed
+acceleration against the reference trajectory implementation. It supports fixed
 quantity and approximate fixed-time sampling and returns explicit ``dt``.
 ``minimum_duration`` applies one uniform per-environment time scale, preserving
 the path while reducing velocity, acceleration, and jerk. The minimal
