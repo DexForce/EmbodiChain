@@ -732,6 +732,9 @@ target link's initial local frame.
 Both clouds use Open3D uniform surface sampling. Sampling the whole articulation
 as one merged mesh preserves triangle-area weighting instead of giving every
 link an equal point budget, which would over-represent tiny decorative links.
+To keep the target and merged clouds geometrically consistent, every non-empty
+link mesh must contain at least one non-degenerate triangle surface; the adapter
+rejects vertices-only and fully degenerate link meshes before merging.
 The sampler also walks the target's parent chain and transforms the nearest
 prismatic joint axis into the target link's initial local frame. The target
 cloud center and twice its distribution radius define a spherical neighborhood

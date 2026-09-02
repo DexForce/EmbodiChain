@@ -75,6 +75,11 @@ body scale. The adapter owns Open3D surface sampling, target-link-frame mesh
 transforms, nearest prismatic/revolute ancestor geometry, and the private
 `ObjectSemantics.geometry` keys.
 
+Every non-empty provider link mesh must expose at least one non-degenerate
+triangle surface. The adapter rejects vertices-only or fully degenerate links
+before merging so the target-link and whole-articulation clouds cannot disagree
+about whether a link contributes geometry.
+
 The adapter returns `ArticulationAffordanceGeometry`; convert it with
 `to_object_geometry()` only when constructing `ObjectSemantics`. Keep random
 sampling and semantic geometry keys out of `objects/articulation.py`.

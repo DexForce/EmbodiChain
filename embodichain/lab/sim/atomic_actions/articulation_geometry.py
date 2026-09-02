@@ -80,6 +80,10 @@ class ArticulationGeometryProvider(Protocol):
 
         Returns:
             Link-local vertices and triangle indices.
+
+        .. attention::
+            A non-empty link mesh must contain at least one non-degenerate
+            triangle surface.
         """
         ...
 
@@ -566,6 +570,11 @@ def _validate_point_cloud_mesh(
     if triangles.dim() != 2 or triangles.shape[1:] != (3,):
         raise ValueError(f"Link {link_name!r} triangles must have shape (M, 3).")
     if triangles.shape[0] == 0:
+        if vertices.shape[0] > 0:
+            raise ValueError(
+                f"Link {link_name!r} must contain at least one non-degenerate "
+                "triangle surface."
+            )
         return
     if vertices.shape[0] == 0:
         raise ValueError(
@@ -575,6 +584,28 @@ def _validate_point_cloud_mesh(
         vertices
     ):
         raise ValueError(f"Link {link_name!r} triangles reference invalid vertices.")
+    if not bool(_valid_triangle_mask(vertices, triangles).any().item()):
+        raise ValueError(
+            f"Link {link_name!r} must contain at least one non-degenerate "
+            "triangle surface."
+        )
+
+
+def _valid_triangle_mask(
+    vertices: torch.Tensor,
+    triangles: torch.Tensor,
+) -> torch.Tensor:
+    """Return the non-degenerate triangle mask used by validation and sampling."""
+    face_vertices = vertices[triangles]
+    face_areas = 0.5 * torch.linalg.vector_norm(
+        torch.cross(
+            face_vertices[:, 1] - face_vertices[:, 0],
+            face_vertices[:, 2] - face_vertices[:, 0],
+            dim=1,
+        ),
+        dim=1,
+    )
+    return face_areas > torch.finfo(vertices.dtype).eps
 
 
 def _sample_mesh_surface_points(
@@ -602,16 +633,7 @@ def _sample_mesh_surface_points(
         )
         return vertices[indices].clone()
 
-    face_vertices = vertices[triangles]
-    face_areas = 0.5 * torch.linalg.vector_norm(
-        torch.cross(
-            face_vertices[:, 1] - face_vertices[:, 0],
-            face_vertices[:, 2] - face_vertices[:, 0],
-            dim=1,
-        ),
-        dim=1,
-    )
-    valid_faces = face_areas > torch.finfo(vertices.dtype).eps
+    valid_faces = _valid_triangle_mask(vertices, triangles)
     if not bool(valid_faces.any().item()):
         indices = (
             torch.linspace(

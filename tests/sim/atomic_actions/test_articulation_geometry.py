@@ -707,6 +707,57 @@ class TestInitialArticulationGeometrySampling:
         assert points.shape == (7, 3)
         assert set(points[:, 0].tolist()) <= {0.0, 1.0, 2.0}
 
+    @pytest.mark.parametrize(
+        "target_triangles",
+        (
+            pytest.param(
+                torch.empty((0, 3), dtype=torch.long),
+                id="no-faces",
+            ),
+            pytest.param(
+                torch.tensor(((0, 1, 2),), dtype=torch.long),
+                id="degenerate-faces",
+            ),
+        ),
+    )
+    def test_rejects_mixed_mesh_when_target_has_no_valid_triangle_surface(
+        self,
+        target_triangles: torch.Tensor,
+    ) -> None:
+        valid_triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes={
+                "body": (
+                    torch.tensor(
+                        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                        dtype=torch.float32,
+                    ),
+                    valid_triangle,
+                ),
+                "target": (
+                    torch.tensor(
+                        ((10.0, 0.0, 0.0), (11.0, 0.0, 0.0), (12.0, 0.0, 0.0)),
+                        dtype=torch.float32,
+                    ),
+                    target_triangles,
+                ),
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Link 'target' must contain at least one non-degenerate triangle",
+        ):
+            sample_initial_articulation_geometry(
+                articulation,
+                "target",
+                initial_qpos=articulation.initial_qpos,
+                initial_qpos_joint_names=articulation.initial_qpos_joint_names,
+                body_scale=articulation.body_scale,
+                articulation_point_count=32,
+                target_point_count=8,
+            )
+
     def test_merged_surface_sampling_is_weighted_by_face_area(self):
         triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
         articulation, _ = _make_point_cloud_articulation(
