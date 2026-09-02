@@ -130,6 +130,7 @@ SCENE_FREE_TUTORIAL_MODULES = (
     "move_end_effector",
     "move_joints",
 )
+TUTORIAL_REVOLUTE_AXIS_ORIGIN = torch.tensor([0.75, -0.5, 0.25])
 
 
 def _tutorial_axis_geometry(
@@ -155,6 +156,7 @@ def _tutorial_axis_geometry(
                 (center + torch.tensor(neighbor_offset)).unsqueeze(0),
             )
         ),
+        "target_link_revolute_axis_origin": TUTORIAL_REVOLUTE_AXIS_ORIGIN.clone(),
     }
 
 
@@ -281,7 +283,9 @@ def test_articulation_tutorial_semantics_resolve_axis_from_initial_point_clouds(
     if module_name == "press":
         assert semantics.affordance.press_position == pytest.approx((2.0, -3.0, 5.0))
     elif module_name == "twist":
-        assert semantics.affordance.axis_origin == pytest.approx((2.0, -3.0, 4.0))
+        assert semantics.affordance.axis_origin == pytest.approx(
+            tuple(float(value) for value in TUTORIAL_REVOLUTE_AXIS_ORIGIN)
+        )
 
 
 def test_should_wait_for_tutorial_input_is_disabled_for_headless_modes() -> None:

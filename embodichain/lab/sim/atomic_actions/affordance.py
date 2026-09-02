@@ -24,6 +24,7 @@ import torch
 
 _TARGET_LINK_POINT_CLOUD_KEY = "target_link_point_cloud"
 _ARTICULATION_POINT_CLOUD_KEY = "articulation_point_cloud"
+_TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY = "target_link_revolute_axis_origin"
 
 
 @dataclass
@@ -267,7 +268,7 @@ class TwistAffordance(Affordance):
         default=None,
         kw_only=True,
     )
-    """Fallback axis point, overridden by the target point-cloud centroid."""
+    """Fallback axis point, overridden by revolute-joint origin metadata."""
 
     twist_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
@@ -300,16 +301,20 @@ class TwistAffordance(Affordance):
         _validate_joint_metadata(self.joint_name, self.joint_limits)
 
     def resolve_from_object_geometry(self, geometry: Mapping[str, Any]) -> None:
-        """Infer the twist axis and its target-local origin from point clouds."""
+        """Resolve the twist axis and target-local revolute-joint origin."""
         resolved = _infer_articulation_neighborhood_axis(
             geometry,
             field_name="TwistAffordance.twist_axis",
         )
         if resolved is not None:
-            self.twist_axis, target_points = resolved
-            self.axis_origin = tuple(
-                float(component) for component in target_points.mean(dim=0)
-            )
+            self.twist_axis = resolved[0]
+
+        resolved_origin = _resolve_geometry_local_point(
+            geometry,
+            key=_TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY,
+        )
+        if resolved_origin is not None:
+            self.axis_origin = resolved_origin
 
     def require_axis_origin(self) -> tuple[float, float, float]:
         """Return the explicit or geometry-derived local rotation-axis point.
@@ -324,7 +329,8 @@ class TwistAffordance(Affordance):
         if self.axis_origin is None:
             raise ValueError(
                 "TwistAffordance.axis_origin must be provided explicitly or "
-                "resolved from articulation point-cloud geometry."
+                "resolved from geometry['target_link_revolute_axis_origin']; "
+                "the target link's revolute joint origin is missing."
             )
         return self.axis_origin
 
@@ -841,6 +847,28 @@ def _validate_local_point_cloud(value: Any, *, field_name: str) -> torch.Tensor:
             "shape (N, 3)."
         )
     return value
+
+
+def _resolve_geometry_local_point(
+    geometry: Mapping[str, Any],
+    *,
+    key: str,
+) -> tuple[float, float, float] | None:
+    """Resolve an optional finite target-local point tensor from geometry."""
+    if key not in geometry:
+        return None
+    value = geometry[key]
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"geometry[{key!r}] must be a torch.Tensor.")
+    if (
+        not value.is_floating_point()
+        or value.shape != (3,)
+        or not bool(torch.isfinite(value).all().item())
+    ):
+        raise ValueError(
+            f"geometry[{key!r}] must be a finite floating tensor with shape (3,)."
+        )
+    return tuple(float(component) for component in value)
 
 
 def _outer_surface_center(

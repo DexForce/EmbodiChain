@@ -181,7 +181,7 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 | :--- | :--- | :--- |
 | `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
 | `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
-| `sample_initial_point_clouds(target_link_name)` | `Dict[str, Tensor]` | Uniformly sample the target link and merged articulation surface at `init_qpos`, both in the target link's initial local frame. |
+| `sample_initial_point_clouds(target_link_name)` | `Dict[str, Tensor]` | Uniformly sample the target link and merged articulation surface at `init_qpos` in the target link's initial local frame, and include the nearest parent revolute-joint origin when available. |
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
 | `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
@@ -213,6 +213,7 @@ geometry = articulation.sample_initial_point_clouds(
 )
 target_points = geometry["target_link_point_cloud"]
 articulation_points = geometry["articulation_point_cloud"]
+revolute_origin = geometry.get("target_link_revolute_axis_origin")
 ```
 
 The shown point counts are the defaults. Open3D draws random uniform samples
@@ -221,6 +222,16 @@ calls are not expected to be bitwise identical and consumers should rely on
 the spatial distribution rather than point-for-point correspondence. The
 method requires a built kinematic chain and currently supports unit
 `body_scale`.
+
+When the target link has a revolute ancestor, the returned
+`target_link_revolute_axis_origin` tensor has shape `(3,)`. It is the first
+revolute joint found while walking upward from the target link (through any
+fixed parent joints), evaluated at the initial joint configuration and
+expressed in the target link's initial local frame. If no revolute ancestor
+exists, the key is omitted without preventing point-cloud sampling. Atomic
+`Twist` uses this metadata as its rotation origin. The target-cloud centroid is
+used only to center neighborhood/contact calculations and is not a substitute
+for a physical joint origin.
 
 ### Visual Appearance
 

@@ -823,11 +823,19 @@ Plans **approach -> reach -> close -> twist -> open -> retract** for an
 articulation link or a rigid object. The entity-free `TwistAffordance` stores an
 explicit local `grasp_position`, plus optional joint name/limits. For an
 articulation link, the same initial target-neighborhood geometry used by
-`Slide` and `Press` resolves `twist_axis` and sets `axis_origin` to the sampled
-target-link cloud centroid. Complete point-cloud geometry overrides both legacy
-fallback values, including when the centroid is not the link-frame origin. A
-rigid object without articulation context may still provide explicit
-compatibility values. `TwistGoal.target_pose` supplies the grounded target pose.
+`Slide` and `Press` resolves `twist_axis`. The independent
+`target_link_revolute_axis_origin` geometry entry sets `axis_origin` to the
+nearest parent revolute joint's initial origin, expressed in the target link's
+initial local frame. Resolution walks through fixed parent joints. The sampled
+target-link centroid is only a neighborhood/contact reference; it is never used
+as the rotation origin.
+
+Complete point-cloud geometry overrides the legacy `twist_axis` fallback but
+does not overwrite an explicit `axis_origin` when revolute-joint metadata is
+absent. If neither source supplies an origin, planning reports the missing
+rotation-axis point. A rigid object without articulation context may still
+provide explicit compatibility values. `TwistGoal.target_pose` supplies the
+grounded target pose.
 
 The grasp frame's z-axis follows the world-transformed twist axis; an adaptive
 reference completes a right-handed orthonormal frame. Twist keyframes rotate

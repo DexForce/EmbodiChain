@@ -52,6 +52,7 @@ def _make_point_cloud_articulation(
     link_meshes: dict[str, tuple[torch.Tensor, torch.Tensor]] | None = None,
     link_poses: torch.Tensor | None = None,
     body_scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    parent_joint_chain: tuple[object, ...] = (),
 ) -> tuple[Articulation, list[tuple[torch.Tensor, list[str]]]]:
     """Build a pure-Python articulation double for point-cloud sampling."""
     if link_meshes is None:
@@ -99,7 +100,16 @@ def _make_point_cloud_articulation(
         fk_calls.append((qpos.clone(), list(link_names)))
         return link_poses.clone()
 
+    def get_parent_joint_chain(
+        link_name: str,
+    ) -> tuple[object, ...]:
+        assert link_name in link_names
+        return parent_joint_chain
+
     articulation.compute_fk = compute_fk  # type: ignore[method-assign]
+    articulation.get_parent_joint_chain = (  # type: ignore[method-assign]
+        get_parent_joint_chain
+    )
     return articulation, fk_calls
 
 
@@ -177,6 +187,178 @@ class TestInitialPointCloudSampling:
         fk_qpos, fk_link_names = fk_calls[0]
         assert torch.equal(fk_qpos, torch.tensor(((1.0, 2.0),)))
         assert fk_link_names == ["target"]
+
+    def test_uses_nearest_revolute_ancestor_after_fixed_descendants(self):
+        triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        link_meshes = {
+            link_name: (
+                torch.tensor(
+                    ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                    dtype=torch.float32,
+                ),
+                triangle,
+            )
+            for link_name in ("base", "near_parent", "moving", "target")
+        }
+        fixed_joint = ArticulationJointKinematics(
+            name="target_fixed",
+            joint_type="fixed",
+            parent_link_name="moving",
+            child_link_name="target",
+            origin_pose=torch.eye(4),
+            axis=torch.zeros(3),
+        )
+        near_origin_pose = torch.eye(4)
+        near_origin_pose[:3, 3] = torch.tensor((1.0, 2.0, 3.0))
+        near_joint = ArticulationJointKinematics(
+            name="near_hinge",
+            joint_type="revolute",
+            parent_link_name="near_parent",
+            child_link_name="moving",
+            origin_pose=near_origin_pose,
+            axis=torch.tensor((0.0, 0.0, 1.0)),
+        )
+        far_origin_pose = torch.eye(4)
+        far_origin_pose[:3, 3] = torch.tensor((9.0, 9.0, 9.0))
+        far_joint = ArticulationJointKinematics(
+            name="far_hinge",
+            joint_type="revolute",
+            parent_link_name="base",
+            child_link_name="near_parent",
+            origin_pose=far_origin_pose,
+            axis=torch.tensor((1.0, 0.0, 0.0)),
+        )
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes=link_meshes,
+            parent_joint_chain=(fixed_joint, near_joint, far_joint),
+        )
+
+        geometry = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=16,
+            target_point_count=8,
+        )
+
+        assert torch.equal(
+            geometry["target_link_revolute_axis_origin"],
+            near_origin_pose[:3, 3],
+        )
+
+    def test_transforms_revolute_origin_from_rotated_parent_to_target_frame(self):
+        triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        link_meshes = {
+            link_name: (
+                torch.tensor(
+                    ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                    dtype=torch.float32,
+                ),
+                triangle,
+            )
+            for link_name in ("parent", "target")
+        }
+        root_from_parent = torch.eye(4)
+        root_from_parent[:3, :3] = torch.tensor(
+            ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+        )
+        root_from_parent[:3, 3] = torch.tensor((3.0, 4.0, 5.0))
+        root_from_target = torch.eye(4)
+        root_from_target[:3, :3] = torch.tensor(
+            ((1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 1.0, 0.0))
+        )
+        root_from_target[:3, 3] = torch.tensor((0.5, -1.0, 2.0))
+        joint_origin_pose = torch.eye(4)
+        joint_origin_pose[:3, :3] = torch.tensor(
+            ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0))
+        )
+        joint_origin_pose[:3, 3] = torch.tensor((1.0, 2.0, 3.0))
+        link_poses = torch.stack((root_from_parent, root_from_target)).unsqueeze(0)
+        joint = ArticulationJointKinematics(
+            name="target_hinge",
+            joint_type="revolute",
+            parent_link_name="parent",
+            child_link_name="target",
+            origin_pose=joint_origin_pose,
+            axis=torch.tensor((0.0, 1.0, 0.0)),
+        )
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes=link_meshes,
+            link_poses=link_poses,
+            parent_joint_chain=(joint,),
+        )
+
+        geometry = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=16,
+            target_point_count=8,
+        )
+
+        target_from_joint = (
+            torch.linalg.inv(root_from_target) @ root_from_parent @ joint_origin_pose
+        )
+        assert torch.allclose(
+            geometry["target_link_revolute_axis_origin"],
+            target_from_joint[:3, 3],
+            atol=POINT_CLOUD_TOLERANCE,
+        )
+
+    def test_omits_revolute_origin_when_parent_chain_has_only_fixed_joints(self):
+        fixed_joint = ArticulationJointKinematics(
+            name="target_fixed",
+            joint_type="fixed",
+            parent_link_name="parent",
+            child_link_name="target",
+            origin_pose=torch.eye(4),
+            axis=torch.zeros(3),
+        )
+        articulation, _ = _make_point_cloud_articulation(
+            parent_joint_chain=(fixed_joint,),
+        )
+
+        geometry = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=5,
+            target_point_count=3,
+        )
+
+        assert "target_link_revolute_axis_origin" not in geometry
+
+    def test_rejects_revolute_ancestor_with_unknown_parent_link(self):
+        joint = ArticulationJointKinematics(
+            name="target_hinge",
+            joint_type="revolute",
+            parent_link_name="missing_parent",
+            child_link_name="target",
+            origin_pose=torch.eye(4),
+            axis=torch.tensor((0.0, 0.0, 1.0)),
+        )
+        articulation, _ = _make_point_cloud_articulation(
+            parent_joint_chain=(joint,),
+        )
+
+        with pytest.raises(ValueError, match="parent link.*not an articulation link"):
+            articulation.sample_initial_point_clouds(
+                "target",
+                articulation_point_count=5,
+                target_point_count=3,
+            )
+
+    def test_rejects_revolute_ancestor_with_invalid_origin_pose(self):
+        joint = SimpleNamespace(
+            name="target_hinge",
+            joint_type="revolute",
+            parent_link_name="target",
+            origin_pose=torch.full((4, 4), float("nan")),
+        )
+        articulation, _ = _make_point_cloud_articulation(
+            parent_joint_chain=(joint,),
+        )
+
+        with pytest.raises(ValueError, match="origin pose must be finite"):
+            articulation.sample_initial_point_clouds(
+                "target",
+                articulation_point_count=5,
+                target_point_count=3,
+            )
 
     def test_returns_both_clouds_in_target_link_initial_frame(self):
         triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)

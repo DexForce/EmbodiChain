@@ -1224,12 +1224,14 @@ class Articulation(BatchEntity):
             Geometry metadata containing ``articulation_point_cloud`` with
             shape ``(articulation_point_count, 3)`` and
             ``target_link_point_cloud`` with shape
-            ``(target_point_count, 3)``.
+            ``(target_point_count, 3)``. If the target link has a revolute
+            ancestor, ``target_link_revolute_axis_origin`` contains that
+            nearest joint's origin in the target link's initial local frame.
 
         Raises:
             TypeError: If a name or point count has the wrong type.
             ValueError: If the target link, point counts, initial joint state,
-                FK output, or mesh geometry is invalid.
+                FK output, parent-joint geometry, or mesh geometry is invalid.
             RuntimeError: If the articulation has no kinematic chain.
         """
         if type(target_link_name) is not str:
@@ -1305,6 +1307,38 @@ class Articulation(BatchEntity):
         )
         target_index = link_names.index(target_link_name)
         target_from_root = torch.linalg.inv(initial_link_poses[target_index])
+        target_link_revolute_axis_origin: torch.Tensor | None = None
+        for joint in self.get_parent_joint_chain(target_link_name):
+            if joint.joint_type != "revolute":
+                continue
+            if joint.parent_link_name not in link_names:
+                raise ValueError(
+                    f"Revolute joint {joint.name!r} parent link "
+                    f"{joint.parent_link_name!r} is not an articulation link."
+                )
+            joint_origin_pose = torch.as_tensor(
+                joint.origin_pose,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            if (
+                joint_origin_pose.shape != (4, 4)
+                or not torch.isfinite(joint_origin_pose).all()
+            ):
+                raise ValueError(
+                    f"Revolute joint {joint.name!r} origin pose must be finite "
+                    "with shape (4, 4)."
+                )
+            parent_index = link_names.index(joint.parent_link_name)
+            target_from_joint = torch.matmul(
+                torch.matmul(
+                    target_from_root,
+                    initial_link_poses[parent_index],
+                ),
+                joint_origin_pose,
+            )
+            target_link_revolute_axis_origin = target_from_joint[:3, 3].clone()
+            break
 
         merged_vertices: list[torch.Tensor] = []
         merged_triangles: list[torch.Tensor] = []
@@ -1359,7 +1393,7 @@ class Articulation(BatchEntity):
             else torch.empty((0, 3), dtype=torch.long, device=self.device)
         )
         assert target_triangles is not None
-        return {
+        geometry = {
             "target_link_point_cloud": self._sample_mesh_surface_points(
                 target_vertices,
                 target_triangles,
@@ -1371,6 +1405,11 @@ class Articulation(BatchEntity):
                 articulation_point_count,
             ),
         }
+        if target_link_revolute_axis_origin is not None:
+            geometry["target_link_revolute_axis_origin"] = (
+                target_link_revolute_axis_origin
+            )
+        return geometry
 
     @staticmethod
     def _validate_point_cloud_mesh(

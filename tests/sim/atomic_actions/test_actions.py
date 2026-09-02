@@ -124,7 +124,8 @@ CONTROL_DT = 1.0 / 60.0
 DUAL_ARM_DOF = 2 * ARM_DOF
 DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
 DOOR_ENTITY_ID = "door"
-AUTOMATIC_TWIST_AXIS_ORIGIN = torch.tensor([1.0, 0.0, 0.0])
+AUTOMATIC_TWIST_TARGET_CENTER = torch.tensor([1.0, 0.0, 0.0])
+AUTOMATIC_TWIST_AXIS_ORIGIN = torch.tensor([0.25, -0.5, 0.75])
 AUTOMATIC_TWIST_TARGET_OFFSETS = torch.tensor(
     [
         [1.0, 0.0, 0.0],
@@ -142,9 +143,9 @@ _GRASP_GENERATORS: dict[int, _StubGraspPoseGenerator] = {}
 
 
 def _automatic_twist_geometry() -> dict[str, torch.Tensor]:
-    """Build target-local geometry with a non-origin center and +Z neighbor."""
-    target_points = AUTOMATIC_TWIST_AXIS_ORIGIN + AUTOMATIC_TWIST_TARGET_OFFSETS
-    articulation_neighbor = AUTOMATIC_TWIST_AXIS_ORIGIN + torch.tensor(
+    """Build geometry whose target centroid and revolute origin are distinct."""
+    target_points = AUTOMATIC_TWIST_TARGET_CENTER + AUTOMATIC_TWIST_TARGET_OFFSETS
+    articulation_neighbor = AUTOMATIC_TWIST_TARGET_CENTER + torch.tensor(
         [0.25, -0.125, 1.5]
     )
     return {
@@ -153,6 +154,7 @@ def _automatic_twist_geometry() -> dict[str, torch.Tensor]:
             (target_points, articulation_neighbor.unsqueeze(0)),
             dim=0,
         ),
+        "target_link_revolute_axis_origin": AUTOMATIC_TWIST_AXIS_ORIGIN.clone(),
     }
 
 
@@ -2494,7 +2496,7 @@ def test_twist_plans_from_explicit_rigid_object_pose_snapshot() -> None:
     assert plan.plan_success.tolist() == [True, True]
 
 
-def test_twist_rotates_grasp_about_geometry_derived_axis_origin() -> None:
+def test_twist_rotates_grasp_about_geometry_derived_joint_axis_origin() -> None:
     action = _bind_action(_motion_generator(), Twist())
     affordance = TwistAffordance(grasp_position=(2.0, 0.0, 0.0))
     ObjectSemantics(
@@ -2518,7 +2520,7 @@ def test_twist_rotates_grasp_about_geometry_derived_axis_origin() -> None:
 
     assert torch.allclose(
         twisted[:, -1, :3, 3],
-        torch.tensor([1.0, 1.0, 0.0]).expand(NUM_ENVS, -1),
+        torch.tensor([-0.25, 1.25, 0.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
 

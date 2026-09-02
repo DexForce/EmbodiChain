@@ -39,6 +39,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
 from embodichain.lab.sim.atomic_actions.core import ObjectSemantics
 
 POINT_CLOUD_CENTER = torch.tensor([2.0, -3.0, 4.0])
+REVOLUTE_AXIS_ORIGIN = torch.tensor([0.75, -0.5, 0.25])
 TARGET_POINT_OFFSETS = torch.tensor(
     [
         [1.0, 0.0, 0.0],
@@ -51,6 +52,7 @@ TARGET_POINT_OFFSETS = torch.tensor(
 )
 TARGET_LINK_POINT_CLOUD_KEY = "target_link_point_cloud"
 ARTICULATION_POINT_CLOUD_KEY = "articulation_point_cloud"
+TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY = "target_link_revolute_axis_origin"
 
 
 def _axis_geometry(neighbor_offset: tuple[float, float, float]) -> dict[str, object]:
@@ -68,6 +70,7 @@ def _axis_geometry(neighbor_offset: tuple[float, float, float]) -> dict[str, obj
             ),
             dim=0,
         ),
+        TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY: REVOLUTE_AXIS_ORIGIN.clone(),
     }
 
 
@@ -399,7 +402,7 @@ class TestArticulationGeometryAxisInference:
             tuple(float(value) for value in expected_surface_center)
         )
 
-    def test_twist_geometry_uses_non_origin_target_center_as_axis_origin(self) -> None:
+    def test_twist_geometry_uses_revolute_joint_axis_origin(self) -> None:
         affordance = TwistAffordance(
             grasp_position=(0.0, 0.0, 0.0),
             axis_origin=(9.0, 8.0, 7.0),
@@ -417,8 +420,93 @@ class TestArticulationGeometryAxisInference:
             torch.tensor([0.0, 0.0, -1.0]),
         )
         assert affordance.axis_origin == pytest.approx(
-            tuple(float(value) for value in POINT_CLOUD_CENTER)
+            tuple(float(value) for value in REVOLUTE_AXIS_ORIGIN)
         )
+        assert not torch.allclose(
+            torch.tensor(affordance.require_axis_origin()),
+            POINT_CLOUD_CENTER,
+        )
+
+    def test_twist_complete_clouds_without_joint_origin_preserve_fallback(
+        self,
+    ) -> None:
+        geometry = _axis_geometry((0.25, -0.125, -1.5))
+        geometry.pop(TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY)
+        affordance = TwistAffordance(
+            grasp_position=(0.0, 0.0, 0.0),
+            axis_origin=(9.0, 8.0, 7.0),
+            twist_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=geometry,
+            entity_id="automatic-twist-target-with-origin-fallback",
+        )
+
+        assert torch.equal(
+            affordance.twist_axis,
+            torch.tensor([0.0, 0.0, -1.0]),
+        )
+        assert affordance.axis_origin == pytest.approx((9.0, 8.0, 7.0))
+
+    def test_twist_complete_clouds_without_joint_origin_do_not_use_centroid(
+        self,
+    ) -> None:
+        geometry = _axis_geometry((0.25, -0.125, -1.5))
+        geometry.pop(TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY)
+        affordance = TwistAffordance(
+            grasp_position=(0.0, 0.0, 0.0),
+            twist_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=geometry,
+            entity_id="automatic-twist-target-without-joint-origin",
+        )
+
+        assert torch.equal(
+            affordance.twist_axis,
+            torch.tensor([0.0, 0.0, -1.0]),
+        )
+        assert affordance.axis_origin is None
+        with pytest.raises(
+            ValueError,
+            match="target_link_revolute_axis_origin",
+        ):
+            affordance.require_axis_origin()
+
+    @pytest.mark.parametrize(
+        ("axis_origin", "exception_type"),
+        (
+            ((0.0, 0.0, 0.0), TypeError),
+            (torch.tensor([0, 0, 0]), ValueError),
+            (torch.tensor([0.0, 0.0]), ValueError),
+            (torch.tensor([0.0, float("nan"), 0.0]), ValueError),
+        ),
+    )
+    def test_twist_rejects_invalid_revolute_joint_axis_origin_metadata(
+        self,
+        axis_origin: object,
+        exception_type: type[Exception],
+    ) -> None:
+        geometry = _axis_geometry((0.25, -0.125, -1.5))
+        geometry[TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY] = axis_origin
+        affordance = TwistAffordance(
+            grasp_position=(0.0, 0.0, 0.0),
+            axis_origin=(9.0, 8.0, 7.0),
+        )
+
+        with pytest.raises(
+            exception_type,
+            match="target_link_revolute_axis_origin",
+        ):
+            ObjectSemantics(
+                affordance=affordance,
+                geometry=geometry,
+                entity_id="twist-target-with-invalid-joint-origin",
+            )
 
     def test_twist_without_point_cloud_geometry_preserves_axis_origin_fallback(
         self,
