@@ -23,7 +23,11 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
-from embodichain.lab.gym.envs.demo import DemoEpisodeResult
+from embodichain.lab.gym.envs.demo import (
+    DemoEpisodeResult,
+    DemoExecutionCfg,
+    DemoSegmentResult,
+)
 from embodichain.lab.task_program.language.loader import (
     load_task_program as _load_task_program,
 )
@@ -374,6 +378,64 @@ def test_generate_function_commits_failed_episode_when_configured(monkeypatch) -
         env,
         time_id=3,
         max_attempts=2,
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options == [None]
+
+
+def test_generate_function_commits_accepted_prefix_as_segment_fragment(
+    monkeypatch,
+) -> None:
+    """Fragment mode keeps useful accepted data without claiming episode success."""
+    env = _ResetTrackingEnv()
+    result = DemoEpisodeResult(
+        episode_index=0,
+        length=4,
+        completed=False,
+        success=(False,),
+        terminated=(False,),
+        truncated=(False,),
+        terminal_reason="segment_validation_failed",
+        segments=(
+            DemoSegmentResult(
+                segment_id=0,
+                name="pick",
+                start_step=0,
+                end_step=2,
+                success=True,
+                active=(True,),
+                start_steps=(0,),
+                end_steps=(2,),
+                successes=(True,),
+                failure_reasons=(None,),
+            ),
+            DemoSegmentResult(
+                segment_id=1,
+                name="place",
+                start_step=2,
+                end_step=4,
+                success=False,
+                failure_reason="segment_validation_failed",
+                active=(True,),
+                start_steps=(2,),
+                end_steps=(4,),
+                successes=(False,),
+                failure_reasons=("segment_validation_failed",),
+            ),
+        ),
+        lengths=(4,),
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: result,
+    )
+
+    generated = generate_function(
+        env,
+        execution_cfg=DemoExecutionCfg(mode="segment_fragments"),
+        max_attempts=1,
         reset_before=False,
     )
 

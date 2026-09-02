@@ -27,6 +27,7 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.demo import (
+    DemoExecutionCfg,
     DemoSegment,
     DemoSegmentResult,
     execute_demo_episode,
@@ -67,6 +68,71 @@ def test_demo_segment_result_rejects_non_json_metadata() -> None:
             success=True,
             metadata={"mask": torch.tensor([True])},
         )
+
+
+@pytest.mark.parametrize(
+    ("validation", "expected"),
+    [
+        (
+            {
+                "runtime_success_mask": [False],
+                "post_policy_success_mask": None,
+                "validators": [],
+                "accepted_mask": [False],
+            },
+            "runtime_failed",
+        ),
+        (
+            {
+                "runtime_success_mask": [True],
+                "post_policy_success_mask": [False],
+                "validators": [],
+                "accepted_mask": [False],
+            },
+            "post_policy_failed",
+        ),
+        (
+            {
+                "runtime_success_mask": [True],
+                "post_policy_success_mask": [True],
+                "validators": [{"result_mask": [False]}],
+                "accepted_mask": [False],
+            },
+            "validation_failed",
+        ),
+    ],
+)
+def test_demo_segment_result_preserves_first_authoritative_failure_phase(
+    validation: dict[str, object], expected: str
+) -> None:
+    result = DemoSegmentResult(
+        segment_id=0,
+        name="place",
+        start_step=0,
+        end_step=2,
+        success=False,
+        failure_reason="segment_validation_failed",
+        metadata={"validation": validation},
+        active=(True,),
+        start_steps=(0,),
+        end_steps=(2,),
+        successes=(False,),
+        failure_reasons=("segment_validation_failed",),
+    )
+
+    assert result.outcome_kind == expected
+    assert result.outcome_kinds == (expected,)
+    assert result.to_metadata(0)["outcome_kind"] == expected
+
+
+def test_demo_execution_cfg_rejects_unknown_mode() -> None:
+    with pytest.raises(ValueError, match="mode must be"):
+        DemoExecutionCfg(mode="resume")  # type: ignore[arg-type]
+
+
+def test_demo_execution_cfg_rejects_failed_fragment_policy_in_continuous_mode() -> None:
+    with pytest.raises(ValueError, match="only valid in segment_fragments"):
+        DemoExecutionCfg(save_failed_fragments=True)
 
 
 def _controller_action_env() -> EmbodiedEnv:
@@ -792,6 +858,9 @@ def _make_rollout_buffer(num_envs: int, steps: int) -> TensorDict:
             "segment_step": torch.full((num_envs, steps), -1, dtype=torch.long),
             "segment_start": torch.zeros(num_envs, steps, dtype=torch.bool),
             "segment_end": torch.zeros(num_envs, steps, dtype=torch.bool),
+            "segment_accepted": torch.zeros(num_envs, steps, dtype=torch.bool),
+            "segment_attempt_id": torch.full((num_envs, steps), -1, dtype=torch.long),
+            "continuity_id": torch.full((num_envs, steps), -1, dtype=torch.long),
             "terminated": torch.zeros(num_envs, steps, dtype=torch.bool),
             "truncated": torch.zeros(num_envs, steps, dtype=torch.bool),
         },
@@ -812,6 +881,8 @@ class _RolloutWriterStub:
         self.rollout_buffer = _make_rollout_buffer(2, 5)
         self.rollout_steps = torch.tensor([0, 2], dtype=torch.long)
         self.current_rollout_step = 2
+        self._demo_attempt_id = 3
+        self._demo_continuity_id = 0
         self._demo_active_segment_start_steps = torch.tensor([0, 2])
         self.rollout_buffer["obs"]["state"][0, 0] = 10.0
         self.rollout_buffer["obs"]["state"][1, 2] = 20.0
@@ -837,6 +908,8 @@ def test_expert_rollout_writer_uses_independent_per_env_lengths() -> None:
     assert env.rollout_buffer["segment_id"][0, 0].item() == 4
     assert env.rollout_buffer["segment_step"][1, 2].item() == 0
     assert env.rollout_buffer["segment_end"][1, 2]
+    assert env.rollout_buffer["segment_attempt_id"][0, 0].item() == 3
+    assert env.rollout_buffer["continuity_id"][1, 2].item() == 0
     assert torch.equal(
         env.rollout_buffer["obs"]["state"][0, 0], torch.tensor([10.0, 10.0])
     )
@@ -850,6 +923,43 @@ def test_expert_rollout_writer_uses_independent_per_env_lengths() -> None:
         env.rollout_buffer["obs"]["state"][1, 3], torch.tensor([2.0, 2.0])
     )
     assert env.current_rollout_step == 3
+
+
+def test_end_segment_retroactively_annotates_accepted_frame_spans() -> None:
+    """The bridge result, not a new evaluator, qualifies every segment frame."""
+    env = _RolloutWriterStub()
+    env._demo_segment_participants = torch.tensor([True, True])
+    env._demo_active_segment_start_steps = torch.tensor([0, 0])
+    env._demo_active_rollout_start_steps = torch.tensor([0, 0])
+    env._demo_steps = torch.tensor([2, 2])
+    env.rollout_steps = torch.tensor([2, 2])
+    env._demo_episode_metadata = [{"segments": []}, {"segments": []}]
+    env.rollout_buffer["valid"][:, :2] = True
+
+    result = DemoSegmentResult(
+        segment_id=0,
+        name="pick",
+        start_step=0,
+        end_step=2,
+        success=False,
+        active=(True, True),
+        start_steps=(0, 0),
+        end_steps=(2, 2),
+        successes=(True, False),
+        failure_reasons=(None, "segment_validation_failed"),
+        attempt_id=3,
+        continuity_id=0,
+    )
+
+    EmbodiedEnv._end_demo_segment_recording(env, result)
+
+    assert env.rollout_buffer["segment_accepted"][0, :2].all()
+    assert not env.rollout_buffer["segment_accepted"][1, :2].any()
+    assert env.rollout_buffer["segment_end"][:, 1].all()
+    assert env._demo_episode_metadata[0]["segments"][0]["outcome_kind"] == ("succeeded")
+    assert env._demo_episode_metadata[1]["segments"][0]["outcome_kind"] == (
+        "validation_failed"
+    )
 
 
 def test_expert_rollout_writer_freezes_inactive_demo_row() -> None:
