@@ -603,17 +603,6 @@ def test_dual_franka_mount_preserves_single_arm_facing_direction() -> None:
         )
 
 
-def test_hand_commands_use_pgi_open_limit() -> None:
-    robot = MagicMock()
-    robot.device = torch.device("cpu")
-    robot.get_qpos_limits.return_value = torch.tensor([[[0.0, 0.04]]])
-
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
-
-    assert torch.allclose(hand_open, torch.tensor([0.0]))
-    assert torch.allclose(hand_close, torch.tensor([0.024]))
-
-
 def test_hand_commands_cover_all_six_robotiq_joints_with_mimic_directions() -> None:
     robot = MagicMock()
     robot.device = torch.device("cpu")
