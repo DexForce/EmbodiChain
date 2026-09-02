@@ -25,6 +25,51 @@ The environment is defined by inheriting from {class}`~envs.EmbodiedEnvCfg`. Thi
 
 {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg` (the base environment configuration class, sometimes referred to as `BaseEnvCfg`), which provides fundamental environment parameters. The following sections describe both the base class parameters and the additional parameters specific to {class}`~envs.EmbodiedEnvCfg`.
 
+### File-Based Component Ownership
+
+File-based deployments may build the same in-memory configuration from
+reusable physical owners. A task-local `env.yaml` component combines simulation
+scene entities with ordinary environment and manager values, while an
+embodiment component combines one robot with its sensors:
+
+```yaml
+# env.yaml: reusable and not directly runnable
+environment_id: repeated_pick_place
+simulation:
+  rigid_object:
+    - uid: cube
+      # Physical object configuration.
+env:
+  events: {}
+  dataset: {}
+```
+
+A separate runnable config supplies `id` and selects those owners:
+
+```yaml
+# task.ur5.yaml
+id: TaskProgramRepeatedPickPlace-v1
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+```
+
+This split lets one environment support several embodiments and lets one
+embodiment run across several environments. It is independent of how expert
+behavior is authored: a registered handwritten task can select the same two
+components, while a configuration-defined Task Program adds
+`task_program.{program,integration,execution_policy}` only to its runnable
+deployment. The pure `env.yaml` has `environment_id` but no runnable `id` or
+Task Program fields.
+
+Component references resolve relative to the runnable config. A deployment
+must not declare component-owned fields inline at the same time. The original
+fully inline Gym format remains supported; a standalone physical
+`scene.component` also remains available when `environment.component` is not
+selected. See {doc}`/guides/configuration` for the full file schemas and
+{doc}`/tutorial/task_program` for a complete Task Program composition.
+
 ### BaseEnvCfg Parameters
 
 Since {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg`, it includes the following base parameters:
@@ -374,7 +419,9 @@ In a gym config file, use the ``actions`` section:
 ````{tip}
 **Using an AI coding agent?** The following skills can scaffold boilerplate for you:
 
-- **`/add-task-env`** — Generate a new task environment with the correct file structure, `@register_env` decorator, base class methods, `__init__.py` update, and test stub.
+- **`/add-task-env`** — Generate either an import-registered task module or a
+  configuration-defined Task Program deployment, with the matching config
+  layout and test stub.
 - **`/add-functor`** — Add observation, reward, event, or randomization functors with the correct signature and module placement.
 - **`/add-test`** — Write tests following project conventions (pytest or class style, mock patterns, correct file placement).
 - **`/pre-commit-check`** — Run all local CI checks (black, headers, `__all__`, type annotations) before committing.

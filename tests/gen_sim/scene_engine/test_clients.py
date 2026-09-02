@@ -17,11 +17,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from embodichain.gen_sim.scene_engine.clients import articulated_generation
 from embodichain.gen_sim.scene_engine.clients import geometry_generation
 from embodichain.gen_sim.scene_engine.clients import image_generation
 from embodichain.gen_sim.scene_engine.clients import image_segmentation
@@ -39,7 +41,7 @@ class _Response:
         headers: dict[str, str] | None = None,
     ) -> None:
         self._payload = payload
-        self.content = content
+        self.content = content or json.dumps(payload).encode("utf-8")
         self.headers = headers or {}
 
     def raise_for_status(self) -> None:
@@ -60,7 +62,7 @@ class _Session:
         self.get_calls: list[tuple[str, int]] = []
         self.post_call: dict[str, object] | None = None
 
-    def get(self, url: str, *, timeout: int) -> _Response:
+    def get(self, url: str, *, timeout: int, **_: object) -> _Response:
         self.get_calls.append((url, timeout))
         return _Response(self.get_payload)
 
@@ -96,6 +98,13 @@ def test_clients_load_their_required_dotenv_values(
         "SCENE_ENGINE_IMAGE_GENERATION_HEALTH_PATH": "/health",
         "SCENE_ENGINE_IMAGE_GENERATION_BY_PROMPT_PATH": "/generate_image_by_prompt",
     }
+    articulated_generation_values = {
+        "SCENE_ENGINE_ARTICULATED_GENERATION_BASE_URL": "http://articulation/",
+        "SCENE_ENGINE_ARTICULATED_GENERATION_TIMEOUT_S": "7200",
+        "SCENE_ENGINE_ARTICULATED_GENERATION_MAX_ATTEMPTS": "2",
+        "SCENE_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH": "/health",
+        "SCENE_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH": "/generate_articulation",
+    }
     llm_values = {
         "OPENAI_API_KEY": "test-key",
         "OPENAI_MODEL": "test-model",
@@ -117,12 +126,20 @@ def test_clients_load_their_required_dotenv_values(
         lambda *_: image_generation_values,
     )
     monkeypatch.setattr(
+        articulated_generation,
+        "read_scene_engine_env_values",
+        lambda *_: articulated_generation_values,
+    )
+    monkeypatch.setattr(
         load_config, "read_scene_engine_env_values", lambda *_: llm_values
     )
 
     geometry_client = geometry_generation.GeometryGenerationClient.from_dotenv()
     segmentation_client = image_segmentation.ImageSegmentationClient.from_dotenv()
     image_generation_client = image_generation.ImageGenerationClient.from_dotenv()
+    articulated_generation_client = (
+        articulated_generation.ArticulatedGenerationClient.from_dotenv()
+    )
     llm_client_config = load_config.load_llm_config()
 
     assert geometry_client._base_url == "http://geometry"
@@ -134,6 +151,7 @@ def test_clients_load_their_required_dotenv_values(
         image_generation_client._generate_image_by_prompt_path
         == "/generate_image_by_prompt"
     )
+    assert articulated_generation_client._base_url == "http://articulation/"
     assert llm_client_config.default_query == {"api-version": "1"}
     assert llm_client_config.base_url == "http://llm/v1"
 
@@ -184,16 +202,63 @@ def test_service_health_checks_use_the_configured_health_path() -> None:
         generate_image_by_prompt_path="/generate_image_by_prompt",
         session=image_generation_session,
     )
+    articulated_generation_session = _Session(get_payload={"ok": True})
+    articulated_generation_client = articulated_generation.ArticulatedGenerationClient(
+        base_url="http://articulation",
+        timeout_s=30,
+        max_attempts=1,
+        health_path="/health",
+        generate_path="/generate_articulation",
+        session=articulated_generation_session,
+    )
 
     geometry_client.check_health()
     segmentation_client.check_health()
     image_generation_client.check_health()
+    articulated_generation_client.check_health()
 
     assert geometry_session.get_calls == [("http://geometry/health", 10)]
     assert segmentation_session.get_calls == [("http://segment/health", 30)]
     assert image_generation_session.get_calls == [
         ("http://image-generation/health", 10)
     ]
+    assert articulated_generation_session.get_calls == [
+        ("http://articulation/health", 30)
+    ]
+
+
+def test_articulated_generation_client_posts_image_and_returns_server_json(
+    tmp_path: Path,
+) -> None:
+    class ArticulatedGenerationSession(_Session):
+        def __init__(self) -> None:
+            super().__init__(get_payload={})
+
+        def post(self, url: str, **kwargs: object) -> _Response:
+            self.post_call = {"url": url, **kwargs}
+            return _Response({"status": "accepted"}, content=b'{"status":"accepted"}')
+
+    image_path = tmp_path / "reference.png"
+    image_path.write_bytes(b"png")
+    session = ArticulatedGenerationSession()
+    client = articulated_generation.ArticulatedGenerationClient(
+        base_url="http://articulation",
+        timeout_s=30,
+        max_attempts=1,
+        health_path="/health",
+        generate_path="/generate_articulation",
+        session=session,
+    )
+
+    response_data = client.generate_articulated_object(
+        prompt="a cabinet with one opening door",
+        image_path=image_path,
+    )
+
+    assert response_data == {"status": "accepted"}
+    assert session.post_call is not None
+    assert session.post_call["url"] == "http://articulation/generate_articulation"
+    assert session.post_call["data"] == {"prompt": "a cabinet with one opening door"}
 
 
 def test_image_generation_client_posts_prompt_and_writes_png(

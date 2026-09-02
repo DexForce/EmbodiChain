@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,7 +29,7 @@ import torch
 
 from tensordict import TensorDict
 
-from embodichain.lab.gym.envs.expert_program import IntegrationFingerprintMismatch
+from embodichain.lab.task_program.integrations import IntegrationFingerprintMismatch
 from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -43,15 +42,25 @@ from embodichain.lab.gym.utils.gym_utils import (
     init_rollout_buffer_from_config,
 )
 from embodichain.lab.sim.robots import URRobotCfg
+from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.utils.utility import load_config, save_config
 
 _REPOSITORY_ROOT = Path(__file__).parents[3]
 _CUBE_GYM_CONFIG_PATH = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json"
+    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
-CUBE_ROBOT_PROFILE_ID = "expert_program_ur5_pick_place"
-CUBE_SCENE_REGISTRY_ID = "expert_program_repeated_pick_place"
+_CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
+_CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
+_CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "env.yaml"
+_COMPONENT_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs/components"
+_CUBE_POLICY_PATH = _COMPONENT_ROOT / "execution_policies/trajectory_open_loop.yaml"
+_CUBE_EMBODIMENT_PATH = _COMPONENT_ROOT / "embodiments/ur5_dh_pgi_140_80.yaml"
+_TABLEWARE_CONFIG_ROOT = (
+    _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation/tableware"
+)
+CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
+CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
 
 
 class TestInitRolloutBufferFromConfig:
@@ -90,6 +99,10 @@ class TestInitRolloutBufferFromConfig:
         # Check actions and rewards
         assert buffer["actions"].shape == (4, 100, 7)
         assert buffer["rewards"].shape == (4, 100)
+        assert buffer["segment_accepted"].shape == (4, 100)
+        assert not buffer["segment_accepted"].any()
+        assert (buffer["segment_attempt_id"] == -1).all()
+        assert (buffer["continuity_id"] == -1).all()
 
     def test_extra_observation_with_shape_tuple(self):
         """Test that extra observations with shape tuple are added correctly."""
@@ -525,39 +538,81 @@ class TestConfigToCfgFromFile:
     @staticmethod
     def _minimal_gym_config() -> dict[str, object]:
         """Return a minimal config that reaches the generic parser."""
-        production_config = json.loads(
-            _CUBE_GYM_CONFIG_PATH.read_text(encoding="utf-8")
-        )
         return {
-            "id": "ExpertProgramRepeatedPickPlace-v1",
-            "max_episode_steps": 1200,
-            "expert_program_runtime": deepcopy(
-                production_config["expert_program_runtime"]
-            ),
-            "env": {},
-            "robot": {
-                "class_type": "URRobot",
-                "robot_type": "ur5",
-                "uid": "TestUR5",
+            "id": "TaskProgramRepeatedPickPlace-v1",
+            "environment": {"component": "env.yaml"},
+            "task_program": {
+                "program": "program.yaml",
+                "integration": "integration.yaml",
+                "execution_policy": "policy.yaml",
             },
+            "embodiment": {"component": "embodiment.yaml"},
         }
 
     @staticmethod
-    def _expert_program_payload() -> dict[str, object]:
-        """Return one minimal strict Expert Program payload."""
+    def _task_program_payload() -> dict[str, object]:
+        """Return one minimal strict Task Program payload."""
         return {
             "program_id": "configured_pick",
-            "integration": {
-                "robot_profile": CUBE_ROBOT_PROFILE_ID,
-                "scene_registry": CUBE_SCENE_REGISTRY_ID,
-                "runtime_preset": "trajectory",
-            },
             "targets": {},
             "program": {
                 "kind": "invoke",
                 "call": {"kind": "pick", "object": "cube"},
             },
         }
+
+    @staticmethod
+    def _environment_component_payload() -> dict[str, object]:
+        """Return one reusable physical environment component."""
+        simulation = load_config(_CUBE_ENVIRONMENT_PATH)["simulation"]
+        return {
+            "environment_id": "configured_pick",
+            "max_episodes": 5,
+            "max_episode_steps": 1200,
+            "simulation": simulation,
+            "env": {},
+        }
+
+    @staticmethod
+    def _environment_component_gym_config() -> dict[str, object]:
+        """Return one runnable deployment selecting a reusable environment."""
+        return {
+            "id": "TaskProgramRepeatedPickPlace-v1",
+            "environment": {"component": "env.yaml"},
+            "task_program": {
+                "program": "program.yaml",
+                "integration": "integration.yaml",
+                "execution_policy": "policy.yaml",
+            },
+            "embodiment": {"component": "embodiment.yaml"},
+        }
+
+    @classmethod
+    def _write_deployment(
+        cls,
+        directory: Path,
+        *,
+        include_program: bool = True,
+        include_integration: bool = True,
+    ) -> Path:
+        """Write one test-owned component deployment."""
+        directory.mkdir(parents=True, exist_ok=True)
+        if include_program:
+            save_config(directory / "program.yaml", cls._task_program_payload())
+        if include_integration:
+            integration = load_config(_CUBE_INTEGRATION_PATH)
+            integration["program_id"] = "configured_pick"
+            save_config(
+                directory / "integration.yaml",
+                integration,
+            )
+        save_config(directory / "policy.yaml", load_config(_CUBE_POLICY_PATH))
+        save_config(
+            directory / "embodiment.yaml",
+            load_config(_CUBE_EMBODIMENT_PATH),
+        )
+        save_config(directory / "env.yaml", cls._environment_component_payload())
+        return directory
 
     def test_robot_class_type_preserves_ur_variant(self):
         config = {
@@ -582,20 +637,458 @@ class TestConfigToCfgFromFile:
             "uid": "TestUR5",
         }
 
-    def test_expert_program_path_is_resolved_from_gym_config_source(
+    def test_handwritten_config_composes_embodiment_without_task_program(
         self,
         tmp_path,
     ) -> None:
-        """A serialized program path is relative to its Gym config file."""
-        gym_dir = tmp_path / "gym" / "task"
-        program_dir = tmp_path / "expert_program"
-        gym_dir.mkdir(parents=True)
-        program_dir.mkdir()
-        gym_path = gym_dir / "gym_config.json"
-        program_path = program_dir / "program.yaml"
-        save_config(program_path, self._expert_program_payload())
+        """Physical embodiment reuse is independent of Task Program."""
+        save_config(
+            tmp_path / "embodiment.yaml",
+            {
+                "embodiment_id": "test_ur5",
+                "simulation": {
+                    "class_type": "URRobot",
+                    "robot_type": "ur5",
+                    "uid": "TestUR5",
+                },
+                "sensor": [],
+            },
+        )
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "embodiment": {
+                "component": "embodiment.yaml",
+                "overrides": {"uid": "OverriddenUR5"},
+            },
+        }
+        original = deepcopy(config)
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=tmp_path / "env.yaml",
+        )
+
+        assert isinstance(cfg.robot, URRobotCfg)
+        assert cfg.robot.robot_type == "ur5"
+        assert cfg.robot.uid == "OverriddenUR5"
+        assert cfg.sensor == []
+        assert cfg.task_program is None
+        assert config == original
+
+    def test_handwritten_config_composes_environment_without_task_program(
+        self,
+        tmp_path,
+    ) -> None:
+        """Physical environment reuse is independent of Task Program."""
+        self._write_deployment(tmp_path)
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "environment": {"component": "env.yaml"},
+            "embodiment": {"component": "embodiment.yaml"},
+        }
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=tmp_path / "task.handwritten.yaml",
+        )
+
+        assert cfg.max_episode_steps == 1200
+        assert [rigid.uid for rigid in cfg.rigid_object] == ["cube"]
+        assert cfg.task_program is None
+
+    def test_removed_task_component_selector_fails_closed(self) -> None:
+        """The former mixed-ownership component cannot be silently ignored."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "task": {"component": "task.yaml"},
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+        }
+
+        with pytest.raises(ValueError, match="task.component has been removed"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    @pytest.mark.parametrize("field_name", ("robot", "sensor"))
+    def test_handwritten_config_rejects_mixed_embodiment_ownership(
+        self,
+        tmp_path,
+        field_name: str,
+    ) -> None:
+        """Inline and component-owned physical fields cannot conflict."""
+        save_config(
+            tmp_path / "embodiment.yaml",
+            {
+                "embodiment_id": "test_robot",
+                "simulation": {"uid": "TestRobot"},
+                "sensor": [],
+            },
+        )
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "embodiment": {"component": "embodiment.yaml"},
+            field_name: {} if field_name == "robot" else [],
+        }
+
+        with pytest.raises(ValueError, match="embodiment.component owns"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_handwritten_config_composes_scene_without_task_program(
+        self,
+        tmp_path,
+    ) -> None:
+        """A handwritten task may also select a reusable physical scene."""
+        save_config(
+            tmp_path / "scene.yaml",
+            {
+                "scene_id": "empty_lit_scene",
+                "simulation": {"light": {"direct": []}},
+            },
+        )
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+            "scene": {"component": "scene.yaml"},
+        }
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=tmp_path / "env.yaml",
+        )
+
+        assert cfg.robot.uid == "TestRobot"
+        assert cfg.light.direct == []
+        assert cfg.task_program is None
+
+    def test_handwritten_config_rejects_mixed_scene_ownership(
+        self,
+        tmp_path,
+    ) -> None:
+        """A scene component cannot silently replace an inline scene field."""
+        save_config(
+            tmp_path / "scene.yaml",
+            {
+                "scene_id": "component_scene",
+                "simulation": {"light": {"direct": []}},
+            },
+        )
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+            "scene": {"component": "scene.yaml"},
+            "light": {"direct": []},
+        }
+
+        with pytest.raises(ValueError, match="scene.component fields"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_deployment_resolves_components_from_its_own_directory(
+        self,
+        tmp_path,
+    ) -> None:
+        """All task-deployment component paths share one relative base."""
+        deployment_dir = self._write_deployment(tmp_path / "deployment")
+        gym_dir = tmp_path / "gym"
+        gym_dir.mkdir()
+        config = self._environment_component_gym_config()
+        config["environment"] = {"component": "../deployment/env.yaml"}
+        task_program = config["task_program"]
+        assert type(task_program) is dict
+        for field_name in ("program", "integration", "execution_policy"):
+            task_program[field_name] = f"../deployment/{task_program[field_name]}"
+        config["embodiment"] = {"component": "../deployment/embodiment.yaml"}
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=gym_dir / "task.ur5.yaml",
+        )
+
+        assert deployment_dir.is_dir()
+        assert cfg.task_program.program_id == "configured_pick"
+        assert cfg.task_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+        assert cfg.max_episode_steps == 1200
+
+    def test_launcher_returns_environment_component_runtime_values(
+        self,
+        tmp_path,
+    ) -> None:
+        """The launcher exposes environment-owned run controls after composition."""
+        self._write_deployment(tmp_path)
+        gym_path = tmp_path / "task.ur5.yaml"
+        save_config(gym_path, self._environment_component_gym_config())
+        args = argparse.Namespace(
+            gym_config=str(gym_path),
+            num_envs=1,
+            device="cpu",
+            headless=True,
+            renderer=None,
+            gpu_id=0,
+            arena_space=2.0,
+            max_episodes=None,
+            filter_visual_rand=False,
+            filter_dataset_saving=False,
+            preview=False,
+            action_config=None,
+        )
+
+        _, gym_config, _ = build_env_cfg_from_args(args)
+
+        assert gym_config["max_episodes"] == 5
+        assert gym_config["env"] == {}
+        assert "environment" not in gym_config
+
+    def test_environment_component_rejects_separate_scene(self, tmp_path) -> None:
+        """A deployment cannot select two owners for its physical scene."""
+        self._write_deployment(tmp_path)
+        save_config(
+            tmp_path / "scene.yaml",
+            {
+                "scene_id": "duplicate_scene",
+                "simulation": {"light": {"direct": []}},
+            },
+        )
+        config = self._environment_component_gym_config()
+        config["scene"] = {"component": "scene.yaml"}
+
+        with pytest.raises(ValueError, match="environment.component owns"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    def test_scene_binding_rejects_unknown_physical_entity(self, tmp_path) -> None:
+        """Semantic roots must bind an entity declared by the physical scene."""
+        self._write_deployment(tmp_path)
+        integration_path = tmp_path / "integration.yaml"
+        integration = load_config(integration_path)
+        integration["scene_binding"]["rigid_objects"][0][
+            "simulation_uid"
+        ] = "missing_cube"
+        save_config(integration_path, integration)
+
+        with pytest.raises(ValueError, match="missing_cube.*physical environment"):
+            config_to_cfg(
+                self._minimal_gym_config(),
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    @pytest.mark.parametrize(
+        "task_name",
+        (
+            "blocks_ranking_rgb",
+            "blocks_ranking_size",
+            "match_object_container",
+            "place_object_drawer",
+            "stack_blocks_two",
+            "stack_cups",
+        ),
+    )
+    def test_official_handwritten_config_uses_shared_embodiment(
+        self,
+        task_name: str,
+    ) -> None:
+        """CobotMagic handwritten demos share one exact physical component."""
+        config_path = _TABLEWARE_CONFIG_ROOT / task_name / "env.json"
+        config = load_config(config_path)
+
+        assert config["embodiment"] == {
+            "component": "../../../../components/embodiments/cobotmagic.yaml"
+        }
+        assert "robot" not in config
+        assert "sensor" not in config
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=config_path,
+        )
+
+        assert cfg.robot.uid == "CobotMagic"
+        assert [sensor.uid for sensor in cfg.sensor] == [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist",
+        ]
+        assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
+
+    @pytest.mark.parametrize("field_name", ("robot", "sensor"))
+    def test_configured_task_program_rejects_top_level_embodiment_fields(
+        self,
+        tmp_path,
+        field_name: str,
+    ) -> None:
+        """A deployment obtains both robot and sensors from its embodiment."""
+        self._write_deployment(tmp_path)
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "../../expert_program/program.yaml"
+        config[field_name] = {} if field_name == "robot" else []
+
+        with pytest.raises(ValueError, match="embodiment.component"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    def test_embodiment_requires_an_explicit_sensor_suite(self, tmp_path) -> None:
+        """Even an empty sensor suite is an explicit embodiment-owned field."""
+        self._write_deployment(tmp_path)
+        embodiment_path = tmp_path / "embodiment.yaml"
+        embodiment = load_config(embodiment_path)
+        embodiment.pop("sensor")
+        save_config(embodiment_path, embodiment)
+        config = self._minimal_gym_config()
+
+        with pytest.raises(ValueError, match="missing required fields.*sensor"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_task_program_requires_embodiment_skill_profile(self, tmp_path) -> None:
+        """A Task Program embodiment must expose semantic capabilities."""
+        self._write_deployment(tmp_path)
+        component_path = tmp_path / "embodiment.yaml"
+        component = load_config(component_path)
+        component.pop("skill_profile")
+        save_config(component_path, component)
+
+        with pytest.raises(
+            ValueError,
+            match="embodiment component must declare skill_profile",
+        ):
+            config_to_cfg(
+                self._minimal_gym_config(),
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_task_integration_requires_scene_binding(self, tmp_path) -> None:
+        """Every task integration owns one semantic scene binding."""
+        self._write_deployment(tmp_path)
+        integration_path = tmp_path / "integration.yaml"
+        integration = load_config(integration_path)
+        integration.pop("scene_binding")
+        save_config(integration_path, integration)
+
+        with pytest.raises(
+            ValueError,
+            match="task integration is missing required fields.*scene_binding",
+        ):
+            config_to_cfg(
+                self._minimal_gym_config(),
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_task_program_rejects_separate_scene_binding_component(
+        self,
+        tmp_path,
+    ) -> None:
+        """The removed three-path format fails instead of being ignored."""
+        self._write_deployment(tmp_path)
+        config = self._minimal_gym_config()
+        task_program = config["task_program"]
+        assert type(task_program) is dict
+        task_program["scene_binding"] = "scene_binding.yaml"
+
+        with pytest.raises(ValueError, match="unsupported fields.*scene_binding"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_environment_component_rejects_task_program_metadata(
+        self,
+        tmp_path,
+    ) -> None:
+        """Reusable environments cannot own Task Program selections."""
+        self._write_deployment(tmp_path)
+        environment_path = tmp_path / "env.yaml"
+        environment = load_config(environment_path)
+        integration = load_config(tmp_path / "integration.yaml")
+        environment["task_program"] = integration["scene_binding"]
+        save_config(environment_path, environment)
+
+        with pytest.raises(ValueError, match="unsupported fields.*task_program"):
+            config_to_cfg(
+                self._minimal_gym_config(),
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    def test_embodiment_rejects_removed_task_program_metadata_name(
+        self,
+        tmp_path,
+    ) -> None:
+        """The former ambiguous embodiment metadata key is not accepted."""
+        self._write_deployment(tmp_path)
+        component_path = tmp_path / "embodiment.yaml"
+        component = load_config(component_path)
+        component["task_program"] = component.pop("skill_profile")
+        save_config(component_path, component)
+
+        with pytest.raises(ValueError, match="unsupported fields.*task_program"):
+            config_to_cfg(
+                self._minimal_gym_config(),
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_environment_rejects_embodiment_owned_sensors(self, tmp_path) -> None:
+        """Environments cannot silently add or replace embodiment sensors."""
+        self._write_deployment(tmp_path)
+        environment_path = tmp_path / "env.yaml"
+        environment = load_config(environment_path)
+        environment["simulation"]["sensor"] = []
+        save_config(environment_path, environment)
+        config = self._minimal_gym_config()
+
+        with pytest.raises(ValueError, match="unsupported fields.*sensor"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    def test_components_are_resolved_from_gym_config_source(
+        self,
+        tmp_path,
+    ) -> None:
+        """All component paths are relative to their Gym config file."""
+        gym_dir = tmp_path / "gym" / "task"
+        gym_dir.mkdir(parents=True)
+        self._write_deployment(tmp_path / "deployment")
+        gym_path = gym_dir / "gym_config.json"
+        config = self._minimal_gym_config()
+        task_program = config["task_program"]
+        assert type(task_program) is dict
+        for field_name in (
+            "program",
+            "integration",
+            "execution_policy",
+        ):
+            task_program[field_name] = f"../../deployment/{task_program[field_name]}"
+        config["environment"] = {"component": "../../deployment/env.yaml"}
+        config["embodiment"] = {"component": "../../deployment/embodiment.yaml"}
 
         cfg = config_to_cfg(
             config,
@@ -603,23 +1096,30 @@ class TestConfigToCfgFromFile:
             source_path=gym_path,
         )
 
-        assert cfg.expert_program.program_id == "configured_pick"
-        assert cfg.expert_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+        assert cfg.task_program.program_id == "configured_pick"
+        assert cfg.task_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+        assert get_env_spec(str(config["id"])).task_program_registration is not None
 
-    def test_build_env_cfg_loads_source_relative_expert_program(
+    def test_build_env_cfg_loads_source_relative_task_program(
         self,
         tmp_path,
     ) -> None:
         """The normal file launcher attaches the decoded program before init."""
         gym_dir = tmp_path / "gym"
-        program_dir = tmp_path / "programs"
         gym_dir.mkdir()
-        program_dir.mkdir()
+        self._write_deployment(tmp_path / "deployment")
         gym_path = gym_dir / "gym_config.json"
-        program_path = program_dir / "program.json"
-        save_config(program_path, self._expert_program_payload())
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "../programs/program.json"
+        task_program = config["task_program"]
+        assert type(task_program) is dict
+        for field_name in (
+            "program",
+            "integration",
+            "execution_policy",
+        ):
+            task_program[field_name] = f"../deployment/{task_program[field_name]}"
+        config["environment"] = {"component": "../deployment/env.yaml"}
+        config["embodiment"] = {"component": "../deployment/embodiment.yaml"}
         save_config(gym_path, config)
         args = argparse.Namespace(
             gym_config=str(gym_path),
@@ -638,7 +1138,7 @@ class TestConfigToCfgFromFile:
 
         cfg, _, _ = build_env_cfg_from_args(args)
 
-        assert cfg.expert_program.program_id == "configured_pick"
+        assert cfg.task_program.program_id == "configured_pick"
 
     def test_cli_program_override_is_selected_and_loaded_once(
         self,
@@ -646,17 +1146,34 @@ class TestConfigToCfgFromFile:
         monkeypatch,
     ) -> None:
         """The CLI override replaces the Gym path at the single loader boundary."""
-        from embodichain.lab.gym.envs.expert_program import loader
+        from embodichain.lab.task_program.language import loader
 
         gym_path = tmp_path / "gym_config.json"
         override_path = tmp_path / "override.yaml"
-        save_config(override_path, self._expert_program_payload())
+        save_config(override_path, self._task_program_payload())
+        deployment_dir = self._write_deployment(
+            tmp_path / "deployment",
+            include_program=False,
+        )
+        (deployment_dir / "program.yaml").write_text(
+            "this configured program must not be loaded\n",
+            encoding="utf-8",
+        )
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "must_not_be_loaded.yaml"
+        task_program = config["task_program"]
+        assert type(task_program) is dict
+        for field_name in (
+            "program",
+            "integration",
+            "execution_policy",
+        ):
+            task_program[field_name] = str(deployment_dir / task_program[field_name])
+        config["environment"] = {"component": str(deployment_dir / "env.yaml")}
+        config["embodiment"] = {"component": str(deployment_dir / "embodiment.yaml")}
         save_config(gym_path, config)
         args = argparse.Namespace(
             gym_config=str(gym_path),
-            expert_program=str(override_path),
+            task_program=str(override_path),
             num_envs=1,
             device="cpu",
             headless=True,
@@ -670,17 +1187,17 @@ class TestConfigToCfgFromFile:
             action_config=None,
         )
         calls: list[str] = []
-        original = loader.load_expert_program
+        original = loader.load_task_program
 
         def load_once(path, **kwargs):
             calls.append(str(path))
             return original(path, **kwargs)
 
-        monkeypatch.setattr(loader, "load_expert_program", load_once)
+        monkeypatch.setattr(loader, "load_task_program", load_once)
 
         cfg, _, _ = build_env_cfg_from_args(args)
 
-        assert cfg.expert_program.program_id == "configured_pick"
+        assert cfg.task_program.program_id == "configured_pick"
         assert calls == [str(override_path)]
 
     def test_registration_drift_fails_during_repeated_config_load(
@@ -689,26 +1206,35 @@ class TestConfigToCfgFromFile:
         monkeypatch,
     ) -> None:
         """A repeated config load rejects drift in its registered integration."""
-        from embodichain.lab.gym.envs.expert_program import loader
+        from embodichain.lab.task_program.language import loader
 
-        program_path = tmp_path / "program.yaml"
-        save_config(program_path, self._expert_program_payload())
+        deployment_dir = self._write_deployment(tmp_path / "deployment")
+        program_path = deployment_dir / "program.yaml"
         config = self._minimal_gym_config()
-        config["expert_program_path"] = str(program_path)
+        task_program = config["task_program"]
+        assert type(task_program) is dict
+        for field_name in (
+            "program",
+            "integration",
+            "execution_policy",
+        ):
+            task_program[field_name] = str(deployment_dir / task_program[field_name])
+        config["environment"] = {"component": str(deployment_dir / "env.yaml")}
+        config["embodiment"] = {"component": str(deployment_dir / "embodiment.yaml")}
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
-        registration = get_env_spec(str(config["id"])).expert_program_registration
+        registration = get_env_spec(str(config["id"])).task_program_registration
         assert registration is not None
         binding = registration.scene_binding.rigid_objects[0]
         original_semantic_type = binding.semantic_type
         object.__setattr__(binding, "semantic_type", "changed_cube")
         loader_calls: list[str] = []
-        original_load = loader.load_expert_program
+        original_load = loader.load_task_program
 
         def tracked_load(path, **kwargs):
             loader_calls.append(str(path))
             return original_load(path, **kwargs)
 
-        monkeypatch.setattr(loader, "load_expert_program", tracked_load)
+        monkeypatch.setattr(loader, "load_task_program", tracked_load)
 
         try:
             with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
@@ -724,41 +1250,117 @@ class TestConfigToCfgFromFile:
         monkeypatch,
     ) -> None:
         """Dictionary-only callers retain explicit current-directory semantics."""
-        program_path = tmp_path / "program.yaml"
-        save_config(program_path, self._expert_program_payload())
+        self._write_deployment(tmp_path)
         monkeypatch.chdir(tmp_path)
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "program.yaml"
 
         cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
-        assert cfg.expert_program.program_id == "configured_pick"
+        assert cfg.task_program.program_id == "configured_pick"
 
     @pytest.mark.parametrize("value", [None, True, 1, {}, "", " program.yaml"])
-    def test_expert_program_path_rejects_ambiguous_values(
-        self,
-        value,
-    ) -> None:
-        """The path field never accepts coercion, null, or outer whitespace."""
-        config = self._minimal_gym_config()
-        config["expert_program_path"] = value
-
-        with pytest.raises((TypeError, ValueError), match="expert_program_path"):
-            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
-
-    def test_expert_program_path_missing_file_fails_before_environment_init(
+    def test_component_path_rejects_ambiguous_values(
         self,
         tmp_path,
+        value,
     ) -> None:
-        """A configured program must exist when the Gym config is decoded."""
+        """A component path rejects coercion, null, and outer whitespace."""
+        self._write_deployment(tmp_path)
         config = self._minimal_gym_config()
-        config["expert_program_path"] = "missing.yaml"
+        task_program = config["task_program"]
+        assert type(task_program) is dict
+        task_program["program"] = value
 
-        with pytest.raises(FileNotFoundError, match="missing.yaml"):
+        with pytest.raises((TypeError, ValueError), match="task_program.program"):
             config_to_cfg(
                 config,
                 manager_modules=DEFAULT_MANAGER_MODULES,
-                source_path=tmp_path / "gym_config.json",
+                source_path=tmp_path / "env.yaml",
+            )
+
+    @pytest.mark.parametrize(
+        "removed_field",
+        [
+            "task_program_dir",
+            "task_program_path",
+            "task_program_integration_path",
+        ],
+    )
+    def test_removed_task_program_path_fields_fail_closed(
+        self,
+        removed_field: str,
+    ) -> None:
+        """Removed bundle and two-path formats fail instead of being ignored."""
+        config = self._minimal_gym_config()
+        config[removed_field] = "removed.yaml"
+
+        with pytest.raises(ValueError, match="component mapping"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    @pytest.mark.parametrize(
+        ("field_name", "filename"),
+        (
+            ("program", "program.yaml"),
+            ("integration", "integration.yaml"),
+            ("execution_policy", "policy.yaml"),
+        ),
+    )
+    def test_missing_component_fails_before_environment_init(
+        self,
+        tmp_path,
+        field_name: str,
+        filename: str,
+    ) -> None:
+        """Every selected component must be an existing regular file."""
+        deployment = self._write_deployment(tmp_path)
+        (deployment / filename).unlink()
+        config = self._minimal_gym_config()
+
+        with pytest.raises(FileNotFoundError, match=f"task_program.{field_name}"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_integration_component_requires_yaml_extension(
+        self,
+        tmp_path,
+    ) -> None:
+        """Task integrations use one explicit YAML component format."""
+        self._write_deployment(tmp_path)
+        save_config(
+            tmp_path / "integration.json",
+            load_config(_CUBE_INTEGRATION_PATH),
+        )
+        config = self._minimal_gym_config()
+        task_program = config["task_program"]
+        assert type(task_program) is dict
+        task_program["integration"] = "integration.json"
+
+        with pytest.raises(ValueError, match="task_program.integration"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
+            )
+
+    def test_task_integration_rejects_removed_version_field(
+        self,
+        tmp_path,
+    ) -> None:
+        """Component declarations contain no compatibility version field."""
+        self._write_deployment(tmp_path)
+        integration = load_config(tmp_path / "integration.yaml")
+        integration["version"] = 1
+        save_config(tmp_path / "integration.yaml", integration)
+        config = self._minimal_gym_config()
+
+        with pytest.raises(ValueError, match="unsupported fields.*version"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "env.yaml",
             )
 
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):

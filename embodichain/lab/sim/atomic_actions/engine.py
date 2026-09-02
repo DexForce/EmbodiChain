@@ -152,7 +152,7 @@ class AtomicActionEngine:
 
     @property
     def skill_catalog_revision(self) -> int:
-        """Return the monotonic installed semantic-skill catalog revision.
+        """Return the monotonic installed Atomic Skill catalog revision.
 
         Installing or replacing an agent-visible implementation advances the
         revision even when its public descriptor is equal. External binding and
