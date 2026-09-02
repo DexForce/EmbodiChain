@@ -25,6 +25,7 @@ import argparse
 import gymnasium
 import gymnasium as gym
 
+from collections.abc import Mapping
 from typing import Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
@@ -50,6 +51,22 @@ DEFAULT_MANAGER_MODULES = [
 
 # Extra manager modules registered by third-party packages via init hooks
 _EXTRA_MANAGER_MODULES: list[str] = []
+_PHYSICS_BACKENDS = frozenset({"default", "newton"})
+
+
+def _declared_physics_backend(config: Mapping[str, object]) -> str:
+    """Return the single physics backend explicitly owned by a Gym config."""
+    if "physics" not in config:
+        raise ValueError(
+            "Gym config must explicitly declare physics as 'default' or 'newton'."
+        )
+    backend = config["physics"]
+    if type(backend) is not str or backend not in _PHYSICS_BACKENDS:
+        raise ValueError(
+            "Gym config physics must be exactly 'default' or 'newton', "
+            f"got {backend!r}."
+        )
+    return backend
 
 
 def register_manager_modules(modules: list[str]) -> None:
@@ -411,6 +428,8 @@ def config_to_cfg(
     policy. Inline ``robot``, ``sensor``, and scene fields remain valid when
     their corresponding component selector is absent. A resolved config
     containing ``task_program`` composes its semantic and policy components.
+    Every resolved environment explicitly owns one ``physics`` backend and an
+    optional ``physics_config`` mapping whose fields must belong to that backend.
     The existing
     :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class is registered under
     the config's ``id`` with the decoded integration factory.
@@ -493,6 +512,24 @@ def config_to_cfg(
     )
     component_resolution = _resolve_gym_components(config, base_dir=base_dir)
     config = component_resolution.config
+
+    physics_backend = _declared_physics_backend(config)
+    physics_config_value = config.get("physics_config", {})
+    if not isinstance(physics_config_value, Mapping):
+        raise TypeError("Gym config physics_config must be a mapping.")
+    if not all(type(key) is str for key in physics_config_value):
+        raise TypeError("Gym config physics_config keys must be exact strings.")
+    physics_config = deepcopy(dict(physics_config_value))
+    if "gravity" in physics_config:
+        physics_config["gravity"] = np.asarray(physics_config["gravity"])
+    physics_cfg = physics_cfg_for_backend(physics_backend)
+    try:
+        physics_cfg = type(physics_cfg)(**physics_config)
+    except TypeError as exc:
+        raise ValueError(
+            f"physics_config does not match declared physics backend "
+            f"{physics_backend!r}: {exc}"
+        ) from exc
 
     # Check required fields after reusable task expansion.
     required_keys = ["id", "env"]
@@ -597,12 +634,6 @@ def config_to_cfg(
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
 
-    physics_config = deepcopy(config.get("physics_config", {}))
-    if "gravity" in physics_config:
-        physics_config["gravity"] = np.asarray(physics_config["gravity"])
-    physics_cfg = physics_cfg_for_backend(config.get("physics", "default"))
-    physics_cfg = type(physics_cfg)(**physics_config)
-
     render_config = deepcopy(config.get("render_cfg", {}))
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
@@ -621,7 +652,7 @@ def config_to_cfg(
 
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=config.get("headless", False),
-        device=config.get("device", "cpu"),
+        device=config.get("device"),
         render_cfg=RenderCfg(**render_config),
         gpu_id=config.get("gpu_id", 0),
         arena_space=config.get("arena_space", 5.0),
@@ -982,7 +1013,8 @@ def add_env_launcher_args_to_parser(
 
     This function adds the following arguments to the provided parser:
         --num_envs: Number of environments to run in parallel (default: 1)
-        --device: Device to run the environment on (default: 'cpu')
+        --device: Runtime device override. When omitted, the selected backend
+            supplies its own default (CPU for Default, CUDA for Newton).
         --headless: Whether to perform the simulation in headless mode (default: False)
         --renderer: Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'. (default: 'hybrid')
         --physics: Physics backend configuration to use. Options are 'default' and 'newton'. (default: 'default')
@@ -1014,8 +1046,10 @@ def add_env_launcher_args_to_parser(
     parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
-        help="Device to run the environment on, e.g., 'cpu' or 'cuda'.",
+        default=None,
+        help="Device used by environment tensors and the selected physics "
+        "backend, e.g. 'cpu' or 'cuda:0'. When omitted, the selected backend "
+        "default is preserved unless this option is set.",
     )
     parser.add_argument(
         "--headless",
@@ -1037,9 +1071,9 @@ def add_env_launcher_args_to_parser(
         type=str,
         choices=["default", "newton"],
         default=None if require_gym_config else "default",
-        help="Physics backend configuration to use for the simulation. When "
-        "loading a gym config, the configured backend is used unless this "
-        "option is provided.",
+        help="Physics backend to use for standalone simulation. Gym configs "
+        "declare their backend in the file; this option may only confirm the "
+        "same value.",
     )
     parser.add_argument(
         "--arena_space",
@@ -1128,7 +1162,8 @@ def add_env_launcher_args_to_parser(
 def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
     """Merge command-line arguments with gym configuration.
 
-    Command-line arguments will override the corresponding values in the gym configuration.
+    Command-line arguments override runtime values in the Gym configuration.
+    The physics backend is file-owned and cannot be changed by the launcher.
 
     Args:
         args (argparse.Namespace): The parsed command-line arguments.
@@ -1138,15 +1173,22 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         dict: The merged gym configuration dictionary.
     """
     merged_config = deepcopy(gym_config)
+    configured_physics = _declared_physics_backend(merged_config)
     if args.num_envs is not None:
         merged_config["num_envs"] = args.num_envs
-    merged_config["device"] = args.device
+    if args.device is not None:
+        merged_config["device"] = args.device
     viser_enabled = bool(getattr(args, "viser", False))
     merged_config["headless"] = args.headless or viser_enabled
     if args.renderer is not None:
         merged_config["renderer"] = args.renderer
-    if getattr(args, "physics", None) is not None:
-        merged_config["physics"] = args.physics
+    requested_physics = getattr(args, "physics", None)
+    if requested_physics is not None and requested_physics != configured_physics:
+        raise ValueError(
+            f"Gym config declares physics={configured_physics!r}; "
+            f"--physics={requested_physics!r} cannot override a file-owned "
+            "backend. Select a Gym config for the requested backend."
+        )
     merged_config["gpu_id"] = args.gpu_id
     merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:

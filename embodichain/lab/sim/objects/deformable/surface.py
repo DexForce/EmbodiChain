@@ -22,13 +22,11 @@ from typing import Any, Sequence
 
 import numpy as np
 import torch
-from dexsim.engine import ClothBody, PhysicsScene
-from dexsim.models import MeshObject
-from dexsim.types import ClothBodyGPUAPIReadWriteType
+from dexsim.scene import Scene, SpawnedClothParticleSet
 from scipy.spatial import cKDTree
 
 from .base import DeformableObject
-from .data import DeformableObjectData
+from .data import _ParticleSetData
 
 __all__ = [
     "ClothBodyData",
@@ -38,78 +36,32 @@ __all__ = [
 ]
 
 
-class SurfaceDeformableData(DeformableObjectData):
+class SurfaceDeformableData(_ParticleSetData):
     """DexSim cloth buffers exposed through the common nodal contract."""
 
     def __init__(
         self,
-        entities: Sequence[MeshObject],
-        ps: PhysicsScene,
+        entities: Sequence[SpawnedClothParticleSet],
+        scene: Scene,
         device: torch.device,
     ) -> None:
-        self.entities = list(entities)
-        self.device = device
-        self.ps = ps
-        self.num_instances = len(self.entities)
-        self.cloth_bodies: Sequence[ClothBody] = [
-            entity.get_physical_body() for entity in self.entities
-        ]
-        self.n_vertices = self.cloth_bodies[0].get_num_vertices()
-
-        self._rest_position_buffer = torch.empty(
-            (self.num_instances, self.n_vertices, 4),
-            device=self.device,
-            dtype=torch.float32,
-        )
-        for i, cloth_body in enumerate(self.cloth_bodies):
-            self._rest_position_buffer[i] = cloth_body.get_rest_position_buffer()
-
-        self._vertex_position = torch.zeros(
-            (self.num_instances, self.n_vertices, 3),
-            device=self.device,
-            dtype=torch.float32,
-        )
-        self._vertex_velocity = torch.zeros_like(self._vertex_position)
-        self._default_nodal_state_w = torch.cat(
-            (
-                self._rest_position_buffer[..., :3],
-                torch.zeros_like(self._rest_position_buffer[..., :3]),
-            ),
-            dim=-1,
-        )
+        super().__init__(entities, scene, device)
+        self.n_vertices = self.num_nodes
 
     @property
     def rest_vertices(self) -> torch.Tensor:
         """Return rest surface vertices in simulation world frame."""
-        return self._rest_position_buffer[..., :3].clone()
+        return self.default_nodal_state_w[..., :3]
 
     @property
     def vertex_position(self) -> torch.Tensor:
         """Return current surface vertices in simulation world frame."""
-        for i, cloth_body in enumerate(self.cloth_bodies):
-            self._vertex_position[i] = cloth_body.get_position_inv_mass_buffer()[:, :3]
-        return self._vertex_position.clone()
+        return self.nodal_pos_w
 
     @property
     def vertex_velocity(self) -> torch.Tensor:
         """Return current surface-vertex velocities."""
-        for i, cloth_body in enumerate(self.cloth_bodies):
-            # DexSim stores velocity in the first xyz channels. The fourth
-            # channel is padding/metadata and must not be exposed as velocity.
-            self._vertex_velocity[i] = cloth_body.get_velocity_buffer()[:, :3]
-        return self._vertex_velocity.clone()
-
-    @property
-    def nodal_pos_w(self) -> torch.Tensor:
-        return self.vertex_position
-
-    @property
-    def nodal_vel_w(self) -> torch.Tensor:
-        return self.vertex_velocity
-
-    @property
-    def default_nodal_state_w(self) -> torch.Tensor:
-        return self._default_nodal_state_w.clone()
+        return self.nodal_vel_w
 
 
 class SurfaceDeformableObject(DeformableObject):
@@ -122,16 +74,22 @@ class SurfaceDeformableObject(DeformableObject):
     def _create_data(
         self,
         entities: Sequence[Any],
-        physics_scene: PhysicsScene,
+        scene: Scene,
         device: torch.device,
     ) -> SurfaceDeformableData:
-        return SurfaceDeformableData(entities, physics_scene, device)
+        return SurfaceDeformableData(entities, scene, device)
 
     def _initialize_topology(self, entities: Sequence[Any]) -> None:
+        entity = entities[0]
+        initial_world_pose = np.asarray(entity.desc.pose, dtype=np.float32).reshape(
+            4, 4
+        )
+        arena_index = self._spawn_result.arenas.index(entity.arena_name)
+        initial_world_pose[:3, 3] += self._spawn_result.arenas.root_offsets[arena_index]
         self._surface_triangles = self._build_surface_triangles(
-            entities[0],
+            entity,
             self.body_data.rest_vertices[0].detach().cpu().numpy(),
-            self.body_data.cloth_bodies[0].get_initial_transform(),
+            initial_world_pose,
         )
 
     @property
@@ -141,28 +99,35 @@ class SurfaceDeformableObject(DeformableObject):
 
     @staticmethod
     def _build_surface_triangles(
-        entity: MeshObject,
+        entity: SpawnedClothParticleSet,
         rest_vertices: np.ndarray,
-        initial_transform: np.ndarray,
+        initial_world_pose: np.ndarray,
     ) -> np.ndarray:
         """Map render triangles onto DexSim's welded cloth vertex buffer."""
         render_body = entity.get_render_body()
+        if render_body is None:
+            raise RuntimeError("Surface-deformable Spawn handle has no render body.")
         render_vertices: list[np.ndarray] = []
         render_triangles: list[np.ndarray] = []
         vertex_offset = 0
         for mesh_id in range(render_body.get_mesh_count()):
-            vertices = np.asarray(render_body.get_vertices(mesh_id), dtype=np.float32)
-            triangles = np.asarray(render_body.get_triangles(mesh_id), dtype=np.int64)
+            vertices = entity.get_render_vertices(mesh_id)
+            triangles = entity.get_render_triangles(mesh_id)
             render_vertices.append(vertices)
             render_triangles.append(triangles + vertex_offset)
             vertex_offset += len(vertices)
 
         vertices = np.concatenate(render_vertices, axis=0)
         triangles = np.concatenate(render_triangles, axis=0)
-        initial_transform = np.asarray(initial_transform, dtype=np.float32).reshape(
+        initial_world_pose = np.asarray(initial_world_pose, dtype=np.float32).reshape(
             4, 4
         )
-        vertices = vertices @ initial_transform[:3, :3].T + initial_transform[:3, 3]
+        vertices = vertices @ initial_world_pose[:3, :3].T + initial_world_pose[:3, 3]
+        # Runtime preparation may advance a newly created cloth by one small
+        # step before its particle batch is bound. Topology is invariant to
+        # that uniform root translation, so align the render snapshot with the
+        # captured simulation nodes before resolving the welded vertex IDs.
+        vertices += rest_vertices.mean(axis=0) - vertices.mean(axis=0)
         distances, cloth_vertex_ids = cKDTree(rest_vertices).query(vertices)
         scale = max(float(np.ptp(rest_vertices, axis=0).max()), 1.0)
         if float(distances.max(initial=0.0)) > scale * 1.0e-5:
@@ -171,38 +136,6 @@ class SurfaceDeformableObject(DeformableObject):
                 "physical vertex buffer."
             )
         return np.asarray(cloth_vertex_ids[triangles], dtype=np.int32)
-
-    def _apply_local_pose(
-        self,
-        pose: torch.Tensor,
-        env_ids: Sequence[int],
-        arena_offsets: torch.Tensor,
-    ) -> None:
-        self._require_data()
-        rest_vertices = self.body_data.rest_vertices
-        for i, env_idx in enumerate(env_ids):
-            cloth_body: ClothBody = self._entities[env_idx].get_physical_body()
-            initial_transform = torch.as_tensor(
-                cloth_body.get_initial_transform(),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            rest_vertices_local = (
-                rest_vertices[env_idx] - initial_transform[:3, 3]
-            ) @ initial_transform[:3, :3]
-            rotation = pose[i, :3, :3]
-            translation = pose[i, :3, 3]
-            arena_offset = torch.as_tensor(
-                arena_offsets[env_idx], dtype=torch.float32, device=self.device
-            )
-            transformed_vertices = (
-                rest_vertices_local @ rotation.T + translation + arena_offset
-            )
-
-            cloth_body.get_position_inv_mass_buffer()[:, :3] = transformed_vertices
-            cloth_body.get_velocity_buffer()[:, :3] = 0.0
-            cloth_body.mark_dirty(ClothBodyGPUAPIReadWriteType.ALL)
-            cloth_body.set_wake_counter(0.4)
 
     def get_rest_vertex_position(self) -> torch.Tensor:
         """Return rest surface-vertex positions."""

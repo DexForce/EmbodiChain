@@ -52,6 +52,12 @@ class DefaultPhysicsBackend(PhysicsBackend):
         dexsim.set_physics_config(**cfg.to_dexsim_args())
         dexsim.set_physics_gpu_memory_config(**cfg.gpu_memory.to_dict())
 
+    def prepare_spawn_runtime(self, result: "dexsim.scene.Scene") -> None:
+        """Initialize Direct GPU buffers for a committed CUDA topology."""
+        del result
+        if self._manager.device.type == "cuda":
+            self._manager._world.init_gpu_physics()
+
     # -- scene ---------------------------------------------------------- #
     def get_scene(self):
         """Return the Default backend's compatibility scene after Spawn is prepared."""
@@ -75,4 +81,12 @@ class DefaultPhysicsBackend(PhysicsBackend):
 
     @property
     def supports_robot(self) -> bool:
+        return True
+
+    @property
+    def supports_rigid_constraints(self) -> bool:
+        return True
+
+    @property
+    def supports_contact_sensor(self) -> bool:
         return True

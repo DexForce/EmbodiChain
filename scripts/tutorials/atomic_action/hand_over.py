@@ -105,7 +105,6 @@ def parse_arguments() -> argparse.Namespace:
     parser = create_tutorial_argument_parser(
         "Dual-arm handover demo",
         features=("diagnose_plan", "headless_play"),
-        default_device="cpu",
         default_renderer="hybrid",
     )
     parser.add_argument(

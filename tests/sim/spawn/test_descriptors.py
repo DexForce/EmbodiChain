@@ -1385,6 +1385,63 @@ def test_global_articulation_mass_properties_can_recompute_inertia() -> None:
     for link in descriptor.links:
         assert link.rigid_body.inertia is None
         assert link.replace_inertial is True
+        assert link._embodichain_apply_physics
+
+
+def test_invalid_source_inertia_uses_geometry_fallback_without_an_overlay() -> None:
+    """All-zero asset inertia is not a physical value to preserve."""
+    descriptor = _resolved_articulation_desc()
+    for link in descriptor.links:
+        link._embodichain_source_inertia_valid = False
+        link._embodichain_has_collision_geometry = True
+        link.rigid_body.inertia = None
+        link.rigid_body.com_position = None
+        link.rigid_body.com_quaternion = None
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+    )
+
+    configure_articulation_desc(descriptor, cfg)
+
+    for link in descriptor.links:
+        assert link._embodichain_apply_physics
+        assert link.replace_inertial is True
+        assert link.rigid_body.inertia is None
+
+
+def test_joint_only_overlay_does_not_author_link_physics() -> None:
+    """A robot drive overlay must not trigger native inertia derivation."""
+    descriptor = _resolved_articulation_desc()
+    before = copy.deepcopy(descriptor)
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        joint_drive_props=JointDrivePropertiesCfg(stiffness=10.0),
+    )
+
+    configure_articulation_desc(descriptor, cfg)
+
+    for link, source_link in zip(descriptor.links, before.links, strict=True):
+        assert not link._embodichain_apply_physics
+        _assert_property_tree_equal(link.rigid_body, source_link.rigid_body)
+
+
+def test_density_override_requires_explicit_source_inertia_recomputation() -> None:
+    descriptor = _resolved_articulation_desc()
+    for link in descriptor.links:
+        link._embodichain_source_inertia_valid = True
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(density=1000.0)),
+    )
+
+    with pytest.raises(ValueError, match="Density override.*recompute_inertia=True"):
+        configure_articulation_desc(descriptor, cfg)
 
 
 def test_per_link_mass_properties_can_preserve_global_source_inertia() -> None:

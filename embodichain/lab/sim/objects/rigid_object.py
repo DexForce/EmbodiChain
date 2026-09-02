@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import torch
-import dexsim
 import numpy as np
 
 from copy import deepcopy
@@ -25,14 +24,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Sequence
 from functools import cached_property
 
-from dexsim.models import MeshObject
-from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
-from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
+from dexsim.scene import Scene
+from dexsim.engine import MaterialInst
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.objects.backends import (
-    DefaultRigidBodyView,
-    NewtonRigidBodyView,
-    apply_collision_filter_for_entities,
+    SceneRigidBodyView,
     is_newton_scene,
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
@@ -58,7 +54,7 @@ from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_fr
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
-    from dexsim.spawn import SpawnResult, SpawnedObject
+    from dexsim.scene import SpawnedRigidBody
 
 _UINT64_MAX = (1 << 64) - 1
 __all__ = ["RigidBodyData", "RigidObject", "RigidObjectCfg"]
@@ -66,7 +62,7 @@ __all__ = ["RigidBodyData", "RigidObject", "RigidObjectCfg"]
 
 @dataclass
 class RigidBodyData:
-    """Data manager for rigid body with body type of dynamic or kinematic.
+    """Scene-batch data manager for dynamic or kinematic rigid bodies.
 
     All pose/velocity/acceleration data uses EmbodiChain convention:
     ``(x, y, z, qx, qy, qz, qw)``.
@@ -74,37 +70,29 @@ class RigidBodyData:
 
     def __init__(
         self,
-        entities: List[MeshObject],
-        ps: PhysicsScene | None,
+        entities: Sequence[SpawnedRigidBody],
+        scene: Scene,
         device: torch.device,
-        body_view: RigidBodyViewBase | None = None,
     ) -> None:
         """Initialize the RigidBodyData.
 
         Args:
-            entities (List[MeshObject]): List of MeshObjects representing the rigid bodies.
-            ps (PhysicsScene): The physics scene.
-            device (torch.device): The device to use for the rigid body data.
+            entities: Rigid-body handles owned by ``scene``.
+            scene: Finalized DexSim Scene.
+            device: Device to use for the rigid-body data.
         """
+        if not isinstance(scene, Scene):
+            raise TypeError("RigidBodyData requires a finalized DexSim Scene.")
         self.entities = entities
-        self.ps = ps
+        self.scene = scene
         self.num_instances = len(entities)
         self.device = device
-
-        # Create the appropriate backend view.
-        if body_view is not None:
-            self.body_view = body_view
-        elif is_newton_scene(ps):
-            self.body_view: RigidBodyViewBase = NewtonRigidBodyView(
-                entities=entities, scene=ps, device=device
-            )
-        else:
-            self.body_view = DefaultRigidBodyView(
-                entities=entities, ps=ps, device=device
-            )
+        self.body_view: RigidBodyViewBase = SceneRigidBodyView.from_entities(
+            scene, entities, device
+        )
 
         # Kept for backward compatibility with callers that index gpu_indices directly.
-        # NOTE: for Newton, body IDs are lazily resolved after finalization.
+        # Scene-backed views expose logical batch rows until backend IDs become available.
         # Use the ``gpu_indices`` property instead of caching here.
 
         # Initialize rigid body data.
@@ -205,13 +193,7 @@ class RigidBodyData:
 
     @property
     def is_newton_backend(self) -> bool:
-        return bool(
-            getattr(
-                self.body_view,
-                "is_newton_backend",
-                isinstance(self.body_view, NewtonRigidBodyView),
-            )
-        )
+        return self.body_view.is_newton_backend
 
     @property
     def gpu_indices(self) -> torch.Tensor:
@@ -317,145 +299,82 @@ class RigidObject(BatchEntity):
         - Dynamic: Actors that can move and are affected by physics.
         - Kinematic: Actors that can move but are not affected by physics.
 
+    Args:
+        cfg: Configuration for the rigid object.
+        device: Device to use (CPU or CUDA).
+
     """
 
     def __init__(
         self,
         cfg: RigidObjectCfg,
-        entities: List[MeshObject] = None,
         device: torch.device = torch.device("cpu"),
-        *,
-        spawn_result: SpawnResult | None = None,
-        declared_num_instances: int | None = None,
     ) -> None:
-        if entities is None:
-            if declared_num_instances is None or declared_num_instances <= 0:
-                raise ValueError(
-                    "A declared RigidObject requires declared_num_instances > 0."
+        """Create an unregistered rigid-object facade.
+
+        ``SpawnScene`` supplies the replicated instance count when it registers
+        the facade and supplies the finalized ``Scene`` only when binding it.
+        This keeps construction independent of a process-global manager.
+        """
+        self.cfg = deepcopy(cfg)
+        self.uid = self.cfg.uid
+        self.device = device
+        self.body_type = self.cfg.body_type
+        self._entities: list[SpawnedRigidBody] = []
+        self._declared_num_instances: int | None = None
+        self._spawn_result: Scene | None = None
+        self._ps = None
+        self._world = None
+        self._data: RigidBodyData | None = None
+        self._all_indices: list[int] = []
+        self._visual_material: List[VisualMaterialInst] = []
+        self.is_shared_visual_material = False
+        self._has_collision_visible_node = False
+
+    def _initialize_spawn_declaration(self, num_instances: int) -> None:
+        """Initialize instance-dependent declaration state from ``SpawnScene``."""
+        if num_instances <= 0:
+            raise ValueError("A declared RigidObject requires num_instances > 0.")
+        if self._declared_num_instances is not None:
+            if self._declared_num_instances != num_instances:
+                raise RuntimeError(
+                    f"RigidObject {self.uid!r} is already declared for "
+                    f"{self._declared_num_instances} instances."
                 )
-            self.cfg = deepcopy(cfg)
-            self.uid = self.cfg.uid
-            self.device = device
-            self.body_type = cfg.body_type
-            self._entities = []
-            self._declared_num_instances = declared_num_instances
-            self._spawn_result = None
-            self._ps = None
-            self._world = None
-            self._data = None
-            self._all_indices = list(range(declared_num_instances))
-            self._visual_material = [None] * declared_num_instances
-            self.is_shared_visual_material = False
-            self._has_collision_visible_node = False
             return
 
-        self._declared_num_instances = len(entities)
-        self._spawn_result = spawn_result
-        self.body_type = cfg.body_type
+        self._declared_num_instances = num_instances
+        self._all_indices = list(range(num_instances))
+        self._visual_material = [None] * num_instances
 
-        if spawn_result is None:
-            self._world = dexsim.default_world()
-            from embodichain.lab.sim.sim_manager import get_physics_scene
-
-            self._ps = get_physics_scene()
-        else:
-            self._world = spawn_result.world
-            self._ps = None
-
-        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
-
-        # data for managing body data (only for dynamic and kinematic bodies) on GPU.
-        self._data: RigidBodyData | None = None
-        if self.is_static is False:
-            body_view = None
-            if spawn_result is not None:
-                from embodichain.lab.sim.objects.backends import SpawnRigidBodyView
-
-                batch = spawn_result.create_rigid_body_batch(entities)
-                body_view = SpawnRigidBodyView(spawn_result, batch, device)
-            self._data = RigidBodyData(
-                entities=entities,
-                ps=self._ps,
-                device=device,
-                body_view=body_view,
+    def _require_declared_num_instances(self) -> int:
+        """Return the Spawn-provided instance count or raise a lifecycle error."""
+        if self._declared_num_instances is None:
+            raise RuntimeError(
+                f"RigidObject {self.uid!r} must be registered through SpawnScene "
+                "before it can be used."
             )
-
-        # For rendering purposes, each instance can have its own material.
-        self._visual_material: List[VisualMaterialInst] = [None] * len(entities)
-        self.is_shared_visual_material = False
-
-        source_path = getattr(cfg.shape, "fpath", None)
-        is_usd_source = str(source_path).lower().endswith((".usd", ".usda", ".usdc"))
-        preserve_asset_physics = (
-            is_usd_source and cfg.resolve_asset_physics_mode() == "preserve"
-        )
-
-        # Procedural/non-USD sources have no authored physics to preserve.
-        if spawn_result is None and not preserve_asset_physics:
-            for entity in entities:
-                entity.set_body_scale(*cfg.body_scale)
-                if is_newton_scene(self._ps):
-                    # TODO: DexSim Newton consumes the initial physical
-                    # attributes during add_rigidbody(); MeshObject
-                    # set_physical_attr() is still default-backend only.
-                    continue
-                entity.set_physical_attr(cfg.attrs.to_dexsim_physical_attr())
-        elif spawn_result is None:
-            # Read current properties from USD-loaded entities and write back to cfg
-            # Use first entity as reference
-            first_entity: MeshObject = entities[0]
-
-            cfg.body_scale = tuple(first_entity.get_body_scale())
-            cfg.attrs = RigidBodyPhysicsCfg.from_dexsim_physical_attr(
-                first_entity.get_physical_attr()
-            )
-
-        super().__init__(cfg, entities, device)
-
-        self._initialize_existing_visual_material()
-
-        # set default collision filter
-        if spawn_result is None:
-            self._set_default_collision_filter()
-
-        self._apply_initial_state()
-
-        # Cache reset-relative physical properties after backend materialization.
-        if self._data is not None:
-            self._capture_default_physical_properties()
-
-        # TODO: Must be called after setting all attributes.
-        # May be improved in the future.
-        if (
-            spawn_result is None
-            and cfg.attrs.collision_props is not None
-            and cfg.attrs.collision_props.collision_enabled is False
-        ):
-            flag = torch.zeros(len(entities), dtype=torch.bool)
-            self.enable_collision(flag)
-
-        # reserve flag for collision visible node existence
-        self._has_collision_visible_node = False
+        return self._declared_num_instances
 
     @property
     def is_spawn_bound(self) -> bool:
-        """Whether this facade is bound to one finalized SpawnResult."""
+        """Whether this facade is bound to one finalized Scene."""
         return self._spawn_result is not None
 
     @property
     def is_declared(self) -> bool:
-        """Whether this facade is waiting for its SpawnResult binding."""
+        """Whether this facade is waiting for its Scene binding."""
         return self._world is None
 
     @property
     def num_instances(self) -> int:
         if self._entities:
             return len(self._entities)
-        return self._declared_num_instances
+        return self._require_declared_num_instances()
 
     def attach_spawn_handles(
         self,
-        entities: Sequence[SpawnedObject],
+        entities: Sequence[SpawnedRigidBody],
     ) -> None:
         """Store materialized handles without initializing runtime Batch data.
 
@@ -464,16 +383,61 @@ class RigidObject(BatchEntity):
         result-dependent Batch/Data state after finalization.
         """
         handles = list(entities)
-        if len(handles) != self._declared_num_instances:
+        expected = self._require_declared_num_instances()
+        if len(handles) != expected:
             raise ValueError(
                 f"RigidObject {self.uid!r} expected "
-                f"{self._declared_num_instances} Spawn handles, got {len(handles)}."
+                f"{expected} Spawn handles, got {len(handles)}."
             )
         self._entities = handles
 
+    def _initialize_spawn_bound(self, result: Scene) -> None:
+        """Create result-dependent runtime state on this declared facade."""
+        if not isinstance(result, Scene):
+            raise TypeError(
+                "RigidObject binding requires a finalized DexSim Scene; use "
+                "SimulationManager.prepare()."
+            )
+
+        entities = list(self._entities)
+        expected = self._require_declared_num_instances()
+        if len(entities) != expected:
+            raise ValueError(
+                f"RigidObject {self.uid!r} expected {expected} Spawn handles, "
+                f"got {len(entities)}."
+            )
+
+        cfg = deepcopy(self.cfg)
+        self.__dict__.pop("user_ids", None)
+        self._spawn_result = result
+        self.body_type = cfg.body_type
+        self._world = result.world
+        self._ps = None
+        self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
+
+        # Dynamic and kinematic bodies expose finalized Scene batch data.
+        self._data = None
+        if not self.is_static:
+            self._data = RigidBodyData(
+                entities=entities,
+                scene=result,
+                device=self.device,
+            )
+
+        # For rendering purposes, each instance can have its own material.
+        self._visual_material = [None] * len(entities)
+        self.is_shared_visual_material = False
+
+        super().__init__(cfg, entities, self.device)
+        self._initialize_existing_visual_material()
+        self._apply_initial_state()
+        if self._data is not None:
+            self._capture_default_physical_properties()
+        self._has_collision_visible_node = False
+
     def bind_spawn(
         self,
-        result: SpawnResult,
+        result: Scene,
     ) -> None:
         """Atomically bind a declared facade to stable Spawn handles."""
         if self.is_spawn_bound:
@@ -483,23 +447,13 @@ class RigidObject(BatchEntity):
                 f"RigidObject {self.uid!r} was not created as a Spawn declaration."
             )
 
-        cfg = self.cfg
-        device = self.device
-        entities = list(self._entities)
-        if len(entities) != self._declared_num_instances:
-            raise ValueError(
-                f"RigidObject {self.uid!r} expected "
-                f"{self._declared_num_instances} Spawn handles, got {len(entities)}."
-            )
-
-        bound = type(self)(
-            cfg,
-            entities,
-            device,
-            spawn_result=result,
-        )
-        self.__dict__.clear()
-        self.__dict__.update(bound.__dict__)
+        declared_state = self.__dict__.copy()
+        try:
+            self._initialize_spawn_bound(result)
+        except Exception:
+            self.__dict__.clear()
+            self.__dict__.update(declared_state)
+            raise
 
     def __str__(self) -> str:
         if self.is_declared:
@@ -710,15 +664,6 @@ class RigidObject(BatchEntity):
         """
         return self.body_type in ("static", "kinematic")
 
-    def _set_default_collision_filter(self) -> None:
-        collision_filter_data = torch.zeros(
-            size=(self.num_instances, 4), dtype=torch.int32
-        )
-        for i in range(self.num_instances):
-            collision_filter_data[i, 0] = i
-            collision_filter_data[i, 1] = 1
-        self.set_collision_filter(collision_filter_data)
-
     def set_collision_filter(
         self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
@@ -750,13 +695,13 @@ class RigidObject(BatchEntity):
             return
 
         if is_newton_scene(self._ps):
-            if self._data is not None and isinstance(
-                self._data.body_view, NewtonRigidBodyView
-            ):
-                self._data.body_view.apply_collision_filter(filter_data, local_env_ids)
-            else:
-                entities = [self._entities[env_idx] for env_idx in local_env_ids]
-                apply_collision_filter_for_entities(self._ps, entities, filter_data)
+            if self._data is None:
+                raise NotImplementedError(
+                    "Runtime collision-filter updates are unavailable for static "
+                    "Newton rigid objects."
+                )
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_collision_filter(filter_data, body_ids)
             return
 
         filter_data_np = filter_data.cpu().numpy().astype(np.uint32)
@@ -826,7 +771,7 @@ class RigidObject(BatchEntity):
         """
 
         def get_local_pose_cpu(
-            entities: List[MeshObject], to_matrix: bool
+            entities: Sequence[SpawnedRigidBody], to_matrix: bool
         ) -> torch.Tensor:
             """Helper function to get local pose on CPU."""
             if to_matrix:
@@ -2025,7 +1970,7 @@ class RigidObject(BatchEntity):
 
     def destroy(self) -> None:
         if self.is_declared or self.is_spawn_bound:
-            # SimulationManager owns topology removal and SpawnResult lifetime.
+            # SimulationManager owns topology removal and Scene lifetime.
             # Direct facade destruction must never bypass that owner.
             return
         env = self._world.get_env()

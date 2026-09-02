@@ -1,5 +1,6 @@
 {   
     "id": "SimpleTask-v1",
+    "physics": "default",
     "max_episodes": 24,
     "env": {
         "events": {

@@ -27,9 +27,10 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
     NewtonPhysicsCfg,
+    PhysicsBackendCfg,
     WindowCameraPoseCfg,
 )
-from embodichain.lab.sim.physics import NewtonPhysicsBackend
+from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBackend
 from embodichain.lab.sim.physics import newton as newton_physics
 from embodichain.lab.sim import sim_manager
 
@@ -38,6 +39,20 @@ def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
     cfg = SimulationManagerCfg()
 
     assert type(cfg.physics_cfg) is DefaultPhysicsCfg
+
+
+@pytest.mark.no_sim
+def test_newton_physics_cfg_owns_backend_device_default() -> None:
+    """The concrete Newton default shadows the generic backend default."""
+    assert PhysicsBackendCfg().device == "cpu"
+    assert DefaultPhysicsCfg().device == "cpu"
+    assert NewtonPhysicsCfg().device == "cuda:0"
+    assert SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg()).device == "cuda:0"
+    assert (
+        SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg(), sim_device=None).device
+        == "cuda:0"
+    )
+    assert SimulationManagerCfg(physics_config=NewtonPhysicsCfg()).device == "cuda:0"
 
 
 def test_physics_runtime_fields_are_stored_on_physics_cfg() -> None:
@@ -67,6 +82,17 @@ def test_simulation_manager_cfg_keeps_legacy_physics_accessors() -> None:
 
     assert cfg.physics_cfg.physics_dt == 0.005
     assert cfg.physics_cfg.device == "cuda:0"
+
+
+def test_simulation_manager_cfg_explicit_cpu_overrides_newton_default() -> None:
+    """An explicit runtime device has the same meaning for every backend."""
+    cfg = SimulationManagerCfg(
+        physics_cfg=NewtonPhysicsCfg(device="cuda:0"),
+        device="cpu",
+    )
+
+    assert cfg.device == "cpu"
+    assert cfg.physics_cfg.device == "cpu"
 
 
 def test_simulation_manager_cfg_initializes_window_camera_pose() -> None:
@@ -107,6 +133,16 @@ def test_newton_physics_cfg_preserves_dexsim_auto_solver_default() -> None:
 
     assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
     assert dexsim_cfg.solver_cfg.solver_type == "auto"
+
+
+@pytest.mark.no_sim
+def test_newton_physics_cfg_forwards_cuda_default_to_dexsim() -> None:
+    """The concrete Newton device default reaches the native config unchanged."""
+    cfg = NewtonPhysicsCfg()
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.device == "cuda:0"
 
 
 @pytest.mark.no_sim
@@ -325,6 +361,26 @@ def test_newton_backend_syncs_render_state_without_physics_step(
 
     native_backend.sync_to_dexsim.assert_called_once_with(world)
     native_backend.sync_particle_fluids.assert_called_once_with(world)
+
+
+@pytest.mark.parametrize(
+    ("device", "initializes_direct_gpu"),
+    [(torch.device("cpu"), False), (torch.device("cuda"), True)],
+)
+def test_default_backend_prepares_runtime_for_device(
+    device: torch.device,
+    initializes_direct_gpu: bool,
+) -> None:
+    manager = SimpleNamespace(device=device, _world=MagicMock())
+    backend = DefaultPhysicsBackend(manager)
+    result = object()
+
+    backend.prepare_spawn_runtime(result)
+
+    if initializes_direct_gpu:
+        manager._world.init_gpu_physics.assert_called_once_with()
+    else:
+        manager._world.init_gpu_physics.assert_not_called()
 
 
 @pytest.mark.no_sim

@@ -209,13 +209,19 @@ if __name__ == "__main__":
         default="default",
         help="Physics backend to launch (default: default).",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
     args = parser.parse_args()
 
     torch.set_printoptions(precision=5, sci_mode=False)
 
     config = SimulationManagerCfg(
         headless=True,
-        device="cpu",
+        device=args.device,
         num_envs=2,
         physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="fast-rt"),

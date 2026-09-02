@@ -32,6 +32,7 @@ from embodichain.lab.sim.cfg import (
     RigidConstraintCfg,
     RigidBodyPhysicsCfg,
     RenderCfg,
+    physics_cfg_for_backend,
 )
 from embodichain.lab.sim.shapes import CubeCfg
 
@@ -68,6 +69,7 @@ def main():
         render_cfg=RenderCfg(renderer=args.renderer),
         num_envs=args.num_envs,
         arena_space=3.0,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 

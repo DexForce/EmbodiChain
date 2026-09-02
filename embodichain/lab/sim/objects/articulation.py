@@ -27,14 +27,12 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, List, Sequence, Dict, Union, Tuple, Optional
 
-from dexsim.engine import Articulation as _Articulation
+from dexsim.scene import Scene
 from dexsim.types import (
     ArticulationFlag,
-    ArticulationGPUAPIWriteType,
-    ArticulationGPUAPIReadType,
     DriveType,
 )
-from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
+from dexsim.engine import MaterialInst
 
 from embodichain.lab.sim import VisualMaterialInst, VisualMaterial, ReuseSegmentState
 from embodichain.lab.sim.material import (
@@ -57,10 +55,7 @@ from embodichain.utils.string import (
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.physics.newton import is_newton_gradient_mode
 from embodichain.lab.sim.objects.backends import (
-    DefaultArticulationView,
-    NewtonArticulationView,
-    SpawnArticulationView,
-    is_newton_scene,
+    SceneArticulationView,
 )
 from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
 from embodichain.lab.sim.objects.backends.newton import (
@@ -83,7 +78,7 @@ from embodichain.lab.sim.utility.solver_utils import (
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
-    from dexsim.spawn import SpawnResult, SpawnedArticulation
+    from dexsim.scene import SpawnedArticulation
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,48 +149,37 @@ class ArticulationJointKinematics:
 
 @dataclass
 class ArticulationData:
-    """GPU data manager for articulation."""
+    """Scene-batch data manager for articulations."""
 
     def __init__(
         self,
-        entities: Sequence[_Articulation | SpawnedArticulation],
-        ps: PhysicsScene | None,
+        entities: Sequence[SpawnedArticulation],
+        scene: Scene,
         device: torch.device,
-        articulation_view: ArticulationViewBase | None = None,
     ) -> None:
         """Initialize the ArticulationData.
 
         Args:
-            entities (List[_Articulation]): List of DexSim Articulation objects.
-            ps (PhysicsScene): The physics scene.
-            device (torch.device): The device to use for the articulation data.
+            entities: Articulation handles owned by ``scene``.
+            scene: Finalized DexSim Scene.
+            device: Device to use for the articulation data.
         """
+        if not isinstance(scene, Scene):
+            raise TypeError("ArticulationData requires a finalized DexSim Scene.")
         self.entities = entities
-        self.ps = ps
+        self.scene = scene
         self.num_instances = len(entities)
         self.device = device
-        if articulation_view is not None:
-            self.articulation_view = articulation_view
-        elif is_newton_scene(ps):
-            self.articulation_view = NewtonArticulationView(
-                entities=entities, scene=ps, device=device
-            )
-        else:
-            self.articulation_view = DefaultArticulationView(
-                entities=entities, ps=ps, device=device
-            )
+        self.articulation_view: ArticulationViewBase = (
+            SceneArticulationView.from_entities(scene, entities, device)
+        )
 
         # Backward-compatible alias for callers that use GPU/articulation ids.
         self.gpu_indices = self.articulation_view.articulation_ids_tensor
 
-        if isinstance(self.articulation_view, SpawnArticulationView):
-            self.dof = self.articulation_view.dof
-            self.num_links = self.articulation_view.num_links
-            self.link_names = self.articulation_view.link_names
-        else:
-            self.dof = self.entities[0].get_dof()
-            self.num_links = self.entities[0].get_links_num()
-            self.link_names = self.entities[0].get_link_names()
+        self.dof = self.articulation_view.dof
+        self.num_links = self.articulation_view.num_links
+        self.link_names = self.articulation_view.link_names
 
         self._root_pose = torch.zeros(
             (self.num_instances, 7), dtype=torch.float32, device=self.device
@@ -207,31 +191,24 @@ class ArticulationData:
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
 
-        max_num_links = self.num_links
-        if (
-            articulation_view is None
-            and self.device.type == "cuda"
-            and not self.is_newton_backend
-        ):
-            max_num_links = self.ps.gpu_get_articulation_max_link_count()
         self._body_link_pose = torch.zeros(
-            (self.num_instances, max_num_links, 7),
+            (self.num_instances, self.num_links, 7),
             dtype=torch.float32,
             device=self.device,
         )
         self._body_link_vel = torch.zeros(
-            (self.num_instances, max_num_links, 6),
+            (self.num_instances, self.num_links, 6),
             dtype=torch.float32,
             device=self.device,
         )
 
         self._body_link_lin_vel = torch.zeros(
-            (self.num_instances, max_num_links, 3),
+            (self.num_instances, self.num_links, 3),
             dtype=torch.float32,
             device=self.device,
         )
         self._body_link_ang_vel = torch.zeros(
-            (self.num_instances, max_num_links, 3),
+            (self.num_instances, self.num_links, 3),
             dtype=torch.float32,
             device=self.device,
         )
@@ -258,30 +235,23 @@ class ArticulationData:
         self._default_inertia: torch.Tensor | None = None
         self._default_com_pose: torch.Tensor | None = None
 
-        max_dof = self.dof
-        if (
-            articulation_view is None
-            and self.device.type == "cuda"
-            and not self.is_newton_backend
-        ):
-            max_dof = self.ps.gpu_get_articulation_max_dof()
         self._target_qpos = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qpos = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._target_qvel = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qvel = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qacc = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qf = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qpos_limits = torch.as_tensor(
             np.array([entity.get_joint_position_limits() for entity in self.entities]),
@@ -420,17 +390,10 @@ class ArticulationData:
             self._body_link_ang_vel,
         )
 
-    def _entity_link_name(self, entity: object, link_name: str) -> str:
-        """Resolve one public link name to an entity-local backend name."""
-        resolver = getattr(self.articulation_view, "entity_link_name", None)
-        if resolver is not None:
-            return resolver(entity, link_name)
-        return link_name
-
     def _entity_drive_properties(self, entity: object) -> tuple[object, ...]:
         """Read drive values without conflating backend target semantics."""
         if (
-            isinstance(self.articulation_view, SpawnArticulationView)
+            isinstance(self.articulation_view, SceneArticulationView)
             and self.is_newton_backend
         ):
             return tuple(entity.get_newton_drive())
@@ -439,7 +402,7 @@ class ArticulationData:
     def _entity_link_properties(self, entity: object, link_name: str) -> object:
         """Read native mass properties through the active backend contract."""
         if (
-            isinstance(self.articulation_view, SpawnArticulationView)
+            isinstance(self.articulation_view, SceneArticulationView)
             and self.is_newton_backend
         ):
             return entity.get_newton_link_properties(link_name)
@@ -462,8 +425,7 @@ class ArticulationData:
             inertia_row: list[np.ndarray] = []
             com_row: list[np.ndarray] = []
             for link_name in self.link_names:
-                local_name = self._entity_link_name(entity, link_name)
-                attr = self._entity_link_properties(entity, local_name)
+                attr = self._entity_link_properties(entity, link_name)
                 mass_row.append(float(attr.mass))
                 inertia_row.append(np.asarray(attr.inertia, dtype=np.float32))
                 com_row.append(
@@ -696,133 +658,157 @@ class Articulation(BatchEntity):
     For floating-base articulation, it can be a humanoid, drawer, etc.
 
     Args:
-        cfg (ArticulationCfg): Configuration for the articulation.
-        entities (List[_Articulation], optional): List of articulation entities.
-        device (torch.device, optional): Device to use (CPU or CUDA).
+        cfg: Configuration for the articulation.
+        device: Device to use (CPU or CUDA).
     """
 
     def __init__(
         self,
         cfg: ArticulationCfg,
-        entities: Sequence[_Articulation | SpawnedArticulation] | None = None,
         device: torch.device = torch.device("cpu"),
-        *,
-        spawn_result: SpawnResult | None = None,
-        declared_num_instances: int | None = None,
     ) -> None:
+        """Create an unregistered articulation facade.
+
+        ``SpawnScene`` owns the replicated instance count and the finalized
+        ``Scene``. It injects them at declaration and binding time instead of
+        exposing either lifecycle dependency through this constructor.
+        """
         self._newton_mimic_compliance_configured = False
         self._prepared_default_root_topology_revision = -1
-        if entities is None:
-            if declared_num_instances is None or declared_num_instances <= 0:
-                raise ValueError(
-                    "A declared Articulation requires declared_num_instances > 0."
+        self.cfg = deepcopy(cfg)
+        self.uid = self.cfg.uid
+        self.device = device
+        self._entities: list[SpawnedArticulation] = []
+        self._declared_num_instances: int | None = None
+        self._spawn_result: Scene | None = None
+        self._world = None
+        self._ps = None
+        self._data: ArticulationData | None = None
+        self._all_indices = torch.empty(0, dtype=torch.int32)
+        self._visual_material: List[Dict[str, VisualMaterialInst]] = []
+        self.is_shared_visual_material = False
+        self._has_collision_visible_node_dict: dict[str, bool] = {}
+
+    def _initialize_spawn_declaration(self, num_instances: int) -> None:
+        """Initialize instance-dependent declaration state from ``SpawnScene``."""
+        if num_instances <= 0:
+            raise ValueError("A declared Articulation requires num_instances > 0.")
+        if self._declared_num_instances is not None:
+            if self._declared_num_instances != num_instances:
+                raise RuntimeError(
+                    f"Articulation {self.uid!r} is already declared for "
+                    f"{self._declared_num_instances} instances."
                 )
-            self.cfg = deepcopy(cfg)
-            self.uid = self.cfg.uid
-            self.device = device
-            self._entities = []
-            self._declared_num_instances = declared_num_instances
-            self._spawn_result = None
-            self._world = None
-            self._ps = None
-            self._data = None
-            self._all_indices = torch.arange(declared_num_instances, dtype=torch.int32)
-            self._visual_material = [{} for _ in range(declared_num_instances)]
-            self.is_shared_visual_material = False
-            self._has_collision_visible_node_dict = {}
             return
 
-        self._declared_num_instances = len(entities)
-        self._spawn_result = spawn_result
-        if spawn_result is None:
-            # Legacy initialization remains temporarily while SimulationManager
-            # migration is in progress. Spawn-bound facades never reach for a
-            # process-global World or raw PhysicsScene.
-            self._world = dexsim.default_world()
-            from embodichain.lab.sim.sim_manager import get_physics_scene
+        self._declared_num_instances = num_instances
+        self._all_indices = torch.arange(num_instances, dtype=torch.int32)
+        self._visual_material = [{} for _ in range(num_instances)]
 
-            self._ps = get_physics_scene()
-        else:
-            self._world = spawn_result.world
-            self._ps = None
+    def _require_declared_num_instances(self) -> int:
+        """Return the Spawn-provided instance count or raise a lifecycle error."""
+        if self._declared_num_instances is None:
+            raise RuntimeError(
+                f"Articulation {self.uid!r} must be registered through SpawnScene "
+                "before it can be used."
+            )
+        return self._declared_num_instances
 
+    @property
+    def is_spawn_bound(self) -> bool:
+        """Whether this facade is bound to one finalized Scene."""
+        return self._spawn_result is not None
+
+    @property
+    def is_declared(self) -> bool:
+        """Whether this facade is waiting for its Scene binding."""
+        return self._world is None
+
+    @property
+    def num_instances(self) -> int:
+        if self._entities:
+            return len(self._entities)
+        return self._require_declared_num_instances()
+
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedArticulation],
+    ) -> None:
+        """Store handles and expose metadata without initializing Batch data.
+
+        This pre-finalize step supports eager Default loading and only reads
+        articulation metadata. ``bind_spawn()`` performs result-dependent
+        Batch/Data initialization after finalization.
+        """
+        handles = list(entities)
+        expected = self._require_declared_num_instances()
+        if len(handles) != expected:
+            raise ValueError(
+                f"Articulation {self.uid!r} expected "
+                f"{expected} Spawn handles, got {len(handles)}."
+            )
+        self._entities = handles
+        self._mimic_info = self._state_mimic_info()
+        self.active_joint_ids = [
+            index for index in range(self.dof) if index not in self.mimic_ids
+        ]
+
+    def _clear_spawn_cached_properties(self) -> None:
+        """Drop metadata cached against declaration-time handles."""
+        for name in (
+            "dof",
+            "active_dof",
+            "num_links",
+            "link_names",
+            "user_ids",
+            "root_link_name",
+            "joint_names",
+            "active_joint_names",
+            "all_joint_names",
+        ):
+            self.__dict__.pop(name, None)
+
+    def _initialize_spawn_bound(self, result: Scene) -> None:
+        """Create result-dependent runtime state on this declared facade."""
+        if not isinstance(result, Scene):
+            raise TypeError(
+                "Articulation binding requires a finalized DexSim Scene; use "
+                "SimulationManager.prepare()."
+            )
+
+        entities = list(self._entities)
+        expected = self._require_declared_num_instances()
+        if len(entities) != expected:
+            raise ValueError(
+                f"Articulation {self.uid!r} expected {expected} Spawn handles, "
+                f"got {len(entities)}."
+            )
+
+        cfg = deepcopy(self.cfg)
+        self._clear_spawn_cached_properties()
+        self._newton_mimic_compliance_configured = False
+        self._spawn_result = result
+        self._world = result.world
+        self._ps = None
         self.cfg = cfg
         self._entities = entities
-        self.device = device
-
-        # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
-
-        if (
-            spawn_result is None
-            and device.type == "cuda"
-            and not is_newton_scene(self._ps)
-        ):
-            self._world.update(0.001)
-
-        articulation_view = None
-        if spawn_result is not None:
-            batch = spawn_result.create_articulation_batch(entities)
-            articulation_view = SpawnArticulationView(spawn_result, batch, device)
         self._data = ArticulationData(
             entities=entities,
-            ps=self._ps,
-            device=device,
-            articulation_view=articulation_view,
+            scene=result,
+            device=self.device,
         )
 
-        self.cfg: ArticulationCfg
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
         self._capture_default_physical_properties()
-
-        preserve_asset_physics = self.cfg.resolve_asset_physics_mode() == "preserve"
         self.default_joint_stiffness = self._data.joint_stiffness.clone()
         self.default_joint_damping = self._data.joint_damping.clone()
         self.default_joint_friction = self._data.joint_friction.clone()
         self.default_joint_armature = self._data.joint_armature.clone()
         self.default_joint_max_effort = self._data.qf_limits.clone()
         self.default_joint_max_velocity = self._data.qvel_limits.clone()
-
-        # Spawn descriptors already contain build-time overlays. The retained
-        # legacy path applies only explicitly requested drive fields here.
-        if (
-            spawn_result is None
-            and not preserve_asset_physics
-            and self.cfg.joint_drive_props is not None
-        ):
-            self._set_default_joint_drive()
-
-        # Spawn-owned articulations compile both named and flattened-DOF limits
-        # into the source-resolved descriptor before either backend builds its
-        # model. The retained raw path must still apply limits at runtime.
-        if (
-            spawn_result is None
-            and self.cfg.qpos_limits is not None
-            and not preserve_asset_physics
-        ):
-            if isinstance(self.cfg.qpos_limits, dict):
-                indices, _, values = resolve_matching_names_values(
-                    self.cfg.qpos_limits, self.joint_names
-                )
-                local_joint_ids = torch.as_tensor(
-                    indices, dtype=torch.long, device=self.device
-                )
-                values_tensor = torch.as_tensor(
-                    values, dtype=torch.float32, device=self.device
-                ).unsqueeze(0)
-                values_tensor = values_tensor.expand(self.num_instances, -1, -1)
-                self.set_qpos_limits(values_tensor, joint_ids=local_joint_ids)
-            else:
-                qpos_limits = torch.as_tensor(
-                    self.cfg.qpos_limits, dtype=torch.float32, device=self.device
-                )
-                if qpos_limits.dim() == 2:
-                    qpos_limits = qpos_limits.unsqueeze(0).expand(
-                        self.num_instances, -1, -1
-                    )
-                self.set_qpos_limits(qpos_limits)
 
         is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
         self.pk_chain = None
@@ -837,83 +823,24 @@ class Articulation(BatchEntity):
                 "URDF when kinematics are required."
             )
 
-        # For rendering purposes, each articulation can have multiple material instances associated with its links.
-        self._visual_material: List[Dict[str, VisualMaterialInst]] = [
-            {} for _ in range(len(entities))
-        ]
+        self._visual_material = [{} for _ in range(len(entities))]
         self.is_shared_visual_material = False
-
-        # Stores mimic information in the same index domain as qpos/qvel/qf.
         self._mimic_info = self._state_mimic_info()
-
         self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
 
-        # TODO: very weird that we must call update here to make sure the GPU indices are valid.
-        if (
-            spawn_result is None
-            and device.type == "cuda"
-            and not is_newton_scene(self._ps)
-        ):
-            self._world.update(0.001)
-
-        # Spawn-bound articulations receive post-load configuration before
-        # their initial reset. Legacy construction keeps its historical reset.
-        super().__init__(cfg, entities, device)
-        if spawn_result is None:
-            self.reset()
-
+        super().__init__(cfg, entities, self.device)
         self._initialize_existing_visual_material()
+        self._has_collision_visible_node_dict = {
+            link_name: False for link_name in self.link_names
+        }
+        self._initialize_spawn_bound_extension()
 
-        # set default collision filter
-        if spawn_result is None:
-            self._set_default_collision_filter()
-
-        # flag for collision visible node existence
-        self._has_collision_visible_node_dict = dict()
-        for link_name in self.link_names:
-            self._has_collision_visible_node_dict[link_name] = False
-
-    @property
-    def is_spawn_bound(self) -> bool:
-        """Whether this facade is bound to one finalized SpawnResult."""
-        return self._spawn_result is not None
-
-    @property
-    def is_declared(self) -> bool:
-        """Whether this facade is waiting for its SpawnResult binding."""
-        return self._world is None
-
-    @property
-    def num_instances(self) -> int:
-        if self._entities:
-            return len(self._entities)
-        return self._declared_num_instances
-
-    def attach_spawn_handles(
-        self,
-        entities: Sequence[SpawnedArticulation],
-    ) -> None:
-        """Store handles and expose metadata without initializing Batch data.
-
-        This pre-finalize step supports eager Default loading and only reads
-        articulation metadata. ``bind_spawn()`` performs result-dependent
-        Batch/Data initialization after finalization.
-        """
-        handles = list(entities)
-        if len(handles) != self._declared_num_instances:
-            raise ValueError(
-                f"Articulation {self.uid!r} expected "
-                f"{self._declared_num_instances} Spawn handles, got {len(handles)}."
-            )
-        self._entities = handles
-        self._mimic_info = self._state_mimic_info()
-        self.active_joint_ids = [
-            index for index in range(self.dof) if index not in self.mimic_ids
-        ]
+    def _initialize_spawn_bound_extension(self) -> None:
+        """Initialize subclass state after the Scene batch becomes available."""
 
     def bind_spawn(
         self,
-        result: SpawnResult,
+        result: Scene,
     ) -> None:
         """Initialize this declared facade from Spawn articulation handles."""
         if self.is_spawn_bound:
@@ -923,51 +850,33 @@ class Articulation(BatchEntity):
                 f"Articulation {self.uid!r} was not created as a Spawn declaration."
             )
 
-        cfg = self.cfg
-        device = self.device
-        entities = list(self._entities)
-        if len(entities) != self._declared_num_instances:
-            raise ValueError(
-                f"Articulation {self.uid!r} expected "
-                f"{self._declared_num_instances} Spawn handles, got {len(entities)}."
-            )
-
-        # Build and configure the bound state off to the side. If batch
-        # creation or post-load configuration fails, the public facade remains
-        # declared and can be retried by SimulationManager.prepare().
-        bound = type(self)(
-            cfg,
-            entities,
-            device,
-            spawn_result=result,
-        )
-        bound._prepared_default_root_topology_revision = getattr(
-            self,
-            "_prepared_default_root_topology_revision",
-            -1,
-        )
-        bound._apply_spawn_config()
-        if is_newton_gradient_mode(result):
-            initial_qpos = torch.as_tensor(bound.cfg.init_qpos).reshape(-1)
-            if initial_qpos.numel() != bound.dof:
-                raise ValueError(
-                    f"Articulation {bound.uid!r} expected {bound.dof} initial "
-                    f"joint positions, got {initial_qpos.numel()}."
-                )
-            if torch.any(initial_qpos != 0.0):
-                raise NotImplementedError(
-                    "Newton gradient mode cannot apply non-zero init_qpos after "
-                    "Spawn finalization. Author the initial coordinates in the "
-                    "source asset or initialize them in a differentiable task "
-                    "before opening a Warp tape."
-                )
-            # Spawn already authored the root pose and zero joint/dynamics
-            # state during model construction. Its Batch mutation APIs are
-            # intentionally fenced once the model requires gradients.
-        else:
-            bound.reset()
-        self.__dict__.clear()
-        self.__dict__.update(bound.__dict__)
+        declared_state = self.__dict__.copy()
+        try:
+            self._initialize_spawn_bound(result)
+            self._apply_spawn_config()
+            if is_newton_gradient_mode(result):
+                initial_qpos = torch.as_tensor(self.cfg.init_qpos).reshape(-1)
+                if initial_qpos.numel() != self.dof:
+                    raise ValueError(
+                        f"Articulation {self.uid!r} expected {self.dof} initial "
+                        f"joint positions, got {initial_qpos.numel()}."
+                    )
+                if torch.any(initial_qpos != 0.0):
+                    raise NotImplementedError(
+                        "Newton gradient mode cannot apply non-zero init_qpos after "
+                        "Spawn finalization. Author the initial coordinates in the "
+                        "source asset or initialize them in a differentiable task "
+                        "before opening a Warp tape."
+                    )
+                # Spawn already authored the root pose and zero joint/dynamics
+                # state during model construction. Its Batch mutation APIs are
+                # intentionally fenced once the model requires gradients.
+            else:
+                self.reset()
+        except Exception:
+            self.__dict__.clear()
+            self.__dict__.update(declared_state)
+            raise
 
     def _apply_spawn_config(self) -> None:
         """Apply configuration that requires finalized backend resources.
@@ -998,7 +907,7 @@ class Articulation(BatchEntity):
                 if render_body is not None:
                     render_body.set_projective_uv()
 
-    def _prepare_spawn_runtime_config(self, result: SpawnResult | None) -> None:
+    def _prepare_spawn_runtime_config(self, result: Scene | None) -> None:
         """Apply Default root properties before Direct GPU initialization.
 
         PhysX snapshots articulation solver iteration counts when the Direct
@@ -1129,7 +1038,7 @@ class Articulation(BatchEntity):
     def _state_joint_names(self) -> List[str]:
         """Return active joint names in the backing qpos-buffer order.
 
-        Spawn's Newton batch layout may differ from its source articulation
+        The Scene's Newton batch layout may differ from its source articulation
         order.  Joint IDs sent to the batch must therefore use the layout
         order. :attr:`joint_names` exposes this same order; query the Spawn
         handle directly only for source-topology resolution.
@@ -1494,16 +1403,6 @@ class Articulation(BatchEntity):
                 link_names=self.link_names,
                 env_ids=env_list,
             )
-
-    def _entity_link_name(self, env_idx: int, link_name: str) -> str:
-        """Resolve a canonical link name to the backend entity's local name."""
-        if isinstance(env_idx, torch.Tensor):
-            env_idx = int(env_idx.detach().cpu().item())
-        entity = self._entities[int(env_idx)]
-        view = self._data.articulation_view
-        if hasattr(view, "entity_link_name"):
-            return view.entity_link_name(entity, link_name)
-        return link_name
 
     @property
     def root_state(self) -> torch.Tensor:
@@ -2144,12 +2043,8 @@ class Articulation(BatchEntity):
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
             for j, name in enumerate(names):
-                if self.is_spawn_bound:
-                    local_name = self._entity_link_name(env_idx, name)
-                    entity.set_link_mass(local_name, mass[i, j].item())
-                elif self._data.is_newton_backend:
-                    local_name = self._entity_link_name(env_idx, name)
-                    entity.set_link_mass(local_name, mass[i, j].item())
+                if self.is_spawn_bound or self._data.is_newton_backend:
+                    entity.set_link_mass(name, mass[i, j].item())
                 else:
                     entity.set_mass(name, mass[i, j].item())
 
@@ -2196,25 +2091,22 @@ class Articulation(BatchEntity):
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
             for j, name in enumerate(names):
-                local_name = self._entity_link_name(env_idx, name)
                 value = np.asarray(values[i, j], dtype=np.float32)
                 if self.is_spawn_bound and self._data.is_newton_backend:
                     entity.set_newton_link_properties(
-                        local_name,
+                        name,
                         rigid_body=dexsim.spawn.RigidBodyPhysicsDesc.dynamic(
                             inertia=value
                         ),
                     )
                 elif not self._data.is_newton_backend:
-                    entity.get_physical_body(local_name).set_mass_space_inertia_tensor(
-                        value
-                    )
+                    entity.get_physical_body(name).set_mass_space_inertia_tensor(value)
                 else:
-                    attr = entity.get_physical_attr(local_name)
+                    attr = entity.get_physical_attr(name)
                     attr.inertia = value
                     entity.set_physical_attr(
                         attr,
-                        local_name,
+                        name,
                         is_replace_inertial=False,
                     )
 
@@ -2253,7 +2145,6 @@ class Articulation(BatchEntity):
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
             for j, name in enumerate(names):
-                local_name = self._entity_link_name(env_idx, name)
                 position = np.asarray(values[i, j, :3], dtype=np.float32)
                 quaternion = np.asarray(
                     convert_quat(values[i, j, 3:7], to="wxyz"),
@@ -2261,24 +2152,24 @@ class Articulation(BatchEntity):
                 )
                 if self.is_spawn_bound and self._data.is_newton_backend:
                     entity.set_newton_link_properties(
-                        local_name,
+                        name,
                         rigid_body=dexsim.spawn.RigidBodyPhysicsDesc.dynamic(
                             com_position=position,
                             com_quaternion=quaternion,
                         ),
                     )
                 elif not self._data.is_newton_backend:
-                    entity.get_physical_body(local_name).set_cmass_local_pose(
+                    entity.get_physical_body(name).set_cmass_local_pose(
                         position,
                         quaternion,
                     )
                 else:
-                    attr = entity.get_physical_attr(local_name)
+                    attr = entity.get_physical_attr(name)
                     attr.com_position = position
                     attr.com_quaternion = quaternion
                     entity.set_physical_attr(
                         attr,
-                        local_name,
+                        name,
                         is_replace_inertial=False,
                     )
 
@@ -2331,9 +2222,7 @@ class Articulation(BatchEntity):
         for env_idx in local_env_ids:
             entity = self._entities[env_idx]
             for name in matched_link_names:
-                attrs.append(
-                    entity.get_physical_attr(self._entity_link_name(env_idx, name))
-                )
+                attrs.append(entity.get_physical_attr(name))
         return attrs
 
     def get_newton_link_properties(
@@ -2375,11 +2264,7 @@ class Articulation(BatchEntity):
         for env_idx in local_env_ids:
             entity = self._entities[env_idx]
             for name in matched_link_names:
-                properties.append(
-                    entity.get_newton_link_properties(
-                        self._entity_link_name(env_idx, name)
-                    )
-                )
+                properties.append(entity.get_newton_link_properties(name))
         return properties
 
     def set_link_physical_attr(
@@ -2438,10 +2323,9 @@ class Articulation(BatchEntity):
         for env_idx in local_env_ids:
             entity = self._entities[env_idx]
             for name in matched_link_names:
-                local_name = self._entity_link_name(env_idx, name)
                 entity.set_physical_attr(
                     physical_attr,
-                    local_name,
+                    name,
                     is_replace_inertial=replace_inertial,
                 )
 
@@ -3505,7 +3389,7 @@ class Articulation(BatchEntity):
 
     def destroy(self) -> None:
         if self.is_declared or self.is_spawn_bound:
-            # SpawnResult is the sole owner of native lifetime.
+            # The finalized Scene is the sole owner of native lifetime.
             return
         env = self._world.get_env()
         arenas = env.get_all_arenas()

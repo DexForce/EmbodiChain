@@ -364,11 +364,17 @@ if __name__ == "__main__":
         default="newton",
         help="Physics backend to launch (default: newton).",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
     args = parser.parse_args()
 
     config = SimulationManagerCfg(
         headless=True,
-        device="cpu",
+        device=args.device,
         num_envs=4,
         physics_cfg=physics_cfg_for_backend(args.physics),
     )

@@ -56,6 +56,7 @@ from embodichain.data_pipeline.datasets import (
 from embodichain.data_pipeline.engine.data import (
     OnlineDataEngine,
     OnlineDataEngineCfg,
+    _apply_worker_simulation_overrides,
 )
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,39 @@ LAB_PACKAGE_NAME = "embodichain.lab"
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.no_sim
+def test_worker_overrides_preserve_newton_device_default() -> None:
+    """Worker rendering overrides must not replace Newton's typed config."""
+    from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    sim_cfg = SimulationManagerCfg(
+        physics_cfg=NewtonPhysicsCfg(num_substeps=3),
+    )
+
+    _apply_worker_simulation_overrides(
+        sim_cfg,
+        {"headless": True, "renderer": "hybrid", "gpu_id": 0},
+    )
+
+    assert isinstance(sim_cfg.physics_cfg, NewtonPhysicsCfg)
+    assert sim_cfg.device == "cuda:0"
+    assert sim_cfg.physics_cfg.num_substeps == 3
+
+
+@pytest.mark.no_sim
+def test_worker_overrides_apply_explicit_device() -> None:
+    """An authored worker device remains an explicit runtime override."""
+    from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    sim_cfg = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg())
+
+    _apply_worker_simulation_overrides(sim_cfg, {"device": "cpu"})
+
+    assert sim_cfg.device == "cpu"
 
 
 def _make_fake_engine(

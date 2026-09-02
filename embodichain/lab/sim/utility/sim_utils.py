@@ -53,7 +53,7 @@ from dexsim.kit.meshproc import get_mesh_auto_uv
 import numpy as np
 
 if TYPE_CHECKING:
-    from dexsim.spawn import SpawnedArticulation
+    from dexsim.scene import SpawnedArticulation
 
 
 def _is_newton_backend_active() -> bool:

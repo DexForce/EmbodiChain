@@ -33,6 +33,7 @@ from embodichain.lab.sim.cfg import (
     RobotPresetCfg,
 )
 from embodichain.lab.sim.profiler import Profiler
+from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBackend
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
     SimulationManagerCfg,
@@ -612,7 +613,7 @@ def test_add_robot_resolves_backend_preset_before_declaration() -> None:
         default: RobotCfg = RobotCfg(uid="selected", fpath="selected.urdf")
 
     sim = object.__new__(SimulationManager)
-    sim.physics = SimpleNamespace(name="default", supports_robot=True)
+    sim.physics = SimpleNamespace(name="default", supports_robot=True, solver_type=None)
     sim.sim_config = SimpleNamespace(physics_cfg=DefaultPhysicsCfg())
     sim._robots = {}
     sim._declare_spawn_articulation = MagicMock(return_value="robot-handle")
@@ -678,12 +679,13 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
 
     sim = object.__new__(SimulationManager)
     sync_render_state = MagicMock()
-    sim.physics = SimpleNamespace(
-        name=backend,
-        sync_render_state=sync_render_state,
-    )
     sim.device = device
     sim._world = MagicMock()
+    backend_cls = (
+        DefaultPhysicsBackend if backend == "default" else NewtonPhysicsBackend
+    )
+    sim.physics = backend_cls(sim)
+    sim.physics.sync_render_state = sync_render_state
     sim._world.init_gpu_physics.side_effect = lambda: events.append("gpu_init")
     sim._spawn_scene = spawn_scene
     sim._default_plane = object()
@@ -705,6 +707,18 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
         assert events == ["runtime_config", "bind"]
 
 
+def test_manager_delegates_differentiable_runtime_without_backend_name() -> None:
+    """Runtime availability is capability-based rather than name-based."""
+    runtime = object()
+    sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(
+        name="third_party",
+        differentiable_runtime=runtime,
+    )
+
+    assert sim.differentiable_runtime is runtime
+
+
 def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     result = MagicMock()
     result.needs_rebuild = False
@@ -716,13 +730,14 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
 
     sim = object.__new__(SimulationManager)
     sync_render_state = MagicMock()
+    prepare_spawn_runtime = MagicMock(side_effect=[RuntimeError("first attempt"), None])
     sim.physics = SimpleNamespace(
         name="default",
+        prepare_spawn_runtime=prepare_spawn_runtime,
         sync_render_state=sync_render_state,
     )
     sim.device = torch.device("cuda")
     sim._world = MagicMock()
-    sim._world.init_gpu_physics.side_effect = [RuntimeError("first attempt"), None]
     sim._spawn_scene = spawn_scene
     sim._pending_sensor_attachments = []
     sim._prepared_spawn_topology_revision = -1
@@ -733,7 +748,7 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     sim.prepare()
 
     spawn_scene.commit.assert_not_called()
-    assert sim._world.init_gpu_physics.call_count == 2
+    assert prepare_spawn_runtime.call_count == 2
     spawn_scene.bind.assert_called_once_with()
     sync_render_state.assert_called_once_with(result)
 
@@ -756,6 +771,7 @@ def test_prepare_removes_each_sensor_after_successful_attachment() -> None:
     sync_render_state = MagicMock()
     sim.physics = SimpleNamespace(
         name="default",
+        prepare_spawn_runtime=MagicMock(),
         sync_render_state=sync_render_state,
     )
     sim.device = torch.device("cpu")
@@ -794,6 +810,7 @@ def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
     sim = object.__new__(SimulationManager)
     sim.physics = SimpleNamespace(
         name="newton",
+        prepare_spawn_runtime=MagicMock(),
         sync_render_state=sync_render_state,
     )
     sim.device = torch.device("cpu")
@@ -832,6 +849,7 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     sim = object.__new__(SimulationManager)
     sim.physics = SimpleNamespace(
         name="newton",
+        prepare_spawn_runtime=MagicMock(),
         sync_render_state=sync_render_state,
     )
     sim.device = torch.device("cpu")

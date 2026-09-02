@@ -74,7 +74,8 @@ cfg = RigidObjectCfg(
 # 3. Spawn Rigid Object
 cube: RigidObject = sim.add_rigid_object(cfg=cfg)
 
-# 4. (Optional) Open window and run
+# 4. Commit the complete scene, then optionally open a window and run
+sim.prepare()
 if not sim.sim_config.headless:
     sim.open_window()
 sim.update()
@@ -204,7 +205,8 @@ N denotes the number of parallel environments when using vectorized simulation (
 - Use `static` body type for fixed obstacles or environment pieces (they do not consume dynamic simulation resources).
 - Use `kinematic` for objects whose pose is driven by code (teleporting or animation) but still interact with dynamic objects.
 - For complex meshes, configure `MeshCfg.collision` with `approximation="convex_decomposition"` and a bounded `max_hulls`, or provide a simplified collision mesh.
-- To use GPU physics, ensure `SimulationManagerCfg.device` is set to `cuda` and call `sim.init_gpu_physics()` before large-batch simulations.
+- For large GPU batches, select an indexed CUDA device and call the same
+  backend-neutral `sim.prepare()` boundary after all initial assets are added.
 
 ## Example: Applying Force and Torque
 

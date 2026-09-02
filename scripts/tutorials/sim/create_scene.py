@@ -122,7 +122,7 @@ def main() -> None:
                 mass_props=MassPropertiesCfg(mass=10.0),
             ),
             body_scale=[0.5, 0.5, 0.5],
-            init_pos=[0.0, 0.0, 0.5],
+            init_pos=[0.0, 0.0, 0.51],
             init_rot=[0.0, 0.0, 0.0],
         )
     )

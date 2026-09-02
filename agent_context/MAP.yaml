@@ -127,6 +127,10 @@ topics:
       - gym
       - environment.component
       - reusable physical environment
+      - file-owned physics backend
+      - physics_config
+      - default
+      - newton
       - embodiment.component
       - reusable embodiment
       - scene_binding

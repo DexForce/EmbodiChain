@@ -551,7 +551,16 @@ def configure_articulation_desc(
             f"Articulation source {desc.name!r} must be resolved before "
             "configuration."
         )
-    if cfg.resolve_asset_physics_mode() == "preserve":
+    preserve_source_physics = cfg.resolve_asset_physics_mode() == "preserve"
+    setattr(desc, "_embodichain_preserve_source_physics", preserve_source_physics)
+    for link in desc.links:
+        # The Default adapter receives a source snapshot for descriptor/query
+        # parity, but it must only call its native physical-attribute setter
+        # for an actual user overlay. Keep that decision attached to the exact
+        # resolved link so both backends share the same ownership boundary.
+        setattr(link, "_embodichain_apply_physics", False)
+        setattr(link, "_embodichain_mass_override", False)
+    if preserve_source_physics:
         configured_fields = _configured_articulation_overlay_fields(cfg)
         if configured_fields:
             warnings.warn(
@@ -620,6 +629,49 @@ def configure_articulation_desc(
         recompute_inertia,
     ) in link_properties.items():
         link = desc.get_link_desc(link_name)
+        source_inertia_invalid = (
+            getattr(link, "_embodichain_source_inertia_valid", None) is False
+        )
+        source_has_collision_geometry = (
+            getattr(link, "_embodichain_has_collision_geometry", None) is True
+        )
+        # An all-zero/invalid source tensor is not an asset value that either
+        # backend can safely preserve. Newton already derives its fallback
+        # from shapes; make that fallback explicit in the shared descriptor so
+        # Default does the same instead of retaining its native epsilon tensor.
+        source_geometry_fallback = (
+            source_inertia_invalid and source_has_collision_geometry
+        )
+        # A source link without collision geometry has no quantity from which
+        # to recompute inertia. Keep its source/fallback tensor instead of
+        # asking Newton to apply a mass override to an empty shape set. The
+        # marker is attached by the URDF source resolver; explicit descriptors
+        # without the marker retain the historical, caller-controlled behavior.
+        effective_recompute = recompute_inertia or source_geometry_fallback
+        if (
+            effective_recompute
+            and getattr(link, "_embodichain_has_collision_geometry", None) is False
+        ):
+            effective_recompute = False
+        apply_physics = _has_articulation_link_physics_overlay(
+            rigid_body,
+            collision,
+            recompute_inertia=effective_recompute,
+        )
+        setattr(link, "_embodichain_apply_physics", apply_physics)
+        setattr(link, "_embodichain_mass_override", rigid_body.mass is not None)
+        if not apply_physics:
+            continue
+        if (
+            rigid_body.density is not None
+            and not effective_recompute
+            and getattr(link, "_embodichain_source_inertia_valid", None) is True
+        ):
+            raise ValueError(
+                f"Density override for source-backed link {link_name!r} requires "
+                "mass_props.recompute_inertia=True. Density derives mass "
+                "properties and cannot preserve the source inertia."
+            )
         desc.set_link_properties(
             link_name,
             rigid_body=rigid_body,
@@ -631,7 +683,7 @@ def configure_articulation_desc(
             collision=(
                 collision if link.collisions or desc.urdf_path is not None else None
             ),
-            replace_inertial=recompute_inertia,
+            replace_inertial=effective_recompute,
         )
     for joint_name, (default_desc, newton_desc) in joint_properties.items():
         lower_limit, upper_limit = joint_limits.get(joint_name, (None, None))
@@ -648,6 +700,41 @@ def configure_articulation_desc(
             newton_target_mode=joint_target_modes.get(joint_name),
         )
     return desc
+
+
+def _has_articulation_link_physics_overlay(
+    rigid_body: RigidBodyPhysicsDesc,
+    collision: CollisionDesc,
+    *,
+    recompute_inertia: bool,
+) -> bool:
+    """Return whether an exact link needs a native physics write.
+
+    ``RigidBodyPhysicsDesc.dynamic()`` is the compilation container for a
+    sparse configuration; its actor type alone is not an authored override.
+    Avoiding a no-op native setter matters for source URDFs because the
+    Default backend otherwise derives a new tensor from collision geometry.
+    """
+    if recompute_inertia:
+        return True
+    if any(
+        getattr(rigid_body, name) is not None
+        for name in (
+            "mass",
+            "density",
+            "inertia",
+            "com_position",
+            "com_quaternion",
+            "collision_filter_data",
+            "dexsim",
+            "newton",
+        )
+    ):
+        return True
+    return any(
+        getattr(collision, name) is not None
+        for name in ("enable_collision", "dexsim", "newton")
+    )
 
 
 def _compile_joint_properties(

@@ -160,6 +160,23 @@ inline `robot`, `sensor`, and scene fields continue to parse unchanged.
 `build_env_cfg_from_args()` expands `environment.component` before applying
 launcher arguments so environment-owned run controls such as `max_episodes`
 remain visible to the run loop while explicit CLI values retain precedence.
+An inline runnable config must declare exactly one
+`physics: default|newton` backend. A reusable environment component must also
+declare exactly one backend and owns its optional `physics_config`; the thin
+deployment cannot repeat either field. `config_to_cfg()` constructs the
+backend-specific typed physics config and rejects fields from the other
+backend. Launcher `--physics` may confirm the declared value but cannot switch
+the file-owned backend. Use separate environment files when the same logical
+task needs both backends.
+
+Device selection is one shared runtime value. The selected typed physics config
+provides the backend default (`cpu` for Default and `cuda:0` for Newton), an
+optional top-level Gym `device` overrides it, and an explicitly supplied CLI
+`--device` wins last. A config-backed launcher leaves `--device` unset by
+default, so omission preserves the authored/backend value. `config_to_cfg()`
+passes the resolved value through `SimulationManagerCfg`, and `BaseEnv` tensors
+use the manager's resulting device; there is no separate environment-device
+setting.
 
 The component boundary is implemented in
 `gym/utils/_component_composition.py`. An embodiment's optional `skill_profile`
@@ -174,8 +191,9 @@ configured Task Program deployments reuse that same embodiment.
 
 A simple supported Task Program does not require a task subclass. Its thin Gym
 deployment selects a reusable environment and embodiment and declares all
-three Task Program component paths. The environment component owns only the
-physical scene and ordinary environment values. After the generic resolver
+three Task Program component paths. The environment component owns the
+physical scene, one physics backend and its settings, and ordinary environment
+values. After the generic resolver
 lowers the environment, robot, and sensors into the existing
 `EmbodiedEnvCfg` fields, it checks every semantic root's `simulation_uid`
 against the physical scene. The Task Program layer then checks
@@ -258,7 +276,7 @@ EmbodiedEnv.__init__(cfg)
   │     │     ├── _setup_robot()  → Robot + single_action_space
   │     │     ├── _prepare_scene()  → lights, background, objects
   │     │     └── _setup_sensors() → sensors dict
-  │     ├── init GPU physics (if CUDA)
+  │     ├── SimulationManager.prepare() (backend-neutral readiness boundary)
   │     ├── open window (if not headless)
   │     └── _init_sim_state()
   │           ├── _apply_functor_filter() (strip visual rand if configured)

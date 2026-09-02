@@ -168,16 +168,17 @@ normalized by joint name before these properties are exposed. Newton initial
 positions are also projected onto each URDF relation
 `child = multiplier * parent + offset` before the first simulation step.
 
-Newton's MuJoCo-Warp solver currently represents URDF mimic joints as rigid
-equality constraints without Default's compliance control. For mimic parents
-that have a position drive, the Spawn-bound articulation installs the internal
-Newton soft-mimic adapter from `objects/backends/newton.py`. It disables only
-the articulation's native mimic rows, copies each parent's gains to the child,
-and mirrors parent position/velocity targets into the child. This avoids
-corrective-impulse instability on light finger links while retaining the
-authored multiplier and offset. Passive/velocity-only mechanisms, gradient
-mode, other Newton solvers, and the Default backend keep their native mimic
-constraints.
+Newton's MuJoCo-Warp solver lowers URDF mimic joints to native joint equality
+constraints, whose default solver reference is underdamped compared with
+Default's PhysX mimic. For position-driven mimic parents, the Spawn-bound
+articulation keeps those native equality rows enabled and tunes their MuJoCo
+`solref` from the authored parent gains. A weak follower drive (1% of the
+parent gains for the W1 hand) stabilizes the equality between solver updates,
+and target `set_qpos()`/`set_qvel()` writes propagate the authored
+`child = multiplier * parent + offset` relation. Never copy measured follower
+state or disable the native equality: either change would turn mimic into an
+independent servo and lose the mechanical coupling. Other Newton solvers,
+gradient mode, and Default keep their native behavior.
 
 ## Drive Properties
 

@@ -1,7 +1,13 @@
 # EmbodiChain Newton Backend Integration Design
 
-This document records the current EmbodiChain integration state for the DexSim
-Newton physics backend and the remaining work needed to complete it.
+> **Status:** Supplementary implementation record, not a normative API
+> specification. For current contracts use
+> `agent_context/topics/simulation-system/simulation-system.md` and the Sphinx
+> simulation guides; code and tests remain the source of truth when this record
+> lags them. Dated files under `docs/superpowers/` are historical plans/specs.
+
+This document summarizes the EmbodiChain integration state for the DexSim
+Newton physics backend and records remaining work.
 
 Use these EmbodiChain backend names consistently:
 
@@ -31,6 +37,13 @@ Backend selection is inferred from `SimulationManagerCfg.physics_cfg`:
 CUDA graph when gradient mode is enabled, and requires
 `solver_type="semi_implicit"` for gradient mode.
 
+The typed physics config owns its device default (`cpu` for Default and
+`cuda:0` for Newton). `SimulationManagerCfg(device=...)` and legacy
+`sim_device=...` are explicit, backend-neutral overrides; omission preserves
+the typed config value. Config-backed CLI launchers likewise preserve the
+file/backend device unless `--device` is supplied, including honoring an
+explicit Newton CPU selection.
+
 ### PhysicsBackend abstraction
 
 `SimulationManager` delegates backend-specific behavior to a
@@ -50,36 +63,44 @@ embodichain/lab/sim/physics/
 `SimulationManager` (an instance member, not a class singleton — this preserves
 EmbodiChain's multiton, which IsaacLab's class-singleton approach would break).
 The manager delegates through `self.physics.*` instead of branching on a backend
-name:
+name for operational decisions:
 
 - `configure_world(world_config, sim_config)` applies backend-specific
   `WorldConfig` fields (default tolerances/GPU flags, or `world_config.newton_cfg`).
 - `activate(sim_config)` runs post-world-creation setup (default
-  `set_physics_config` / GPU-memory config, or `get_newton_manager(self._world)`).
-- `prepare()` is the unified "force the backend ready-to-step" entry point.
-  `SimulationManager.init_gpu_physics()` and `finalize_newton_physics()` both
-  delegate to it — Newton's "GPU init" is a finalize; the default's "finalize"
-  is a GPU init. Idempotent; after `invalidate()` it re-prepares (rebuilds).
-- `ensure_initialized()` is the lazy `update()`-time wrapper (default: lazy GPU
-  init; Newton: finalize/rebuild if invalidated).
-- `invalidate()` marks the scene dirty after mutation (no-op for default).
+  `set_physics_config` / GPU-memory config; Newton registration already comes
+  from `WorldConfig.newton_cfg`).
+- `prepare_spawn_runtime(result)` performs backend runtime work once per
+  committed topology revision. Default initializes Direct GPU buffers on CUDA;
+  the base implementation is a no-op used by Default CPU and Newton.
+- `sync_render_state(result)` publishes bound state without stepping. Newton
+  syncs its World-owned runtime to render resources; Default is a no-op.
+- `prepare_for_teardown()` releases backend-owned views before Spawn releases
+  their native parents.
 - `get_scene()` returns the active physics scene.
-- `newton_manager` returns the Newton manager or `None`.
+- `solver_type` and `differentiable_runtime` expose optional runtime services
+  without manager-side type checks.
 
 Capability predicates drive the `add_*` guards (see Parity Matrix below):
-`supports_robot`, `supports_soft_bodies`, `supports_cloth`,
-`supports_rigid_object_group`, `can_disable_manual_update`.
+`supports_robot`, deformable topology flags and their soft/cloth compatibility
+aliases, `supports_rigid_object_group`, `supports_rigid_constraints`,
+`supports_contact_sensor`, and `can_disable_manual_update`.
+
+`SimulationManager.prepare()` owns the convergent readiness sequence: commit or
+rebuild the dirty Spawn scene, apply runtime config, call the backend runtime
+hook, bind stable facades, publish render state, and attach deferred sensors.
+The legacy `init_gpu_physics()` and `finalize_newton_physics()` methods both
+delegate to this same backend-neutral boundary.
 
 Public `SimulationManager` accessors are preserved as thin delegators for
 back-compat: `physics_backend`, `is_default_backend`, `is_newton_backend`,
 `newton_manager`, `init_gpu_physics()`, `finalize_newton_physics()`,
 `get_physics_scene()`.
 
-Scene mutation invalidates Newton finalization via `_invalidate_newton_physics()`
-(delegates to `self.physics.invalidate()`). After finalization,
-`_reset_entities_after_finalize()` resets rigid objects, articulations, and
-robots so deferred initial state is applied once Newton runtime data is ready.
-Rigid object groups are not yet supported on Newton.
+`newton_manager` is retained only as a compatibility diagnostic: Newton raises
+an actionable error because Spawn owns the World-level backend and no independent
+`NewtonManager` exists. Scene dirtiness and topology revisions belong to
+`SceneBuilder`/finalized `Scene`, not to a second backend lifecycle state machine.
 
 ### Object Backend Adapters
 
@@ -87,29 +108,30 @@ Rigid-body and articulation data access is routed through:
 
 ```text
 embodichain/lab/sim/objects/backends/
-    base.py     # RigidBodyViewBase, ArticulationViewBase (ABCs)
-    default.py  # DefaultRigidBodyView, DefaultArticulationView (Default/DexSim GPU)
-    newton.py   # NewtonRigidBodyView,  NewtonArticulationView  (Warp)
+    base.py     # Stable RigidBodyViewBase / ArticulationViewBase contracts
+    scene.py    # Backend-neutral Scene rigid-body/articulation batch adapters
+    newton.py   # Newton-only state synchronization and mimic hooks
 ```
 
-`*Data` selects the view at construction via `is_newton_scene(ps)` (a duck-type
-check). The views implement lazy body-id resolution and a BUILDER-state
-entity-level fallback before the Newton model is finalized.
+Normal `SimulationManager` construction binds both Default and Newton facades
+to the same Scene batch views. `RigidBodyData` and `ArticulationData` require a
+finalized Scene; the raw `PhysicsScene`/native-entity adapter path has been
+removed. Scene and its batches own backend dispatch, stable selection
+rebinding, and topology revisions. `Scene*View.from_entities()` centralizes the
+two public batch-factory calls instead of repeating them in each object facade.
 
 EmbodiChain public rigid-body tensor convention is `(x, y, z, qx, qy, qz, qw)`;
-the default adapter converts to/from DexSim's `(qx,qy,qz,qw,x,y,z)`, Newton
-needs no conversion.
+the Scene adapters convert to/from DexSim's `(qx,qy,qz,qw,x,y,z)` batch layout.
 
 Newton rigid-object support includes dynamic/kinematic/static creation, local
 pose, body state, linear/angular velocity+acceleration, force/torque at COM,
 clear dynamics, reset, COM local pose, mass/friction/inertia-diagonal/
-restitution/contact-offset get+set, collision filter (dynamic/kinematic/static/
-pre-finalize), and visual material/visibility/geometry/scale/user-id APIs.
-`apply_contact_offset`/`fetch_contact_offset` were added to
-`RigidBodyViewBase` and the Newton view.
+restitution/contact-offset get+set, dynamic/kinematic collision filters, and
+visual material/visibility/geometry/scale/user-id APIs. The common Scene view
+implements `RigidBodyViewBase`, including contact-offset access.
 
-Static Newton bodies do not have `RigidBodyData`; static collision-filter writes
-use DexSim's per-entity metadata hook when a Newton body ID is not available.
+Static Newton bodies do not have `RigidBodyData`; runtime collision-filter
+writes are therefore unavailable and must be configured before materialization.
 
 ### Grouped Newton and Default physics attributes
 
@@ -172,16 +194,17 @@ dexsim fix lives on dexsim branch `yueci/adapt-embodichain` (commit `d0e86bb02`)
 `tests/sim/test_backend_parity.py` is the single source of truth for which
 features each backend supports (`BACKEND_CAPABILITIES` table). It pins that each
 backend's `supports_*`/`can_disable_manual_update` flags match the table, every
-`add_robot/add_soft_object/add_cloth_object/add_rigid_object_group` guard raises
-`NotImplementedError` iff its flag is False, and the matrix covers every flag and
-backend. Current matrix:
+manager feature guards raise `NotImplementedError` iff their capability is
+false, and the matrix covers every flag and backend. Current matrix:
 
 | feature                  | default | newton |
 |--------------------------|---------|--------|
 | robot                    | yes     | yes    |
 | soft_bodies              | yes     | no     |
 | cloth                    | yes     | no     |
-| rigid_object_group       | yes     | no     |
+| rigid_object_group       | yes     | yes    |
+| rigid_constraints        | yes     | no     |
+| contact_sensor           | yes     | no     |
 | can_disable_manual_update| yes     | no     |
 
 ### Currently Unsupported Newton APIs
@@ -191,7 +214,11 @@ parity matrix):
 
 - `add_soft_object(...)`
 - `add_cloth_object(...)`
-- `add_rigid_object_group(...)`
+- `create_rigid_constraint(...)`
+- `add_sensor(ContactSensorCfg(...))`
+
+Newton does support `RigidObjectGroup`; it is an env-major view over the same
+Scene rigid-body batch used by individual objects.
 
 `RigidObject.add_force_torque(pos=...)` ignores `pos` and applies force/torque at
 the center of mass.
@@ -214,40 +241,38 @@ Newton integration is covered across headless and GPU suites:
 
 ```bash
 pytest -q tests/sim/objects/test_rigid_object.py
+pytest -q tests/sim/objects/test_rigid_object_group.py
 pytest -q tests/sim/objects/test_articulation.py::TestArticulationNewton
 pytest -q tests/sim/objects/test_robot.py::TestRobotNewton
 pytest -q tests/sim/test_physics_attrs.py tests/sim/test_backend_parity.py
-pytest -q tests/sim/test_newton_finalize_lifecycle.py tests/sim/test_sim_manager_cfg.py
+pytest -q tests/sim/test_sim_manager.py tests/sim/test_sim_manager_cfg.py
 ```
 
-Recently observed results: Newton rigid (physical_attributes + desc-native
-spawn), Newton articulation (incl. per-link mass-live), `TestRobotNewton`
-(spawn/finalize/control smoke), 14 headless `physics_attrs` tests, 22 headless
-`backend_parity` tests, 5 Newton lifecycle tests, 6 cfg tests — all green. The
-default-backend rigid suite (CPU+CUDA) passes with no regression.
+Do not copy historical pass counts into this document; report results from the
+current checkout and dependency build.
 
 ## Improvements To Make
 
 ### API Clarity
 
-- The `is_newton_scene` sweep is largely complete: backend selection is via the
-  `PhysicsBackend` ABC and the `add_*` capability guards; the remaining
-  `is_newton_scene` branches in `rigid_object.py`/`articulation.py` are
-  legitimate lifecycle fallbacks (BUILDER-state entity dynamics, not-ready meta
-  reads, static-object paths) that don't map to the batch-oriented view ABC
-  without extending its semantics.
+- Manager-level operational selection is routed through `PhysicsBackend` hooks,
+  runtime properties, and capability flags. Backend names remain only for
+  diagnostics, explicit implementation registries, and compatibility
+  predicates. Object-view `is_newton_backend` checks are adapter-level storage
+  and lifecycle distinctions; move them only when a backend-neutral view
+  operation can express the same contract without hiding behavior.
 - `is_use_gpu_physics` still conflates selected tensor/device location,
   default-backend GPU API availability, and Newton GPU execution; consider
   splitting when a consumer needs to distinguish them.
 
 ### Newton Lifecycle
 
-- `finalize_newton_physics()` (`self.physics.prepare()`) is the single Newton
-  preparation API.
+- `SimulationManager.prepare()` is the single readiness API for Default CPU,
+  Default CUDA, and Newton. Compatibility aliases delegate to it.
 - Track dirty scene/model state more explicitly so mutations after finalization
   can choose between live batch updates and model rebuilds.
-- Avoid global Newton teardown while another world may still use monkey-patched
-  DexSim classes.
+- Keep teardown World-owned and deferred; release backend views through
+  `prepare_for_teardown()` before closing Spawn/native parents.
 
 ### RigidObject
 
@@ -257,8 +282,7 @@ default-backend rigid suite (CPU+CUDA) passes with no regression.
 
 ### Object Groups, Soft, Cloth
 
-- Add Newton rigid-object-group support after a design decision (dexsim has no
-  first-class group API).
+- Maintain Newton rigid-object-group parity through the Scene rigid-body batch.
 - Keep soft and cloth fail-fast until there is an explicit Newton design and
   test coverage. dexsim exposes `SoftBodyObject`/`add_softbody`/`add_clothbody`
   (requires the VBD solver) — feasible but substantial.
@@ -273,13 +297,10 @@ default-backend rigid suite (CPU+CUDA) passes with no regression.
 
 ### Gym Env Integration
 
-Use backend-specific initialization in env setup:
+Use the backend-neutral readiness boundary after declaring the complete scene:
 
 ```python
-if self.sim.is_default_backend and self.sim.is_use_gpu_physics:
-    self.sim.init_gpu_physics()
-elif self.sim.is_newton_backend:
-    self.sim.finalize_newton_physics()
+self.sim.prepare()
 ```
 
 For stepping, keep the existing high-level flow:
@@ -290,8 +311,8 @@ self._step_action(action)
 self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
 ```
 
-For reset, call object/manager reset methods and finalize Newton before reading
-observations when the backend is Newton.
+For reset, call object/manager reset methods through the normal BaseEnv flow;
+do not introduce a backend-specific second initialization path.
 
 ## Completion Plan
 
@@ -304,10 +325,12 @@ Done:
    (`set_attrs` live subset + meta-mirror, `set_damping` no-op+meta,
    `set_body_type` documented no-op).
 4. Tests for Newton lifecycle rebuild and runtime property mutation after
-   finalization — present (`test_newton_finalize_lifecycle.py`,
+   finalization — present (`test_sim_manager.py`, `spawn/test_scene.py`, and
    `test_rigid_object.py::TestRigidObjectNewton`).
-6. Gym env init/reset uses `init_gpu_physics()` / `finalize_newton_physics()`
-   (already wired via the `base_env.py` pattern).
+5. Newton `RigidObjectGroup` support uses the Scene rigid-body batch and is
+   covered by `test_rigid_object_group.py::TestRigidObjectGroupNewton`.
+6. Gym environment construction uses the unified `SimulationManager.prepare()`
+   boundary after scene declaration.
 9. Articulation and robot support on Newton — implemented (incl. upstream
    dexsim joint-active-indexing fix); `TestArticulationNewton` and
    `TestRobotNewton` green.
@@ -345,7 +368,6 @@ Done:
 
 Remaining:
 
-5. Implement and test Newton `RigidObjectGroup` (after a design decision).
 7. Add rigid-only Newton gym smoke tests.
 10. Add soft/cloth support after a dedicated Newton object design and tests.
 11. Newton-native per-link contact params for articulations (after dexsim
@@ -369,9 +391,9 @@ PhysicsBackend abstraction:
 - `PhysicsBackend` ABC contract enforced (abstract methods; concrete backends
   implement them). `test_backend_parity.py` pins the capability matrix and the
   `add_*` guard mapping.
-- The Newton finalize/invalidate lifecycle is owned by `NewtonPhysicsBackend`
-  (`test_newton_finalize_lifecycle.py` — headless, patches the rebuild entry
-  point).
+- `SimulationManager.prepare()` delegates backend runtime preparation and render
+  publication once per topology revision (`test_sim_manager.py`), while
+  `SpawnScene`/DexSim own commit and rebuild state (`spawn/test_scene.py`).
 
 Simulation:
 
@@ -436,6 +458,12 @@ Gradient:
   warmup updates; Newton is guarded from those paths.
 - Runtime shape/property mutations may require model rebuilds rather than live
   updates; Newton-native per-link contact params are build-time only.
-- Standalone Newton scripts can segfault during teardown (`sim.destroy()` +
-  `teardown_newton_physics()`); pytest's `flush_cleanup_queue` teardown path is
-  stable — use the pytest pattern, not bare scripts.
+- Newton `RigidObjectGroup` partial reset does not currently restore the
+  initialization-time inertia diagonal after the same row's COM orientation was
+  mutated at runtime. The focused
+  `TestRigidObjectGroupNewton::test_reset_restores_default_mass_properties`
+  regression remains open at the DexSim Newton mass-property boundary.
+- Standalone and embedded callers should use `destroy(exit_process=False)` plus
+  `SimulationManager.flush_cleanup_queue()` after local scene/object references
+  unwind; the manager's deferred teardown releases backend views before Spawn
+  closes their native parents.

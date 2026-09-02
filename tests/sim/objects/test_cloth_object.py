@@ -145,6 +145,30 @@ class BaseSoftObjectTest:
         assert triangles.ndim == 3 and triangles.shape[0] == 1
         assert int(triangles.max()) < vertices.shape[1]
 
+    def test_set_local_pose_updates_selected_particle_batch(self):
+        """Setting one instance pose writes only its packed simulation nodes."""
+        before = self.cloth.get_current_vertex_position()
+        translation = torch.tensor([0.5, 0.0, 0.0], device=self.cloth.device)
+        pose = torch.eye(
+            4,
+            dtype=torch.float32,
+            device=self.cloth.device,
+        ).unsqueeze(0)
+        pose[:, :3, 3] = (
+            torch.as_tensor(
+                self.cloth.cfg.init_pos,
+                dtype=torch.float32,
+                device=self.cloth.device,
+            )
+            + translation
+        )
+
+        self.cloth.set_local_pose(pose, env_ids=[0])
+        after = self.cloth.get_current_vertex_position()
+
+        torch.testing.assert_close(after[0], before[0] + translation)
+        torch.testing.assert_close(after[1:], before[1:])
+
     def test_unified_deformable_contract(self):
         self.sim.update(step=5)
         assert isinstance(self.cloth, DeformableObject)
@@ -162,14 +186,7 @@ class BaseSoftObjectTest:
         assert velocities.shape == positions.shape
         assert state.shape == (*positions.shape[:-1], 6)
         assert default_state.shape == state.shape
-        native_velocities = torch.stack(
-            [
-                body.get_velocity_buffer()[:, :3].clone()
-                for body in self.cloth.body_data.cloth_bodies
-            ]
-        )
-        assert torch.count_nonzero(native_velocities) > 0
-        torch.testing.assert_close(velocities, native_velocities)
+        assert torch.count_nonzero(velocities) > 0
         torch.testing.assert_close(
             self.cloth.get_surface_vertices(),
             self.cloth.get_current_vertex_position(),

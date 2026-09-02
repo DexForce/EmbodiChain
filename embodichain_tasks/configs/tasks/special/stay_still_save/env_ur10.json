@@ -1,5 +1,6 @@
 {
     "id": "StayStillSave-v1",
+    "physics": "default",
     "max_episodes": 1,
     "env": {
         "dataset": {

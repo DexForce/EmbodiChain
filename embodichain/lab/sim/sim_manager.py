@@ -103,7 +103,7 @@ from embodichain.lab.sim.cfg import (
     RobotPresetCfg,
     RigidConstraintCfg,
 )
-from embodichain.lab.sim.physics import NewtonPhysicsBackend, make_physics_backend
+from embodichain.lab.sim.physics import make_physics_backend
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     configure_articulation_desc,
@@ -129,7 +129,7 @@ from embodichain.utils.math import (
 
 if TYPE_CHECKING:
     from dexsim.engine import PhysicsScene
-    from dexsim.spawn import SpawnResult
+    from dexsim.scene import Scene
 
     from embodichain.lab.visualization import (
         RuntimeHealth,
@@ -219,7 +219,7 @@ class SimulationManagerCfg:
         device: str | torch.device | None = None,
         physics_cfg: PhysicsBackendCfg | None = None,
         sim_device: str | torch.device | None = None,
-        physics_config: DefaultPhysicsCfg | None = None,
+        physics_config: PhysicsBackendCfg | None = None,
         gpu_memory_config: GPUMemoryCfg | None = None,
         profiler: ProfilerCfg | None = None,
         visualization: VisualizationCfg | None = None,
@@ -259,19 +259,13 @@ class SimulationManagerCfg:
         )
         if physics_dt is not None:
             self.physics_cfg.physics_dt = physics_dt
+        # ``None`` is an omission sentinel, not a request for the generic
+        # PhysicsBackendCfg default.  Leave the concrete config untouched so
+        # NewtonPhysicsCfg's CUDA default remains authoritative.  A non-None
+        # value is an intentional runtime override and is applied uniformly.
         runtime_device = device if device is not None else sim_device
         if runtime_device is not None:
-            # Env tensors may use CPU while Newton/Warp sim stays on CUDA for GPU render sync.
-            if isinstance(self.physics_cfg, NewtonPhysicsCfg):
-                torch_device = (
-                    torch.device(runtime_device)
-                    if isinstance(runtime_device, str)
-                    else runtime_device
-                )
-                if torch_device.type != "cpu":
-                    self.physics_cfg.device = runtime_device
-            else:
-                self.physics_cfg.device = runtime_device
+            self.physics_cfg.device = runtime_device
 
         self.__post_init__()
 
@@ -315,7 +309,12 @@ class SimulationManagerCfg:
     """The distance between each arena when building multiple arenas."""
 
     physics_cfg: PhysicsBackendCfg = field(default_factory=DefaultPhysicsCfg)
-    """Physics backend configuration (type selects default vs Newton backend)."""
+    """Physics backend configuration (type selects default vs Newton backend).
+
+    The concrete config owns the default device: Default uses ``cpu`` and
+    Newton uses ``cuda:0``.  The constructor's optional ``device``/``sim_device``
+    arguments are applied only when explicitly provided.
+    """
 
     profiler: ProfilerCfg | None = None
     """Optional simulation profiler. ``None`` disables profiling.
@@ -693,8 +692,8 @@ class SimulationManager:
         return self.sim_config.num_envs
 
     @property
-    def spawn_result(self) -> "SpawnResult | None":
-        """Return the current SpawnResult, or ``None`` before first prepare."""
+    def spawn_result(self) -> "Scene | None":
+        """Return the finalized Scene, or ``None`` before first prepare."""
         spawn_scene = getattr(self, "_spawn_scene", None)
         if spawn_scene is None or not spawn_scene.builder.is_finalized:
             return None
@@ -722,10 +721,8 @@ class SimulationManager:
 
     @property
     def _active_newton_solver_type(self) -> str | None:
-        """Return the resolved Newton solver without widening the base contract."""
-        if isinstance(self.physics, NewtonPhysicsBackend):
-            return self.physics.solver_type
-        return None
+        """Return the active backend's resolved solver type, when available."""
+        return self.physics.solver_type
 
     @property
     def newton_manager(self):
@@ -735,19 +732,18 @@ class SimulationManager:
         an actionable error because Spawn owns its World-level runtime and no
         independent NewtonManager exists.
         """
-        if not self.is_newton_backend:
-            logger.log_warning("Newton backend is not active.")
-            return None
         return self.physics.newton_manager
 
     @property
     def differentiable_runtime(self):
         """Return the differentiable facade over the Spawn-owned Newton runtime."""
-        if not self.is_newton_backend:
+        runtime = self.physics.differentiable_runtime
+        if runtime is None:
             raise RuntimeError(
-                "differentiable_runtime requires the Newton physics backend."
+                f"The {self.physics.name} physics backend does not expose a "
+                "differentiable runtime."
             )
-        return self.physics.differentiable_runtime
+        return runtime
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -1049,16 +1045,15 @@ class SimulationManager:
             self._attach_camera_parent(sensor)
             self._pending_sensor_attachments.pop(0)
 
-    def _prepare_spawn_runtime(self, result: dexsim.spawn.SpawnResult) -> None:
+    def _prepare_spawn_runtime(self, result: Scene) -> None:
         """Prepare backend runtime buffers for one Spawn topology revision."""
         topology_revision = int(result.topology_revision)
         if getattr(self, "_prepared_spawn_topology_revision", -1) == topology_revision:
             return
-        if self.is_default_backend and self.device.type == "cuda":
-            self._world.init_gpu_physics()
+        self.physics.prepare_spawn_runtime(result)
         self._prepared_spawn_topology_revision = topology_revision
 
-    def _sync_spawn_render_state(self, result: dexsim.spawn.SpawnResult) -> None:
+    def _sync_spawn_render_state(self, result: Scene) -> None:
         """Publish newly bound state once for each Spawn topology revision."""
         topology_revision = int(result.topology_revision)
         if (
@@ -1113,18 +1108,14 @@ class SimulationManager:
     def create_differentiable_stepper(self):
         """Create a single-step differentiable physics primitive (Newton-only).
 
-        Requires the Newton backend with ``requires_grad=True`` and
-        ``solver_type="semi_implicit"``. Delegates to
-        :meth:`dexsim.engine.newton_physics.NewtonManager.create_differentiable_stepper`.
+        Requires a backend differentiable runtime configured with gradients.
+        Newton currently provides that runtime for its explicit
+        ``semi_implicit`` solver route.
 
         Raises:
-            RuntimeError: If the active backend is not Newton or if the
-                Newton manager is not ready / not in grad mode.
+            RuntimeError: If the active backend has no differentiable runtime,
+                or that runtime is not ready for gradient execution.
         """
-        if not self.is_newton_backend:
-            logger.log_error(
-                "create_differentiable_stepper requires the Newton backend."
-            )
         return self.differentiable_runtime.create_differentiable_stepper()
 
     def create_gradient_rollout(
@@ -1135,24 +1126,21 @@ class SimulationManager:
     ):
         """Create a gradient rollout buffer (Newton-only).
 
-        Delegates to
-        :meth:`dexsim.engine.newton_physics.NewtonManager.create_gradient_rollout`.
+        Delegates to the active backend's differentiable runtime.
 
         Args:
             record_steps: Number of record points to capture in the rollout
                 buffer.
             substeps_per_record: Newton substeps between successive record
-                points. Defaults to the Newton manager's configured
+                points. Defaults to the differentiable runtime's configured
                 ``num_substeps``.
             record_dt: Time interval between successive record points.
-                Defaults to the Newton manager's configured ``dt``.
+                Defaults to the differentiable runtime's configured ``dt``.
 
         Raises:
-            RuntimeError: If the active backend is not Newton or if the
-                Newton manager is not ready / not in grad mode.
+            RuntimeError: If the active backend has no differentiable runtime,
+                or that runtime is not ready for gradient execution.
         """
-        if not self.is_newton_backend:
-            logger.log_error("create_gradient_rollout requires the Newton backend.")
         return self.differentiable_runtime.create_gradient_rollout(
             record_steps=record_steps,
             substeps_per_record=substeps_per_record,
@@ -1759,9 +1747,7 @@ class SimulationManager:
                 )
                 facade = RigidObject(
                     cfg=cfg,
-                    entities=None,
                     device=self.device,
-                    declared_num_instances=self.sim_config.num_envs,
                 )
 
                 self._spawn_scene.track(
@@ -1798,9 +1784,7 @@ class SimulationManager:
                 cfg.build_pk_chain = False
                 facade = facade_type(
                     cfg=cfg,
-                    entities=None,
                     device=self.device,
-                    declared_num_instances=self.sim_config.num_envs,
                 )
 
                 self._spawn_scene.track(
@@ -1852,9 +1836,7 @@ class SimulationManager:
 
         rigid_obj = RigidObject(
             cfg=cfg,
-            entities=None,
             device=self.device,
-            declared_num_instances=self.sim_config.num_envs,
         )
 
         was_materialized = self.spawn_result is not None
@@ -1945,9 +1927,7 @@ class SimulationManager:
         self._spawn_scene.builder.materials.update(materials)
         deformable = object_cls(
             cfg,
-            entities=None,
             device=self.device,
-            declared_num_instances=self.sim_config.num_envs,
         )
         self._spawn_scene.declare(
             spawn_kind,
@@ -2087,10 +2067,9 @@ class SimulationManager:
         Returns:
             The created constraint batch.
         """
-        if hasattr(self, "physics") and not self.is_default_backend:
+        if hasattr(self, "physics") and not self.physics.supports_rigid_constraints:
             raise NotImplementedError(
-                "Rigid constraints are currently supported only by the Default "
-                "backend."
+                f"The {self.physics.name} backend does not support rigid constraints."
             )
         if cfg.constraint_type != "fixed":
             logger.log_error(
@@ -2325,9 +2304,7 @@ class SimulationManager:
 
         group = RigidObjectGroup(
             cfg,
-            entities=None,
             device=self.device,
-            declared_num_instances=self.sim_config.num_envs,
         )
 
         was_materialized = self.spawn_result is not None
@@ -2535,9 +2512,7 @@ class SimulationManager:
 
         facade = facade_type(
             cfg=cfg,
-            entities=None,
             device=self.device,
-            declared_num_instances=self.sim_config.num_envs,
         )
 
         self._spawn_scene.declare(
@@ -2860,10 +2835,10 @@ class SimulationManager:
                 f"Unsupported sensor type {sensor_type!r}. Supported types: "
                 f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
             )
-        if sensor_type == "ContactSensor" and self.is_newton_backend:
+        if sensor_type == "ContactSensor" and not self.physics.supports_contact_sensor:
             raise NotImplementedError(
-                "ContactSensor currently requires the Default backend PhysicsScene. "
-                "Newton needs a public backend-neutral contact query API in DexSim."
+                f"ContactSensor is not supported by the {self.physics.name} backend; "
+                "it requires a backend-neutral contact query implementation."
             )
 
         if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
@@ -3875,7 +3850,7 @@ class SimulationManager:
 
         import sys, gc
 
-        # Release backend-owned views before SpawnResult closes the native
+        # Release backend-owned views before Scene closes the native
         # resources that back them. Newton also synchronizes its device here.
         self.physics.prepare_for_teardown()
         # Run wrapper destructors while their World is still alive. The later
@@ -3883,7 +3858,7 @@ class SimulationManager:
         gc.collect()
 
         # Render-only cameras may be attached to Spawn articulation link
-        # nodes. Remove their Arena views before closing SpawnResult, which
+        # nodes. Remove their Arena views before closing Scene, which
         # releases those parent nodes, and before World.quit releases their
         # CameraGroups.
         for sensor in list(getattr(self, "_sensors", {}).values()):
@@ -3897,7 +3872,7 @@ class SimulationManager:
 
         if self._spawn_scene is not None:
             # Release result-scoped batches/facades before closing the
-            # SpawnResult and, finally, the World that owns native resources.
+            # Scene and, finally, the World that owns native resources.
             for registry_name in (
                 "_rigid_objects",
                 "_rigid_object_groups",

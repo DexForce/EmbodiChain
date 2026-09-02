@@ -46,7 +46,7 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     HandOverOptions,
 )
-from embodichain.lab.sim.cfg import RobotCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RobotCfg
 from embodichain.lab.task_program.semantics import (
     BinaryEffectClause,
     BinaryEffectEvidenceQuery,
@@ -166,10 +166,29 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
     assert embodiment["embodiment_id"] == _PROFILE_ID
     assert "object_ids" not in evidence
     assert "task_program" not in environment
+    assert environment["physics"] == "default"
+    assert environment["physics_config"] == {"enable_ccd": True}
     assert environment["env"]["extensions"] == {}
     settle = environment["env"]["events"]["settle_can_on_reset"]
     assert settle["func"] == "wait_for_dynamic_objects_to_settle"
     assert settle["params"]["entity_cfgs"] == [{"uid": _CAN_SIMULATION_UID}]
+
+
+def test_hand_over_gym_config_uses_declared_default_backend() -> None:
+    """The reusable physical environment owns its backend selection."""
+    cfg = config_to_cfg(_gym_payload(), source_path=_gym_config_path())
+
+    assert isinstance(cfg.sim_cfg.physics_config, DefaultPhysicsCfg)
+    assert cfg.sim_cfg.physics_config.enable_ccd is True
+
+
+def test_hand_over_gym_config_rejects_newton_override() -> None:
+    """The Default CCD environment cannot be relabeled as Newton."""
+    payload = _gym_payload()
+    payload["physics"] = "newton"
+
+    with pytest.raises(ValueError, match="owns physics and physics_config"):
+        config_to_cfg(payload, source_path=_gym_config_path())
 
 
 def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:

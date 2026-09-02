@@ -42,6 +42,16 @@ BatchEntity
 | StereoCamera | `StereoCameraCfg` | `"StereoCamera"` | color/depth/mask/normal/position (left + right), disparity | Extends Camera; adds right camera with baseline transform |
 | ContactSensor | `ContactSensorCfg` | `"ContactSensor"` | contact data tensors | Collision detection between rigid bodies and articulation links; uses Warp kernels |
 
+### Backend support
+
+Camera and stereo-camera creation are backend-neutral render features and are
+supported with both Default and Newton physics. `ContactSensor` currently
+depends on the Default backend's native contact-query path. The manager checks
+`PhysicsBackend.supports_contact_sensor` and rejects it on Newton before sensor
+construction with `NotImplementedError`; do not infer support merely because
+Newton itself computes contacts. A Newton contact sensor requires an explicit
+backend-neutral query adapter and parity tests before enabling that capability.
+
 ## Sensor Configuration
 
 ### SensorCfg.OffsetCfg
@@ -142,4 +152,5 @@ Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. 
 - **Parent frame not found** — `OffsetCfg.parent` must match a link name in a Spawn-bound robot or articulation. Missing or ambiguous names raise during immediate attachment or `SimulationManager.prepare()`.
 - **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
 - **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
+- **Contact sensor rejected on Newton** — this is an intentional capability boundary, not a sensor-type typo; use the Default backend or implement and validate a Newton contact-query adapter.
 - **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.

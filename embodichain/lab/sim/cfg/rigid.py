@@ -53,6 +53,9 @@ class MassPropertiesCfg:
     """Uniform density used to derive mass properties from collision shapes [kg/m^3].
 
     The value must be positive and is ignored when :attr:`mass` is positive.
+    For a source-backed body with valid authored inertia, set
+    :attr:`recompute_inertia` to ``True`` when supplying density: deriving
+    density-based properties necessarily replaces the source tensor.
     """
 
     inertia: Sequence[float] | np.ndarray | None = None
@@ -72,7 +75,9 @@ class MassPropertiesCfg:
     ``True`` discards source inertia so the backend recomputes it from the
     collision geometry and effective mass or density. ``False`` preserves the
     source inertia. ``None`` inherits an outer rigid-body overlay and otherwise
-    behaves like ``False``. Explicit :attr:`inertia` cannot be combined with
+    behaves like ``False``. An invalid/all-zero source tensor is never
+    preserved: when collision geometry exists, both backends use it as the
+    common fallback. Explicit :attr:`inertia` cannot be combined with
     recomputation.
     """
 

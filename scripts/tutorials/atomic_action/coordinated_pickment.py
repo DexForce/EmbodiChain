@@ -175,7 +175,6 @@ def parse_arguments() -> argparse.Namespace:
             "headless_play",
             "visualize_axes",
         ),
-        default_device="cpu",
         default_renderer="hybrid",
     )
     parser.add_argument(

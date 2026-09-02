@@ -85,3 +85,5 @@ def test_robot_entrypoint_selects_newton_backend(
         sys.path[0] = original_path_entry
 
     assert isinstance(captured["physics_cfg"], NewtonPhysicsCfg)
+    assert captured["device"] is None
+    assert captured["physics_cfg"].device == "cuda:0"

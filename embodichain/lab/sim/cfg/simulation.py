@@ -180,7 +180,13 @@ class PhysicsBackendCfg:
     """
 
     device: str | torch.device = "cpu"
-    """Compute device used to build and step the selected physics backend."""
+    """Compute device used to build and step the selected physics backend.
+
+    Concrete backend configurations may redeclare this field when their native
+    runtime has a different default.  In particular,
+    :class:`NewtonPhysicsCfg` intentionally shadows this CPU default with
+    ``"cuda:0"``.  Callers can still provide an explicit device override.
+    """
 
     gravity: Sequence[float] | np.ndarray = field(
         default_factory=lambda: np.array([0.0, 0.0, -9.81])
@@ -319,7 +325,12 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     """
 
     device: str | torch.device = "cuda:0"
-    """Warp device used to build and step Newton, for example ``"cuda:0"``."""
+    """Warp device used to build and step Newton, for example ``"cuda:0"``.
+
+    This redeclaration intentionally takes precedence over
+    :class:`PhysicsBackendCfg.device`, so ``NewtonPhysicsCfg()`` always starts
+    on CUDA unless the caller explicitly supplies another device.
+    """
 
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step.
@@ -533,7 +544,7 @@ def _newton_solver_cfg_to_dexsim(
 
 def physics_cfg_for_backend(
     backend: Literal["default", "newton"],
-) -> PhysicsBackendCfg:
+) -> DefaultPhysicsCfg | NewtonPhysicsCfg:
     """Return a default physics configuration instance for the given backend."""
     if backend == "newton":
         return NewtonPhysicsCfg()

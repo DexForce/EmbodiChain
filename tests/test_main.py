@@ -243,7 +243,7 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
         encoding="utf-8",
     )
     (expert_task / "env.yaml").write_text(
-        "environment_id: pick_place\nsimulation: {}\nenv: {}\n",
+        "environment_id: pick_place\nphysics: default\nsimulation: {}\nenv: {}\n",
         encoding="utf-8",
     )
     (expert_task / "notes.yaml").write_text(

@@ -13,16 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""EmbodiChain tensor-layout adapters for :mod:`dexsim.spawn` batches.
+"""EmbodiChain views over backend-neutral :mod:`dexsim.scene` batches.
 
-The classes in this module deliberately know nothing about Default backend scenes or
-Newton runtime objects. Backend selection, handle rebinding, and topology
-revision tracking remain owned by DexSim's ``SpawnResult`` and batch classes.
-EmbodiChain only adapts logical row selections and its public pose convention
-``(x, y, z, qx, qy, qz, qw)``.
+Backend selection, handle rebinding, and topology revision tracking remain
+owned by DexSim's ``Scene`` and batch classes. EmbodiChain adapts logical row
+selections and its public pose convention ``(x, y, z, qx, qy, qz, qw)``;
+backend-specific native compatibility work is delegated to narrow hooks.
 
-Row and DOF selection is delegated to DexSim's public batches. This adapter is
-therefore limited to EmbodiChain naming and tensor-layout conversion.
+Row and DOF selection is delegated to DexSim's public batches.
 """
 
 from __future__ import annotations
@@ -35,23 +33,17 @@ import torch
 from .base import ArticulationViewBase, RigidBodyViewBase
 
 if TYPE_CHECKING:
-    from dexsim.spawn import ArticulationBatch, RigidBodyBatch, SpawnResult
-
-__all__ = ["SpawnArticulationView", "SpawnRigidBodyView"]
-
-_NEWTON_ROOT_POSE_ATOL = 1.0e-6
-
-
-def _create_newton_standalone_state_sync(
-    model: Any,
-    body_ids: Sequence[int],
-) -> Any:
-    """Create DexSim's reusable FREE-joint synchronization selection."""
-    from dexsim.engine.newton_physics.rigid_body.state_sync import (
-        StandaloneRigidStateSync,
+    from dexsim.scene import (
+        ArticulationBatch,
+        RigidBodyBatch,
+        Scene,
+        SpawnedArticulation,
+        SpawnedRigidBody,
     )
 
-    return StandaloneRigidStateSync.from_body_ids(model, body_ids)
+__all__ = ["SceneArticulationView", "SceneRigidBodyView"]
+
+_NEWTON_ROOT_POSE_ATOL = 1.0e-6
 
 
 def _checked_batch_call(
@@ -61,11 +53,11 @@ def _checked_batch_call(
     *args: Any,
     **kwargs: Any,
 ) -> Any:
-    """Call one Spawn batch operation and reject native failure statuses."""
+    """Call one Scene batch operation and reject native failure statuses."""
     status = getattr(batch, method_name)(*args, **kwargs)
     if isinstance(status, Integral) and status < 0:
         raise RuntimeError(
-            f"DexSim Spawn batch operation {method_name!r} failed with "
+            f"DexSim Scene batch operation {method_name!r} failed with "
             f"status {status}."
         )
     return status
@@ -84,8 +76,8 @@ def _rows(
     return result
 
 
-def _spawn_pose(data: torch.Tensor) -> torch.Tensor:
-    """Convert rigid-body ``xyz+xyzw`` poses to Spawn ``xyzw+xyz``."""
+def _batch_pose(data: torch.Tensor) -> torch.Tensor:
+    """Convert rigid-body ``xyz+xyzw`` poses to batch ``xyzw+xyz``."""
     result = torch.empty_like(data, dtype=torch.float32)
     result[..., 0:4] = data[..., 3:7]
     result[..., 4:7] = data[..., 0:3]
@@ -93,28 +85,18 @@ def _spawn_pose(data: torch.Tensor) -> torch.Tensor:
 
 
 def _embodichain_pose(data: torch.Tensor) -> torch.Tensor:
-    """Convert Spawn ``xyzw+xyz`` poses to rigid-body ``xyz+xyzw``."""
+    """Convert batch ``xyzw+xyz`` poses to rigid-body ``xyz+xyzw``."""
     result = torch.empty_like(data, dtype=torch.float32)
     result[..., 0:3] = data[..., 4:7]
     result[..., 3:7] = data[..., 0:4]
     return result
 
 
-def _spawn_articulation_pose(data: torch.Tensor) -> torch.Tensor:
-    """Convert articulation ``xyz+xyzw`` poses to Spawn ``xyzw+xyz``."""
-    return _spawn_pose(data)
-
-
-def _embodichain_articulation_pose(data: torch.Tensor) -> torch.Tensor:
-    """Convert Spawn ``xyzw+xyz`` poses to articulation ``xyz+xyzw``."""
-    return _embodichain_pose(data)
-
-
-class _SpawnSelectionAdapter:
-    """Shared row-selection support for fixed-size Spawn batches."""
+class _SceneBatchSelectionAdapter:
+    """Shared row-selection support for fixed-size Scene batches."""
 
     def __init__(self, batch: Any, device: torch.device, row_count: int) -> None:
-        self._batch = batch
+        self.batch = batch
         self.device = device
         self._row_count = row_count
 
@@ -125,15 +107,25 @@ class _SpawnSelectionAdapter:
         selection: Sequence[int] | torch.Tensor | None,
         tail_shape: tuple[int, ...],
     ) -> torch.Tensor:
+        if selection is None:
+            expected_shape = (self._row_count, *tail_shape)
+            if tuple(out.shape) != expected_shape:
+                raise ValueError(
+                    f"Expected batch output shape {expected_shape}, got "
+                    f"{tuple(out.shape)}."
+                )
+            _checked_batch_call(self.batch, method_name, out)
+            return out
+
         rows = _rows(selection, self._row_count, self.device)
-        selected = torch.empty(
-            (len(rows), *tail_shape),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        expected_shape = (len(rows), *tail_shape)
+        if tuple(out.shape) != expected_shape:
+            raise ValueError(
+                f"Expected selected output shape {expected_shape}, got "
+                f"{tuple(out.shape)}."
+            )
         if len(rows):
-            _checked_batch_call(self._batch.select(rows), method_name, selected)
-        out.copy_(selected.to(device=out.device, dtype=out.dtype))
+            _checked_batch_call(self.batch.select(rows), method_name, out)
         return out
 
     def _apply_rows(
@@ -144,7 +136,6 @@ class _SpawnSelectionAdapter:
         tail_shape: tuple[int, ...],
     ) -> None:
         rows = _rows(selection, self._row_count, self.device)
-        values = values.to(device=self.device, dtype=torch.float32)
         expected_shape = (len(rows), *tail_shape)
         if tuple(values.shape) != expected_shape:
             raise ValueError(
@@ -152,21 +143,34 @@ class _SpawnSelectionAdapter:
                 f"{tuple(values.shape)}."
             )
         if len(rows):
-            _checked_batch_call(self._batch.select(rows), method_name, values)
+            _checked_batch_call(self.batch.select(rows), method_name, values)
 
 
-class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
+class SceneRigidBodyView(_SceneBatchSelectionAdapter, RigidBodyViewBase):
     """Backend-neutral rigid-body view backed by ``RigidBodyBatch``."""
+
+    @classmethod
+    def from_entities(
+        cls,
+        scene: Scene,
+        entities: Sequence[SpawnedRigidBody],
+        device: torch.device,
+    ) -> SceneRigidBodyView:
+        """Create a view from rigid-body handles owned by ``scene``."""
+        return cls(
+            scene,
+            scene.create_rigid_body_batch(list(entities)),
+            device,
+        )
 
     def __init__(
         self,
-        result: SpawnResult,
+        scene: Scene,
         batch: RigidBodyBatch,
         device: torch.device,
     ) -> None:
         super().__init__(batch, device, len(batch))
-        self.result = result
-        self.batch = batch
+        self.scene = scene
         self._body_ids_tensor = torch.arange(
             len(batch), dtype=torch.int32, device=device
         )
@@ -178,7 +182,7 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
 
     @property
     def is_newton_backend(self) -> bool:
-        return self.result.backend == "newton"
+        return self.scene.backend == "newton"
 
     @property
     def body_ids(self) -> list[int]:
@@ -194,14 +198,16 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
     def fetch_pose(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
-        spawn = torch.empty((len(data), 7), dtype=torch.float32, device=self.device)
-        self._fetch_rows("fetch_pose", spawn, body_ids, (7,))
-        data.copy_(_embodichain_pose(spawn).to(data.device, data.dtype))
+        batch_pose = torch.empty(
+            (len(data), 7), dtype=torch.float32, device=self.device
+        )
+        self._fetch_rows("fetch_pose", batch_pose, body_ids, (7,))
+        data.copy_(_embodichain_pose(batch_pose).to(data.device, data.dtype))
 
     def apply_pose(self, pose: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_rows(
             "apply_pose",
-            _spawn_pose(pose.to(self.device, torch.float32)),
+            _batch_pose(pose.to(self.device, torch.float32)),
             body_ids,
             (7,),
         )
@@ -216,41 +222,27 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
         rigid bodies from their reduced FREE-joint state. Cache one selection
         for this stable batch and project both state buffers after each write.
         """
-        topology_revision = int(self.result.topology_revision)
-        cached = self._newton_state_sync
-        if cached is None or cached[0] != topology_revision:
-            # Accessing ``_binding`` refreshes a stale stable batch. DexSim
-            # currently exposes neither the Newton runtime nor this required
-            # synchronization through the public Batch API.
-            binding = self.batch._binding
-            runtime = getattr(binding, "_runtime", None)
-            indices = getattr(binding, "_indices", None)
-            if runtime is None or indices is None:
-                raise RuntimeError(
-                    "Newton rigid-body batch has no finalized runtime selection."
-                )
-            selected_body_ids = indices.detach().cpu().tolist()
-            state_sync = _create_newton_standalone_state_sync(
-                runtime.model,
-                selected_body_ids,
-            )
-            cached = (topology_revision, runtime, state_sync)
-            self._newton_state_sync = cached
+        from .newton import _synchronize_standalone_rigid_body_state
 
-        _, runtime, state_sync = cached
-        state_sync.synchronize((runtime.current_state, runtime.other_state))
+        self._newton_state_sync = _synchronize_standalone_rigid_body_state(
+            self.scene,
+            self.batch,
+            self._newton_state_sync,
+        )
 
     def fetch_com_local_pose(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
-        spawn = torch.empty((len(data), 7), dtype=torch.float32, device=self.device)
-        self._fetch_rows("fetch_com_local_pose", spawn, body_ids, (7,))
-        data.copy_(_embodichain_pose(spawn).to(data.device, data.dtype))
+        batch_pose = torch.empty(
+            (len(data), 7), dtype=torch.float32, device=self.device
+        )
+        self._fetch_rows("fetch_com_local_pose", batch_pose, body_ids, (7,))
+        data.copy_(_embodichain_pose(batch_pose).to(data.device, data.dtype))
 
     def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_rows(
             "apply_com_local_pose",
-            _spawn_pose(data.to(self.device, torch.float32)),
+            _batch_pose(data.to(self.device, torch.float32)),
             body_ids,
             (7,),
         )
@@ -363,41 +355,17 @@ class SpawnRigidBodyView(_SpawnSelectionAdapter, RigidBodyViewBase):
         data: torch.Tensor,
         body_ids: torch.Tensor | None = None,
     ) -> None:
-        rows = _rows(body_ids, self._row_count, self.device)
-        selected = torch.empty(
-            (len(rows), 4),
-            dtype=data.dtype,
-            device=self.device,
-        )
-        if len(rows):
-            _checked_batch_call(
-                self.batch.select(rows),
-                "fetch_collision_filter",
-                selected,
-            )
-        data.copy_(selected.to(device=data.device, dtype=data.dtype))
+        self._fetch_rows("fetch_collision_filter", data, body_ids, (4,))
 
     def apply_collision_filter(
         self,
         data: torch.Tensor,
         body_ids: torch.Tensor,
     ) -> None:
-        rows = _rows(body_ids, self._row_count, self.device)
-        expected_shape = (len(rows), 4)
-        if tuple(data.shape) != expected_shape:
-            raise ValueError(
-                f"Expected selected data shape {expected_shape}, got "
-                f"{tuple(data.shape)}."
-            )
-        if len(rows):
-            _checked_batch_call(
-                self.batch.select(rows),
-                "apply_collision_filter",
-                data,
-            )
+        self._apply_rows("apply_collision_filter", data, body_ids, (4,))
 
 
-class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
+class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
     """Backend-neutral articulation state view backed by ``ArticulationBatch``.
 
     Joint selections currently require one scalar DOF per selected joint. The
@@ -406,15 +374,28 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
     kept as an explicit boundary rather than guessed here.
     """
 
+    @classmethod
+    def from_entities(
+        cls,
+        scene: Scene,
+        entities: Sequence[SpawnedArticulation],
+        device: torch.device,
+    ) -> SceneArticulationView:
+        """Create a view from articulation handles owned by ``scene``."""
+        return cls(
+            scene,
+            scene.create_articulation_batch(list(entities)),
+            device,
+        )
+
     def __init__(
         self,
-        result: SpawnResult,
+        scene: Scene,
         batch: ArticulationBatch,
         device: torch.device,
     ) -> None:
         super().__init__(batch, device, len(batch))
-        self.result = result
-        self.batch = batch
+        self.scene = scene
         self._validate_homogeneous_layout()
         self._articulation_ids = torch.arange(
             len(batch), dtype=torch.int32, device=device
@@ -428,29 +409,29 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
         link_names = tuple(self.batch.link_names_per_articulation)
         if dof_counts and len(set(dof_counts)) != 1:
             raise ValueError(
-                "One EmbodiChain Articulation cannot bind heterogeneous Spawn "
+                "One EmbodiChain Articulation cannot bind heterogeneous Scene "
                 f"DOF counts: {dof_counts}."
             )
         if link_counts and len(set(link_counts)) != 1:
             raise ValueError(
-                "One EmbodiChain Articulation cannot bind heterogeneous Spawn "
+                "One EmbodiChain Articulation cannot bind heterogeneous Scene "
                 f"link counts: {link_counts}."
             )
         if joint_names and any(names != joint_names[0] for names in joint_names[1:]):
             raise ValueError(
                 "One EmbodiChain Articulation requires identical active-joint "
-                "ordering in every Spawn row."
+                "ordering in every Scene row."
             )
         if link_names and any(names != link_names[0] for names in link_names[1:]):
             raise ValueError(
                 "One EmbodiChain Articulation requires identical link ordering "
-                "in every Spawn row."
+                "in every Scene row."
             )
         layouts = tuple(self.batch.joint_layouts_per_articulation)
         if layouts and any(layout.dof_count != 1 for layout in layouts[0]):
             raise NotImplementedError(
                 "EmbodiChain's Articulation API currently indexes joints and "
-                "scalar DOFs interchangeably. Spawn multi-DOF joints require "
+                "scalar DOFs interchangeably. Scene multi-DOF joints require "
                 "an explicit DOF-selection API before they can be bound safely."
             )
 
@@ -482,7 +463,7 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
 
     @property
     def is_newton_backend(self) -> bool:
-        return self.result.backend == "newton"
+        return self.scene.backend == "newton"
 
     @property
     def articulation_ids_tensor(self) -> torch.Tensor:
@@ -494,9 +475,9 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
         return self._articulation_ids[env_ids]
 
     def fetch_root_pose(self, data: torch.Tensor) -> torch.Tensor:
-        spawn = torch.empty_like(data, dtype=torch.float32, device=self.device)
-        _checked_batch_call(self.batch, "fetch_root_pose", spawn)
-        data.copy_(_embodichain_articulation_pose(spawn).to(data.device, data.dtype))
+        batch_pose = torch.empty_like(data, dtype=torch.float32, device=self.device)
+        _checked_batch_call(self.batch, "fetch_root_pose", batch_pose)
+        data.copy_(_embodichain_pose(batch_pose).to(data.device, data.dtype))
         return data
 
     def fetch_root_linear_velocity(self, data: torch.Tensor) -> torch.Tensor:
@@ -532,9 +513,9 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
         return data
 
     def fetch_link_pose(self, data: torch.Tensor) -> torch.Tensor:
-        spawn = torch.empty_like(data, dtype=torch.float32, device=self.device)
-        _checked_batch_call(self.batch, "fetch_link_pose", spawn)
-        data.copy_(_embodichain_articulation_pose(spawn).to(data.device, data.dtype))
+        batch_pose = torch.empty_like(data, dtype=torch.float32, device=self.device)
+        _checked_batch_call(self.batch, "fetch_link_pose", batch_pose)
+        data.copy_(_embodichain_pose(batch_pose).to(data.device, data.dtype))
         return data
 
     def fetch_link_velocity(
@@ -553,9 +534,15 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
         self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
     ) -> None:
         rows = _rows(env_ids, self._row_count, self.device)
-        spawn_pose = _spawn_articulation_pose(pose.to(self.device, torch.float32))
+        batch_pose = _batch_pose(pose.to(self.device, torch.float32))
+        expected_shape = (len(rows), 7)
+        if tuple(batch_pose.shape) != expected_shape:
+            raise ValueError(
+                f"Expected selected data shape {expected_shape}, got "
+                f"{tuple(batch_pose.shape)}."
+            )
         if self.is_newton_backend and len(rows):
-            current_pose = torch.empty_like(spawn_pose)
+            current_pose = torch.empty_like(batch_pose)
             self._fetch_rows(
                 "fetch_root_pose",
                 current_pose,
@@ -563,39 +550,39 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
                 (7,),
             )
             translation_matches = torch.all(
-                torch.abs(current_pose[:, 4:7] - spawn_pose[:, 4:7])
+                torch.abs(current_pose[:, 4:7] - batch_pose[:, 4:7])
                 <= _NEWTON_ROOT_POSE_ATOL,
                 dim=1,
             )
             quaternion_delta = torch.minimum(
-                torch.amax(torch.abs(current_pose[:, 0:4] - spawn_pose[:, 0:4]), dim=1),
-                torch.amax(torch.abs(current_pose[:, 0:4] + spawn_pose[:, 0:4]), dim=1),
+                torch.amax(torch.abs(current_pose[:, 0:4] - batch_pose[:, 0:4]), dim=1),
+                torch.amax(torch.abs(current_pose[:, 0:4] + batch_pose[:, 0:4]), dim=1),
             )
             changed = ~(
                 translation_matches & (quaternion_delta <= _NEWTON_ROOT_POSE_ATOL)
             )
             rows = rows[changed]
-            spawn_pose = spawn_pose[changed]
+            batch_pose = batch_pose[changed]
 
         self._apply_rows(
             "apply_root_pose",
-            spawn_pose,
+            batch_pose,
             rows,
             (7,),
         )
 
     def _joint_columns(self, joint_ids: Sequence[int] | torch.Tensor) -> torch.Tensor:
-        ids = torch.as_tensor(joint_ids, dtype=torch.long, device=self.device)
         layouts = self.batch.joint_layouts_per_articulation
         if not layouts:
-            return ids
+            return _rows(joint_ids, self.dof, self.device)
         reference = layouts[0]
+        ids = _rows(joint_ids, len(reference), self.device)
         columns: list[int] = []
         for joint_id in ids.detach().cpu().tolist():
             layout = reference[joint_id]
             if layout.dof_count != 1:
                 raise NotImplementedError(
-                    "SpawnArticulationView needs DexSim DOF selection for "
+                    "SceneArticulationView needs DexSim DOF selection for "
                     f"multi-DOF joint {layout.name!r}."
                 )
             columns.append(layout.dof_start)
@@ -618,7 +605,7 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
                 f"Expected selected joint data shape {expected}, got "
                 f"{tuple(values.shape)}."
             )
-        if len(rows):
+        if len(rows) and len(columns):
             _checked_batch_call(
                 self.batch.select(rows),
                 apply_method,

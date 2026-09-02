@@ -800,6 +800,7 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     assert "task_program_runtime" not in payload
     assert environment["env"]["events"] == {}
     assert environment["env"]["dataset"] == {}
+    assert environment["physics"] == "default"
     assert "physics_config" not in environment
 
 

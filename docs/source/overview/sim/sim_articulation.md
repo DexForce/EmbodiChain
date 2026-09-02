@@ -58,6 +58,20 @@ art_cfg = ArticulationCfg(
 At runtime, use `articulation.set_link_physical_attr(...)` and `get_link_physical_attr(...)`
 for the same partial-override behavior.
 
+### Source mass properties
+
+For URDF-backed articulations, `MassPropertiesCfg.recompute_inertia` is the
+only switch that permits geometry-derived mass properties to replace the
+asset's authored inertia. It defaults to `False` (or `None`, which resolves to
+the same behavior), so an `overlay` that only configures joint drives or other
+unrelated attributes retains the source mass, inertia, and center of mass in
+both backends. Set it to `True` only when collision geometry should be used to
+derive a new tensor. A positive `mass` can be overridden while retaining the
+source tensor; `density` requires `recompute_inertia=True` when the source
+already provides a valid tensor. An all-zero or otherwise invalid source
+tensor is not preserved: when the link has collision geometry, both backends
+derive a fallback tensor from that geometry.
+
 ### Drive Configuration
 
 The `joint_drive_props` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.

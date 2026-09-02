@@ -91,7 +91,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
 
-    def sync_render_state(self, result: "dexsim.spawn.SpawnResult") -> None:
+    def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish Newton state through DexSim's render bridge without stepping."""
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
@@ -117,7 +117,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         backend = get_newton_backend(world)
         if backend is not None:
             # NewtonRenderSync retains native link-node wrappers. They must be
-            # released before SpawnResult.close() drops the owning skeletons;
+            # released before Scene.close() drops the owning skeletons;
             # otherwise pybind can destruct a child after its native parent.
             backend.render_sync.clear()
 
@@ -178,7 +178,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     @property
     def supports_rigid_object_group(self) -> bool:
-        # Groups are env-major views over the Spawn rigid-body batch, which
+        # Groups are env-major views over the Scene rigid-body batch, which
         # provides the same state and mass-property API on Newton.
         return True
 

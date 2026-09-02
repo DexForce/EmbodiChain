@@ -51,6 +51,8 @@ BACKEND_CAPABILITIES: dict[str, dict[str, bool]] = {
     "soft_bodies": {"default": True, "newton": False},
     "cloth": {"default": True, "newton": False},
     "rigid_object_group": {"default": True, "newton": True},
+    "rigid_constraints": {"default": True, "newton": False},
+    "contact_sensor": {"default": True, "newton": False},
     "can_disable_manual_update": {"default": True, "newton": False},
 }
 
@@ -69,6 +71,8 @@ CAPABILITY_TO_ADD_METHOD: dict[str, str | None] = {
     "soft_bodies": None,
     "cloth": None,
     "rigid_object_group": "add_rigid_object_group",
+    "rigid_constraints": None,
+    "contact_sensor": None,
     "can_disable_manual_update": None,
 }
 
@@ -103,6 +107,27 @@ def test_can_disable_manual_update_matches_matrix(backend_name: str) -> None:
     backend = _make_backend(backend_name)
     expected = BACKEND_CAPABILITIES["can_disable_manual_update"][backend_name]
     assert backend.can_disable_manual_update is expected
+
+
+def test_rigid_constraint_guard_uses_backend_capability() -> None:
+    """Rigid constraints fail at the capability boundary before world access."""
+    backend = _make_backend("newton")
+    sim = _make_sim_with_backend(backend)
+
+    with pytest.raises(NotImplementedError, match="rigid constraints"):
+        sim.create_rigid_constraint(cfg=SimpleNamespace())
+
+
+def test_contact_sensor_guard_uses_backend_capability() -> None:
+    """Contact sensors fail at the capability boundary before preparation."""
+    backend = _make_backend("newton")
+    sim = _make_sim_with_backend(backend)
+    sim._sensors = {}
+    sim.SUPPORTED_SENSOR_TYPES = {"ContactSensor": object()}
+    sensor_cfg = SimpleNamespace(sensor_type="ContactSensor", uid="contact")
+
+    with pytest.raises(NotImplementedError, match="ContactSensor"):
+        sim.add_sensor(sensor_cfg)
 
 
 def _make_sim_with_backend(backend: PhysicsBackend) -> SimulationManager:

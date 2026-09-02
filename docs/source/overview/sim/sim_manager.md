@@ -42,6 +42,7 @@ sim_config = SimulationManagerCfg(
 | `cpu_num` | `int` | `1` | The number of CPU threads to use for the simulation engine. |
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
+| `device` | `str` \| `torch.device` \| `None` | `None` | Optional explicit compute-device override. When omitted, the selected physics config keeps its backend default. |
 | `physics_cfg` | `DefaultPhysicsCfg` \| `NewtonPhysicsCfg` | `DefaultPhysicsCfg()` | Physics backend configuration (class selects default vs Newton). |
 | `profiler` | `ProfilerCfg` \| `None` | `None` | Optional hierarchical wall-time profiler for simulation updates. |
 | `visualization` | `VisualizationCfg` | `VisualizationCfg()` | Browser visualization, opt-in Gizmo commands, and Viser server settings. |
@@ -55,12 +56,36 @@ Backend-neutral nested property groups may additionally use `common`. DexSim
 is the runtime and Spawn SDK integration layer, not another selectable physics
 backend; SDK-native `Dexsim*Desc` names remain confined to that adapter boundary.
 
+The physics-config type is the only backend selector. Runtime code delegates
+backend-specific work through `PhysicsBackend` hooks and capability flags;
+backend names are retained for diagnostics and compatibility predicates, not as
+a second operational switch.
+
+| Capability | Default | Newton |
+| :--- | :---: | :---: |
+| Rigid objects, rigid-object groups, articulations, and robots | Yes | Yes |
+| Volume and surface deformables | CUDA only | No |
+| Native rigid constraints | Yes | No |
+| Camera and stereo camera | Yes | Yes |
+| `ContactSensor` | Yes | No |
+
+Unsupported operations fail at the manager capability boundary with an
+actionable `NotImplementedError`, before backend-native handles are accessed.
+
 All physics backends inherit these base parameters from {class}`~cfg.PhysicsBackendCfg`:
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
-| `device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
+| `device` | `str` \| `torch.device` | `"cpu"` (Default), `"cuda:0"` (Newton) | The selected backend's compute device. `SimulationManagerCfg(device=...)` is an explicit override; omitting it preserves the concrete physics config default. |
+
+`physics_cfg.device` owns the backend default. Passing
+`SimulationManagerCfg(device=...)` overrides it uniformly for either backend;
+the legacy `sim_device` argument is an alias with the same behavior. In Gym
+launches, omitting `--device` preserves the config value or backend default,
+while an explicit value such as `--device cpu` is honored for Newton as well.
+Environment tensors use `sim.device`, so there is no separate environment and
+physics-device selection to keep in sync.
 
 #### Default Backend
 
@@ -398,7 +423,9 @@ while True:
 
 In this mode, the physics simulation stepping is automatically handling by the physics thread running in dexsim engine, which makes it easier to use for visualization and interactive applications.
 
-> When in automatic update mode, user are recommanded to use CPU `device` for simulation.
+> When in automatic update mode, use the device recommended by the selected
+> backend. The Default backend may use CPU for this mode; Newton keeps its
+> CUDA default unless an explicit device override is supplied.
 
 
 ## Mainly used methods

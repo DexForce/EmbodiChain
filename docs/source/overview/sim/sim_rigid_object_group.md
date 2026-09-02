@@ -74,7 +74,8 @@ group_cfg = RigidObjectGroupCfg(
 # 4. Spawn the rigid object group
 obj_group: RigidObjectGroup = sim.add_rigid_object_group(cfg=group_cfg)
 
-# 5. Run or step simulation
+# 5. Commit the complete scene, then run or step simulation
+sim.prepare()
 sim.update()
 ```
 
@@ -115,7 +116,9 @@ Use these shapes when collecting vectorized observations for multi-environment t
 - Prefer simplified collision meshes or an explicit `MeshCfg.collision` convex-decomposition strategy with a bounded `max_hulls` for complex visual meshes.
 - `RigidObjectGroup` only supports `dynamic` and `kinematic` body types (not `static`).
 - When teleporting many members, batch pose updates and call `sim.update()` once to avoid synchronization overhead.
-- For GPU physics, set `SimulationManagerCfg.device` to `cuda` and call `sim.init_gpu_physics()` before running simulations.
+- Add every initial scene asset, then call the backend-neutral `sim.prepare()`
+  before reading state or stepping. `BaseEnv` performs this boundary
+  automatically.
 - Use `clear_dynamics()` to reset velocities without changing poses.
 
 ## Example: Working with Group Poses
@@ -143,7 +146,11 @@ sim.update()
 
 ## Integration with Sensors 
 
-Members in a group behave like normal `RigidObject`s: they can be observed by cameras, attached to contact sensors. You can operate on individual members or treat the group as a single unit depending on your scenario.
+Members in a group behave like normal `RigidObject`s and can be observed by
+cameras. They can also be included in a `ContactSensor` on the Default backend;
+Newton currently rejects that sensor through its capability boundary. You can
+operate on individual members or treat the group as a single unit depending on
+your scenario.
 
 ## Related Topics
 
