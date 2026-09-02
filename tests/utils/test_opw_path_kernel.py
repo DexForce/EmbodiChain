@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import torch
 import warp as wp
+import pytest
 
 from embodichain.utils.warp.kinematics.opw_solver import (
     opw_ik_path_select_kernel,
@@ -58,8 +59,8 @@ def test_opw_path_selector_preserves_temporal_branch_continuity() -> None:
     assert torch.allclose(output[0, :, 0], torch.tensor((0.1, 0.2, 0.3)))
 
 
-def test_opw_path_selector_rejects_limit_blocked_full_turn() -> None:
-    """A raw fallback must not turn a blocked equivalent into a full-turn jump."""
+def test_opw_path_selector_uses_raw_valid_equivalent() -> None:
+    """A valid raw representation remains available when the nearest turn is blocked."""
     wp.init()
     candidates = torch.zeros(1, 1, 8, 6)
     candidates[0, 0, 0, 0] = -3.0
@@ -88,12 +89,12 @@ def test_opw_path_selector_rejects_limit_blocked_full_turn() -> None:
         device="cpu",
     )
 
-    assert success.item() == 0
-    assert torch.equal(output[:, 0], initial_seed)
+    assert success.item() == 1
+    assert output[0, 0, 0].item() == pytest.approx(-3.0)
 
 
-def test_opw_path_selector_rejects_equivalent_inside_safety_margin() -> None:
-    """A seed-nearest equivalent must remain outside the excluded margin."""
+def test_opw_path_selector_uses_equivalent_outside_safety_margin() -> None:
+    """A valid equivalent is selected when the nearest turn is in the margin."""
     wp.init()
     candidates = torch.zeros(1, 1, 8, 6)
     candidates[0, 0, 0, 0] = -6.0
@@ -123,5 +124,38 @@ def test_opw_path_selector_rejects_equivalent_inside_safety_margin() -> None:
         device="cpu",
     )
 
-    assert success.item() == 0
-    assert torch.equal(output[:, 0], initial_seed)
+    assert success.item() == 1
+    assert output[0, 0, 0].item() == pytest.approx(-6.0)
+
+
+def test_opw_path_selector_uses_other_valid_periodic_equivalent() -> None:
+    """A distant seed can select a different valid 2π representation."""
+    wp.init()
+    candidates = torch.zeros(1, 1, 8, 6)
+    validity = torch.zeros(1, 1, 8, dtype=torch.int32)
+    validity[0, 0, 0] = 1
+    initial_seed = torch.zeros(1, 6)
+    initial_seed[0, 0] = 20.0
+    output = torch.empty(1, 1, 6)
+    success = torch.empty(1, 1, dtype=torch.int32)
+    lower = wp_vec6f(-0.1, -3.1, -3.1, -3.1, -3.1, -3.1)
+    upper = wp_vec6f(6.4, 3.1, 3.1, 3.1, 3.1, 3.1)
+
+    wp.launch(
+        kernel=opw_ik_path_select_kernel,
+        dim=1,
+        inputs=[
+            wp.from_torch(candidates),
+            wp.from_torch(validity),
+            wp.from_torch(initial_seed),
+            wp_vec6f(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+            lower,
+            upper,
+            0.0,
+        ],
+        outputs=[wp.from_torch(output), wp.from_torch(success)],
+        device="cpu",
+    )
+
+    assert success.item() == 1
+    assert output[0, 0, 0].item() == pytest.approx(2.0 * torch.pi, abs=1e-5)

@@ -49,6 +49,25 @@ def is_within_limit(
 
 
 @wp.func
+def nearest_equivalent_in_limit(
+    solution: float,
+    seed: float,
+    lower: float,
+    upper: float,
+    safe_margin: float,
+) -> Tuple[float, bool]:
+    """Return the seed-nearest periodic equivalent inside the safe limits."""
+    two_pi = 2.0 * wp.pi
+    lower_turn = wp.ceil((lower + safe_margin - solution) / two_pi)
+    upper_turn = wp.floor((upper - safe_margin - solution) / two_pi)
+    if lower_turn > upper_turn:
+        return solution, False
+    nearest_turn = wp.round((seed - solution) / two_pi)
+    selected_turn = wp.min(wp.max(nearest_turn, lower_turn), upper_turn)
+    return solution + selected_turn * two_pi, True
+
+
+@wp.func
 def safe_acos(x: float) -> float:
     return wp.acos(wp.clamp(x, -1.0, 1.0))
 
@@ -554,17 +573,14 @@ def opw_ik_path_select_kernel(
                 if sample > 0:
                     seed = path_result[batch, sample - 1, joint]
                 solution = full_ik_result[batch, sample, candidate, joint]
-                nearest = solution + wp.round((seed - solution) / (2.0 * wp.pi)) * (
-                    2.0 * wp.pi
-                )
-                if is_within_limit(
-                    nearest,
+                solution, equivalent_valid = nearest_equivalent_in_limit(
+                    solution,
+                    seed,
                     lower_limits[joint],
                     upper_limits[joint],
                     safe_margin,
-                ):
-                    solution = nearest
-                else:
+                )
+                if not equivalent_valid:
                     is_continuous = False
                 error = (solution - seed) * joint_weights[joint]
                 distance += error * error
@@ -578,11 +594,13 @@ def opw_ik_path_select_kernel(
                 if sample > 0:
                     seed = path_result[batch, sample - 1, joint]
                 solution = full_ik_result[batch, sample, best_solution, joint]
-                nearest = solution + wp.round((seed - solution) / (2.0 * wp.pi)) * (
-                    2.0 * wp.pi
+                nearest, _ = nearest_equivalent_in_limit(
+                    solution,
+                    seed,
+                    lower_limits[joint],
+                    upper_limits[joint],
+                    safe_margin,
                 )
-                # Selection accepts this candidate only when every adjusted
-                # joint is within limits, so no raw-angle fallback is allowed.
                 path_result[batch, sample, joint] = nearest
         else:
             path_valid[batch, sample] = 0

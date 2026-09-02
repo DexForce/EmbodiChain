@@ -176,11 +176,17 @@ def test_double_s_multi_waypoint_samples_match_reference() -> None:
     boundary_index = boundary_matches.nonzero()[0, 0]
     assert torch.allclose(result.positions[0, boundary_index], waypoints[0, 1])
     assert torch.allclose(result.positions[0, -1], waypoints[0, -1])
-    assert torch.allclose(result.velocities[0, 0], torch.zeros(2))
     assert torch.allclose(
-        result.velocities[0, boundary_index], torch.zeros(2), atol=1e-8
+        result.velocities[0, 0], torch.zeros(2, dtype=result.velocities.dtype)
     )
-    assert torch.allclose(result.velocities[0, -1], torch.zeros(2))
+    assert torch.allclose(
+        result.velocities[0, boundary_index],
+        torch.zeros(2, dtype=result.velocities.dtype),
+        atol=1e-8,
+    )
+    assert torch.allclose(
+        result.velocities[0, -1], torch.zeros(2, dtype=result.velocities.dtype)
+    )
     assert torch.all(result.dt[0, 1:] >= 0.0)
 
 
