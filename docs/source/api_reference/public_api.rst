@@ -982,10 +982,10 @@ embodichain.lab.sim.planners.trapezoidal_planner
    TrapezoidalPlanner
    TrapezoidalPlannerCfg
 
-embodichain.lab.sim.planners.trapezoidal_warp
----------------------------------------------
+embodichain.utils.warp.kinematics.trapezoidal_warp
+--------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.trapezoidal_warp
+.. currentmodule:: embodichain.utils.warp.kinematics.trapezoidal_warp
 
 Warp-accelerated helpers construct scalar trapezoidal or Double-S motion
 profiles and compose their sampled path derivatives into batched joint-space

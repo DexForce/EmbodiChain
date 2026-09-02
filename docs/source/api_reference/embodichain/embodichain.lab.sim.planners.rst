@@ -110,7 +110,7 @@ the same ``MotionGenerator`` entry point::
     )
 
 The complete batched simulation tutorial is
-``scripts/tutorials/sim/trapezoidal_planner.py``.
+``scripts/tutorials/sim/planner/trapezoidal_planner.py``.
 Pass ``--backend torch`` or ``--backend warp`` to compare implementations.
 For repeatable timing and memory measurements, run
 ``scripts/benchmark/motion_generation/trapezoidal_planner.py``.

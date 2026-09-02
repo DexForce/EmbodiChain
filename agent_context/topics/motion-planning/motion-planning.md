@@ -8,6 +8,7 @@
 | Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
 | TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
 | Trapezoidal planner | `embodichain/lab/sim/planners/trapezoidal_planner.py` → `TrapezoidalPlanner`, `TrapezoidalPlannerCfg`, `TrapezoidalPlanOptions` |
+| Trapezoidal Warp kernels | `embodichain/utils/warp/kinematics/trapezoidal_warp.py` → batched profile construction and sampling kernels |
 | Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
 | Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
@@ -104,9 +105,9 @@ acceleration against the HolisticMotion Python binding. It supports fixed
 quantity and approximate fixed-time sampling and returns explicit ``dt``.
 ``minimum_duration`` applies one uniform per-environment time scale, preserving
 the path while reducing velocity, acceleration, and jerk. The minimal
-``scripts/tutorials/sim/trapezoidal_profile.py`` example plots scalar position,
+``scripts/tutorials/sim/planner/trapezoidal_profile.py`` example plots scalar position,
 velocity, acceleration, and jerk without starting simulation. A runnable
-batched robot example lives in ``scripts/tutorials/sim/trapezoidal_planner.py``.
+batched robot example lives in ``scripts/tutorials/sim/planner/trapezoidal_planner.py``.
 The tutorial names the two diagnostics ``velocity_trapezoidal`` (the
 ``trapezoidal`` backend profile) and ``acceleration_trapezoidal`` (the
 jerk-limited ``double_s`` backend profile). Its default ``--profile both`` run

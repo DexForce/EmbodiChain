@@ -28,7 +28,7 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
-from scripts.tutorials.sim.trapezoidal_planner import (
+from scripts.tutorials.sim.planner.trapezoidal_planner import (
     build_cartesian_line_poses,
     build_demo_waypoints,
     compute_eef_trajectory,
