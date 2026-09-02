@@ -415,7 +415,7 @@ class MotionGenerator:
             raise ValueError("sample_count must be at least 2.")
         if plan_opts is not None:
             return deepcopy(plan_opts)
-        planner_type = self.planner.cfg.planner_type
+        planner_type = getattr(getattr(self.planner, "cfg", None), "planner_type", None)
         if planner_type in {"toppra", "trapezoidal"} and (
             sample_count is not None
             or velocity_limit is not None

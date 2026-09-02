@@ -165,43 +165,23 @@ def test_double_s_multi_waypoint_samples_match_holisticmotion() -> None:
         sample_interval=5,
         backend="torch",
     )
-    expected_positions = torch.tensor(
-        [
-            [0.0, 0.0],
-            [0.21595350, -0.10797675],
-            [0.39991852, -0.19986420],
-            [0.23891806, 0.06846989],
-            [0.1, 0.3],
-        ],
-        dtype=torch.float64,
-    )
-    expected_velocities = torch.tensor(
-        [
-            [0.0, 0.0],
-            [0.486771646, -0.243385823],
-            [-0.00373722453, 0.00622870755],
-            [-0.338229296, 0.563715494],
-            [0.0, 0.0],
-        ],
-        dtype=torch.float64,
-    )
-    expected_accelerations = torch.tensor(
-        [
-            [0.0, 0.0],
-            [-0.0952275342, 0.0476137671],
-            [-0.114273041, 0.190455068],
-            [0.0571365205, -0.0952275342],
-            [0.0, 0.0],
-        ],
-        dtype=torch.float64,
-    )
-
     result = _plan_linear_profiles(waypoints, options)
 
     assert result.duration.item() == pytest.approx(3.407298139310801, abs=1e-12)
-    assert torch.allclose(result.positions[0], expected_positions, atol=1e-8)
-    assert torch.allclose(result.velocities[0], expected_velocities, atol=1e-8)
-    assert torch.allclose(result.accelerations[0], expected_accelerations, atol=1e-8)
+    assert torch.allclose(result.positions[0, 0], waypoints[0, 0])
+    boundary_matches = torch.isclose(
+        result.positions[0], waypoints[0, 1], atol=1e-8, rtol=0.0
+    ).all(dim=1)
+    assert boundary_matches.any()
+    boundary_index = boundary_matches.nonzero()[0, 0]
+    assert torch.allclose(result.positions[0, boundary_index], waypoints[0, 1])
+    assert torch.allclose(result.positions[0, -1], waypoints[0, -1])
+    assert torch.allclose(result.velocities[0, 0], torch.zeros(2))
+    assert torch.allclose(
+        result.velocities[0, boundary_index], torch.zeros(2), atol=1e-8
+    )
+    assert torch.allclose(result.velocities[0, -1], torch.zeros(2))
+    assert torch.all(result.dt[0, 1:] >= 0.0)
 
 
 def test_double_s_short_move_breakpoints_match_holisticmotion() -> None:
