@@ -679,10 +679,12 @@ migration.
 Plans **close hand -> approach target -> contact -> press along axis -> return
 to the approach pose**. For an articulation link,
 `Articulation.sample_initial_point_clouds()` stores target-link-local target and
-whole-articulation clouds in `ObjectSemantics.geometry`. `PressAffordance`
-derives `press_axis` from that geometry and can derive the outer-surface
-`press_position` when it is omitted. `PressGoal.target_pose` is either a pose
-snapshot or `SceneEntityPose`, which resolves through the current
+whole-articulation clouds in `ObjectSemantics.geometry`, together with the
+nearest parent prismatic joint axis transformed into the same frame.
+`PressAffordance` uses `target_link_prismatic_joint_axis` for its axis direction;
+the point-cloud neighborhood selects only the sign. It can also derive the
+outer-surface `press_position` when it is omitted. `PressGoal.target_pose` is
+either a pose snapshot or `SceneEntityPose`, which resolves through the current
 `PlanningContext.scene` and participates in dynamic-goal recovery.
 
 The contact, press, and retract segments use axis-aligned Cartesian keyframes;
@@ -728,11 +730,18 @@ Axis inference samples the target link and the merged articulation surface at
 Both clouds use Open3D uniform surface sampling. Sampling the whole articulation
 as one merged mesh preserves triangle-area weighting instead of giving every
 link an equal point budget, which would over-represent tiny decorative links.
-The target cloud center and twice its distribution radius define a spherical
-neighborhood in the full cloud. The largest signed component of the
-neighborhood-center offset selects exactly one of `+X`, `-X`, `+Y`, `-Y`, `+Z`,
-or `-Z`. A complete point-cloud geometry snapshot overrides any legacy explicit
-axis fallback.
+The sampler also walks the target's parent chain and transforms the nearest
+prismatic joint axis into the target link's initial local frame. The target
+cloud center and twice its distribution radius define a spherical neighborhood
+in the full cloud. The dot product between the neighborhood-center offset and
+the normalized joint axis selects its sign. It does not quantize an oblique
+joint axis to a Cartesian basis direction; an offset perpendicular to the joint
+axis is rejected as directionally ambiguous.
+
+Automatic resolution requires all three entries:
+`target_link_point_cloud`, `articulation_point_cloud`, and
+`target_link_prismatic_joint_axis`. With none of those inference entries, an
+explicit compatibility axis is preserved; a partial set is rejected.
 
 With `direction="pull"`, the sequence is **approach -> reach -> close -> pull ->
 open**. With `direction="push"`, it is **approach -> reach -> close -> push -> open
@@ -823,19 +832,22 @@ Plans **approach -> reach -> close -> twist -> open -> retract** for an
 articulation link or a rigid object. The entity-free `TwistAffordance` stores an
 explicit local `grasp_position`, plus optional joint name/limits. For an
 articulation link, the same initial target-neighborhood geometry used by
-`Slide` and `Press` resolves `twist_axis`. The independent
+`Slide` and `Press` signs the normalized `target_link_revolute_joint_axis` to
+resolve `twist_axis`. The independent
 `target_link_revolute_axis_origin` geometry entry sets `axis_origin` to the
 nearest parent revolute joint's initial origin, expressed in the target link's
 initial local frame. Resolution walks through fixed parent joints. The sampled
 target-link centroid is only a neighborhood/contact reference; it is never used
 as the rotation origin.
 
-Complete point-cloud geometry overrides the legacy `twist_axis` fallback but
-does not overwrite an explicit `axis_origin` when revolute-joint metadata is
-absent. If neither source supplies an origin, planning reports the missing
-rotation-axis point. A rigid object without articulation context may still
-provide explicit compatibility values. `TwistGoal.target_pose` supplies the
-grounded target pose.
+Automatic axis resolution requires the revolute joint-axis entry and both point
+clouds. When all three axis-inference entries are absent, the legacy
+`twist_axis` fallback is preserved; a partial set is rejected. Axis-origin
+resolution is independent, so missing origin metadata does not overwrite an
+explicit `axis_origin`. If neither source supplies an origin, planning reports
+the missing rotation-axis point. A rigid object without articulation context
+may still provide explicit compatibility values. `TwistGoal.target_pose`
+supplies the grounded target pose.
 
 The grasp frame's z-axis follows the world-transformed twist axis; an adaptive
 reference completes a right-handed orthonormal frame. Twist keyframes rotate

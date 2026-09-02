@@ -102,7 +102,7 @@ _EXPECTED_GRASP_SAMPLES = 1_000
 
 
 def _drawer_handle_point_cloud_geometry() -> dict[str, torch.Tensor]:
-    """Return target-local clouds whose articulation neighborhood lies along +Y."""
+    """Return target-local clouds and a prismatic axis oriented toward +Y."""
     target_points = torch.tensor(
         [
             [-0.10, 0.0, 0.0],
@@ -124,6 +124,10 @@ def _drawer_handle_point_cloud_geometry() -> dict[str, torch.Tensor]:
     return {
         "target_link_point_cloud": target_points,
         "articulation_point_cloud": torch.cat((target_points, body_points), dim=0),
+        "target_link_prismatic_joint_axis": torch.tensor(
+            [0.0, 1.0, 0.0],
+            dtype=torch.float32,
+        ),
     }
 
 

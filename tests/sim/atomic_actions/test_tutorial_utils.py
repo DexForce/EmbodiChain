@@ -130,6 +130,8 @@ SCENE_FREE_TUTORIAL_MODULES = (
     "move_end_effector",
     "move_joints",
 )
+TUTORIAL_PRISMATIC_JOINT_AXIS = torch.tensor([2.0, 2.0, 1.0])
+TUTORIAL_REVOLUTE_JOINT_AXIS = torch.tensor([-1.0, 2.0, 2.0])
 TUTORIAL_REVOLUTE_AXIS_ORIGIN = torch.tensor([0.75, -0.5, 0.25])
 
 
@@ -156,6 +158,8 @@ def _tutorial_axis_geometry(
                 (center + torch.tensor(neighbor_offset)).unsqueeze(0),
             )
         ),
+        "target_link_prismatic_joint_axis": TUTORIAL_PRISMATIC_JOINT_AXIS.clone(),
+        "target_link_revolute_joint_axis": TUTORIAL_REVOLUTE_JOINT_AXIS.clone(),
         "target_link_revolute_axis_origin": TUTORIAL_REVOLUTE_AXIS_ORIGIN.clone(),
     }
 
@@ -237,28 +241,28 @@ def _run_obstacle_animation(*, pace_wall_time: bool) -> tuple[MagicMock, MagicMo
             "create_drawer_semantics",
             "large_handle_bar",
             "translation_axis",
-            (0.25, 1.5, -0.125),
-            (0.0, 1.0, 0.0),
+            (1.0, 1.0, 0.5),
+            (2.0 / 3.0, 2.0 / 3.0, 1.0 / 3.0),
         ),
         (
             "press",
             "create_button_semantics",
             "button_cap",
             "press_axis",
-            (0.25, -0.125, -1.5),
-            (0.0, 0.0, -1.0),
+            (-1.0, -1.0, -0.5),
+            (-2.0 / 3.0, -2.0 / 3.0, -1.0 / 3.0),
         ),
         (
             "twist",
             "create_knob_semantics",
             "cap_1",
             "twist_axis",
-            (0.25, -0.125, -1.5),
-            (0.0, 0.0, -1.0),
+            (0.5, -1.0, -1.0),
+            (1.0 / 3.0, -2.0 / 3.0, -2.0 / 3.0),
         ),
     ),
 )
-def test_articulation_tutorial_semantics_resolve_axis_from_initial_point_clouds(
+def test_articulation_tutorial_semantics_resolve_signed_parent_joint_axis(
     module_name: str,
     factory_name: str,
     link_name: str,
@@ -276,12 +280,13 @@ def test_articulation_tutorial_semantics_resolve_axis_from_initial_point_clouds(
     semantics = result[0] if isinstance(result, tuple) else result
     assert articulation.sampled_link_name == link_name
     assert semantics.geometry is geometry
-    assert torch.equal(
+    assert torch.allclose(
         getattr(semantics.affordance, axis_field),
         torch.tensor(expected_axis),
+        atol=1.0e-6,
     )
     if module_name == "press":
-        assert semantics.affordance.press_position == pytest.approx((2.0, -3.0, 5.0))
+        assert semantics.affordance.press_position == pytest.approx((2.5, -2.5, 4.0))
     elif module_name == "twist":
         assert semantics.affordance.axis_origin == pytest.approx(
             tuple(float(value) for value in TUTORIAL_REVOLUTE_AXIS_ORIGIN)

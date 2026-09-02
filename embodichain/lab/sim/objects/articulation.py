@@ -1227,6 +1227,9 @@ class Articulation(BatchEntity):
             ``(target_point_count, 3)``. If the target link has a revolute
             ancestor, ``target_link_revolute_axis_origin`` contains that
             nearest joint's origin in the target link's initial local frame.
+            ``target_link_prismatic_joint_axis`` and
+            ``target_link_revolute_joint_axis`` contain the normalized axes of
+            the nearest ancestors of each type in the same frame when present.
 
         Raises:
             TypeError: If a name or point count has the wrong type.
@@ -1308,12 +1311,19 @@ class Articulation(BatchEntity):
         target_index = link_names.index(target_link_name)
         target_from_root = torch.linalg.inv(initial_link_poses[target_index])
         target_link_revolute_axis_origin: torch.Tensor | None = None
+        target_link_joint_axes: dict[str, torch.Tensor] = {}
+        joint_axis_geometry_keys = {
+            "prismatic": "target_link_prismatic_joint_axis",
+            "revolute": "target_link_revolute_joint_axis",
+        }
         for joint in self.get_parent_joint_chain(target_link_name):
-            if joint.joint_type != "revolute":
+            joint_type = joint.joint_type
+            geometry_key = joint_axis_geometry_keys.get(joint_type)
+            if geometry_key is None or geometry_key in target_link_joint_axes:
                 continue
             if joint.parent_link_name not in link_names:
                 raise ValueError(
-                    f"Revolute joint {joint.name!r} parent link "
+                    f"{joint_type.capitalize()} joint {joint.name!r} parent link "
                     f"{joint.parent_link_name!r} is not an articulation link."
                 )
             joint_origin_pose = torch.as_tensor(
@@ -1326,8 +1336,24 @@ class Articulation(BatchEntity):
                 or not torch.isfinite(joint_origin_pose).all()
             ):
                 raise ValueError(
-                    f"Revolute joint {joint.name!r} origin pose must be finite "
+                    f"{joint_type.capitalize()} joint {joint.name!r} origin pose "
+                    "must be finite "
                     "with shape (4, 4)."
+                )
+            joint_axis = torch.as_tensor(
+                joint.axis,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            if (
+                joint_axis.shape != (3,)
+                or not torch.isfinite(joint_axis).all()
+                or torch.linalg.vector_norm(joint_axis)
+                <= torch.finfo(joint_axis.dtype).eps
+            ):
+                raise ValueError(
+                    f"{joint_type.capitalize()} joint {joint.name!r} axis must "
+                    "be finite and nonzero with shape (3,)."
                 )
             parent_index = link_names.index(joint.parent_link_name)
             target_from_joint = torch.matmul(
@@ -1337,8 +1363,30 @@ class Articulation(BatchEntity):
                 ),
                 joint_origin_pose,
             )
-            target_link_revolute_axis_origin = target_from_joint[:3, 3].clone()
-            break
+            target_link_joint_axis = torch.matmul(
+                target_from_joint[:3, :3],
+                joint_axis,
+            )
+            target_link_joint_axis_norm = torch.linalg.vector_norm(
+                target_link_joint_axis
+            )
+            if (
+                not torch.isfinite(target_link_joint_axis).all()
+                or not torch.isfinite(target_link_joint_axis_norm)
+                or target_link_joint_axis_norm
+                <= torch.finfo(target_link_joint_axis.dtype).eps
+            ):
+                raise ValueError(
+                    f"{joint_type.capitalize()} joint {joint.name!r} axis must "
+                    "transform to a finite, nonzero target-link vector."
+                )
+            target_link_joint_axes[geometry_key] = (
+                target_link_joint_axis / target_link_joint_axis_norm
+            )
+            if joint_type == "revolute":
+                target_link_revolute_axis_origin = target_from_joint[:3, 3].clone()
+            if len(target_link_joint_axes) == len(joint_axis_geometry_keys):
+                break
 
         merged_vertices: list[torch.Tensor] = []
         merged_triangles: list[torch.Tensor] = []
@@ -1409,6 +1457,7 @@ class Articulation(BatchEntity):
             geometry["target_link_revolute_axis_origin"] = (
                 target_link_revolute_axis_origin
             )
+        geometry.update(target_link_joint_axes)
         return geometry
 
     @staticmethod

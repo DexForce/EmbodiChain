@@ -243,6 +243,146 @@ class TestInitialPointCloudSampling:
             geometry["target_link_revolute_axis_origin"],
             near_origin_pose[:3, 3],
         )
+        assert torch.equal(
+            geometry["target_link_revolute_joint_axis"],
+            near_joint.axis,
+        )
+
+    def test_uses_nearest_prismatic_axis_after_fixed_descendant(self):
+        triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        link_meshes = {
+            link_name: (
+                torch.tensor(
+                    ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                    dtype=torch.float32,
+                ),
+                triangle,
+            )
+            for link_name in ("base", "near_parent", "moving", "target")
+        }
+        fixed_joint = ArticulationJointKinematics(
+            name="target_fixed",
+            joint_type="fixed",
+            parent_link_name="moving",
+            child_link_name="target",
+            origin_pose=torch.eye(4),
+            axis=torch.zeros(3),
+        )
+        near_origin_pose = torch.eye(4)
+        near_origin_pose[:3, :3] = torch.tensor(
+            ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+        )
+        near_joint = ArticulationJointKinematics(
+            name="near_slider",
+            joint_type="prismatic",
+            parent_link_name="near_parent",
+            child_link_name="moving",
+            origin_pose=near_origin_pose,
+            axis=torch.tensor((4.0, 0.0, 0.0)),
+        )
+        far_joint = ArticulationJointKinematics(
+            name="far_slider",
+            joint_type="prismatic",
+            parent_link_name="base",
+            child_link_name="near_parent",
+            origin_pose=torch.eye(4),
+            axis=torch.tensor((0.0, 0.0, 2.0)),
+        )
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes=link_meshes,
+            parent_joint_chain=(fixed_joint, near_joint, far_joint),
+        )
+
+        geometry = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=16,
+            target_point_count=8,
+        )
+
+        assert torch.allclose(
+            geometry["target_link_prismatic_joint_axis"],
+            torch.tensor((0.0, 1.0, 0.0)),
+            atol=POINT_CLOUD_TOLERANCE,
+        )
+        assert "target_link_revolute_joint_axis" not in geometry
+        assert "target_link_revolute_axis_origin" not in geometry
+
+    def test_collects_both_nearest_joint_types_from_one_parent_chain(self):
+        triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        link_meshes = {
+            link_name: (
+                torch.tensor(
+                    ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                    dtype=torch.float32,
+                ),
+                triangle,
+            )
+            for link_name in ("root", "base", "near_parent", "hinge_child", "target")
+        }
+        near_prismatic = ArticulationJointKinematics(
+            name="near_slider",
+            joint_type="prismatic",
+            parent_link_name="hinge_child",
+            child_link_name="target",
+            origin_pose=torch.eye(4),
+            axis=torch.tensor((4.0, 0.0, 0.0)),
+        )
+        near_revolute_origin = torch.eye(4)
+        near_revolute_origin[:3, 3] = torch.tensor((1.0, 2.0, 3.0))
+        near_revolute = ArticulationJointKinematics(
+            name="near_hinge",
+            joint_type="revolute",
+            parent_link_name="near_parent",
+            child_link_name="hinge_child",
+            origin_pose=near_revolute_origin,
+            axis=torch.tensor((0.0, 5.0, 0.0)),
+        )
+        far_prismatic = ArticulationJointKinematics(
+            name="far_slider",
+            joint_type="prismatic",
+            parent_link_name="base",
+            child_link_name="near_parent",
+            origin_pose=torch.eye(4),
+            axis=torch.tensor((0.0, 0.0, 2.0)),
+        )
+        far_revolute_origin = torch.eye(4)
+        far_revolute_origin[:3, 3] = torch.tensor((9.0, 9.0, 9.0))
+        far_revolute = ArticulationJointKinematics(
+            name="far_hinge",
+            joint_type="revolute",
+            parent_link_name="root",
+            child_link_name="base",
+            origin_pose=far_revolute_origin,
+            axis=torch.tensor((0.0, 0.0, 7.0)),
+        )
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes=link_meshes,
+            parent_joint_chain=(
+                near_prismatic,
+                near_revolute,
+                far_prismatic,
+                far_revolute,
+            ),
+        )
+
+        geometry = articulation.sample_initial_point_clouds(
+            "target",
+            articulation_point_count=16,
+            target_point_count=8,
+        )
+
+        assert torch.equal(
+            geometry["target_link_prismatic_joint_axis"],
+            torch.tensor((1.0, 0.0, 0.0)),
+        )
+        assert torch.equal(
+            geometry["target_link_revolute_joint_axis"],
+            torch.tensor((0.0, 1.0, 0.0)),
+        )
+        assert torch.equal(
+            geometry["target_link_revolute_axis_origin"],
+            near_revolute_origin[:3, 3],
+        )
 
     def test_transforms_revolute_origin_from_rotated_parent_to_target_frame(self):
         triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
@@ -278,7 +418,7 @@ class TestInitialPointCloudSampling:
             parent_link_name="parent",
             child_link_name="target",
             origin_pose=joint_origin_pose,
-            axis=torch.tensor((0.0, 1.0, 0.0)),
+            axis=torch.tensor((0.0, 4.0, 0.0)),
         )
         articulation, _ = _make_point_cloud_articulation(
             link_meshes=link_meshes,
@@ -300,6 +440,16 @@ class TestInitialPointCloudSampling:
             target_from_joint[:3, 3],
             atol=POINT_CLOUD_TOLERANCE,
         )
+        expected_axis = target_from_joint[:3, :3] @ joint.axis
+        expected_axis = expected_axis / torch.linalg.vector_norm(expected_axis)
+        assert torch.allclose(
+            geometry["target_link_revolute_joint_axis"],
+            expected_axis,
+            atol=POINT_CLOUD_TOLERANCE,
+        )
+        assert torch.linalg.vector_norm(
+            geometry["target_link_revolute_joint_axis"]
+        ).item() == pytest.approx(1.0)
 
     def test_omits_revolute_origin_when_parent_chain_has_only_fixed_joints(self):
         fixed_joint = ArticulationJointKinematics(
@@ -320,12 +470,19 @@ class TestInitialPointCloudSampling:
             target_point_count=3,
         )
 
-        assert "target_link_revolute_axis_origin" not in geometry
+        assert set(geometry) == {
+            "target_link_point_cloud",
+            "articulation_point_cloud",
+        }
 
-    def test_rejects_revolute_ancestor_with_unknown_parent_link(self):
+    @pytest.mark.parametrize("joint_type", ("prismatic", "revolute"))
+    def test_rejects_joint_axis_metadata_with_unknown_parent_link(
+        self,
+        joint_type: str,
+    ):
         joint = ArticulationJointKinematics(
-            name="target_hinge",
-            joint_type="revolute",
+            name="target_joint",
+            joint_type=joint_type,
             parent_link_name="missing_parent",
             child_link_name="target",
             origin_pose=torch.eye(4),
@@ -342,18 +499,54 @@ class TestInitialPointCloudSampling:
                 target_point_count=3,
             )
 
-    def test_rejects_revolute_ancestor_with_invalid_origin_pose(self):
+    @pytest.mark.parametrize("joint_type", ("prismatic", "revolute"))
+    def test_rejects_joint_axis_metadata_with_invalid_origin_pose(
+        self,
+        joint_type: str,
+    ):
         joint = SimpleNamespace(
-            name="target_hinge",
-            joint_type="revolute",
+            name="target_joint",
+            joint_type=joint_type,
             parent_link_name="target",
             origin_pose=torch.full((4, 4), float("nan")),
+            axis=torch.tensor((0.0, 0.0, 1.0)),
         )
         articulation, _ = _make_point_cloud_articulation(
             parent_joint_chain=(joint,),
         )
 
         with pytest.raises(ValueError, match="origin pose must be finite"):
+            articulation.sample_initial_point_clouds(
+                "target",
+                articulation_point_count=5,
+                target_point_count=3,
+            )
+
+    @pytest.mark.parametrize(
+        ("joint_type", "axis"),
+        (
+            ("prismatic", torch.zeros(3)),
+            ("revolute", torch.tensor((float("nan"), 0.0, 1.0))),
+            ("prismatic", torch.zeros(2)),
+        ),
+    )
+    def test_rejects_invalid_joint_axes(
+        self,
+        joint_type: str,
+        axis: torch.Tensor,
+    ):
+        joint = SimpleNamespace(
+            name="target_joint",
+            joint_type=joint_type,
+            parent_link_name="target",
+            origin_pose=torch.eye(4),
+            axis=axis,
+        )
+        articulation, _ = _make_point_cloud_articulation(
+            parent_joint_chain=(joint,),
+        )
+
+        with pytest.raises(ValueError, match="axis must be finite and nonzero"):
             articulation.sample_initial_point_clouds(
                 "target",
                 articulation_point_count=5,

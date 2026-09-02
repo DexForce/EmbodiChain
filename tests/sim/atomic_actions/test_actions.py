@@ -126,6 +126,10 @@ DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
 DOOR_ENTITY_ID = "door"
 AUTOMATIC_TWIST_TARGET_CENTER = torch.tensor([1.0, 0.0, 0.0])
 AUTOMATIC_TWIST_AXIS_ORIGIN = torch.tensor([0.25, -0.5, 0.75])
+AUTOMATIC_TWIST_JOINT_AXIS = torch.tensor([2.0, 2.0, 1.0])
+AUTOMATIC_TWIST_JOINT_AXIS_UNIT = AUTOMATIC_TWIST_JOINT_AXIS / torch.linalg.vector_norm(
+    AUTOMATIC_TWIST_JOINT_AXIS
+)
 AUTOMATIC_TWIST_TARGET_OFFSETS = torch.tensor(
     [
         [1.0, 0.0, 0.0],
@@ -145,8 +149,8 @@ _GRASP_GENERATORS: dict[int, _StubGraspPoseGenerator] = {}
 def _automatic_twist_geometry() -> dict[str, torch.Tensor]:
     """Build geometry whose target centroid and revolute origin are distinct."""
     target_points = AUTOMATIC_TWIST_TARGET_CENTER + AUTOMATIC_TWIST_TARGET_OFFSETS
-    articulation_neighbor = AUTOMATIC_TWIST_TARGET_CENTER + torch.tensor(
-        [0.25, -0.125, 1.5]
+    articulation_neighbor = (
+        AUTOMATIC_TWIST_TARGET_CENTER + 1.5 * AUTOMATIC_TWIST_JOINT_AXIS_UNIT
     )
     return {
         "target_link_point_cloud": target_points,
@@ -154,6 +158,7 @@ def _automatic_twist_geometry() -> dict[str, torch.Tensor]:
             (target_points, articulation_neighbor.unsqueeze(0)),
             dim=0,
         ),
+        "target_link_revolute_joint_axis": AUTOMATIC_TWIST_JOINT_AXIS.clone(),
         "target_link_revolute_axis_origin": AUTOMATIC_TWIST_AXIS_ORIGIN.clone(),
     }
 
@@ -2456,7 +2461,11 @@ def test_twist_plans_six_segments_from_articulation_link() -> None:
     assert torch.all(
         trajectory.positions[:, plan.segment("open").stop - 1, ARM_DOF:] == 0.0
     )
-    assert torch.equal(affordance.twist_axis, torch.tensor([0.0, 0.0, 1.0]))
+    assert torch.allclose(
+        affordance.twist_axis,
+        AUTOMATIC_TWIST_JOINT_AXIS_UNIT,
+        atol=1.0e-6,
+    )
     assert affordance.require_axis_origin() == pytest.approx(
         tuple(float(value) for value in AUTOMATIC_TWIST_AXIS_ORIGIN)
     )
@@ -2520,7 +2529,7 @@ def test_twist_rotates_grasp_about_geometry_derived_joint_axis_origin() -> None:
 
     assert torch.allclose(
         twisted[:, -1, :3, 3],
-        torch.tensor([-0.25, 1.25, 0.0]).expand(NUM_ENVS, -1),
+        torch.tensor([5.0 / 12.0, 17.0 / 12.0, 1.0 / 3.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
 
