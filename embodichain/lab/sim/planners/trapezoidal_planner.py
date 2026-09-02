@@ -452,7 +452,9 @@ def _build_scalar_profile(
         use_warp = False
     if use_warp:
         try:
-            from embodichain.utils.warp.kinematics.trapezoidal_warp import build_profile_warp
+            from embodichain.utils.warp.kinematics.trapezoidal_warp import (
+                build_profile_warp,
+            )
         except ImportError:
             if backend == "warp":
                 raise ImportError(
