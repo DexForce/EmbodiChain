@@ -96,6 +96,12 @@ for integrations that need link ancestry. It returns immediate-parent-first
 origin, axis, and optional limits. Consumers must not reach into
 `BatchEntity._entities` or retain backend-native joint-info objects.
 
+`Articulation` also exposes deterministic link meshes through
+`get_link_vert_face()` and named-state FK through `compute_fk()` with
+`qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
+do not belong to the simulation object; use
+`atomic_actions.sample_initial_articulation_geometry()` for that adaptation.
+
 ## Configuration Flow
 
 `SimulationManagerCfg` owns window size, headless mode, rendering, GPU/CPU
@@ -141,6 +147,8 @@ corresponding robot/sensor module. Scene composition belongs in
   `SimulationManager.flush_cleanup_queue()`.
 - Resolve articulation ancestry through `get_parent_joint_chain()`; keep
   DexSim topology access encapsulated by `Articulation`.
+- Keep articulation mesh access, FK, and topology domain-neutral. Perform
+  affordance sampling and semantic-key conversion in the Atomic Action adapter.
 
 ## Common Failure Modes
 

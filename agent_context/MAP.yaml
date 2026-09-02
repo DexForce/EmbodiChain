@@ -626,6 +626,11 @@ topics:
       - RigidObjectSceneProvider
       - create_simulation_atomic_action_engine
       - ObjectSemantics
+      - ArticulationAffordanceGeometry
+      - ArticulationGeometryProvider
+      - ArticulationJointGeometry
+      - sample_initial_articulation_geometry
+      - articulation geometry adapter
       - entity_id
       - frozen ObjectSemantics
       - canonical entity identity
@@ -736,6 +741,8 @@ topics:
       - embodichain/lab/sim/atomic_actions/goals.py
       - embodichain/lab/sim/atomic_actions/effects.py
       - embodichain/lab/sim/atomic_actions/affordance.py
+      - embodichain/lab/sim/atomic_actions/_articulation_geometry_keys.py
+      - embodichain/lab/sim/atomic_actions/articulation_geometry.py
       - embodichain/lab/sim/atomic_actions/bindings.py
       - embodichain/lab/sim/atomic_actions/control.py
       - embodichain/lab/sim/atomic_actions/invocation.py

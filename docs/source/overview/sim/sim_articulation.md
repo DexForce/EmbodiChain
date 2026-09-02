@@ -181,7 +181,6 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 | :--- | :--- | :--- |
 | `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
 | `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
-| `sample_initial_point_clouds(target_link_name)` | `Dict[str, Tensor]` | Uniformly sample target and merged articulation surfaces at `init_qpos`, and include nearest parent prismatic/revolute axes and the revolute origin in the target link's initial local frame when available. |
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
 | `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
@@ -194,51 +193,18 @@ print(f"Current Joint Positions: {articulation.get_qpos()}")
 print(f"End Effector Pose: {articulation.get_link_pose('ee_link')}")
 ```
 
-### Initial Link-Local Point Clouds
+### Atomic Action Geometry Adapter
 
-`sample_initial_point_clouds()` uses the configured initial joint positions and
-forward kinematics, rather than the articulation's mutable runtime state. It
-transforms every link mesh into the requested target link's initial frame,
-merges the meshes, and uses Open3D uniform surface sampling on the combined
-triangle mesh. Sampling the merged mesh makes each surface's representation
-proportional to triangle area instead of assigning the same point count to
-every link. The returned float32 tensors are moved back to the articulation
-device and are ready to store in an atomic action's `ObjectSemantics.geometry`:
+`Articulation` exposes deterministic, domain-neutral facts through APIs such as
+`get_link_vert_face()`, `compute_fk()`, and `get_parent_joint_chain()`. Atomic
+Action integrations compose those facts with initial-state mesh transforms,
+Open3D surface sampling, and affordance-specific geometry metadata through
+`sample_initial_articulation_geometry()` in
+`embodichain.lab.sim.atomic_actions`. The adapter returns a typed value; call
+`to_object_geometry()` only at the `ObjectSemantics.geometry` boundary.
 
-```python
-geometry = articulation.sample_initial_point_clouds(
-    "button_cap",
-    articulation_point_count=100_000,
-    target_point_count=5_000,
-)
-target_points = geometry["target_link_point_cloud"]
-articulation_points = geometry["articulation_point_cloud"]
-prismatic_axis = geometry.get("target_link_prismatic_joint_axis")
-revolute_axis = geometry.get("target_link_revolute_joint_axis")
-revolute_origin = geometry.get("target_link_revolute_axis_origin")
-```
-
-The shown point counts are the defaults. Open3D draws random uniform samples
-from the target mesh and merged articulation mesh independently, so repeated
-calls are not expected to be bitwise identical and consumers should rely on
-the spatial distribution rather than point-for-point correspondence. The
-method requires a built kinematic chain and currently supports unit
-`body_scale`.
-
-The sampler walks the immediate-parent-first joint chain and records the nearest
-ancestor of each supported type. `target_link_prismatic_joint_axis` and
-`target_link_revolute_joint_axis` are normalized `(3,)` axes transformed by the
-initial parent-link and joint-origin rotations into the target link's initial
-local frame. `target_link_revolute_axis_origin` is the matching nearest
-revolute-joint origin in that frame. A key is omitted when the corresponding
-joint type has no ancestor; this does not prevent point-cloud sampling.
-
-`Slide` and `Press` consume the prismatic axis, while `Twist` consumes the
-revolute axis and origin. The point-cloud neighborhood only chooses between the
-stored axis and its negation by projecting the neighborhood-center offset onto
-the axis. It never replaces an oblique physical axis with a Cartesian basis
-direction. The target-cloud centroid centers neighborhood/contact calculations
-and is not a substitute for the revolute joint origin.
+Keeping this stochastic conversion in the Atomic Action layer means simulation
+objects do not own private point-cloud keys or affordance interpretation.
 
 ### Visual Appearance
 

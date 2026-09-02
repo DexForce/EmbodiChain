@@ -40,6 +40,7 @@ from embodichain.lab.sim.atomic_actions import (
     SlideAffordance,
     SlideGoal,
     SlideOptions,
+    sample_initial_articulation_geometry,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -114,7 +115,13 @@ def create_drawer_semantics(drawer: Articulation) -> ObjectSemantics:
         Pure target-local semantics for the handle's pull/push affordance.
     """
     vertices, triangles = drawer.get_link_vert_face(HANDLE_LINK_NAME)
-    geometry = drawer.sample_initial_point_clouds(HANDLE_LINK_NAME)
+    geometry = sample_initial_articulation_geometry(
+        drawer,
+        HANDLE_LINK_NAME,
+        initial_qpos=drawer.cfg.init_qpos,
+        initial_qpos_joint_names=drawer.joint_names,
+        body_scale=drawer.cfg.body_scale,
+    ).to_object_geometry()
     return ObjectSemantics(
         label="drawer_large_handle",
         geometry=geometry,

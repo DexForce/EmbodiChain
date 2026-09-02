@@ -53,6 +53,7 @@ from embodichain.lab.sim.atomic_actions import (
     SlideAffordance,
     SlideGoal,
     SlideOptions,
+    sample_initial_articulation_geometry,
 )
 from embodichain.lab.task_program.semantics import (
     BinaryEffectEvidenceQuery,
@@ -359,16 +360,13 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         if not callable(get_link_vert_face):
             raise TypeError("Articulation must provide get_link_vert_face().")
         vertices, triangles = get_link_vert_face(native_link_name)
-        sample_initial_point_clouds = getattr(
+        geometry = sample_initial_articulation_geometry(
             articulation,
-            "sample_initial_point_clouds",
-            None,
-        )
-        if not callable(sample_initial_point_clouds):
-            raise TypeError("Articulation must provide sample_initial_point_clouds().")
-        geometry = sample_initial_point_clouds(native_link_name)
-        if not isinstance(geometry, dict):
-            raise TypeError("Articulation point-cloud geometry must be a dict.")
+            native_link_name,
+            initial_qpos=articulation.cfg.init_qpos,
+            initial_qpos_joint_names=articulation.joint_names,
+            body_scale=articulation.cfg.body_scale,
+        ).to_object_geometry()
         affordance_kwargs: dict[str, object] = {}
         if self.translation_axis is not None:
             affordance_kwargs["translation_axis"] = torch.tensor(

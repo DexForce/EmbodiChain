@@ -53,6 +53,7 @@ a physical effect.
 | Concern | Source of truth |
 |---|---|
 | Core action and goal contracts | `atomic_actions/core.py`, `goals.py`, `affordance.py` |
+| Articulation affordance geometry adapter | `atomic_actions/articulation_geometry.py` |
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
 | Plans and runtime commands | `plans.py`, `runtime_commands.py` |
@@ -64,6 +65,19 @@ a physical effect.
 | Task Program semantic declarations | `embodichain/lab/task_program/semantics/` |
 | Task Program lowering/execution | `embodichain/lab/task_program/compiler/`, `runtime/` |
 | Gym lifecycle bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
+
+## Articulation geometry boundary
+
+`sample_initial_articulation_geometry()` adapts domain-neutral articulation
+facts into the geometry consumed by link affordances. Callers pass an
+`ArticulationGeometryProvider`, the explicitly named initial joint state, and
+body scale. The adapter owns Open3D surface sampling, target-link-frame mesh
+transforms, nearest prismatic/revolute ancestor geometry, and the private
+`ObjectSemantics.geometry` keys.
+
+The adapter returns `ArticulationAffordanceGeometry`; convert it with
+`to_object_geometry()` only when constructing `ObjectSemantics`. Keep random
+sampling and semantic geometry keys out of `objects/articulation.py`.
 
 ## Direct resolution path
 
@@ -221,6 +235,7 @@ an action implementation.
 | Change | Owning location |
 |---|---|
 | Goal/options or action behavior | matching file under `atomic_actions/primitives/` plus `goals.py` when shared |
+| Articulation-link sampling or affordance geometry metadata | `atomic_actions/articulation_geometry.py`; keep `objects/articulation.py` limited to meshes, FK, and topology |
 | Engine catalog or lifecycle | `engine.py` |
 | Session transitions or recovery | `execution.py` |
 | Verification value contracts | `verification.py` |

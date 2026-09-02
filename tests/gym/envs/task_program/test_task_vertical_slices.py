@@ -24,6 +24,7 @@ import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import call, patch
 
 import pytest
 import torch
@@ -48,6 +49,7 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
+    ArticulationAffordanceGeometry,
     AtomicActionEngine,
     DynamicCollisionMode,
     EntityState,
@@ -129,6 +131,16 @@ def _drawer_handle_point_cloud_geometry() -> dict[str, torch.Tensor]:
             dtype=torch.float32,
         ),
     }
+
+
+def _drawer_handle_articulation_geometry() -> ArticulationAffordanceGeometry:
+    """Return the typed adapter result used by the configured lowerer."""
+    geometry = _drawer_handle_point_cloud_geometry()
+    return ArticulationAffordanceGeometry(
+        target_link_point_cloud=geometry["target_link_point_cloud"],
+        articulation_point_cloud=geometry["articulation_point_cloud"],
+        prismatic_joint_axis=geometry["target_link_prismatic_joint_axis"],
+    )
 
 
 class _NeverObserveProvider:
@@ -554,6 +566,11 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
 
     class Drawer:
         link_names = (_OPEN_DRAWER_HANDLE_LINK_NAME,)
+        joint_names = ("drawer_joint",)
+        cfg = SimpleNamespace(
+            init_qpos=(0.0,),
+            body_scale=(1.0, 1.0, 1.0),
+        )
 
         @staticmethod
         def get_link_vert_face(name: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -562,11 +579,6 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
                 torch.tensor([[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]),
                 torch.tensor([[0, 1, 2]]),
             )
-
-        @staticmethod
-        def sample_initial_point_clouds(name: str) -> dict[str, torch.Tensor]:
-            assert name == _OPEN_DRAWER_HANDLE_LINK_NAME
-            return _drawer_handle_point_cloud_geometry()
 
     drawer_ref = SceneArticulationRef(_OPEN_DRAWER_ENTITY_ID)
     registry = SceneRegistry(
@@ -589,24 +601,46 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
         robot=robot,
         device=torch.device("cpu"),
     )
+    drawer = Drawer()
     simulation = SimpleNamespace(
-        get_articulation=lambda identifier: (
-            Drawer() if identifier == "drawer" else None
-        )
+        get_articulation=lambda identifier: drawer if identifier == "drawer" else None
     )
+    sampled_geometry = _drawer_handle_articulation_geometry()
 
-    first = registration.create_registered_semantic_lowerers(
-        simulation=simulation,
-        robot=robot,
-        scene_registry=registry,
-        engine=engine,
-    )
-    second = registration.create_registered_semantic_lowerers(
-        simulation=simulation,
-        robot=robot,
-        scene_registry=registry,
-        engine=engine,
-    )
+    with patch(
+        "embodichain.lab.task_program.integrations._configured_services."
+        "sample_initial_articulation_geometry",
+        return_value=sampled_geometry,
+    ) as sampler:
+        first = registration.create_registered_semantic_lowerers(
+            simulation=simulation,
+            robot=robot,
+            scene_registry=registry,
+            engine=engine,
+        )
+        second = registration.create_registered_semantic_lowerers(
+            simulation=simulation,
+            robot=robot,
+            scene_registry=registry,
+            engine=engine,
+        )
+
+    assert sampler.call_args_list == [
+        call(
+            drawer,
+            _OPEN_DRAWER_HANDLE_LINK_NAME,
+            initial_qpos=drawer.cfg.init_qpos,
+            initial_qpos_joint_names=drawer.joint_names,
+            body_scale=drawer.cfg.body_scale,
+        ),
+        call(
+            drawer,
+            _OPEN_DRAWER_HANDLE_LINK_NAME,
+            initial_qpos=drawer.cfg.init_qpos,
+            initial_qpos_joint_names=drawer.joint_names,
+            body_scale=drawer.cfg.body_scale,
+        ),
+    ]
 
     assert type(first[0]) is type(second[0])
     assert type(first[0]).call_id == _OPEN_DRAWER_CALL_ID

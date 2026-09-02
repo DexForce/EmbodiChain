@@ -21,7 +21,6 @@ import math
 import torch
 import dexsim
 import numpy as np
-import open3d as o3d
 
 from dataclasses import dataclass
 from functools import cached_property
@@ -1198,364 +1197,6 @@ class Articulation(BatchEntity):
         verts, faces = self.body_data.link_vert_face[link_name]
         return verts, faces
 
-    def sample_initial_point_clouds(
-        self,
-        target_link_name: str,
-        *,
-        articulation_point_count: int = 100_000,
-        target_point_count: int = 5_000,
-    ) -> dict[str, torch.Tensor]:
-        """Sample initial articulation geometry in a target-link frame.
-
-        All link meshes are transformed with forward kinematics evaluated at
-        :attr:`ArticulationCfg.init_qpos`, merged into one triangle mesh, and
-        sampled proportionally to triangle area. The target link is sampled
-        separately so consumers can derive a target-centered neighborhood.
-        Both returned clouds use the target link's initial local frame.
-
-        Args:
-            target_link_name: Link whose initial local frame defines the output.
-            articulation_point_count: Number of points sampled from the merged
-                articulation surface.
-            target_point_count: Number of points sampled from the target-link
-                surface.
-
-        Returns:
-            Geometry metadata containing ``articulation_point_cloud`` with
-            shape ``(articulation_point_count, 3)`` and
-            ``target_link_point_cloud`` with shape
-            ``(target_point_count, 3)``. If the target link has a revolute
-            ancestor, ``target_link_revolute_axis_origin`` contains that
-            nearest joint's origin in the target link's initial local frame.
-            ``target_link_prismatic_joint_axis`` and
-            ``target_link_revolute_joint_axis`` contain the normalized axes of
-            the nearest ancestors of each type in the same frame when present.
-
-        Raises:
-            TypeError: If a name or point count has the wrong type.
-            ValueError: If the target link, point counts, initial joint state,
-                FK output, parent-joint geometry, or mesh geometry is invalid.
-            RuntimeError: If the articulation has no kinematic chain.
-        """
-        if type(target_link_name) is not str:
-            raise TypeError("target_link_name must be a string.")
-        if not target_link_name or target_link_name != target_link_name.strip():
-            raise ValueError("target_link_name must be non-empty.")
-        if target_link_name not in self.link_names:
-            raise ValueError(
-                f"Unknown articulation link {target_link_name!r}. Available "
-                f"links: {list(self.link_names)}."
-            )
-        for value, field_name in (
-            (articulation_point_count, "articulation_point_count"),
-            (target_point_count, "target_point_count"),
-        ):
-            if type(value) is not int:
-                raise TypeError(f"{field_name} must be an integer.")
-            if value <= 0:
-                raise ValueError(f"{field_name} must be positive.")
-        if self.pk_chain is None:
-            raise RuntimeError(
-                "Initial point-cloud sampling requires cfg.build_pk_chain=True."
-            )
-        body_scale = torch.as_tensor(self.cfg.body_scale, dtype=torch.float32)
-        if body_scale.shape != (3,) or not torch.allclose(
-            body_scale,
-            torch.ones(3, dtype=torch.float32),
-        ):
-            raise ValueError(
-                "Initial point-cloud sampling currently requires unit body_scale."
-            )
-
-        initial_qpos = torch.as_tensor(
-            self.cfg.init_qpos,
-            dtype=torch.float32,
-            device=self.device,
-        )
-        if initial_qpos.shape != (self.dof,) or not torch.isfinite(initial_qpos).all():
-            raise ValueError(
-                "ArticulationCfg.init_qpos must be a finite vector matching "
-                f"the articulation DoF ({self.dof})."
-            )
-        backend_joint_names = list(self.joint_names)
-        kinematic_joint_names = list(self.pk_chain.get_joint_parameter_names())
-        if backend_joint_names != kinematic_joint_names:
-            if len(backend_joint_names) != len(kinematic_joint_names) or set(
-                backend_joint_names
-            ) != set(kinematic_joint_names):
-                raise ValueError(
-                    "Initial point-cloud sampling requires matching simulator "
-                    "and kinematic-chain joint names."
-                )
-            qpos_by_name = dict(zip(backend_joint_names, initial_qpos))
-            initial_qpos = torch.stack(
-                [qpos_by_name[name] for name in kinematic_joint_names]
-            )
-        link_names = list(self.link_names)
-        initial_link_poses = self.compute_fk(
-            initial_qpos.unsqueeze(0),
-            link_names=link_names,
-        )
-        if (
-            initial_link_poses.shape != (1, len(link_names), 4, 4)
-            or not torch.isfinite(initial_link_poses).all()
-        ):
-            raise ValueError(
-                "Initial FK must return finite poses with shape "
-                f"(1, {len(link_names)}, 4, 4)."
-            )
-        initial_link_poses = initial_link_poses[0].to(
-            device=self.device,
-            dtype=torch.float32,
-        )
-        target_index = link_names.index(target_link_name)
-        target_from_root = torch.linalg.inv(initial_link_poses[target_index])
-        target_link_revolute_axis_origin: torch.Tensor | None = None
-        target_link_joint_axes: dict[str, torch.Tensor] = {}
-        joint_axis_geometry_keys = {
-            "prismatic": "target_link_prismatic_joint_axis",
-            "revolute": "target_link_revolute_joint_axis",
-        }
-        for joint in self.get_parent_joint_chain(target_link_name):
-            joint_type = joint.joint_type
-            geometry_key = joint_axis_geometry_keys.get(joint_type)
-            if geometry_key is None or geometry_key in target_link_joint_axes:
-                continue
-            if joint.parent_link_name not in link_names:
-                raise ValueError(
-                    f"{joint_type.capitalize()} joint {joint.name!r} parent link "
-                    f"{joint.parent_link_name!r} is not an articulation link."
-                )
-            joint_origin_pose = torch.as_tensor(
-                joint.origin_pose,
-                dtype=torch.float32,
-                device=self.device,
-            )
-            if (
-                joint_origin_pose.shape != (4, 4)
-                or not torch.isfinite(joint_origin_pose).all()
-            ):
-                raise ValueError(
-                    f"{joint_type.capitalize()} joint {joint.name!r} origin pose "
-                    "must be finite "
-                    "with shape (4, 4)."
-                )
-            joint_axis = torch.as_tensor(
-                joint.axis,
-                dtype=torch.float32,
-                device=self.device,
-            )
-            if (
-                joint_axis.shape != (3,)
-                or not torch.isfinite(joint_axis).all()
-                or torch.linalg.vector_norm(joint_axis)
-                <= torch.finfo(joint_axis.dtype).eps
-            ):
-                raise ValueError(
-                    f"{joint_type.capitalize()} joint {joint.name!r} axis must "
-                    "be finite and nonzero with shape (3,)."
-                )
-            parent_index = link_names.index(joint.parent_link_name)
-            target_from_joint = torch.matmul(
-                torch.matmul(
-                    target_from_root,
-                    initial_link_poses[parent_index],
-                ),
-                joint_origin_pose,
-            )
-            target_link_joint_axis = torch.matmul(
-                target_from_joint[:3, :3],
-                joint_axis,
-            )
-            target_link_joint_axis_norm = torch.linalg.vector_norm(
-                target_link_joint_axis
-            )
-            if (
-                not torch.isfinite(target_link_joint_axis).all()
-                or not torch.isfinite(target_link_joint_axis_norm)
-                or target_link_joint_axis_norm
-                <= torch.finfo(target_link_joint_axis.dtype).eps
-            ):
-                raise ValueError(
-                    f"{joint_type.capitalize()} joint {joint.name!r} axis must "
-                    "transform to a finite, nonzero target-link vector."
-                )
-            target_link_joint_axes[geometry_key] = (
-                target_link_joint_axis / target_link_joint_axis_norm
-            )
-            if joint_type == "revolute":
-                target_link_revolute_axis_origin = target_from_joint[:3, 3].clone()
-            if len(target_link_joint_axes) == len(joint_axis_geometry_keys):
-                break
-
-        merged_vertices: list[torch.Tensor] = []
-        merged_triangles: list[torch.Tensor] = []
-        vertex_offset = 0
-        target_vertices: torch.Tensor | None = None
-        target_triangles: torch.Tensor | None = None
-        for link_index, link_name in enumerate(link_names):
-            vertices, triangles = self.get_link_vert_face(link_name)
-            vertices = torch.as_tensor(
-                vertices,
-                dtype=torch.float32,
-                device=self.device,
-            )
-            triangles = torch.as_tensor(
-                triangles,
-                dtype=torch.long,
-                device=self.device,
-            )
-            self._validate_point_cloud_mesh(vertices, triangles, link_name=link_name)
-            if vertices.shape[0] == 0:
-                continue
-
-            target_from_link = torch.matmul(
-                target_from_root,
-                initial_link_poses[link_index],
-            )
-            transformed_vertices = (
-                torch.matmul(
-                    vertices,
-                    target_from_link[:3, :3].transpose(0, 1),
-                )
-                + target_from_link[:3, 3]
-            )
-            merged_vertices.append(transformed_vertices)
-            if triangles.shape[0] > 0:
-                merged_triangles.append(triangles + vertex_offset)
-            if link_name == target_link_name:
-                target_vertices = transformed_vertices
-                target_triangles = triangles
-            vertex_offset += vertices.shape[0]
-
-        if target_vertices is None or target_vertices.shape[0] == 0:
-            raise ValueError(
-                f"Target link {target_link_name!r} has no point-cloud geometry."
-            )
-        if not merged_vertices:
-            raise ValueError("Articulation has no point-cloud geometry.")
-        articulation_vertices = torch.cat(merged_vertices, dim=0)
-        articulation_triangles = (
-            torch.cat(merged_triangles, dim=0)
-            if merged_triangles
-            else torch.empty((0, 3), dtype=torch.long, device=self.device)
-        )
-        assert target_triangles is not None
-        geometry = {
-            "target_link_point_cloud": self._sample_mesh_surface_points(
-                target_vertices,
-                target_triangles,
-                target_point_count,
-            ),
-            "articulation_point_cloud": self._sample_mesh_surface_points(
-                articulation_vertices,
-                articulation_triangles,
-                articulation_point_count,
-            ),
-        }
-        if target_link_revolute_axis_origin is not None:
-            geometry["target_link_revolute_axis_origin"] = (
-                target_link_revolute_axis_origin
-            )
-        geometry.update(target_link_joint_axes)
-        return geometry
-
-    @staticmethod
-    def _validate_point_cloud_mesh(
-        vertices: torch.Tensor,
-        triangles: torch.Tensor,
-        *,
-        link_name: str,
-    ) -> None:
-        """Validate one link-local mesh used for surface sampling."""
-        if vertices.dim() != 2 or vertices.shape[1:] != (3,):
-            raise ValueError(f"Link {link_name!r} vertices must have shape (N, 3).")
-        if not torch.isfinite(vertices).all():
-            raise ValueError(f"Link {link_name!r} vertices must be finite.")
-        if triangles.dim() != 2 or triangles.shape[1:] != (3,):
-            raise ValueError(f"Link {link_name!r} triangles must have shape (M, 3).")
-        if triangles.shape[0] == 0:
-            return
-        if vertices.shape[0] == 0:
-            raise ValueError(
-                f"Link {link_name!r} triangles cannot reference an empty mesh."
-            )
-        if bool((triangles < 0).any().item()) or int(triangles.max().item()) >= len(
-            vertices
-        ):
-            raise ValueError(
-                f"Link {link_name!r} triangles reference invalid vertices."
-            )
-
-    @staticmethod
-    def _sample_mesh_surface_points(
-        vertices: torch.Tensor,
-        triangles: torch.Tensor,
-        point_count: int,
-    ) -> torch.Tensor:
-        """Uniformly sample a triangle mesh with Open3D's CPU sampler."""
-        if vertices.shape[0] == 0:
-            raise ValueError("Cannot sample an empty mesh.")
-        if triangles.shape[0] == 0:
-            indices = (
-                torch.linspace(
-                    0,
-                    vertices.shape[0] - 1,
-                    point_count,
-                    device=vertices.device,
-                )
-                .round()
-                .to(torch.long)
-            )
-            return vertices[indices]
-
-        face_vertices = vertices[triangles]
-        face_areas = 0.5 * torch.linalg.vector_norm(
-            torch.cross(
-                face_vertices[:, 1] - face_vertices[:, 0],
-                face_vertices[:, 2] - face_vertices[:, 0],
-                dim=1,
-            ),
-            dim=1,
-        )
-        valid_faces = face_areas > torch.finfo(vertices.dtype).eps
-        if not bool(valid_faces.any().item()):
-            indices = (
-                torch.linspace(
-                    0,
-                    vertices.shape[0] - 1,
-                    point_count,
-                    device=vertices.device,
-                )
-                .round()
-                .to(torch.long)
-            )
-            return vertices[indices]
-
-        mesh = o3d.geometry.TriangleMesh(
-            vertices=o3d.utility.Vector3dVector(
-                vertices.detach().to(device="cpu", dtype=torch.float64).numpy()
-            ),
-            triangles=o3d.utility.Vector3iVector(
-                triangles[valid_faces]
-                .detach()
-                .to(device="cpu", dtype=torch.int32)
-                .numpy()
-            ),
-        )
-        point_cloud = mesh.sample_points_uniformly(number_of_points=point_count)
-        sampled_points = np.asarray(point_cloud.points).copy()
-        if sampled_points.shape != (point_count, 3):
-            raise RuntimeError(
-                "Open3D surface sampling returned an unexpected point-cloud shape "
-                f"{sampled_points.shape}; expected ({point_count}, 3)."
-            )
-        return torch.tensor(
-            sampled_points,
-            device=vertices.device,
-            dtype=vertices.dtype,
-        )
-
     def get_link_pose(
         self, link_name: str, env_ids: Sequence[int] | None = None, to_matrix=False
     ) -> torch.Tensor:
@@ -2539,10 +2180,12 @@ class Articulation(BatchEntity):
     def compute_fk(
         self,
         qpos: torch.Tensor | np.ndarray | None,
-        link_names: str | list[str] | tuple[str] | None = None,
+        link_names: str | list[str] | tuple[str, ...] | None = None,
         end_link_name: str | None = None,
         root_link_name: str | None = None,
         to_dict: bool = False,
+        *,
+        qpos_joint_names: Sequence[str] | None = None,
         **kwargs,
     ) -> Union[torch.Tensor, dict[str, "pk.Transform3d"]]:
         """Compute the forward kinematics (FK) for the given joint positions.
@@ -2555,6 +2198,9 @@ class Articulation(BatchEntity):
             end_link_name (str, optional): Name of the end link for which FK is computed. If None, all links are considered.
             root_link_name (str, optional): Name of the root link for which FK is computed. Defaults to None.
             to_dict (bool, optional): If True, returns the FK result as a dictionary of Transform3d objects. Defaults to False.
+            qpos_joint_names: Optional names corresponding to the last dimension
+                of ``qpos``. When supplied, the values are reordered into the
+                kinematic chain's parameter order before FK.
             **kwargs: Additional keyword arguments for customization.
 
         Raises:
@@ -2570,6 +2216,52 @@ class Articulation(BatchEntity):
         frame_indices = None
         if self.pk_chain is None:
             logger.log_error("pk_chain is not initialized for this articulation.")
+
+        if qpos_joint_names is not None:
+            if end_link_name is not None or root_link_name is not None:
+                raise ValueError(
+                    "qpos_joint_names cannot be combined with serial-chain FK."
+                )
+            if isinstance(qpos_joint_names, (str, bytes)) or not isinstance(
+                qpos_joint_names,
+                Sequence,
+            ):
+                raise TypeError("qpos_joint_names must be a sequence of names.")
+            supplied_joint_names = tuple(qpos_joint_names)
+            if any(
+                type(name) is not str or not name or name != name.strip()
+                for name in supplied_joint_names
+            ):
+                raise ValueError(
+                    "qpos_joint_names must contain non-empty string names."
+                )
+            if len(set(supplied_joint_names)) != len(supplied_joint_names):
+                raise ValueError("qpos_joint_names must not contain duplicates.")
+            if qpos is None:
+                raise ValueError("qpos is required when qpos_joint_names is supplied.")
+            qpos_tensor = torch.as_tensor(qpos, device=self.device)
+            if qpos_tensor.dim() not in (1, 2) or qpos_tensor.shape[-1] != len(
+                supplied_joint_names
+            ):
+                raise ValueError("qpos last dimension must match qpos_joint_names.")
+            kinematic_joint_names = tuple(self.pk_chain.get_joint_parameter_names())
+            if len(supplied_joint_names) != len(kinematic_joint_names) or set(
+                supplied_joint_names
+            ) != set(kinematic_joint_names):
+                raise ValueError(
+                    "qpos_joint_names must match the kinematic-chain joint names."
+                )
+            if kinematic_joint_names:
+                qpos_by_name = {
+                    name: qpos_tensor[..., index]
+                    for index, name in enumerate(supplied_joint_names)
+                }
+                qpos = torch.stack(
+                    [qpos_by_name[name] for name in kinematic_joint_names],
+                    dim=-1,
+                )
+            else:
+                qpos = qpos_tensor[..., :0].clone()
 
         # Adapt link_names to work with get_frame_indices
         if link_names is not None:

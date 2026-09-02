@@ -678,9 +678,10 @@ migration.
 
 Plans **close hand -> approach target -> contact -> press along axis -> return
 to the approach pose**. For an articulation link,
-`Articulation.sample_initial_point_clouds()` stores target-link-local target and
-whole-articulation clouds in `ObjectSemantics.geometry`, together with the
-nearest parent prismatic joint axis transformed into the same frame.
+`sample_initial_articulation_geometry()` builds typed target-link-local target
+and whole-articulation geometry. Its `to_object_geometry()` conversion stores
+the two clouds and the nearest parent prismatic joint axis in
+`ObjectSemantics.geometry`.
 `PressAffordance` uses `target_link_prismatic_joint_axis` for its axis direction;
 the point-cloud neighborhood selects only the sign. It can also derive the
 outer-surface `press_position` when it is omitted. `PressGoal.target_pose` is
@@ -725,8 +726,9 @@ push/close; pull/open uses its negative direction. The affordance inherits
 grasp approach direction is the resolved link-frame translation axis
 transformed by the current link rotation.
 
-Axis inference samples the target link and the merged articulation surface at
-`ArticulationCfg.init_qpos`, expressed in the target link's initial local frame.
+The Atomic Action articulation-geometry adapter samples the target link and the
+merged articulation surface at `ArticulationCfg.init_qpos`, expressed in the
+target link's initial local frame.
 Both clouds use Open3D uniform surface sampling. Sampling the whole articulation
 as one merged mesh preserves triangle-area weighting instead of giving every
 link an equal point budget, which would over-represent tiny decorative links.

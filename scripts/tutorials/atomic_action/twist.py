@@ -37,6 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     TwistAffordance,
     TwistGoal,
     TwistOptions,
+    sample_initial_articulation_geometry,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -123,7 +124,13 @@ def create_knob_semantics(
     if isinstance(target, Articulation):
         vertices, _ = target.get_link_vert_face(KNOB_LINK_NAME)
         target_pose = target.get_link_pose(KNOB_LINK_NAME, to_matrix=True)
-        geometry = target.sample_initial_point_clouds(KNOB_LINK_NAME)
+        geometry = sample_initial_articulation_geometry(
+            target,
+            KNOB_LINK_NAME,
+            initial_qpos=target.cfg.init_qpos,
+            initial_qpos_joint_names=target.joint_names,
+            body_scale=target.cfg.body_scale,
+        ).to_object_geometry()
         affordance = TwistAffordance(
             grasp_position=_mesh_center(vertices),
         )

@@ -37,6 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     PressAffordance,
     PressGoal,
     PressOptions,
+    sample_initial_articulation_geometry,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -131,7 +132,13 @@ def create_button_semantics(
     """Create press semantics for an articulation-link or rigid button."""
     if isinstance(target, Articulation):
         target_pose = target.get_link_pose(BUTTON_LINK_NAME, to_matrix=True)
-        geometry = target.sample_initial_point_clouds(BUTTON_LINK_NAME)
+        geometry = sample_initial_articulation_geometry(
+            target,
+            BUTTON_LINK_NAME,
+            initial_qpos=target.cfg.init_qpos,
+            initial_qpos_joint_names=target.joint_names,
+            body_scale=target.cfg.body_scale,
+        ).to_object_geometry()
         affordance = PressAffordance()
         label = "microwave_start_button"
     else:

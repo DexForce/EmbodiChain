@@ -22,11 +22,13 @@ from typing import Any, ClassVar
 
 import torch
 
-_TARGET_LINK_POINT_CLOUD_KEY = "target_link_point_cloud"
-_ARTICULATION_POINT_CLOUD_KEY = "articulation_point_cloud"
-_TARGET_LINK_PRISMATIC_JOINT_AXIS_KEY = "target_link_prismatic_joint_axis"
-_TARGET_LINK_REVOLUTE_JOINT_AXIS_KEY = "target_link_revolute_joint_axis"
-_TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY = "target_link_revolute_axis_origin"
+from ._articulation_geometry_keys import (
+    _ARTICULATION_POINT_CLOUD_KEY,
+    _TARGET_LINK_POINT_CLOUD_KEY,
+    _TARGET_LINK_PRISMATIC_JOINT_AXIS_KEY,
+    _TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY,
+    _TARGET_LINK_REVOLUTE_JOINT_AXIS_KEY,
+)
 
 
 @dataclass
