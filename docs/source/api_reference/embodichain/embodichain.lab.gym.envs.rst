@@ -79,6 +79,13 @@ segment spans.
 
 .. currentmodule:: embodichain.lab.gym.envs.demo
 
+.. autoclass:: DemoExecutionCfg
+    :members:
+
+.. autodata:: DemoOutputMode
+
+.. autodata:: DemoSegmentOutcomeKind
+
 .. autoclass:: DemoSegment
     :members:
 

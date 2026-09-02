@@ -309,6 +309,11 @@ Include:
 5. **Add tests** that prove your fix or feature works.
 6. Use the `/pr` skill to create PRs following the project's template and label conventions.
 
+Use the `/review-pr` skill for read-only, evidence-backed review of a PR,
+branch, commit, patch, or working-tree diff. Keep review separate from
+`/pre-commit-check`, which runs local readiness gates, and `/pr`, which drafts
+or creates the pull request.
+
 ### Adding a New Robot
 
 Refer to `docs/source/guides/add_robot.rst` for a detailed guide. The basic structure requires:
@@ -373,5 +378,6 @@ Tool-specific adapter files should stay thin and point back to the canonical ski
 | Add Test | `/add-test` | Scaffold tests following project conventions |
 | Update API Docs | `/update-api-docs` | Document public exports reported by the read-only API checker |
 | Pre-Commit Check | `/pre-commit-check` | Run all local CI checks before committing |
+| Review PR | `/review-pr` | Review changes for actionable regressions and architecture violations |
 | Create PR | `/pr` | Create a PR following the project template |
 | Benchmark | `/benchmark` | Write benchmark scripts for EmbodiChain modules |

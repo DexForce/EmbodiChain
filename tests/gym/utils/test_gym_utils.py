@@ -99,6 +99,10 @@ class TestInitRolloutBufferFromConfig:
         # Check actions and rewards
         assert buffer["actions"].shape == (4, 100, 7)
         assert buffer["rewards"].shape == (4, 100)
+        assert buffer["segment_accepted"].shape == (4, 100)
+        assert not buffer["segment_accepted"].any()
+        assert (buffer["segment_attempt_id"] == -1).all()
+        assert (buffer["continuity_id"] == -1).all()
 
     def test_extra_observation_with_shape_tuple(self):
         """Test that extra observations with shape tuple are added correctly."""
