@@ -415,29 +415,32 @@ class MotionGenerator:
             raise ValueError("sample_count must be at least 2.")
         if plan_opts is not None:
             return deepcopy(plan_opts)
-        if sample_count is not None and self.planner.cfg.planner_type == "toppra":
-            return ToppraPlanOptions(
-                sample_method=TrajectorySampleMethod.QUANTITY,
-                sample_interval=sample_count,
-                constraints={
-                    "velocity": 0.2 if velocity_limit is None else velocity_limit,
-                    "acceleration": (
-                        0.5 if acceleration_limit is None else acceleration_limit
-                    ),
-                },
+        planner_type = self.planner.cfg.planner_type
+        if planner_type in {"toppra", "trapezoidal"} and (
+            sample_count is not None
+            or velocity_limit is not None
+            or acceleration_limit is not None
+        ):
+            options_type = (
+                ToppraPlanOptions
+                if planner_type == "toppra"
+                else TrapezoidalPlanOptions
             )
-        if sample_count is not None and self.planner.cfg.planner_type == "trapezoidal":
-            return TrapezoidalPlanOptions(
-                sample_method=TrajectorySampleMethod.QUANTITY,
-                sample_interval=sample_count,
-                constraints={
-                    "velocity": 0.2 if velocity_limit is None else velocity_limit,
-                    "acceleration": (
-                        0.5 if acceleration_limit is None else acceleration_limit
-                    ),
-                    "jerk": 2.0,
-                },
-            )
+            constraints: dict[str, float] = {
+                "velocity": 0.2 if velocity_limit is None else velocity_limit,
+                "acceleration": (
+                    0.5 if acceleration_limit is None else acceleration_limit
+                ),
+            }
+            if planner_type == "trapezoidal":
+                constraints["jerk"] = 2.0
+            options_kwargs: dict[str, object] = {"constraints": constraints}
+            if sample_count is not None:
+                options_kwargs.update(
+                    sample_method=TrajectorySampleMethod.QUANTITY,
+                    sample_interval=sample_count,
+                )
+            return options_type(**options_kwargs)
         return self.planner.default_plan_options()
 
     @classmethod

@@ -987,20 +987,35 @@ class Robot(Articulation):
         joint_seed: torch.Tensor | np.ndarray | None,
         name: str,
         env_ids: Sequence[int] | None = None,
-    ):
-        """Compute the inverse kinematics of the robot given joint positions and optionally a specific part name.
-        The input pose should be in the local arena frame.
+        *,
+        continuous: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Compute batched inverse kinematics for arena-frame poses.
+
+        When ``continuous`` is enabled, all analytic candidates are generated
+        in one solver call and the branch nearest to the previous path sample
+        is selected sequentially. The selected solver must support continuous
+        candidate selection.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (num_envs, n_batch, 7) or (num_envs, n_batch, 4, 4).
-            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
-            name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
-            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
+            pose: End-effector poses shaped ``(B, N, 7)`` or
+                ``(B, N, 4, 4)`` in the local arena frame.
+            joint_seed: Independent seeds shaped ``(B, N, DOF)``. In
+                continuous mode, the initial path seed shaped ``(B, DOF)``.
+                Defaults to zero independent seeds when omitted.
+            name: Control part whose solver should be used.
+            env_ids: Optional environment indices. Defaults to all
+                environments.
+            continuous: Preserve one temporally continuous IK branch across
+                the ``N`` path samples. Defaults to ``False``.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]:
-                Success Tensor with shape (num_envs, n_batch)
-                Qpos Tensor with shape (num_envs, n_batch, dof).
+            Per-sample success shaped ``(B, N)`` and joint positions shaped
+            ``(B, N, DOF)``, or ``None`` when no solver is configured.
+
+        Raises:
+            ValueError: If an input shape is invalid or continuous selection
+                is unsupported by the configured solver.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -1012,36 +1027,43 @@ class Robot(Articulation):
             return None
         pose = to_tensor(pose, device=self.device)
 
-        if pose.shape[0] != len(local_env_ids):
-            logger.log_error(
-                f"Pose batch size mismatch. Expected {len(local_env_ids)} but got {pose.shape[0]}."
+        batch_size = len(local_env_ids)
+        if pose.ndim not in {3, 4} or pose.shape[0] != batch_size:
+            raise ValueError(
+                f"pose must have shape ({batch_size}, N, 7) or "
+                f"({batch_size}, N, 4, 4)."
             )
 
         n_batch = pose.shape[1]
         n_dof = solver.dof
-        if joint_seed is None:
+        if continuous:
+            if joint_seed is None:
+                joint_seed_tensor = torch.zeros(
+                    (batch_size, n_dof),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            else:
+                joint_seed_tensor = to_tensor(joint_seed, device=self.device)
+            if joint_seed_tensor.shape != (batch_size, n_dof):
+                raise ValueError(
+                    f"joint_seed must have shape ({batch_size}, {n_dof}) "
+                    "when continuous=True."
+                )
+        elif joint_seed is None:
             joint_seed = torch.zeros(
-                (len(local_env_ids), n_batch, n_dof),
+                (batch_size, n_batch, n_dof),
                 dtype=torch.float32,
                 device=self.device,
             )
-
-        if joint_seed.shape[0] != len(local_env_ids):
-            logger.log_error(
-                f"Joint seed env size mismatch. Expected {len(local_env_ids)} but got {joint_seed.shape[0]}."
+        else:
+            joint_seed = to_tensor(joint_seed, device=self.device)
+        if not continuous and joint_seed.shape != (batch_size, n_batch, n_dof):
+            raise ValueError(
+                f"joint_seed must have shape ({batch_size}, {n_batch}, {n_dof})."
             )
 
-        if joint_seed.shape[1] != n_batch:
-            logger.log_error(
-                f"Joint seed batch size mismatch. Expected {n_batch} but got {joint_seed.shape[1]}."
-            )
-
-        if joint_seed.shape[-1] != n_dof:
-            logger.log_error(
-                f"Joint seed dof size mismatch. Expected {n_batch} but got {joint_seed.shape[-1]}."
-            )
-
-        if pose.shape[-1] == 7 and pose.dim() == 3:
+        if pose.shape[-1] == 7 and pose.ndim == 3:
             # Convert pose from (num_envs, n_batch, 7) to (num_envs * n_batch, 4, 4)
             pose_batch = pose.reshape(-1, 7)
             pos = pose_batch[:, :3]
@@ -1054,9 +1076,14 @@ class Robot(Articulation):
             )
             pose_batch[:, :3, :3] = rot
             pose_batch[:, :3, 3] = pos
-        else:
+        elif pose.shape[-2:] == (4, 4) and pose.ndim == 4:
             # Convert pose from (num_envs, n_batch, 4, 4) to (num_envs * n_batch, 4, 4)
             pose_batch = pose.reshape(-1, 4, 4)
+        else:
+            raise ValueError(
+                f"pose must have shape ({batch_size}, N, 7) or "
+                f"({batch_size}, N, 4, 4)."
+            )
 
         # get xpos from link root
         base_xpos_n_envs = self.get_link_pose(
@@ -1070,61 +1097,32 @@ class Robot(Articulation):
         )
         pose_batch = torch.bmm(base_inv_xpos_batch, pose_batch)
 
+        if continuous:
+            candidate_valid, candidate_qpos = solver.get_ik(
+                target_xpos=pose_batch,
+                qpos_seed=None,
+                return_all_solutions=True,
+            )
+            select_path = getattr(solver, "_select_continuous_ik_path", None)
+            if not callable(select_path):
+                raise ValueError(
+                    f"Solver for {name!r} does not support continuous batch IK."
+                )
+            return select_path(
+                candidate_qpos.reshape(batch_size, n_batch, -1, n_dof),
+                candidate_valid.reshape(batch_size, n_batch, -1),
+                joint_seed_tensor,
+            )
+
         joint_seed_batch = joint_seed.reshape(-1, n_dof)
         ret, qpos_batch = solver.get_ik(
             target_xpos=pose_batch,
             qpos_seed=joint_seed_batch,
             return_all_solutions=False,
         )
-        ret = ret.reshape(len(local_env_ids), n_batch)
-        qpos = qpos_batch.reshape(len(local_env_ids), n_batch, n_dof)
+        ret = ret.reshape(batch_size, n_batch)
+        qpos = qpos_batch.reshape(batch_size, n_batch, n_dof)
         return ret, qpos
-
-    def compute_ik_path(
-        self,
-        pose: torch.Tensor | np.ndarray,
-        joint_seed: torch.Tensor | np.ndarray,
-        name: str,
-        env_ids: Sequence[int] | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor] | None:
-        """Solve a pose path while preserving IK branch continuity.
-
-        Args:
-            pose: Arena-frame pose matrices shaped ``(B, N, 4, 4)``.
-            joint_seed: Initial joint seed shaped ``(B, DOF)``.
-            name: Control part whose solver should be used.
-            env_ids: Optional environment indices. Defaults to all environments.
-
-        Returns:
-            Per-sample success shaped ``(B, N)`` and joint positions shaped
-            ``(B, N, DOF)``, or ``None`` when the solver is unavailable.
-
-        Raises:
-            ValueError: If the solver does not implement continuous path IK or
-                an input shape is invalid.
-        """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-        solver = self._solvers.get(name)
-        if solver is None:
-            return None
-        solve_path = getattr(solver, "get_ik_path", None)
-        if not callable(solve_path):
-            raise ValueError(f"Solver for {name!r} does not support path IK.")
-        pose_tensor = to_tensor(pose, device=self.device)
-        seed_tensor = to_tensor(joint_seed, device=self.device)
-        batch_size = len(local_env_ids)
-        if pose_tensor.ndim != 4 or pose_tensor.shape[0] != batch_size:
-            raise ValueError("pose must have shape (B, N, 4, 4).")
-        if seed_tensor.shape != (batch_size, solver.dof):
-            raise ValueError(
-                f"joint_seed must have shape ({batch_size}, {solver.dof})."
-            )
-        base_pose = self.get_link_pose(
-            link_name=solver.root_link_name, env_ids=local_env_ids, to_matrix=True
-        )
-        solver_poses = torch.matmul(torch.inverse(base_pose)[:, None], pose_tensor)
-        success, qpos = solve_path(solver_poses, seed_tensor)
-        return success.to(self.device), qpos.to(self.device)
 
     def _init_control_parts(self, control_parts: Dict[str, List[str]]) -> None:
         """Initialize the control parts of the robot.

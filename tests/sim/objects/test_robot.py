@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -63,6 +64,32 @@ def test_get_qf_selects_control_part_joint_efforts():
     actual_qf = robot.get_qf(name="arm")
 
     assert torch.equal(actual_qf, full_qf[:, [3, 1]])
+
+
+def test_compute_batch_ik_continuous_reuses_all_solver_candidates() -> None:
+    """Continuous batch IK uses the existing batch boundary and one candidate call."""
+    robot = object.__new__(Robot)
+    robot.device = torch.device("cpu")
+    robot._all_indices = [0, 1]
+    solver = Mock(dof=2, root_link_name="base")
+    candidate_valid = torch.ones(6, 8, dtype=torch.bool)
+    candidate_qpos = torch.zeros(6, 8, 2)
+    selected = torch.ones(2, 3, dtype=torch.bool)
+    selected_qpos = torch.full((2, 3, 2), 0.25)
+    solver.get_ik.return_value = (candidate_valid, candidate_qpos)
+    solver._select_continuous_ik_path.return_value = (selected, selected_qpos)
+    robot._solvers = {"arm": solver}
+    robot.get_link_pose = Mock(return_value=torch.eye(4).repeat(2, 1, 1))
+    poses = torch.eye(4).repeat(2, 3, 1, 1)
+    seed = torch.zeros(2, 2)
+
+    success, qpos = robot.compute_batch_ik(poses, seed, "arm", continuous=True)
+
+    assert torch.equal(success, selected)
+    assert torch.equal(qpos, selected_qpos)
+    solver.get_ik.assert_called_once()
+    assert solver.get_ik.call_args.kwargs["return_all_solutions"] is True
+    solver._select_continuous_ik_path.assert_called_once()
 
 
 # Base test class for CPU and CUDA

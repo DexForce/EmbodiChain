@@ -158,26 +158,45 @@ def _compress_collinear_waypoints(
     if waypoints.shape[1] <= 2:
         return waypoints
     edges = waypoints[:, 1:] - waypoints[:, :-1]
+    epsilon = max(1e-8, float(tolerance) * 1e-3)
+    deduplicate = torch.ones(
+        waypoints.shape[:2], dtype=torch.bool, device=waypoints.device
+    )
+    deduplicate[:, 1:] = torch.linalg.vector_norm(edges, dim=-1) > epsilon
+    deduplicated_count = deduplicate.sum(dim=1)
+    deduplicated_size = max(2, int(deduplicated_count.max().item()))
+    deduplicated = waypoints[:, -1:].expand(-1, deduplicated_size, -1).clone()
+    deduplicated_index = deduplicate.cumsum(dim=1) - 1
+    batch_index = torch.arange(waypoints.shape[0], device=waypoints.device)[:, None]
+    batch_index = batch_index.expand_as(deduplicate)
+    deduplicated[batch_index[deduplicate], deduplicated_index[deduplicate]] = waypoints[
+        deduplicate
+    ]
+
+    if deduplicated_size <= 2:
+        return deduplicated
+    edges = deduplicated[:, 1:] - deduplicated[:, :-1]
     previous = edges[:, :-1]
     following = edges[:, 1:]
     previous_norm = torch.linalg.vector_norm(previous, dim=-1)
     following_norm = torch.linalg.vector_norm(following, dim=-1)
-    epsilon = max(1e-8, float(tolerance) * 1e-3)
     active = (previous_norm > epsilon) & (following_norm > epsilon)
     cosine = (previous * following).sum(dim=-1) / (
         previous_norm * following_norm
     ).clamp_min(epsilon)
     straight = active & (cosine >= 1.0 - tolerance)
-    duplicate_neighbor = (previous_norm <= epsilon) | (following_norm <= epsilon)
-    keep = torch.ones(waypoints.shape[:2], dtype=torch.bool, device=waypoints.device)
-    keep[:, 1:-1] = ~(straight | duplicate_neighbor)
+    point_ids = torch.arange(deduplicated_size, device=waypoints.device)[None]
+    last_point = (deduplicated_count - 1)[:, None]
+    keep = (point_ids == 0) | (point_ids == last_point)
+    real_interior = (point_ids[:, 1:-1] > 0) & (point_ids[:, 1:-1] < last_point)
+    keep[:, 1:-1] |= real_interior & ~straight
     retained_count = keep.sum(dim=1)
     output_count = max(2, int(retained_count.max().item()))
-    output = waypoints[:, -1:].expand(-1, output_count, -1).clone()
+    output = deduplicated[:, -1:].expand(-1, output_count, -1).clone()
     output_index = keep.cumsum(dim=1) - 1
     batch_index = torch.arange(waypoints.shape[0], device=waypoints.device)[:, None]
     batch_index = batch_index.expand_as(keep)
-    output[batch_index[keep], output_index[keep]] = waypoints[keep]
+    output[batch_index[keep], output_index[keep]] = deduplicated[keep]
     return output
 
 
@@ -591,27 +610,91 @@ def _compose_profile_samples(
     )
 
 
-def _make_sample_times(
-    duration: torch.Tensor, options: TrapezoidalPlanOptions
+def _sample_times_from_intervals(
+    segment_duration: torch.Tensor,
+    intervals: torch.Tensor,
+    output_count: int,
 ) -> torch.Tensor:
-    """Create batched sample times, padding shorter rows at their endpoint."""
+    """Compose sorted sample times whose segment endpoints are exact."""
+    cumulative_intervals = intervals.cumsum(dim=1)
+    cumulative_duration = segment_duration.cumsum(dim=1)
+    sample_ids = torch.arange(output_count, device=segment_duration.device)[None]
+    last_sample = cumulative_intervals[:, -1:]
+    clamped_ids = sample_ids.expand(segment_duration.shape[0], -1).clamp_max(
+        last_sample
+    )
+    segment = torch.searchsorted(
+        cumulative_intervals.contiguous(), clamped_ids.contiguous(), right=False
+    ).clamp_max(segment_duration.shape[1] - 1)
+    previous_intervals = torch.cat(
+        (torch.zeros_like(cumulative_intervals[:, :1]), cumulative_intervals[:, :-1]),
+        dim=1,
+    )
+    previous_duration = torch.cat(
+        (torch.zeros_like(cumulative_duration[:, :1]), cumulative_duration[:, :-1]),
+        dim=1,
+    )
+    segment_intervals = intervals.gather(1, segment).clamp_min(1)
+    local_interval = clamped_ids - previous_intervals.gather(1, segment)
+    times = previous_duration.gather(1, segment) + segment_duration.gather(
+        1, segment
+    ) * (local_interval / segment_intervals)
+    times[:, 0] = 0.0
+    return torch.where(last_sample > 0, times, torch.zeros_like(times))
+
+
+def _make_sample_times(
+    segment_duration: torch.Tensor, options: TrapezoidalPlanOptions
+) -> torch.Tensor:
+    """Create samples per segment so every retained boundary is represented."""
+    active = segment_duration > 1e-12
     if options.sample_method is TrajectorySampleMethod.QUANTITY:
         count = int(options.sample_interval)
-        alpha = torch.linspace(
-            0.0, 1.0, count, dtype=duration.dtype, device=duration.device
+        required = active.sum(dim=1) + 1
+        if count < int(required.max().item()):
+            raise ValueError(
+                "Quantity sampling requires at least one sample per retained waypoint; "
+                f"received {count}, requires at least {int(required.max().item())}."
+            )
+        base = active.to(torch.long)
+        extra = count - 1 - base.sum(dim=1)
+        total_duration = segment_duration.sum(dim=1, keepdim=True).clamp_min(1e-12)
+        raw_extra = segment_duration / total_duration * extra[:, None]
+        allocated_extra = torch.floor(raw_extra).to(torch.long)
+        remainder_count = extra - allocated_extra.sum(dim=1)
+        fractional = torch.where(
+            active,
+            raw_extra - allocated_extra,
+            torch.full_like(raw_extra, -1.0),
         )
-        return duration[:, None] * alpha[None]
+        order = fractional.argsort(dim=1, descending=True)
+        rank = torch.empty_like(order)
+        rank.scatter_(
+            1,
+            order,
+            torch.arange(order.shape[1], device=order.device)[None].expand_as(order),
+        )
+        allocated_extra += (rank < remainder_count[:, None]).to(torch.long)
+        intervals = base + allocated_extra
+        return _sample_times_from_intervals(segment_duration, intervals, count)
 
-    counts = torch.maximum(
-        torch.ceil(duration / float(options.sample_interval)).to(torch.long) + 1,
-        torch.full_like(duration, 2, dtype=torch.long),
+    intervals = torch.where(
+        active,
+        torch.ceil(segment_duration / float(options.sample_interval)).to(torch.long),
+        torch.zeros_like(segment_duration, dtype=torch.long),
     )
-    count = int(counts.max().item())
-    sample_ids = torch.arange(count, device=duration.device)[None]
-    valid = sample_ids < counts[:, None]
-    row_last = torch.maximum(counts - 1, torch.ones_like(counts))
-    row_alpha = sample_ids / row_last[:, None]
-    return torch.where(valid, duration[:, None] * row_alpha, duration[:, None])
+    counts = torch.maximum(
+        intervals.sum(dim=1) + 1,
+        torch.full(
+            (segment_duration.shape[0],),
+            2,
+            dtype=torch.long,
+            device=segment_duration.device,
+        ),
+    )
+    return _sample_times_from_intervals(
+        segment_duration, intervals, int(counts.max().item())
+    )
 
 
 def _plan_linear_profiles(
@@ -635,7 +718,7 @@ def _plan_linear_profiles(
     if bool(stationary_path.all().item()):
         hold_duration = options.minimum_duration or 0.0
         duration = waypoints.new_full((batch_size,), hold_duration)
-        times = _make_sample_times(duration, options)
+        times = _make_sample_times(duration[:, None], options)
         positions = waypoints[:, :1].expand(-1, times.shape[1], dof).clone()
         velocities = torch.zeros_like(positions)
         accelerations = torch.zeros_like(positions)
@@ -661,7 +744,7 @@ def _plan_linear_profiles(
     segment_duration = profile.durations.sum(dim=-1)
     cumulative_duration = segment_duration.cumsum(dim=-1)
     duration = cumulative_duration[:, -1]
-    times = _make_sample_times(duration, options)
+    times = _make_sample_times(segment_duration, options)
     positions, velocities, accelerations = _compose_profile_samples(
         times=times,
         cumulative_duration=cumulative_duration,

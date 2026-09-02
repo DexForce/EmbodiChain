@@ -110,25 +110,8 @@ velocity, acceleration, and jerk without starting simulation. A runnable
 batched robot example lives in ``scripts/tutorials/sim/planner/trapezoidal_planner.py``.
 The tutorial names the two diagnostics ``velocity_trapezoidal`` (the
 ``trapezoidal`` backend profile) and ``acceleration_trapezoidal`` (the
-jerk-limited ``double_s`` backend profile). Its default ``--profile both`` run
-writes a separate PNG for each profile. Every figure contains EEF XYZ, EEF XYZ
-Euler orientation, joint position, joint velocity, and joint acceleration for
-the selected ``--plot-env`` batch row. Figures are shown interactively by
-default and are saved only when ``--plot-output`` is supplied; use
-``--no-show-plot`` for headless runs. FK is evaluated in one call across all
-trajectory samples for only the selected row rather than repeatedly per sample
-or across the full environment batch, and plotted Euler angles are
-unwrapped across ±π to suppress representation-only discontinuities. The demo
-uses a stable writable Matplotlib cache under ``/tmp`` for headless execution.
-Each result uses a compact 3-by-2 dashboard: a 3D FK path with start, goal, and
-endpoint-line reference plus XYZ, RPY, joint position, joint velocity, and
-joint acceleration time plots. Its header reports duration, derivative peaks,
-and line deviation. The 3D path uses equal physical scaling on X, Y, and Z so
-small cross-axis IK errors are not visually magnified, while the XYZ time plot
-overlays dashed desired Cartesian coordinates against the FK result.
-Each trajectory tutorial keeps a small local CJK-capable font fallback and
-readable title/legend defaults; ASCII minus rendering avoids missing-glyph
-boxes.
+jerk-limited ``double_s`` backend profile). It can save diagnostic plots with
+``--plot-output`` and supports headless execution with ``--no-show-plot``.
 Multi-path/profile runs finish planning before showing all figures together.
 ``--path joint`` generates synchronized, limit-clamped motion on every arm
 joint. ``--path cartesian`` is Cartesian-first rather than joint-first: the
@@ -156,10 +139,10 @@ each analytic IK sample is replaced only by the joint-limit-valid ``2π``
 equivalent nearest to the previous seed, removing representation wrap jumps
 without changing the physical configuration or Cartesian path.
 For OPW robots the Cartesian tutorial submits the complete pose path through
-``Robot.compute_ik_path``. OPW evaluates all pose candidates in one Warp launch
-and performs temporally ordered branch selection in a second launch with one
-thread per environment; other solver types fail explicitly rather than being
-silently treated as continuous path solvers.
+``Robot.compute_batch_ik(..., continuous=True)``. This reuses the existing batch
+IK boundary and asks OPW for all candidates in one solver call before its
+internal temporally ordered branch selector runs; other solver types fail
+explicitly rather than being silently treated as continuous path solvers.
 Interactive replay consumes ``PlanResult.dt`` rather than submitting all
 samples as fast as Python can loop: every command advances enough physics steps
 for its scaled interval and windowed runs are wall-clock paced. The
@@ -289,7 +272,7 @@ import or branch on concrete planner option types.
 Unified interface for trajectory planning with optional pre-interpolation.
 
 - Wraps a `BasePlanner` instance (resolved from `planner_cfg.planner_type`).
-- Supported planner types: TOPPRA, NeuralPlanner, and cuRobo.
+- Supported planner types: TOPPRA, TrapezoidalPlanner, NeuralPlanner, and cuRobo.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the

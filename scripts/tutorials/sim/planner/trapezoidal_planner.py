@@ -358,11 +358,12 @@ def plan_cartesian_line(
 
     joint_ids = robot.get_joint_ids(name=control_part)
     joint_limits = robot.get_qpos_limits(joint_ids=joint_ids).to(start_qpos)
-    path_ik = getattr(robot, "compute_ik_path", None)
-    if callable(path_ik):
-        ik_result = path_ik(desired_poses, start_qpos, control_part)
-    else:
-        ik_result = None
+    ik_result = robot.compute_batch_ik(
+        desired_poses,
+        start_qpos,
+        control_part,
+        continuous=True,
+    )
     if ik_result is None:
         raise RuntimeError("Cartesian line IK solver is unavailable.")
     sample_success, positions = ik_result
@@ -430,6 +431,10 @@ def replay_plan(
         raise ValueError("positions and dt must have shapes (B, N, DOF) and (B, N).")
     if replay_speed <= 0.0:
         raise ValueError("replay_speed must be greater than zero.")
+    if positions.shape[0] > 1 and not torch.allclose(dt, dt[:1].expand_as(dt)):
+        raise ValueError(
+            "replay_plan requires one environment or identical dt rows across environments."
+        )
     physics_dt = float(sim.sim_config.physics_dt)
     wall_start = time.perf_counter()
     target_elapsed = 0.0

@@ -372,85 +372,46 @@ class OPWSolver(BaseSolver):
         best_ik_valid = wp.to_torch(best_ik_valid_wp).to(self.device)
         return best_ik_valid, best_ik_result
 
-    def get_ik_path(
+    def _select_continuous_ik_path(
         self,
-        target_xpos: torch.Tensor,
+        candidate_qpos: torch.Tensor,
+        candidate_valid: torch.Tensor,
         qpos_seed: torch.Tensor,
-        **kwargs: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Solve and continuously select an entire Cartesian pose path.
-
-        Args:
-            target_xpos: Solver-frame poses shaped ``(B, N, 4, 4)``.
-            qpos_seed: Initial joint seed shaped ``(B, 6)``.
-            **kwargs: Supports an optional six-element ``joint_weight`` tensor.
-
-        Returns:
-            Per-sample validity shaped ``(B, N)`` and joint positions shaped
-            ``(B, N, 6)``.
-
-        Raises:
-            ValueError: If an input shape is invalid.
-        """
-        if target_xpos.ndim != 4 or target_xpos.shape[-2:] != (4, 4):
-            raise ValueError("target_xpos must have shape (B, N, 4, 4).")
-        batch_size, sample_count = target_xpos.shape[:2]
+        """Select a continuous branch from precomputed OPW candidates."""
+        if candidate_qpos.ndim != 4 or candidate_qpos.shape[-2:] != (8, 6):
+            raise ValueError("candidate_qpos must have shape (B, N, 8, 6).")
+        batch_size, sample_count = candidate_qpos.shape[:2]
+        if candidate_valid.shape != (batch_size, sample_count, 8):
+            raise ValueError(
+                f"candidate_valid must have shape ({batch_size}, {sample_count}, 8)."
+            )
         if qpos_seed.shape != (batch_size, 6):
             raise ValueError(f"qpos_seed must have shape ({batch_size}, 6).")
         kernel_device = standardize_device_string(self.device)
-        flat_targets = (
-            target_xpos.to(device=kernel_device, dtype=torch.float32)
-            .contiguous()
-            .reshape(-1, 4, 4)
-        )
-        candidate_qpos = wp.zeros(
-            batch_size * sample_count * 8 * 6, dtype=float, device=kernel_device
-        )
-        candidate_valid = wp.zeros(
-            batch_size * sample_count * 8, dtype=int, device=kernel_device
-        )
         lower_limits = self.lower_qpos_limits.detach().cpu().tolist()
         upper_limits = self.upper_qpos_limits.detach().cpu().tolist()
-        wp.launch(
-            kernel=opw_ik_kernel,
-            dim=batch_size * sample_count,
-            inputs=(
-                wp.from_torch(flat_targets.reshape(-1)),
-                self._tcp_inv_warp,
-                self.params,
-                self.offsets.to(kernel_device),
-                self.sign_corrections.to(kernel_device),
-                wp_vec6f(*lower_limits),
-                wp_vec6f(*upper_limits),
-                self.cfg.safe_margin,
-            ),
-            outputs=[candidate_qpos, candidate_valid],
-            device=kernel_device,
-        )
-        candidate_qpos = candidate_qpos.reshape((batch_size, sample_count, 8, 6))
-        candidate_valid = candidate_valid.reshape((batch_size, sample_count, 8))
         path_qpos = wp.zeros(
             (batch_size, sample_count, 6), dtype=float, device=kernel_device
         )
         path_valid = wp.zeros(
             (batch_size, sample_count), dtype=int, device=kernel_device
         )
-        joint_weight = kwargs.get(
-            "joint_weight", torch.ones(6, dtype=torch.float32, device=self.device)
-        )
-        joint_weight = torch.as_tensor(joint_weight)
-        if joint_weight.shape != (6,):
-            raise ValueError("joint_weight must have shape (6,).")
+        joint_weight = self.ik_nearest_weight.detach().cpu().tolist()
         wp.launch(
             kernel=opw_ik_path_select_kernel,
             dim=batch_size,
             inputs=[
-                candidate_qpos,
-                candidate_valid,
+                wp.from_torch(candidate_qpos.to(kernel_device).contiguous()),
+                wp.from_torch(
+                    candidate_valid.to(
+                        device=kernel_device, dtype=torch.int32
+                    ).contiguous()
+                ),
                 wp.from_torch(
                     qpos_seed.to(device=kernel_device, dtype=torch.float32).contiguous()
                 ),
-                wp_vec6f(*joint_weight.detach().cpu().tolist()),
+                wp_vec6f(*joint_weight),
                 wp_vec6f(*lower_limits),
                 wp_vec6f(*upper_limits),
                 self.cfg.safe_margin,

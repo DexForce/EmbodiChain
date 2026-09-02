@@ -27,6 +27,7 @@ from embodichain.lab.sim.planners.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
 )
+from embodichain.lab.sim.planners.trapezoidal_planner import TrapezoidalPlanOptions
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
 
 BATCH_SIZE = 2
@@ -368,6 +369,24 @@ def _mock_planner(b=3, n=15, dofs=6):
         lambda options, *, start_qpos, control_part: options
     )
     return planner
+
+
+def test_resolve_trapezoidal_limits_without_sample_count() -> None:
+    planner = Mock()
+    planner.cfg.planner_type = "trapezoidal"
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    options = generator.resolve_plan_options(
+        plan_opts=None,
+        sample_count=None,
+        velocity_limit=0.01,
+        acceleration_limit=0.02,
+    )
+
+    assert isinstance(options, TrapezoidalPlanOptions)
+    assert options.constraints["velocity"] == 0.01
+    assert options.constraints["acceleration"] == 0.02
 
 
 def _mock_generator(

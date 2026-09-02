@@ -109,13 +109,16 @@ class _Robot:
         success = torch.ones(pose.shape[0], dtype=torch.bool)
         return success, qpos
 
-    def compute_ik_path(
+    def compute_batch_ik(
         self,
         pose: torch.Tensor,
         joint_seed: torch.Tensor,
         name: str,
+        *,
+        continuous: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         assert name == "left_arm"
+        assert continuous
         self.path_ik_call_count += 1
         qpos = joint_seed[:, None].expand(-1, pose.shape[1], -1).clone()
         qpos[:, :, :3] = pose[:, :, :3, 3]
@@ -425,6 +428,17 @@ def test_replay_uses_explicit_dt_to_advance_physics() -> None:
 
     assert simulation.update_steps == [1, 2, 3]
     assert len(robot.commands) == positions.shape[1]
+
+
+def test_replay_rejects_per_environment_timing_mismatch() -> None:
+    """Replay must not silently slow shorter batch rows to the longest row."""
+    robot = _Robot(batch_size=2)
+    simulation = _Simulation(physics_dt=0.01)
+    positions = torch.zeros(2, 2, 6)
+    dt = torch.tensor([[0.0, 0.02], [0.0, 0.03]])
+
+    with pytest.raises(ValueError, match="identical dt rows"):
+        replay_plan(simulation, robot, "left_arm", positions, dt, realtime=False)
 
 
 @pytest.mark.parametrize(

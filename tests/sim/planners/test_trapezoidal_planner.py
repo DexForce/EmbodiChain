@@ -418,6 +418,35 @@ def test_collinear_compression_pads_batch_rows_with_final_point() -> None:
     assert torch.equal(compressed[1], waypoints[1])
 
 
+def test_duplicate_waypoint_run_preserves_adjacent_corner() -> None:
+    waypoints = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 1.0]]])
+
+    compressed = _compress_collinear_waypoints(waypoints, tolerance=1e-5)
+
+    assert torch.equal(compressed[0, :3], waypoints[0, (0, 1, 3)])
+
+
+def test_quantity_sampling_includes_exact_internal_waypoint_and_stop() -> None:
+    waypoints = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]])
+    options = TrapezoidalPlanOptions(sample_interval=4)
+
+    result = _plan_linear_profiles(waypoints, options)
+
+    waypoint_matches = torch.isclose(
+        result.positions[0], waypoints[0, 1], atol=1e-6, rtol=0.0
+    ).all(dim=1)
+    assert waypoint_matches.any()
+    waypoint_index = waypoint_matches.nonzero()[0, 0]
+    assert torch.allclose(result.velocities[0, waypoint_index], torch.zeros(2))
+
+
+def test_quantity_sampling_rejects_fewer_samples_than_waypoints() -> None:
+    waypoints = torch.tensor([[[0.0], [1.0], [2.0]]])
+
+    with pytest.raises(ValueError, match="at least one sample per retained waypoint"):
+        _plan_linear_profiles(waypoints, TrapezoidalPlanOptions(sample_interval=2))
+
+
 def test_stationary_path_returns_zero_duration_hold() -> None:
     waypoints = torch.full((2, 3, 4), 0.25)
     options = TrapezoidalPlanOptions(sample_interval=10)

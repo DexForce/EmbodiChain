@@ -11,7 +11,7 @@
 * Flexible configuration via `OPWSolverCfg`
 * Strict enforcement of joint limits
 * Forward kinematics (FK) and multiple IK solution branches
-* Continuous whole-path IK with two Warp launches independent of sample count
+* Continuous whole-path IK through the existing batch-IK boundary
 
 ## Configuration
 
@@ -105,12 +105,11 @@ solver = OPWSolver(cfg, device="cuda")
 
 ```
 
-* `get_ik_path(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]`
-  Solves a pose path shaped `(B, N, 4, 4)`. The first Warp kernel computes all
-  eight analytical candidates for every pose. A second kernel assigns one
-  thread to each environment and walks its samples in time order, selecting
-  each solution relative to the previously selected joint state. It returns
-  validity `(B, N)` and continuous joint positions `(B, N, 6)`.
+Continuous selection is requested at the robot boundary with
+`Robot.compute_batch_ik(..., continuous=True)`. The robot performs arena/root
+frame conversion and calls `get_ik(..., return_all_solutions=True)` once for the
+flattened pose batch. OPW then applies its internal sequential selector and
+returns validity `(B, N)` plus continuous joint positions `(B, N, 6)`.
 
 ## References
 
