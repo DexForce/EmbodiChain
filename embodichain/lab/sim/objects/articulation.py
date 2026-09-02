@@ -654,6 +654,10 @@ class Articulation(BatchEntity):
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
 
+        # Apply gravity before the first physics update. Unlike asset-backed
+        # physical properties, this config field is an explicit runtime flag.
+        self.set_gravity(self.cfg.enable_gravity)
+
         if device.type == "cuda":
             self._world.update(0.001)
 
@@ -2726,6 +2730,21 @@ class Articulation(BatchEntity):
             self._entities[env_idx].set_articulation_flag(
                 ArticulationFlag.DISABLE_SELF_COLLISION, not enable
             )
+
+    def set_gravity(
+        self,
+        enable: bool = True,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set whether gravity is enabled for the articulation.
+
+        Args:
+            enable: Whether to enable gravity. Defaults to True.
+            env_ids: Environment indices. If None, all environments are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for env_idx in local_env_ids:
+            self._entities[env_idx].enable_gravity(bool(enable))
 
     def destroy(self) -> None:
         env = self._world.get_env()

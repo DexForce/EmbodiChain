@@ -33,6 +33,8 @@ topics:
       - simulation lifecycle
       - ArticulationJointKinematics
       - get_parent_joint_chain
+      - ArticulationCfg
+      - enable_gravity
     paths:
       - topics/simulation-system/simulation-system.md
     source_of_truth:
@@ -253,6 +255,7 @@ topics:
       - dexforce_w1
       - gripper
       - arm
+      - enable_gravity
     paths:
       - topics/robot-system/robot-system.md
     source_of_truth:

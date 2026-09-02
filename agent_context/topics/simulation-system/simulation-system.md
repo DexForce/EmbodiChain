@@ -70,6 +70,12 @@ then advances the world for the requested number of physics steps. Each
 environment control step normally calls it with
 `sim_steps_per_control`.
 
+`ArticulationCfg.enable_gravity` defaults to `True`. During articulation
+construction, `Articulation` applies this explicit runtime flag to every native
+entity before the first physics update, including when
+`use_usd_properties=True`. Use `Articulation.set_gravity(...)` to change the
+flag later for all or selected environment indices.
+
 ## Module Boundaries
 
 | Area | Owner | Routed topic |

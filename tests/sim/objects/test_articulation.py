@@ -43,6 +43,47 @@ ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
 
 
+class _GravityEntity:
+    """Record native gravity calls for an articulation test double."""
+
+    def __init__(self) -> None:
+        self.calls: list[bool] = []
+
+    def enable_gravity(self, flag: bool) -> None:
+        self.calls.append(flag)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("enable", [True, False])
+def test_set_gravity_updates_only_selected_environments(enable: bool) -> None:
+    """Runtime gravity updates are dispatched to the requested native entities."""
+    articulation = object.__new__(Articulation)
+    articulation._entities = [_GravityEntity() for _ in range(3)]
+    articulation._all_indices = torch.arange(3, dtype=torch.int32)
+
+    articulation.set_gravity(enable, env_ids=(2, 0))
+
+    assert articulation._entities[0].calls == [enable]
+    assert articulation._entities[1].calls == []
+    assert articulation._entities[2].calls == [enable]
+
+
+@pytest.mark.no_sim
+def test_set_gravity_updates_all_environments_by_default() -> None:
+    """Omitting environment indices applies gravity to every native entity."""
+    articulation = object.__new__(Articulation)
+    articulation._entities = [_GravityEntity() for _ in range(3)]
+    articulation._all_indices = torch.arange(3, dtype=torch.int32)
+
+    articulation.set_gravity(False)
+
+    assert [entity.calls for entity in articulation._entities] == [
+        [False],
+        [False],
+        [False],
+    ]
+
+
 def test_get_qf_returns_all_articulation_joint_efforts():
     expected_qf = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
     articulation = object.__new__(Articulation)

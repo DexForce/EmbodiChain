@@ -18,11 +18,14 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
 | `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override joint position limits. Replaces asset limits and may either tighten or expand the range. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
-| `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
+| `disable_self_collision` | `bool` | `True` | Whether to disable self-collisions. |
+| `enable_gravity` | `bool` | `True` | Whether gravity affects the articulation. This runtime flag also applies when `use_usd_properties=True`. |
 | `drive_pros` | `JointDrivePropertiesCfg` | `drive_type="none"` | Default drive properties. |
 | `attrs` | `RigidBodyAttributesCfg` | `...` | Default rigid body attributes applied to all links. |
 | `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
+At runtime, call `articulation.set_gravity(...)` to change gravity for every
+environment or for a selected set of environment indices.
 
 ### Per-link physics (`link_attrs`)
 
