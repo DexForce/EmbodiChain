@@ -2837,8 +2837,9 @@ class SimulationManager:
 
         Cameras keep EmbodiChain's native CameraGroup implementation. A camera
         attached to an articulation link is created immediately and attached
-        after the physical Spawn scene is prepared. ContactSensor still
-        requires the Default backend scene and therefore prepares physics first.
+        after the physical Spawn scene is prepared. Contact sensors are created
+        after preparation and query contacts through the backend-neutral Spawn
+        Scene API.
 
         Args:
             sensor_cfg (SensorCfg): configuration for the sensor.
@@ -2860,12 +2861,6 @@ class SimulationManager:
                 f"Unsupported sensor type {sensor_type!r}. Supported types: "
                 f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
             )
-        if sensor_type == "ContactSensor" and self.is_newton_backend:
-            raise NotImplementedError(
-                "ContactSensor currently requires the Default backend PhysicsScene. "
-                "Newton needs a public backend-neutral contact query API in DexSim."
-            )
-
         if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
@@ -2883,9 +2878,18 @@ class SimulationManager:
                     self._attach_camera_parent(sensor)
                 else:
                     self._pending_sensor_attachments.append(sensor)
+        elif isinstance(sensor_factory, type) and issubclass(
+            sensor_factory, ContactSensor
+        ):
+            self.prepare()
+            sensor = sensor_factory(
+                sensor_cfg,
+                self.device,
+                owner=self,
+            )
         else:
-            # ContactSensor and custom native sensors require a prepared
-            # physics scene; cameras only depend on the pre-created Arenas.
+            # Custom native sensors require a prepared physics scene; cameras
+            # only depend on the pre-created Arenas.
             self.prepare()
             # Preserve custom test/plugin factories whose two-argument
             # constructor predates the manager-owned render context.

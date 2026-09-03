@@ -246,10 +246,6 @@ def run_simulation(sim: SimulationManager):
     contact_filter_cfg.articulation_cfg_list = [contact_filter_art_cfg]
     contact_filter_cfg.filter_need_both_actor = True
 
-    if sim.is_newton_backend:
-        run_newton_contact_query(sim, contact_filter_cfg)
-        return
-
     contact_sensor = sim.add_sensor(sensor_cfg=contact_filter_cfg)
 
     try:
@@ -270,13 +266,22 @@ def run_simulation(sim: SimulationManager):
                     f"[INFO]: Fetch contact cost time: {average_cost_time * 1000:.2f} ms, num_envs: {sim.num_envs}"
                 )
                 # filter contact report for a rigid object with a articulation link
-                cube2_user_ids = sim.get_rigid_object("cube2").get_user_ids()
-                finger1_user_ids = (
-                    sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
+                assert contact_sensor.item_user_ids is not None
+                filter_actor_ids = torch.as_tensor(
+                    [
+                        actor_id
+                        for actor_id in contact_sensor.item_user_ids.tolist()
+                        if contact_sensor.get_actor_info(actor_id).path.endswith(
+                            "/cube2"
+                        )
+                        or contact_sensor.get_actor_info(actor_id).link_name
+                        == "finger1_link"
+                    ],
+                    dtype=torch.int32,
+                    device=sim.device,
                 )
-                filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
                 filter_contact_report = contact_sensor.filter_by_user_ids(
-                    filter_user_ids
+                    filter_actor_ids
                 )
                 # print("filter_contact_report", filter_contact_report)
                 # visualize contact points
@@ -291,126 +296,6 @@ def run_simulation(sim: SimulationManager):
         # Clean up resources
         sim.destroy()
         print("[INFO]: Simulation terminated successfully")
-
-
-def run_newton_contact_query(
-    sim: SimulationManager, contact_filter_cfg: ContactSensorCfg
-) -> None:
-    """Run Newton's raw contact query for the configured collision shapes.
-
-    The generic :class:`ContactSensor` currently consumes Default-backend
-    ``PhysicsScene`` buffers. Newton's Spawn runtime instead owns the contact
-    buffers directly, so this example queries those buffers without claiming
-    that the generic sensor API is backend-neutral yet.
-
-    Args:
-        sim: Prepared simulation manager using the Newton backend.
-        contact_filter_cfg: Rigid objects and articulation links to monitor.
-    """
-    import warp as wp
-    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
-
-    result = sim.spawn_result
-    if result is None:
-        raise RuntimeError("Newton contact queries require a prepared Spawn scene.")
-    backend = get_newton_backend(result.world)
-    if backend is None:
-        raise RuntimeError("Newton Spawn runtime is unavailable for contact queries.")
-    if not callable(getattr(backend.solver, "update_contacts", None)):
-        raise RuntimeError(
-            "The active Newton solver does not expose contact-query support."
-        )
-
-    filter_shape_ids = _newton_filter_shape_ids(sim, contact_filter_cfg)
-    step_count = 0
-    accumulated_cost_time = 0.0
-
-    try:
-        while True:
-            sim.update(step=1)
-            start_time = time.time()
-            backend.solver.update_contacts(backend.contacts, backend.state_0)
-            total_contacts = int(
-                wp.to_torch(backend.contacts.rigid_contact_count).reshape(-1)[0].item()
-            )
-            matched_contacts = 0
-            if total_contacts > 0:
-                shape0 = wp.to_torch(backend.contacts.rigid_contact_shape0)[
-                    :total_contacts
-                ]
-                shape1 = wp.to_torch(backend.contacts.rigid_contact_shape1)[
-                    :total_contacts
-                ]
-                shape0_matches = torch.isin(shape0, filter_shape_ids)
-                shape1_matches = torch.isin(shape1, filter_shape_ids)
-                if contact_filter_cfg.filter_need_both_actor:
-                    matched_contacts = int(
-                        torch.logical_and(shape0_matches, shape1_matches).sum().item()
-                    )
-                else:
-                    matched_contacts = int(
-                        torch.logical_or(shape0_matches, shape1_matches).sum().item()
-                    )
-            accumulated_cost_time += time.time() - start_time
-            step_count += 1
-
-            if step_count % 100 == 0:
-                average_cost_time = accumulated_cost_time / 100.0
-                print(
-                    "[INFO]: Fetch Newton contact cost time: "
-                    f"{average_cost_time * 1000:.2f} ms, "
-                    f"contacts: {matched_contacts}, num_envs: {sim.num_envs}"
-                )
-                accumulated_cost_time = 0.0
-    except KeyboardInterrupt:
-        print("\n[INFO]: Stopping simulation...")
-    finally:
-        sim.destroy()
-        print("[INFO]: Simulation terminated successfully")
-
-
-def _newton_filter_shape_ids(
-    sim: SimulationManager, contact_filter_cfg: ContactSensorCfg
-) -> torch.Tensor:
-    """Resolve a contact filter configuration to Newton Spawn shape IDs."""
-    shape_ids: list[int] = []
-    for rigid_uid in contact_filter_cfg.rigid_uid_list:
-        rigid_object = sim.get_rigid_object(rigid_uid)
-        if rigid_object is None:
-            continue
-        for entity in rigid_object._entities:
-            physics_body = entity.physics_body
-            if physics_body is not None:
-                shape_ids.extend(int(shape_id) for shape_id in physics_body.shape_ids)
-
-    for articulation_cfg in contact_filter_cfg.articulation_cfg_list:
-        articulation = sim.get_robot(articulation_cfg.articulation_uid)
-        if articulation is None:
-            articulation = sim.get_articulation(articulation_cfg.articulation_uid)
-        if articulation is None:
-            continue
-        for entity in articulation._entities:
-            physics_articulation = entity.physics_articulation
-            if physics_articulation is None:
-                continue
-            link_names = (
-                set(articulation_cfg.link_name_list)
-                if articulation_cfg.link_name_list
-                else {link.name for link in physics_articulation.links}
-            )
-            for link in physics_articulation.links:
-                if link.name in link_names:
-                    shape_ids.extend(int(shape_id) for shape_id in link.shape_ids)
-
-    if not shape_ids:
-        raise ValueError(
-            "The Newton contact filter did not resolve to any collision shapes."
-        )
-    return torch.tensor(
-        sorted(set(shape_ids)),
-        dtype=torch.int32,
-        device=sim.device,
-    )
 
 
 if __name__ == "__main__":
