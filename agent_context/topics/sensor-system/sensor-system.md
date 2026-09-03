@@ -40,7 +40,7 @@ BatchEntity
 |---|---|---|---|---|
 | Camera | `CameraCfg` | `"Camera"` | color, depth, mask, normal, position | Single RGB-D camera; configurable intrinsics/extrinsics |
 | StereoCamera | `StereoCameraCfg` | `"StereoCamera"` | color/depth/mask/normal/position (left + right), disparity | Extends Camera; adds right camera with baseline transform |
-| ContactSensor | `ContactSensorCfg` | `"ContactSensor"` | contact data tensors | Collision detection between rigid bodies and articulation links; uses Warp kernels |
+| ContactSensor | `ContactSensorCfg` | `"ContactSensor"` | contact data tensors | Backend-neutral rigid/link contacts on Default and Newton; uses DexSim `ContactQuery` plus a Warp scatter kernel |
 
 ## Sensor Configuration
 
@@ -121,6 +121,36 @@ Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. 
 
 `ArticulationContactFilterCfg` specifies `articulation_uid` and `link_name_list` to filter which links report contacts.
 
+### Contact query lifecycle
+
+Create contact sensors through `SimulationManager.add_sensor()`. The manager
+crosses `prepare()` first and passes itself as the explicit owner. The sensor
+resolves every configured UID to per-Arena Spawn handles and creates one
+`spawn_result.create_contact_query(...)`:
+
+- `filter_need_both_actor=True` maps to `match="all"`; `False` maps to
+  `match="any"`.
+- The query returns positions in each Arena frame and supplies an explicit
+  `env_ids` row for every contact. Environment assignment therefore works
+  when the selected actor is either actor 0 or actor 1 and when the other
+  actor is global.
+- Query targets and actor IDs survive Newton topology rebuilds by semantic
+  Spawn path/link identity.
+- `contact_capabilities` reports whether the backend supplies geometry,
+  normal impulse, and friction impulse. MuJoCo-Warp and MJVBD provide all
+  three; other Newton solvers may provide geometry only.
+
+The existing TensorDict shape and field names remain stable. `user_ids` now
+contains backend-neutral contact actor IDs rather than PhysX render user IDs;
+resolve one with `ContactSensor.get_actor_info()`. `item_user_ids` contains the
+IDs selected by the sensor, and `filter_by_user_ids()` accepts those same IDs.
+Normals consistently point from `user_ids[..., 0]` toward
+`user_ids[..., 1]`.
+PhysX Direct GPU does not identify static counterparts in its raw contact
+buffer; those rows use actor ID `-1`. Monitor the dynamic/link side with
+`filter_need_both_actor=False` when contacts against arbitrary static geometry
+are required. Default CPU and Newton identify registered static shapes.
+
 ## Common Failure Modes
 
 - **`sensor_type` string mismatch** — `SensorCfg.from_dict()` looks up `sensor_type + "Cfg"` in the sensors module. A typo (e.g. `"camera"` instead of `"Camera"`) causes `AttributeError`.
@@ -128,4 +158,7 @@ Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. 
 - **Parent frame not found** — `OffsetCfg.parent` must match a link name in a Spawn-bound robot or articulation. Missing or ambiguous names raise during immediate attachment or `SimulationManager.prepare()`.
 - **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
 - **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
+- **Using native object user IDs with contact data** — `user_ids` is now a
+  query-local, backend-neutral actor identity. Use `get_actor_info()` or
+  `item_user_ids`, not `RigidObject.get_user_ids()`.
 - **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.

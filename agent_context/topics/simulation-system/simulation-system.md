@@ -27,6 +27,12 @@ Spawn topology revision. EmbodiChain registry objects are stable facades:
 `add_*()` returns a declared facade and `prepare()` binds that same object in
 place.
 
+Backend-neutral contact access follows the same ownership boundary.
+`ContactSensor` resolves configured logical UIDs through `SpawnScene.handles()`
+after `prepare()`, then creates a DexSim `Scene.create_contact_query(...)`.
+PhysX user IDs and Newton shape/body IDs are backend-binding details; neither
+the sensor nor `SimulationManager` reads them directly.
+
 The registries cover:
 
 - rigid objects and rigid-object groups;
@@ -533,6 +539,8 @@ where `None` means “leave the source/backend value unchanged.”
   `SimulationManager.flush_cleanup_queue()`.
 - Resolve articulation ancestry through `get_parent_joint_chain()`; keep
   DexSim topology access encapsulated by `Articulation`.
+- Resolve rigid contacts through the Spawn result's `ContactQuery`; do not add
+  a second PhysicsScene/Newton contact path in `SimulationManager` or sensors.
 
 ## Common Failure Modes
 

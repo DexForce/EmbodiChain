@@ -39,6 +39,8 @@ topics:
       - manual update
       - GPU physics
       - simulation lifecycle
+      - ContactQuery
+      - Scene.create_contact_query
       - collision_policy
       - collision isolation
       - arena isolation
@@ -323,6 +325,9 @@ topics:
       - Camera
       - StereoCamera
       - ContactSensor
+      - ContactQuery
+      - contact actor ID
+      - Newton contact
       - rgb
       - depth
       - pointcloud
