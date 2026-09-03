@@ -285,6 +285,41 @@ class _EffectfulInspectLowerer(_InspectLowerer):
         )
 
 
+class _ReleasingInspectLowerer(_InspectLowerer):
+    """Registered test call requiring one verified release baseline."""
+
+    effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.RELEASE
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: object,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        lowering = super().lower(
+            call,
+            context=context,
+            bound=bound,
+            option_template=option_template,
+        )
+        return SemanticLowering(
+            goal=lowering.goal,
+            registered_effect=RegisteredSemanticEffect(
+                effect_kind=SemanticEffectKind.RELEASE,
+                held_objects=(
+                    RegisteredHeldObjectEffect(
+                        expectation_id="source",
+                        relation=HeldObjectRelation.DETACHED,
+                        object_id="cube",
+                        slot_id="primary",
+                    ),
+                ),
+            ),
+        )
+
+
 class _RetainingInspectLowerer(_InspectLowerer):
     """Test extension that safely exposes retained-object look-ahead."""
 
@@ -1316,6 +1351,58 @@ def test_registered_effect_contract_is_grounded_by_compiler() -> None:
     assert expectation.slot_id == "primary"
     assert expectation.object_id == "cube"
     assert grounded.effect_monitor is not None
+
+
+def test_registered_release_requires_object_held_in_every_eligible_row() -> None:
+    """Registered release calls cannot consume inactive held-state rows."""
+    registry, _ = _scene_registry()
+    templates = _action_option_templates(registered=True)
+    templates["vendor.inspect"] = PickUpOptions(pre_grasp_distance=0.07)
+    profile = _profile(
+        preset=_preset(
+            "safe",
+            registered=True,
+            action_option_templates=templates,
+            effect_monitors={
+                "vendor.inspect": EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                )
+            },
+        )
+    )
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(_ReleasingInspectLowerer(),),
+        profile=profile,
+    )
+    pick_compiler, _ = _compiler(registry)
+    pick_workflow = pick_compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    semantics = pick_compiler.ground(
+        pick_workflow,
+        0,
+        _context(registry),
+    ).invocation.goal.semantics
+    context = _held_context(
+        registry,
+        semantics,
+        torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.tensor([True, False]),
+    )
+    workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.ground(workflow, 0, context)
+
+    assert error.value.diagnostic.code == "verified_held_object_required"
+    grounded = compiler.ground(
+        workflow,
+        0,
+        context,
+        eligible_mask=torch.tensor([True, False]),
+    )
+    assert grounded.eligible_mask.tolist() == [True, False]
 
 
 def test_ground_wraps_effect_monitor_factory_contract_failure_with_path() -> None:

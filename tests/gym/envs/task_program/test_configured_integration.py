@@ -87,6 +87,10 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     TaskState,
 )
+from embodichain.lab.sim.atomic_actions.goals import (
+    collect_scene_dependencies,
+    resolve_pose_goal,
+)
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.task_program.semantics import (
     HeldObjectRelation,
@@ -762,10 +766,46 @@ def test_relative_place_uses_fresh_reference_pose_and_verified_grasp() -> None:
     )
 
     assert type(lowering.goal) is PlaceGoal
+    assert type(lowering.goal.xpos) is SceneEntityPose
+    assert lowering.goal.xpos.entity_id == "notebook"
+    assert collect_scene_dependencies(lowering.goal) == ("notebook",)
+    resolved = resolve_pose_goal(lowering.goal.xpos, context, name="xpos")
     torch.testing.assert_close(
-        lowering.goal.xpos[:, :3, 3],
+        resolved[:, :3, 3],
         torch.tensor(((0.58, 0.1, 1.27),)),
     )
+    moved_reference_pose = reference_pose.clone()
+    moved_reference_pose[:, :3, :3] = torch.tensor(
+        [
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    moved_reference_pose[:, 1, 3] = 0.4
+    moved_context = PlanningContext(
+        robot=context.robot,
+        task=context.task,
+        scene=SceneSnapshot(
+            timestamp=2.0,
+            version=2,
+            entities={
+                "can": EntityState(object_pose),
+                "notebook": EntityState(moved_reference_pose),
+            },
+        ),
+        env_ids=context.env_ids,
+    )
+    moved_resolved = resolve_pose_goal(
+        lowering.goal.xpos,
+        moved_context,
+        name="xpos",
+    )
+    torch.testing.assert_close(
+        moved_resolved[:, :3, 3],
+        torch.tensor(((0.58, 0.4, 1.27),)),
+    )
+    torch.testing.assert_close(moved_resolved[:, :3, :3], torch.eye(3).unsqueeze(0))
     assert lowering.registered_effect is not None
     assert lowering.registered_effect.effect_kind is SemanticEffectKind.RELEASE
     assert lowering.registered_effect.held_objects[0].relation is (

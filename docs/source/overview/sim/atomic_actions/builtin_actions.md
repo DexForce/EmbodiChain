@@ -254,7 +254,11 @@ Explicit pose tensors use `(4, 4)` or `(B, 4, 4)`. Waypoint-capable fields in
 `EndEffectorPoseGoal` and `PlaceGoal` also accept `(B, N, 4, 4)`.
 `SceneEntityPose` resolves to the latest `(B, 4, 4)` pose from each
 `SceneSnapshot`, checks optional perception confidence, and registers that
-entity as a recovery dependency.
+entity as a recovery dependency. `world_displacement` keeps a translation in
+the world frame after local composition. `world_orientation` replaces the
+tracked entity's rotation before applying `relative_pose`, allowing a target to
+track a moving reference position while retaining a grounded world-frame
+orientation.
 
 | Skill / field | `SceneEntityPose` accepted | Automatic scene-motion replan |
 |---|---:|---:|

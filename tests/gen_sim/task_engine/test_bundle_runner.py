@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -52,6 +53,59 @@ def test_exception_metadata_rejects_non_exception_values() -> None:
     """The private serializer fails closed on an invalid diagnostic value."""
     with pytest.raises(TypeError, match="BaseException"):
         _exception_metadata("failure")  # type: ignore[arg-type]
+
+
+def test_execution_report_preserves_partial_row_success() -> None:
+    """A normal partial result remains eligible for Task Engine any/at-least."""
+    graph = {
+        "task_id": "partial",
+        "integration_fingerprint": "0" * 64,
+        "nodes": [{"id": "step_01"}],
+        "task_groups": [{"id": "group_01", "node_ids": ["step_01"]}],
+    }
+    runtime_result = {
+        "segments": [
+            {
+                "name": "step_01",
+                "active": [True, True],
+                "successes": [True, False],
+            }
+        ]
+    }
+
+    report = _bundle_runner._build_execution_report(
+        graph,
+        runtime_result,
+        row_success=[True, False],
+        terminal_reasons=["success", "task_incomplete"],
+        failure=None,
+        trajectory_root=Path("trajectory"),
+    )
+
+    assert report["status"] == "failed"
+    assert [row["success"] for row in report["environments"]] == [True, False]
+    assert report["failure"] is None
+
+
+def test_execution_report_masks_rows_after_global_failure() -> None:
+    """An infrastructure failure invalidates every row in the attempt."""
+    graph = {
+        "task_id": "failed",
+        "integration_fingerprint": "0" * 64,
+        "nodes": [],
+        "task_groups": [],
+    }
+
+    report = _bundle_runner._build_execution_report(
+        graph,
+        None,
+        row_success=[True, False],
+        terminal_reasons=["success", "runtime_failed"],
+        failure={"type": "RuntimeError", "message": "transport failed"},
+        trajectory_root=Path("trajectory"),
+    )
+
+    assert [row["success"] for row in report["environments"]] == [False, False]
 
 
 def test_module_entrypoint_flushes_protocol_before_fast_exit(

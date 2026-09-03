@@ -756,6 +756,47 @@ def test_scene_entity_pose_applies_world_displacement_after_local_transform() ->
     )
 
 
+def test_scene_entity_pose_applies_world_orientation_before_local_transform() -> None:
+    entity_pose = torch.eye(4).repeat(2, 1, 1)
+    entity_pose[:, :3, :3] = torch.tensor(
+        [
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    entity_pose[:, :3, 3] = torch.tensor([[0.5, 0.2, 0.0], [0.7, 0.4, 0.0]])
+    object_to_eef = torch.eye(4)
+    object_to_eef[2, 3] = 0.2
+    world_orientation = torch.eye(3)
+    reference = SceneEntityPose(
+        "tray",
+        relative_pose=object_to_eef,
+        world_orientation=world_orientation,
+        world_displacement=torch.tensor([0.1, 0.0, 0.0]),
+    )
+    world_orientation.fill_(9.0)
+    context = _context(
+        SceneSnapshot(
+            timestamp=1.0,
+            version=3,
+            entities={"tray": EntityState(entity_pose, confidence=0.9)},
+        )
+    )
+
+    resolved = resolve_pose_goal(reference, context, name="xpos")
+
+    torch.testing.assert_close(resolved[:, :3, :3], torch.eye(3).repeat(2, 1, 1))
+    torch.testing.assert_close(
+        resolved[:, :3, 3],
+        torch.tensor([[0.6, 0.2, 0.2], [0.8, 0.4, 0.2]]),
+    )
+    assert collect_scene_dependencies(EndEffectorPoseGoal(reference)) == ("tray",)
+    snapshot = reference.snapshot()
+    assert snapshot.world_orientation is not reference.world_orientation
+    torch.testing.assert_close(snapshot.world_orientation, torch.eye(3))
+
+
 def test_scene_entity_pose_enforces_confidence() -> None:
     context = _context(
         SceneSnapshot(

@@ -805,17 +805,15 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
             )
 
         object_pose = self._observed_pose(context, route.object_id)
-        reference_pose = self._observed_pose(context, route.reference_entity_id)
-        object_target = object_pose.clone()
+        self._observed_pose(context, route.reference_entity_id)
         displacement = torch.tensor(
             route.world_displacement,
-            dtype=object_target.dtype,
-            device=object_target.device,
+            dtype=object_pose.dtype,
+            device=object_pose.device,
         )
-        object_target[:, :3, 3] = reference_pose[:, :3, 3] + displacement
         object_to_eef = held.object_to_eef.to(
-            dtype=object_target.dtype,
-            device=object_target.device,
+            dtype=object_pose.dtype,
+            device=object_pose.device,
         )
         if object_to_eef.shape == (4, 4):
             object_to_eef = object_to_eef.unsqueeze(0).expand(
@@ -828,7 +826,18 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
                 "Relative Place held-object transform must match the planning batch."
             )
         return SemanticLowering(
-            goal=PlaceGoal(xpos=torch.bmm(object_target, object_to_eef)),
+            goal=PlaceGoal(
+                xpos=SceneEntityPose(
+                    route.reference_entity_id,
+                    relative_pose=object_to_eef,
+                    world_displacement=displacement,
+                    world_orientation=(
+                        object_pose[:, :3, :3]
+                        if option_template.preserve_current_object_orientation
+                        else None
+                    ),
+                )
+            ),
             registered_effect=RegisteredSemanticEffect(
                 effect_kind=SemanticEffectKind.RELEASE,
                 held_objects=(

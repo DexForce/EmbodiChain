@@ -1407,6 +1407,13 @@ class SemanticCallCompiler:
             lowering = self._lower_handover(analyzed, context, eligible, path=path)
         elif type(call) is RegisteredSemanticCall:
             lowering = self._lower_registered(analyzed, context, path=path)
+            self._validate_registered_held_effects(
+                analyzed,
+                lowering,
+                context,
+                eligible,
+                path=(*path, call_index, "call"),
+            )
         else:  # pragma: no cover - exact workflow construction prevents this
             raise AssertionError(f"Unsupported analyzed call {type(call).__name__}.")
 
@@ -2113,6 +2120,34 @@ class SemanticCallCompiler:
             clauses=tuple(clauses),
         )
 
+    def _validate_registered_held_effects(
+        self,
+        analyzed: AnalyzedSemanticCall,
+        lowering: SemanticLowering,
+        context: PlanningContext,
+        eligible: torch.Tensor,
+        *,
+        path: tuple[PathPart, ...],
+    ) -> None:
+        """Require verified input holds declared by a registered release."""
+        contract = lowering.registered_effect
+        if contract is None:
+            return
+        for item in contract.held_objects:
+            if (
+                item.relation is not HeldObjectRelation.DETACHED
+                or item.allow_missing_detached_baseline
+            ):
+                continue
+            self._require_held_object(
+                analyzed,
+                context,
+                eligible,
+                slot_id=item.slot_id,
+                object_id=item.object_id,
+                path=(*path, "registered_effect", item.expectation_id),
+            )
+
     def _ground_phase_effect_gates(
         self,
         analyzed: AnalyzedSemanticCall,
@@ -2793,6 +2828,8 @@ class SemanticCallCompiler:
             object_target.entity_id,
             relative_pose=composed,
             minimum_confidence=object_target.minimum_confidence,
+            world_displacement=object_target.world_displacement,
+            world_orientation=object_target.world_orientation,
         )
 
     def _target_with_observed_object_orientation(
@@ -2833,6 +2870,13 @@ class SemanticCallCompiler:
         target_pose[:, :3, :3] = observed_object_pose[:, :3, :3]
         if isinstance(object_target, torch.Tensor):
             return target_pose
+        if object_target.relative_pose is None:
+            return SceneEntityPose(
+                object_target.entity_id,
+                minimum_confidence=object_target.minimum_confidence,
+                world_displacement=object_target.world_displacement,
+                world_orientation=observed_object_pose[:, :3, :3],
+            )
 
         parent_pose = resolve_pose_goal(
             SceneEntityPose(
@@ -2856,6 +2900,7 @@ class SemanticCallCompiler:
         eligible: torch.Tensor,
         *,
         slot_id: str,
+        object_id: str | None = None,
         path: tuple[PathPart, ...],
     ) -> tuple[str, HeldObjectState]:
         """Resolve the logical participant key and verify held-object identity."""
@@ -2871,13 +2916,15 @@ class SemanticCallCompiler:
         task_state_key = endpoint.task_state_key
         assert isinstance(task_state_key, str)
         held = context.task.get_held_object(task_state_key)
-        call_object = getattr(analyzed.call, "object", None)
-        assert type(call_object) is SceneObjectRef
-        if held is None or held.semantics.entity_id != call_object.entity_id:
+        if object_id is None:
+            call_object = getattr(analyzed.call, "object", None)
+            assert type(call_object) is SceneObjectRef
+            object_id = call_object.entity_id
+        if held is None or held.semantics.entity_id != object_id:
             raise _diagnostic(
                 "verified_held_object_required",
                 path,
-                f"Call requires verified object {call_object.entity_id!r} held by "
+                f"Call requires verified object {object_id!r} held by "
                 f"logical state key {task_state_key!r}.",
             )
         assert held.env_mask is not None
@@ -2890,7 +2937,7 @@ class SemanticCallCompiler:
             raise _diagnostic(
                 "verified_held_object_required",
                 path,
-                f"Object {call_object.entity_id!r} is not verified as held in "
+                f"Object {object_id!r} is not verified as held in "
                 "every eligible environment.",
                 missing_env_ids,
             )

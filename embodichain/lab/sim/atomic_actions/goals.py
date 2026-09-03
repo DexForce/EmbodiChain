@@ -50,6 +50,9 @@ class SceneEntityPose:
     world_displacement: torch.Tensor | None = None
     """Optional world-frame translation applied after ``relative_pose``."""
 
+    world_orientation: torch.Tensor | None = None
+    """Optional world-frame orientation applied before ``relative_pose``."""
+
     def __post_init__(self) -> None:
         if not isinstance(self.entity_id, str) or not self.entity_id.strip():
             raise ValueError("entity_id must be a non-empty string.")
@@ -73,6 +76,19 @@ class SceneEntityPose:
             if not torch.isfinite(displacement).all():
                 raise ValueError("world_displacement must contain finite values.")
             object.__setattr__(self, "world_displacement", displacement.clone())
+        if self.world_orientation is not None:
+            orientation = self.world_orientation
+            if not isinstance(orientation, torch.Tensor):
+                raise TypeError("world_orientation must be a torch.Tensor or None.")
+            if orientation.dim() not in (2, 3) or orientation.shape[-2:] != (3, 3):
+                raise ValueError(
+                    "world_orientation must have shape (3, 3) or " "(num_envs, 3, 3)."
+                )
+            if orientation.dim() == 3 and orientation.shape[0] == 0:
+                raise ValueError("world_orientation batches must not be empty.")
+            if not torch.isfinite(orientation).all():
+                raise ValueError("world_orientation must contain finite values.")
+            object.__setattr__(self, "world_orientation", orientation.clone())
         if not 0.0 <= self.minimum_confidence <= 1.0:
             raise ValueError("minimum_confidence must be in [0, 1].")
 
@@ -87,6 +103,7 @@ class SceneEntityPose:
             relative_pose=self.relative_pose,
             minimum_confidence=self.minimum_confidence,
             world_displacement=self.world_displacement,
+            world_orientation=self.world_orientation,
         )
 
 
@@ -171,6 +188,16 @@ def resolve_pose_goal(
         raise ValueError(
             f"Scene entity {value.entity_id!r} pose must match planning batch size."
         )
+    if value.world_orientation is not None:
+        orientation = value.world_orientation.to(device=pose.device, dtype=pose.dtype)
+        if orientation.shape == (3, 3):
+            orientation = orientation.unsqueeze(0).expand(context.batch_size, -1, -1)
+        elif orientation.shape != (context.batch_size, 3, 3):
+            raise ValueError(
+                f"{name}.world_orientation must match planning batch size."
+            )
+        pose = pose.clone()
+        pose[:, :3, :3] = orientation
     if value.relative_pose is None:
         resolved = pose.clone()
     else:

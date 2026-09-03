@@ -132,10 +132,6 @@ def execute_bundle(
                 num_envs=len(row_success),
             )
             env.reset(options={"save_data": False})
-            failure = {
-                "type": "TaskProgramRuntimeFailure",
-                "terminal_reason": str(result.terminal_reason),
-            }
     except Exception as exc:
         failure = _exception_metadata(exc)
         if env is not None:
@@ -188,12 +184,35 @@ def execute_bundle(
                 else "runtime_failed"
             )
         ] * len(row_success)
-    semantic_success = _semantic_success_by_env(
+    report = _build_execution_report(
         graph,
         result_metadata,
+        row_success=row_success,
+        terminal_reasons=terminal_reasons,
+        failure=failure,
+        trajectory_root=trajectory_root,
+    )
+    write_execution_report(output, report)
+    _print_json(report)
+    return 0 if report["status"] == "succeeded" else 2
+
+
+def _build_execution_report(
+    graph: dict[str, Any],
+    runtime_result: dict[str, Any] | None,
+    *,
+    row_success: list[bool],
+    terminal_reasons: list[str],
+    failure: dict[str, Any] | None,
+    trajectory_root: Path,
+) -> dict[str, Any]:
+    """Build a report without turning row-local failure into global failure."""
+    semantic_success = _semantic_success_by_env(
+        graph,
+        runtime_result,
         num_envs=len(row_success),
     )
-    report = {
+    return {
         "schema_version": "task_program_execution_report/v1",
         "status": "succeeded" if failure is None and all(row_success) else "failed",
         "task_id": str(graph["task_id"]),
@@ -209,12 +228,9 @@ def execute_bundle(
             }
             for env_id, success in enumerate(row_success)
         ],
-        "runtime_result": deepcopy(result_metadata),
+        "runtime_result": deepcopy(runtime_result),
         "failure": failure,
     }
-    write_execution_report(output, report)
-    _print_json(report)
-    return 0 if report["status"] == "succeeded" else 2
 
 
 def _exception_metadata(exc: BaseException) -> dict[str, Any]:
