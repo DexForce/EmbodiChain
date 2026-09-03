@@ -130,6 +130,27 @@ control_parts = {
 
 When using a dict, keys are joint names or regex patterns matching joint names. Control-part names can also be used as keys (resolved via `ArticulationCfg` logic).
 
+### qpos-only tracking-qualified defaults
+
+`scripts/benchmark/robotics/robot_trajectory_tracking.py` is the regression
+entry point for the maintained Franka Panda, UR10e, CobotMagic, and DexForce
+W1 presets. Its default mode writes only qpos targets at 60 Hz with a 240 Hz
+physics step; it records that no qvel target was written. The qualified
+configuration changes are intentionally narrow:
+
+| Robot | Qualified joint group | Default adjustment |
+|---|---|---|
+| Franka Panda | Arm / fingers | Damping `1e2` / `2e1` |
+| UR10e | Arm | Damping `1e2`; other UR variants retain `1e3` until separately qualified |
+| CobotMagic | Both grippers | Stiffness `1e3`, damping `2e1`; arm defaults unchanged |
+| DexForce W1 | Arms + head / default hands | Damping `1e2`; hand stiffness/damping `1e3` / `2e1`; body defaults unchanged |
+
+The benchmark audits source URDF inertia as well as loaded mass. Missing
+inertia currently belongs to fixed/reference frames such as tool TCP, base
+connectors, and mounting offsets. Do not invent mass or inertia for those
+frames merely to clear the audit; change physical asset data only with a
+validated source.
+
 ## Adding a New Robot
 
 Full guide: `docs/source/tutorial/add_robot.rst` · Quick reference: `docs/source/guides/add_robot.rst`

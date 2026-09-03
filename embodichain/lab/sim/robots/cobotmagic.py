@@ -128,14 +128,14 @@ class CobotMagicCfg(RobotCfg):
             stiffness={
                 "left_joint[1-6]": 7e4,
                 "right_joint[1-6]": 7e4,
-                "left_joint[7-8]": 3e2,
-                "right_joint[7-8]": 3e2,
+                "left_joint[7-8]": 1e3,
+                "right_joint[7-8]": 1e3,
             },
             damping={
                 "left_joint[1-6]": 1e3,
                 "right_joint[1-6]": 1e3,
-                "left_joint[7-8]": 3e1,
-                "right_joint[7-8]": 3e1,
+                "left_joint[7-8]": 2e1,
+                "right_joint[7-8]": 2e1,
             },
             max_effort={
                 "left_joint[1-6]": 3e6,
