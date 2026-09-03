@@ -805,6 +805,7 @@ def test_newton_physics_inherits_common_gravity_and_collision_config() -> None:
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",
             rigid_contact_max=1234,
+            update_interval=4,
         ),
     )
 
@@ -813,6 +814,7 @@ def test_newton_physics_inherits_common_gravity_and_collision_config() -> None:
     assert dexsim_cfg.gravity == [0.0, 0.0, -1.5]
     assert dexsim_cfg.collision_pipeline_cfg.broad_phase == "sap"
     assert dexsim_cfg.collision_pipeline_cfg.rigid_contact_max == 1234
+    assert dexsim_cfg.collision_pipeline_cfg.update_interval == 4
 
 
 def test_newton_physics_normalizes_mapping_collision_config() -> None:
@@ -823,6 +825,34 @@ def test_newton_physics_normalizes_mapping_collision_config() -> None:
     assert isinstance(cfg.collision_cfg, NewtonCollisionPipelineCfg)
     assert cfg.collision_cfg.broad_phase == "sap"
     assert cfg.collision_cfg.rigid_contact_max == 12
+
+
+@pytest.mark.parametrize("update_interval", [0, -1, True, 1.5])
+def test_newton_collision_pipeline_rejects_invalid_update_interval(
+    update_interval: int | float | bool,
+) -> None:
+    with pytest.raises(ValueError, match="update_interval must be a positive integer"):
+        NewtonCollisionPipelineCfg(update_interval=update_interval)
+
+
+def test_newton_physics_can_disable_the_external_collision_pipeline() -> None:
+    cfg = NewtonPhysicsCfg(collision_cfg=None)
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.collision_pipeline_cfg is None
+    assert not hasattr(cfg, "enable_collision_pipeline")
+    assert not hasattr(cfg, "collision_pipeline_update_interval")
+
+
+def test_newton_physics_rejects_broad_phase_without_a_collision_pipeline() -> None:
+    with pytest.raises(ValueError, match="broad_phase requires collision_cfg"):
+        NewtonPhysicsCfg(collision_cfg=None, broad_phase="sap")
+
+    cfg = NewtonPhysicsCfg(collision_cfg=None)
+    cfg.broad_phase = "sap"
+    with pytest.raises(ValueError, match="broad_phase requires collision_cfg"):
+        cfg.to_dexsim_cfg(gpu_id=0)
 
 
 def test_default_physics_accepts_the_same_gravity_input_shape() -> None:

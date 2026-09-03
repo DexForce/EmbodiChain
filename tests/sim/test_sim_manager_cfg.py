@@ -176,6 +176,21 @@ def test_newton_physics_cfg_passes_warp_log_suppression() -> None:
     assert dexsim_cfg.suppress_warp_kernel_logs is False
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize("update_interval", [None, 4])
+def test_newton_physics_cfg_forwards_collision_pipeline_update_interval(
+    update_interval: int | None,
+) -> None:
+    cfg = NewtonPhysicsCfg(collision_cfg={"update_interval": update_interval})
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.collision_pipeline_cfg is not None
+    assert dexsim_cfg.collision_pipeline_cfg.update_interval == update_interval
+    assert not hasattr(cfg, "enable_collision_pipeline")
+    assert not hasattr(cfg, "collision_pipeline_update_interval")
+
+
 @pytest.mark.parametrize(
     ("physics_cfg", "expect_suppressed"),
     [

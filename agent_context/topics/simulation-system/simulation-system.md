@@ -228,7 +228,13 @@ origin, axis, and optional limits. Consumers must not reach into
 backend config. `PhysicsBackendCfg` owns common timing, device, and gravity;
 `DefaultPhysicsCfg` adds default-backend scene settings, while
 `NewtonPhysicsCfg` adds the Newton solver, substeps, gradient/CUDA-graph
-behavior, and a grouped `NewtonCollisionPipelineCfg`.
+behavior, and an optional grouped `NewtonCollisionPipelineCfg`. Its
+`update_interval` schedules external contact generation in both the ordinary
+DexSim runtime and EmbodiChain's manual differentiable trajectory: `None`
+updates at the first solver substep of each physics step, while `k >= 1`
+updates at local substeps `0, k, 2k, ...`; intervening solver calls reuse the
+most recent contact buffer. `collision_cfg=None` omits the external pipeline,
+which the differentiable trajectory rejects because it requires contacts.
 Do not add a second backend string that can disagree with the config type.
 `physics_cfg.device` owns the backend's default (`cpu` for Default and
 `cuda:0` for Newton). An explicit `SimulationManagerCfg.device` or legacy
@@ -259,12 +265,15 @@ The `open_drawer.py` tutorial combines this option with 20 Newton substeps per
 10 ms control step, while keeping its authored robot gains, collision geometry,
 pull trajectory, success criteria, and push trajectory identical to Default.
 Atomic-action tutorials configure their shared Newton simulation in
-`scripts/tutorials/atomic_action/tutorial_utils.py`: they retain 20 substeps
-while following Newton's brick-stacking contact profile (`solver=newton`,
-`integrator=implicitfast`, 15 solver iterations, 100 line-search iterations,
-an elliptic friction cone, `impratio=50`, and the Newton collision pipeline
-with contact reduction and an `nxn` broad phase). The shared factory leaves
-the Default backend configuration unchanged.
+`scripts/tutorials/atomic_action/tutorial_utils.py` with 10 solver substeps
+per 10 ms physics step. They select `mujoco_warp` with
+`use_mujoco_contacts=True` and set the external `collision_cfg` to `None`.
+MuJoCo-Warp then generates and solves contacts internally at every solver
+substep; external-pipeline settings such as `update_interval`, contact
+reduction, and the external `rigid_contact_max` do not apply. DexSim derives
+the native per-world contact capacity from the finalized scene, avoiding the
+oversized fixed buffers formerly inherited from external-pipeline examples.
+The shared factory leaves the Default backend configuration unchanged.
 The package dependency must identify the exact DexSim dev build containing
 this API; a base `==0.4.3` requirement also accepts older local-version wheels
 that do not export `AutoSolverCfg` and is therefore insufficient.

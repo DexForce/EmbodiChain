@@ -245,10 +245,12 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
 class NewtonCollisionPipelineCfg:
     """Newton collision-pipeline settings owned at scene scope.
 
-    These values map to DexSim's ``NewtonCollisionPipelineCfg``.  Per-shape
-    contact and SDF values belong to :class:`NewtonCollisionPropertiesCfg`
-    instead.  The pipeline performs broad-phase pair selection, narrow-phase
-    contact generation, and optional contact reduction for the complete scene.
+    Construction values map to DexSim's ``NewtonCollisionPipelineCfg``.
+    ``update_interval`` controls the DexSim-side scheduling of that external
+    pipeline. Per-shape contact and SDF values belong to
+    :class:`NewtonCollisionPropertiesCfg` instead. The pipeline performs
+    broad-phase pair selection, narrow-phase contact generation, and optional
+    contact reduction for the complete scene.
 
     See the `Newton collision guide
     <https://newton-physics.github.io/newton/latest/concepts/collisions.html>`_
@@ -313,6 +315,24 @@ class NewtonCollisionPipelineCfg:
     :attr:`~embodichain.lab.sim.shapes.MeshCollisionCfg.is_hydroelastic`.
     """
 
+    update_interval: int | None = None
+    """External-pipeline updates within one EmbodiChain physics step.
+
+    ``None`` (the default) updates once at the first solver substep. An integer
+    ``k >= 1`` updates at substeps ``0, k, 2k, ...``; ``1`` updates before
+    every solver substep.
+    """
+
+    def __post_init__(self) -> None:
+        """Validate external collision-pipeline scheduling."""
+        if self.update_interval is not None and (
+            type(self.update_interval) is not int or self.update_interval < 1
+        ):
+            raise ValueError(
+                "NewtonCollisionPipelineCfg.update_interval must be a positive "
+                "integer or None."
+            )
+
 
 @configclass
 class NewtonPhysicsCfg(PhysicsBackendCfg):
@@ -370,16 +390,15 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
     """
 
-    collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] = field(
+    collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
         default_factory=NewtonCollisionPipelineCfg
     )
-    """Scene-level Newton collision-pipeline configuration."""
+    """Optional external collision-pipeline configuration.
 
-    enable_collision_pipeline: bool = True
-    """Whether Newton generates rigid contacts before each solver substep.
-
-    Disable this only for a solver/workflow that deliberately obtains contacts
-    elsewhere; ordinary rigid-body scenes require it.
+    The default preserves external contact generation for ordinary rigid-body
+    scenes. Set to ``None`` to avoid constructing or executing the external
+    pipeline, for example when particle solvers use rigid shapes solely as
+    one-way SDF boundaries.
     """
 
     broad_phase: Literal["nxn", "sap", "explicit"] | None = None
@@ -395,18 +414,28 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         """Normalize dictionary collision settings at the config boundary."""
         if isinstance(self.collision_cfg, Mapping):
             self.collision_cfg = NewtonCollisionPipelineCfg(**self.collision_cfg)
+        self._validate_collision_pipeline_configuration()
+
+    def _validate_collision_pipeline_configuration(self) -> None:
+        """Keep the deprecated broad-phase shortcut meaningful."""
+        if self.collision_cfg is None and self.broad_phase is not None:
+            logger.log_error(
+                "NewtonPhysicsCfg.broad_phase requires collision_cfg to be configured.",
+                ValueError,
+            )
 
     def to_dexsim_cfg(
         self,
         gpu_id: int,
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        self._validate_collision_pipeline_configuration()
         from dexsim.engine.newton_physics import (
             AutoSolverCfg,
             FeatherstoneSolverCfg,
             MJWarpSolverCfg,
             NewtonCfg,
-            NewtonCollisionPipelineCfg,
+            NewtonCollisionPipelineCfg as DexsimNewtonCollisionPipelineCfg,
             SemiImplicitSolverCfg,
             VBDSolverCfg,
             XPBDSolverCfg,
@@ -443,13 +472,18 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
                 "differentiable solver."
             )
 
-        collision_values = {
-            item.name: getattr(self.collision_cfg, item.name)
-            for item in fields(self.collision_cfg)
-        }
-        if collision_values["broad_phase"] is None:
-            collision_values["broad_phase"] = self.broad_phase
-        collision_values["requires_grad"] = self.requires_grad
+        collision_pipeline_cfg = None
+        if self.collision_cfg is not None:
+            collision_values = {
+                item.name: getattr(self.collision_cfg, item.name)
+                for item in fields(self.collision_cfg)
+            }
+            if collision_values["broad_phase"] is None:
+                collision_values["broad_phase"] = self.broad_phase
+            collision_values["requires_grad"] = self.requires_grad
+            collision_pipeline_cfg = DexsimNewtonCollisionPipelineCfg(
+                **collision_values
+            )
 
         newton_cfg_args: dict[str, Any] = {
             "dt": self.physics_dt,
@@ -459,8 +493,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "debug_mode": self.debug_mode,
             "requires_grad": self.requires_grad,
             "suppress_warp_kernel_logs": self.suppress_warp_kernel_logs,
-            "collision_pipeline_cfg": NewtonCollisionPipelineCfg(**collision_values),
-            "enable_collision_pipeline": self.enable_collision_pipeline,
+            "collision_pipeline_cfg": collision_pipeline_cfg,
             "sync_to_dexsim": True,
         }
         if solver_cfg is not None:

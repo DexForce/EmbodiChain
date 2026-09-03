@@ -109,6 +109,8 @@ _CAN_INIT_ROTATION = torch.tensor(
 )
 
 HAND_CLOSE_QPOS = 0.026
+PICKUP_OBJECT_PART = "center"
+"""Central body grasp keeps the horizontally staged can symmetric in the jaws."""
 PICKUP_SAMPLE_INTERVAL = 80
 PICKUP_HAND_INTERP_STEPS = 5
 PICKUP_PRE_GRASP_DISTANCE = 0.08
@@ -291,9 +293,9 @@ def run_assemble_demo(
             broadcast_pose_batch(assemble_object_target_pose, num_envs),
         )
 
-    # Step 1 - the left arm picks the soda can up by its top part.
+    # Step 1 - the left arm picks the soda can up at its central body.
     pick_up_options = PickUpOptions(
-        pick_object_part="top",
+        pick_object_part=PICKUP_OBJECT_PART,
         pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
         lift_height=PICKUP_LIFT_HEIGHT,
         hand_interp_steps=PICKUP_HAND_INTERP_STEPS,

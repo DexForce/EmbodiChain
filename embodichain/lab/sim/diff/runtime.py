@@ -37,16 +37,24 @@ class NewtonDifferentiableTrajectory:
         self._backend = runtime._validated_backend()
         self.physics_steps = int(physics_steps)
         self.physics_dt = float(physics_dt)
-        self.total_solver_steps = self.physics_steps * runtime.num_substeps
-        self.solver_dt = self.physics_dt / runtime.num_substeps
+        self._num_substeps = runtime.num_substeps
+        self._collision_update_interval = (
+            self._backend.cfg.collision_pipeline_cfg.update_interval
+        )
+        self.total_solver_steps = self.physics_steps * self._num_substeps
+        self.solver_dt = self.physics_dt / self._num_substeps
 
         model = self._backend.model
         self.states = [model.state() for _ in range(self.total_solver_steps + 1)]
         self.states[0].assign(self._backend.runtime.current_state)
         self.control = model.control()
+        # Keep a distinct buffer for each pipeline update so Warp retains the
+        # contacts needed for backward. Solver substeps between updates reuse
+        # the most recent buffer.
         self.contacts = [
             self._backend.collision_pipeline.contacts()
-            for _ in range(self.total_solver_steps)
+            for solver_step in range(self.total_solver_steps)
+            if self._should_update_collision_pipeline(solver_step)
         ]
         self._stepped = False
         self._committed = False
@@ -56,6 +64,13 @@ class NewtonDifferentiableTrajectory:
     def final_state(self) -> Any:
         """Return the terminal state owned by this trajectory."""
         return self.states[-1]
+
+    def _should_update_collision_pipeline(self, solver_step: int) -> bool:
+        """Return whether ``solver_step`` starts a collision-update interval."""
+        substep = solver_step % self._num_substeps
+        if self._collision_update_interval is None:
+            return substep == 0
+        return substep % self._collision_update_interval == 0
 
     def step(self) -> Any:
         """Run the complete trajectory inside the caller's active Warp tape."""
@@ -71,13 +86,17 @@ class NewtonDifferentiableTrajectory:
 
         backend = self._backend
         apply_external_wrenches = backend.runtime.has_external_wrenches
-        for index, (state_in, state_out, contacts) in enumerate(
-            zip(self.states, self.states[1:], self.contacts)
+        contacts = self.contacts[0]
+        contact_buffers = iter(self.contacts[1:])
+        for index, (state_in, state_out) in enumerate(
+            zip(self.states, self.states[1:])
         ):
             state_in.clear_forces()
             if apply_external_wrenches and index < self._runtime.num_substeps:
                 backend.runtime.apply_external_wrenches(state_in)
-            if backend.cfg.enable_collision_pipeline:
+            if self._should_update_collision_pipeline(index):
+                if index:
+                    contacts = next(contact_buffers)
                 backend.collision_pipeline.collide(state_in, contacts)
             backend.solver.step(
                 state_in,

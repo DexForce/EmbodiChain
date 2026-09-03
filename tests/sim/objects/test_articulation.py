@@ -106,6 +106,48 @@ def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values():
     assert chain[0].origin_pose[0, 3].item() == 0.0
 
 
+@pytest.mark.no_sim
+def test_get_parent_joint_chain_uses_newton_joint_descriptors_when_needed():
+    articulation = object.__new__(Articulation)
+    articulation._data = SimpleNamespace(
+        link_names=["body", "door", "door_handle"],
+        is_newton_backend=True,
+    )
+    fixed = SimpleNamespace(
+        name="handle_fixed",
+        joint_type=SimpleNamespace(name="FIXED"),
+        parent_link_name="door",
+        child_link_name="door_handle",
+        origin_pose=np.eye(4, dtype=np.float32),
+        axis=np.zeros(3, dtype=np.float32),
+        lower_limit=np.asarray([0.0], dtype=np.float32),
+        upper_limit=np.asarray([0.0], dtype=np.float32),
+    )
+    hinge = SimpleNamespace(
+        name="door_hinge",
+        joint_type=SimpleNamespace(name="REVOLUTE"),
+        parent_link_name="body",
+        child_link_name="door",
+        origin_pose=np.eye(4, dtype=np.float32),
+        axis=np.asarray([0.0, 0.0, 1.0], dtype=np.float32),
+        lower_limit=np.asarray([0.0], dtype=np.float32),
+        upper_limit=np.asarray([2.0], dtype=np.float32),
+    )
+    joint_descs = {fixed.name: fixed, hinge.name: hinge}
+    entity = SimpleNamespace(
+        get_joint_names=lambda: [fixed.name, hinge.name],
+        get_joint_info=lambda _: None,
+        get_joint_desc=joint_descs.__getitem__,
+    )
+    articulation._entities = [entity]
+
+    chain = articulation.get_parent_joint_chain("door_handle")
+
+    assert [joint.name for joint in chain] == ["handle_fixed", "door_hinge"]
+    assert [joint.joint_type for joint in chain] == ["fixed", "revolute"]
+    assert chain[1].joint_limits == (0.0, 2.0)
+
+
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:
     return art.get_link_physical_attr(link_names=[link_name], env_ids=[env_idx])[
         0

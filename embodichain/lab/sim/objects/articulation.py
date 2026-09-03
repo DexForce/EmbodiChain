@@ -1248,9 +1248,10 @@ class Articulation(BatchEntity):
     ) -> tuple[ArticulationJointKinematics, ...]:
         """Return the joints from a link toward the articulation root.
 
-        The immediate parent joint is first. Native simulator joint-info values
-        are copied into :class:`ArticulationJointKinematics`, keeping callers
-        independent of DexSim objects and the private entity collection.
+        The immediate parent joint is first. Backend-native joint-info values
+        or Newton's backend-neutral joint descriptors are copied into
+        :class:`ArticulationJointKinematics`, keeping callers independent of
+        DexSim objects and the private entity collection.
 
         Args:
             link_name: Link whose parent chain should be queried.
@@ -1277,11 +1278,36 @@ class Articulation(BatchEntity):
         entity = self._entities[0]
         joints_by_child: dict[str, ArticulationJointKinematics] = {}
         for joint_name in entity.get_joint_names():
-            native = entity.get_joint_info(joint_name)
-            if native is None:
-                raise ValueError(
-                    f"Native articulation has no joint info for {joint_name!r}."
-                )
+            if getattr(self._data, "is_newton_backend", False):
+                get_joint_desc = getattr(entity, "get_joint_desc", None)
+                if not callable(get_joint_desc):
+                    raise ValueError(
+                        "Native articulation has no joint topology for "
+                        f"{joint_name!r}."
+                    )
+                try:
+                    native = get_joint_desc(joint_name)
+                except (KeyError, StopIteration) as exc:
+                    raise ValueError(
+                        "Native articulation has no joint topology for "
+                        f"{joint_name!r}."
+                    ) from exc
+            else:
+                native = entity.get_joint_info(joint_name)
+                if native is None:
+                    get_joint_desc = getattr(entity, "get_joint_desc", None)
+                    if not callable(get_joint_desc):
+                        raise ValueError(
+                            "Native articulation has no joint topology for "
+                            f"{joint_name!r}."
+                        )
+                    try:
+                        native = get_joint_desc(joint_name)
+                    except (KeyError, StopIteration) as exc:
+                        raise ValueError(
+                            "Native articulation has no joint topology for "
+                            f"{joint_name!r}."
+                        ) from exc
             native_joint_type = getattr(
                 native.joint_type,
                 "name",
@@ -1289,11 +1315,19 @@ class Articulation(BatchEntity):
             )
             lower_limit = getattr(native, "lower_limit", None)
             upper_limit = getattr(native, "upper_limit", None)
-            joint_limits = (
-                None
-                if lower_limit is None or upper_limit is None
-                else (float(lower_limit), float(upper_limit))
-            )
+            if lower_limit is None or upper_limit is None:
+                joint_limits = None
+            else:
+                lower_values = np.asarray(lower_limit, dtype=np.float32).reshape(-1)
+                upper_values = np.asarray(upper_limit, dtype=np.float32).reshape(-1)
+                if lower_values.size != 1 or upper_values.size != 1:
+                    raise ValueError(
+                        "Articulation topology requires scalar limits for "
+                        f"joint {joint_name!r}; got lower shape "
+                        f"{tuple(lower_values.shape)} and upper shape "
+                        f"{tuple(upper_values.shape)}."
+                    )
+                joint_limits = (float(lower_values[0]), float(upper_values[0]))
             joint = ArticulationJointKinematics(
                 name=native.name,
                 joint_type=str(native_joint_type),
