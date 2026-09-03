@@ -675,9 +675,85 @@ def test_open_drawer_lowerer_keeps_optional_legacy_axis_compatibility() -> None:
         path="runtime_services.lowerer",
     )
 
-    assert automatic.revision == "3"
+    assert automatic.revision == "4"
     assert automatic.translation_axis is None
     assert legacy.translation_axis == (0.0, 1.0, 0.0)
+
+
+def test_explicit_slide_axis_bypasses_sampling_with_non_unit_scale() -> None:
+    """A non-unit scale cannot block the explicit-axis legacy branch."""
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    factory = _decode_registered_lowerer(
+        {
+            "kind": "articulation_link_slide",
+            "articulation_id": _OPEN_DRAWER_ENTITY_ID,
+            "articulation_simulation_uid": _OPEN_DRAWER_ENTITY_ID,
+            "link_entity_id": _OPEN_DRAWER_HANDLE_ID,
+            "translation_axis": [0.0, -2.0, 0.0],
+        },
+        path="runtime_services.lowerer",
+    )
+    vertices = torch.tensor(
+        [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]],
+    )
+    triangles = torch.tensor([[0, 1, 2]])
+    drawer = SimpleNamespace(
+        link_names=(_OPEN_DRAWER_HANDLE_LINK_NAME,),
+        joint_names=("drawer_joint",),
+        cfg=SimpleNamespace(
+            init_qpos=(0.0,),
+            body_scale=(1.0, 2.0, 1.0),
+        ),
+        get_link_vert_face=lambda name: (vertices, triangles),
+    )
+    drawer_ref = SceneArticulationRef(_OPEN_DRAWER_ENTITY_ID)
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=drawer_ref,
+                state_provider=_NeverObserveProvider(),
+            ),
+            SceneEntityRegistration(
+                ref=SceneLinkRef(_OPEN_DRAWER_HANDLE_ID),
+                state_provider=_NeverObserveProvider(),
+                parent=drawer_ref,
+                native_name=_OPEN_DRAWER_HANDLE_LINK_NAME,
+            ),
+        )
+    )
+    robot = object()
+    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
+        robot=robot,
+        device=torch.device("cpu"),
+    )
+    simulation = SimpleNamespace(
+        get_articulation=lambda identifier: (
+            drawer if identifier == _OPEN_DRAWER_ENTITY_ID else None
+        )
+    )
+
+    with patch(
+        "embodichain.lab.task_program.integrations._configured_services."
+        "sample_initial_articulation_geometry",
+        side_effect=AssertionError("explicit axes must not sample geometry"),
+    ) as sampler:
+        lowerer = factory.create(
+            simulation=simulation,
+            robot=robot,
+            scene_registry=registry,
+            engine=engine,
+        )
+
+    sampler.assert_not_called()
+    assert lowerer._semantics.geometry == {}
+    assert torch.equal(
+        lowerer._semantics.affordance.translation_axis,
+        torch.tensor([0.0, -2.0, 0.0]),
+    )
 
 
 def test_open_drawer_lowerer_accepts_only_canonical_payload() -> None:

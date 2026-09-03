@@ -293,14 +293,14 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
     """Create Slide semantics from one configured articulation-link geometry."""
 
     call_id: ClassVar[str] = _ARTICULATION_LINK_SLIDE_CALL_ID
-    revision: ClassVar[str] = "3"
+    revision: ClassVar[str] = "4"
     target_descriptor: ClassVar[SkillDescriptor] = Slide.descriptor()
 
     articulation_id: str
     articulation_simulation_uid: str
     link_entity_id: str
     translation_axis: tuple[float, float, float] | None = None
-    """Optional compatibility fallback superseded by complete point-cloud geometry."""
+    """Optional compatibility axis that preserves the mesh-only legacy path."""
 
     target_pose_mode: str = "live"
 
@@ -360,13 +360,17 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         if not callable(get_link_vert_face):
             raise TypeError("Articulation must provide get_link_vert_face().")
         vertices, triangles = get_link_vert_face(native_link_name)
-        geometry = sample_initial_articulation_geometry(
-            articulation,
-            native_link_name,
-            initial_qpos=articulation.cfg.init_qpos,
-            initial_qpos_joint_names=articulation.joint_names,
-            body_scale=articulation.cfg.body_scale,
-        ).to_object_geometry()
+        geometry: dict[str, object] = {}
+        if self.translation_axis is None:
+            # Explicit axes own the legacy mesh-only path: sampled geometry
+            # would both override their sign and reject scaled articulations.
+            geometry = sample_initial_articulation_geometry(
+                articulation,
+                native_link_name,
+                initial_qpos=articulation.cfg.init_qpos,
+                initial_qpos_joint_names=articulation.joint_names,
+                body_scale=articulation.cfg.body_scale,
+            ).to_object_geometry()
         affordance_kwargs: dict[str, object] = {}
         if self.translation_axis is not None:
             affordance_kwargs["translation_axis"] = torch.tensor(
