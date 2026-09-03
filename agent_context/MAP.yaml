@@ -13,6 +13,7 @@ topics:
       - sim system
       - lab sim
       - simulation manager
+      - camera attachment
       - 仿真系统
       - 仿真核心
       - 仿真管理器
@@ -39,6 +40,9 @@ topics:
       - manual update
       - GPU physics
       - simulation lifecycle
+      - CameraCfg.extrinsics.parent
+      - parented camera
+      - topology revision attachment
       - ContactQuery
       - Scene.create_contact_query
       - collision_policy

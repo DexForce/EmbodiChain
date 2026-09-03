@@ -67,7 +67,7 @@ EnvCfg.sim_cfg
        → prepare manager-owned runtime buffers for the committed revision
        → bind declared EmbodiChain facades in place
        → publish bound state through the backend render-sync hook
-       → attach sensors whose parents are now materialized
+       → attach parented cameras for the committed topology revision
   → initialize metadata-dependent robot, action, and render-only resources
   → BaseEnv.step()
        → preprocess/apply action
@@ -183,6 +183,20 @@ attachment remain retryable; already completed declarations are not
 reconfigured or rebound. `init_gpu_physics()` and
 `finalize_newton_physics()` remain compatibility aliases, but new code should
 call `prepare()`.
+
+`CameraCfg.extrinsics.parent` accepts either an unambiguous articulation link
+name or `"<asset_uid>/<link_name>"`; the resolver returns the corresponding
+public render node in every Arena. Cameras continue to use the manager-owned
+`CameraGroup` plus one native camera view per Arena—attachment only reparents
+those views, and extrinsics are local to the resolved link.
+
+`prepare()` records camera attachment completion by committed Spawn
+`topology_revision`; a new revision reparents all configured cameras to the
+rebuilt render nodes. The revision marker advances only after every attachment
+succeeds, so a partial failure is retried on the next `prepare()`. The camera
+registry remains the only source of attachment intent; there is no separate
+pending list or physical dependency graph. `LightCfg` has no parent-attachment
+contract in EmbodiChain.
 
 Standalone callers must call `prepare()` after their last `add_*()` and before
 reading link/joint metadata, object state, or advancing physics. `BaseEnv`
