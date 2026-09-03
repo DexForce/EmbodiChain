@@ -231,9 +231,10 @@ control-part adapter resolves current joint-backed endpoints through
 `Robot.control_parts`; custom adapters may instead return mobile, whole-body, or
 other runtime targets.
 
-`MoveJoints` is intentionally `agent_visible=False`: it is useful for home,
-recovery, calibration, and scripted postures, but is not exposed to an Action
-Agent by default.
+`MoveJoints` is also the canonical implementation for home, recovery,
+calibration, and other embodiment-named postures. Semantic callers should
+constrain those uses through a registered call and keep the named target in the
+robot profile.
 
 ## Shared goal and configuration rules
 
@@ -379,7 +380,7 @@ than an EEF pose.
 | Motion | joint planning/interpolation from observed qpos; supports joint waypoints |
 | Completion | `JOINT_GOAL_REACHED` |
 | Effect | none |
-| Agent visibility | hidden by default (`agent_visible=False`) |
+| Agent visibility | visible |
 
 `target` accepts an explicit qpos tensor with shape `(control_dof,)`,
 `(B, control_dof)`, or `(B, N, control_dof)`, or a non-empty string resolved

@@ -52,6 +52,7 @@ from .control import (
     GRASP_COMMAND,
     JointPositionCommand,
     OPEN_COMMAND,
+    PARK_COMMAND,
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
@@ -171,6 +172,7 @@ from .primitives import (
     EndEffectorPoseGoal,
     GraspGoal,
     HandOver,
+    HandOverGoal,
     HandOverOptions,
     HeldObjectPoseGoal,
     JointPositionGoal,
@@ -317,6 +319,7 @@ __all__ = [
     "GRASP_CAPABILITY",
     "GraspGoal",
     "HandOver",
+    "HandOverGoal",
     "HandOverOptions",
     "HeldObjectPoseGoal",
     "HeldObjectState",
@@ -349,6 +352,7 @@ __all__ = [
     "OPEN_COMMAND",
     "ObservationProvider",
     "ObservedArticulationJointState",
+    "PARK_COMMAND",
     "PickUp",
     "PickUpOptions",
     "Place",

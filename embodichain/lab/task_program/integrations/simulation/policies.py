@@ -66,6 +66,9 @@ class _SimulationSettleTarget:
     native_entity: Any
 
 
+_POSE_DELTA_SETTLE_PRESETS = frozenset({"contained_rigid_object"})
+
+
 def default_simulation_settle_presets() -> Mapping[str, DynamicSettleMonitorCfg]:
     """Return independently owned built-in post-policy presets."""
     return MappingProxyType(
@@ -73,6 +76,14 @@ def default_simulation_settle_presets() -> Mapping[str, DynamicSettleMonitorCfg]
             "rigid_object": DynamicSettleMonitorCfg(
                 linear_velocity_threshold=0.03,
                 angular_velocity_threshold=0.20,
+                min_steps=10,
+                max_steps=240,
+                check_interval_steps=2,
+                required_stable_checks=3,
+            ),
+            "contained_rigid_object": DynamicSettleMonitorCfg(
+                linear_velocity_threshold=0.03,
+                angular_velocity_threshold=1.0,
                 min_steps=10,
                 max_steps=240,
                 check_interval_steps=2,
@@ -107,8 +118,10 @@ class SimulationSegmentPolicyPort:
         robot: Live robot used to produce full target-qpos holds while the
             post-policy observes settling.
         scene_binding: Exact canonical-to-native scene declaration.
+        step_dt: Duration in seconds between environment control steps.
         settle_presets: Named settling policies. ``None`` installs the shared
-            ``rigid_object`` and ``articulation`` presets.
+            ``rigid_object``, ``contained_rigid_object``, and ``articulation``
+            presets.
         env_ids: Optional stable logical row IDs. They describe correlation,
             not simulator row indices; simulator rows remain ordered exactly as
             returned by the robot and bound entities.
@@ -124,6 +137,7 @@ class SimulationSegmentPolicyPort:
         robot: Robot,
         scene_binding: SimulationSceneBinding,
         *,
+        step_dt: float,
         settle_presets: Mapping[str, DynamicSettleMonitorCfg] | None = None,
         env_ids: torch.Tensor | None = None,
     ) -> None:
@@ -146,6 +160,13 @@ class SimulationSegmentPolicyPort:
             raise ValueError("env_ids and robot qpos must share a device.")
         if torch.unique(env_ids).numel() != env_ids.numel():
             raise ValueError("env_ids must contain unique values.")
+        if (
+            isinstance(step_dt, bool)
+            or not isinstance(step_dt, (int, float))
+            or not math.isfinite(float(step_dt))
+            or float(step_dt) <= 0.0
+        ):
+            raise ValueError("step_dt must be a finite positive real number.")
 
         selected_presets = (
             default_simulation_settle_presets()
@@ -174,6 +195,7 @@ class SimulationSegmentPolicyPort:
         self._simulation = simulation
         self._robot = robot
         self._scene_binding = scene_binding
+        self._step_dt = float(step_dt)
         self._env_ids = env_ids.clone()
         self._row_indices = torch.arange(
             qpos.shape[0],
@@ -264,6 +286,11 @@ class SimulationSegmentPolicyPort:
         preset = self._settle_presets[policy.cfg.preset]
         entity_id = policy.entity.entity_id
         target = self._settle_targets[entity_id]
+        use_pose_delta = (
+            target.kind == "rigid_object"
+            and policy.cfg.preset in _POSE_DELTA_SETTLE_PRESETS
+        )
+        measurement_source = "pose_delta" if use_pose_delta else "reported_velocity"
 
         result_key = id(policy)
         self._post_policy_results.pop(result_key, None)
@@ -274,6 +301,7 @@ class SimulationSegmentPolicyPort:
                 "kind": policy.cfg.kind,
                 "entity_id": entity_id,
                 "preset": policy.cfg.preset,
+                "measurement_source": measurement_source,
                 "source_path": list(policy.source_path),
                 "status": "skipped",
                 "active_mask": active_mask.detach().cpu().tolist(),
@@ -284,10 +312,22 @@ class SimulationSegmentPolicyPort:
 
         active_rows = self._row_indices[active_mask]
         monitor = DynamicSettleMonitor(preset, self._env_ids[active_mask])
+        previous_pose: torch.Tensor | None = None
         elapsed_steps = 0
         while True:
+            if use_pose_delta:
+                sample, previous_pose = self._measure_pose_delta_settle_target(
+                    target,
+                    row_indices=active_rows,
+                    previous_pose=previous_pose,
+                )
+            else:
+                sample = self._measure_reported_settle_target(
+                    target,
+                    row_indices=active_rows,
+                )
             state = monitor.observe(
-                (self._measure_settle_target(target, row_indices=active_rows),),
+                (sample,),
                 elapsed_steps=elapsed_steps,
             )
             settled_mask = torch.zeros_like(active_mask)
@@ -296,6 +336,7 @@ class SimulationSegmentPolicyPort:
                 "kind": policy.cfg.kind,
                 "entity_id": entity_id,
                 "preset": policy.cfg.preset,
+                "measurement_source": measurement_source,
                 "source_path": list(policy.source_path),
                 "active_mask": active_mask.detach().cpu().tolist(),
                 "status": (
@@ -753,13 +794,13 @@ class SimulationSegmentPolicyPort:
             )
         return entity
 
-    def _measure_settle_target(
+    def _measure_reported_settle_target(
         self,
         target: _SimulationSettleTarget,
         *,
         row_indices: torch.Tensor,
     ) -> DynamicSettleSample:
-        """Measure physical bodies for explicitly selected simulator rows."""
+        """Measure reported body velocities for selected simulator rows."""
         if target.kind == "articulation":
             body_data = getattr(target.native_entity, "body_data", None)
             velocity = getattr(body_data, "body_link_vel", None)
@@ -815,6 +856,69 @@ class SimulationSegmentPolicyPort:
             entity_id=target.canonical_id,
             linear_speed=linear_speed.to(device=device),
             angular_speed=angular_speed.to(device=device),
+        )
+
+    def _measure_pose_delta_settle_target(
+        self,
+        target: _SimulationSettleTarget,
+        *,
+        row_indices: torch.Tensor,
+        previous_pose: torch.Tensor | None,
+    ) -> tuple[DynamicSettleSample, torch.Tensor]:
+        """Derive rigid-object speed from consecutive observed poses.
+
+        Contact solvers can retain non-zero velocity-cache values for an object
+        that is geometrically stationary inside a container.  Pose deltas are
+        therefore the canonical settling evidence for the contained-object
+        preset.  The first observation is deliberately unresolved because no
+        temporal evidence exists yet.
+        """
+        if target.kind != "rigid_object":
+            raise ValueError("Pose-delta settling requires a rigid-object target.")
+        pose = self._read_pose(
+            target.native_entity,
+            entity_id=target.canonical_id,
+        )
+        pose = pose.index_select(0, row_indices.to(pose.device))
+        row_count = row_indices.numel()
+        if previous_pose is None:
+            speed = torch.full(
+                (row_count, 1),
+                float("inf"),
+                dtype=pose.dtype,
+                device=pose.device,
+            )
+            return (
+                DynamicSettleSample(
+                    entity_id=target.canonical_id,
+                    linear_speed=speed.to(device=self._env_ids.device),
+                    angular_speed=speed.to(device=self._env_ids.device),
+                ),
+                pose,
+            )
+        if previous_pose.shape != pose.shape or previous_pose.device != pose.device:
+            raise ValueError(
+                "Consecutive rigid-object poses must have equal shape and device."
+            )
+
+        linear_speed = (
+            torch.linalg.vector_norm(
+                pose[:, :3, 3] - previous_pose[:, :3, 3],
+                dim=-1,
+            )
+            / self._step_dt
+        )
+        relative_rotation = previous_pose[:, :3, :3].transpose(-1, -2) @ pose[:, :3, :3]
+        cosine = (relative_rotation.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0) * 0.5
+        angular_speed = torch.acos(cosine.clamp(min=-1.0, max=1.0)) / self._step_dt
+        device = self._env_ids.device
+        return (
+            DynamicSettleSample(
+                entity_id=target.canonical_id,
+                linear_speed=linear_speed.unsqueeze(-1).to(device=device),
+                angular_speed=angular_speed.unsqueeze(-1).to(device=device),
+            ),
+            pose,
         )
 
     @staticmethod

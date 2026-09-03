@@ -245,6 +245,7 @@ def _compiled_articulation_segment():
 def _port(
     positions: torch.Tensor,
     *,
+    preset_id: str = "fast",
     preset: DynamicSettleMonitorCfg | None = None,
     target_qpos: torch.Tensor | None = None,
 ) -> tuple[SimulationSegmentPolicyPort, _RigidObject, _Robot]:
@@ -266,8 +267,9 @@ def _port(
                 ),
             ),
         ),
+        step_dt=0.04,
         settle_presets={
-            "fast": preset
+            preset_id: preset
             or DynamicSettleMonitorCfg(
                 min_steps=0,
                 max_steps=3,
@@ -303,9 +305,14 @@ def test_default_settle_presets_cover_rigid_objects_and_articulations() -> None:
                 ),
             ),
         ),
+        step_dt=0.04,
     )
 
-    assert port.settle_preset_ids == ("rigid_object", "articulation")
+    assert port.settle_preset_ids == (
+        "rigid_object",
+        "contained_rigid_object",
+        "articulation",
+    )
 
 
 def test_pure_preflight_validates_hooks_without_reading_live_state() -> None:
@@ -391,6 +398,76 @@ def test_wait_stable_yields_fresh_target_qpos_holds_through_gym() -> None:
         segment.post_policies[0],
         segment=segment,
     ).tolist() == [True, True]
+
+
+def test_contained_wait_stable_uses_observed_pose_delta() -> None:
+    """Contained objects ignore stale solver velocities when poses are stable."""
+    preset_id = "contained_rigid_object"
+    segment = _compiled_segment(settle_preset=preset_id)
+    port, entity, _ = _port(
+        torch.zeros(2, 3),
+        preset_id=preset_id,
+        preset=DynamicSettleMonitorCfg(
+            min_steps=0,
+            max_steps=4,
+            check_interval_steps=1,
+            required_stable_checks=2,
+        ),
+    )
+    entity.body_data.lin_vel.fill_(4.0)
+    entity.body_data.ang_vel.fill_(8.0)
+
+    actions = port.actions(
+        segment.post_policies[0],
+        segment=segment,
+        active_mask=torch.ones(2, dtype=torch.bool),
+    )
+
+    assert sum(1 for _ in actions) == 2
+    metadata = port.post_policy_metadata(
+        segment.post_policies[0],
+        segment=segment,
+    )
+    assert metadata["status"] == "settled"
+    assert metadata["measurement_source"] == "pose_delta"
+    assert metadata["state"]["max_linear_speed"] == [0.0, 0.0]
+    assert metadata["state"]["max_angular_speed"] == [0.0, 0.0]
+
+
+def test_contained_wait_stable_rejects_observed_pose_motion() -> None:
+    """Pose-delta settling still times out a geometrically moving object."""
+    preset_id = "contained_rigid_object"
+    segment = _compiled_segment(settle_preset=preset_id)
+    port, entity, _ = _port(
+        torch.zeros(2, 3),
+        preset_id=preset_id,
+        preset=DynamicSettleMonitorCfg(
+            min_steps=0,
+            max_steps=3,
+            check_interval_steps=1,
+            required_stable_checks=2,
+        ),
+    )
+    actions = port.actions(
+        segment.post_policies[0],
+        segment=segment,
+        active_mask=torch.ones(2, dtype=torch.bool),
+    )
+
+    for _ in range(3):
+        next(actions)
+        entity._pose[:, 0, 3] += 0.01
+    with pytest.raises(StopIteration):
+        next(actions)
+
+    metadata = port.post_policy_metadata(
+        segment.post_policies[0],
+        segment=segment,
+    )
+    assert metadata["status"] == "timed_out"
+    assert metadata["measurement_source"] == "pose_delta"
+    assert metadata["state"]["settled_mask"] == [False, False]
+    assert metadata["state"]["timeout_mask"] == [True, True]
 
 
 def test_wait_stable_holds_active_targets_and_inactive_current_qpos() -> None:
@@ -605,6 +682,7 @@ def test_articulation_joint_position_validates_measured_rows() -> None:
                 ),
             ),
         ),
+        step_dt=0.04,
     )
 
     validator = segment.validators[0]
@@ -640,6 +718,7 @@ def test_policy_port_rejects_unbound_native_entities_and_foreign_members() -> No
             _Simulation(_RigidObject(torch.zeros(2, 3))),
             robot,
             binding,
+            step_dt=0.04,
         )
 
     segment = _compiled_segment()

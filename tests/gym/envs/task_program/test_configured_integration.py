@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from copy import deepcopy
 import importlib.util
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,12 +32,17 @@ import torch
 from embodichain.lab.task_program import load_task_program
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.task_program.integrations._configured_services import (
+    _CoordinatedTransportLowerer,
+    _CoordinatedTransportRoute,
     _MoveHeldObjectLowerer,
+    _ParkLowerer,
     _PourLowerer,
 )
 from embodichain.lab.task_program.integrations.configured import (
+    _decode_action_options,
     _decode_configured_task_program_integration,
     _decode_grasp_generator,
+    _decode_registered_lowerer,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
@@ -51,17 +57,33 @@ from embodichain.lab.gym.envs.task_program.registration import (
     _register_configured_task_program_integration,
 )
 from embodichain.lab.sim.atomic_actions import (
+    AntipodalAffordance,
+    CoordinatedPickGoal,
+    CoordinatedPickmentOptions,
+    EntityState,
+    HandOverOptions,
     HeldObjectPoseGoal,
+    JointPositionGoal,
     MoveHeldObjectOptions,
+    MoveJoints,
+    MoveJointsOptions,
+    ObjectSemantics,
+    PARK_COMMAND,
     PickUpOptions,
+    PlanningContext,
     PlaceOptions,
     PourGoal,
     PourOptions,
+    RobotObservation,
+    SceneSnapshot,
+    TaskState,
 )
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.task_program.semantics import (
+    HeldObjectRelation,
     RegisteredSemanticCall,
     SceneObjectRef,
+    SemanticEffectKind,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
@@ -543,6 +565,258 @@ def test_move_held_object_lowerer_rejects_non_se3_relative_pose() -> None:
         _decode_configured_task_program_integration(payload)
 
 
+def test_coordinated_transport_lowerer_builds_one_releasing_atomic_goal() -> None:
+    """A registered transport owns no arm names, goals, or trajectory data."""
+    relative_pose = (
+        1.0,
+        0.0,
+        0.0,
+        0.2,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(),
+        geometry={},
+        label="tray",
+        entity_id="tray",
+    )
+    lowerer = _CoordinatedTransportLowerer(
+        (("tray", "tray_forward", "tray", relative_pose),),
+        (semantics,),
+    )
+
+    lowering = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.coordinated_transport",
+            arguments={"object": "tray", "target": "tray_forward"},
+        ),
+        context=None,  # type: ignore[arg-type]
+        bound=None,  # type: ignore[arg-type]
+        option_template=CoordinatedPickmentOptions(release=True),
+    )
+
+    assert type(lowering.goal) is CoordinatedPickGoal
+    assert lowering.goal.object_initial_pose is None
+    assert lowering.goal.object_target_pose.entity_id == "tray"
+    assert lowering.goal.object_target_pose.relative_pose == pytest.approx(
+        torch.tensor(relative_pose, dtype=torch.float32).reshape(4, 4)
+    )
+    assert lowering.registered_effect is not None
+    assert lowering.registered_effect.effect_kind is SemanticEffectKind.RELEASE
+    assert tuple(
+        (effect.slot_id, effect.relation, effect.object_id)
+        for effect in lowering.registered_effect.held_objects
+    ) == (
+        ("left", HeldObjectRelation.DETACHED, "tray"),
+        ("right", HeldObjectRelation.DETACHED, "tray"),
+    )
+    with pytest.raises(ValueError, match="enable coordinated release"):
+        lowerer.lower(
+            RegisteredSemanticCall(
+                call_id="simulation.coordinated_transport",
+                arguments={"object": "tray", "target": "tray_forward"},
+            ),
+            context=None,  # type: ignore[arg-type]
+            bound=None,  # type: ignore[arg-type]
+            option_template=CoordinatedPickmentOptions(),
+        )
+
+
+def test_coordinated_transport_config_decodes_closed_routes_and_options() -> None:
+    """Configured transport data round-trips through the strict allowlist."""
+    identity = [
+        1.0,
+        0.0,
+        0.0,
+        0.2,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+    factory = _decode_registered_lowerer(
+        {
+            "kind": "coordinated_transport",
+            "routes": [
+                {
+                    "object_id": "tray",
+                    "target_id": "tray_forward",
+                    "reference_entity_id": "tray",
+                    "relative_pose": identity,
+                }
+            ],
+        },
+        path="integration.runtime_services.registered_semantic_lowerers[0]",
+    )
+    options = _decode_action_options(
+        {
+            "kind": "coordinated_pickment",
+            "release": True,
+            "release_steps": 6,
+            "retreat_steps": 8,
+            "grasp_seed": 17393,
+        },
+        path="policy.action_options.simulation.coordinated_transport",
+    )
+
+    assert factory.call_id == "simulation.coordinated_transport"
+    assert type(options) is CoordinatedPickmentOptions
+    assert options.release is True
+    assert options.release_steps == 6
+    assert options.retreat_steps == 8
+    assert options.grasp_seed == 17393
+
+
+def test_park_lowerer_and_config_keep_joint_values_in_the_profile() -> None:
+    """Semantic Park reuses MoveJoints while profile data continues to own qpos."""
+    lowerer = _ParkLowerer()
+    lowering = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.park",
+            arguments={},
+            resources={"primary": "left"},
+        ),
+        context=None,  # type: ignore[arg-type]
+        bound=None,  # type: ignore[arg-type]
+        option_template=MoveJointsOptions(),
+    )
+    factory = _decode_registered_lowerer(
+        {"kind": "park"},
+        path="integration.runtime_services.registered_semantic_lowerers[0]",
+    )
+    options = _decode_action_options(
+        {"kind": "move_joints"},
+        path="policy.action_options.simulation.park",
+    )
+
+    assert type(lowering.goal) is JointPositionGoal
+    assert lowering.goal.target == PARK_COMMAND
+    assert factory.call_id == "simulation.park"
+    assert factory.target_descriptor == MoveJoints.descriptor()
+    assert type(options) is MoveJointsOptions
+    with pytest.raises(ValueError, match="arguments must be empty"):
+        lowerer.lower(
+            RegisteredSemanticCall(
+                call_id="simulation.park",
+                arguments={"qpos": [0.0]},
+                resources={"primary": "left"},
+            ),
+            context=None,  # type: ignore[arg-type]
+            bound=None,  # type: ignore[arg-type]
+            option_template=MoveJointsOptions(),
+        )
+
+
+def test_configured_handover_decodes_source_retreat_clearance() -> None:
+    """The semantic profile may tune physical source-hand clearance."""
+    options = _decode_action_options(
+        {
+            "kind": "hand_over",
+            "retreat_distance": 0.12,
+            "retreat_steps": 28,
+        },
+        path="policy.action_options.hand_over",
+    )
+
+    assert type(options) is HandOverOptions
+    assert options.retreat_distance == pytest.approx(0.12)
+    assert options.retreat_steps == 28
+
+
+def test_coordinated_transport_world_displacement_uses_fresh_object_pose() -> None:
+    """A relative task motion keeps live orientation and robot-frame direction."""
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(),
+        geometry={},
+        label="tray",
+        entity_id="tray",
+    )
+    lowerer = _CoordinatedTransportLowerer(
+        (
+            _CoordinatedTransportRoute(
+                object_id="tray",
+                target_id="tray_forward",
+                world_displacement=(-0.16, 0.0, 0.0),
+            ),
+        ),
+        (semantics,),
+    )
+    pose = torch.eye(4).unsqueeze(0)
+    pose[:, :3, :3] = torch.tensor(
+        (((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),)
+    )
+    pose[:, :3, 3] = torch.tensor(((0.03, -0.02, 0.68),))
+    qpos = torch.zeros((1, 1))
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=1.0, qpos=qpos, qvel=torch.zeros_like(qpos)),
+        task=TaskState(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=1.0,
+            version=1,
+            entities={"tray": EntityState(pose)},
+        ),
+        env_ids=torch.tensor((0,), dtype=torch.long),
+    )
+
+    lowering = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.coordinated_transport",
+            arguments={"object": "tray", "target": "tray_forward"},
+        ),
+        context=context,
+        bound=None,  # type: ignore[arg-type]
+        option_template=CoordinatedPickmentOptions(release=True),
+    )
+
+    assert type(lowering.goal) is CoordinatedPickGoal
+    assert isinstance(lowering.goal.object_target_pose, torch.Tensor)
+    torch.testing.assert_close(
+        lowering.goal.object_target_pose[:, :3, :3],
+        pose[:, :3, :3],
+    )
+    torch.testing.assert_close(
+        lowering.goal.object_target_pose[:, :3, 3],
+        torch.tensor(((-0.13, -0.02, 0.68),)),
+    )
+
+
+def test_coordinated_transport_config_decodes_world_displacement() -> None:
+    factory = _decode_registered_lowerer(
+        {
+            "kind": "coordinated_transport",
+            "routes": [
+                {
+                    "object_id": "tray",
+                    "target_id": "tray_forward",
+                    "world_displacement": [-0.16, 0.0, 0.0],
+                }
+            ],
+        },
+        path="integration.runtime_services.registered_semantic_lowerers[0]",
+    )
+
+    assert factory.routes[0].world_displacement == (-0.16, 0.0, 0.0)
+
+
 def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
     """Configured fixed grasps must contain exactly one SE(3) transform."""
     payload = deepcopy(_tableware_integration_payload("pour_water"))
@@ -614,7 +888,9 @@ def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     assert factory.min_opening_width == pytest.approx(0.005)
     assert factory.palm_depth == pytest.approx(0.096)
     assert factory.sample_count is None
+    assert factory.approach_deviation_angle is None
     assert factory.approach_direction_samples is None
+    assert factory.max_candidates is None
     assert factory.opening_margin is None
     assert factory.point_sample_density is None
     assert factory.filter_ground_collision is None
@@ -633,12 +909,34 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
     )()
 
     assert generator.algorithm_cfg.sample_count == 20_000
+    assert generator.algorithm_cfg.approach_deviation_angle == pytest.approx(
+        math.pi / 6
+    )
     assert generator.algorithm_cfg.approach_direction_samples == 4
+    assert generator.algorithm_cfg.max_candidates == 50
     assert generator.collision_cfg.opening_margin == pytest.approx(0.01)
     assert generator.collision_cfg.point_sample_density == pytest.approx(0.01)
     assert generator.collision_cfg.filter_ground_collision is True
     assert generator.annotation_cfg.selection_mode == "whole_mesh"
     assert generator.annotation_cfg.force_refresh is False
+
+
+def test_grasp_generator_decodes_candidate_search_policy() -> None:
+    """Robot profiles may widen and constrain the canonical grasp search."""
+    generator = _decode_grasp_generator(
+        {
+            "kind": "antipodal_parallel_jaw",
+            "model": "dh_pgi_140_80",
+            "approach_deviation_angle": math.pi / 9,
+            "max_candidates": 500,
+        },
+        path="generator",
+    )()
+
+    assert generator.algorithm_cfg.approach_deviation_angle == pytest.approx(
+        math.pi / 9
+    )
+    assert generator.algorithm_cfg.max_candidates == 500
 
 
 def test_grasp_generator_inline_model_uses_geometry_defaults() -> None:
@@ -726,6 +1024,7 @@ def test_scene_entity_nesting_derives_all_affordance_parents() -> None:
                 "entity_id": "cube_inside",
                 "kind": "container",
                 "native_name": "inside",
+                "release_clearance": 0.12,
             },
         )
     )
@@ -737,6 +1036,7 @@ def test_scene_entity_nesting_derives_all_affordance_parents() -> None:
     assert binding.antipodal_grasps[0].object_id == "cube"
     assert binding.support_surfaces[0].parent_id == "cube"
     assert binding.containers[0].parent_id == "cube"
+    assert binding.containers[0].release_clearance == pytest.approx(0.12)
 
 
 def test_placement_affordances_can_belong_to_articulations_and_links() -> None:

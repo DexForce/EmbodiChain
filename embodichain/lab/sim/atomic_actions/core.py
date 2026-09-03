@@ -48,7 +48,7 @@ from .plans import (
     normalize_success_mask,
 )
 from .policies import DynamicCollisionMode
-from .requirements import SkillBindingContract
+from .requirements import GRASP_CAPABILITY, SkillBindingContract
 from .runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
@@ -716,6 +716,12 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             for command in frame.commands:
                 endpoints = endpoints_by_destination[command.destination_key]
                 for endpoint in endpoints:
+                    # Contact intentionally prevents grasping endpoints from
+                    # reaching their unobstructed close setpoint. Attachment
+                    # and release are accepted by typed effect evidence; joint
+                    # tracking remains authoritative for motion endpoints.
+                    if GRASP_CAPABILITY in endpoint.capabilities:
+                        continue
                     for channel_id in metrics_by_channel:
                         channel = endpoint.tracking_channels.get(channel_id)
                         if channel is None:

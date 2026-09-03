@@ -29,8 +29,11 @@ from typing import TYPE_CHECKING, TypeVar
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
     _ArticulationLinkSlideLowererFactory,
+    _CoordinatedTransportLowererFactory,
+    _CoordinatedTransportRoute,
     _JointPositionConstraintEvidenceProviderFactory,
     _MoveHeldObjectLowererFactory,
+    _ParkLowererFactory,
     _PourLowererFactory,
     _PushObjectLowererFactory,
 )
@@ -58,11 +61,13 @@ from .simulation.handover import (
 )
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
+    CoordinatedPickmentOptions,
     DynamicCollisionMode,
     ExecutionRunnerCfg,
     HandOverOptions,
     MotionPolicy,
     MoveHeldObjectOptions,
+    MoveJointsOptions,
     PickUpOptions,
     PlaceOptions,
     PourOptions,
@@ -468,13 +473,19 @@ def _decode_placement_affordance(
     ),
 ) -> SupportSurfaceAffordanceBinding | ContainerAffordanceBinding:
     """Decode one configured placement affordance."""
+    optional = {
+        "aliases",
+        "object_target_pose",
+        "minimum_confidence",
+        "is_default",
+    }
+    if binding_type is ContainerAffordanceBinding:
+        optional.add("release_clearance")
     config = _mapping(
         value,
         path=path,
         required=frozenset({"kind", "entity_id", "native_name"}),
-        optional=frozenset(
-            {"aliases", "object_target_pose", "minimum_confidence", "is_default"}
-        ),
+        optional=frozenset(optional),
     )
     kind = _identifier(config["kind"], path=f"{path}.kind")
     if kind != expected_kind:
@@ -507,6 +518,12 @@ def _decode_placement_affordance(
             path=f"{path}.object_target_pose",
             expected_length=16,
         )
+    if binding_type is ContainerAffordanceBinding:
+        kwargs["release_clearance"] = _real(
+            config.get("release_clearance", 0.0),
+            path=f"{path}.release_clearance",
+            minimum=0.0,
+        )
     return binding_type(**kwargs)
 
 
@@ -536,6 +553,7 @@ def _decode_entity_affordance(
                 "internal_axis",
                 "object_target_pose",
                 "minimum_confidence",
+                "release_clearance",
                 "is_default",
             }
         ),
@@ -755,12 +773,25 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         optional=frozenset(
             {
                 "hand_interp_steps",
+                "hold_steps",
+                "release",
+                "release_at_target",
+                "arm_selection",
+                "release_steps",
+                "retreat_distance",
+                "retreat_steps",
+                "receive_pick_object_part",
+                "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
                 "pick_object_part",
                 "lift_height",
                 "pre_grasp_distance",
+                "grasp_commit_fraction",
                 "approach_direction",
+                "left_to_right_arm_direction",
+                "middle_empty_ratio",
+                "grasp_seed",
                 "approach_alignment_max_angle",
                 "obj_upright_direction",
                 "rotate_upright",
@@ -798,6 +829,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "pick_object_part",
                     "lift_height",
                     "pre_grasp_distance",
+                    "grasp_commit_fraction",
                     "approach_direction",
                     "approach_alignment_max_angle",
                     "obj_upright_direction",
@@ -832,6 +864,13 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     path=f"{path}.{field_name}",
                     minimum=0.0,
                 )
+        if "grasp_commit_fraction" in config:
+            kwargs["grasp_commit_fraction"] = _real(
+                config["grasp_commit_fraction"],
+                path=f"{path}.grasp_commit_fraction",
+                minimum=0.0,
+                maximum=1.0,
+            )
         if "approach_direction" in config:
             import torch
 
@@ -948,6 +987,82 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             required=frozenset({"kind"}),
         )
         return MoveHeldObjectOptions()
+    if kind == "move_joints":
+        _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+        )
+        return MoveJointsOptions()
+    if kind == "coordinated_pickment":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {
+                    "object_motion_keyframes",
+                    "pre_grasp_distance",
+                    "lift_height",
+                    "hand_interp_steps",
+                    "hold_steps",
+                    "release",
+                    "release_steps",
+                    "retreat_distance",
+                    "retreat_steps",
+                    "approach_direction",
+                    "left_to_right_arm_direction",
+                    "middle_empty_ratio",
+                    "grasp_seed",
+                }
+            ),
+        )
+        kwargs: dict[str, object] = {}
+        for field_name in (
+            "object_motion_keyframes",
+            "hand_interp_steps",
+            "hold_steps",
+            "release_steps",
+            "retreat_steps",
+            "grasp_seed",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _integer(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    minimum=(2 if field_name == "object_motion_keyframes" else 0),
+                )
+        for field_name in (
+            "pre_grasp_distance",
+            "lift_height",
+            "retreat_distance",
+            "middle_empty_ratio",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _real(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    minimum=0.0,
+                    maximum=(1.0 if field_name == "middle_empty_ratio" else math.inf),
+                )
+        if "release" in config:
+            kwargs["release"] = _boolean(
+                config["release"],
+                path=f"{path}.release",
+            )
+        import torch
+
+        for field_name in ("approach_direction", "left_to_right_arm_direction"):
+            if field_name in config:
+                kwargs[field_name] = torch.tensor(
+                    _finite_tuple(
+                        config[field_name],
+                        path=f"{path}.{field_name}",
+                        expected_length=3,
+                    ),
+                    dtype=torch.float32,
+                )
+        return CoordinatedPickmentOptions(**kwargs)
     if kind == "pour":
         config = _mapping(
             value,
@@ -1125,11 +1240,25 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             path=path,
             required=frozenset({"kind"}),
             optional=frozenset(
-                {"pre_grasp_distance", "lift_height", "hand_interp_steps"}
+                {
+                    "pre_grasp_distance",
+                    "lift_height",
+                    "hand_interp_steps",
+                    "hold_steps",
+                    "retreat_distance",
+                    "retreat_steps",
+                    "receive_pick_object_part",
+                    "release_at_target",
+                    "arm_selection",
+                }
             ),
         )
         kwargs = {}
-        for field_name in ("pre_grasp_distance", "lift_height"):
+        for field_name in (
+            "pre_grasp_distance",
+            "lift_height",
+            "retreat_distance",
+        ):
             if field_name in config:
                 kwargs[field_name] = _real(
                     config[field_name],
@@ -1142,11 +1271,34 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 path=f"{path}.hand_interp_steps",
                 minimum=1,
             )
+        for field_name in ("hold_steps", "retreat_steps"):
+            if field_name in config:
+                kwargs[field_name] = _integer(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    minimum=0 if field_name == "hold_steps" else 2,
+                )
+        if "receive_pick_object_part" in config:
+            kwargs["receive_pick_object_part"] = _identifier(
+                config["receive_pick_object_part"],
+                path=f"{path}.receive_pick_object_part",
+            )
+        if "release_at_target" in config:
+            kwargs["release_at_target"] = _boolean(
+                config["release_at_target"],
+                path=f"{path}.release_at_target",
+            )
+        if "arm_selection" in config:
+            kwargs["arm_selection"] = _identifier(
+                config["arm_selection"],
+                path=f"{path}.arm_selection",
+            )
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['hand_over', 'move_held_object', 'pick_up', 'place', 'pour', "
-        "'push_object', 'slide']."
+        "['coordinated_pickment', 'hand_over', 'move_held_object', "
+        "'move_joints', "
+        "'pick_up', 'place', 'pour', 'push_object', 'slide']."
     )
 
 
@@ -1593,7 +1745,9 @@ def _decode_grasp_generator(
         optional=frozenset(
             {
                 "sample_count",
+                "approach_deviation_angle",
                 "approach_direction_samples",
+                "max_candidates",
                 "opening_margin",
                 "point_sample_density",
                 "filter_ground_collision",
@@ -1628,6 +1782,15 @@ def _decode_grasp_generator(
             if "sample_count" in config
             else None
         ),
+        approach_deviation_angle=(
+            _real(
+                config["approach_deviation_angle"],
+                path=f"{path}.approach_deviation_angle",
+                minimum=0.0,
+            )
+            if "approach_deviation_angle" in config
+            else None
+        ),
         approach_direction_samples=(
             _integer(
                 config["approach_direction_samples"],
@@ -1635,6 +1798,15 @@ def _decode_grasp_generator(
                 minimum=1,
             )
             if "approach_direction_samples" in config
+            else None
+        ),
+        max_candidates=(
+            _integer(
+                config["max_candidates"],
+                path=f"{path}.max_candidates",
+                minimum=1,
+            )
+            if "max_candidates" in config
             else None
         ),
         opening_margin=(
@@ -1715,7 +1887,9 @@ def _decode_registered_lowerer(
     path: str,
 ) -> (
     _ArticulationLinkSlideLowererFactory
+    | _CoordinatedTransportLowererFactory
     | _MoveHeldObjectLowererFactory
+    | _ParkLowererFactory
     | _PourLowererFactory
     | _PushObjectLowererFactory
 ):
@@ -1808,6 +1982,82 @@ def _decode_registered_lowerer(
                 expected_length=16,
             ),
         )
+    if kind == "coordinated_transport":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes"}),
+        )
+        routes: list[_CoordinatedTransportRoute] = []
+        for index, route_value in enumerate(
+            _sequence(config["routes"], path=f"{path}.routes")
+        ):
+            route_path = f"{path}.routes[{index}]"
+            route = _mapping(
+                route_value,
+                path=route_path,
+                required=frozenset({"object_id", "target_id"}),
+                optional=frozenset(
+                    {
+                        "reference_entity_id",
+                        "relative_pose",
+                        "world_displacement",
+                    }
+                ),
+            )
+            has_reference = "reference_entity_id" in route
+            has_pose = "relative_pose" in route
+            has_displacement = "world_displacement" in route
+            if has_reference != has_pose or has_reference == has_displacement:
+                raise ValueError(
+                    f"{route_path} must declare exactly one of "
+                    "reference_entity_id with relative_pose or "
+                    "world_displacement."
+                )
+            routes.append(
+                _CoordinatedTransportRoute(
+                    object_id=_identifier(
+                        route["object_id"], path=f"{route_path}.object_id"
+                    ),
+                    target_id=_identifier(
+                        route["target_id"], path=f"{route_path}.target_id"
+                    ),
+                    reference_entity_id=(
+                        _identifier(
+                            route["reference_entity_id"],
+                            path=f"{route_path}.reference_entity_id",
+                        )
+                        if has_reference
+                        else None
+                    ),
+                    relative_pose=(
+                        _finite_tuple(
+                            route["relative_pose"],
+                            path=f"{route_path}.relative_pose",
+                            expected_length=16,
+                        )
+                        if has_pose
+                        else None
+                    ),
+                    world_displacement=(
+                        _finite_tuple(
+                            route["world_displacement"],
+                            path=f"{route_path}.world_displacement",
+                            expected_length=3,
+                        )
+                        if has_displacement
+                        else None
+                    ),
+                )
+            )
+        return _CoordinatedTransportLowererFactory(routes=tuple(routes))
+    if kind == "park":
+        _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+        )
+        return _ParkLowererFactory()
     if kind == "pour":
         config = _mapping(
             value,
@@ -1848,7 +2098,8 @@ def _decode_registered_lowerer(
         return _PushObjectLowererFactory(routes=tuple(routes))
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['articulation_link_slide', 'move_held_object', 'pour', 'push_object']."
+        "['articulation_link_slide', 'coordinated_transport', "
+        "'move_held_object', 'park', 'pour', 'push_object']."
     )
 
 
@@ -1910,7 +2161,9 @@ class _DecodedRuntimeServices:
     handover_pose_providers: tuple[ConfiguredHandOverPoseProvider, ...] = ()
     registered_semantic_lowerers: tuple[
         _ArticulationLinkSlideLowererFactory
+        | _CoordinatedTransportLowererFactory
         | _MoveHeldObjectLowererFactory
+        | _ParkLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory,
         ...,

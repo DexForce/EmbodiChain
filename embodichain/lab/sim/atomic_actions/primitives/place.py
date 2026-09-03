@@ -360,6 +360,14 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 "release": n_open + n_settle,
                 "retract": n_back,
             },
+            # Contact and release can move a dynamic destination (for example,
+            # a tray).  Monitor late-bound targets through approach, then let
+            # the semantic effect/post-policy boundary observe the resulting
+            # physical state instead of treating expected contact as a new
+            # goal revision.
+            scene_dependency_monitor_until={
+                entity_id: n_down for entity_id in self._scene_dependencies(request)
+            },
         )
 
     def _resolve_place_xpos(

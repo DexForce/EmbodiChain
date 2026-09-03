@@ -35,10 +35,17 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AtomicActionEngine,
     AxisAlignAffordance,
+    CoordinatedPickGoal,
+    CoordinatedPickment,
+    CoordinatedPickmentOptions,
     HeldObjectPoseGoal,
+    JointPositionGoal,
     MoveHeldObject,
     MoveHeldObjectOptions,
+    MoveJoints,
+    MoveJointsOptions,
     ObjectSemantics,
+    PARK_COMMAND,
     PlanningContext,
     Pour,
     PourGoal,
@@ -67,15 +74,19 @@ from embodichain.lab.task_program.semantics import (
     EffectEvidenceCollectionContext,
     EffectEvidenceProvider,
     GRASP_AFFORDANCE_CAPABILITY,
+    HeldObjectRelation,
     HeldObjectStateExpectation,
     RegisteredSemanticCall,
     SceneArticulationRef,
     SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
+    SemanticEffectKind,
 )
 from embodichain.lab.task_program.compiler.lowering import (
+    RegisteredHeldObjectEffect,
     RegisteredSemanticLowerer,
+    RegisteredSemanticEffect,
     SemanticLowering,
     SemanticObjectTarget,
 )
@@ -86,7 +97,9 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _ARTICULATION_LINK_SLIDE_CALL_ID = "simulation.articulation_link_slide"
+_COORDINATED_TRANSPORT_CALL_ID = "simulation.coordinated_transport"
 _MOVE_HELD_OBJECT_CALL_ID = "simulation.move_held_object"
+_PARK_CALL_ID = "simulation.park"
 _POUR_CALL_ID = "simulation.pour"
 _PUSH_OBJECT_CALL_ID = "simulation.push_object"
 _SLIDE_TARGET_POSE_MODES = frozenset({"live", "snapshot"})
@@ -145,6 +158,20 @@ def _pose(value: tuple[float, ...]) -> tuple[float, ...]:
     return normalized
 
 
+def _world_displacement(
+    value: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    """Validate one finite non-zero world-frame displacement."""
+    if type(value) is not tuple or len(value) != 3:
+        raise TypeError("world_displacement must be an exact three-value tuple.")
+    normalized = tuple(float(item) for item in value)
+    if not all(math.isfinite(item) for item in normalized):
+        raise ValueError("world_displacement must contain only finite values.")
+    if math.sqrt(sum(item * item for item in normalized)) <= 1.0e-6:
+        raise ValueError("world_displacement must be non-zero.")
+    return normalized
+
+
 def _slide_target_pose_mode(value: object) -> str:
     """Validate how a configured Slide resolves its target pose."""
     if type(value) is not str or value not in _SLIDE_TARGET_POSE_MODES:
@@ -152,6 +179,59 @@ def _slide_target_pose_mode(value: object) -> str:
             f"target_pose_mode must be one of {sorted(_SLIDE_TARGET_POSE_MODES)}."
         )
     return value
+
+
+class _ParkLowerer(RegisteredSemanticLowerer):
+    """Lower one resource-scoped semantic park request."""
+
+    call_id: ClassVar[str] = _PARK_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = MoveJoints.descriptor()
+    preserves_symbolic_state: ClassVar[bool] = True
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Construct a named joint goal whose posture stays in the profile."""
+        del context, bound
+        if type(option_template) is not MoveJointsOptions:
+            raise TypeError(
+                "Configured semantic park requires an exact "
+                "MoveJointsOptions template."
+            )
+        if dict(call.arguments):
+            raise ValueError(
+                f"{self.call_id} arguments must be empty; the embodiment profile "
+                "owns the parked posture."
+            )
+        return SemanticLowering(goal=JointPositionGoal(PARK_COMMAND))
+
+
+@dataclass(frozen=True, slots=True)
+class _ParkLowererFactory(RegisteredSemanticLowererFactory):
+    """Create the stateless profile-bound Park lowerer."""
+
+    call_id: ClassVar[str] = _PARK_CALL_ID
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = MoveJoints.descriptor()
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Validate runtime ownership and return one fresh Park lowerer."""
+        del simulation, scene_registry
+        if engine.robot is not robot:
+            raise ValueError("Park lowerer requires the engine's exact robot.")
+        return _ParkLowerer()
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +246,9 @@ class _AntipodalGraspPoseGeneratorFactory:
     finger_thickness: float
     palm_depth: float
     sample_count: int | None = None
+    approach_deviation_angle: float | None = None
     approach_direction_samples: int | None = None
+    max_candidates: int | None = None
     opening_margin: float | None = None
     point_sample_density: float | None = None
     filter_ground_collision: bool | None = None
@@ -185,10 +267,14 @@ class _AntipodalGraspPoseGeneratorFactory:
         algorithm_kwargs: dict[str, object] = {}
         if self.sample_count is not None:
             algorithm_kwargs["sample_count"] = self.sample_count
+        if self.approach_deviation_angle is not None:
+            algorithm_kwargs["approach_deviation_angle"] = self.approach_deviation_angle
         if self.approach_direction_samples is not None:
             algorithm_kwargs["approach_direction_samples"] = (
                 self.approach_direction_samples
             )
+        if self.max_candidates is not None:
+            algorithm_kwargs["max_candidates"] = self.max_candidates
 
         collision_kwargs: dict[str, object] = {}
         if self.opening_margin is not None:
@@ -491,6 +577,281 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
             self.target_id,
             self.reference_entity_id,
             self.relative_pose,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _CoordinatedTransportRoute:
+    """One configured absolute target or fresh world-frame displacement."""
+
+    object_id: str
+    target_id: str
+    reference_entity_id: str | None = None
+    relative_pose: tuple[float, ...] | None = None
+    world_displacement: tuple[float, float, float] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "object_id",
+            _identifier(self.object_id, field_name="object_id"),
+        )
+        object.__setattr__(
+            self,
+            "target_id",
+            _identifier(self.target_id, field_name="target_id"),
+        )
+        has_reference = self.reference_entity_id is not None
+        has_pose = self.relative_pose is not None
+        has_displacement = self.world_displacement is not None
+        if has_reference != has_pose or has_reference == has_displacement:
+            raise ValueError(
+                "Coordinated transport route must declare exactly one of "
+                "reference_entity_id with relative_pose or world_displacement."
+            )
+        if has_reference:
+            assert self.reference_entity_id is not None
+            assert self.relative_pose is not None
+            object.__setattr__(
+                self,
+                "reference_entity_id",
+                _identifier(
+                    self.reference_entity_id,
+                    field_name="reference_entity_id",
+                ),
+            )
+            object.__setattr__(self, "relative_pose", _pose(self.relative_pose))
+        else:
+            assert self.world_displacement is not None
+            object.__setattr__(
+                self,
+                "world_displacement",
+                _world_displacement(self.world_displacement),
+            )
+
+
+def _coordinated_transport_route(
+    value: _CoordinatedTransportRoute | tuple[str, str, str, tuple[float, ...]],
+    *,
+    index: int,
+) -> _CoordinatedTransportRoute:
+    """Normalize the legacy private tuple used by direct lowerer tests."""
+    if type(value) is _CoordinatedTransportRoute:
+        return value
+    if type(value) is not tuple or len(value) != 4:
+        raise TypeError(
+            f"Coordinated transport routes[{index}] must be a route or an "
+            "exact four-value compatibility tuple."
+        )
+    return _CoordinatedTransportRoute(
+        object_id=value[0],
+        target_id=value[1],
+        reference_entity_id=value[2],
+        relative_pose=value[3],
+    )
+
+
+class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
+    """Lower one configured dual-arm object transport and release route."""
+
+    call_id: ClassVar[str] = _COORDINATED_TRANSPORT_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = CoordinatedPickment.descriptor()
+    effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.RELEASE
+
+    def __init__(
+        self,
+        routes: tuple[
+            _CoordinatedTransportRoute | tuple[str, str, str, tuple[float, ...]],
+            ...,
+        ],
+        semantics: tuple[ObjectSemantics, ...],
+    ) -> None:
+        if len(routes) != len(semantics):
+            raise ValueError(
+                "Coordinated transport routes and semantics must have equal length."
+            )
+        normalized = tuple(
+            _coordinated_transport_route(route, index=index)
+            for index, route in enumerate(routes)
+        )
+        self._routes = {
+            (route.object_id, route.target_id): (route, object_semantics)
+            for route, object_semantics in zip(normalized, semantics, strict=True)
+        }
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Construct one late-bound coordinated object target."""
+        del bound
+        if type(option_template) is not CoordinatedPickmentOptions:
+            raise TypeError(
+                "Configured coordinated transport requires an exact "
+                "CoordinatedPickmentOptions template."
+            )
+        if not option_template.release:
+            raise ValueError(
+                "Configured coordinated transport must enable coordinated release."
+            )
+        arguments = dict(call.arguments)
+        if set(arguments) != {"object", "target"}:
+            raise ValueError(
+                f"{self.call_id} arguments must contain only 'object' and 'target'."
+            )
+        route = (arguments["object"], arguments["target"])
+        resolved = self._routes.get(route)
+        if resolved is None:
+            raise ValueError(
+                f"{self.call_id} does not declare object-target route {route!r}."
+            )
+        route_cfg, semantics = resolved
+        if route_cfg.world_displacement is not None:
+            try:
+                observed = context.scene.entities[route_cfg.object_id]
+            except KeyError as exc:
+                raise KeyError(
+                    "Coordinated transport world displacement references "
+                    f"unobserved object {route_cfg.object_id!r}."
+                ) from exc
+            if observed.confidence <= 0.0:
+                raise ValueError(
+                    "Coordinated transport requires positive observation "
+                    f"confidence for {route_cfg.object_id!r}."
+                )
+            object_pose = observed.pose.to(
+                device=context.robot.qpos.device,
+                dtype=context.robot.qpos.dtype,
+            )
+            if object_pose.dim() == 2:
+                object_pose = object_pose.unsqueeze(0).expand(
+                    context.batch_size,
+                    -1,
+                    -1,
+                )
+            object_target_pose: torch.Tensor | SceneEntityPose = object_pose.clone()
+            displacement = torch.tensor(
+                route_cfg.world_displacement,
+                dtype=object_target_pose.dtype,
+                device=object_target_pose.device,
+            )
+            object_target_pose[:, :3, 3] += displacement
+        else:
+            assert route_cfg.reference_entity_id is not None
+            assert route_cfg.relative_pose is not None
+            object_target_pose = SceneEntityPose(
+                route_cfg.reference_entity_id,
+                relative_pose=torch.tensor(
+                    route_cfg.relative_pose,
+                    dtype=torch.float32,
+                ).reshape(4, 4),
+            )
+        return SemanticLowering(
+            goal=CoordinatedPickGoal(
+                semantics=semantics,
+                object_target_pose=object_target_pose,
+            ),
+            registered_effect=RegisteredSemanticEffect(
+                effect_kind=SemanticEffectKind.RELEASE,
+                held_objects=tuple(
+                    RegisteredHeldObjectEffect(
+                        expectation_id=slot_id,
+                        relation=HeldObjectRelation.DETACHED,
+                        object_id=route_cfg.object_id,
+                        slot_id=slot_id,
+                        allow_missing_detached_baseline=True,
+                    )
+                    for slot_id in ("left", "right")
+                ),
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
+    """Create configured dual-arm transport routes from canonical scene refs."""
+
+    call_id: ClassVar[str] = _COORDINATED_TRANSPORT_CALL_ID
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = CoordinatedPickment.descriptor()
+
+    routes: tuple[
+        _CoordinatedTransportRoute | tuple[str, str, str, tuple[float, ...]],
+        ...,
+    ]
+
+    def __post_init__(self) -> None:
+        if type(self.routes) is not tuple or not self.routes:
+            raise ValueError(
+                "Coordinated transport routes must be a non-empty exact tuple."
+            )
+        normalized = [
+            _coordinated_transport_route(route, index=index)
+            for index, route in enumerate(self.routes)
+        ]
+        selectors = [(route.object_id, route.target_id) for route in normalized]
+        if len(set(selectors)) != len(selectors):
+            raise ValueError("Coordinated transport routes must be unique.")
+        object.__setattr__(self, "routes", tuple(normalized))
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Resolve grasp semantics and validate all live target references."""
+        del simulation
+        if engine.robot is not robot:
+            raise ValueError(
+                "Coordinated transport lowerer requires the engine's exact robot."
+            )
+        canonical_routes: list[_CoordinatedTransportRoute] = []
+        semantics: list[ObjectSemantics] = []
+        for route in self.routes:
+            object_ref = scene_registry.resolve(
+                route.object_id,
+                expected_type=SceneObjectRef,
+            )
+            grasp_ref = scene_registry.resolve_affordance(
+                object_ref,
+                capability=GRASP_AFFORDANCE_CAPABILITY,
+            )
+            if route.world_displacement is not None:
+                canonical_routes.append(
+                    _CoordinatedTransportRoute(
+                        object_id=object_ref.entity_id,
+                        target_id=route.target_id,
+                        world_displacement=route.world_displacement,
+                    )
+                )
+            else:
+                assert route.reference_entity_id is not None
+                assert route.relative_pose is not None
+                reference = scene_registry.lookup(route.reference_entity_id)
+                canonical_routes.append(
+                    _CoordinatedTransportRoute(
+                        object_id=object_ref.entity_id,
+                        target_id=route.target_id,
+                        reference_entity_id=reference.ref.entity_id,
+                        relative_pose=route.relative_pose,
+                    )
+                )
+            semantics.append(
+                scene_registry.object_semantics(
+                    object_ref,
+                    affordance=grasp_ref,
+                )
+            )
+        return _CoordinatedTransportLowerer(
+            tuple(canonical_routes),
+            tuple(semantics),
         )
 
 
