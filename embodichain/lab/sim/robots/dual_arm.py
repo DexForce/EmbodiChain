@@ -265,7 +265,7 @@ def _resolve_base_cfg(base_robot: str | dict) -> RobotCfg:
 # --------------------------------------------------------------------------- #
 
 
-def _mirror_drive_pros(
+def _mirror_joint_drive_props(
     base_drive: JointDrivePropertiesCfg, name_case: dict[str, str] | None = None
 ) -> JointDrivePropertiesCfg:
     """Mirror a single-arm drive config across left/right arms.
@@ -288,13 +288,14 @@ def _mirror_drive_pros(
     Returns:
         A fresh :class:`JointDrivePropertiesCfg` for the dual arm.
     """
-    new = JointDrivePropertiesCfg(drive_type=base_drive.drive_type)
-    for prop in _DRIVE_PROPS:
+    new = type(base_drive)(drive_type=base_drive.drive_type)
+    properties = [*_DRIVE_PROPS, "target_mode"]
+    for prop in properties:
         val = getattr(base_drive, prop, None)
         if val is None:
             continue
         if isinstance(val, dict):
-            mirrored: Dict[str, float] = {}
+            mirrored: Dict[str, object] = {}
             for pattern, v in val.items():
                 mirrored[_prefixed_name(str(pattern), "left_", "joint", name_case)] = v
                 mirrored[_prefixed_name(str(pattern), "right_", "joint", name_case)] = v
@@ -404,13 +405,11 @@ def _populate_dual_cfg(
         )
     cfg.solver_cfg = new_solver
 
-    cfg.drive_pros = _mirror_drive_pros(base_cfg.drive_pros, name_case)
+    cfg.joint_drive_props = _mirror_joint_drive_props(
+        base_cfg.joint_drive_props, name_case
+    )
     cfg.attrs = base_cfg.attrs.copy()
-    cfg.min_position_iters = base_cfg.min_position_iters
-    cfg.min_velocity_iters = base_cfg.min_velocity_iters
-    cfg.fix_base = base_cfg.fix_base
-    cfg.disable_self_collision = base_cfg.disable_self_collision
-    cfg.sleep_threshold = base_cfg.sleep_threshold
+    cfg.root_props = base_cfg.root_props.copy()
 
 
 def build_dual_arm_cfg(
@@ -455,7 +454,7 @@ class DualArmRobotCfg(RobotCfg):
 
     Two identical arms (the ``base_robot``) are mounted on a shared synthetic
     ``base_link``. The left/right ``control_parts``, per-arm ``solver_cfg`` and
-    mirrored ``drive_pros`` are derived automatically by
+    mirrored ``joint_drive_props`` are derived automatically by
     :func:`build_dual_arm_cfg`.
 
     Example:
@@ -574,15 +573,33 @@ class DualArmRobotCfg(RobotCfg):
 
 
 if __name__ == "__main__":
+    import argparse
+
     np.set_printoptions(precision=5, suppress=True)
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+
+    parser = argparse.ArgumentParser(description="Launch a dual-arm robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="default",
+        help="Physics backend to launch (default: default).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
+    args = parser.parse_args()
 
     config = SimulationManagerCfg(
         headless=True,
-        sim_device="cpu",
+        device=args.device,
         num_envs=1,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)
@@ -608,10 +625,8 @@ if __name__ == "__main__":
         }
     )
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     # Round-trip check: from_dict(to_dict()) reproduces the cfg.
     cfg2 = DualArmRobotCfg.from_dict(cfg.to_dict())

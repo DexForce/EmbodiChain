@@ -179,6 +179,12 @@ Tracking recovery is separate from task-level semantic recovery:
 - Task Program may perform bounded workflow recovery after the action reaches
   a semantic effect boundary.
 
+The `scripts/tutorials/atomic_action/place.py` tutorial configures matching
+Newton contact stiffness and damping on the cube and gripper collision links
+before `SimulationManager.prepare()`. MuJoCo-Warp's default response is too
+compliant for this force-closure replay and otherwise lets the cube slip near
+its pickup pose instead of reaching the place target.
+
 ## Semantic integration boundary
 
 `semantics` contains:

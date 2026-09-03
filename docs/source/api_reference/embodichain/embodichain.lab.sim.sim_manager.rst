@@ -19,6 +19,7 @@ instance registry instead of passing it around explicitly.
 
    SimulationManager
    SimulationManagerCfg
+   get_physics_scene
 
 .. currentmodule:: embodichain.lab.sim.sim_manager
 
@@ -37,3 +38,8 @@ instance registry instead of passing it around explicitly.
    :undoc-members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+Active Physics Scene
+--------------------
+
+.. autofunction:: get_physics_scene

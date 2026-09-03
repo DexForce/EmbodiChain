@@ -35,6 +35,7 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
@@ -54,15 +55,24 @@ def main():
         description="Create and simulate a robot in SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Stop after this many physics steps (default: run until interrupted).",
+    )
     args = parser.parse_args()
+    if args.max_steps is not None and args.max_steps < 1:
+        parser.error("--max-steps must be at least 1")
 
     # Initialize simulation
     print("Creating simulation...")
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         arena_space=3.0,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         visualization=visualization_cfg_from_args(args),
@@ -72,16 +82,16 @@ def main():
     # Create robot configuration
     robot = create_robot(sim)
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    # Materialize the declared scene before accessing robot metadata.
+    sim.prepare()
+    print(f"Robot created successfully with {robot.dof} joints")
 
     # Open visualization window if not headless
     if not args.headless:
         sim.open_window()
 
     # Run simulation loop
-    run_simulation(sim, robot)
+    run_simulation(sim, robot, max_steps=args.max_steps)
 
 
 def create_robot(sim):
@@ -127,21 +137,45 @@ def create_robot(sim):
             ]
         ),
         control_parts=CONTROL_PARTS,
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"joint[1-6]": 1e4, "LEFT_.*": 1e3},
-            damping={"joint[1-6]": 1e3, "LEFT_.*": 1e2},
+            damping={"joint[1-6]": 1.5e3, "LEFT_.*": 1e2},
+            max_effort={"joint[1-6]": 1e4, "LEFT_.*": 1e4},
         ),
     )
 
     # Add robot to simulation
     robot: Robot = sim.add_robot(cfg=cfg)
 
-    print(f"Robot created successfully with {robot.dof} joints")
-
     return robot
 
 
-def run_simulation(sim: SimulationManager, robot: Robot):
+def _expand_mimic_targets(
+    robot: Robot, joint_ids: list[int], joint_targets: torch.Tensor
+) -> torch.Tensor:
+    """Expand active-joint targets into mimic-consistent articulation targets."""
+
+    targets = robot.get_qpos(target=True).clone()
+    targets[:, joint_ids] = joint_targets
+
+    for mimic_id, parent_id, multiplier, offset in zip(
+        robot.mimic_ids,
+        robot.mimic_parents,
+        robot.mimic_multipliers,
+        robot.mimic_offsets,
+    ):
+        if mimic_id is None or parent_id is None:
+            continue
+        targets[:, mimic_id] = offset + multiplier * targets[:, parent_id]
+
+    limits = robot.body_data.qpos_limits
+    return targets.clamp(min=limits[..., 0], max=limits[..., 1])
+
+
+def run_simulation(
+    sim: SimulationManager, robot: Robot, max_steps: int | None = None
+) -> None:
     """Run the simulation loop with robot control."""
 
     print("Starting simulation...")
@@ -170,14 +204,29 @@ def run_simulation(sim: SimulationManager, robot: Robot):
 
     # Get joint IDs for the hand.
     hand_joint_ids = robot.get_joint_ids("hand")
-    # Define hand open and close positions based on joint limits.
-    hand_position_open = robot.body_data.qpos_limits[:, hand_joint_ids, 1]
-    hand_position_close = robot.body_data.qpos_limits[:, hand_joint_ids, 0]
+    active_hand_joint_ids = robot.get_joint_ids("hand", remove_mimic=True)
+    # Drive mimic joints toward the pose implied by their active parent instead of
+    # sending each joint to its independent limit. Newton keeps drives on mimic
+    # joints, so inconsistent targets otherwise compete with the mimic constraints.
+    hand_position_open = _expand_mimic_targets(
+        robot,
+        active_hand_joint_ids,
+        robot.body_data.qpos_limits[:, active_hand_joint_ids, 1],
+    )[:, hand_joint_ids]
+    hand_position_close = _expand_mimic_targets(
+        robot,
+        active_hand_joint_ids,
+        robot.body_data.qpos_limits[:, active_hand_joint_ids, 0],
+    )[:, hand_joint_ids]
+
+    # The reset pose is zero for every DOF, but this hand has non-zero mimic
+    # offsets. Start from a valid closed pose so the initial state and drive
+    # targets satisfy the same mimic equations.
+    robot.set_qpos(qpos=hand_position_close, joint_ids=hand_joint_ids, target=False)
+    robot.set_qpos(qpos=hand_position_close, joint_ids=hand_joint_ids)
 
     try:
-        while True:
-            # Update physics
-            sim.update(step=1)
+        while max_steps is None or step_count < max_steps:
             cycle_step = step_count % ACTION_CYCLE_STEPS
 
             if cycle_step == 0:
@@ -196,6 +245,9 @@ def run_simulation(sim: SimulationManager, robot: Robot):
                 robot.set_qpos(qpos=hand_position_open, joint_ids=hand_joint_ids)
                 print(f"Opening hand")
 
+            # Apply commands before advancing physics so both backends observe the
+            # target change on the same simulation step.
+            sim.update(step=1)
             step_count += 1
 
     except KeyboardInterrupt:

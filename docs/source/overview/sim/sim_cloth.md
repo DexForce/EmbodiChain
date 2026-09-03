@@ -94,7 +94,7 @@ def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_config=sim_cfg)
 
 cloth_verts, cloth_faces = create_2d_grid_mesh(width=0.3, height=0.3, nx=12, ny=12)
@@ -173,7 +173,7 @@ You can set the global pose of a cloth object (which transforms all its vertices
 
 ```python
 # Reset or Move the Cloth Object
-target_pose = torch.tensor([[0, 0, 1.0, 1, 0, 0, 0]], device=device) # (x, y, z, qw, qx, qy, qz)
+target_pose = torch.tensor([[0, 0, 1.0, 0, 0, 0, 1]], device=device) # (x, y, z, qx, qy, qz, qw)
 cloth_object.set_local_pose(target_pose)
 
 # Important: Step simulation to apply changes

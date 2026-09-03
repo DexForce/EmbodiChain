@@ -36,7 +36,7 @@ class TestToppraPlanner:
         cls = type(self)
         if hasattr(cls, "sim"):
             return
-        cls.sim_config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        cls.sim_config = SimulationManagerCfg(headless=True, device="cpu")
         cls.sim = SimulationManager(cls.sim_config)
 
         cfg_dict = {
@@ -45,6 +45,7 @@ class TestToppraPlanner:
             "init_qpos": [0.0] * 16,
         }
         cls.robot = cls.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        cls.sim.prepare()
 
     def setup_method(self):
         self.setup_simulation()

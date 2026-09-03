@@ -26,21 +26,22 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from typing import Union
-from scipy.spatial.transform import Rotation as R
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     LightCfg,
     MarkerCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    MassPropertiesCfg,
+    RigidBodyPhysicsCfg,
     ArticulationCfg,
 )
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -58,6 +59,12 @@ def parse_arguments():
         description="Create and simulate a robot in SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Seed for scene XY perturbations; use a negative value for random runs.",
+    )
     return parser.parse_args()
 
 
@@ -71,10 +78,22 @@ def initialize_simulation(args) -> SimulationManager:
     Returns:
         SimulationManager: Configured simulation manager instance.
     """
+    physics_cfg = physics_cfg_for_backend(args.physics)
+    if args.physics == "newton":
+        # This contact-heavy URDF scene needs Newton's collision pipeline;
+        # MuJoCo's native contact path is not reliable for these convex meshes.
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "use_mujoco_contacts": False,
+            "nconmax": 16384,
+            "njmax": 65536,
+        }
+
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg,
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         arena_space=2.5,
@@ -178,11 +197,14 @@ def create_table(sim: SimulationManager) -> RigidObject:
         uid="table",
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/table_a.obj"),
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=8,
+            ),
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.5,
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=0.5),
         ),
-        max_convex_hull_num=8,
         body_type="kinematic",
         init_pos=[1.1, -0.5, 0.08],
         init_rot=[0.0, 0.0, 0.0],
@@ -206,11 +228,15 @@ def create_caffe(sim: SimulationManager) -> Robot:
         fpath=get_data_path("MultiW1Data/cafe/cafe.urdf"),
         init_pos=[1.05, -0.5, 0.79],
         init_rot=[0, 0, -30],
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=1.0),
         ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness=1.0, damping=0.1, max_effort=100.0, drive_type="force"
+        asset_physics_mode="overlay",
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness=1.0,
+            damping=0.1,
+            max_effort=100.0,
         ),
     )
     container = sim.add_articulation(cfg=container_cfg)
@@ -232,10 +258,9 @@ def create_cup(sim: SimulationManager) -> RigidObject:
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/paper_cup_2.obj"),
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.3,
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=0.3),
         ),
-        max_convex_hull_num=1,
         body_type="dynamic",
         init_pos=[0.86, -0.76, 0.841],
         init_rot=[0.0, 0.0, 0.0],
@@ -274,7 +299,11 @@ def create_trajectory(
     cup_position = cup.get_local_pose(to_matrix=True)[:, :3, 3]
 
     # grasp cup waypoint generation
-    rest_right_qpos = robot.get_qpos()[:, right_arm_ids]  # [num_envs, dof]
+    # Build the task trajectory from the authored hold target.  The measured
+    # pose after the first physics step includes backend-specific gravity and
+    # constraint settling, which can send the redundant arm IK to a different
+    # solution before the task even starts.
+    rest_right_qpos = robot.get_qpos(target=True)[:, right_arm_ids]
     right_arm_xpos = robot.compute_fk(
         qpos=rest_right_qpos, name="right_arm", to_matrix=True
     )
@@ -426,17 +455,19 @@ def main():
     caffe = create_caffe(sim)
     cup = create_cup(sim)
 
-    sim.update(step=1)
+    sim.prepare()
 
-    # apply random perturbation
+    # Apply initialization-time poses before Newton captures its CUDA graph.
+    # Seed here so backend initialization cannot consume a different random
+    # prefix and make Default/Newton comparisons use different scenes.
+    if args.seed >= 0:
+        np.random.seed(args.seed)
     apply_random_xy_perturbation(cup, max_perturbation=0.05)
     apply_random_xy_perturbation(caffe, max_perturbation=0.05)
+    sim.update(step=1)
 
     if not args.headless:
         sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     run_simulation(sim, robot, cup, caffe)
 

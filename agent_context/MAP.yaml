@@ -13,6 +13,7 @@ topics:
       - sim system
       - lab sim
       - simulation manager
+      - camera attachment
       - 仿真系统
       - 仿真核心
       - 仿真管理器
@@ -21,7 +22,15 @@ topics:
       - simulation
       - SimulationManager
       - SimulationManagerCfg
+      - PhysicsBackendCfg
+      - DefaultPhysicsCfg
       - DexSim
+      - AutoSolverCfg
+      - Newton AutoSolver
+      - solver_cfg
+      - enable_multiccd
+      - cone
+      - impratio
       - world
       - arena
       - physics step
@@ -31,19 +40,50 @@ topics:
       - manual update
       - GPU physics
       - simulation lifecycle
+      - CameraCfg.extrinsics.parent
+      - parented camera
+      - topology revision attachment
+      - ContactQuery
+      - Scene.create_contact_query
+      - collision_policy
+      - collision isolation
+      - arena isolation
+      - JointDrivePropertiesCfg
+      - joint_drive_props
+      - root_props
+      - AssetPhysicsMode
+      - asset_physics_mode
+      - RigidBodyPhysicsCfg
+      - recompute_inertia
+      - MeshCollisionCfg
+      - mesh collision approximation
+      - shape.collision
+      - target_mode
+      - drive_type
+      - mimic joint
       - ArticulationJointKinematics
       - get_parent_joint_chain
+      - quaternion
+      - xyzw
+      - pose convention
     paths:
       - topics/simulation-system/simulation-system.md
     source_of_truth:
       - embodichain/lab/sim/__init__.py
       - embodichain/lab/sim/sim_manager.py
-      - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/cfg/
+      - embodichain/lab/sim/physics/
       - embodichain/lab/sim/common.py
       - embodichain/lab/sim/material.py
       - embodichain/lab/sim/profiler.py
+      - embodichain/lab/sim/spawn/descriptors.py
+      - embodichain/lab/sim/spawn/scene.py
       - embodichain/lab/sim/objects/__init__.py
       - embodichain/lab/sim/objects/articulation.py
+      - embodichain/lab/sim/objects/rigid_object.py
+      - embodichain/lab/sim/objects/backends/
+      - embodichain/lab/sim/objects/deformable/
+      - embodichain/utils/math.py
       - embodichain/lab/sim/sensors/__init__.py
       - embodichain/lab/sim/solvers/__init__.py
       - embodichain/lab/sim/planners/__init__.py
@@ -93,6 +133,10 @@ topics:
       - gym
       - environment.component
       - reusable physical environment
+      - file-owned physics backend
+      - physics_config
+      - default
+      - newton
       - embodiment.component
       - reusable embodiment
       - scene_binding
@@ -244,21 +288,34 @@ topics:
     keywords:
       - robot
       - RobotCfg
+      - RobotPresetCfg
       - Robot
       - control
       - drive
+      - JointDrivePropertiesCfg
+      - joint_drive_props
+      - root_props
+      - AssetPhysicsMode
+      - asset_physics_mode
+      - target_mode
+      - drive_type
       - joint
+      - mimic joint
       - urdf
       - cobotmagic
       - dexforce_w1
       - gripper
       - arm
+      - quaternion
+      - xyzw
     paths:
       - topics/robot-system/robot-system.md
     source_of_truth:
+      - embodichain/lab/gym/envs/embodied_env.py
       - embodichain/lab/sim/objects/robot.py
+      - embodichain/lab/sim/sim_manager.py
       - embodichain/lab/sim/robots/
-      - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/cfg/
     related_topics:
       - simulation-system
       - ik-solvers
@@ -288,9 +345,14 @@ topics:
       - Camera
       - StereoCamera
       - ContactSensor
+      - ContactQuery
+      - contact actor ID
+      - Newton contact
       - rgb
       - depth
       - pointcloud
+      - quaternion
+      - xyzw
     paths:
       - topics/sensor-system/sensor-system.md
     source_of_truth:
@@ -341,6 +403,8 @@ topics:
       - deformable
       - soft body
       - cloth
+      - quaternion
+      - xyzw
     paths:
       - topics/sim-visualization/sim-visualization.md
     source_of_truth:
@@ -353,6 +417,7 @@ topics:
       - embodichain/lab/sim/objects/rigid_object_group.py
       - embodichain/lab/sim/objects/soft_object.py
       - embodichain/lab/sim/objects/cloth_object.py
+      - embodichain/lab/sim/objects/deformable/
     related_topics:
       - simulation-system
       - env-framework
@@ -402,6 +467,9 @@ topics:
       - collision_world_batch_mode
       - collision_geometry_by_id
       - make_planning_scene_provider
+      - quaternion
+      - xyzw
+      - wxyz
     paths:
       - topics/motion-planning/motion-planning.md
     source_of_truth:
@@ -574,6 +642,38 @@ topics:
     related_topics:
       - manager-functor
       - env-framework
+    status: active
+  - id: differentiable-env
+    title: Differentiable Environment (APG)
+    aliases:
+      - differentiable env
+      - apg
+      - analytic policy gradient
+      - differentiable rl
+      - Warp tape autograd
+      - NewtonStepFunc
+      - 可微环境
+    keywords:
+      - differentiable
+      - gradient
+      - apg
+      - autograd
+      - warp tape
+      - requires_grad
+      - semi_implicit
+      - DifferentiableEmbodiedEnv
+      - NewtonStepFunc
+      - quaternion
+      - xyzw
+    paths:
+      - topics/differentiable-env/differentiable-env.md
+    source_of_truth:
+      - embodichain/lab/gym/envs/differentiable_env.py
+      - embodichain/lab/sim/diff/
+      - embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py
+    related_topics:
+      - env-framework
+      - rl-learning
     status: active
 
   - id: atomic-actions
@@ -897,6 +997,8 @@ topics:
       - 配置生成环境
       - 集成配置
       - 运行时环境注册
+      - SemanticPose
+      - quaternion_xyzw
     paths:
       - topics/task-programs/task-programs.md
     source_of_truth:

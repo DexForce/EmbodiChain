@@ -33,7 +33,7 @@ if not torch.cuda.is_available():
     pytest.skip("cuRobo V2 requires CUDA", allow_module_level=True)
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
 from embodichain.lab.sim.robots import FrankaPandaCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
@@ -71,12 +71,13 @@ def _make_franka_curobo_engine():
         cfg=RigidObjectCfg(
             uid="demo_block",
             shape=CubeCfg(size=DEMO_BLOCK_DIMS),
-            attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
+            attrs=RigidBodyPhysicsCfg(),
+            body_type="static",
             init_pos=DEMO_BLOCK_POS,
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     mg = MotionGenerator(
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(

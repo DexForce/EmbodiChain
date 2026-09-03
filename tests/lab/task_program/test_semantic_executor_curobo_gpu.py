@@ -48,7 +48,7 @@ from embodichain.lab.sim.atomic_actions import (  # noqa: E402
     SkillDescriptor,
 )
 from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy  # noqa: E402
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator  # noqa: E402
 from embodichain.lab.sim.planners.curobo.curobo_planner import (  # noqa: E402
@@ -249,7 +249,7 @@ def test_semantic_runtime_replans_after_dynamic_curobo_world_change() -> None:
             cfg=RigidObjectCfg(
                 uid=OBSTACLE_UID,
                 shape=CubeCfg(size=OBSTACLE_SIZE),
-                attrs=RigidBodyAttributesCfg(),
+                attrs=RigidBodyPhysicsCfg(),
                 body_type="kinematic",
                 init_pos=OBSTACLE_START_POSITION,
                 init_rot=[0.0, 0.0, 0.0],

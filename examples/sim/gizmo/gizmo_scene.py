@@ -34,11 +34,12 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.shapes import CubeCfg
@@ -63,8 +64,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -101,7 +103,7 @@ def main():
                 dt=0.1,
             ),
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness={"LEFT_J[1-7]": 1e4, "RIGHT_J[1-7]": 1e4},
             damping={"LEFT_J[1-7]": 1e3, "RIGHT_J[1-7]": 1e3},
         ),
@@ -120,22 +122,20 @@ def main():
         device="cpu",
     )
 
-    left_joint_ids = robot.get_joint_ids("left_arm")
-    right_joint_ids = robot.get_joint_ids("right_arm")
-
-    robot.set_qpos(qpos=left_arm_qpos, joint_ids=left_joint_ids)
-    robot.set_qpos(qpos=right_arm_qpos, joint_ids=right_joint_ids)
-
     # Create a rigid object (cube) positioned to the side of the robot
     cube_cfg = RigidObjectCfg(
         uid="interactive_cube",
         shape=CubeCfg(size=[0.1, 0.1, 0.1]),
         body_type="kinematic",
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            dynamic_friction=0.5,
-            static_friction=0.5,
-            restitution=0.1,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 1.0},
+                "material_props": {
+                    "dynamic_friction": 0.5,
+                    "static_friction": 0.5,
+                    "restitution": 0.1,
+                },
+            }
         ),
         init_pos=[1.0, 0.0, 0.5],  # Position to the side of the robot
     )
@@ -157,6 +157,12 @@ def main():
         ),
     )
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
+    sim.prepare()
+
+    left_joint_ids = robot.get_joint_ids("left_arm")
+    right_joint_ids = robot.get_joint_ids("right_arm")
+    robot.set_qpos(qpos=left_arm_qpos, joint_ids=left_joint_ids)
+    robot.set_qpos(qpos=right_arm_qpos, joint_ids=right_joint_ids)
 
     native_window_opened = False
     if not args.headless:

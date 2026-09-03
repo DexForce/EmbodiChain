@@ -44,15 +44,16 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
+    configure_newton_link_contacts,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -87,21 +88,26 @@ def create_drawer(
     sim: SimulationManager,
 ) -> Articulation:
     """Create the fixed-base drawer in its closed initial state."""
-    drawer = sim.add_articulation(
-        cfg=ArticulationCfg(
-            uid="drawer",
-            fpath=get_data_path(DRAWER_ASSET),
-            init_pos=DRAWER_POSITION,
-            init_rot=DRAWER_ORIENTATION,
-            init_qpos=(0.0,),
-            drive_pros=JointDrivePropertiesCfg(drive_type="none"),
-            attrs=RigidBodyAttributesCfg(
-                static_friction=1.0,
-                dynamic_friction=1.0,
-            ),
-            fix_base=True,
-        )
+    drawer_cfg = ArticulationCfg(
+        uid="drawer",
+        fpath=get_data_path(DRAWER_ASSET),
+        asset_physics_mode="overlay",
+        init_pos=DRAWER_POSITION,
+        init_rot=DRAWER_ORIENTATION,
+        init_qpos=(0.0,),
+        joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+        attrs=create_tutorial_rigid_body_physics(
+            static_friction=1.0,
+            dynamic_friction=1.0,
+        ),
     )
+    configure_newton_link_contacts(
+        sim,
+        drawer_cfg,
+        group_name="newton_handle_contacts",
+        link_names_expr=[HANDLE_LINK_NAME],
+    )
+    drawer = sim.add_articulation(cfg=drawer_cfg)
     sim.update(step=10)
     return drawer
 
@@ -185,6 +191,7 @@ def main() -> None:
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0], tcp_z=0.15
     )
     drawer = create_drawer(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     motion_gen = create_toppra_motion_generator(robot)
     semantics = create_drawer_semantics(drawer)

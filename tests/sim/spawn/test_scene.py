@@ -1,0 +1,475 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import inspect
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RigidObjectCfg
+from embodichain.lab.sim.objects import (
+    Articulation,
+    DeformableObject,
+    RigidObject,
+    RigidObjectGroup,
+    Robot,
+)
+from embodichain.lab.sim.spawn.scene import SpawnScene
+
+pytestmark = pytest.mark.no_sim
+
+
+def _make_scene(handles: dict[str, object]) -> SpawnScene:
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = 1
+    scene.builder = SimpleNamespace(
+        is_finalized=True,
+        result=SimpleNamespace(handles=handles),
+    )
+    scene._assets = {}
+    return scene
+
+
+class _RetryableFacade:
+    def __init__(self, *, fail_first: bool = False) -> None:
+        self._entities: list[object] = []
+        self.is_declared = True
+        self.declared_num_instances: int | None = None
+        self.fail_first = fail_first
+        self.bind_attempts = 0
+
+    def _initialize_spawn_declaration(self, num_instances: int) -> None:
+        self.declared_num_instances = num_instances
+
+    def attach_spawn_handles(self, entities: tuple[object, ...]) -> None:
+        self._entities = list(entities)
+
+    def bind_spawn(self, _result: object) -> None:
+        self.bind_attempts += 1
+        if self.fail_first and self.bind_attempts == 1:
+            raise RuntimeError("bind failed")
+        self.is_declared = False
+
+
+class _RuntimeConfigFacade(_RetryableFacade):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    def attach_spawn_handles(self, entities: tuple[object, ...]) -> None:
+        self.events.append("attach")
+        super().attach_spawn_handles(entities)
+
+    def _prepare_spawn_runtime_config(self, _result: object) -> None:
+        self.events.append("runtime_config")
+
+
+def test_bind_retries_only_incomplete_declarations() -> None:
+    first_handle = object()
+    second_handle = object()
+    scene = _make_scene({"first": first_handle, "second": second_handle})
+    first = _RetryableFacade()
+    second = _RetryableFacade(fail_first=True)
+
+    scene.track(
+        "rigid_object",
+        "first",
+        SimpleNamespace(name="first", per_env=False),
+        facade=first,
+    )
+    scene.track(
+        "rigid_object",
+        "second",
+        SimpleNamespace(name="second", per_env=False),
+        facade=second,
+    )
+
+    with pytest.raises(RuntimeError, match="bind failed"):
+        scene.bind()
+    scene.bind()
+    scene.bind()
+
+    assert first._entities == [first_handle]
+    assert second._entities == [second_handle]
+    assert first.declared_num_instances == 1
+    assert second.declared_num_instances == 1
+    assert first.bind_attempts == 1
+    assert second.bind_attempts == 2
+
+
+def test_declare_initializes_facade_with_spawn_instance_count() -> None:
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = 3
+    scene.builder = SimpleNamespace(
+        is_finalized=False,
+        result=None,
+        add_object=lambda descriptor: descriptor,
+    )
+    scene._assets = {}
+    facade = _RetryableFacade()
+
+    scene.declare(
+        "rigid_object",
+        "cube",
+        SimpleNamespace(name="cube", per_env=True),
+        facade=facade,
+    )
+
+    assert facade.declared_num_instances == 3
+
+
+def test_rigid_object_receives_instance_count_only_when_declared() -> None:
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = 3
+    scene.builder = SimpleNamespace(
+        is_finalized=False,
+        result=None,
+        add_object=lambda descriptor: descriptor,
+    )
+    scene._assets = {}
+    facade = RigidObject(RigidObjectCfg(uid="cube"))
+
+    with pytest.raises(RuntimeError, match="registered through SpawnScene"):
+        _ = facade.num_instances
+
+    scene.declare(
+        "rigid_object",
+        "cube",
+        SimpleNamespace(name="cube", per_env=True),
+        facade=facade,
+    )
+
+    assert facade.num_instances == 3
+    assert facade._all_indices == [0, 1, 2]
+
+
+@pytest.mark.parametrize(
+    "facade_type",
+    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject],
+)
+def test_object_constructors_hide_spawn_lifecycle_parameters(
+    facade_type: type[object],
+) -> None:
+    parameters = inspect.signature(facade_type.__init__).parameters
+
+    assert "declared_num_instances" not in parameters
+    assert "spawn_result" not in parameters
+
+
+def test_runtime_config_attaches_articulation_before_preparing_it() -> None:
+    scene = _make_scene({})
+    events: list[str] = []
+    facade = _RuntimeConfigFacade(events)
+    scene.track(
+        "articulation",
+        "robot",
+        SimpleNamespace(name="robot", per_env=False),
+        facade=facade,
+    )
+    handle = object()
+    scene.builder.result.handles["robot"] = handle
+
+    scene.prepare_runtime_config(scene.builder.result)
+
+    assert facade._entities == [handle]
+    assert events == ["attach", "runtime_config"]
+
+
+def test_default_root_properties_prepare_once_per_topology_revision() -> None:
+    native_articulation = MagicMock()
+    articulation = object.__new__(Articulation)
+    articulation.cfg = SimpleNamespace(
+        root_props=ArticulationRootPropertiesCfg(
+            min_position_iters=32,
+            min_velocity_iters=8,
+        )
+    )
+    articulation._entities = [SimpleNamespace(_physics_binding=native_articulation)]
+    articulation._prepared_default_root_topology_revision = -1
+    result = SimpleNamespace(backend="dexsim", topology_revision=3)
+
+    articulation._prepare_spawn_runtime_config(result)
+    articulation._prepare_spawn_runtime_config(result)
+
+    native_articulation.set_solver_iteration_counts.assert_called_once_with(
+        min_position_iters=32,
+        min_velocity_iters=8,
+    )
+
+    result.topology_revision = 4
+    articulation._prepare_spawn_runtime_config(result)
+    assert native_articulation.set_solver_iteration_counts.call_count == 2
+
+
+def test_newton_skips_default_root_runtime_properties() -> None:
+    native_articulation = MagicMock()
+    articulation = object.__new__(Articulation)
+    articulation.cfg = SimpleNamespace(
+        root_props=ArticulationRootPropertiesCfg(
+            min_position_iters=32,
+            min_velocity_iters=8,
+        )
+    )
+    articulation._entities = [SimpleNamespace(_physics_binding=native_articulation)]
+    articulation._prepared_default_root_topology_revision = -1
+
+    articulation._prepare_spawn_runtime_config(
+        SimpleNamespace(backend="newton", topology_revision=3)
+    )
+
+    native_articulation.set_solver_iteration_counts.assert_not_called()
+
+
+def test_commit_resolves_and_configures_before_finalize(monkeypatch) -> None:
+    events: list[str] = []
+    descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
+    result = object()
+    builder = SimpleNamespace(
+        backend="newton",
+        is_finalized=False,
+        result=None,
+        replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
+        add_articulation=lambda value: value,
+    )
+
+    def resolve_source(_builder: object, value: object) -> None:
+        events.append("resolve")
+        value.links = [SimpleNamespace(name="base")]
+
+    def finalize() -> object:
+        events.append("finalize")
+        builder.is_finalized = True
+        builder.result = result
+        return result
+
+    builder.finalize = finalize
+    monkeypatch.setattr(
+        "embodichain.lab.sim.spawn.source.resolve_articulation_source",
+        resolve_source,
+    )
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {}
+
+    def configure(value: object) -> None:
+        assert value.links[0].name == "base"
+        events.append("configure")
+
+    scene.declare(
+        "articulation",
+        "robot",
+        descriptor,
+        configure_source=configure,
+    )
+
+    assert scene.commit() is result
+    assert events == ["resolve", "configure", "finalize"]
+
+
+@pytest.mark.parametrize("is_finalized", [False, True])
+def test_materialized_articulation_is_configured_before_backend_add(
+    is_finalized: bool,
+) -> None:
+    events: list[str] = []
+    descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
+    result = SimpleNamespace(handles={})
+    builder = SimpleNamespace(
+        is_finalized=is_finalized,
+        result=result,
+        replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
+    )
+
+    def resolve_source(value: object) -> None:
+        events.append("resolve")
+        value.links = [SimpleNamespace(name="base")]
+
+    def configure(value: object) -> None:
+        assert value.links[0].name == "base"
+        events.append("configure")
+
+    def add_articulation(value: object) -> object:
+        assert value.links[0].name == "base"
+        events.append("add")
+        return value
+
+    builder.resolve_articulation_source = resolve_source
+    builder.add_articulation = add_articulation
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {}
+
+    scene.declare(
+        "articulation",
+        "robot",
+        descriptor,
+        configure_source=configure,
+    )
+
+    assert events == ["resolve", "configure", "add"]
+
+
+@pytest.mark.parametrize("is_finalized", [False, True])
+def test_default_eager_articulation_is_configured_after_native_add(
+    is_finalized: bool,
+) -> None:
+    events: list[str] = []
+    descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
+    result = SimpleNamespace(backend="dexsim", handles={})
+    builder = SimpleNamespace(
+        backend="dexsim",
+        is_finalized=is_finalized,
+        result=result,
+        replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
+    )
+
+    def configure(value: object) -> None:
+        assert value.links[0].name == "base"
+        events.append("configure")
+
+    def add_articulation(value: object) -> object:
+        events.append("add")
+        value.links = [SimpleNamespace(name="base")]
+        result.handles["arena_0/robot"] = SimpleNamespace(
+            articulation_desc=value,
+            apply_dexsim_properties=lambda source: events.append("apply"),
+        )
+        return value
+
+    builder.add_articulation = add_articulation
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {}
+
+    scene.declare(
+        "articulation",
+        "robot",
+        descriptor,
+        configure_source=configure,
+    )
+
+    assert events == ["add", "configure", "apply"]
+
+
+def test_source_configuration_retries_failure_then_runs_only_once() -> None:
+    events: list[str] = []
+    descriptor = SimpleNamespace(name="robot", per_env=True, links=[])
+    builder = SimpleNamespace(
+        is_finalized=False,
+        result=None,
+        replicate_plan=SimpleNamespace(env_names=lambda: ["arena_0"]),
+        add_articulation=lambda value: value,
+    )
+
+    def resolve_sources() -> None:
+        events.append("resolve")
+        descriptor.links = [SimpleNamespace(name="base")]
+
+    attempts = 0
+
+    def configure(_value: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        events.append("configure")
+        if attempts == 1:
+            raise RuntimeError("configuration failed")
+
+    builder.resolve_sources = resolve_sources
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {}
+
+    scene.declare(
+        "articulation",
+        "robot",
+        descriptor,
+        configure_source=configure,
+    )
+
+    with pytest.raises(RuntimeError, match="configuration failed"):
+        scene.resolve_sources()
+    scene.resolve_sources()
+    scene.resolve_sources()
+
+    assert attempts == 2
+    assert events == [
+        "resolve",
+        "configure",
+        "resolve",
+        "configure",
+        "resolve",
+    ]
+
+
+class _RetryableArticulation(Articulation):
+    bind_attempts = 0
+    reset_attempts = 0
+
+    def __init__(
+        self,
+        cfg: object,
+        device: object = "cpu",
+    ) -> None:
+        self.cfg = cfg
+        self.uid = cfg.uid
+        self.device = device
+        self._entities: list[object] = []
+        self._spawn_result = None
+        self._world = None
+        self._declared_num_instances: int | None = None
+
+    def _initialize_spawn_declaration(self, num_instances: int) -> None:
+        self._declared_num_instances = num_instances
+
+    def _initialize_spawn_bound(self, result: object) -> None:
+        self._spawn_result = result
+        self._world = object()
+
+    def attach_spawn_handles(self, entities: list[object]) -> None:
+        self._entities = list(entities)
+
+    def _apply_spawn_config(self) -> None:
+        type(self).bind_attempts += 1
+        if type(self).bind_attempts == 1:
+            raise RuntimeError("configuration failed")
+
+    def reset(self, env_ids: object | None = None) -> None:
+        del env_ids
+        type(self).reset_attempts += 1
+
+
+def test_articulation_binding_is_atomic_and_retryable() -> None:
+    _RetryableArticulation.bind_attempts = 0
+    _RetryableArticulation.reset_attempts = 0
+    facade = _RetryableArticulation(
+        SimpleNamespace(uid="robot"),
+    )
+    facade._initialize_spawn_declaration(1)
+    result = object()
+    handles = [object()]
+    facade.attach_spawn_handles(handles)
+
+    with pytest.raises(RuntimeError, match="configuration failed"):
+        facade.bind_spawn(result)
+
+    assert facade.is_declared
+    assert _RetryableArticulation.reset_attempts == 0
+    facade.bind_spawn(result)
+    assert facade.is_spawn_bound
+    assert facade._entities == handles
+    assert _RetryableArticulation.reset_attempts == 1

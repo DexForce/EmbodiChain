@@ -88,6 +88,12 @@ Unknown fields, duplicate keys, non-finite values, invalid exact types,
 excessive depth/nodes/repeats, cyclic or executable registered payloads, and
 unresolved references fail before live providers are touched.
 
+Task Program poses follow the EmbodiChain quaternion contract. `PoseCfg` and
+serialized target poses require `quaternion_xyzw`; `SemanticPose` stores and
+reports the same order. The configured hand-over service uses
+`final_quaternion_xyzw`. Identity is `[0, 0, 0, 1]`; legacy `*_wxyz` keys are
+unknown fields and are rejected rather than silently reinterpreted.
+
 `TaskProgramCompiler` resolves canonical scene references, expands bounded
 repeats and cyclic targets, assigns stable segment/call indices, preserves
 parallel branches, and returns an immutable `CompiledTaskProgram`.

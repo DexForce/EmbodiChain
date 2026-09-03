@@ -41,10 +41,10 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     torch.set_printoptions(precision=5, sci_mode=False)
 
     # Initialize simulation
-    sim_device = "cpu"
+    device = "cpu"
     config = SimulationManagerCfg(
         headless=False,
-        sim_device=sim_device,
+        device=device,
         visualization=visualization or VisualizationCfg(),
     )
     sim = SimulationManager(config)
@@ -76,6 +76,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     }
 
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+    sim.prepare()
     arm_name = "left_arm"
     # Set initial joint positions for left arm
     qpos_seed = torch.tensor(

@@ -21,8 +21,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import (
+    RenderCfg,
+    physics_cfg_for_backend,
+    RigidObjectCfg,
+    LightCfg,
+)
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, LightCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import RigidObject, Light
 from embodichain.lab.sim.sensors import (
@@ -38,10 +43,11 @@ from embodichain.data import get_data_path
 def main(args):
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         num_envs=args.num_envs,
         arena_space=2,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
@@ -54,8 +60,7 @@ def main(args):
         )
     )
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     if not args.headless:
         sim.open_window()
@@ -116,6 +121,8 @@ def main(args):
         plt.savefig(f"camera_data.png")
     else:
         plt.show()
+
+    sim.destroy()
 
 
 if __name__ == "__main__":

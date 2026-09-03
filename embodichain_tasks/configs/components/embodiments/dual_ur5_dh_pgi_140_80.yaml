@@ -32,7 +32,7 @@ simulation:
     dual_arm: ["left_joint[0-9]", "right_joint[0-9]"]
     left_hand: [left_gripper_finger1_joint_1]
     right_hand: [right_gripper_finger1_joint_1]
-  drive_pros:
+  joint_drive_props:
     stiffness:
       "left_joint[0-9]": 10000.0
       "right_joint[0-9]": 10000.0
@@ -59,8 +59,9 @@ simulation:
     gripper_fingers:
       link_names_expr: ["(left|right)_gripper_finger[12]_link_1"]
       attrs:
-        dynamic_friction: 2.0
-        static_friction: 2.0
+        material_props:
+          dynamic_friction: 2.0
+          static_friction: 2.0
   solver_cfg:
     left_arm:
       class_type: URSolver

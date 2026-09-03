@@ -38,8 +38,9 @@ from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     LightCfg,
     ClothObjectCfg,
     ClothPhysicalAttributesCfg,
@@ -71,7 +72,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
                     {"component_type": "hand", "urdf_path": gripper_urdf_path},
                 ]
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {"FINGER[1-2]": 1e2},
                 "damping": {"FINGER[1-2]": 1e1},
                 "max_effort": {"FINGER[1-2]": 1e3},
@@ -112,13 +113,16 @@ def create_padding_box(sim: SimulationManager):
         shape=CubeCfg(
             size=[0.02, 0.07, 0.05],
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            static_friction=0.01,
-            dynamic_friction=0.00,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 1.0},
+                "rigid_props": {"min_position_iters": 32, "min_velocity_iters": 8},
+                "material_props": {
+                    "static_friction": 0.01,
+                    "dynamic_friction": 0.00,
+                    "restitution": 0.01,
+                },
+            }
         ),
         body_type="kinematic",
         init_pos=[0.5, 0.0, 0.026],
@@ -257,10 +261,11 @@ def main():
         num_envs=args.num_envs,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device="cuda",
+        device="cuda",
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -270,7 +275,7 @@ def main():
     robot = create_robot(sim)
     cloth = create_cloth(sim)
     padding_box = create_padding_box(sim)
-    sim.init_gpu_physics()
+    sim.prepare()
     if not args.headless:
         sim.open_window()
     sim.update(step=10)  # Let the cloth settle before interaction

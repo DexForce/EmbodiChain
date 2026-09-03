@@ -25,8 +25,12 @@ import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import (
+    RigidBodyPhysicsCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
@@ -49,10 +53,11 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -65,11 +70,15 @@ def main():
             uid="cube1",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="kinematic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.1,
+                    },
+                }
             ),
             init_pos=[0.0, 0.0, 1.0],
         )
@@ -79,15 +88,20 @@ def main():
             uid="cube2",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="kinematic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.1,
+                    },
+                }
             ),
             init_pos=[0.3, 0.0, 1.0],
         )
     )
+    sim.prepare()
 
     native_window_opened = False
     if not args.headless:
@@ -123,9 +137,6 @@ def main():
 
 def run_simulation(sim: SimulationManager):
     """Run the simulation loop."""
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     step_count = 0
     gizmo_enabled = True
     try:

@@ -58,17 +58,20 @@ class MockRigidObject:
         self.cfg.shape = Mock()
         self.cfg.shape.fpath = "test.obj"
         self.cfg.attrs = Mock()
-        self.cfg.attrs.mass = 1.0
+        self.cfg.attrs.mass_props = Mock(mass=1.0)
 
         # Default pose at origin
         self._pose = torch.eye(4).unsqueeze(0).repeat(num_envs, 1, 1)
         self._mass = torch.ones(num_envs) * 1.0
+        self._inertia = torch.ones(num_envs, 3)
         self._com = torch.zeros(num_envs, 3)
 
         # Mock body_data
         self.body_data = Mock()
+        self.body_data.default_mass = self._mass.clone()
+        self.body_data.default_inertia = self._inertia.clone()
         self.body_data.default_com_pose = torch.zeros(num_envs, 7)
-        self.body_data.default_com_pose[:, 3] = 1.0  # quaternion w
+        self.body_data.default_com_pose[:, 6] = 1.0  # xyzw quaternion w
         self.body_data.lin_vel = torch.zeros(num_envs, 3)
         self.body_data.ang_vel = torch.zeros(num_envs, 3)
 
@@ -91,6 +94,17 @@ class MockRigidObject:
             self._mass[env_ids] = mass
         else:
             self._mass = mass
+
+    def get_inertia(self, env_ids=None):
+        if env_ids is not None:
+            return self._inertia[env_ids]
+        return self._inertia
+
+    def set_inertia(self, inertia, env_ids=None):
+        if env_ids is not None:
+            self._inertia[env_ids] = inertia
+        else:
+            self._inertia = inertia
 
 
 class MockRigidObjectGroup:
@@ -221,12 +235,17 @@ class MockArticulation:
         # Default pose at origin (position + quaternion)
         # Format: (N, 7) - position (3) + quaternion (4)
         self._pose = torch.zeros(num_envs, 7)
-        self._pose[:, 3] = 1.0  # quaternion w = 1 (identity rotation)
+        self._pose[:, 6] = 1.0  # xyzw quaternion w = 1 (identity rotation)
 
-        self.default_link_masses = torch.ones(
-            (self.num_envs, len(self.link_names)), device=self.device
+        self._inertia = torch.ones(
+            (self.num_envs, len(self.link_names), 3), device=self.device
         )
         self.body_data = Mock()
+        self.body_data.default_mass = torch.ones(
+            (self.num_envs, len(self.link_names)), device=self.device
+        )
+        self.body_data.default_inertia = self._inertia.clone()
+        self.default_link_masses = self.body_data.default_mass
         self.body_data.body_link_vel = torch.zeros(
             self.num_envs, len(self.link_names), 6, device=self.device
         )
@@ -305,6 +324,30 @@ class MockArticulation:
         for i, env_idx in enumerate(local_env_ids):
             for j, name in enumerate(link_names):
                 self._entities[env_idx]._link_masses[name] = mass[i, j].item()
+
+    def get_inertia(self, link_names=None, env_ids=None):
+        """Get link inertia diagonals, matching Articulation API."""
+        env_index = torch.as_tensor(
+            list(range(self.num_envs)) if env_ids is None else env_ids,
+            dtype=torch.long,
+        )
+        names = self.link_names if link_names is None else list(link_names)
+        link_index = torch.as_tensor(
+            [self.link_names.index(name) for name in names], dtype=torch.long
+        )
+        return self._inertia[env_index[:, None], link_index[None, :]]
+
+    def set_inertia(self, inertia, link_names=None, env_ids=None):
+        """Set link inertia diagonals, matching Articulation API."""
+        env_index = torch.as_tensor(
+            list(range(self.num_envs)) if env_ids is None else env_ids,
+            dtype=torch.long,
+        )
+        names = self.link_names if link_names is None else list(link_names)
+        link_index = torch.as_tensor(
+            [self.link_names.index(name) for name in names], dtype=torch.long
+        )
+        self._inertia[env_index[:, None], link_index[None, :]] = inertia
 
 
 class MockSim:
@@ -532,6 +575,81 @@ class TestRandomizeRigidObjectMass:
         masses = env.test_object.get_mass()
         assert torch.all(masses >= 0.5)
         assert torch.all(masses <= 1.5)
+
+    def test_relative_mass_randomization_does_not_accumulate(self):
+        """Test repeated relative randomization uses the initial mass."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+        # The backend-resolved mass is the baseline, not stale config metadata.
+        env.test_object.cfg.attrs.mass_props.mass = 10.0
+
+        for _ in range(2):
+            randomize_rigid_object_mass(
+                env,
+                env_ids,
+                entity_cfg=MagicMock(uid="cube"),
+                mass_range=(0.5, 0.5),
+                relative=True,
+            )
+
+        masses = env.test_object.get_mass().reshape(-1)
+        assert torch.allclose(masses, torch.full((4,), 1.5))
+
+    def test_mass_randomization_recomputes_inertia_from_defaults(self):
+        """Test inertia scaling uses the initial mass-property snapshot."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+        env.test_object._inertia.fill_(9.0)
+
+        randomize_rigid_object_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="cube"),
+            mass_range=(2.0, 2.0),
+        )
+
+        assert torch.allclose(env.test_object.get_inertia(), torch.full((4, 3), 2.0))
+
+    def test_mass_randomization_enforces_positive_mass(self):
+        """Test relative offsets cannot produce a non-positive mass."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_rigid_object_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="cube"),
+            mass_range=(-2.0, -2.0),
+            relative=True,
+            min_mass=0.25,
+        )
+
+        assert torch.allclose(env.test_object.get_mass(), torch.full((4, 1), 0.25))
+
+    def test_sampling_uses_rigid_object_device(self, monkeypatch):
+        """Test samples are allocated on the rigid object's device."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+        sampled_device = None
+
+        def fake_sample_uniform(*, lower, upper, size, device):
+            nonlocal sampled_device
+            sampled_device = device
+            return torch.zeros(size, device=device)
+
+        monkeypatch.setattr(
+            "embodichain.lab.gym.envs.managers.randomization.physics.sample_uniform",
+            fake_sample_uniform,
+        )
+
+        randomize_rigid_object_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="cube"),
+            mass_range=(0.5, 2.0),
+        )
+
+        assert sampled_device == env.test_object.device
 
     def test_handles_nonexistent_object(self):
         """Test that function handles non-existent object gracefully."""
@@ -781,7 +899,7 @@ class TestRandomizeArticulationMass:
         assert torch.all(randomized <= 2.0)
 
     def test_relative_mass_randomization(self):
-        """Test relative mass randomization adds to current mass."""
+        """Test relative mass randomization adds to the initial mass."""
         env = MockEnv(num_envs=4)
         env_ids = torch.tensor([0, 1, 2, 3])
 
@@ -801,6 +919,90 @@ class TestRandomizeArticulationMass:
         )
         assert torch.all(masses >= 0.5)
         assert torch.all(masses <= 1.5)
+
+    def test_relative_mass_randomization_does_not_accumulate(self):
+        """Repeated relative randomization uses initialization-time link mass."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        for _ in range(2):
+            randomize_articulation_mass(
+                env,
+                env_ids,
+                entity_cfg=MagicMock(uid="articulation"),
+                mass_range=(0.5, 0.5),
+                link_names=["base_link"],
+                relative=True,
+            )
+
+        masses = env.test_articulation.get_mass(
+            link_names=["base_link"], env_ids=env_ids
+        )
+        assert torch.allclose(masses, torch.full((4, 1), 1.5))
+
+    def test_mass_randomization_recomputes_link_inertia_from_defaults(self):
+        """Inertia scaling uses initialization snapshots rather than current values."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+        env.test_articulation._inertia.fill_(9.0)
+
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range=(2.0, 2.0),
+            link_names=["base_link"],
+        )
+
+        inertia = env.test_articulation.get_inertia(
+            link_names=["base_link"], env_ids=env_ids
+        )
+        assert torch.allclose(inertia, torch.full((4, 1, 3), 2.0))
+
+    def test_mass_randomization_enforces_positive_link_mass(self):
+        """Relative offsets cannot produce a non-positive link mass."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range=(-2.0, -2.0),
+            link_names=["base_link"],
+            relative=True,
+            min_mass=0.25,
+        )
+
+        masses = env.test_articulation.get_mass(
+            link_names=["base_link"], env_ids=env_ids
+        )
+        assert torch.allclose(masses, torch.full((4, 1), 0.25))
+
+    def test_sampling_uses_articulation_device(self, monkeypatch):
+        """Test tuple-range samples use the articulation's device."""
+        env = MockEnv(num_envs=4)
+        env_ids = torch.tensor([0, 1, 2, 3])
+        sampled_device = None
+
+        def fake_sample_uniform(*, lower, upper, size, device):
+            nonlocal sampled_device
+            sampled_device = device
+            return torch.zeros(size, device=device)
+
+        monkeypatch.setattr(
+            "embodichain.lab.gym.envs.managers.randomization.physics.sample_uniform",
+            fake_sample_uniform,
+        )
+
+        randomize_articulation_mass(
+            env,
+            env_ids,
+            entity_cfg=MagicMock(uid="articulation"),
+            mass_range=(0.5, 2.0),
+        )
+
+        assert sampled_device == env.test_articulation.device
 
     def test_handles_nonexistent_articulation(self):
         """Test that function handles non-existent articulation gracefully."""

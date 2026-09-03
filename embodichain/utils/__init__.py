@@ -19,6 +19,8 @@
 The ``@configclass`` decorator, ``CfgNode`` configuration system, logging, math/tensor helpers, file/string/device/image utilities, non-maximum suppression, and high-performance ``warp`` kernels.
 """
 
+from __future__ import annotations
+
 from .configclass import configclass, is_configclass
 from .config_paths import resolve_config_path
 

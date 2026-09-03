@@ -26,7 +26,14 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import ArticulationCfg, LightCfg, MeshCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    ArticulationRootPropertiesCfg,
+    LightCfg,
+    MeshCfg,
+    MeshCollisionCfg,
+    RigidObjectCfg,
+)
 from embodichain.lab.visualization import (
     VisualizationCfg,
     add_viser_args_to_parser,
@@ -87,8 +94,6 @@ def preview_scene_export(
         )
     )
     try:
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
         _add_lights(sim)
         _add_objects(
             sim=sim,
@@ -107,6 +112,7 @@ def preview_scene_export(
             entries=_config_entries(scene_config, "articulation"),
             config_dir=config_path.parent,
         )
+        sim.prepare()
 
         is_viser = sim.sim_config.visualization.backend == "viser"
         joint_controller = _setup_viser_joint_control(
@@ -207,19 +213,29 @@ def _add_objects(
             field_name=f"{uid}.body_scale",
         )
         max_convex_hull_num = max(1, int(entry.get("max_convex_hull_num", 32)))
+        mesh_collision = MeshCollisionCfg(approximation="convex_hull")
+        if max_convex_hull_num > 1:
+            # The exported preview schema still carries the legacy hull budget;
+            # normalize it at this input boundary into the explicit Lab schema.
+            mesh_collision = MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=max_convex_hull_num,
+                acd_method="coacd",
+            )
 
         sim.add_rigid_object(
             RigidObjectCfg(
                 uid=uid,
-                shape=MeshCfg(fpath=str(mesh_path)),
+                shape=MeshCfg(
+                    fpath=str(mesh_path),
+                    collision=mesh_collision,
+                ),
                 # Keep every preview body static: exported poses are already the
                 # final gravity-settled poses and should not be simulated again.
                 body_type="static",
                 init_pos=tuple(init_pos),
                 init_rot=tuple(init_rot),
                 body_scale=tuple(body_scale),
-                max_convex_hull_num=max_convex_hull_num,
-                acd_method="vhacd",  # Use vhacd by default.
             )
         )
         print(f"[{label}] {uid}: pos={init_pos} rot={init_rot} scale={body_scale}")
@@ -273,7 +289,7 @@ def _add_articulations(
                     init_pos=tuple(init_pos),
                     init_rot=tuple(init_rot),
                     body_scale=tuple(body_scale),
-                    fix_base=True,
+                    root_props=ArticulationRootPropertiesCfg(fixed_base=True),
                     # Generated USDC is not URDF, so it cannot build a PK chain.
                     build_pk_chain=False,
                 )

@@ -36,7 +36,7 @@ if not torch.cuda.is_available():
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
 from embodichain.lab.sim.robots import FrankaPandaCfg  # noqa: E402
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
 from embodichain.lab.sim.planners import (  # noqa: E402
     MotionGenCfg,
@@ -74,12 +74,13 @@ def _make_sim_robot(num_envs: int = 1):
         cfg=RigidObjectCfg(
             uid="demo_block",
             shape=CubeCfg(size=DEMO_BLOCK_DIMS),
-            attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
+            attrs=RigidBodyPhysicsCfg(),
+            body_type="static",
             init_pos=DEMO_BLOCK_POS,
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     return sim, robot, block
 
 

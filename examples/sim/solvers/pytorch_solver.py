@@ -41,11 +41,11 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     torch.set_printoptions(precision=5, sci_mode=False)
 
     # Initialize simulation environment (CPU or CUDA)
-    sim_device = "cpu"
+    device = "cpu"
     num_envs = 9  # Number of parallel environments
     config = SimulationManagerCfg(
         headless=False,
-        sim_device=sim_device,
+        device=device,
         arena_space=2.0,
         num_envs=num_envs,
         visualization=visualization or VisualizationCfg(),
@@ -82,6 +82,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
 
     # Add robot to simulation
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+    sim.prepare()
 
     # Prepare initial joint positions for all environments
     arm_name = "left_arm"

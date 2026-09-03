@@ -22,18 +22,17 @@ import torch
 import dexsim
 import numpy as np
 
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import cached_property
-from typing import List, Sequence, Dict, Union, Tuple, Optional
+from typing import TYPE_CHECKING, List, Sequence, Dict, Union, Tuple, Optional
 
-from dexsim.engine import Articulation as _Articulation
+from dexsim.scene import Scene
 from dexsim.types import (
     ArticulationFlag,
-    ArticulationGPUAPIWriteType,
-    ArticulationGPUAPIReadType,
     DriveType,
 )
-from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
+from dexsim.engine import MaterialInst
 
 from embodichain.lab.sim import VisualMaterialInst, VisualMaterial, ReuseSegmentState
 from embodichain.lab.sim.material import (
@@ -43,10 +42,10 @@ from embodichain.lab.sim.material import (
     _wrap_first_render_material,
 )
 from embodichain.lab.sim.cfg import (
+    _normalize_joint_target_mode,
     ArticulationCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
+    RigidBodyPhysicsCfg,
 )
 from dexsim.types import PhysicalAttr
 from embodichain.utils.string import (
@@ -54,21 +53,42 @@ from embodichain.utils.string import (
     resolve_matching_names_values,
 )
 from embodichain.lab.sim.common import BatchEntity
+from embodichain.lab.sim.physics.newton import is_newton_gradient_mode
+from embodichain.lab.sim.objects.backends import (
+    SceneArticulationView,
+)
+from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
+from embodichain.lab.sim.objects.backends.newton import (
+    _configure_newton_mimic_compliance,
+)
 from embodichain.utils.math import (
+    convert_quat,
     matrix_from_quat,
     quat_from_matrix,
-    convert_quat,
     matrix_from_euler,
 )
 from embodichain.lab.sim.utility.sim_utils import (
+    _apply_default_articulation_root_properties,
     get_dexsim_drive_type,
-    set_dexsim_articulation_cfg,
 )
 from embodichain.lab.sim.utility.solver_utils import (
     create_pk_chain,
     create_pk_serial_chain,
 )
 from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    from dexsim.scene import SpawnedArticulation
+
+
+@dataclass(frozen=True, slots=True)
+class _MimicInfo:
+    """Mimic metadata expressed in the backing state-buffer index domain."""
+
+    mimic_id: np.ndarray
+    mimic_parent: np.ndarray
+    mimic_multiplier: np.ndarray
+    mimic_offset: np.ndarray
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -129,38 +149,37 @@ class ArticulationJointKinematics:
 
 @dataclass
 class ArticulationData:
-    """GPU data manager for articulation."""
+    """Scene-batch data manager for articulations."""
 
     def __init__(
-        self, entities: List[_Articulation], ps: PhysicsScene, device: torch.device
+        self,
+        entities: Sequence[SpawnedArticulation],
+        scene: Scene,
+        device: torch.device,
     ) -> None:
         """Initialize the ArticulationData.
 
         Args:
-            entities (List[_Articulation]): List of DexSim Articulation objects.
-            ps (PhysicsScene): The physics scene.
-            device (torch.device): The device to use for the articulation data.
+            entities: Articulation handles owned by ``scene``.
+            scene: Finalized DexSim Scene.
+            device: Device to use for the articulation data.
         """
+        if not isinstance(scene, Scene):
+            raise TypeError("ArticulationData requires a finalized DexSim Scene.")
         self.entities = entities
-        self.ps = ps
+        self.scene = scene
         self.num_instances = len(entities)
         self.device = device
-
-        # get gpu indices for the entities.
-        # only meaningful when using GPU physics.
-        self.gpu_indices = (
-            torch.as_tensor(
-                [entity.get_gpu_index() for entity in self.entities],
-                dtype=torch.int32,
-                device=self.device,
-            )
-            if self.device.type == "cuda"
-            else None
+        self.articulation_view: ArticulationViewBase = (
+            SceneArticulationView.from_entities(scene, entities, device)
         )
 
-        self.dof = self.entities[0].get_dof()
-        self.num_links = self.entities[0].get_links_num()
-        self.link_names = self.entities[0].get_link_names()
+        # Backward-compatible alias for callers that use GPU/articulation ids.
+        self.gpu_indices = self.articulation_view.articulation_ids_tensor
+
+        self.dof = self.articulation_view.dof
+        self.num_links = self.articulation_view.num_links
+        self.link_names = self.articulation_view.link_names
 
         self._root_pose = torch.zeros(
             (self.num_instances, 7), dtype=torch.float32, device=self.device
@@ -172,55 +191,67 @@ class ArticulationData:
             (self.num_instances, 3), dtype=torch.float32, device=self.device
         )
 
-        max_num_links = (
-            self.ps.gpu_get_articulation_max_link_count()
-            if self.device.type == "cuda"
-            else self.num_links
-        )
         self._body_link_pose = torch.zeros(
-            (self.num_instances, max_num_links, 7),
+            (self.num_instances, self.num_links, 7),
             dtype=torch.float32,
             device=self.device,
         )
         self._body_link_vel = torch.zeros(
-            (self.num_instances, max_num_links, 6),
+            (self.num_instances, self.num_links, 6),
             dtype=torch.float32,
             device=self.device,
         )
 
         self._body_link_lin_vel = torch.zeros(
-            (self.num_instances, max_num_links, 3),
+            (self.num_instances, self.num_links, 3),
             dtype=torch.float32,
             device=self.device,
         )
         self._body_link_ang_vel = torch.zeros(
-            (self.num_instances, max_num_links, 3),
+            (self.num_instances, self.num_links, 3),
             dtype=torch.float32,
             device=self.device,
         )
 
-        max_dof = (
-            self.ps.gpu_get_articulation_max_dof()
-            if self.device.type == "cuda"
-            else self.dof
+        # Current link mass-property buffers use the public articulation link
+        # ordering. Initialization snapshots are captured after backend
+        # materialization and remain unchanged by runtime writes.
+        self._mass = torch.zeros(
+            (self.num_instances, self.num_links),
+            dtype=torch.float32,
+            device=self.device,
         )
+        self._inertia = torch.zeros(
+            (self.num_instances, self.num_links, 3),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._com_pose = torch.zeros(
+            (self.num_instances, self.num_links, 7),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._default_mass: torch.Tensor | None = None
+        self._default_inertia: torch.Tensor | None = None
+        self._default_com_pose: torch.Tensor | None = None
+
         self._target_qpos = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qpos = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._target_qvel = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qvel = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qacc = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qf = torch.zeros(
-            (self.num_instances, max_dof), dtype=torch.float32, device=self.device
+            (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
         self._qpos_limits = torch.as_tensor(
             np.array([entity.get_joint_position_limits() for entity in self.entities]),
@@ -239,30 +270,22 @@ class ArticulationData:
         )
 
     @property
+    def is_newton_backend(self) -> bool:
+        return self.articulation_view.is_newton_backend
+
+    @property
+    def is_ready(self) -> bool:
+        return self.articulation_view.is_ready
+
+    @property
     def root_pose(self) -> torch.Tensor:
         """Get the root pose of the articulation.
 
         Returns:
-            torch.Tensor: The root pose of the articulation with shape of (num_instances, 7).
+            torch.Tensor: Root poses with shape ``(num_instances, 7)`` in
+            ``(x, y, z, qx, qy, qz, qw)`` order.
         """
-        if self.device.type == "cpu":
-            # Fetch pose from CPU entities
-            root_pose = torch.as_tensor(
-                np.array([entity.get_local_pose() for entity in self.entities]),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            xyzs = root_pose[:, :3, 3]
-            quats = quat_from_matrix(root_pose[:, :3, :3])
-            return torch.cat((xyzs, quats), dim=-1)
-        else:
-            self.ps.gpu_fetch_root_data(
-                data=self._root_pose,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.ROOT_GLOBAL_POSE,
-            )
-            self._root_pose[:, :4] = convert_quat(self._root_pose[:, :4], to="wxyz")
-            return self._root_pose[:, [4, 5, 6, 0, 1, 2, 3]]
+        return self.articulation_view.fetch_root_pose(self._root_pose)
 
     @property
     def root_lin_vel(self) -> torch.Tensor:
@@ -271,22 +294,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The linear velocity of the root link with shape of (num_instances, 3).
         """
-        if self.device.type == "cpu":
-            # Fetch linear velocity from CPU entities
-            return torch.as_tensor(
-                np.array(
-                    [entity.get_root_link_velocity()[:3] for entity in self.entities]
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_root_data(
-                data=self._root_lin_vel,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.ROOT_LINEAR_VELOCITY,
-            )
-            return self._root_lin_vel.clone()
+        return self.articulation_view.fetch_root_linear_velocity(self._root_lin_vel)
 
     @property
     def root_ang_vel(self) -> torch.Tensor:
@@ -295,22 +303,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The angular velocity of the root link with shape of (num_instances, 3).
         """
-        if self.device.type == "cpu":
-            # Fetch angular velocity from CPU entities
-            return torch.as_tensor(
-                np.array(
-                    [entity.get_root_link_velocity()[3:] for entity in self.entities]
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_root_data(
-                data=self._root_ang_vel,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.ROOT_ANGULAR_VELOCITY,
-            )
-        return self._root_ang_vel.clone()
+        return self.articulation_view.fetch_root_angular_velocity(self._root_ang_vel)
 
     @property
     def root_vel(self) -> torch.Tensor:
@@ -328,22 +321,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The current positions of the articulation with shape of (num_instances, dof).
         """
-        if self.device.type == "cpu":
-            # Fetch qpos from CPU entities
-            return torch.as_tensor(
-                np.array(
-                    [entity.get_current_qpos() for entity in self.entities],
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_joint_data(
-                data=self._qpos,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.JOINT_POSITION,
-            )
-            return self._qpos[:, : self.dof].clone()
+        return self.articulation_view.fetch_qpos(self._qpos)
 
     @property
     def target_qpos(self) -> torch.Tensor:
@@ -352,22 +330,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The target positions of the articulation with shape of (num_instances, dof).
         """
-        if self.device.type == "cpu":
-            # Fetch target_qpos from CPU entities
-            return torch.as_tensor(
-                np.array(
-                    [entity.get_target_qpos() for entity in self.entities],
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_joint_data(
-                data=self._target_qpos,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.JOINT_TARGET_POSITION,
-            )
-            return self._target_qpos[:, : self.dof].clone()
+        return self.articulation_view.fetch_target_qpos(self._target_qpos)
 
     @property
     def qvel(self) -> torch.Tensor:
@@ -376,20 +339,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The current velocities of the articulation with shape of (num_instances, dof).
         """
-        if self.device.type == "cpu":
-            # Fetch qvel from CPU entities
-            return torch.as_tensor(
-                np.array([entity.get_current_qvel() for entity in self.entities]),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_joint_data(
-                data=self._qvel,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.JOINT_VELOCITY,
-            )
-            return self._qvel[:, : self.dof].clone()
+        return self.articulation_view.fetch_qvel(self._qvel)
 
     @property
     def target_qvel(self) -> torch.Tensor:
@@ -397,22 +347,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The target velocities of the articulation with shape of (num_instances, dof).
         """
-        if self.device.type == "cpu":
-            # Fetch target_qvel from CPU entities
-            return torch.as_tensor(
-                np.array(
-                    [entity.get_target_qvel() for entity in self.entities],
-                ),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_joint_data(
-                data=self._target_qvel,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.JOINT_TARGET_VELOCITY,
-            )
-            return self._target_qvel[:, : self.dof].clone()
+        return self.articulation_view.fetch_target_qvel(self._target_qvel)
 
     @property
     def qacc(self) -> torch.Tensor:
@@ -421,20 +356,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The current accelerations of the articulation with shape of (num_instances, dof).
         """
-        if self.device.type == "cpu":
-            # Fetch qacc from CPU entities
-            return torch.as_tensor(
-                np.array([entity.get_current_qacc() for entity in self.entities]),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_joint_data(
-                data=self._qacc,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.JOINT_ACCELERATION,
-            )
-            return self._qacc[:, : self.dof].clone()
+        return self.articulation_view.fetch_qacc(self._qacc)
 
     @property
     def qf(self) -> torch.Tensor:
@@ -443,56 +365,17 @@ class ArticulationData:
         Returns:
             torch.Tensor: The current forces of the articulation with shape of (num_instances, dof).
         """
-        if self.device.type == "cpu":
-            # Fetch qf from CPU entities
-            return torch.as_tensor(
-                np.array([entity.get_current_qf() for entity in self.entities]),
-                dtype=torch.float32,
-                device=self.device,
-            )
-        else:
-            self.ps.gpu_fetch_joint_data(
-                data=self._qf,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.JOINT_FORCE,
-            )
-            return self._qf[:, : self.dof].clone()
+        return self.articulation_view.fetch_qf(self._qf)
 
     @property
     def body_link_pose(self) -> torch.Tensor:
         """Get the pose of all links in the articulation.
 
         Returns:
-            torch.Tensor: The poses of the links in the articulation with shape (N, num_links, 7).
+            torch.Tensor: Link poses with shape ``(N, num_links, 7)`` in
+            ``(x, y, z, qx, qy, qz, qw)`` order.
         """
-        if self.device.type == "cpu":
-            from embodichain.lab.sim.utility import get_dexsim_arenas
-
-            arenas = get_dexsim_arenas()
-            for j, entity in enumerate(self.entities):
-
-                link_pose = np.zeros((self.num_links, 4, 4), dtype=np.float32)
-                for i, link_name in enumerate(self.link_names):
-                    pose = entity.get_link_pose(link_name)
-                    arena_pose = arenas[j].get_root_node().get_local_pose()
-                    pose[:2, 3] -= arena_pose[:2, 3]
-                    link_pose[i] = pose
-
-                link_pose = torch.from_numpy(link_pose)
-                xyz = link_pose[:, :3, 3]
-                quat = quat_from_matrix(link_pose[:, :3, :3])
-                self._body_link_pose[j][: self.num_links, :] = torch.cat(
-                    (xyz, quat), dim=-1
-                )
-            return self._body_link_pose[:, : self.num_links, :]
-        else:
-            self.ps.gpu_fetch_link_data(
-                data=self._body_link_pose,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
-            )
-            quat = convert_quat(self._body_link_pose[..., :4], to="wxyz")
-            return torch.cat((self._body_link_pose[..., 4:], quat), dim=-1)
+        return self.articulation_view.fetch_link_pose(self._body_link_pose)
 
     @property
     def body_link_vel(self) -> torch.Tensor:
@@ -501,26 +384,161 @@ class ArticulationData:
         Returns:
             torch.Tensor: The poses of the links in the articulation with shape (N, num_links, 6).
         """
-        if self.device.type == "cpu":
-            for i, entity in enumerate(self.entities):
-                self._body_link_vel[i][: self.num_links] = torch.from_numpy(
-                    entity.get_link_general_velocities()
+        return self.articulation_view.fetch_link_velocity(
+            self._body_link_vel,
+            self._body_link_lin_vel,
+            self._body_link_ang_vel,
+        )
+
+    def _entity_drive_properties(self, entity: object) -> tuple[object, ...]:
+        """Read drive values without conflating backend target semantics."""
+        if (
+            isinstance(self.articulation_view, SceneArticulationView)
+            and self.is_newton_backend
+        ):
+            return tuple(entity.get_newton_drive())
+        return tuple(entity.get_drive())
+
+    def _entity_link_properties(self, entity: object, link_name: str) -> object:
+        """Read native mass properties through the active backend contract."""
+        if (
+            isinstance(self.articulation_view, SceneArticulationView)
+            and self.is_newton_backend
+        ):
+            return entity.get_newton_link_properties(link_name)
+        return entity.get_physical_attr(link_name)
+
+    def read_physical_properties(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Refresh current mass, inertia diagonal, and local COM pose buffers.
+
+        COM poses use the EmbodiChain convention ``xyz + xyzw`` and all
+        tensors use the public link ordering. DexSim physical-property
+        descriptors use ``wxyz`` and are converted at this boundary.
+        """
+        masses: list[list[float]] = []
+        inertias: list[list[np.ndarray]] = []
+        com_poses: list[list[np.ndarray]] = []
+        for entity in self.entities:
+            mass_row: list[float] = []
+            inertia_row: list[np.ndarray] = []
+            com_row: list[np.ndarray] = []
+            for link_name in self.link_names:
+                attr = self._entity_link_properties(entity, link_name)
+                mass_row.append(float(attr.mass))
+                inertia_row.append(np.asarray(attr.inertia, dtype=np.float32))
+                com_row.append(
+                    np.concatenate(
+                        (
+                            np.asarray(attr.com_position, dtype=np.float32),
+                            convert_quat(
+                                np.asarray(attr.com_quaternion, dtype=np.float32),
+                                to="xyzw",
+                            ),
+                        )
+                    )
                 )
-            return self._body_link_vel[:, : self.num_links, :]
-        else:
-            self.ps.gpu_fetch_link_data(
-                data=self._body_link_lin_vel,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.LINK_LINEAR_VELOCITY,
+            masses.append(mass_row)
+            inertias.append(inertia_row)
+            com_poses.append(com_row)
+
+        self._mass.copy_(
+            torch.as_tensor(
+                np.asarray(masses, dtype=np.float32),
+                dtype=torch.float32,
+                device=self.device,
             )
-            self.ps.gpu_fetch_link_data(
-                data=self._body_link_ang_vel,
-                gpu_indices=self.gpu_indices,
-                data_type=ArticulationGPUAPIReadType.LINK_ANGULAR_VELOCITY,
+        )
+        self._inertia.copy_(
+            torch.as_tensor(
+                np.asarray(inertias, dtype=np.float32),
+                dtype=torch.float32,
+                device=self.device,
             )
-            self._body_link_vel[..., :3] = self._body_link_lin_vel
-            self._body_link_vel[..., 3:] = self._body_link_ang_vel
-        return self._body_link_vel[:, : self.num_links, :]
+        )
+        self._com_pose.copy_(
+            torch.as_tensor(
+                np.asarray(com_poses, dtype=np.float32),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        )
+        return self._mass, self._inertia, self._com_pose
+
+    @property
+    def mass(self) -> torch.Tensor:
+        """Current link masses with shape ``(N, num_links)``."""
+        return self.read_physical_properties()[0]
+
+    @property
+    def inertia(self) -> torch.Tensor:
+        """Current link inertia diagonals with shape ``(N, num_links, 3)``."""
+        return self.read_physical_properties()[1]
+
+    @property
+    def com_pose(self) -> torch.Tensor:
+        """Current local link COM poses as ``xyz + xyzw`` tensors."""
+        return self.read_physical_properties()[2]
+
+    @property
+    def default_physical_properties_initialized(self) -> bool:
+        """Whether initialization-time link mass properties are available."""
+        return (
+            self._default_mass is not None
+            and self._default_inertia is not None
+            and self._default_com_pose is not None
+        )
+
+    @property
+    def default_mass(self) -> torch.Tensor:
+        """Initialization-time link masses with shape ``(N, num_links)``."""
+        if self._default_mass is None:
+            raise RuntimeError("Default articulation link masses are unavailable.")
+        return self._default_mass
+
+    @property
+    def default_inertia(self) -> torch.Tensor:
+        """Initialization-time link inertia diagonals."""
+        if self._default_inertia is None:
+            raise RuntimeError("Default articulation link inertias are unavailable.")
+        return self._default_inertia
+
+    @property
+    def default_com_pose(self) -> torch.Tensor:
+        """Initialization-time local link COM poses in ``xyz + xyzw`` order."""
+        if self._default_com_pose is None:
+            raise RuntimeError("Default articulation link COM poses are unavailable.")
+        return self._default_com_pose
+
+    def capture_default_physical_properties(
+        self,
+        *,
+        mass: torch.Tensor,
+        inertia: torch.Tensor,
+        com_pose: torch.Tensor,
+    ) -> None:
+        """Capture backend-resolved link mass properties exactly once."""
+        expected_shapes = {
+            "mass": (self.num_instances, self.num_links),
+            "inertia": (self.num_instances, self.num_links, 3),
+            "com_pose": (self.num_instances, self.num_links, 7),
+        }
+        values = {"mass": mass, "inertia": inertia, "com_pose": com_pose}
+        for name, value in values.items():
+            if tuple(value.shape) != expected_shapes[name]:
+                raise ValueError(
+                    f"Expected {name} shape {expected_shapes[name]}, "
+                    f"got {tuple(value.shape)}."
+                )
+        if self.default_physical_properties_initialized:
+            raise RuntimeError(
+                "Default articulation link mass properties are already captured."
+            )
+
+        self._default_mass = mass.to(self.device, dtype=torch.float32).clone()
+        self._default_inertia = inertia.to(self.device, dtype=torch.float32).clone()
+        self._default_com_pose = com_pose.to(self.device, dtype=torch.float32).clone()
 
     @property
     def joint_stiffness(self) -> torch.Tensor:
@@ -530,7 +548,9 @@ class ArticulationData:
             torch.Tensor: The joint stiffness of the articulation with shape (N, dof).
         """
         return torch.as_tensor(
-            np.array([entity.get_drive()[0] for entity in self.entities]),
+            np.array(
+                [self._entity_drive_properties(entity)[0] for entity in self.entities]
+            ),
             dtype=torch.float32,
             device=self.device,
         )
@@ -543,7 +563,9 @@ class ArticulationData:
             torch.Tensor: The joint damping of the articulation with shape (N, dof).
         """
         return torch.as_tensor(
-            np.array([entity.get_drive()[1] for entity in self.entities]),
+            np.array(
+                [self._entity_drive_properties(entity)[1] for entity in self.entities]
+            ),
             dtype=torch.float32,
             device=self.device,
         )
@@ -556,7 +578,9 @@ class ArticulationData:
             torch.Tensor: The joint friction of the articulation with shape (N, dof).
         """
         return torch.as_tensor(
-            np.array([entity.get_drive()[4] for entity in self.entities]),
+            np.array(
+                [self._entity_drive_properties(entity)[4] for entity in self.entities]
+            ),
             dtype=torch.float32,
             device=self.device,
         )
@@ -569,7 +593,9 @@ class ArticulationData:
             torch.Tensor: The joint armature of the articulation with shape (N, dof).
         """
         return torch.as_tensor(
-            np.array([entity.get_drive()[5] for entity in self.entities]),
+            np.array(
+                [self._entity_drive_properties(entity)[5] for entity in self.entities]
+            ),
             dtype=torch.float32,
             device=self.device,
         )
@@ -632,174 +658,300 @@ class Articulation(BatchEntity):
     For floating-base articulation, it can be a humanoid, drawer, etc.
 
     Args:
-        cfg (ArticulationCfg): Configuration for the articulation.
-        entities (List[_Articulation], optional): List of articulation entities.
-        device (torch.device, optional): Device to use (CPU or CUDA).
+        cfg: Configuration for the articulation.
+        device: Device to use (CPU or CUDA).
     """
 
     def __init__(
         self,
         cfg: ArticulationCfg,
-        entities: List[_Articulation] = None,
         device: torch.device = torch.device("cpu"),
     ) -> None:
-        # Initialize world and physics scene
-        self._world = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        """Create an unregistered articulation facade.
 
+        ``SpawnScene`` owns the replicated instance count and the finalized
+        ``Scene``. It injects them at declaration and binding time instead of
+        exposing either lifecycle dependency through this constructor.
+        """
+        self._newton_mimic_compliance_configured = False
+        self._prepared_default_root_topology_revision = -1
+        self.cfg = deepcopy(cfg)
+        self.uid = self.cfg.uid
+        self.device = device
+        self._entities: list[SpawnedArticulation] = []
+        self._declared_num_instances: int | None = None
+        self._spawn_result: Scene | None = None
+        self._world = None
+        self._ps = None
+        self._data: ArticulationData | None = None
+        self._all_indices = torch.empty(0, dtype=torch.int32)
+        self._visual_material: List[Dict[str, VisualMaterialInst]] = []
+        self.is_shared_visual_material = False
+        self._has_collision_visible_node_dict: dict[str, bool] = {}
+
+    def _initialize_spawn_declaration(self, num_instances: int) -> None:
+        """Initialize instance-dependent declaration state from ``SpawnScene``."""
+        if num_instances <= 0:
+            raise ValueError("A declared Articulation requires num_instances > 0.")
+        if self._declared_num_instances is not None:
+            if self._declared_num_instances != num_instances:
+                raise RuntimeError(
+                    f"Articulation {self.uid!r} is already declared for "
+                    f"{self._declared_num_instances} instances."
+                )
+            return
+
+        self._declared_num_instances = num_instances
+        self._all_indices = torch.arange(num_instances, dtype=torch.int32)
+        self._visual_material = [{} for _ in range(num_instances)]
+
+    def _require_declared_num_instances(self) -> int:
+        """Return the Spawn-provided instance count or raise a lifecycle error."""
+        if self._declared_num_instances is None:
+            raise RuntimeError(
+                f"Articulation {self.uid!r} must be registered through SpawnScene "
+                "before it can be used."
+            )
+        return self._declared_num_instances
+
+    @property
+    def is_spawn_bound(self) -> bool:
+        """Whether this facade is bound to one finalized Scene."""
+        return self._spawn_result is not None
+
+    @property
+    def is_declared(self) -> bool:
+        """Whether this facade is waiting for its Scene binding."""
+        return self._world is None
+
+    @property
+    def num_instances(self) -> int:
+        if self._entities:
+            return len(self._entities)
+        return self._require_declared_num_instances()
+
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedArticulation],
+    ) -> None:
+        """Store handles and expose metadata without initializing Batch data.
+
+        This pre-finalize step supports eager Default loading and only reads
+        articulation metadata. ``bind_spawn()`` performs result-dependent
+        Batch/Data initialization after finalization.
+        """
+        handles = list(entities)
+        expected = self._require_declared_num_instances()
+        if len(handles) != expected:
+            raise ValueError(
+                f"Articulation {self.uid!r} expected "
+                f"{expected} Spawn handles, got {len(handles)}."
+            )
+        self._entities = handles
+        self._mimic_info = self._state_mimic_info()
+        self.active_joint_ids = [
+            index for index in range(self.dof) if index not in self.mimic_ids
+        ]
+
+    def _clear_spawn_cached_properties(self) -> None:
+        """Drop metadata cached against declaration-time handles."""
+        for name in (
+            "dof",
+            "active_dof",
+            "num_links",
+            "link_names",
+            "user_ids",
+            "root_link_name",
+            "joint_names",
+            "active_joint_names",
+            "all_joint_names",
+        ):
+            self.__dict__.pop(name, None)
+
+    def _initialize_spawn_bound(self, result: Scene) -> None:
+        """Create result-dependent runtime state on this declared facade."""
+        if not isinstance(result, Scene):
+            raise TypeError(
+                "Articulation binding requires a finalized DexSim Scene; use "
+                "SimulationManager.prepare()."
+            )
+
+        entities = list(self._entities)
+        expected = self._require_declared_num_instances()
+        if len(entities) != expected:
+            raise ValueError(
+                f"Articulation {self.uid!r} expected {expected} Spawn handles, "
+                f"got {len(entities)}."
+            )
+
+        cfg = deepcopy(self.cfg)
+        self._clear_spawn_cached_properties()
+        self._newton_mimic_compliance_configured = False
+        self._spawn_result = result
+        self._world = result.world
+        self._ps = None
         self.cfg = cfg
         self._entities = entities
-        self.device = device
-
-        # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
+        self._data = ArticulationData(
+            entities=entities,
+            scene=result,
+            device=self.device,
+        )
 
-        if device.type == "cuda":
-            self._world.update(0.001)
-
-        self._data = ArticulationData(entities=entities, ps=self._ps, device=device)
-
-        self.cfg: ArticulationCfg
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
 
-        # Get default masses.
-        self.default_link_masses = self.get_mass()
+        self._capture_default_physical_properties()
+        self.default_joint_stiffness = self._data.joint_stiffness.clone()
+        self.default_joint_damping = self._data.joint_damping.clone()
+        self.default_joint_friction = self._data.joint_friction.clone()
+        self.default_joint_armature = self._data.joint_armature.clone()
+        self.default_joint_max_effort = self._data.qf_limits.clone()
+        self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
-        # Determine if we should use USD properties or cfg properties.
-        if not self.cfg.use_usd_properties:
-            # Set articulation configuration in DexSim
-            set_dexsim_articulation_cfg(entities, self.cfg)
-
-            num_entities = len(entities)
-            dof = self._data.dof
-            default_cfg = JointDrivePropertiesCfg()
-            self.default_joint_damping = torch.full(
-                (num_entities, dof),
-                default_cfg.damping,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_stiffness = torch.full(
-                (num_entities, dof),
-                default_cfg.stiffness,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_max_effort = torch.full(
-                (num_entities, dof),
-                default_cfg.max_effort,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_max_velocity = torch.full(
-                (num_entities, dof),
-                default_cfg.max_velocity,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_friction = torch.full(
-                (num_entities, dof),
-                default_cfg.friction,
-                dtype=torch.float32,
-                device=device,
-            )
-            self.default_joint_armature = torch.full(
-                (num_entities, dof),
-                default_cfg.armature,
-                dtype=torch.float32,
-                device=device,
-            )
-            self._set_default_joint_drive()
-        else:
-            # Read current properties from USD-loaded entities
-            self.default_joint_stiffness = self._data.joint_stiffness.clone()
-            self.default_joint_damping = self._data.joint_damping.clone()
-            self.default_joint_friction = self._data.joint_friction.clone()
-            self.default_joint_armature = self._data.joint_armature.clone()
-            self.default_joint_max_effort = self._data.qf_limits.clone()
-            self.default_joint_max_velocity = self._data.qvel_limits.clone()
-
-            # Write the USD properties back to cfg
-            usd_drive_pros = self.cfg.drive_pros
-            usd_drive_pros.stiffness = (
-                self.default_joint_stiffness[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.damping = (
-                self.default_joint_damping[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.friction = (
-                self.default_joint_friction[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.armature = (
-                self.default_joint_armature[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.max_effort = (
-                self.default_joint_max_effort[0].cpu().numpy().tolist()
-            )
-            usd_drive_pros.max_velocity = (
-                self.default_joint_max_velocity[0].cpu().numpy().tolist()
-            )
-
-        # Apply configured qpos limits if provided. This replaces the asset
-        # limits as the baseline and allows expanding the allowed range.
-        if self.cfg.qpos_limits is not None:
-            if isinstance(self.cfg.qpos_limits, dict):
-                indices, _, values = resolve_matching_names_values(
-                    self.cfg.qpos_limits, self.joint_names
-                )
-                local_joint_ids = torch.as_tensor(
-                    indices, dtype=torch.long, device=self.device
-                )
-                values_tensor = torch.as_tensor(
-                    values, dtype=torch.float32, device=self.device
-                ).unsqueeze(0)
-                values_tensor = values_tensor.expand(self.num_instances, -1, -1)
-                self.set_qpos_limits(values_tensor, joint_ids=local_joint_ids)
-            else:
-                qpos_limits = torch.as_tensor(
-                    self.cfg.qpos_limits, dtype=torch.float32, device=self.device
-                )
-                if qpos_limits.dim() == 2:
-                    qpos_limits = qpos_limits.unsqueeze(0).expand(
-                        self.num_instances, -1, -1
-                    )
-                self.set_qpos_limits(qpos_limits)
-
+        is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
         self.pk_chain = None
-        if self.cfg.build_pk_chain:
+        if self.cfg.build_pk_chain and not is_usd_source:
             self.pk_chain = create_pk_chain(
                 urdf_path=self.cfg.fpath, device=self.device
             )
+        elif self.cfg.build_pk_chain:
+            logger.log_warning(
+                f"Articulation {self.uid!r} uses USD for simulation; skipping "
+                "the URDF-only pk_chain. Configure a solver with its matching "
+                "URDF when kinematics are required."
+            )
 
-        # For rendering purposes, each articulation can have multiple material instances associated with its links.
-        self._visual_material: List[Dict[str, VisualMaterialInst]] = [
-            {} for _ in range(len(entities))
-        ]
+        self._visual_material = [{} for _ in range(len(entities))]
         self.is_shared_visual_material = False
-
-        # Stores mimic information for joints.
-        self._mimic_info = entities[0].get_mimic_info()
-
+        self._mimic_info = self._state_mimic_info()
         self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
 
-        # TODO: very weird that we must call update here to make sure the GPU indices are valid.
-        if device.type == "cuda":
-            self._world.update(0.001)
-
-        super().__init__(cfg, entities, device)
-
+        super().__init__(cfg, entities, self.device)
         self._initialize_existing_visual_material()
+        self._has_collision_visible_node_dict = {
+            link_name: False for link_name in self.link_names
+        }
+        self._initialize_spawn_bound_extension()
 
-        # set default collision filter
-        self._set_default_collision_filter()
+    def _initialize_spawn_bound_extension(self) -> None:
+        """Initialize subclass state after the Scene batch becomes available."""
 
-        # flag for collision visible node existence
-        self._has_collision_visible_node_dict = dict()
-        for link_name in self.link_names:
-            self._has_collision_visible_node_dict[link_name] = False
+    def bind_spawn(
+        self,
+        result: Scene,
+    ) -> None:
+        """Initialize this declared facade from Spawn articulation handles."""
+        if self.is_spawn_bound:
+            raise RuntimeError(f"Articulation {self.uid!r} is already Spawn-bound.")
+        if not self.is_declared:
+            raise RuntimeError(
+                f"Articulation {self.uid!r} was not created as a Spawn declaration."
+            )
+
+        declared_state = self.__dict__.copy()
+        try:
+            self._initialize_spawn_bound(result)
+            self._apply_spawn_config()
+            if is_newton_gradient_mode(result):
+                initial_qpos = torch.as_tensor(self.cfg.init_qpos).reshape(-1)
+                if initial_qpos.numel() != self.dof:
+                    raise ValueError(
+                        f"Articulation {self.uid!r} expected {self.dof} initial "
+                        f"joint positions, got {initial_qpos.numel()}."
+                    )
+                if torch.any(initial_qpos != 0.0):
+                    raise NotImplementedError(
+                        "Newton gradient mode cannot apply non-zero init_qpos after "
+                        "Spawn finalization. Author the initial coordinates in the "
+                        "source asset or initialize them in a differentiable task "
+                        "before opening a Warp tape."
+                    )
+                # Spawn already authored the root pose and zero joint/dynamics
+                # state during model construction. Its Batch mutation APIs are
+                # intentionally fenced once the model requires gradients.
+            else:
+                self.reset()
+        except Exception:
+            self.__dict__.clear()
+            self.__dict__.update(declared_state)
+            raise
+
+    def _apply_spawn_config(self) -> None:
+        """Apply configuration that requires finalized backend resources.
+
+        Link physics and joint-drive regex selection is resolved by
+        EmbodiChain against the source descriptor before finalization. Default
+        articulation-root properties are normally handled by the pre-runtime
+        hook; calling it here keeps direct facade binding safe. Render
+        operations also require materialized native resources.
+        """
+        spawn_result = getattr(self, "_spawn_result", None)
+        self._prepare_spawn_runtime_config(spawn_result)
+
+        self._newton_mimic_compliance_configured = _configure_newton_mimic_compliance(
+            result=spawn_result,
+            entities=self._entities,
+            state_joint_names=self._state_joint_names(),
+            mimic_ids=self.mimic_ids,
+            mimic_parents=self.mimic_parents,
+        )
+
+        if not self.cfg.compute_uv:
+            return
+
+        for entity in self._entities:
+            for link_name in self.link_names:
+                render_body = entity.get_render_body(link_name)
+                if render_body is not None:
+                    render_body.set_projective_uv()
+
+    def _prepare_spawn_runtime_config(self, result: Scene | None) -> None:
+        """Apply Default root properties before Direct GPU initialization.
+
+        PhysX snapshots articulation solver iteration counts when the Direct
+        GPU runtime is initialized. Applying these values only during facade
+        binding is too late because ``World.init_gpu_physics()`` has already
+        performed its warm-up steps. CPU simulation accepts the late write,
+        which otherwise makes identical hand mimic constraints substantially
+        softer on CUDA.
+        """
+        if result is None or getattr(result, "backend", None) != "dexsim":
+            return
+
+        topology_revision = int(result.topology_revision)
+        if self._prepared_default_root_topology_revision == topology_revision:
+            return
+
+        root_props = getattr(self.cfg, "root_props", None)
+        default_root_values_configured = root_props is not None and (
+            root_props.sleep_threshold is not None
+            or root_props.min_position_iters is not None
+            or root_props.min_velocity_iters is not None
+        )
+        if default_root_values_configured:
+            for entity in self._entities:
+                # SpawnedArticulation deliberately fences these setters, while
+                # its Default-native binding exposes the articulation-root API.
+                native_articulation = getattr(entity, "_physics_binding", None)
+                if native_articulation is None:
+                    raise RuntimeError(
+                        "Default Spawn articulation has no native physics binding."
+                    )
+                _apply_default_articulation_root_properties(
+                    native_articulation,
+                    root_props,
+                )
+        self._prepared_default_root_topology_revision = topology_revision
 
     def __str__(self) -> str:
+        if self.is_declared:
+            parent_str = (
+                f"{self.__class__}: declared {self.num_instances} Spawn "
+                f"articulations | uid: {self.uid} | device: {self.device}"
+            )
+            return parent_str
         parent_str = super().__str__()
         return parent_str + f" | dof: {self.dof} | num_links: {self.num_links}"
 
@@ -810,7 +962,9 @@ class Articulation(BatchEntity):
         Returns:
             int: The degree of freedom of the articulation.
         """
-        return self._data.dof
+        if self._data is not None:
+            return self._data.dof
+        return self._entities[0].get_dof()
 
     @cached_property
     def active_dof(self) -> int:
@@ -828,7 +982,9 @@ class Articulation(BatchEntity):
         Returns:
             int: The number of links in the articulation.
         """
-        return self._data.num_links
+        if self._data is not None:
+            return self._data.num_links
+        return len(self._entities[0].get_link_names())
 
     @cached_property
     def link_names(self) -> List[str]:
@@ -837,7 +993,9 @@ class Articulation(BatchEntity):
         Returns:
             List[str]: The names of the links in the articulation.
         """
-        return self._data.link_names
+        if self._data is not None:
+            return self._data.link_names
+        return self._entities[0].get_link_names()
 
     @cached_property
     def user_ids(self) -> torch.Tensor:
@@ -868,12 +1026,202 @@ class Articulation(BatchEntity):
 
     @cached_property
     def joint_names(self) -> List[str]:
-        """Get the names of the joints in the articulation.
+        """Get active joint names in public qpos-buffer order.
 
         Returns:
-            List[str]: The names of the actived joints in the articulation.
+            List[str]: Active joint names aligned with qpos, qvel, and qf.
         """
-        return self._entities[0].get_actived_joint_names()
+        if getattr(self, "_data", None) is not None:
+            return list(self._data.articulation_view.joint_names)
+        return self._state_joint_names()
+
+    def _state_joint_names(self) -> List[str]:
+        """Return active joint names in the backing qpos-buffer order.
+
+        The Scene's Newton batch layout may differ from its source articulation
+        order.  Joint IDs sent to the batch must therefore use the layout
+        order. :attr:`joint_names` exposes this same order; query the Spawn
+        handle directly only for source-topology resolution.
+        """
+        if not self._entities:
+            return []
+        entity = self._entities[0]
+        try:
+            layout = entity.joint_dof_layout
+        except (AttributeError, RuntimeError):
+            return entity.get_actived_joint_names()
+        return [joint.name for joint in layout]
+
+    def _source_qpos_to_state_order(self, qpos: torch.Tensor) -> torch.Tensor:
+        """Map source-ordered initial qpos values to the runtime state order."""
+        if not self.is_spawn_bound:
+            return qpos
+
+        source_joint_names = self._entities[0].get_actived_joint_names()
+        state_joint_names = self._state_joint_names()
+        if source_joint_names == state_joint_names:
+            return qpos
+
+        source_indices = {name: index for index, name in enumerate(source_joint_names)}
+        try:
+            state_order = [source_indices[name] for name in state_joint_names]
+        except KeyError as error:
+            raise RuntimeError(
+                "Spawn articulation state layout contains a joint absent from "
+                "the source articulation layout."
+            ) from error
+        return qpos[..., state_order]
+
+    def _state_mimic_info(self) -> _MimicInfo:
+        """Map source-articulation mimic indices to state-buffer indices."""
+        entity = self._entities[0]
+        source_info = entity.get_mimic_info()
+        source_mimic_ids = np.asarray(source_info.mimic_id, dtype=np.int32).reshape(-1)
+        source_parent_ids = np.asarray(
+            source_info.mimic_parent, dtype=np.int32
+        ).reshape(-1)
+        multipliers = np.asarray(
+            source_info.mimic_multiplier, dtype=np.float32
+        ).reshape(-1)
+        offsets = np.asarray(source_info.mimic_offset, dtype=np.float32).reshape(-1)
+        relation_count = len(source_mimic_ids)
+        if not all(
+            len(values) == relation_count
+            for values in (source_parent_ids, multipliers, offsets)
+        ):
+            raise RuntimeError("Articulation mimic metadata has inconsistent lengths.")
+        if relation_count == 0:
+            return _MimicInfo(
+                mimic_id=source_mimic_ids,
+                mimic_parent=source_parent_ids,
+                mimic_multiplier=multipliers,
+                mimic_offset=offsets,
+            )
+
+        source_joint_names = entity.get_actived_joint_names()
+        try:
+            state_joint_ids = {
+                joint.name: int(joint.dof_start) for joint in entity.joint_dof_layout
+            }
+        except (AttributeError, RuntimeError):
+            state_joint_ids = {
+                name: index for index, name in enumerate(source_joint_names)
+            }
+
+        try:
+            mimic_ids = np.asarray(
+                [
+                    state_joint_ids[source_joint_names[int(source_id)]]
+                    for source_id in source_mimic_ids
+                ],
+                dtype=np.int32,
+            )
+            parent_ids = np.asarray(
+                [
+                    state_joint_ids[source_joint_names[int(source_id)]]
+                    for source_id in source_parent_ids
+                ],
+                dtype=np.int32,
+            )
+        except (IndexError, KeyError) as error:
+            raise RuntimeError(
+                "Articulation mimic metadata references a joint absent from "
+                "the backing state layout."
+            ) from error
+
+        return _MimicInfo(
+            mimic_id=mimic_ids,
+            mimic_parent=parent_ids,
+            mimic_multiplier=multipliers,
+            mimic_offset=offsets,
+        )
+
+    def _project_mimic_qpos(self, qpos: torch.Tensor) -> torch.Tensor:
+        """Return qpos with every mimic child projected from its parent."""
+        if not self.mimic_ids:
+            return qpos
+
+        projected = qpos.clone()
+        mimic_ids = torch.as_tensor(
+            self.mimic_ids, dtype=torch.long, device=qpos.device
+        )
+        parent_ids = torch.as_tensor(
+            self.mimic_parents, dtype=torch.long, device=qpos.device
+        )
+        multipliers = torch.as_tensor(
+            self.mimic_multipliers, dtype=qpos.dtype, device=qpos.device
+        )
+        offsets = torch.as_tensor(
+            self.mimic_offsets, dtype=qpos.dtype, device=qpos.device
+        )
+        projected[..., mimic_ids] = projected[..., parent_ids] * multipliers + offsets
+        return projected
+
+    def _stabilize_newton_mimic_target_write(
+        self,
+        values: torch.Tensor,
+        env_ids: torch.Tensor,
+        joint_ids: torch.Tensor,
+        *,
+        velocity: bool,
+    ) -> None:
+        """Update weak follower-drive targets for written mimic leaders.
+
+        The native Newton equality remains the physical coupling. This only
+        keeps its low-gain follower stabilizer pointed at the same commanded
+        relation; it never copies measured qpos or qvel into follower state.
+        """
+        if not self._newton_mimic_compliance_configured:
+            return
+
+        selected_columns = {
+            int(joint_id): column
+            for column, joint_id in enumerate(joint_ids.detach().cpu().tolist())
+        }
+        follower_ids: list[int] = []
+        follower_targets: list[torch.Tensor] = []
+        for child_id, parent_id, multiplier, offset in zip(
+            self.mimic_ids,
+            self.mimic_parents,
+            self.mimic_multipliers,
+            self.mimic_offsets,
+            strict=True,
+        ):
+            parent_column = selected_columns.get(int(parent_id))
+            if parent_column is None:
+                continue
+            target = values[:, parent_column] * float(multiplier)
+            if not velocity:
+                target = target + float(offset)
+            follower_ids.append(int(child_id))
+            follower_targets.append(target)
+
+        if not follower_ids:
+            return
+
+        targets = torch.stack(follower_targets, dim=1)
+        follower_ids_tensor = torch.as_tensor(
+            follower_ids, dtype=torch.int32, device=self.device
+        )
+        if velocity:
+            limits = self.body_data.qvel_limits[env_ids][:, follower_ids_tensor]
+            targets = targets.clamp(-limits, limits)
+            self._data.articulation_view.apply_qvel(
+                targets,
+                env_ids,
+                follower_ids_tensor,
+                target=True,
+            )
+            return
+
+        limits = self.body_data.qpos_limits[env_ids][:, follower_ids_tensor, :]
+        targets = targets.clamp(limits[..., 0], limits[..., 1])
+        self._data.articulation_view.apply_qpos(
+            targets,
+            env_ids,
+            follower_ids_tensor,
+            target=True,
+        )
 
     @cached_property
     def active_joint_names(self) -> List[str]:
@@ -882,7 +1230,8 @@ class Articulation(BatchEntity):
         Returns:
             List[str]: The names of the active joints in the articulation.
         """
-        return [self.joint_names[i] for i in self.active_joint_ids]
+        state_joint_names = self._state_joint_names()
+        return [state_joint_names[i] for i in self.active_joint_ids]
 
     @cached_property
     def all_joint_names(self) -> List[str]:
@@ -899,9 +1248,10 @@ class Articulation(BatchEntity):
     ) -> tuple[ArticulationJointKinematics, ...]:
         """Return the joints from a link toward the articulation root.
 
-        The immediate parent joint is first. Native simulator joint-info values
-        are copied into :class:`ArticulationJointKinematics`, keeping callers
-        independent of DexSim objects and the private entity collection.
+        The immediate parent joint is first. Backend-native joint-info values
+        or Newton's backend-neutral joint descriptors are copied into
+        :class:`ArticulationJointKinematics`, keeping callers independent of
+        DexSim objects and the private entity collection.
 
         Args:
             link_name: Link whose parent chain should be queried.
@@ -928,11 +1278,36 @@ class Articulation(BatchEntity):
         entity = self._entities[0]
         joints_by_child: dict[str, ArticulationJointKinematics] = {}
         for joint_name in entity.get_joint_names():
-            native = entity.get_joint_info(joint_name)
-            if native is None:
-                raise ValueError(
-                    f"Native articulation has no joint info for {joint_name!r}."
-                )
+            if getattr(self._data, "is_newton_backend", False):
+                get_joint_desc = getattr(entity, "get_joint_desc", None)
+                if not callable(get_joint_desc):
+                    raise ValueError(
+                        "Native articulation has no joint topology for "
+                        f"{joint_name!r}."
+                    )
+                try:
+                    native = get_joint_desc(joint_name)
+                except (KeyError, StopIteration) as exc:
+                    raise ValueError(
+                        "Native articulation has no joint topology for "
+                        f"{joint_name!r}."
+                    ) from exc
+            else:
+                native = entity.get_joint_info(joint_name)
+                if native is None:
+                    get_joint_desc = getattr(entity, "get_joint_desc", None)
+                    if not callable(get_joint_desc):
+                        raise ValueError(
+                            "Native articulation has no joint topology for "
+                            f"{joint_name!r}."
+                        )
+                    try:
+                        native = get_joint_desc(joint_name)
+                    except (KeyError, StopIteration) as exc:
+                        raise ValueError(
+                            "Native articulation has no joint topology for "
+                            f"{joint_name!r}."
+                        ) from exc
             native_joint_type = getattr(
                 native.joint_type,
                 "name",
@@ -940,11 +1315,19 @@ class Articulation(BatchEntity):
             )
             lower_limit = getattr(native, "lower_limit", None)
             upper_limit = getattr(native, "upper_limit", None)
-            joint_limits = (
-                None
-                if lower_limit is None or upper_limit is None
-                else (float(lower_limit), float(upper_limit))
-            )
+            if lower_limit is None or upper_limit is None:
+                joint_limits = None
+            else:
+                lower_values = np.asarray(lower_limit, dtype=np.float32).reshape(-1)
+                upper_values = np.asarray(upper_limit, dtype=np.float32).reshape(-1)
+                if lower_values.size != 1 or upper_values.size != 1:
+                    raise ValueError(
+                        "Articulation topology requires scalar limits for "
+                        f"joint {joint_name!r}; got lower shape "
+                        f"{tuple(lower_values.shape)} and upper shape "
+                        f"{tuple(upper_values.shape)}."
+                    )
+                joint_limits = (float(lower_values[0]), float(upper_values[0]))
             joint = ArticulationJointKinematics(
                 name=native.name,
                 joint_type=str(native_joint_type),
@@ -983,6 +1366,77 @@ class Articulation(BatchEntity):
             RigidBodyData: The rigid body data manager.
         """
         return self._data
+
+    @property
+    def default_link_masses(self) -> torch.Tensor:
+        """Initialization-time link masses retained for compatibility."""
+        return self.body_data.default_mass
+
+    def _capture_default_physical_properties(self) -> None:
+        """Capture materialized link mass properties as reset defaults."""
+        if self._data.default_physical_properties_initialized:
+            return
+        mass, inertia, com_pose = self._data.read_physical_properties()
+        self._data.capture_default_physical_properties(
+            mass=mass,
+            inertia=inertia,
+            com_pose=com_pose,
+        )
+
+    def _resolve_link_names(
+        self, link_names: str | Sequence[str] | None
+    ) -> tuple[list[str], torch.Tensor]:
+        """Validate link names and return their public data-column indices."""
+        names = (
+            list(self.link_names)
+            if link_names is None
+            else [link_names] if isinstance(link_names, str) else list(link_names)
+        )
+        unknown = [name for name in names if name not in self.link_names]
+        if unknown:
+            raise ValueError(
+                f"Unknown articulation links {unknown}; available links: "
+                f"{self.link_names}."
+            )
+        indices = torch.as_tensor(
+            [self.link_names.index(name) for name in names],
+            dtype=torch.long,
+            device=self.device,
+        )
+        return names, indices
+
+    def _restore_default_physical_properties(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Restore initialization-time link mass properties for selected rows."""
+        if not self._data.default_physical_properties_initialized or len(env_ids) == 0:
+            return
+
+        env_index = self._resolve_env_ids(env_ids)
+        env_list = env_index.detach().cpu().tolist()
+        default_mass = self._data.default_mass[env_index]
+        default_inertia = self._data.default_inertia[env_index]
+        default_com_pose = self._data.default_com_pose[env_index]
+        current_mass, current_inertia, current_com_pose = (
+            value[env_index] for value in self._data.read_physical_properties()
+        )
+
+        mass_changed = not torch.allclose(current_mass, default_mass)
+        inertia_changed = not torch.allclose(current_inertia, default_inertia)
+        if mass_changed:
+            self.set_mass(default_mass, link_names=self.link_names, env_ids=env_list)
+        if mass_changed or inertia_changed:
+            self.set_inertia(
+                default_inertia,
+                link_names=self.link_names,
+                env_ids=env_list,
+            )
+        if not torch.allclose(current_com_pose, default_com_pose):
+            self.set_com_pose(
+                default_com_pose,
+                link_names=self.link_names,
+                env_ids=env_list,
+            )
 
     @property
     def root_state(self) -> torch.Tensor:
@@ -1114,53 +1568,29 @@ class Articulation(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match pose length {len(pose)}."
             )
 
-        if self.device.type == "cpu":
-            pose = pose.cpu()
-            if pose.dim() == 2 and pose.shape[1] == 7:
-                pose_matrix = torch.eye(4).unsqueeze(0).repeat(pose.shape[0], 1, 1)
-                pose_matrix[:, :3, 3] = pose[:, :3]
-                pose_matrix[:, :3, :3] = matrix_from_quat(pose[:, 3:7])
-                for i, env_idx in enumerate(local_env_ids):
-                    self._entities[env_idx].set_local_pose(pose_matrix[i])
-            elif pose.dim() == 3 and pose.shape[1:] == (4, 4):
-                for i, env_idx in enumerate(local_env_ids):
-                    self._entities[env_idx].set_local_pose(pose[i])
-            else:
-                logger.log_error(
-                    f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
-                )
-            # TODO: in manual physics mode, the update should be explicitly called after
-            # setting the pose to synchronize the state to renderer.
-
-        else:
-            if pose.dim() == 2 and pose.shape[1] == 7:
-                xyz = pose[:, :3]
-                quat = convert_quat(pose[:, 3:7], to="xyzw")
-            elif pose.dim() == 3 and pose.shape[1:] == (4, 4):
-                xyz = pose[:, :3, 3]
-                quat = quat_from_matrix(pose[:, :3, :3])
-                quat = convert_quat(quat, to="xyzw")
-            else:
-                logger.log_error(
-                    f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
-                )
-
-            # we should keep `pose_` life cycle to the end of the function.
-            pose_ = torch.cat((quat, xyz), dim=-1)
-            indices = self.body_data.gpu_indices[local_env_ids]
-            self._ps.gpu_apply_root_data(
-                data=pose_,
-                gpu_indices=indices,
-                data_type=ArticulationGPUAPIWriteType.ROOT_GLOBAL_POSE,
+        if pose.dim() == 2 and pose.shape[1] == 7:
+            target_pose = pose.to(device=self.device, dtype=torch.float32)
+        elif pose.dim() == 3 and pose.shape[1:] == (4, 4):
+            xyz = pose[:, :3, 3]
+            quat = quat_from_matrix(pose[:, :3, :3])
+            target_pose = torch.cat((xyz, quat), dim=-1).to(
+                device=self.device, dtype=torch.float32
             )
-            self._ps.gpu_compute_articulation_kinematic(gpu_indices=indices)
-        self._world.update(0.001)
+        else:
+            logger.log_error(
+                f"Invalid pose shape {pose.shape}. Expected (N, 7) or (N, 4, 4)."
+            )
+            return
+
+        self._data.articulation_view.apply_root_pose(target_pose, local_env_ids)
+        if self.device.type == "cpu" and not self._data.is_newton_backend:
+            self._world.update(0.001)
 
     def get_local_pose(self, to_matrix=False) -> torch.Tensor:
         """Get local pose (root link pose) of the articulation.
 
         Args:
-            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
+            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qx, qy, qz, qw). Defaults to False.
 
         Returns:
             torch.Tensor: The local pose of the articulation with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
@@ -1205,7 +1635,7 @@ class Articulation(BatchEntity):
         Args:
             link_name (str): The name of the link.
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
-            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qw, qx, qy, qz). Defaults to False.
+            to_matrix (bool, optional): If True, return the pose as a 4x4 matrix. If False, return as (x, y, z, qx, qy, qz, qw). Defaults to False.
 
         Returns:
             torch.Tensor: The pose of the specified link with shape (N, 7) or (N, 4, 4) depending on `to_matrix`.
@@ -1459,34 +1889,18 @@ class Articulation(BatchEntity):
             :, local_joint_ids, :
         ]
         qpos = qpos.clamp(selected_limits[..., 0], selected_limits[..., 1])
-
-        if self.device.type == "cpu":
-            local_joint_ids_np = (
-                local_joint_ids.detach().cpu().numpy().astype(np.int32, copy=False)
-            )
-            for i, env_idx in enumerate(local_env_ids.detach().cpu().tolist()):
-                setter = (
-                    self._entities[env_idx].set_target_qpos
-                    if target
-                    else self._entities[env_idx].set_current_qpos
-                )
-                setter(qpos[i].detach().cpu().numpy(), local_joint_ids_np)
-        else:
-            data_type = (
-                ArticulationGPUAPIWriteType.JOINT_TARGET_POSITION
-                if target
-                else ArticulationGPUAPIWriteType.JOINT_POSITION
-            )
-
-            # Always fetch the latest data to avoid stale values
-            qpos_set = self.body_data._target_qpos if target else self.body_data._qpos
-
-            indices = self.body_data.gpu_indices[local_env_ids]
-            qpos_set[local_env_ids[:, None], local_joint_ids] = qpos
-            self._ps.gpu_apply_joint_data(
-                data=qpos_set,
-                gpu_indices=indices,
-                data_type=data_type,
+        self._data.articulation_view.apply_qpos(
+            qpos,
+            local_env_ids,
+            local_joint_ids,
+            target=target,
+        )
+        if target:
+            self._stabilize_newton_mimic_target_write(
+                qpos,
+                local_env_ids,
+                local_joint_ids,
+                velocity=False,
             )
 
     def get_qvel(self, target: bool = False) -> torch.Tensor:
@@ -1537,55 +1951,35 @@ class Articulation(BatchEntity):
         Raises:
             ValueError: If the length of `env_ids` does not match the length of `qvel`.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
+        local_env_ids = self._resolve_env_ids(env_ids)
+
+        if not isinstance(qvel, torch.Tensor):
+            qvel = torch.as_tensor(qvel, dtype=torch.float32, device=self.device)
+        else:
+            qvel = qvel.to(device=self.device, dtype=torch.float32)
+
+        if qvel.dim() == 1:
+            qvel = qvel.unsqueeze(0)
 
         if len(local_env_ids) != len(qvel):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match qvel length {len(qvel)}."
             )
 
-        if joint_ids is None:
-            local_joint_ids = torch.arange(
-                self.dof, device=self.device, dtype=torch.int32
-            )
-        elif not isinstance(joint_ids, torch.Tensor):
-            local_joint_ids = torch.as_tensor(
-                joint_ids, dtype=torch.int32, device=self.device
-            )
-        else:
-            local_joint_ids = joint_ids
+        local_joint_ids = self._resolve_joint_ids(joint_ids)
 
-        if self.device.type == "cpu":
-            for i, env_idx in enumerate(local_env_ids):
-                setter = (
-                    self._entities[env_idx].set_target_qvel
-                    if target
-                    else self._entities[env_idx].set_current_qvel
-                )
-                setter(qvel[i].numpy(), local_joint_ids)
-        else:
-            data_type = (
-                ArticulationGPUAPIWriteType.JOINT_TARGET_VELOCITY
-                if target
-                else ArticulationGPUAPIWriteType.JOINT_VELOCITY
-            )
-
-            # Always fetch the latest data to avoid stale values
-            if target:
-                qvel_set = self.body_data._target_qvel
-            else:
-                qvel_set = self.body_data._qvel
-
-            if not isinstance(local_env_ids, torch.Tensor):
-                local_env_ids = torch.as_tensor(
-                    local_env_ids, dtype=torch.long, device=self.device
-                )
-            indices = self.body_data.gpu_indices[local_env_ids]
-            qvel_set[local_env_ids[:, None], local_joint_ids] = qvel
-            self._ps.gpu_apply_joint_data(
-                data=qvel_set,
-                gpu_indices=indices,
-                data_type=data_type,
+        self._data.articulation_view.apply_qvel(
+            qvel,
+            local_env_ids,
+            local_joint_ids,
+            target=target,
+        )
+        if target:
+            self._stabilize_newton_mimic_target_write(
+                qvel,
+                local_env_ids,
+                local_joint_ids,
+                velocity=True,
             )
 
     def set_qf(
@@ -1603,30 +1997,31 @@ class Articulation(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        if not isinstance(qf, torch.Tensor):
+            qf = torch.as_tensor(qf, dtype=torch.float32, device=self.device)
+        else:
+            qf = qf.to(device=self.device, dtype=torch.float32)
+
+        if qf.dim() == 1:
+            qf = qf.unsqueeze(0)
+
         if len(local_env_ids) != len(qf):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match qf length {len(qf)}."
             )
 
-        if self.device.type == "cpu":
-            local_joint_ids = np.arange(self.dof) if joint_ids is None else joint_ids
-            for i, env_idx in enumerate(local_env_ids):
-                setter = self._entities[env_idx].set_current_qf
-                setter(qf[i].numpy(), local_joint_ids)
-        else:
-            indices = self.body_data.gpu_indices[local_env_ids]
-            if joint_ids is None:
-                qf_set = self.body_data._qf[local_env_ids]
-                qf_set[:, : self.dof] = qf
-            else:
-                self.body_data.qf
-                qf_set = self.body_data._qf[local_env_ids]
-                qf_set[:, joint_ids] = qf
-            self._ps.gpu_apply_joint_data(
-                data=qf_set,
-                gpu_indices=indices,
-                data_type=ArticulationGPUAPIWriteType.JOINT_FORCE,
+        if joint_ids is None:
+            local_joint_ids = torch.arange(
+                self.dof, device=self.device, dtype=torch.int32
             )
+        elif not isinstance(joint_ids, torch.Tensor):
+            local_joint_ids = torch.as_tensor(
+                joint_ids, dtype=torch.int32, device=self.device
+            )
+        else:
+            local_joint_ids = joint_ids.to(device=self.device, dtype=torch.int32)
+
+        self._data.articulation_view.apply_qf(qf, local_env_ids, local_joint_ids)
 
     def get_qf(self) -> torch.Tensor:
         """Get the current generalized efforts (qf) of the articulation.
@@ -1659,76 +2054,178 @@ class Articulation(BatchEntity):
     def set_mass(
         self,
         mass: torch.Tensor,
-        link_names: Sequence[str],
-        env_ids: Sequence[int] | None = None,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
         """Set the mass of specific links in the articulation.
 
         Args:
-            mass (torch.Tensor): The mass values to set with shape (N, len(link_names)).
-            link_names (Sequence[str]): The names of the links to set the mass for.
-            env_ids (Sequence[int] | None, optional): Environment indices to apply the mass change. If None, applies to all environments. Defaults to None.
+            mass: Mass values with shape ``(num_envs, num_links)``.
+            link_names: Link names to update. If None, all links are updated.
+            env_ids: Environment indices. If None, all rows are updated.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-
-        if len(local_env_ids) != len(mass):
-            logger.log_error(
-                f"Length of env_ids {len(local_env_ids)} does not match mass length {len(mass)}."
+        env_index = self._resolve_env_ids(env_ids)
+        env_list = env_index.detach().cpu().tolist()
+        names, _ = self._resolve_link_names(link_names)
+        mass = torch.as_tensor(mass, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env_list), len(names))
+        if tuple(mass.shape) != expected_shape:
+            raise ValueError(
+                f"Expected mass shape {expected_shape}, got {tuple(mass.shape)}."
             )
 
-        for link_name in link_names:
-            if link_name not in self.link_names:
-                logger.log_error(
-                    f"Link name {link_name} not found in {self.__class__.__name__}. Available links: {self.link_names}"
-                )
-
-        for i, env_idx in enumerate(local_env_ids):
-            for j, name in enumerate(link_names):
-                self._entities[env_idx].set_mass(name, mass[i, j].item())
+        for i, env_idx in enumerate(env_list):
+            entity = self._entities[env_idx]
+            for j, name in enumerate(names):
+                if self.is_spawn_bound or self._data.is_newton_backend:
+                    entity.set_link_mass(name, mass[i, j].item())
+                else:
+                    entity.set_mass(name, mass[i, j].item())
 
     def get_mass(
         self,
-        link_names: Sequence[str] | None = None,
-        env_ids: Sequence[int] | None = None,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Get the mass of specific links in the articulation.
 
         Args:
-            link_names (Sequence[str] | None, optional): The names of the links to get the mass for. If None, gets mass for all links. Defaults to None.
-            env_ids (Sequence[int] | None, optional): Environment indices to get the mass from. If None, gets from all environments. Defaults to None.
+            link_names: Link names to query. If None, all links are returned.
+            env_ids: Environment indices. If None, all rows are returned.
 
         Returns:
-            torch.Tensor: The mass of the specified links with shape (N, len(link_names)).
+            Selected link masses with shape ``(num_envs, num_links)``.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
+        env_index = self._resolve_env_ids(env_ids)
+        _, link_index = self._resolve_link_names(link_names)
+        return self.body_data.mass[
+            env_index[:, None],
+            link_index[None, :],
+        ]
 
-        if link_names is None:
-            link_names = self.link_names
-        else:
-            for link_name in link_names:
-                if link_name not in self.link_names:
-                    logger.log_error(
-                        f"Link name {link_name} not found in {self.__class__.__name__}. Available links: {self.link_names}"
+    def set_inertia(
+        self,
+        inertia: torch.Tensor,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set principal moments of inertia for selected links."""
+        env_index = self._resolve_env_ids(env_ids)
+        env_list = env_index.detach().cpu().tolist()
+        names, _ = self._resolve_link_names(link_names)
+        inertia = torch.as_tensor(inertia, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env_list), len(names), 3)
+        if tuple(inertia.shape) != expected_shape:
+            raise ValueError(
+                f"Expected inertia shape {expected_shape}, "
+                f"got {tuple(inertia.shape)}."
+            )
+
+        values = inertia.detach().cpu().numpy()
+        for i, env_idx in enumerate(env_list):
+            entity = self._entities[env_idx]
+            for j, name in enumerate(names):
+                value = np.asarray(values[i, j], dtype=np.float32)
+                if self.is_spawn_bound and self._data.is_newton_backend:
+                    entity.set_newton_link_properties(
+                        name,
+                        rigid_body=dexsim.spawn.RigidBodyPhysicsDesc.dynamic(
+                            inertia=value
+                        ),
+                    )
+                elif not self._data.is_newton_backend:
+                    entity.get_physical_body(name).set_mass_space_inertia_tensor(value)
+                else:
+                    attr = entity.get_physical_attr(name)
+                    attr.inertia = value
+                    entity.set_physical_attr(
+                        attr,
+                        name,
+                        is_replace_inertial=False,
                     )
 
-        mass_tensor = torch.zeros(
-            (len(local_env_ids), len(link_names)),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        for i, env_idx in enumerate(local_env_ids):
-            for j, name in enumerate(link_names):
-                mass_tensor[i, j] = (
-                    self._entities[env_idx].get_physical_body(name).get_mass()
+    def get_inertia(
+        self,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get principal moments of inertia for selected links."""
+        env_index = self._resolve_env_ids(env_ids)
+        _, link_index = self._resolve_link_names(link_names)
+        return self.body_data.inertia[
+            env_index[:, None],
+            link_index[None, :],
+        ]
+
+    def set_com_pose(
+        self,
+        com_pose: torch.Tensor,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set local COM poses in EmbodiChain ``xyz + xyzw`` convention."""
+        env_index = self._resolve_env_ids(env_ids)
+        env_list = env_index.detach().cpu().tolist()
+        names, _ = self._resolve_link_names(link_names)
+        com_pose = torch.as_tensor(com_pose, dtype=torch.float32, device=self.device)
+        expected_shape = (len(env_list), len(names), 7)
+        if tuple(com_pose.shape) != expected_shape:
+            raise ValueError(
+                f"Expected COM pose shape {expected_shape}, "
+                f"got {tuple(com_pose.shape)}."
+            )
+
+        values = com_pose.detach().cpu().numpy()
+        for i, env_idx in enumerate(env_list):
+            entity = self._entities[env_idx]
+            for j, name in enumerate(names):
+                position = np.asarray(values[i, j, :3], dtype=np.float32)
+                quaternion = np.asarray(
+                    convert_quat(values[i, j, 3:7], to="wxyz"),
+                    dtype=np.float32,
                 )
-        return mass_tensor
+                if self.is_spawn_bound and self._data.is_newton_backend:
+                    entity.set_newton_link_properties(
+                        name,
+                        rigid_body=dexsim.spawn.RigidBodyPhysicsDesc.dynamic(
+                            com_position=position,
+                            com_quaternion=quaternion,
+                        ),
+                    )
+                elif not self._data.is_newton_backend:
+                    entity.get_physical_body(name).set_cmass_local_pose(
+                        position,
+                        quaternion,
+                    )
+                else:
+                    attr = entity.get_physical_attr(name)
+                    attr.com_position = position
+                    attr.com_quaternion = quaternion
+                    entity.set_physical_attr(
+                        attr,
+                        name,
+                        is_replace_inertial=False,
+                    )
+
+    def get_com_pose(
+        self,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get local COM poses in EmbodiChain ``xyz + xyzw`` convention."""
+        env_index = self._resolve_env_ids(env_ids)
+        _, link_index = self._resolve_link_names(link_names)
+        return self.body_data.com_pose[
+            env_index[:, None],
+            link_index[None, :],
+        ]
 
     def get_link_physical_attr(
         self,
         link_names: str | Sequence[str] | None = None,
         env_ids: Sequence[int] | None = None,
     ) -> list[PhysicalAttr]:
-        """Get physical attributes for articulation links.
+        """Get DexSim-native physical attributes for articulation links.
 
         Args:
             link_names: Link names or regex patterns. If None, all links are returned.
@@ -1738,6 +2235,11 @@ class Articulation(BatchEntity):
             List of :class:`~dexsim.types.PhysicalAttr`, one per (env, link) pair in
             row-major order (env-major).
         """
+        if self._data is not None and self._data.is_newton_backend:
+            raise RuntimeError(
+                "get_link_physical_attr() exposes DexSim PhysicalAttr semantics; "
+                "use get_newton_link_properties() for Newton."
+            )
         if link_names is None:
             matched_link_names = self.link_names
         elif isinstance(link_names, str):
@@ -1752,28 +2254,82 @@ class Articulation(BatchEntity):
         local_env_ids = [0] if env_ids is None else list(env_ids)
         attrs: list[PhysicalAttr] = []
         for env_idx in local_env_ids:
+            entity = self._entities[env_idx]
             for name in matched_link_names:
-                attrs.append(self._entities[env_idx].get_physical_attr(name))
+                attrs.append(entity.get_physical_attr(name))
         return attrs
+
+    def get_newton_link_properties(
+        self,
+        link_names: str | Sequence[str] | None = None,
+        env_ids: Sequence[int] | None = None,
+    ) -> list[dexsim.spawn.RigidBodyPhysicsDesc]:
+        """Get Newton model mass properties as typed Spawn descriptors.
+
+        Args:
+            link_names: Link names or regex patterns. If None, all links are
+                returned.
+            env_ids: Environment indices. If None, only environment 0 is
+                queried.
+
+        Returns:
+            One typed descriptor per selected ``(environment, link)`` pair in
+            environment-major order.
+        """
+        if not (
+            self.is_spawn_bound
+            and self._data is not None
+            and self._data.is_newton_backend
+        ):
+            raise RuntimeError(
+                "get_newton_link_properties() requires a Spawn-bound Newton "
+                "articulation."
+            )
+        if link_names is None:
+            matched_link_names = self.link_names
+        else:
+            _, matched_link_names = resolve_matching_names(
+                keys=link_names,
+                list_of_strings=self.link_names,
+            )
+
+        local_env_ids = [0] if env_ids is None else list(env_ids)
+        properties = []
+        for env_idx in local_env_ids:
+            entity = self._entities[env_idx]
+            for name in matched_link_names:
+                properties.append(entity.get_newton_link_properties(name))
+        return properties
 
     def set_link_physical_attr(
         self,
-        attrs: RigidBodyAttributesCfg | RigidBodyAttributesOverrideCfg | PhysicalAttr,
+        attrs: RigidBodyPhysicsCfg | PhysicalAttr,
         link_names: str | Sequence[str] | None = None,
         env_ids: Sequence[int] | None = None,
         *,
-        base_attrs: RigidBodyAttributesCfg | None = None,
+        base_attrs: RigidBodyPhysicsCfg | None = None,
         replace_inertial: bool = False,
     ) -> None:
         """Set physical attributes for selected articulation links.
 
         Args:
-            attrs: Full, partial, or DexSim physical attributes to apply.
+            attrs: Grouped or DexSim physical attributes to apply.
             link_names: Link names or regex patterns. If None, all links are updated.
             env_ids: Environment indices. If None, all environments are updated.
             base_attrs: Base config used when ``attrs`` is a partial override.
             replace_inertial: Recompute inertia when mass changes.
+
+        .. attention::
+            This compatibility API exposes DexSim ``PhysicalAttr`` semantics.
+            Newton properties must use typed Spawn descriptors.
         """
+        is_newton = self._data is not None and self._data.is_newton_backend
+        if is_newton:
+            raise TypeError(
+                "set_link_physical_attr() is DexSim-only; use typed Newton "
+                "link properties or set_mass()/set_inertia()/set_com_pose()."
+            )
+
         if link_names is None:
             matched_link_names = self.link_names
         elif isinstance(link_names, str):
@@ -1785,22 +2341,26 @@ class Articulation(BatchEntity):
                 keys=link_names, list_of_strings=self.link_names
             )
 
-        if isinstance(attrs, RigidBodyAttributesOverrideCfg):
+        if isinstance(attrs, RigidBodyPhysicsCfg):
             if base_attrs is None:
                 base_attrs = self.cfg.attrs
-            physical_attr = attrs.merge_with(base_attrs)
-            if attrs.mass is not None:
-                replace_inertial = True
-        elif isinstance(attrs, RigidBodyAttributesCfg):
-            physical_attr = attrs.attr()
+            physical_attr = attrs.to_dexsim_physical_attr(
+                base=base_attrs.to_dexsim_physical_attr()
+            )
+            mass_props = attrs.mass_props
+            if mass_props is not None and mass_props.recompute_inertia is not None:
+                replace_inertial = bool(mass_props.recompute_inertia)
         else:
             physical_attr = attrs
 
         local_env_ids = self._all_indices if env_ids is None else env_ids
         for env_idx in local_env_ids:
+            entity = self._entities[env_idx]
             for name in matched_link_names:
-                self._entities[env_idx].set_physical_attr(
-                    physical_attr, name, is_replace_inertial=replace_inertial
+                entity.set_physical_attr(
+                    physical_attr,
+                    name,
+                    is_replace_inertial=replace_inertial,
                 )
 
     def set_joint_drive(
@@ -1811,9 +2371,11 @@ class Articulation(BatchEntity):
         max_velocity: torch.Tensor | None = None,
         friction: torch.Tensor | None = None,
         armature: torch.Tensor | None = None,
-        drive_type: str = "none",
+        drive_type: str | None = None,
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
+        *,
+        target_mode: str | int | None = None,
     ) -> None:
         """Set the drive properties for the articulation.
 
@@ -1824,24 +2386,88 @@ class Articulation(BatchEntity):
             max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
             friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
             armature (torch.Tensor): The joint armature with shape (len(env_ids), len(joint_ids)).
-            drive_type (str, optional): The type of drive to apply. Defaults to "none".
+            drive_type: ``force``, ``acceleration``, or ``none``. ``None``
+                preserves the current mode unless a target mode activates a
+                force drive.
             joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
             env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
+            target_mode: Portable target mode: ``none``, ``position``,
+                ``velocity``, ``position_velocity``, ``effort``, or integer
+                value 0 through 4.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         local_joint_ids = np.arange(self.dof) if joint_ids is None else joint_ids
         cache_env_ids = self._resolve_env_ids(env_ids)
         cache_joint_ids = self._resolve_joint_ids(joint_ids)
 
+        mode_cfg = JointDrivePropertiesCfg(
+            target_mode=target_mode,
+            drive_type=drive_type,
+        )
+        resolved_target_mode, resolved_drive_type = mode_cfg._resolve_modes()
+        if isinstance(resolved_target_mode, dict):
+            raise TypeError(
+                "set_joint_drive() accepts one scalar target_mode; configure "
+                "per-joint mappings through JointDrivePropertiesCfg."
+            )
+        target_mode_value = (
+            None
+            if resolved_target_mode is None
+            else _normalize_joint_target_mode(resolved_target_mode)
+        )
+        if target_mode_value in {1, 2, 3} and resolved_drive_type == "none":
+            raise ValueError(
+                "drive_type='none' conflicts with an active target_mode; use "
+                "target_mode='none' or 'effort'."
+            )
+
         def _drive_arg(value: torch.Tensor, index: int) -> float | np.ndarray:
             result = value[index].detach().cpu().numpy()
             return result.item() if result.size == 1 else result
 
         for i, env_idx in enumerate(local_env_ids):
-            drive_args = {
-                "drive_type": get_dexsim_drive_type(drive_type),
-                "joint_ids": local_joint_ids,
-            }
+            if self.is_spawn_bound and self.body_data.is_newton_backend:
+                if resolved_drive_type == "acceleration" and target_mode_value in {
+                    1,
+                    2,
+                    3,
+                }:
+                    raise NotImplementedError(
+                        "Newton Spawn does not have an exact equivalent of "
+                        "the Default acceleration drive. Use "
+                        "drive_type='force' or disable the drive."
+                    )
+                drive_args = {"joint_ids": local_joint_ids}
+                if target_mode_value is not None:
+                    drive_args["target_mode"] = target_mode_value
+                if stiffness is not None:
+                    drive_args["target_ke"] = _drive_arg(stiffness, i)
+                if damping is not None:
+                    drive_args["target_kd"] = _drive_arg(damping, i)
+                if max_effort is not None:
+                    drive_args["effort_limit"] = _drive_arg(max_effort, i)
+                if max_velocity is not None:
+                    drive_args["velocity_limit"] = _drive_arg(max_velocity, i)
+                if friction is not None:
+                    drive_args["friction"] = _drive_arg(friction, i)
+                if armature is not None:
+                    drive_args["armature"] = _drive_arg(armature, i)
+                if target_mode_value in {0, 4}:
+                    drive_args["target_ke"] = 0.0
+                    drive_args["target_kd"] = 0.0
+                elif target_mode_value == 2:
+                    drive_args["target_ke"] = 0.0
+                self._entities[env_idx].set_newton_drive(**drive_args)
+                continue
+
+            drive_args = {"joint_ids": local_joint_ids}
+            default_drive_type = resolved_drive_type
+            if target_mode_value in {0, 4}:
+                default_drive_type = "none"
+            elif target_mode_value in {1, 2, 3} and default_drive_type is None:
+                default_drive_type = "force"
+            if default_drive_type is not None:
+                drive_args["drive_type"] = get_dexsim_drive_type(default_drive_type)
             if stiffness is not None:
                 drive_args["stiffness"] = _drive_arg(stiffness, i)
             if damping is not None:
@@ -1854,6 +2480,11 @@ class Articulation(BatchEntity):
                 drive_args["joint_friction"] = _drive_arg(friction, i)
             if armature is not None:
                 drive_args["armature"] = _drive_arg(armature, i)
+            if target_mode_value in {0, 4}:
+                drive_args["stiffness"] = 0.0
+                drive_args["damping"] = 0.0
+            elif target_mode_value == 2:
+                drive_args["stiffness"] = 0.0
             self._entities[env_idx].set_drive(**drive_args)
 
         if max_velocity is not None:
@@ -1946,7 +2577,7 @@ class Articulation(BatchEntity):
                 friction_i,
                 armature_i,
                 *_,
-            ) = self._entities[env_idx].get_drive()
+            ) = self._data._entity_drive_properties(self._entities[env_idx])
             stiffness[i] = torch.as_tensor(
                 stiffness_i, dtype=torch.float32, device=self.device
             )[local_joint_ids_tensor]
@@ -1972,15 +2603,20 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
     ) -> list[list[DriveType]]:
-        """Get the backend drive type for the selected joints.
+        """Get the portable drive type for the selected joints.
 
         Args:
             joint_ids: Joint indices to query. If None, queries all joints.
             env_ids: Environment indices to query. If None, queries all environments.
 
         Returns:
-            Backend drive types grouped by environment, with one
+            Drive types grouped by environment, with one
             :class:`~dexsim.types.DriveType` per selected joint.
+
+            Newton has no acceleration-drive equivalent. Its passive and
+            direct-effort target modes map to :attr:`DriveType.NONE` because
+            neither installs a PD drive; position and velocity target modes
+            map to :attr:`DriveType.FORCE`.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         if joint_ids is None:
@@ -1994,11 +2630,62 @@ class Articulation(BatchEntity):
 
         drive_types: list[list[DriveType]] = []
         for env_idx in local_env_ids:
-            entity_drive_types = self._entities[int(env_idx)].get_drive(
-                local_joint_ids
-            )[-1]
-            drive_types.append(list(entity_drive_types))
+            entity = self._entities[int(env_idx)]
+            if self._data is not None and self._data.is_newton_backend:
+                target_modes = np.asarray(entity.get_newton_drive()[-1])[
+                    local_joint_ids
+                ]
+                drive_types.append(
+                    [
+                        (DriveType.NONE if int(mode) in {0, 4} else DriveType.FORCE)
+                        for mode in target_modes
+                    ]
+                )
+            else:
+                entity_drive_types = np.asarray(entity.get_drive()[-1])[local_joint_ids]
+                drive_types.append(list(entity_drive_types))
         return drive_types
+
+    def get_joint_target_mode(
+        self,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
+    ) -> list[list[int]]:
+        """Get Newton ``JointTargetMode`` integer values by environment.
+
+        Args:
+            joint_ids: Flattened DOF indices. If None, all DOFs are queried.
+            env_ids: Environment indices. If None, all environments are
+                queried.
+
+        Returns:
+            Integer target modes grouped by selected environment.
+        """
+        if not (
+            self.is_spawn_bound
+            and self._data is not None
+            and self._data.is_newton_backend
+        ):
+            raise RuntimeError(
+                "get_joint_target_mode() requires a Spawn-bound Newton " "articulation."
+            )
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        if joint_ids is None:
+            local_joint_ids = np.arange(self.dof, dtype=np.int32)
+        elif isinstance(joint_ids, torch.Tensor):
+            local_joint_ids = (
+                joint_ids.detach().cpu().numpy().astype(np.int32, copy=False)
+            )
+        else:
+            local_joint_ids = np.asarray(joint_ids, dtype=np.int32)
+
+        target_modes = []
+        for env_idx in local_env_ids:
+            modes = self._entities[int(env_idx)].get_newton_drive()[-1]
+            target_modes.append(
+                [int(value) for value in np.asarray(modes)[local_joint_ids]]
+            )
+        return target_modes
 
     def get_user_ids(
         self, link_name: str | None = None, env_ids: Sequence[int] | None = None
@@ -2032,10 +2719,7 @@ class Articulation(BatchEntity):
             env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
-        zeros = torch.zeros((len(local_env_ids), self.dof), device=self.device)
-        self.set_qvel(zeros, env_ids=local_env_ids)
-        self.set_qvel(zeros, env_ids=local_env_ids, target=True)
-        self.set_qf(zeros, env_ids=local_env_ids)
+        self._data.articulation_view.clear_dynamics(local_env_ids)
 
     def reallocate_body_data(self) -> None:
         """Reallocate body data tensors to match the current articulation state in the GPU physics scene."""
@@ -2092,49 +2776,76 @@ class Articulation(BatchEntity):
         self.cfg: ArticulationCfg
 
         self.restore_visual_material(env_ids=local_env_ids)
+        self._restore_default_physical_properties(local_env_ids)
 
-        pos = torch.as_tensor(
-            self.cfg.init_pos, dtype=torch.float32, device=self.device
-        )
-        rot = (
-            torch.as_tensor(self.cfg.init_rot, dtype=torch.float32, device=self.device)
-            * torch.pi
-            / 180.0
-        )
-        pos = pos.unsqueeze(0).repeat(num_instances, 1)
-        rot = rot.unsqueeze(0).repeat(num_instances, 1)
-        mat = matrix_from_euler(rot, "XYZ")
-        pose = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .unsqueeze(0)
-            .repeat(num_instances, 1, 1)
-        )
-        pose[:, :3, 3] = pos
-        pose[:, :3, :3] = mat
+        if self.cfg.init_local_pose is not None:
+            pose = (
+                torch.as_tensor(
+                    self.cfg.init_local_pose,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                .reshape(1, 4, 4)
+                .repeat(num_instances, 1, 1)
+            )
+        else:
+            pos = torch.as_tensor(
+                self.cfg.init_pos, dtype=torch.float32, device=self.device
+            )
+            rot = (
+                torch.as_tensor(
+                    self.cfg.init_rot, dtype=torch.float32, device=self.device
+                )
+                * torch.pi
+                / 180.0
+            )
+            pos = pos.unsqueeze(0).repeat(num_instances, 1)
+            rot = rot.unsqueeze(0).repeat(num_instances, 1)
+            pose = (
+                torch.eye(4, dtype=torch.float32, device=self.device)
+                .unsqueeze(0)
+                .repeat(num_instances, 1, 1)
+            )
+            pose[:, :3, 3] = pos
+            pose[:, :3, :3] = matrix_from_euler(rot, "XYZ")
         self.set_local_pose(pose, env_ids=local_env_ids)
 
         qpos = torch.as_tensor(
             self.cfg.init_qpos, dtype=torch.float32, device=self.device
         )
         qpos = qpos.unsqueeze(0).repeat(num_instances, 1)
+        qpos = self._source_qpos_to_state_order(qpos)
+        if (
+            self.body_data.is_newton_backend
+            and not self._newton_mimic_compliance_configured
+        ):
+            # Native Newton mimic constraints can generate a large corrective
+            # impulse when initialized away from their equality manifold.
+            qpos = self._project_mimic_qpos(qpos)
         self.set_qpos(qpos, target=False, env_ids=local_env_ids)
         # Set drive target to hold position.
         self.set_qpos(qpos, target=True, env_ids=local_env_ids)
 
         self.clear_dynamics(env_ids=local_env_ids)
 
-        if self.device.type == "cuda":
-            self._ps.gpu_compute_articulation_kinematic(
-                gpu_indices=self.body_data.gpu_indices[local_env_ids]
-            )
-        self._world.update(0.001)
+        self._data.articulation_view.compute_kinematics(local_env_ids)
+        if self.device.type == "cpu" and not self._data.is_newton_backend:
+            self._world.update(0.001)
 
-    def _set_default_joint_drive(self) -> None:
+    def _set_default_joint_drive(
+        self,
+        joint_drive_props: JointDrivePropertiesCfg | dict | None = None,
+    ) -> None:
         """Set default joint drive parameters based on the configuration."""
         import numbers
         from embodichain.utils.string import resolve_matching_names_values
 
-        drive_props = [
+        if joint_drive_props is None:
+            joint_drive_props = self.cfg.joint_drive_props
+        if joint_drive_props is None:
+            return
+
+        joint_property_targets = [
             ("damping", self.default_joint_damping),
             ("stiffness", self.default_joint_stiffness),
             ("max_effort", self.default_joint_max_effort),
@@ -2143,8 +2854,12 @@ class Articulation(BatchEntity):
             ("armature", self.default_joint_armature),
         ]
 
-        for prop_name, default_array in drive_props:
-            value = getattr(self.cfg.drive_pros, prop_name, None)
+        for prop_name, default_array in joint_property_targets:
+            value = (
+                joint_drive_props.get(prop_name)
+                if isinstance(joint_drive_props, dict)
+                else getattr(joint_drive_props, prop_name, None)
+            )
             if value is None:
                 continue
             if isinstance(value, numbers.Number):
@@ -2160,11 +2875,19 @@ class Articulation(BatchEntity):
                 except Exception as e:
                     logger.log_error(f"Failed to set {prop_name}: {e}")
 
-        drive_pros = self.cfg.drive_pros
-        if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type", "none")
+        if isinstance(joint_drive_props, dict):
+            drive_type = joint_drive_props.get("drive_type")
+            target_mode = joint_drive_props.get("target_mode")
         else:
-            drive_type = getattr(drive_pros, "drive_type", "none")
+            drive_type = getattr(joint_drive_props, "drive_type", None)
+            target_mode = getattr(joint_drive_props, "target_mode", None)
+        if isinstance(target_mode, dict):
+            logger.log_warning(
+                "Per-joint target_mode mappings require a Spawn-bound "
+                "articulation; the retained raw-articulation path preserves "
+                "its current target modes."
+            )
+            target_mode = None
 
         # Apply drive parameters to all articulations in the batch
         self.set_joint_drive(
@@ -2175,6 +2898,7 @@ class Articulation(BatchEntity):
             friction=self.default_joint_friction,
             armature=self.default_joint_armature,
             drive_type=drive_type,
+            target_mode=target_mode,
         )
 
     def compute_fk(
@@ -2384,7 +3108,12 @@ class Articulation(BatchEntity):
             for link_name in link_names:
                 mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{link_name}")
                 for i, env_idx in enumerate(local_env_ids):
-                    self._entities[env_idx].set_material(link_name, mat_inst.mat)
+                    if self.is_spawn_bound:
+                        self._entities[env_idx].set_material_inst(
+                            link_name, mat_inst.mat
+                        )
+                    else:
+                        self._entities[env_idx].set_material(link_name, mat_inst.mat)
                     self._visual_material[env_idx][link_name] = mat_inst
                     if update_default:
                         self._original_visual_material[env_idx][link_name] = (
@@ -2402,7 +3131,12 @@ class Articulation(BatchEntity):
                     mat_inst = mat.create_instance(
                         f"{mat.uid}_{self.uid}_{link_name}_{env_idx}"
                     )
-                    self._entities[env_idx].set_material(link_name, mat_inst.mat)
+                    if self.is_spawn_bound:
+                        self._entities[env_idx].set_material_inst(
+                            link_name, mat_inst.mat
+                        )
+                    else:
+                        self._entities[env_idx].set_material(link_name, mat_inst.mat)
                     self._visual_material[env_idx][link_name] = mat_inst
                     if update_default:
                         self._original_visual_material[env_idx][link_name] = (
@@ -2627,6 +3361,17 @@ class Articulation(BatchEntity):
         )
         link_names = self.link_names if link_names is None else link_names
 
+        if self.is_spawn_bound:
+            for env_idx in self._all_indices:
+                entity = self._entities[env_idx]
+                for link_name in link_names:
+                    self._spawn_result.set_physical_visible(
+                        (entity, link_name), rgba, visible
+                    )
+            for link_name in link_names:
+                self._has_collision_visible_node_dict[link_name] = True
+            return
+
         # create collision visible node if not exist
         if visible:
             for i, env_idx in enumerate(self._all_indices):
@@ -2677,12 +3422,18 @@ class Articulation(BatchEntity):
             )
 
     def destroy(self) -> None:
+        if self.is_declared or self.is_spawn_bound:
+            # The finalized Scene is the sole owner of native lifetime.
+            return
         env = self._world.get_env()
         arenas = env.get_all_arenas()
         if len(arenas) == 0:
             arenas = [env]
         for i, entity in enumerate(self._entities):
-            arenas[i].remove_articulation(entity)
+            if self._data.is_newton_backend:
+                arenas[i].remove_skeleton(entity)
+            else:
+                arenas[i].remove_articulation(entity)
 
 
 __all__ = ["ArticulationData", "Articulation", "ArticulationJointKinematics"]

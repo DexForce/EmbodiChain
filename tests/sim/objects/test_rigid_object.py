@@ -13,41 +13,73 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-
 from __future__ import annotations
 
 import os
-import torch
+
+import numpy as np
 import pytest
+import torch
 
 from embodichain.lab.sim import (
     SimulationManager,
     SimulationManagerCfg,
     VisualMaterialCfg,
 )
-from embodichain.lab.sim.objects import RigidObject
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
-from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
-from dexsim.types import ActorType
-
-from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonRigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+    RigidObjectCfg,
+    physics_cfg_for_backend,
+)
+from embodichain.lab.sim.objects import RigidObject
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
+from embodichain.utils.math import matrix_from_quat
 
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 CHAIR_PATH = "Chair/chair.glb"
 NUM_ARENAS = 2
 Z_TRANSLATION = 2.0
+# Newton stores a full inertia tensor and converts it to/from the principal-frame
+# diagonal in float32. The two quaternion rotations introduce small round-trip
+# error for imported meshes whose COM frame is not axis-aligned.
+NEWTON_INERTIA_ROUND_TRIP_ATOL = 2e-4
+
+
+def _make_test_com_pose(device: torch.device) -> torch.Tensor:
+    """Create per-env COM poses using EmbodiChain xyzw quaternion convention."""
+    return torch.tensor(
+        [
+            [0.04, -0.02, 0.03, 0.0, 0.0, 0.0, 1.0],
+            [-0.01, 0.05, 0.02, 0.0, 0.0, 0.70710677, 0.70710677],
+        ],
+        device=device,
+        dtype=torch.float32,
+    )
+
+
+def _teardown_newton_physics() -> None:
+    from dexsim.engine.newton_physics import teardown_newton_physics
+
+    teardown_newton_physics()
 
 
 class BaseRigidObjectTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, device: str, physics: str = "default"):
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
+            headless=True,
+            device=device,
+            num_envs=NUM_ARENAS,
+            physics_cfg=physics_cfg_for_backend(physics),
         )
         self.sim = SimulationManager(config)
+        self.physics = physics
         self.sim.enable_physics(False)
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
@@ -62,9 +94,7 @@ class BaseRigidObjectTest:
                 "shape_type": "Mesh",
                 "fpath": duck_path,
             },
-            "attrs": {
-                "mass": 1.0,
-            },
+            "attrs": {"mass_props": {"mass": 1.0}},
             "body_type": "dynamic",
         }
         self.duck: RigidObject = self.sim.add_rigid_object(
@@ -78,12 +108,13 @@ class BaseRigidObjectTest:
 
         self.chair: RigidObject = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
-                uid="chair", shape=MeshCfg(fpath=chair_path), body_type="kinematic"
+                uid="chair",
+                shape=MeshCfg(fpath=chair_path),
+                body_type="kinematic",
             ),
         )
 
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
+        self.sim.prepare()
 
         self.sim.enable_physics(True)
 
@@ -94,6 +125,34 @@ class BaseRigidObjectTest:
         assert (
             not self.chair.is_static
         ), "Chair should be kinematic but is marked static"
+
+    def test_replicated_collision_shapes_are_isolated_by_environment(self):
+        """Every rigid shape should use its replicated environment group."""
+        for env_index in range(NUM_ARENAS):
+            for rigid_object in (self.duck, self.table, self.chair):
+                entity = rigid_object._entities[env_index]
+                if self.physics == "newton":
+                    shape_ids = entity.physics_body.shape_ids
+                    assert shape_ids
+                    groups = (
+                        entity.physics_body.runtime.model.shape_collision_group.numpy()
+                    )
+                    assert {int(groups[shape_id]) for shape_id in shape_ids} == {
+                        env_index + 1
+                    }
+                else:
+                    np.testing.assert_array_equal(
+                        entity.object_desc.physics.collision_filter_data,
+                        np.asarray([env_index, 1, 0, 0], dtype=np.uint32),
+                    )
+
+    def test_spawn_clones_distinct_entities(self):
+        """Multi-env rigid objects are spawned via prototype + clone_actor_to."""
+        assert len(self.duck._entities) == NUM_ARENAS
+        handles = {entity.get_native_handle() for entity in self.duck._entities}
+        assert len(handles) == NUM_ARENAS, "Each arena clone must be a distinct actor"
+        assert {entity.get_name() for entity in self.duck._entities} == {"duck"}
+        assert len({entity.path for entity in self.duck._entities}) == NUM_ARENAS
 
     def test_local_pose_behavior(self):
         """Test set_local_pose and get_local_pose:
@@ -160,9 +219,32 @@ class BaseRigidObjectTest:
         assert all(
             abs(x) < 1e-5 for x in table_xyz_after
         ), f"FAIL: Table moved unexpectedly: {table_xyz_after}"
-        assert torch.allclose(
-            chair_xyz_after, expected_chair_pos, atol=1e-5
-        ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
+        if self.chair.body_type == "kinematic" and self.physics != "newton":
+            assert torch.allclose(
+                chair_xyz_after, expected_chair_pos, atol=1e-5
+            ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
+        # Newton: kinematic bodies are not pose-locked yet (DexSim TODO).
+
+    def test_dynamic_pose_write_persists_across_physics_step(self):
+        """A dynamic pose reset must update Newton's FREE-joint state too."""
+        target_xy = torch.tensor(
+            [[0.31, -0.27], [-0.42, 0.36]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        pose = torch.eye(4, device=self.sim.device).repeat(NUM_ARENAS, 1, 1)
+        pose[:, :2, 3] = target_xy
+        pose[:, 2, 3] = Z_TRANSLATION
+
+        self.duck.set_local_pose(pose)
+        self.sim.update(step=1)
+
+        torch.testing.assert_close(
+            self.duck.get_local_pose()[:, :2],
+            target_xy,
+            atol=1.0e-4,
+            rtol=0.0,
+        )
 
     def test_add_force_torque(self):
         """Test that add_force applies force correctly to the duck object."""
@@ -333,7 +415,13 @@ class BaseRigidObjectTest:
         sdf = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid="duck_sdf",
-                shape=MeshCfg(fpath=duck_path, sdf_resolution=128),
+                shape=MeshCfg(
+                    fpath=duck_path,
+                    collision=MeshCollisionCfg(
+                        approximation="sdf",
+                        sdf_resolution=128,
+                    ),
+                ),
                 body_type="dynamic",
             )
         )
@@ -361,12 +449,37 @@ class BaseRigidObjectTest:
         """Test the body_data property for dynamic objects."""
         # Dynamic object should have body_data
         assert self.duck.body_data is not None, "Dynamic duck should have body_data"
+        assert self.duck.body_data.mass.shape == (NUM_ARENAS,)
+        assert self.duck.body_data.inertia.shape == (NUM_ARENAS, 3)
 
         # Static object should return None with warning
         assert self.table.body_data is None, "Static table should not have body_data"
 
         # Kinematic object should have body_data
         assert self.chair.body_data is not None, "Kinematic chair should have body_data"
+
+    def test_default_physical_properties_remain_at_initialized_values(self):
+        """Test runtime writes do not mutate the mass-property snapshots."""
+        assert self.duck.body_data is not None
+        data = self.duck.body_data
+        initial_mass = self.duck.get_mass().clone()
+        initial_inertia = self.duck.get_inertia().clone()
+        initial_com_pose = data.com_pose.clone()
+
+        assert torch.allclose(data.default_mass, initial_mass)
+        assert torch.allclose(data.default_inertia, initial_inertia)
+        assert torch.allclose(data.default_com_pose, initial_com_pose)
+        assert torch.allclose(self.duck.default_mass, data.default_mass)
+
+        self.duck.set_mass(initial_mass + 0.5)
+        self.duck.set_inertia(initial_inertia + 0.1)
+        changed_com_pose = initial_com_pose.clone()
+        changed_com_pose[:, :3] += 0.05
+        self.duck.set_com_pose(changed_com_pose)
+
+        assert torch.allclose(data.default_mass, initial_mass)
+        assert torch.allclose(data.default_inertia, initial_inertia)
+        assert torch.allclose(data.default_com_pose, initial_com_pose)
 
     def test_physical_attributes(self):
         """Test getting and setting physical attributes and body states."""
@@ -403,30 +516,108 @@ class BaseRigidObjectTest:
         # 2. is_non_dynamic
         assert not self.duck.is_non_dynamic, "Dynamic duck should not be is_non_dynamic"
         assert self.table.is_non_dynamic, "Static table should be is_non_dynamic"
-        assert self.chair.is_non_dynamic, "Kinematic chair should be is_non_dynamic"
+        assert self.chair.is_non_dynamic == (self.chair.body_type == "kinematic")
+
+        if self.physics == "newton":
+            expected_mass = torch.ones(NUM_ARENAS, device=self.sim.device)
+            expected_inertia = self.duck.get_inertia()
+            assert expected_inertia.shape == (NUM_ARENAS, 3)
+            assert (
+                expected_inertia >= 0
+            ).all(), "Initial inertia should be non-negative"
+
+            assert torch.allclose(self.duck.get_mass(), expected_mass)
+            assert self.duck.get_friction().shape == (NUM_ARENAS,)
+            assert torch.isfinite(self.duck.get_friction()).all()
+            assert self.duck.get_damping().shape == (NUM_ARENAS, 2)
+            assert torch.isfinite(self.duck.get_damping()).all()
+
+            self.duck.set_attrs(
+                RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 2.5}})
+            )
+            assert torch.allclose(
+                self.duck.get_mass(),
+                torch.full((NUM_ARENAS,), 2.5, device=self.sim.device),
+            )
+
+            # Actor type is topology, not a runtime batch property.
+            with pytest.raises(NotImplementedError, match="descriptor mutation"):
+                self.duck.set_body_type("kinematic")
+            assert self.duck.body_type == "dynamic"
+
+            # Mass: set and verify round-trip
+            new_mass = torch.full((NUM_ARENAS,), 2.5, device=self.sim.device)
+            self.duck.set_mass(new_mass)
+            assert torch.allclose(
+                self.duck.get_mass(), new_mass, atol=1e-5
+            ), f"Newton set_mass round-trip failed: {self.duck.get_mass()}"
+
+            # Friction: set and verify round-trip
+            new_friction = torch.full((NUM_ARENAS,), 0.7, device=self.sim.device)
+            self.duck.set_friction(new_friction)
+            assert torch.allclose(
+                self.duck.get_friction(), new_friction, atol=1e-5
+            ), f"Newton set_friction round-trip failed: {self.duck.get_friction()}"
+
+            # Inertia: set and verify round-trip
+            new_inertia = torch.full((NUM_ARENAS, 3), 0.3, device=self.sim.device)
+            self.duck.set_inertia(new_inertia)
+            actual_inertia = self.duck.get_inertia()
+            assert torch.allclose(
+                actual_inertia,
+                new_inertia,
+                atol=NEWTON_INERTIA_ROUND_TRIP_ATOL,
+                rtol=0.0,
+            ), (
+                "Newton set_inertia round-trip failed: "
+                f"max_abs_error={(actual_inertia - new_inertia).abs().max().item()}"
+            )
+
+            # Damping is a runtime no-op on Newton (not modelled per body) but
+            # mirrors onto metadata so get_damping stays consistent.
+            new_damping = torch.full((NUM_ARENAS, 2), 0.2, device=self.sim.device)
+            self.duck.set_damping(new_damping)
+            assert torch.allclose(
+                self.duck.get_damping(), new_damping, atol=1e-5
+            ), "Newton set_damping should mirror onto metadata for get_damping"
+
+            # Static Spawn actors do not have dynamic body ids. Their getters
+            # remain readable from source/backend metadata. Empty grouped cfgs
+            # intentionally preserve those values rather than authoring defaults.
+            assert self.table.get_mass().shape == (NUM_ARENAS,)
+            assert torch.isfinite(self.table.get_mass()).all()
+            assert self.table.get_friction().shape == (NUM_ARENAS,)
+            assert torch.isfinite(self.table.get_friction()).all()
+            assert self.table.get_damping().shape == (NUM_ARENAS, 2)
+            assert torch.isfinite(self.table.get_damping()).all()
+            assert torch.equal(
+                self.table.get_inertia(),
+                torch.zeros((NUM_ARENAS, 3), device=self.sim.device),
+            )
+            return
 
         # 3. body_type
         assert self.duck.body_type == "dynamic"
-        self.duck.set_body_type("kinematic")
-        assert self.duck.body_type == "kinematic"
-        self.duck.set_body_type("dynamic")
+        with pytest.raises(NotImplementedError, match="descriptor mutation"):
+            self.duck.set_body_type("kinematic")
         assert self.duck.body_type == "dynamic"
 
-        assert self.chair.body_type == "kinematic"
-        self.chair.set_body_type("dynamic")
-        assert self.chair.body_type == "dynamic"
-        self.chair.set_body_type("kinematic")
-        assert self.chair.body_type == "kinematic"
+        if self.chair.body_type == "kinematic":
+            with pytest.raises(NotImplementedError, match="descriptor mutation"):
+                self.chair.set_body_type("dynamic")
+            assert self.chair.body_type == "kinematic"
 
         # 4. attrs
-        new_attrs = RigidBodyAttributesCfg(mass=2.5, density=1000.0)
+        new_attrs = RigidBodyPhysicsCfg.from_dict(
+            {"mass_props": {"mass": 2.5, "density": 1000.0}}
+        )
         self.duck.set_attrs(new_attrs)
         masses = self.duck.get_mass()
         assert torch.allclose(
             masses, torch.tensor([2.5] * NUM_ARENAS, device=self.sim.device)
         ), f"Mass not set correctly: {masses.tolist()}"
 
-        partial_attrs = RigidBodyAttributesCfg(mass=3.0)
+        partial_attrs = RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 3.0}})
         self.duck.set_attrs(partial_attrs, env_ids=[0])
         masses = self.duck.get_mass()
         assert torch.allclose(
@@ -482,29 +673,62 @@ class BaseRigidObjectTest:
             self.duck.get_body_scale(), new_scale
         ), f"Body scale not set correctly"
 
-        # 6. COM pose
-        com_pose = torch.zeros((NUM_ARENAS, 7), device=self.sim.device)
-        com_pose[:, 3] = 1.0  # Unit quaternion
-        com_pose[0, :3] = torch.tensor([0.1, 0.1, 0.1], device=self.sim.device)
-
-        self.duck.set_com_pose(com_pose)
-
-        # Static object should not be able to set COM pose
-        self.table.set_com_pose(com_pose)  # Should log warning but not crash
-
+    def test_set_com_pose(self):
+        """Test setting full and partial center-of-mass poses."""
         assert self.duck.body_data is not None
         assert self.duck.body_data.default_com_pose is not None
         assert self.duck.body_data.default_com_pose.shape == (
             NUM_ARENAS,
             7,
-        ), f"Default COM pose should have shape (NUM_ARENAS, 7)"
+        ), "Default COM pose should have shape (NUM_ARENAS, 7)"
 
-        com_pose = self.duck.body_data.com_pose
-        assert isinstance(com_pose, torch.Tensor), "com_pose should be a torch.Tensor"
-        assert com_pose.shape == (
+        com_pose = _make_test_com_pose(self.sim.device)
+
+        self.duck.set_com_pose(com_pose)
+
+        actual_com_pose = self.duck.body_data.com_pose
+        assert isinstance(
+            actual_com_pose, torch.Tensor
+        ), "com_pose should be a torch.Tensor"
+        assert actual_com_pose.shape == (
             NUM_ARENAS,
             7,
-        ), f"COM pose should have shape (NUM_ARENAS, 7), got {com_pose.shape}"
+        ), f"COM pose should have shape (NUM_ARENAS, 7), got {actual_com_pose.shape}"
+        assert torch.allclose(actual_com_pose, com_pose, atol=1e-5), (
+            "COM pose did not match after full set: "
+            f"expected {com_pose.tolist()}, got {actual_com_pose.tolist()}"
+        )
+
+        partial_com_pose = torch.tensor(
+            [[0.07, -0.03, 0.04, 0.0, 0.38268343, 0.0, 0.9238795]],
+            device=self.sim.device,
+            dtype=torch.float32,
+        )
+        expected_com_pose = com_pose.clone()
+        expected_com_pose[1] = partial_com_pose[0]
+
+        self.duck.set_com_pose(partial_com_pose, env_ids=[1])
+
+        actual_com_pose = self.duck.body_data.com_pose
+        assert torch.allclose(actual_com_pose, expected_com_pose, atol=1e-5), (
+            "COM pose did not preserve untouched envs after partial set: "
+            f"expected {expected_com_pose.tolist()}, got {actual_com_pose.tolist()}"
+        )
+
+        assert self.chair.body_data is not None
+        chair_com_pose_before = self.chair.body_data.com_pose.clone()
+        self.chair.set_com_pose(com_pose)
+        if self.chair.body_type == "kinematic":
+            assert torch.allclose(
+                self.chair.body_data.com_pose, chair_com_pose_before, atol=1e-5
+            ), "Kinematic rigid object COM pose should not change"
+        else:
+            assert torch.allclose(
+                self.chair.body_data.com_pose, com_pose, atol=1e-5
+            ), "Dynamic rigid object COM pose should change"
+
+        # Static object should not be able to set COM pose.
+        self.table.set_com_pose(com_pose)
 
     def test_misc_properties(self):
         """Test miscellaneous properties like collision filter, vertices, and visual materials."""
@@ -579,6 +803,291 @@ class BaseRigidObjectTest:
                 1.0,
             ], f"Material {i} base color incorrect"
 
+    def test_geometry_data(self):
+        """Test mesh-level read APIs: get_triangles and scaled get_vertices.
+
+        Covers:
+        - ``get_triangles`` — shape ``(N, num_tris, 3)``, int32, partial env_ids.
+        - ``get_vertices(scale=True)`` — scaled vertices differ from unscaled.
+        """
+        # --- get_triangles (full) ---
+        triangles = self.duck.get_triangles()
+        assert isinstance(
+            triangles, torch.Tensor
+        ), "get_triangles should return a torch.Tensor"
+        assert triangles.ndim == 3, "Triangles tensor should be 3-D (N, num_tris, 3)"
+        assert (
+            triangles.shape[0] == NUM_ARENAS
+        ), f"First dim should be {NUM_ARENAS}, got {triangles.shape[0]}"
+        assert triangles.shape[2] == 3, "Last dim should be 3 (vertex indices)"
+        assert (
+            triangles.dtype == torch.int32
+        ), f"Triangles dtype should be int32, got {triangles.dtype}"
+
+        # --- get_triangles (partial) ---
+        partial_tris = self.duck.get_triangles(env_ids=[0])
+        assert (
+            partial_tris.shape[0] == 1
+        ), "Partial get_triangles should return 1 instance"
+
+        # --- get_vertices(scale=True) ---
+        new_scale = torch.full(
+            (NUM_ARENAS, 3), 2.0, device=self.sim.device, dtype=torch.float32
+        )
+        self.duck.set_body_scale(new_scale)
+
+        verts_raw = self.duck.get_vertices()
+        verts_scaled = self.duck.get_vertices(scale=True)
+        assert torch.allclose(
+            verts_scaled, verts_raw * 2.0, atol=1e-5
+        ), "Scaled vertices should be 2x the raw vertices"
+
+    def test_enable_collision(self):
+        """Test enable_collision toggle for individual arenas.
+
+        Covers:
+        - ``enable_collision`` with ``enable=False`` (per-instance mask).
+        - ``enable_collision`` with ``enable=True`` (restore).
+        - partial ``env_ids`` subset.
+        """
+        # Disable collision for all arenas and re-enable — no exception should be raised.
+        disable = torch.zeros(NUM_ARENAS, dtype=torch.bool, device=self.sim.device)
+        self.duck.enable_collision(disable)
+
+        enable = torch.ones(NUM_ARENAS, dtype=torch.bool, device=self.sim.device)
+        self.duck.enable_collision(enable)
+
+        # Partial: disable only env 0.
+        partial_disable = torch.zeros(1, dtype=torch.bool, device=self.sim.device)
+        self.duck.enable_collision(partial_disable, env_ids=[0])
+
+        # Restore env 0.
+        partial_enable = torch.ones(1, dtype=torch.bool, device=self.sim.device)
+        self.duck.enable_collision(partial_enable, env_ids=[0])
+
+    def test_reset(self):
+        """Test reset() restores initial pose and clears dynamics.
+
+        Covers:
+        - ``reset()`` — all envs returned to ``cfg.init_pos`` (default origin).
+        - Velocities cleared to zero after reset.
+        - Partial ``env_ids`` reset: only the specified instance is restored.
+        """
+        # Move duck far from origin and give it velocity.
+        pose_far = (
+            torch.eye(4, device=self.sim.device).unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        )
+        pose_far[:, 2, 3] = 5.0
+        self.duck.set_local_pose(pose_far)
+
+        lin_vel = (
+            torch.tensor([3.0, 0.0, 0.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        self.duck.set_velocity(lin_vel=lin_vel)
+
+        # Full reset.
+        self.duck.reset()
+
+        pos_after = self.duck.get_local_pose()[:, :3]
+        origin = torch.zeros(NUM_ARENAS, 3, device=self.sim.device)
+        assert torch.allclose(
+            pos_after, origin, atol=1e-4
+        ), f"Duck should be at origin after reset, got {pos_after.tolist()}"
+
+        # Velocities should be zero after reset.
+        assert self.duck.body_data is not None
+        lin_vel_after = self.duck.body_data.lin_vel
+        assert torch.allclose(
+            lin_vel_after, torch.zeros_like(lin_vel_after), atol=1e-5
+        ), f"Linear velocity should be zero after reset, got {lin_vel_after.tolist()}"
+
+        # --- Partial reset: move duck again, reset only env 0 ---
+        self.duck.set_local_pose(pose_far)
+        self.duck.reset(env_ids=[0])
+
+        pos_partial = self.duck.get_local_pose()[:, :3]
+        assert torch.allclose(
+            pos_partial[0], origin[0], atol=1e-4
+        ), f"Env 0 should be at origin after partial reset, got {pos_partial[0].tolist()}"
+        # Env 1 was not reset — it should still be displaced.
+        assert (
+            pos_partial[1, 2].item() > 1.0
+        ), f"Env 1 should remain displaced after partial reset, got z={pos_partial[1, 2].item()}"
+
+    def test_reset_restores_default_physical_properties(self):
+        """Test full and partial reset restore mass, inertia, and COM defaults."""
+        assert self.duck.body_data is not None
+        data = self.duck.body_data
+        default_mass = data.default_mass.clone()
+        default_inertia = data.default_inertia.clone()
+        default_com_pose = data.default_com_pose.clone()
+
+        changed_mass = default_mass + 0.5
+        changed_inertia = default_inertia + 0.1
+        changed_com_pose = default_com_pose.clone()
+        changed_com_pose[:, :3] += 0.05
+        self.duck.set_mass(changed_mass)
+        self.duck.set_inertia(changed_inertia)
+        self.duck.set_com_pose(changed_com_pose)
+
+        self.duck.reset(env_ids=[0])
+
+        mass_after_partial = self.duck.get_mass()
+        inertia_after_partial = self.duck.get_inertia()
+        com_after_partial = data.com_pose
+        inertia_atol = (
+            NEWTON_INERTIA_ROUND_TRIP_ATOL if self.physics == "newton" else 1e-5
+        )
+        assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
+        assert torch.allclose(
+            inertia_after_partial[0],
+            default_inertia[0],
+            atol=inertia_atol,
+            rtol=0.0,
+        )
+        assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
+        assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
+        assert torch.allclose(
+            inertia_after_partial[1],
+            changed_inertia[1],
+            atol=inertia_atol,
+            rtol=0.0,
+        )
+        assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
+
+        self.duck.reset()
+
+        assert torch.allclose(self.duck.get_mass(), default_mass, atol=1e-5)
+        assert torch.allclose(
+            self.duck.get_inertia(),
+            default_inertia,
+            atol=inertia_atol,
+            rtol=0.0,
+        )
+        assert torch.allclose(data.com_pose, default_com_pose, atol=1e-5)
+
+    def test_local_pose_matrix(self):
+        """Test ``get_local_pose(to_matrix=True)`` returns correct shape and values.
+
+        Covers:
+        - Shape ``(N, 4, 4)`` output.
+        - Rotation and translation columns are consistent with the 7-vec form.
+        - Partial ``env_ids``.
+        """
+        pose_7 = torch.eye(4, device=self.sim.device)
+        pose_7[0, 3] = 1.0
+        pose_7[1, 3] = 2.0
+        pose_7[2, 3] = 3.0
+        expected_xyzw = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.sim.device
+        ) / torch.sqrt(torch.tensor(30.0, device=self.sim.device))
+        pose_7[:3, :3] = matrix_from_quat(expected_xyzw.unsqueeze(0))[0]
+        pose_mat_input = pose_7.unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        self.duck.set_local_pose(pose_mat_input)
+
+        # 7-vec form
+        pose_vec = self.duck.get_local_pose(to_matrix=False)
+        assert pose_vec.shape == (
+            NUM_ARENAS,
+            7,
+        ), f"7-vec pose shape should be ({NUM_ARENAS}, 7), got {pose_vec.shape}"
+        torch.testing.assert_close(
+            pose_vec[:, 3:7],
+            expected_xyzw.unsqueeze(0).expand(NUM_ARENAS, -1),
+            atol=1e-5,
+            rtol=1e-5,
+        )
+
+        # Matrix form
+        pose_mat = self.duck.get_local_pose(to_matrix=True)
+        assert pose_mat.shape == (
+            NUM_ARENAS,
+            4,
+            4,
+        ), f"Matrix pose shape should be ({NUM_ARENAS}, 4, 4), got {pose_mat.shape}"
+
+        # Translation columns must match.
+        assert torch.allclose(
+            pose_mat[:, :3, 3], pose_vec[:, :3], atol=1e-5
+        ), "Matrix translation column should match 7-vec xyz"
+
+        # Last row must be [0, 0, 0, 1].
+        last_row = (
+            torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        assert torch.allclose(
+            pose_mat[:, 3, :], last_row, atol=1e-5
+        ), "Last row of pose matrix should be [0, 0, 0, 1]"
+
+        # Rotation matrix must be orthogonal (R @ R.T ≈ I).
+        R = pose_mat[:, :3, :3]
+        eye = torch.eye(3, device=self.sim.device).unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        assert torch.allclose(
+            torch.bmm(R, R.transpose(1, 2)), eye, atol=1e-5
+        ), "Rotation sub-matrix should be orthogonal"
+
+        # Partial env_ids.
+        pose_mat_partial = self.duck.get_local_pose(to_matrix=True)
+        assert pose_mat_partial.shape[0] == NUM_ARENAS
+
+    def test_body_data_vel_clear(self):
+        """Test ``body_data.vel``, partial ``clear_dynamics``, and verify dynamics reset.
+
+        Covers:
+        - ``body_data.vel`` — shape ``(N, 6)`` concatenated lin+ang vel.
+        - ``clear_dynamics()`` — verifies all velocities become zero (not just called).
+        - ``clear_dynamics(env_ids=[0])`` — partial clear; only env 0 is zeroed.
+        """
+        assert self.duck.body_data is not None
+
+        lin_vel = (
+            torch.tensor([2.0, 0.0, 0.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        ang_vel = (
+            torch.tensor([0.0, 3.0, 0.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        self.duck.set_velocity(lin_vel=lin_vel, ang_vel=ang_vel)
+
+        # --- body_data.vel ---
+        vel = self.duck.body_data.vel
+        assert vel.shape == (
+            NUM_ARENAS,
+            6,
+        ), f"vel shape should be ({NUM_ARENAS}, 6), got {vel.shape}"
+        assert torch.allclose(
+            vel[:, :3], lin_vel, atol=1e-5
+        ), f"First 3 columns of vel should match lin_vel"
+        assert torch.allclose(
+            vel[:, 3:], ang_vel, atol=1e-5
+        ), f"Last 3 columns of vel should match ang_vel"
+
+        # --- clear_dynamics() full — verify velocities go to zero ---
+        self.duck.clear_dynamics()
+        vel_after_clear = self.duck.body_data.vel
+        assert torch.allclose(
+            vel_after_clear, torch.zeros_like(vel_after_clear), atol=1e-5
+        ), f"Velocities should be zero after clear_dynamics, got {vel_after_clear.tolist()}"
+
+        # --- clear_dynamics(env_ids=[0]) partial ---
+        # Give env 1 non-zero velocity again.
+        self.duck.set_velocity(lin_vel=lin_vel, ang_vel=ang_vel)
+        self.duck.clear_dynamics(env_ids=[0])
+        vel_partial = self.duck.body_data.vel
+        assert torch.allclose(
+            vel_partial[0], torch.zeros(6, device=self.sim.device), atol=1e-5
+        ), f"Env 0 should be zeroed after partial clear_dynamics, got {vel_partial[0].tolist()}"
+        assert not torch.allclose(
+            vel_partial[1], torch.zeros(6, device=self.sim.device), atol=1e-5
+        ), "Env 1 should still have non-zero velocity after partial clear_dynamics"
+
     def test_multi_mesh_geometry_is_combined(self):
         """GLB render meshes are exported as one complete indexed geometry."""
         render_body = self.chair._entities[0].get_render_body()
@@ -619,6 +1128,155 @@ class TestRigidObjectCPU(BaseRigidObjectTest):
 class TestRigidObjectCUDA(BaseRigidObjectTest):
     def setup_method(self):
         self.setup_simulation("cuda")
+
+    def test_kinematic_binding_supports_pose_updates(self):
+        obj = self.sim.add_rigid_object(
+            cfg=RigidObjectCfg(
+                uid="gpu_kinematic",
+                shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+                body_type="kinematic",
+            )
+        )
+        assert obj.body_data is not None
+
+        pose = torch.eye(4, device=self.sim.device).repeat(NUM_ARENAS, 1, 1)
+        pose[:, :3, 3] = torch.tensor([0.2, -0.1, 0.5], device=self.sim.device)
+        obj.set_local_pose(pose)
+        self.sim.update(0.01)
+
+        assert torch.allclose(obj.get_local_pose(to_matrix=True), pose, atol=1e-5)
+
+
+class TestRigidObjectNewton(BaseRigidObjectTest):
+    """Full rigid-object coverage on the DexSim Newton physics backend."""
+
+    def setup_method(self):
+        self.setup_simulation("cuda", physics="newton")
+
+    def teardown_method(self):
+        super().teardown_method()
+        _teardown_newton_physics()
+
+    def test_physical_attributes(self):
+        """Newton getters and setters for mass, friction, inertia work via batch API."""
+        super().test_physical_attributes()
+
+    def test_newton_native_attrs_desc_native_spawn(self):
+        """Typed Newton attributes register through the public Spawn result.
+
+        Newton-native contact/shape parameters are consumed by the descriptor
+        adapter without an independently owned manager or legacy patch path.
+        """
+        duck_path = get_data_path(DUCK_PATH)
+        cfg = RigidObjectCfg(
+            uid="duck_newton_native",
+            shape=MeshCfg(fpath=duck_path),
+            body_type="dynamic",
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=1.0),
+                collision_props=NewtonCollisionPropertiesCfg(margin=0.01),
+                material_props=NewtonRigidBodyMaterialCfg(
+                    dynamic_friction=0.5,
+                    restitution=0.1,
+                    ke=1e3,
+                    kd=50.0,
+                ),
+            ),
+        )
+        obj: RigidObject = self.sim.add_rigid_object(cfg=cfg)
+        self.sim.prepare()
+
+        assert obj.num_instances == NUM_ARENAS
+        assert obj.body_type == "dynamic"
+        result = self.sim.spawn_result
+        handles = [
+            result.get_object(f"{arena_name}/{obj.uid}")
+            for arena_name in result.arenas.names[1:]
+        ]
+        assert len(result.create_rigid_body_batch(handles)) == NUM_ARENAS
+        assert all(handle.is_valid for handle in handles)
+        assert all(
+            handle.desc is not None and handle.desc.physics is not None
+            for handle in handles
+        )
+        # Common fields round-trip via the batch view (mass applied live).
+        assert torch.allclose(
+            obj.get_mass(),
+            torch.full((NUM_ARENAS,), 1.0, device=self.sim.device),
+            atol=1e-5,
+        )
+
+    @pytest.mark.skip(
+        reason="TODO: DexSim Newton SDF rigidbody path is not validated in EmbodiChain yet."
+    )
+    def test_add_sdf_mesh(self):
+        super().test_add_sdf_mesh()
+
+
+@pytest.mark.gpu
+class TestRigidObjectNewtonMujoco:
+    """Focused standalone-rigid state synchronization on MuJoCo-Warp."""
+
+    def setup_method(self):
+        physics_cfg = physics_cfg_for_backend("newton")
+        physics_cfg.gravity = (0.0, 0.0, 0.0)
+        physics_cfg.solver_cfg = {"solver_type": "mujoco_warp"}
+        self.sim = SimulationManager(
+            SimulationManagerCfg(
+                headless=True,
+                device="cuda",
+                num_envs=1,
+                physics_cfg=physics_cfg,
+            )
+        )
+        self.obj = self.sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="free_body",
+                shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+                attrs=RigidBodyPhysicsCfg(
+                    mass_props=MassPropertiesCfg(mass=1.0),
+                ),
+                init_pos=(0.0, 0.0, Z_TRANSLATION),
+            )
+        )
+        self.sim.prepare()
+
+    def teardown_method(self):
+        self.sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+        _teardown_newton_physics()
+
+    def test_clear_dynamics_persists_across_mujoco_step(self):
+        """Clearing body velocity also clears its reduced FREE-joint velocity."""
+        linear_velocity = torch.tensor(
+            [[0.4, -0.2, 0.3]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        angular_velocity = torch.tensor(
+            [[0.1, 0.2, -0.3]],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        self.obj.set_velocity(
+            lin_vel=linear_velocity,
+            ang_vel=angular_velocity,
+        )
+        self.sim.update(step=1)
+        assert not torch.allclose(
+            self.obj.body_data.vel,
+            torch.zeros((1, 6), device=self.sim.device),
+        )
+
+        self.obj.clear_dynamics()
+        self.sim.update(step=1)
+
+        torch.testing.assert_close(
+            self.obj.body_data.vel,
+            torch.zeros((1, 6), device=self.sim.device),
+            atol=1.0e-5,
+            rtol=0.0,
+        )
 
 
 if __name__ == "__main__":

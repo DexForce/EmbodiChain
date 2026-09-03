@@ -29,6 +29,7 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
@@ -55,8 +56,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -84,7 +86,8 @@ def main():
                 dt=0.1,
             )
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"Joint[1-6]": 1e4},
             damping={"Joint[1-6]": 1e3},
         ),
@@ -97,6 +100,8 @@ def main():
         dtype=torch.float32,
         device="cpu",
     )
+
+    sim.prepare()
     joint_ids = robot.get_joint_ids("arm")
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids)
 

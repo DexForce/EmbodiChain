@@ -66,7 +66,7 @@ sim_cfg = SimulationManagerCfg(
     width=1920,
     height=1080,
     physics_dt=1.0 / 100.0,
-    sim_device="cpu",
+    device="cpu",
 )
 
 sim = SimulationManager(sim_cfg)
@@ -92,7 +92,7 @@ robot_cfg = RobotCfg(
             dt=0.1,
         )
     },
-    drive_pros=JointDrivePropertiesCfg(
+    joint_drive_props=JointDrivePropertiesCfg(
         stiffness={"Joint[1-6]": 1e4},
         damping={"Joint[1-6]": 1e3},
     ),

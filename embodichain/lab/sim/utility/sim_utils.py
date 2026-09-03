@@ -14,20 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
+import warnings as _warnings
+
 import dexsim
 import open3d as o3d
 
-from dataclasses import MISSING
-from typing import List, Union
+from typing import TYPE_CHECKING, List, Union
 
 from dexsim.types import (
+    CloneStrategy,
     DriveType,
     ArticulationFlag,
     LoadOption,
+    ObjectCloneOptions,
     RigidBodyShape,
     SDFConfig,
-    PhysicalAttr,
 )
 from dexsim.engine import Articulation
 from dexsim.environment import Env, Arena
@@ -35,16 +39,29 @@ from dexsim.models import MeshObject
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     LinkPhysicsOverrideCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
     SoftObjectCfg,
     ClothObjectCfg,
 )
 from embodichain.utils.string import resolve_matching_names
-from embodichain.lab.sim.shapes import MeshCfg, CubeCfg, SphereCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
 from embodichain.utils import logger
 from dexsim.kit.meshproc import get_mesh_auto_uv
 import numpy as np
+
+if TYPE_CHECKING:
+    from dexsim.scene import SpawnedArticulation
+
+
+def _is_newton_backend_active() -> bool:
+    """Return whether the current default world uses the Newton physics scene."""
+    from embodichain.lab.sim.sim_manager import get_physics_scene
+    from embodichain.lab.sim.objects.backends import is_newton_scene
+
+    return is_newton_scene(get_physics_scene())
 
 
 def get_dexsim_arenas() -> List[dexsim.environment.Arena]:
@@ -77,33 +94,9 @@ def get_dexsim_arena_num() -> int:
 
 def _resolve_mesh_collision_params(
     cfg: RigidObjectCfg,
-) -> tuple[int, str, int]:
-    """Resolve legacy and shape-level mesh collision parameters."""
-
-    def is_missing(value) -> bool:
-        # deepcopy() can produce a distinct instance of dataclasses.MISSING.
-        return value is MISSING or isinstance(value, type(MISSING))
-
-    max_convex_hull_num = next(
-        value
-        for value in (
-            cfg.max_convex_hull_num,
-            cfg.shape.max_convex_hull_num,
-            1,
-        )
-        if not is_missing(value)
-    )
-    acd_method = next(
-        value
-        for value in (cfg.acd_method, cfg.shape.acd_method, "coacd")
-        if not is_missing(value)
-    )
-    sdf_resolution = next(
-        value
-        for value in (cfg.sdf_resolution, cfg.shape.sdf_resolution, 0)
-        if not is_missing(value)
-    )
-    return max_convex_hull_num, acd_method, sdf_resolution
+) -> MeshCollisionCfg:
+    """Resolve mesh collision parameters from the shape configuration."""
+    return cfg.shape.collision or MeshCollisionCfg()
 
 
 def get_dexsim_drive_type(drive_type: str) -> DriveType:
@@ -160,67 +153,276 @@ def _apply_link_physics_overrides(
         group_cfg = link_to_group.get(name)
         if group_cfg is None:
             continue
-        physical_attr = group_cfg.attrs.merge_with(cfg.attrs)
-        replace_inertial = group_cfg.replace_inertial or (
-            group_cfg.attrs.mass is not None
+        base_attr = cfg.attrs.to_dexsim_physical_attr()
+        physical_attr = group_cfg.attrs.to_dexsim_physical_attr(base=base_attr)
+        mass_props = group_cfg.attrs.mass_props
+        recompute_inertia = bool(
+            mass_props is not None and mass_props.recompute_inertia
         )
-        art.set_physical_attr(physical_attr, name, is_replace_inertial=replace_inertial)
+        art.set_physical_attr(
+            physical_attr,
+            name,
+            is_replace_inertial=recompute_inertia,
+        )
 
 
-def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) -> None:
-    """Set articulation configuration for a list of dexsim articulations.
+def _warn_legacy_articulation_api(name: str) -> None:
+    _warnings.warn(
+        f"{name}() bypasses the Spawn ownership/configuration path and is "
+        "deprecated; declare the articulation through SimulationManager instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _default_articulation_clone_options() -> ObjectCloneOptions:
+    options = ObjectCloneOptions()
+    options.render.material = CloneStrategy.DEEP_COPY
+    return options
+
+
+def default_articulation_clone_options() -> ObjectCloneOptions:
+    """Return legacy articulation clone options.
+
+    Deprecated: new scene code must use the Spawn declaration path.
+    """
+    _warn_legacy_articulation_api("default_articulation_clone_options")
+    return _default_articulation_clone_options()
+
+
+def default_rigid_object_clone_options() -> ObjectCloneOptions:
+    """Return clone options used when duplicating rigid actors across arenas."""
+    options = ObjectCloneOptions()
+    options.render.material = CloneStrategy.DEEP_COPY
+    return options
+
+
+def _clone_actor_between_arenas(
+    source_arena: Arena | Env,
+    source_name: str,
+    target_arena: Arena | Env,
+    target_name: str,
+    clone_options: ObjectCloneOptions,
+) -> MeshObject:
+    """Clone a mesh actor from one arena/env to another."""
+    return source_arena.clone_actor_to(
+        source_name, target_arena, target_name, clone_options
+    )
+
+
+def _clone_articulation_between_arenas(
+    source_arena: Arena | Env,
+    source_name: str,
+    target_arena: Arena | Env,
+    target_name: str,
+    clone_options: ObjectCloneOptions,
+) -> Articulation:
+    """Clone an articulation from one arena/env to another."""
+    if _is_newton_backend_active():
+        return source_arena.clone_skeleton_to(
+            source_name, target_arena, target_name, clone_options
+        )
+    return source_arena.clone_articulation_to(
+        source_name, target_arena, target_name, clone_options
+    )
+
+
+def spawn_articulation_entities(
+    cfg: ArticulationCfg,
+    env_list: list[Arena | Env],
+    *,
+    clone_options: ObjectCloneOptions | None = None,
+) -> list[Articulation]:
+    """Load one articulation prototype and clone it into additional arenas.
+
+    DexSim configuration is applied once on the prototype before cloning.
+
+    Deprecated: use ``SimulationManager.add_articulation()`` or
+    ``SimulationManager.add_robot()``.
+    """
+    _warn_legacy_articulation_api("spawn_articulation_entities")
+    if cfg.uid is None:
+        logger.log_error("Articulation uid must be set before spawning entities.")
+
+    if clone_options is None:
+        clone_options = _default_articulation_clone_options()
+
+    source_env = env_list[0]
+    prototype_name = f"{cfg.uid}_0"
+    prototype = source_env.load_urdf(cfg.fpath)
+    prototype.set_name(prototype_name)
+
+    if cfg.resolve_asset_physics_mode() == "overlay":
+        _set_dexsim_articulation_cfg(prototype, cfg)
+
+    entities = [prototype]
+    for env_idx in range(1, len(env_list)):
+        target_name = f"{cfg.uid}_{env_idx}"
+        clone = _clone_articulation_between_arenas(
+            source_env,
+            prototype_name,
+            env_list[env_idx],
+            target_name,
+            clone_options,
+        )
+        if clone is None:
+            logger.log_error(
+                f"Failed to clone articulation '{prototype_name}' into env {env_idx}."
+            )
+        entities.append(clone)
+    return entities
+
+
+def _find_single_articulation_in_usd_import(results: dict, fpath: str) -> Articulation:
+    """Return the sole articulation imported from a USD file."""
+    articulations_found = [
+        value for value in results.values() if isinstance(value, Articulation)
+    ]
+    if len(articulations_found) == 0:
+        logger.log_error(f"No articulation found in USD file {fpath}.")
+    if len(articulations_found) > 1:
+        logger.log_error(f"Multiple articulations found in USD file {fpath}.")
+    return articulations_found[0]
+
+
+def spawn_usd_articulation_entities(
+    cfg: ArticulationCfg,
+    env_list: list[Arena | Env],
+    *,
+    cache_dir: str | None = None,
+    clone_options: ObjectCloneOptions | None = None,
+) -> list[Articulation]:
+    """Import one USD articulation prototype and clone it into additional arenas.
+
+    Deprecated: use ``SimulationManager.add_articulation()`` or
+    ``SimulationManager.add_robot()``.
+    """
+    _warn_legacy_articulation_api("spawn_usd_articulation_entities")
+    if cfg.uid is None:
+        logger.log_error("Articulation uid must be set before spawning entities.")
+    if len(env_list) == 0:
+        return []
+
+    if clone_options is None:
+        clone_options = _default_articulation_clone_options()
+
+    source_env = env_list[0]
+    prototype_name = f"{cfg.uid}_0"
+    results = source_env.import_from_usd_file(
+        cfg.fpath, return_object=True, cache_dir=cache_dir
+    )
+    prototype = _find_single_articulation_in_usd_import(results, cfg.fpath)
+    prototype.set_name(prototype_name)
+
+    if cfg.resolve_asset_physics_mode() == "overlay":
+        _set_dexsim_articulation_cfg(prototype, cfg)
+
+    entities = [prototype]
+    for env_idx in range(1, len(env_list)):
+        target_name = f"{cfg.uid}_{env_idx}"
+        clone = _clone_articulation_between_arenas(
+            source_env,
+            prototype_name,
+            env_list[env_idx],
+            target_name,
+            clone_options,
+        )
+        if clone is None:
+            logger.log_error(
+                f"Failed to clone articulation '{prototype_name}' into env {env_idx}."
+            )
+        entities.append(clone)
+    return entities
+
+
+def set_dexsim_articulation_cfg(
+    art: Articulation | SpawnedArticulation,
+    cfg: ArticulationCfg,
+) -> None:
+    """Apply cfg through the deprecated raw DexSim articulation path.
 
     Args:
-        arts (List[Articulation]): List of dexsim articulations to configure.
-        cfg (ArticulationCfg): Configuration object containing articulation settings.
+        art: DexSim articulation (or Newton skeleton carrier) to configure.
+        cfg: EmbodiChain articulation configuration.
     """
+    _warn_legacy_articulation_api("set_dexsim_articulation_cfg")
+    _set_dexsim_articulation_cfg(art, cfg)
 
-    def get_drive_type(drive_pros):
-        if isinstance(drive_pros, dict):
-            return drive_pros.get("drive_type", None)
-        return getattr(drive_pros, "drive_type", None)
 
-    drive_pros = getattr(cfg, "drive_pros", None)
-    drive_type = get_drive_type(drive_pros) if drive_pros is not None else None
+def _set_dexsim_articulation_cfg(
+    art: Articulation | SpawnedArticulation,
+    cfg: ArticulationCfg,
+) -> None:
+    """Implement the retained legacy path for compatibility wrappers."""
 
-    if drive_type == "force":
-        drive_type = DriveType.FORCE
-    elif drive_type == "acceleration":
-        drive_type = DriveType.ACCELERATION
-    elif drive_type == "none":
-        drive_type = DriveType.NONE
-    else:
-        logger.log_error(f"Unknow drive type {drive_type}")
-
-    for i, art in enumerate(arts):
+    is_newton_art = hasattr(art, "dexsim_meta_links")
+    if is_newton_art:
+        raise TypeError(
+            "The deprecated raw articulation configuration path is "
+            "Default-backend-only. Declare the asset through SimulationManager "
+            "and use grouped RigidBodyPhysicsCfg properties for Newton."
+        )
+    lifecycle_state = getattr(getattr(art, "_mgr", None), "_lifecycle_state", None)
+    lifecycle_name = getattr(lifecycle_state, "name", "")
+    if lifecycle_name == "BUILDER" or not is_newton_art:
         art.set_body_scale(cfg.body_scale)
-        art.set_physical_attr(cfg.attrs.attr())
-        link_names = art.get_link_names()
-        _apply_link_physics_overrides(art, cfg, link_names)
-        art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
-        art.set_articulation_flag(
-            ArticulationFlag.DISABLE_SELF_COLLISION, cfg.disable_self_collision
+
+    link_names = art.get_link_names()
+    physical_attr = cfg.attrs.to_dexsim_physical_attr()
+    art.set_physical_attr(physical_attr)
+    _apply_link_physics_overrides(art, cfg, link_names)
+    root_props = cfg.root_props
+    fixed_base = True if root_props.fixed_base is None else bool(root_props.fixed_base)
+    self_collision_enabled = (
+        False
+        if root_props.self_collision_enabled is None
+        else bool(root_props.self_collision_enabled)
+    )
+    art.set_articulation_flag(ArticulationFlag.FIX_BASE, fixed_base)
+    art.set_articulation_flag(
+        ArticulationFlag.DISABLE_SELF_COLLISION, not self_collision_enabled
+    )
+    _apply_default_articulation_root_properties(art, root_props)
+
+    for name in link_names:
+        if not hasattr(art, "get_physical_body"):
+            continue
+        physical_body = art.get_physical_body(name)
+        inertia = physical_body.get_mass_space_inertia_tensor()
+        inertia = np.maximum(inertia, 1e-4)
+        physical_body.set_mass_space_inertia_tensor(inertia)
+
+        if cfg.compute_uv:
+            render_body = art.get_render_body(name)
+            if render_body:
+                render_body.set_projective_uv()
+
+            # TODO: will crash when exit if not explicitly delete.
+            # This may due to the destruction of render body order when exiting.
+            del render_body
+
+
+def _apply_default_articulation_root_properties(
+    art: Articulation,
+    props: ArticulationRootPropertiesCfg,
+) -> None:
+    """Apply explicitly configured Default-native articulation-root values."""
+    if props.sleep_threshold is not None:
+        art.set_sleep_threshold(float(props.sleep_threshold))
+
+    position_iters = props.min_position_iters
+    velocity_iters = props.min_velocity_iters
+    if (position_iters is None) != (velocity_iters is None):
+        raise ValueError(
+            "Articulation-root min_position_iters and min_velocity_iters "
+            "must be configured together."
         )
+    if position_iters is not None:
+        assert velocity_iters is not None
         art.set_solver_iteration_counts(
-            min_position_iters=cfg.min_position_iters,
-            min_velocity_iters=cfg.min_velocity_iters,
+            min_position_iters=int(position_iters),
+            min_velocity_iters=int(velocity_iters),
         )
-
-        # TODO: We should change this part after improving spawning of articulation.
-        for name in link_names:
-            physical_body = art.get_physical_body(name)
-            inertia = physical_body.get_mass_space_inertia_tensor()
-            inertia = np.maximum(inertia, 1e-4)
-            physical_body.set_mass_space_inertia_tensor(inertia)
-
-            if i == 0 and cfg.compute_uv:
-                render_body = art.get_render_body(name)
-                if render_body:
-                    render_body.set_projective_uv()
-
-                # TODO: will crash when exit if not explicitly delete.
-                # This may due to the destruction of render body order when exiting.
-                del render_body
 
 
 def is_rt_enabled() -> bool:
@@ -284,6 +486,260 @@ def create_sphere(
     return spheres
 
 
+def _mesh_load_option_from_cfg(cfg: RigidObjectCfg) -> LoadOption:
+    """Build DexSim mesh load options from a rigid-object configuration."""
+    option = LoadOption()
+    option.rebuild_normals = cfg.shape.load_option.rebuild_normals
+    option.rebuild_tangent = cfg.shape.load_option.rebuild_tangent
+    option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
+    option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
+    option.smooth = cfg.shape.load_option.smooth
+    return option
+
+
+def _apply_mesh_uv_mapping(obj: MeshObject, cfg: RigidObjectCfg) -> None:
+    """Compute and apply UV mapping for a mesh rigid-object prototype."""
+    if not cfg.shape.compute_uv:
+        return
+
+    vertices = obj.get_vertices()
+    triangles = obj.get_triangles()
+    o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
+    _, uvs = get_mesh_auto_uv(o3d_mesh, np.array(cfg.shape.project_direction))
+    obj.set_uv_mapping(uvs)
+
+
+def _configure_primitive_rigidbody(
+    obj: MeshObject,
+    cfg: RigidObjectCfg,
+    body_type,
+    *,
+    is_newton_backend: bool,
+    shape_type: RigidBodyShape,
+) -> None:
+    """Attach primitive rigid-body physics to a cube or sphere prototype."""
+    if is_newton_backend:
+        raise TypeError(
+            "The deprecated raw rigid-object initialization path is "
+            "Default-backend-only. Use SimulationManager with grouped "
+            "RigidBodyPhysicsCfg properties for Newton."
+        )
+    obj.set_body_scale(*cfg.body_scale)
+    obj.add_rigidbody(
+        body_type,
+        shape_type,
+        cfg.attrs.to_dexsim_physical_attr(),
+    )
+
+
+def _import_usd_rigid_prototype(
+    env: Arena | Env,
+    fpath: str,
+    prototype_name: str,
+) -> MeshObject:
+    """Import a single rigid mesh actor from USD as the spawn prototype."""
+    results = env.import_from_usd_file(fpath, return_object=True)
+    rigidbodys_found = [
+        value for value in results.values() if isinstance(value, MeshObject)
+    ]
+    if len(rigidbodys_found) == 0:
+        logger.log_error(f"No rigid body found in USD file: {fpath}")
+    if len(rigidbodys_found) > 1:
+        logger.log_error(f"Multiple rigid bodies found in USD file: {fpath}.")
+    prototype = rigidbodys_found[0]
+    prototype.set_name(prototype_name)
+    return prototype
+
+
+def _load_rigid_mesh_prototype(
+    env: Arena | Env,
+    cfg: RigidObjectCfg,
+    *,
+    cache_dir: str | None,
+    body_type,
+    is_newton_backend: bool,
+) -> MeshObject:
+    """Load and configure one mesh rigid-object prototype in the source arena."""
+    if is_newton_backend:
+        raise TypeError(
+            "The deprecated raw rigid-object initialization path is "
+            "Default-backend-only. Use SimulationManager with grouped "
+            "RigidBodyPhysicsCfg properties for Newton."
+        )
+    option = _mesh_load_option_from_cfg(cfg)
+    fpath = cfg.shape.fpath
+    collision_cfg = _resolve_mesh_collision_params(cfg)
+
+    if collision_cfg.approximation == "convex_decomposition":
+        obj = env.load_actor_with_acd(
+            fpath,
+            duplicate=True,
+            attach_scene=True,
+            option=option,
+            cache_path=cache_dir,
+            actor_type=body_type,
+            max_convex_hull_num=collision_cfg.max_hulls,
+            method=collision_cfg.acd_method or "coacd",
+        )
+    elif collision_cfg.approximation == "sdf":
+        if collision_cfg.sdf_resolution is None:
+            raise ValueError(
+                "The deprecated raw Default path requires sdf_resolution for "
+                "MeshCollisionCfg(approximation='sdf')."
+            )
+        if cfg.body_scale not in [
+            (1.0, 1.0, 1.0),
+            [1.0, 1.0, 1.0],
+        ]:
+            logger.log_error(
+                f"Non-unit body scale {cfg.body_scale} is not supported for SDF "
+                "collision yet. Please set body_scale to (1.0, 1.0, 1.0) for SDF "
+                "collision."
+            )
+        obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
+        sdf_cfg = SDFConfig(resolution=collision_cfg.sdf_resolution)
+        obj.add_physical_body(
+            body_type,
+            RigidBodyShape.SDF,
+            config=sdf_cfg,
+            attr=cfg.attrs.to_dexsim_physical_attr(),
+        )
+    else:
+        if collision_cfg.approximation == "triangle_mesh" and cfg.body_type != "static":
+            raise ValueError(
+                "triangle_mesh collision is supported only for static rigid objects."
+            )
+        obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
+        shape_type = (
+            RigidBodyShape.MESH
+            if collision_cfg.approximation == "triangle_mesh"
+            else RigidBodyShape.CONVEX
+        )
+        obj.add_rigidbody(
+            body_type,
+            shape_type,
+            cfg.attrs.to_dexsim_physical_attr(),
+        )
+
+    _apply_mesh_uv_mapping(obj, cfg)
+    return obj
+
+
+def _spawn_clones_from_prototype(
+    source_env: Arena | Env,
+    prototype_name: str,
+    env_list: list[Arena | Env],
+    uid: str,
+    clone_options: ObjectCloneOptions,
+) -> list[MeshObject]:
+    """Return the prototype plus clones for all remaining arenas."""
+    prototype = source_env.get_actor(prototype_name)
+    if prototype is None:
+        logger.log_error(
+            f"Rigid object prototype '{prototype_name}' was not found in the source arena."
+        )
+
+    entities = [prototype]
+    for env_idx in range(1, len(env_list)):
+        target_name = f"{uid}_{env_idx}"
+        clone = _clone_actor_between_arenas(
+            source_env,
+            prototype_name,
+            env_list[env_idx],
+            target_name,
+            clone_options,
+        )
+        if clone is None:
+            logger.log_error(
+                f"Failed to clone rigid object '{prototype_name}' into env {env_idx}."
+            )
+        entities.append(clone)
+    return entities
+
+
+def spawn_rigid_object_entities(
+    cfg: RigidObjectCfg,
+    env_list: list[Arena | Env],
+    *,
+    cache_dir: str | None = None,
+    clone_options: ObjectCloneOptions | None = None,
+) -> list[MeshObject]:
+    """Load one rigid-object prototype and clone it into additional arenas.
+
+    Mesh loading, convex decomposition, and physics setup run once on the
+    prototype in ``env_list[0]`` before cloning.
+    """
+    if cfg.uid is None:
+        logger.log_error("Rigid object uid must be set before spawning entities.")
+    if len(env_list) == 0:
+        return []
+
+    if clone_options is None:
+        clone_options = default_rigid_object_clone_options()
+
+    body_type = cfg.to_dexsim_body_type()
+    is_newton_backend = _is_newton_backend_active()
+    if is_newton_backend:
+        raise TypeError(
+            "spawn_rigid_object_entities() is a deprecated "
+            "Default-backend-only initialization path. Use "
+            "SimulationManager.add_rigid_object() with grouped "
+            "RigidBodyPhysicsCfg properties for Newton."
+        )
+    source_env = env_list[0]
+    prototype_name = f"{cfg.uid}_0"
+
+    if isinstance(cfg.shape, MeshCfg):
+        fpath = cfg.shape.fpath
+        is_usd = fpath.endswith((".usd", ".usda", ".usdc"))
+        if is_usd:
+            prototype = _import_usd_rigid_prototype(source_env, fpath, prototype_name)
+        else:
+            cfg.asset_physics_mode = "overlay"
+            prototype = _load_rigid_mesh_prototype(
+                source_env,
+                cfg,
+                cache_dir=cache_dir,
+                body_type=body_type,
+                is_newton_backend=is_newton_backend,
+            )
+            prototype.set_name(prototype_name)
+    elif isinstance(cfg.shape, CubeCfg):
+        prototype = source_env.create_cube(
+            cfg.shape.size[0], cfg.shape.size[1], cfg.shape.size[2]
+        )
+        prototype.set_name(prototype_name)
+        _configure_primitive_rigidbody(
+            prototype,
+            cfg,
+            body_type,
+            is_newton_backend=is_newton_backend,
+            shape_type=RigidBodyShape.BOX,
+        )
+    elif isinstance(cfg.shape, SphereCfg):
+        prototype = source_env.create_sphere(cfg.shape.radius, cfg.shape.resolution)
+        prototype.set_name(prototype_name)
+        _configure_primitive_rigidbody(
+            prototype,
+            cfg,
+            body_type,
+            is_newton_backend=is_newton_backend,
+            shape_type=RigidBodyShape.SPHERE,
+        )
+    else:
+        logger.log_error(
+            f"Unsupported rigid object shape type: {type(cfg.shape)}. "
+            "Supported types: MeshCfg, CubeCfg, SphereCfg."
+        )
+        return []
+
+    if len(env_list) == 1:
+        return [prototype]
+    return _spawn_clones_from_prototype(
+        source_env, prototype_name, env_list, cfg.uid, clone_options
+    )
+
+
 def load_mesh_objects_from_cfg(
     cfg: RigidObjectCfg, env_list: List[Arena], cache_dir: str | None = None
 ) -> List[MeshObject]:
@@ -297,111 +753,7 @@ def load_mesh_objects_from_cfg(
     Returns:
         List[MeshObject]: List of loaded mesh objects.
     """
-    obj_list = []
-    body_type = cfg.to_dexsim_body_type()
-    if isinstance(cfg.shape, MeshCfg):
-
-        option = LoadOption()
-        option.rebuild_normals = cfg.shape.load_option.rebuild_normals
-        option.rebuild_tangent = cfg.shape.load_option.rebuild_tangent
-        option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
-        option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
-        option.smooth = cfg.shape.load_option.smooth
-
-        cfg: RigidObjectCfg
-        max_convex_hull_num, acd_method, sdf_resolution = (
-            _resolve_mesh_collision_params(cfg)
-        )
-        fpath = cfg.shape.fpath
-
-        compute_uv = cfg.shape.compute_uv
-
-        is_usd = fpath.endswith((".usd", ".usda", ".usdc"))
-        if is_usd:
-            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
-            if len(env_list) > 1:
-                logger.log_error(f"Currently not supporting multiple arenas for USD.")
-            _env: dexsim.environment.Env = dexsim.default_world().get_env()
-            results = _env.import_from_usd_file(fpath, return_object=True)
-            # print(f"import usd result: {results}")
-
-            rigidbodys_found = []
-            for key, value in results.items():
-                if isinstance(value, MeshObject):
-                    rigidbodys_found.append(value)
-            if len(rigidbodys_found) == 0:
-                logger.log_error(f"No rigid body found in USD file: {fpath}")
-            elif len(rigidbodys_found) > 1:
-                logger.log_error(f"Multiple rigid bodies found in USD file: {fpath}.")
-            elif len(rigidbodys_found) == 1:
-                obj_list.append(rigidbodys_found[0])
-                return obj_list
-        else:
-            # non-usd file does not support this option, will be forced set False to avoid potential issues.
-            cfg.use_usd_properties = False
-
-        for i, env in enumerate(env_list):
-            if max_convex_hull_num > 1:
-                obj = env.load_actor_with_acd(
-                    fpath,
-                    duplicate=True,
-                    attach_scene=True,
-                    option=option,
-                    cache_path=cache_dir,
-                    actor_type=body_type,
-                    max_convex_hull_num=max_convex_hull_num,
-                    method=acd_method,
-                )
-            elif sdf_resolution > 0:
-                obj = env.load_actor(
-                    fpath, duplicate=True, attach_scene=True, option=option
-                )
-                sdf_cfg = SDFConfig()
-                sdf_cfg.resolution = sdf_resolution
-                obj.add_physical_body(
-                    body_type,
-                    RigidBodyShape.SDF,
-                    config=sdf_cfg,
-                    attr=PhysicalAttr(),
-                )
-            else:
-                obj = env.load_actor(
-                    fpath, duplicate=True, attach_scene=True, option=option
-                )
-                obj.add_rigidbody(body_type, RigidBodyShape.CONVEX)
-            obj.set_name(f"{cfg.uid}_{i}")
-            obj_list.append(obj)
-
-            if compute_uv:
-                vertices = obj.get_vertices()
-                triangles = obj.get_triangles()
-
-                o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
-                _, uvs = get_mesh_auto_uv(
-                    o3d_mesh, np.array(cfg.shape.project_direction)
-                )
-                obj.set_uv_mapping(uvs)
-
-    elif isinstance(cfg.shape, CubeCfg):
-        from embodichain.lab.sim.utility.sim_utils import create_cube
-
-        obj_list = create_cube(env_list, cfg.shape.size, uid=cfg.uid)
-        for obj in obj_list:
-            obj.add_rigidbody(body_type, RigidBodyShape.BOX)
-
-    elif isinstance(cfg.shape, SphereCfg):
-        from embodichain.lab.sim.utility.sim_utils import create_sphere
-
-        obj_list = create_sphere(
-            env_list, cfg.shape.radius, cfg.shape.resolution, uid=cfg.uid
-        )
-        for obj in obj_list:
-            obj.add_rigidbody(body_type, RigidBodyShape.SPHERE)
-    else:
-        logger.log_error(
-            f"Unsupported rigid object shape type: {type(cfg.shape)}. Supported types: MeshCfg, CubeCfg, SphereCfg."
-        )
-    return obj_list
+    return spawn_rigid_object_entities(cfg, env_list, cache_dir=cache_dir)
 
 
 def load_soft_object_from_cfg(

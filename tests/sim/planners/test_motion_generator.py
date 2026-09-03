@@ -53,7 +53,7 @@ class BaseTestMotionGenerator(object):
         cls = type(self)
         if hasattr(cls, "robot_sim"):
             return
-        cls.config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        cls.config = SimulationManagerCfg(headless=True, device="cpu")
         cls.robot_sim = SimulationManager(cls.config)
         cls.robot_sim.set_manual_update(False)
 
@@ -97,6 +97,7 @@ class BaseTestMotionGenerator(object):
         cls.robot: Robot = cls.robot_sim.add_robot(
             cfg=CobotMagicCfg.from_dict(cfg_dict)
         )
+        cls.robot_sim.prepare()
 
         cls.arm_name = "left_arm"
 

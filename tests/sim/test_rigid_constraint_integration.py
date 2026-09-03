@@ -38,7 +38,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     RigidConstraintCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 
@@ -64,21 +64,19 @@ class BaseRigidConstraintTest:
         pose_b = self.duck_b.get_local_pose(to_matrix=True)
         return float(pose_b[0, 2, 3] - pose_a[0, 2, 3])
 
-    def setup_simulation(self, sim_device: str) -> None:
-        if not _can_run_sim(sim_device):
-            pytest.skip(
-                f"Cannot run rigid-constraint integration test on {sim_device}."
-            )
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=1)
+    def setup_simulation(self, device: str) -> None:
+        if not _can_run_sim(device):
+            pytest.skip(f"Cannot run rigid-constraint integration test on {device}.")
+        config = SimulationManagerCfg(headless=True, device=device, num_envs=1)
         self.sim = SimulationManager(config)
         self.sim.enable_physics(False)
 
         duck_path = get_data_path(DUCK_PATH)
         # Two dynamic ducks at different heights; with default (None) local
         # frames the constraint welds them at their current relative pose.
-        attrs_a = RigidBodyAttributesCfg()
+        attrs_a = RigidBodyPhysicsCfg()
         attrs_a.mass = 0.2
-        attrs_b = RigidBodyAttributesCfg()
+        attrs_b = RigidBodyPhysicsCfg()
         attrs_b.mass = 0.1
         self.duck_a = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
@@ -99,8 +97,7 @@ class BaseRigidConstraintTest:
             ),
         )
 
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
+        self.sim.prepare()
         self.sim.enable_physics(True)
 
     def teardown_method(self):

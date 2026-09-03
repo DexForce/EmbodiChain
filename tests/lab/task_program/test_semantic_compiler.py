@@ -720,7 +720,7 @@ def test_curated_analysis_selects_monitors_per_semantic_call() -> None:
             Pick(object=SceneObjectRef("cube")),
             Place(
                 object=SceneObjectRef("cube"),
-                at=SemanticPose((0.5, 0.0, 0.3), (1.0, 0.0, 0.0, 0.0)),
+                at=SemanticPose((0.5, 0.0, 0.3), (0.0, 0.0, 0.0, 1.0)),
             ),
         )
     )
@@ -915,7 +915,7 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
                 object=SceneObjectRef("cube"),
                 at=SemanticPose(
                     (0.5, -0.2, 0.4),
-                    (1.0, 0.0, 0.0, 0.0),
+                    (0.0, 0.0, 0.0, 1.0),
                 ),
             ),
         )
@@ -1166,7 +1166,7 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
             preset=_preset("safe", action_option_templates=templates),
         ),
     )
-    drop = SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0))
+    drop = SemanticPose((0.4, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
 
     workflow = compiler.analyze(
         (
@@ -1214,7 +1214,7 @@ def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
             preset=_preset("safe", action_option_templates=templates),
         ),
     )
-    drop = SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0))
+    drop = SemanticPose((0.4, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
     workflow = compiler.analyze(
         (
             Pick(object=SceneObjectRef("cube")),
@@ -1450,7 +1450,7 @@ def test_place_uses_verified_object_to_eef_transform() -> None:
             preset=_preset("safe", action_option_templates=templates),
         ),
     )
-    drop = SemanticPose((0.5, -0.2, 0.4), (1.0, 0.0, 0.0, 0.0))
+    drop = SemanticPose((0.5, -0.2, 0.4), (0.0, 0.0, 0.0, 1.0))
     workflow = compiler.analyze((Place(object=SceneObjectRef("cube"), at=drop),))
     pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
     semantics = compiler.ground(
@@ -1498,7 +1498,7 @@ def test_place_can_keep_observed_object_orientation_at_target() -> None:
     object_to_eef = torch.eye(4).repeat(2, 1, 1)
     object_to_eef[:, 2, 3] = 0.12
     context = _held_context(registry, semantics, object_to_eef)
-    drop = SemanticPose((0.5, -0.2, 0.4), (1.0, 0.0, 0.0, 0.0))
+    drop = SemanticPose((0.5, -0.2, 0.4), (0.0, 0.0, 0.0, 1.0))
     workflow = compiler.analyze((Place(object=SceneObjectRef("cube"), at=drop),))
 
     grounded = compiler.ground(workflow, 0, context)
@@ -1548,7 +1548,7 @@ def test_place_rejects_wrong_or_inactive_verified_holder() -> None:
         (
             Place(
                 object=SceneObjectRef("cube"),
-                at=SemanticPose((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0)),
+                at=SemanticPose((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
             ),
         )
     )
@@ -1618,7 +1618,7 @@ def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
             registered,
             Place(
                 object=SceneObjectRef("cube"),
-                at=SemanticPose((0.3, 0.0, 0.2), (1.0, 0.0, 0.0, 0.0)),
+                at=SemanticPose((0.3, 0.0, 0.2), (0.0, 0.0, 0.0, 1.0)),
             ),
         )
     )
@@ -1635,11 +1635,11 @@ def test_registered_lowerer_can_certify_retained_object_lookahead() -> None:
     registry, _ = _scene_registry()
     registered_target = SemanticPose(
         (0.25, 0.1, 0.4),
-        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
     )
     place_target = SemanticPose(
         (0.3, 0.0, 0.2),
-        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
     )
     compiler, _ = _compiler(
         registry,

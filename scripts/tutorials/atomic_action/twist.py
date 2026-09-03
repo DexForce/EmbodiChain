@@ -48,8 +48,10 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
+    configure_newton_link_contacts,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     get_hand_open_close_qpos,
     prepare_tutorial_scene,
@@ -87,18 +89,26 @@ def parse_arguments() -> argparse.Namespace:
 
 def create_microwave(sim) -> Articulation:
     """Create the fixed-base microwave articulation used by the demo."""
-    microwave = sim.add_articulation(
-        cfg=ArticulationCfg(
-            uid="microwave",
-            fpath=get_data_path(MICROWAVE_ASSET),
-            init_pos=MICROWAVE_POSITION,
-            init_rot=MICROWAVE_ORIENTATION,
-            drive_pros=JointDrivePropertiesCfg(
-                stiffness=1e-3, damping=1e2, max_effort=1e-2
-            ),
-            fix_base=True,
-        )
+    microwave_cfg = ArticulationCfg(
+        uid="microwave",
+        fpath=get_data_path(MICROWAVE_ASSET),
+        asset_physics_mode="overlay",
+        init_pos=MICROWAVE_POSITION,
+        init_rot=MICROWAVE_ORIENTATION,
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness=1e-3,
+            damping=1e2,
+            max_effort=1e-2,
+        ),
     )
+    configure_newton_link_contacts(
+        sim,
+        microwave_cfg,
+        group_name="newton_knob_contacts",
+        link_names_expr=[KNOB_LINK_NAME],
+    )
+    microwave = sim.add_articulation(cfg=microwave_cfg)
     sim.update(step=10)
     return microwave
 
@@ -109,6 +119,9 @@ def create_rigid_knob(sim) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="rigid_knob",
             shape=CubeCfg(size=list(RIGID_KNOB_SIZE)),
+            attrs=create_tutorial_rigid_body_physics(
+                newton_contact=sim.is_newton_backend,
+            ),
             body_type="static",
             init_pos=RIGID_KNOB_POSITION,
         )
@@ -165,6 +178,7 @@ def main() -> None:
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
     )
     target = create_rigid_knob(sim) if args.rigid_object else create_microwave(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     motion_gen = create_toppra_motion_generator(robot)
     semantics, target_pose = create_knob_semantics(target)

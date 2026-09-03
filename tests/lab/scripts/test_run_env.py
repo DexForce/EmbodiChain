@@ -109,7 +109,7 @@ def test_run_env_syncs_viser_images_each_step_by_default() -> None:
     """Run-env uses step-synchronized camera images when no FPS is supplied."""
     args = _create_parser().parse_args(["--gym_config", GYM_CONFIG_PATH, "--viser"])
 
-    merged = merge_args_with_gym_config(args, {"id": GYM_ID})
+    merged = merge_args_with_gym_config(args, {"id": GYM_ID, "physics": "default"})
 
     assert merged["visualization"]["sensor_image_fps"] is None
 
@@ -127,7 +127,7 @@ def test_run_env_accepts_explicit_viser_image_fps() -> None:
         ]
     )
 
-    merged = merge_args_with_gym_config(args, {"id": GYM_ID})
+    merged = merge_args_with_gym_config(args, {"id": GYM_ID, "physics": "default"})
 
     assert merged["visualization"]["sensor_image_fps"] == expected_fps
 
@@ -141,6 +141,7 @@ def test_run_env_preserves_configured_viser_image_fps() -> None:
         args,
         {
             "id": GYM_ID,
+            "physics": "default",
             "visualization": {"sensor_image_fps": configured_fps},
         },
     )

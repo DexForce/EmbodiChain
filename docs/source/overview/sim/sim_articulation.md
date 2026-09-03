@@ -8,19 +8,19 @@ The {class}`~objects.Articulation` class represents the fundamental physics enti
 ## Configuration
 
 Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
+
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `fpath` | `str` | `None` | Path to the asset file (URDF/USD). |
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
-| `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
-| `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
+| `root_props` | `ArticulationRootPropertiesCfg` | all fields `None` | Fixed-base/self-collision are portable; root sleep and paired solver iterations are Default-only and ignored by Newton. `None` preserves source/backend values. |
+| `asset_physics_mode` | `"preserve" \| "overlay"` | `"preserve"` | Preserve source link/joint physics, or apply explicitly configured overlays after source resolution. |
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
-| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override joint position limits. Replaces asset limits and may either tighten or expand the range. |
+| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override limits by flattened source-resolved DOF order or joint-name/regex rules before backend build. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
-| `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
-| `drive_pros` | `JointDrivePropertiesCfg` | `drive_type="none"` | Default drive properties. |
-| `attrs` | `RigidBodyAttributesCfg` | `...` | Default rigid body attributes applied to all links. |
+| `joint_drive_props` | `JointDrivePropertiesCfg` | `None` | Optional sparse joint drive, limit, friction, and armature overlay. |
+| `attrs` | `RigidBodyPhysicsCfg` | empty groups | Grouped rigid-body physics applied to all links. |
 | `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
 
@@ -32,20 +32,23 @@ override specific links (matched by regex, same rules as joint drive dict keys):
 ```python
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    CollisionPropertiesCfg,
     LinkPhysicsOverrideCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
 )
 
 art_cfg = ArticulationCfg(
     fpath="path/to/robot.urdf",
-    attrs=RigidBodyAttributesCfg(static_friction=0.5),
+    attrs=RigidBodyPhysicsCfg(
+        material_props=RigidBodyMaterialCfg(static_friction=0.5),
+    ),
     link_attrs={
         "eef": LinkPhysicsOverrideCfg(
             link_names_expr=[".*(hand|finger|ee).*"],
-            attrs=RigidBodyAttributesOverrideCfg(
-                static_friction=0.95,
-                contact_offset=0.001,
+            attrs=RigidBodyPhysicsCfg(
+                material_props=RigidBodyMaterialCfg(static_friction=0.95),
+                collision_props=CollisionPropertiesCfg(contact_offset=0.001),
             ),
         ),
     },
@@ -55,9 +58,23 @@ art_cfg = ArticulationCfg(
 At runtime, use `articulation.set_link_physical_attr(...)` and `get_link_physical_attr(...)`
 for the same partial-override behavior.
 
+### Source mass properties
+
+For URDF-backed articulations, `MassPropertiesCfg.recompute_inertia` is the
+only switch that permits geometry-derived mass properties to replace the
+asset's authored inertia. It defaults to `False` (or `None`, which resolves to
+the same behavior), so an `overlay` that only configures joint drives or other
+unrelated attributes retains the source mass, inertia, and center of mass in
+both backends. Set it to `True` only when collision geometry should be used to
+derive a new tensor. A positive `mass` can be overridden while retaining the
+source tensor; `density` requires `recompute_inertia=True` when the source
+already provides a valid tensor. An all-zero or otherwise invalid source
+tensor is not preserved: when the link has collision geometry, both backends
+derive a fallback tensor from that geometry.
+
 ### Drive Configuration
 
-The `drive_pros` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.
+The `joint_drive_props` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -117,18 +134,19 @@ articulation layer.
 ```python
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Articulation, ArticulationCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, ArticulationRootPropertiesCfg
+from embodichain.lab.sim.objects import Articulation
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_config=sim_cfg)
 
 # 2. Configure Articulation
 art_cfg = ArticulationCfg(
     fpath="assets/robots/franka/franka.urdf",
     init_pos=(0, 0, 0.5),
-    fix_base=True
+    root_props=ArticulationRootPropertiesCfg(fixed_base=True),
 )
 
 # 3. Spawn Articulation
@@ -151,7 +169,7 @@ from embodichain.data import get_data_path
 usd_art_cfg = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
     init_pos=(0, 0, 0.5),
-    use_usd_properties=True  # Keep USD drive/physics properties
+    asset_physics_mode="preserve",
 )
 usd_robot = sim.add_articulation(cfg=usd_art_cfg)
 
@@ -159,8 +177,8 @@ usd_robot = sim.add_articulation(cfg=usd_art_cfg)
 usd_art_cfg_override = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
     init_pos=(0, 0, 0.5),
-    use_usd_properties=False,  # Use config instead
-    drive_pros=JointDrivePropertiesCfg(stiffness=5000, damping=500)
+    asset_physics_mode="overlay",
+    joint_drive_props=JointDrivePropertiesCfg(stiffness=5000, damping=500),
 )
 robot = sim.add_articulation(cfg=usd_art_cfg_override)
 ```
@@ -179,8 +197,8 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 
 | Method | Shape / Return Type | Description |
 | :--- | :--- | :--- |
-| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
-| `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
+| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qx, qy, qz, qw]` or a 4x4 matrix. |
+| `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qx, qy, qz, qw]` or a 4x4 matrix. |
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
 | `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
@@ -244,8 +262,8 @@ sim.update()
 ### Pose Control
 ```python
 # Teleport the articulation root to a new pose
-# shape: (N, 7) formatted as [x, y, z, qw, qx, qy, qz]
-new_root_pose = torch.tensor([[0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0]], device=device).repeat(sim.num_envs, 1)
+# shape: (N, 7) formatted as [x, y, z, qx, qy, qz, qw]
+new_root_pose = torch.tensor([[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]], device=device).repeat(sim.num_envs, 1)
 articulation.set_local_pose(new_root_pose)
 ```
 

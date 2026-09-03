@@ -46,7 +46,7 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     HandOverOptions,
 )
-from embodichain.lab.sim.cfg import RobotCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RobotCfg
 from embodichain.lab.task_program.semantics import (
     BinaryEffectClause,
     BinaryEffectEvidenceQuery,
@@ -166,10 +166,29 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
     assert embodiment["embodiment_id"] == _PROFILE_ID
     assert "object_ids" not in evidence
     assert "task_program" not in environment
+    assert environment["physics"] == "default"
+    assert environment["physics_config"] == {"enable_ccd": True}
     assert environment["env"]["extensions"] == {}
     settle = environment["env"]["events"]["settle_can_on_reset"]
     assert settle["func"] == "wait_for_dynamic_objects_to_settle"
     assert settle["params"]["entity_cfgs"] == [{"uid": _CAN_SIMULATION_UID}]
+
+
+def test_hand_over_gym_config_uses_declared_default_backend() -> None:
+    """The reusable physical environment owns its backend selection."""
+    cfg = config_to_cfg(_gym_payload(), source_path=_gym_config_path())
+
+    assert isinstance(cfg.sim_cfg.physics_config, DefaultPhysicsCfg)
+    assert cfg.sim_cfg.physics_config.enable_ccd is True
+
+
+def test_hand_over_gym_config_rejects_newton_override() -> None:
+    """The Default CCD environment cannot be relabeled as Newton."""
+    payload = _gym_payload()
+    payload["physics"] = "newton"
+
+    with pytest.raises(ValueError, match="owns physics and physics_config"):
+        config_to_cfg(payload, source_path=_gym_config_path())
 
 
 def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
@@ -223,7 +242,7 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     )
     assert [item.uid for item in cfg.background] == [_SUPPORT_SURFACE_UID]
     assert [item.uid for item in cfg.rigid_object] == [_CAN_SIMULATION_UID]
-    assert cfg.rigid_object[0].max_convex_hull_num == 16
+    assert cfg.rigid_object[0].shape.collision.max_hulls == 16
     assert cfg.task_program is not None
     assert cfg.task_program.program_id == "dual_ur5_hand_over"
 
@@ -232,8 +251,8 @@ def test_hand_over_config_owns_tuned_can_and_pgi_physics() -> None:
     """The sole config source retains the tuned object and gripper dynamics."""
     cfg = _configured_env_cfg()
 
-    assert cfg.rigid_object[0].attrs.mass == pytest.approx(0.33)
-    drive = cfg.robot.drive_pros
+    assert cfg.rigid_object[0].attrs.mass_props.mass == pytest.approx(0.33)
+    drive = cfg.robot.joint_drive_props
     expected_values = {
         "stiffness": 1e3,
         "damping": 1e2,
@@ -247,8 +266,8 @@ def test_hand_over_config_owns_tuned_can_and_pgi_physics() -> None:
             )
             assert values[f"{side}_gripper_finger2_joint_1"] == pytest.approx(0.0)
     finger_attrs = cfg.robot.link_attrs["gripper_fingers"].attrs
-    assert finger_attrs.dynamic_friction == pytest.approx(2.0)
-    assert finger_attrs.static_friction == pytest.approx(2.0)
+    assert finger_attrs.material_props.dynamic_friction == pytest.approx(2.0)
+    assert finger_attrs.material_props.static_friction == pytest.approx(2.0)
 
 
 def test_hand_over_composition_owns_scene_pose_and_evidence_services() -> None:

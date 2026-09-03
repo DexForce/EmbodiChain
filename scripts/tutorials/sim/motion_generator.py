@@ -25,8 +25,8 @@ import torch
 
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.planners import (
     MotionGenCfg,
@@ -226,7 +226,8 @@ def main() -> None:
             height=RECORD_HEIGHT,
             headless=True,
             physics_dt=1.0 / 100.0,
-            sim_device=args.device,
+            device=args.device,
+            physics_cfg=physics_cfg_for_backend(args.physics),
             render_cfg=RenderCfg(renderer=args.renderer),
             num_envs=args.num_envs,
             arena_space=args.arena_space,
@@ -237,8 +238,7 @@ def main() -> None:
     robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict({"uid": "CobotMagic"}))
     arm_name = "left_arm"
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     if not args.headless:
         sim.open_window()

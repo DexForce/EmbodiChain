@@ -13,30 +13,27 @@ Configured via the {class}`~cfg.RigidObjectCfg` class.
 | :--- | :--- | :--- | :--- |
 | `shape` | {class}`~shapes.ShapeCfg` | `ShapeCfg()` | Geometry configuration for visual and collision shapes. Use `MeshCfg` for mesh files or primitive cfgs (e.g., `CubeCfg`). |
 | `body_type` | `Literal["dynamic","kinematic","static"]` | `"dynamic"` | Actor type for the rigid body. See `{class}`~cfg.RigidObjectCfg.to_dexsim_body_type` for conversion. |
-| `attrs` | {class}`~cfg.RigidBodyAttributesCfg` | defaults in code | Physical attributes (mass, damping, friction, restitution, collision offsets, CCD, etc.). |
+| `attrs` | {class}`~cfg.RigidBodyPhysicsCfg` | empty groups | Grouped physical attributes (mass, damping, friction, restitution, collision offsets, CCD, etc.). |
 | `init_pos` | `Sequence[float]` | `(0,0,0)` | Initial root position (x, y, z). |
 | `init_rot` | `Sequence[float]` | `(0,0,0)` (Euler degrees) | Initial root orientation (Euler angles in degrees) or provide `init_local_pose`. |
-| `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
+| `asset_physics_mode` | {class}`~cfg.AssetPhysicsMode` | `"preserve"` | Preserve source-authored physics or overlay explicitly configured values. |
 | `uid` | `str` | `None` | Optional unique identifier for the object; manager will assign one if omitted. |
 
-### Rigid Body Attributes ({class}`~cfg.RigidBodyAttributesCfg`)
+### Rigid Body Physics ({class}`~cfg.RigidBodyPhysicsCfg`)
 
-The full attribute set lives in `{class}`~cfg.RigidBodyAttributesCfg`. Common fields shown in code include:
+Physical properties are grouped by intent. Every field is optional: `None`
+means that a source asset or the active backend keeps ownership of that value.
 
-| Parameter | Type | Default (from code) | Description |
-| :--- | :--- | :---: | :--- |
-| `mass` | `float` | `1.0` | Mass of the rigid body in kilograms (set to 0 to use density). |
-| `density` | `float` | `1000.0` | Density used when mass is negative/zero. |
-| `linear_damping` | `float` | `0.7` | Linear damping coefficient. |
-| `angular_damping` | `float` | `0.7` | Angular damping coefficient. |
-| `dynamic_friction` | `float` | `0.5` | Dynamic friction coefficient. |
-| `static_friction` | `float` | `0.5` | Static friction coefficient. |
-| `restitution` | `float` | `0.0` | Restitution (bounciness). |
-| `contact_offset` | `float` | `0.002` | Contact offset for collision detection. |
-| `rest_offset` | `float` | `0.001` | Rest offset for collision detection. |
-| `enable_ccd` | `bool` | `False` | Enable continuous collision detection. |
+| Group | Example fields |
+| :--- | :--- |
+| `mass_props` | `mass`, `density`, `inertia`, `com_position`, `com_quaternion` |
+| `rigid_props` | `linear_damping`, `angular_damping`, `enable_ccd` |
+| `collision_props` | `collision_enabled`, `contact_offset`, `rest_offset` |
+| `material_props` | `dynamic_friction`, `static_friction`, `restitution` |
 
-Use the `.attr()` helper to convert to `dexsim.PhysicalAttr` when interfacing with the engine.
+COM quaternions are always authored in `xyzw` order. Native engine attributes
+are an internal adapter detail. Backend-specific values use the concrete type in
+the corresponding property slot rather than a second backend block.
 
 ## Setup & Initialization
 
@@ -45,15 +42,26 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+)
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_cfg)
 
 # 2. Configure a rigid object (cube)
-physics_attrs = RigidBodyAttributesCfg(mass=1.0, dynamic_friction=0.5, static_friction=0.5, restitution=0.1)
+physics_attrs = RigidBodyPhysicsCfg(
+    mass_props=MassPropertiesCfg(mass=1.0),
+    material_props=RigidBodyMaterialCfg(
+        dynamic_friction=0.5,
+        static_friction=0.5,
+        restitution=0.1,
+    ),
+)
 
 cfg = RigidObjectCfg(
     uid="cube",
@@ -66,7 +74,8 @@ cfg = RigidObjectCfg(
 # 3. Spawn Rigid Object
 cube: RigidObject = sim.add_rigid_object(cfg=cfg)
 
-# 4. (Optional) Open window and run
+# 4. Commit the complete scene, then optionally open a window and run
+sim.prepare()
 if not sim.sim_config.headless:
     sim.open_window()
 sim.update()
@@ -85,7 +94,7 @@ from embodichain.data import get_data_path
 usd_cfg = RigidObjectCfg(
     shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
     body_type="dynamic",
-    use_usd_properties=True  # Keep USD properties
+    asset_physics_mode="preserve",  # Keep USD properties
 )
 obj = sim.add_rigid_object(cfg=usd_cfg)
 
@@ -93,8 +102,8 @@ obj = sim.add_rigid_object(cfg=usd_cfg)
 usd_cfg_override = RigidObjectCfg(
     shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
     body_type="dynamic",
-    use_usd_properties=False,  # Use config instead
-    attrs=RigidBodyAttributesCfg(mass=2.0)
+    asset_physics_mode="overlay",
+    attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=2.0)),
 )
 obj2 = sim.add_rigid_object(cfg=usd_cfg_override)
 ```
@@ -107,18 +116,18 @@ Rigid objects are observed and controlled via single poses and linear/angular ve
 
 | Method / Property | Return / Args | Description |
 | :--- | :--- | :--- |
-| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Get object local pose as (x, y, z, qw, qx, qy, qz) or 4x4 matrix per environment. |
+| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Get object local pose as (x, y, z, qx, qy, qz, qw) or 4x4 matrix per environment. |
 | `set_local_pose(pose, env_ids=None)` | `pose: (N, 7)` or `(N, 4, 4)` | Teleport object to given pose (requires calling `sim.update()` to apply). |
-| `body_data.pose` | `(N, 7)` | Access object pose directly (for dynamic/kinematic bodies). |
+| `body_data.pose` | `(N, 7)` | Access object pose as `[x, y, z, qx, qy, qz, qw]` (for dynamic/kinematic bodies). |
 | `body_data.lin_vel` | `(N, 3)` | Access linear velocity of object root (for dynamic bodies). |
 | `body_data.ang_vel` | `(N, 3)` | Access angular velocity of object root (for dynamic bodies). |
 | `body_data.vel` | `(N, 6)` | Concatenated linear and angular velocities. |
 | `body_data.lin_acc` | `(N, 3)` | Access linear acceleration of object root (for dynamic bodies). |
 | `body_data.ang_acc` | `(N, 3)` | Access angular acceleration of object root (for dynamic bodies). |
 | `body_data.acc` | `(N, 6)` | Concatenated linear and angular accelerations. |
-| `body_data.com_pose` | `(N, 7)` | Get center of mass pose of rigid bodies. |
-| `body_data.default_com_pose` | `(N, 7)` | Default center of mass pose. |
-| `body_state` | `(N, 13)` | Get full body state: [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
+| `body_data.com_pose` | `(N, 7)` | Get center of mass pose as `[x, y, z, qx, qy, qz, qw]`. |
+| `body_data.default_com_pose` | `(N, 7)` | Default center of mass pose as `[x, y, z, qx, qy, qz, qw]`. |
+| `body_state` | `(N, 13)` | Get full body state: [x, y, z, qx, qy, qz, qw, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
 
 ### Dynamics Control
 
@@ -132,7 +141,7 @@ Rigid objects are observed and controlled via single poses and linear/angular ve
 
 | Method / Property | Return / Args | Description |
 | :--- | :--- | :--- |
-| `set_attrs(attrs, env_ids=None)` | `attrs: RigidBodyAttributesCfg` | Set physical attributes (mass, friction, damping, etc.). |
+| `set_attrs(attrs, env_ids=None)` | `attrs: RigidBodyPhysicsCfg` | Set grouped physical attributes (mass, friction, damping, etc.). |
 | `set_mass(mass, env_ids=None)` | `mass: (N,)` | Set mass for rigid object. |
 | `get_mass(env_ids=None)` | `(N,)` | Get mass for rigid object. |
 | `set_friction(friction, env_ids=None)` | `friction: (N,)` | Set dynamic and static friction. |
@@ -185,7 +194,7 @@ When a rigid object is loaded, its material assignment is captured without repla
 
 ### Observation Shapes
 
-- Pose: `(N, 7)` per-object pose (position + quaternion).
+- Pose: `(N, 7)` per-object pose `[x, y, z, qx, qy, qz, qw]`.
 - Velocities: `(N, 3)` for linear and angular velocities respectively.
 
 N denotes the number of parallel environments when using vectorized simulation (`SimulationManagerCfg.num_envs`).
@@ -195,8 +204,9 @@ N denotes the number of parallel environments when using vectorized simulation (
 - When moving objects programmatically via `set_local_pose`, call `sim.update()` (or step the sim) to ensure transforms and collision state are synchronized.
 - Use `static` body type for fixed obstacles or environment pieces (they do not consume dynamic simulation resources).
 - Use `kinematic` for objects whose pose is driven by code (teleporting or animation) but still interact with dynamic objects.
-- For complex meshes, enabling convex decomposition (`RigidObjectCfg.max_convex_hull_num`) or providing a simplified collision mesh improves stability and performance.
-- To use GPU physics, ensure `SimulationManagerCfg.sim_device` is set to `cuda` and call `sim.init_gpu_physics()` before large-batch simulations.
+- For complex meshes, configure `MeshCfg.collision` with `approximation="convex_decomposition"` and a bounded `max_hulls`, or provide a simplified collision mesh.
+- For large GPU batches, select an indexed CUDA device and call the same
+  backend-neutral `sim.prepare()` boundary after all initial assets are added.
 
 ## Example: Applying Force and Torque
 

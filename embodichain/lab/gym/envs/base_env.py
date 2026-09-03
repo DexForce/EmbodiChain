@@ -160,21 +160,48 @@ class BaseEnv(gym.Env):
 
         self._configure_timing()
 
+        # Phase 1 only declares scene topology. Spawn-backed assets intentionally
+        # remain metadata-light until the single prepare boundary below.
         self._setup_scene(**kwargs)
 
         # Keep the established env._profiler API while sharing the single
         # profiler instance owned by SimulationManager.
         self._profiler = self.sim.profiler
 
-        # TODO: To be removed.
-        if self.device.type == "cuda":
-            self.sim.init_gpu_physics()
+        # Materialize every physical declaration in one transaction. DexSim's
+        # articulation adapter parses each source while finalizing, then the
+        # resulting handles bind the existing EmbodiChain facades in place.
+        self.sim.prepare()
+
+        # Phase 2 may now consume link/joint metadata, construct action spaces,
+        # and create render-only resources such as CameraGroup instances.
+        configured_robot = self._setup_robot(**kwargs)
+        if configured_robot is not None:
+            self.robot = configured_robot
+
+        if self.robot is None:
+            logger.log_error(
+                f"The robot instance must be initialized in :meth:`_setup_robot` function."
+            )
+        if len(self.active_joint_ids) == 0:
+            self.active_joint_ids = self.robot.active_joint_ids
+        if self.single_action_space is None:
+            logger.log_error(
+                f":attr:`single_action_space` must be defined in the :meth:`_setup_robot` function."
+            )
+
+        self.sensors = self._setup_sensors(**kwargs)
+        self._camera_group_ids = [
+            sensor.group_id
+            for sensor in self.sensors.values()
+            if isinstance(sensor, Camera)
+        ]
 
         if not self.sim_cfg.headless:
             self.sim.open_window()
 
         self._elapsed_steps = torch.zeros(
-            self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
+            self._num_envs, dtype=torch.int32, device=self.sim_cfg.device
         )
 
         # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
@@ -482,46 +509,47 @@ class BaseEnv(gym.Env):
         self._camera_group_ids.append(group_id)
 
     def _setup_scene(self, **kwargs):
-        # Init sim manager.
-        # we want to open gui window when the scene is setup, so init sim manager in headless mode first.
+        """Declare physical scene topology without consuming runtime metadata."""
+        # Init sim manager. We want to open the GUI window after the scene is
+        # materialized, so construct the manager in headless mode first.
         headless = self.sim_cfg.headless
         self.sim_cfg.headless = True
         self.sim = SimulationManager(self.sim_cfg)
         self.sim_cfg.headless = headless
 
         logger.log_info(
-            f"Initializing {self.num_envs} environments on {self.sim_cfg.sim_device}."
+            f"Initializing {self.num_envs} environments on {self.sim_cfg.device}."
         )
 
-        self.robot = self._setup_robot(**kwargs)
-        if len(self.active_joint_ids) == 0:
-            self.active_joint_ids = self.robot.active_joint_ids
-
-        if self.robot is None:
-            logger.log_error(
-                f"The robot instance must be initialized in :meth:`_setup_robot` function."
-            )
-        if self.single_action_space is None:
-            logger.log_error(
-                f":attr:`single_action_space` must be defined in the :meth:`_setup_robot` function."
-            )
+        # Config-driven environments can declare their robot here while
+        # deferring all link/joint queries until the post-prepare phase. Generic
+        # BaseEnv subclasses may keep returning None and add a runtime robot in
+        # _setup_robot() for backwards compatibility.
+        self.robot = self._declare_robot(**kwargs)
 
         self._prepare_scene(**kwargs)
 
-        self.sensors = self._setup_sensors(**kwargs)
+    def _declare_robot(self, **kwargs) -> Robot | None:
+        """Optionally declare a robot before the scene prepare boundary.
 
-        # Setup camera groups for rendering.
-        self._camera_group_ids: List[int] = []
-        for sensor in self.sensors.values():
-            if isinstance(sensor, Camera):
-                self._camera_group_ids.append(sensor.group_id)
+        Config-driven environments should override this hook and call
+        :meth:`SimulationManager.add_robot` without querying link/joint data.
+        The returned facade is bound in place by :meth:`SimulationManager.prepare`.
+
+        Generic subclasses that only implement the historical
+        :meth:`_setup_robot` hook remain supported: their robot is added after
+        the initial prepare boundary and is prepared immediately by the manager.
+        """
+        del kwargs
+        return None
 
     def _setup_robot(self, **kwargs) -> Robot:
-        """Load the robot agent, setup the controller and action space.
+        """Configure the bound robot, controller, and action space.
 
         Note:
-            1. The fuction must return the robot instance.
-            2. The self.single_action_space should be defined.
+            This hook runs after :meth:`SimulationManager.prepare`, so link,
+            joint, and limit metadata are available. It must return the robot
+            instance and define ``self.single_action_space``.
         """
 
         # TODO: single_action_space may be configured in config?

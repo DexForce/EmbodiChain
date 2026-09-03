@@ -1247,6 +1247,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(
         num_envs=None,
         renderer=None,
+        # A live benchmark loads a file-owned Gym backend.  Keep this unset so
+        # the shared launcher does not accidentally request ``default`` and
+        # conflict with a Newton configuration before the file is parsed.
+        physics=None,
         viser_image_fps=None,
     )
     parser.add_argument(

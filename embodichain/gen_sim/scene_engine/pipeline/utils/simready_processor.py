@@ -47,21 +47,34 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface impor
 from embodichain.utils.logger import log_info
 
 _TABLE_PHYSICS_ATTRS = {
-    "mass": 10.0,  # Keep the table heavy if a simulator treats it as movable.
-    "static_friction": 0.95,  # Resist lateral sliding at table contacts.
-    "dynamic_friction": 0.9,  # Maintain high friction during sliding contacts.
-    "restitution": 0.01,  # Prevent a table contact from producing visible bounce.
+    "mass_props": {
+        "mass": 10.0,  # Keep the table heavy if a simulator treats it as movable.
+    },
+    "material_props": {
+        "static_friction": 0.95,  # Resist lateral sliding at table contacts.
+        "dynamic_friction": 0.9,  # Maintain high friction during sliding contacts.
+        "restitution": 0.01,  # Prevent a table contact from producing visible bounce.
+    },
 }
 _ASSET_PHYSICS_ATTRS = {
-    "mass": 0.01,  # Use a lightweight default for unconstrained generated assets.
-    "contact_offset": 0.003,  # Start contact detection slightly before mesh contact.
-    "rest_offset": 0.001,  # Keep a small stable separation after contact resolution.
-    "restitution": 0.01,  # Prevent generated assets from bouncing on the table.
-    "max_depenetration_velocity": 10.0,  # Cap corrective separation speed.
-    "min_position_iters": 32,  # Use extra position iterations for stable contacts.
-    "min_velocity_iters": 8,  # Use extra velocity iterations for stable contacts.
+    "mass_props": {
+        "mass": 0.01,  # Use a lightweight default for unconstrained generated assets.
+    },
+    "collision_props": {
+        "contact_offset": 0.003,  # Start contact detection slightly before mesh contact.
+        "rest_offset": 0.001,  # Keep a small stable separation after contact resolution.
+    },
+    "material_props": {
+        "restitution": 0.01,  # Prevent generated assets from bouncing on the table.
+    },
+    "rigid_props": {
+        "backend": "default",
+        "max_depenetration_velocity": 10.0,  # Cap corrective separation speed.
+        "min_position_iters": 32,  # Use extra position iterations for stable contacts.
+        "min_velocity_iters": 8,  # Use extra velocity iterations for stable contacts.
+    },
 }
-_FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VHACD hull budget for settling and export.
+_FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared decomposition hull budget for settling/export.
 
 
 @dataclass(frozen=True)

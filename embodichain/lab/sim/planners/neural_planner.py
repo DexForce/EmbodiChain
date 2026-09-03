@@ -31,7 +31,7 @@ from embodichain.lab.sim.planners.base_planner import (
 )
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult, PlanState
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import convert_quat, quat_error_magnitude, quat_from_matrix
+from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 __all__ = [
     "NeuralPlanner",
@@ -508,9 +508,7 @@ class NeuralPlanner(BasePlanner):
             if xpos.dim() == 2:
                 xpos = xpos.unsqueeze(0)
             waypoint_pos[:, idx] = xpos[:, :3, 3]
-            waypoint_quat[:, idx] = convert_quat(
-                quat_from_matrix(xpos[:, :3, :3]), to="xyzw"
-            )
+            waypoint_quat[:, idx] = quat_from_matrix(xpos[:, :3, :3])
             valid_mask[:, idx] = 1.0
         return waypoint_pos, waypoint_quat, valid_mask, len(target_states)
 
@@ -536,9 +534,7 @@ class NeuralPlanner(BasePlanner):
 
     def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
         fk = self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=False)
-        pos = fk[:, :3]
-        quat_xyzw = convert_quat(fk[:, 3:7], to="xyzw")
-        return torch.cat([pos, quat_xyzw], dim=-1)
+        return fk
 
     def _build_obs(
         self,
@@ -589,11 +585,9 @@ class NeuralPlanner(BasePlanner):
         idx = torch.arange(b, device=self.device)
         active_idx_clamped = torch.clamp(active_idx, max=self._num_waypoints - 1)
         active_pos = waypoint_pos[idx, active_idx_clamped]
-        active_quat_xyzw = waypoint_quat[idx, active_idx_clamped]
+        active_quat = waypoint_quat[idx, active_idx_clamped]
         pos_dist = (ee_pose[:, :3] - active_pos).norm(dim=-1)
-        ee_quat_wxyz = convert_quat(ee_pose[:, 3:7], to="wxyz")
-        active_quat_wxyz = convert_quat(active_quat_xyzw, to="wxyz")
-        rot_dist = quat_error_magnitude(ee_quat_wxyz, active_quat_wxyz)
+        rot_dist = quat_error_magnitude(ee_pose[:, 3:7], active_quat)
         orientation_required = self._intermediate_orientation | (
             active_idx >= episode_k - 1
         )

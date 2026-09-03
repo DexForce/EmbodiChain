@@ -55,7 +55,7 @@ from embodichain.lab.sim.objects import SoftObject, SoftObjectCfg
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_config=sim_cfg)
 
 # 2. Configure Soft Object
@@ -118,7 +118,7 @@ You can set the global pose of a soft object (which transforms all its vertices)
 
 ```python
 # Reset or Move the Soft Object
-target_pose = torch.tensor([[0, 0, 1.0, 1, 0, 0, 0]], device=device) # (x, y, z, qw, qx, qy, qz)
+target_pose = torch.tensor([[0, 0, 1.0, 0, 0, 0, 1]], device=device) # (x, y, z, qx, qy, qz, qw)
 soft_object.set_local_pose(target_pose)
 
 # Important: Step simulation to apply changes

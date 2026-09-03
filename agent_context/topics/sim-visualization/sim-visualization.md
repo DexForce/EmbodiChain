@@ -185,12 +185,15 @@ frames.
 
 Mesh geometry is identified by a SHA-256 hash of local vertices and faces.
 Static nodes sharing geometry are sent through one Viser batched-mesh handle.
-Normal frames update only positions, `wxyz` quaternions, and visibility.
+Normal frames update only positions, Viser-native `wxyz` quaternions, and visibility.
 Identifiers are URL-escaped before becoming Viser path components.
 
-EmbodiChain pose vectors use `(x, y, z, qw, qx, qy, qz)`. The protocol uses
-normalized `wxyz` quaternions. `pose_to_position_wxyz()` is the conversion
-boundary and also accepts homogeneous `(..., 4, 4)` matrices.
+EmbodiChain pose vectors use `(x, y, z, qx, qy, qz, qw)`. The visualization
+protocol follows Viser and stores normalized `wxyz` quaternions.
+`pose_to_position_wxyz()` converts EmbodiChain `xyz + xyzw` pose vectors at
+that boundary and also accepts homogeneous `(..., 4, 4)` matrices. Protocol
+dataclass fields already named `wxyz` remain protocol-native and must not be
+interpreted as EmbodiChain pose vectors.
 
 Arena offsets are added to rigid, robot, articulation, and camera poses.
 Deformable vertices are stored relative to the corresponding arena node.
@@ -203,8 +206,8 @@ Deformable vertices are stored relative to the corresponding arena node.
 | `RigidObjectGroup` | One node and pose per constituent object |
 | `Robot` | One mesh node per non-empty link |
 | `Articulation` | One mesh node per non-empty link |
-| `SoftObject` | Live collision vertices with a cached convex-hull surface |
-| `ClothObject` | Live physical vertices with render triangles mapped onto the welded physical vertex buffer |
+| Volume `DeformableObject` (`SoftObject`) | Live collision vertices with a cached convex-hull surface |
+| Surface `DeformableObject` (`ClothObject`) | Live physical vertices with render triangles mapped onto the welded physical vertex buffer |
 | `Camera` | Frustum plus optional low-frequency RGB preview |
 | Default ground | 1000 m × 1000 m XY grid, 1 m cells, 10 m sections |
 | `SceneOverlays` | Frames, targets, trajectories, and point clouds |
@@ -232,11 +235,16 @@ slow rendering or clients cannot accumulate an image backlog.
 
 ## Deformables
 
-Soft bodies and cloth require GPU physics. Their live vertices are sampled at
-`soft_body_fps`, independently from `scene_fps`.
+Volume and surface deformables currently require Default-backend GPU physics.
+Their live vertices are sampled at `soft_body_fps`, independently from
+`scene_fps`. `SceneExporter` enumerates the manager's single deformable
+registry and reads both topologies through `get_surface_vertices()` and
+`get_surface_triangles()`; it does not branch on legacy buffer APIs. The
+`deformable_type` discriminator only selects the existing soft/cloth browser
+node kind, path, and color.
 
 - DexSim does not expose soft-body collision triangle connectivity.
-  `SoftBodyData.collision_surface_triangles` therefore caches a SciPy
+  `VolumeDeformableData.collision_surface_triangles` therefore caches a SciPy
   `ConvexHull` over rest collision vertices. The preview follows deformation
   but cannot preserve concave render detail.
 - Cloth maps all render-mesh triangles onto DexSim's welded rest-vertex buffer

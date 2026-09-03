@@ -392,14 +392,14 @@ def _decode_pose(value: object, *, path: ConfigPath) -> PoseCfg:
     mapping = _expect_mapping(value, path=path)
     _validate_fields(
         mapping,
-        allowed=frozenset({"position", "quaternion_wxyz"}),
-        required=frozenset({"position", "quaternion_wxyz"}),
+        allowed=frozenset({"position", "quaternion_xyzw"}),
+        required=frozenset({"position", "quaternion_xyzw"}),
         path=path,
     )
     position_values = _expect_list(mapping["position"], path=(*path, "position"))
     quaternion_values = _expect_list(
-        mapping["quaternion_wxyz"],
-        path=(*path, "quaternion_wxyz"),
+        mapping["quaternion_xyzw"],
+        path=(*path, "quaternion_xyzw"),
     )
     if len(position_values) != 3:
         raise _error(
@@ -410,12 +410,12 @@ def _decode_pose(value: object, *, path: ConfigPath) -> PoseCfg:
     if len(quaternion_values) != 4:
         raise _error(
             "invalid_pose_shape",
-            (*path, "quaternion_wxyz"),
-            "quaternion_wxyz must contain exactly four numbers.",
+            (*path, "quaternion_xyzw"),
+            "quaternion_xyzw must contain exactly four numbers.",
         )
     for name, values in (
         ("position", position_values),
-        ("quaternion_wxyz", quaternion_values),
+        ("quaternion_xyzw", quaternion_values),
     ):
         for index, number in enumerate(values):
             if type(number) not in (int, float):
@@ -428,7 +428,7 @@ def _decode_pose(value: object, *, path: ConfigPath) -> PoseCfg:
         PoseCfg,
         path=path,
         position=tuple(position_values),
-        quaternion_wxyz=tuple(quaternion_values),
+        quaternion_xyzw=tuple(quaternion_values),
     )  # type: ignore[return-value]
 
 

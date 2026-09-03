@@ -20,6 +20,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pytest
 
+from embodichain.lab.sim.cfg import NewtonJointDrivePropertiesCfg
 from embodichain.lab.sim.robots.dual_arm import (
     DualArmRobotCfg,
     _transform_from_xyz_rpy,
@@ -160,6 +161,29 @@ def test_build_dual_arm_dual_part_toggle():
     mounts = resolve_mounts({"preset": "side_by_side", "separation": 0.6})
     cfg = build_dual_arm_cfg(base, mounts, dual_part=False)
     assert "dual_arm" not in cfg.control_parts
+
+
+def test_build_dual_arm_mirrors_newton_joint_overrides():
+    base = URRobotCfg.from_dict({"robot_type": "ur5"})
+    base.joint_drive_props = NewtonJointDrivePropertiesCfg(
+        stiffness={"joint[1-6]": 12.0},
+        target_mode={"joint[1-6]": "position"},
+        friction=0.2,
+    )
+    mounts = resolve_mounts({"preset": "side_by_side", "separation": 0.6})
+
+    cfg = build_dual_arm_cfg(base, mounts)
+
+    assert isinstance(cfg.joint_drive_props, NewtonJointDrivePropertiesCfg)
+    assert cfg.joint_drive_props.stiffness == {
+        "left_joint[1-6]": 12.0,
+        "right_joint[1-6]": 12.0,
+    }
+    assert cfg.joint_drive_props.target_mode == {
+        "left_joint[1-6]": "position",
+        "right_joint[1-6]": "position",
+    }
+    assert cfg.joint_drive_props.friction == 0.2
 
 
 # --------------------------------------------------------------------------- #

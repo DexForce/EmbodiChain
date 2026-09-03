@@ -112,9 +112,10 @@ Official tasks use a task-first layout:
 - Import-registered tasks may keep an inline runnable deployment at
   `embodichain_tasks/configs/tasks/<category-path>/<task>/env.{json,yaml}`
 - Componentized tasks use a reusable physical-environment `env.yaml`, owning
-  both simulation-scene entities and ordinary environment values, plus one or
-  more runnable `task.<embodiment>.yaml` deployments; the reusable environment
-  contains no `id`, robot, sensor, or Task Program fields
+  exactly one explicit `physics: default|newton` backend, its optional matching
+  `physics_config`, simulation-scene entities, and ordinary environment values,
+  plus one or more runnable `task.<embodiment>.yaml` deployments; the reusable
+  environment contains no `id`, robot, sensor, or Task Program fields
 - Optional Task Program components: `<task config>/task_program/`, containing
   `program.yaml` and `integration.yaml`; the integration owns its nested
   semantic `scene_binding`
@@ -145,6 +146,12 @@ and scene fields, and either an embodiment component or inline
 component may omit `skill_profile`. A scene component is always physical-only;
 Task Program semantic roots and affordances live in the task integration's
 nested `scene_binding`. The original inline Gym format remains supported.
+Every inline runnable Gym config must declare exactly one
+`physics: default|newton` backend. An environment component owns both `physics`
+and `physics_config`; its deployment cannot repeat or override either field.
+Launcher `--physics` may confirm the file-owned backend but cannot switch it.
+Use a separate environment config for each backend and keep every
+`physics_config` field valid for the backend declared in that same file.
 
 A supported configuration-defined Task Program may omit `<task>.py`:
 declare `environment.component`,

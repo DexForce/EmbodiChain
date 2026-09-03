@@ -29,7 +29,6 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
-    RigidBodyAttributesCfg,
     RigidObjectCfg,
     URDFCfg,
 )
@@ -79,8 +78,8 @@ def grid_sample_qpos_from_limits(
 class BaseSolverTest:
     sim = None  # Define as a class attribute
 
-    def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+    def setup_simulation(self, device):
+        config = SimulationManagerCfg(headless=True, device=device)
         self.sim = SimulationManager(config)
         self.sim.set_manual_update(False)
 
@@ -95,7 +94,7 @@ class BaseSolverTest:
                     {"component_type": "hand", "urdf_path": gripper_urdf_path},
                 ]
             ),
-            drive_pros=JointDrivePropertiesCfg(
+            joint_drive_props=JointDrivePropertiesCfg(
                 stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e3},
                 damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e2},
                 max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e4},
@@ -129,6 +128,7 @@ class BaseSolverTest:
             init_pos=(0, 0, 0),
         )
         self.robot: Robot = self.sim.add_robot(cfg=cfg)
+        self.sim.prepare()
 
     def test_ik(self):
         # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed

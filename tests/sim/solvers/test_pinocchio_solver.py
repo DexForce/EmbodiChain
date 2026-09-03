@@ -33,9 +33,12 @@ class BaseSolverTest:
 
     def setup_simulation(self, solver_type: str):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        config = SimulationManagerCfg(headless=True, device="cpu")
         self.sim = SimulationManager(config)
-        self.sim.set_manual_update(False)
+        # Keep the scene fixed while FK/IK operate on the same robot state.
+        # Automatic stepping can race with the two solver calls and make the
+        # reconstructed pose depend on test timing.
+        self.sim.set_manual_update(True)
 
         # Load robot URDF file
         urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
@@ -62,6 +65,7 @@ class BaseSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_ik(self, arm_name: str):

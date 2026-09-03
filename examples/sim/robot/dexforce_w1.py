@@ -60,7 +60,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
                     },
                 ]
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "max_effort": {
                     "left_eef": 10.0,
                     "right_eef": 10.0,
@@ -70,6 +70,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     )
 
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.update(step=1)
     print("DexforceW1 with a user defined end-effector added to the simulation.")
 

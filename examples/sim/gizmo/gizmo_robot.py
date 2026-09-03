@@ -29,6 +29,7 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
@@ -55,8 +56,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -93,7 +95,7 @@ def main():
                 num_samples=30,
             )
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e2},
             damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e1},
             max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e3},
@@ -102,6 +104,7 @@ def main():
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
     )
     robot = sim.add_robot(cfg=robot_cfg)
+    sim.prepare()
 
     # Set initial joint positions
     initial_qpos = torch.tensor(

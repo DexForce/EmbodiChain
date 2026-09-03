@@ -35,6 +35,7 @@ _ENVIRONMENT_COMPONENT_FIELDS = frozenset(
         "max_episode_steps",
         "num_envs",
         "arena_space",
+        "physics",
         "physics_config",
         "render_cfg",
         "visualization",
@@ -145,7 +146,7 @@ def _resolve_environment_component(
     *,
     base_dir: Path,
 ) -> dict[str, object]:
-    """Expand one reusable physical environment component."""
+    """Expand one backend-specific reusable physical environment component."""
     resolved = _owned_mapping(config, path="Gym deployment")
     declaration = _mapping(
         resolved.pop("environment"),
@@ -160,8 +161,8 @@ def _resolve_environment_component(
     component = _mapping(
         _load_yaml_component(component_path, field_name="environment component"),
         path="environment component",
-        required=frozenset({"environment_id", "simulation", "env"}),
-        optional=_ENVIRONMENT_COMPONENT_FIELDS - {"simulation", "env"},
+        required=frozenset({"environment_id", "physics", "simulation", "env"}),
+        optional=_ENVIRONMENT_COMPONENT_FIELDS - {"physics", "simulation", "env"},
     )
     _identifier(
         component["environment_id"],
@@ -179,6 +180,15 @@ def _resolve_environment_component(
         if key not in {"environment_id", "simulation"}
     }
     environment_values.update(deepcopy(dict(simulation)))
+
+    deployment_physics_fields = sorted(
+        {"physics", "physics_config"}.intersection(resolved)
+    )
+    if deployment_physics_fields:
+        raise ValueError(
+            "environment.component owns physics and physics_config; remove "
+            f"{deployment_physics_fields} from the Gym deployment."
+        )
 
     duplicate_fields = sorted(
         set(environment_values).intersection(resolved)

@@ -16,19 +16,29 @@
 
 from __future__ import annotations
 
-import dexsim
-import math
-import torch
 import uuid
-import numpy as np
-import warp as wp
+from typing import TYPE_CHECKING, Sequence
 
-from typing import Union, Tuple, Sequence, List, Optional, Dict
+import dexsim
+import numpy as np
+import torch
+import warp as wp
 from tensordict import TensorDict
 
-from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
-from embodichain.utils import logger, configclass
+from embodichain.lab.sim.sensors.base_sensor import BaseSensor, SensorCfg
+from embodichain.utils import configclass, logger
 from embodichain.utils.warp.kernels import scatter_contact_data
+
+if TYPE_CHECKING:
+    from dexsim.scene import ContactActorInfo, ContactQuery, ContactQueryCapabilities
+
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+__all__ = [
+    "ArticulationContactFilterCfg",
+    "ContactSensor",
+    "ContactSensorCfg",
+]
 
 
 @configclass
@@ -39,10 +49,10 @@ class ContactSensorCfg(SensorCfg):
     collisions between rigid bodies and articulation links.
     """
 
-    rigid_uid_list: List[str] = []
+    rigid_uid_list: list[str] = []
     """rigid body contact filter configs"""
 
-    articulation_cfg_list: List[ArticulationContactFilterCfg] = []
+    articulation_cfg_list: list[ArticulationContactFilterCfg] = []
     """articulation link contact filter configs"""
 
     filter_need_both_actor: bool = True
@@ -65,12 +75,12 @@ class ArticulationContactFilterCfg:
     articulation_uid: str = ""
     """Articulation unique identifier."""
 
-    link_name_list: List[str] = []
+    link_name_list: list[str] = []
     """link names in the articulation whose contacts need to be filtered."""
 
     @classmethod
     def from_dict(
-        cls, init_dict: dict[str, str | List[str]]
+        cls, init_dict: dict[str, str | list[str]]
     ) -> "ArticulationContactFilterCfg":
         """Initialize the configuration from a dictionary.
 
@@ -103,31 +113,37 @@ class ContactSensor(BaseSensor):
     ]
 
     def __init__(
-        self, config: ContactSensorCfg, device: torch.device = torch.device("cpu")
+        self,
+        config: ContactSensorCfg,
+        device: torch.device = torch.device("cpu"),
+        *,
+        owner: "SimulationManager | None" = None,
     ) -> None:
-        from embodichain.lab.sim import SimulationManager
+        if owner is None:
+            from embodichain.lab.sim.sim_manager import SimulationManager
 
-        self._sim = SimulationManager.get_instance()
-        """simulation manager reference"""
+            owner = SimulationManager.get_instance()
+        self._sim = owner
 
         self.item_user_ids: torch.Tensor | None = None
-        """Dexsim userid of the contact filter items."""
+        """Backend-neutral actor IDs selected by the contact query."""
 
         self.item_env_ids: torch.Tensor | None = None
-        """Environment ids of the contact filter items."""
+        """Environment IDs of the selected contact actors."""
 
         self.item_user_env_ids_map: torch.Tensor | None = None
-        """Map from dexsim userid to environment id."""
+        """Compatibility map from contact actor ID to environment ID."""
 
-        self._visualizer: Optional[dexsim.models.PointCloud] = None
+        self._visualizer: dexsim.models.PointCloud | None = None
         """contact point visualizer. Default to None"""
         self.device = device
         self.cfg = config
+        self._query: ContactQuery | None = None
 
         self._num_contacts_per_env: torch.Tensor | None = None
         """Number of contacts per environment."""
 
-        super().__init__(config, device)
+        super().__init__(config, device, num_instances=owner.num_envs)
 
     @property
     def max_total_contacts(self) -> int:
@@ -148,94 +164,76 @@ class ContactSensor(BaseSensor):
         Returns:
             int: Total number of contacts.
         """
-        return self._num_contacts_per_env.sum().item()
+        assert self._num_contacts_per_env is not None
+        return int(self._num_contacts_per_env.sum().item())
 
-    def _precompute_filter_ids(self, config: ContactSensorCfg):
-        self.item_user_ids = torch.tensor([], dtype=torch.int32, device=self.device)
-        self.item_env_ids = torch.tensor([], dtype=torch.int32, device=self.device)
-        self.item_user_env_ids_map = torch.tensor(
-            [], dtype=torch.int32, device=self.device
-        )
-        for rigid_uid in config.rigid_uid_list:
-            rigid_object = self._sim.get_rigid_object(rigid_uid)
-            if rigid_object is None:
-                logger.log_warning(
-                    f"Rigid body with uid '{rigid_uid}' not found in simulation."
-                )
-                continue
-            self.item_user_ids = torch.cat(
-                (self.item_user_ids, rigid_object.get_user_ids())
-            )
-            env_ids = torch.tensor(
-                rigid_object._all_indices, dtype=torch.int32, device=self.device
-            )
-            self.item_env_ids = torch.cat((self.item_env_ids, env_ids))
+    @property
+    def contact_capabilities(self) -> "ContactQueryCapabilities":
+        """Capabilities reported by the active DexSim contact binding."""
+        assert self._query is not None
+        return self._query.capabilities
+
+    def _build_sensor_from_config(
+        self,
+        config: ContactSensorCfg,
+        device: torch.device,
+    ) -> None:
+        result = self._sim.spawn_result
+        if result is None:
+            raise RuntimeError("ContactSensor requires SimulationManager.prepare().")
+
+        targets: list[object] = []
+        for uid in config.rigid_uid_list:
+            try:
+                handles = self._sim._spawn_scene.handles(uid)
+            except KeyError as exc:
+                raise KeyError(f"Contact rigid-body UID not found: {uid!r}.") from exc
+            if not handles:
+                raise RuntimeError(f"Contact rigid body {uid!r} is not materialized.")
+            targets.extend(handles)
 
         for articulation_cfg in config.articulation_cfg_list:
-            articulation = self._sim.get_articulation(articulation_cfg.articulation_uid)
-            if articulation is None:
-                articulation = self._sim.get_robot(articulation_cfg.articulation_uid)
-            if articulation is None:
-                logger.log_warning(
-                    f"Articulation with uid '{articulation_cfg.articulation_uid}' not found in simulation."
-                )
+            uid = articulation_cfg.articulation_uid
+            try:
+                handles = self._sim._spawn_scene.handles(uid)
+            except KeyError as exc:
+                raise KeyError(f"Contact articulation UID not found: {uid!r}.") from exc
+            if not handles:
+                raise RuntimeError(f"Contact articulation {uid!r} is not materialized.")
+            if not articulation_cfg.link_name_list:
+                targets.extend(handles)
                 continue
-            all_link_names = articulation.link_names
-            link_names = (
-                all_link_names
-                if len(articulation_cfg.link_name_list) == 0
-                else articulation_cfg.link_name_list
-            )
-            for link_name in link_names:
-                if link_name not in all_link_names:
-                    logger.log_warning(
-                        f"Link {link_name} not found in articulation {articulation_cfg.uid}."
+            for handle in handles:
+                available = set(handle.get_link_names())
+                missing = set(articulation_cfg.link_name_list) - available
+                if missing:
+                    raise ValueError(
+                        f"Contact articulation {uid!r} has no links: {sorted(missing)}."
                     )
-                    continue
-                link_user_ids = articulation.get_user_ids(link_name).reshape(-1)
-                self.item_user_ids = torch.cat((self.item_user_ids, link_user_ids))
-                env_ids = torch.tensor(
-                    articulation._all_indices, dtype=torch.int32, device=self.device
+                targets.extend(
+                    (handle, link_name) for link_name in articulation_cfg.link_name_list
                 )
-                self.item_env_ids = torch.cat((self.item_env_ids, env_ids))
-        # build user_id to env_id map
-        max_user_id = int(self.item_user_ids.max().item())
-        self.item_user_env_ids_map = torch.full(
-            size=(max_user_id + 1,),
-            fill_value=-1,
-            dtype=self.item_user_ids.dtype,
-            device=self.device,
-        )
-        self.item_user_env_ids_map[self.item_user_ids] = self.item_env_ids
 
-    def _build_sensor_from_config(self, config: ContactSensorCfg, device: torch.device):
-        self._precompute_filter_ids(config)
-        self._world: dexsim.World = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
-        world_config = dexsim.get_world_config()
-        self.is_use_gpu_physics = device.type == "cuda" and world_config.enable_gpu_sim
-        if self.is_use_gpu_physics:
-            self.contact_data_buffer = torch.zeros(
-                self.max_total_contacts,
-                11,
-                dtype=torch.float32,
-                device=device,
+        if not targets:
+            raise ValueError(
+                "ContactSensor requires at least one rigid or link target."
             )
-            self.contact_user_ids_buffer = torch.zeros(
-                self.max_total_contacts,
-                2,
-                dtype=torch.int32,
-                device=device,
-            )
-        else:
-            self._ps.enable_contact_data_update_on_cpu(True)
+
+        self._query = result.create_contact_query(
+            targets,
+            match="all" if config.filter_need_both_actor else "any",
+            capacity=self.max_total_contacts,
+            capacity_per_env=config.max_contacts_per_env,
+            device=device,
+            frame="arena",
+        )
+        self._sync_filter_actor_metadata()
 
         num_envs = self.num_instances
         self._num_contacts_per_env = torch.zeros(
             num_envs, dtype=torch.int32, device=device
         )
 
-        # TODO: We may pre-allocate the data buffer for contact data.
         self._data_buffer = TensorDict(
             {
                 "position": torch.zeros(
@@ -267,16 +265,28 @@ class ContactSensor(BaseSensor):
             batch_size=[num_envs, config.max_contacts_per_env],
             device=device,
         )
-        """
-            position: [num_envs, num_contacts, 3] tensor, contact position in arena frame
-            normal: [num_envs, num_contacts, 3] tensor, contact normal
-            friction: [num_envs, num_contacts, 3] tensor, contact friction. Currently this value is not accurate.
-            impulse: [num_envs, num_contacts] tensor, contact impulse
-            distance: [num_envs, num_contacts] tensor, contact distance
-            user_ids: [num_envs, num_contacts, 2] of int, contact user ids
-                , use rigid_object.get_user_id() and find which object it belongs to.
-            is_valid: [num_envs, num_contacts] bool tensor, indicating which contacts are valid
-        """
+
+    def _sync_filter_actor_metadata(self) -> None:
+        assert self._query is not None
+        actor_ids = self._query.selected_actor_ids
+        self.item_user_ids = torch.as_tensor(
+            actor_ids, dtype=torch.int32, device=self.device
+        )
+        self.item_env_ids = torch.as_tensor(
+            [self._query.actor_info(actor_id).env_id for actor_id in actor_ids],
+            dtype=torch.int32,
+            device=self.device,
+        )
+        self.item_user_env_ids_map = torch.full(
+            (max(actor_ids, default=-1) + 1,),
+            -1,
+            dtype=torch.int32,
+            device=self.device,
+        )
+        if actor_ids:
+            self.item_user_env_ids_map[self.item_user_ids.to(torch.long)] = (
+                self.item_env_ids
+            )
 
     def update(self, **kwargs) -> None:
         """Update the sensor state based on the current simulation state.
@@ -287,60 +297,29 @@ class ContactSensor(BaseSensor):
             **kwargs: Additional keyword arguments for sensor update.
         """
 
+        assert self._query is not None and self._num_contacts_per_env is not None
         self._num_contacts_per_env.zero_()
-        # Reset is_valid buffer
-        self._data_buffer["is_valid"][:] = False
+        self._data_buffer["is_valid"].zero_()
 
-        if not self.is_use_gpu_physics:
-            contact_data_np, body_user_indices_np = self._ps.get_cpu_contact_buffer()
-            n_contact = contact_data_np.shape[0]
-            contact_data = torch.tensor(
-                contact_data_np, dtype=torch.float32, device=self.device
-            )
-            body_user_indices = torch.tensor(
-                body_user_indices_np, dtype=torch.int32, device=self.device
-            )
-        else:
-            n_contact = self._ps.gpu_fetch_contact_data(
-                self.contact_data_buffer, self.contact_user_ids_buffer
-            )
-            contact_data = self.contact_data_buffer[:n_contact]
-            body_user_indices = self.contact_user_ids_buffer[:n_contact]
-
-        if n_contact == 0:
+        contact_buffer = self._query.fetch()
+        self._sync_filter_actor_metadata()
+        if contact_buffer.count == 0:
             return
-
-        filter0_mask = torch.isin(body_user_indices[:, 0], self.item_user_ids)
-        filter1_mask = torch.isin(body_user_indices[:, 1], self.item_user_ids)
-        if self.cfg.filter_need_both_actor:
-            filter_mask = torch.logical_and(filter0_mask, filter1_mask)
-        else:
-            filter_mask = torch.logical_or(filter0_mask, filter1_mask)
-
-        if not filter_mask.any():
+        env_ids = contact_buffer.env_ids[: contact_buffer.count]
+        valid = (env_ids >= 0) & (env_ids < self.num_instances)
+        if not bool(valid.any()):
             return
+        contact_data = contact_buffer.data[: contact_buffer.count][valid].contiguous()
+        actor_ids = contact_buffer.actor_ids[: contact_buffer.count][valid].contiguous()
+        env_ids = env_ids[valid].contiguous()
 
-        filtered_contact_data = contact_data[filter_mask]
-        filtered_user_ids = body_user_indices[filter_mask]
-
-        # Get environment IDs for the filtered contacts
-        filtered_env_ids = self.item_user_env_ids_map[filtered_user_ids[:, 0]]
-
-        # Subtract arena offsets from contact positions
-        contact_offsets = self._sim.arena_offsets[filtered_env_ids]
-        filtered_contact_data[:, 0:3] = (
-            filtered_contact_data[:, 0:3] - contact_offsets
-        )  # minus arean offsets
-
-        num_contacts = len(filtered_contact_data)
-        device = str(self.device)
         wp.launch(
             kernel=scatter_contact_data,
-            dim=num_contacts,
+            dim=contact_data.shape[0],
             inputs=[
-                wp.from_torch(filtered_contact_data),
-                wp.from_torch(filtered_user_ids),
-                wp.from_torch(filtered_env_ids),
+                wp.from_torch(contact_data),
+                wp.from_torch(actor_ids),
+                wp.from_torch(env_ids),
                 wp.from_torch(self._num_contacts_per_env),
                 self.cfg.max_contacts_per_env,
             ],
@@ -353,10 +332,10 @@ class ContactSensor(BaseSensor):
                 wp.from_torch(self._data_buffer["user_ids"]),
                 wp.from_torch(self._data_buffer["is_valid"]),
             ],
-            device="cuda:0" if device == "cuda" else device,
+            device=str(self.device),
         )
 
-    def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor:
+    def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor | None:
         """Not used.
 
         Args:
@@ -368,7 +347,7 @@ class ContactSensor(BaseSensor):
         logger.log_error("`get_arena_pose` for contact sensor is not implemented yet.")
         return None
 
-    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
+    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor | None:
         """Get the local pose of the camera.
 
         Args:
@@ -396,40 +375,38 @@ class ContactSensor(BaseSensor):
         """Retrieve data from the sensor.
 
         Returns:
-            Dict:{
-                "position": Tensor of float32 (num_envs, num_contacts, 3) representing the contact positions,
-                "normal": Tensor of float32 (num_envs, num_contacts, 3) representing the contact normals,
-                "friction": Tensor of float32 (num_envs, num_contacts, 3) representing the contact friction,
-                "impulse": Tensor of float32 (num_envs, num_contacts) representing the contact impulses,
-                "distance": Tensor of float32 (num_envs, num_contacts) representing the contact distances,
-                "user_ids": Tensor of int32 (num_envs, num_contacts, 2) representing contact user ids
-                        , use rigid_object.get_user_id() and find which object it belongs to.
-                "is_valid": Tensor of bool (num_envs, num_contacts) indicating which contacts are valid.
-            }
+            Batched contact data. ``position`` is in the Arena frame;
+            ``normal`` points from actor 0 toward actor 1; ``friction`` and
+            ``impulse`` are impulses; ``distance`` is signed separation;
+            ``user_ids`` contains backend-neutral contact actor IDs; and
+            ``is_valid`` marks rows populated by the latest update. Values in
+            invalid rows are unspecified and may come from an earlier update.
         """
         return self._data_buffer
+
+    def get_actor_info(self, actor_id: int) -> "ContactActorInfo":
+        """Resolve an ID from the ``user_ids`` field to its Spawn identity."""
+        assert self._query is not None
+        return self._query.actor_info(actor_id)
 
     def filter_by_user_ids(
         self, item_user_ids: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> TensorDict:
-        """Filter contact report by specific user IDs.
+        """Filter contact report by backend-neutral contact actor IDs.
 
         Args:
-            item_user_ids (torch.Tensor): Tensor of user IDs to filter by.
-            env_ids (Sequence[int] | None): Environment IDs to filter. If None, filter all environments.
+            item_user_ids: Actor IDs from this sensor's ``user_ids`` field.
+            env_ids: Environment IDs to filter. If None, filter all environments.
 
         Returns:
             data: A TensorDict containing only the filtered contacts for the specified environments.
         """
-        if env_ids is None:
-            env_ids = range(self.num_instances)
-
-        # Vectorized filtering across all specified environments
         env_ids_tensor = (
-            torch.tensor(env_ids, device=self.device)
-            if isinstance(env_ids, list)
-            else env_ids
+            torch.arange(self.num_instances, device=self.device)
+            if env_ids is None
+            else torch.as_tensor(list(env_ids), dtype=torch.long, device=self.device)
         )
+        item_user_ids = item_user_ids.to(device=self.device, dtype=torch.int32)
 
         # Flatten data across all specified environments
         env_data = {
@@ -465,7 +442,7 @@ class ContactSensor(BaseSensor):
         # Combine valid and user ID filters
         combined_mask = torch.logical_and(valid_mask, filter_mask)
 
-        if not combined_mask.any():
+        if not bool(combined_mask.any()):
             # Return empty TensorDict if no matches
             return TensorDict(
                 {
@@ -495,10 +472,10 @@ class ContactSensor(BaseSensor):
     def set_contact_point_visibility(
         self,
         visible: bool = True,
-        rgba: Optional[Sequence[int]] = None,
+        rgba: Sequence[float] | None = None,
         point_size: float = 3.0,
         env_ids: Sequence[int] | None = None,
-    ):
+    ) -> None:
         if env_ids is None:
             env_ids = range(self.num_instances)
 

@@ -20,25 +20,33 @@ import gc
 import queue
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import numpy as np
 import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.cfg import (
+    DefaultPhysicsCfg,
+    RobotCfg,
+    RobotPresetCfg,
+)
 from embodichain.lab.sim.profiler import Profiler
+from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBackend
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
     SimulationManagerCfg,
     _WindowRecordState,
 )
+from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.visualization import (
     GizmoCommand,
     PointCloudOverlay,
     SceneOverlays,
     VisualizationCfg,
 )
+from embodichain.utils import configclass
 
 DEFAULT_LOOK_AT = (
     (2.6, -2.2, 1.6),
@@ -211,12 +219,14 @@ def _make_visualization_sim_manager() -> (
     runtime = FakeVisualizationRuntime()
     sim.sim_config = SimpleNamespace(
         physics_dt=0.01,
+        physics_cfg=DefaultPhysicsCfg(),
         visualization=SimpleNamespace(backend="viser"),
     )
     sim.device = SimpleNamespace(type="cpu")
     sim.profiler = Profiler(None, torch.device("cpu"))
     sim._is_initialized_gpu_physics = False
     sim._world = FakeWorld()
+    sim.prepare = MagicMock()
     sim._window_record_state = None
     sim._visualization_runtime = runtime
     sim._visualization_overlays = None
@@ -265,6 +275,55 @@ def test_flush_cleanup_queue_waits_after_running_pending_destroy(
     destroy.assert_called_once_with()
     collect.assert_called_once_with()
     wait_scene_destruction.assert_called_once_with()
+
+
+def test_deferred_destroy_prepares_backend_before_releasing_world(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backend-owned views are released before Spawn and World resources."""
+    events: list[str] = []
+    sim = object.__new__(SimulationManager)
+    spawn_scene = MagicMock()
+    spawn_scene.close.side_effect = lambda: events.append("spawn_close")
+    sim.physics = SimpleNamespace(
+        prepare_for_teardown=lambda: events.append("backend_prepare")
+    )
+    sim._gizmos = {}
+    sim._markers = {}
+    sim._rigid_objects = {}
+    sim._constraints = {}
+    sim._rigid_object_groups = {}
+    sim._deformable_objects = {}
+    sim._articulations = {}
+    sim._robots = {}
+    sim._sensors = {}
+    sim._lights = {}
+    sim._visual_materials = {}
+    sim._texture_cache = {}
+    sim._arenas = []
+    sim._spawn_scene = spawn_scene
+    sim._default_plane = object()
+    sim._sensors = {}
+    sim._env = SimpleNamespace(clean=lambda: events.append("env_clean"))
+    sim._world = SimpleNamespace(quit=lambda: events.append("world_quit"))
+    sim.instance_id = 0
+    sim.is_window_recording = lambda: False
+    sim.wait_window_record_saves = lambda: events.append("record_wait")
+    sim.clean_materials = lambda: events.append("material_clean")
+    sim.is_window_opened = False
+
+    monkeypatch.setattr(
+        SimulationManager,
+        "reset",
+        lambda _instance_id: events.append("manager_reset"),
+    )
+    monkeypatch.setattr(gc, "collect", lambda: events.append("gc_collect"))
+
+    sim._deferred_destroy()
+
+    assert events.index("backend_prepare") < events.index("gc_collect")
+    assert events.index("backend_prepare") < events.index("spawn_close")
+    assert events.index("backend_prepare") < events.index("world_quit")
 
 
 def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -> None:
@@ -475,8 +534,9 @@ def test_start_visualization_rejects_open_native_window() -> None:
         sim.start_visualization()
 
 
-def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> None:
+def test_constructor_only_declares_spawn_scene(monkeypatch) -> None:
     lifecycle: list[str] = []
+    spawn_scene = MagicMock()
     world = MagicMock()
     world.get_physics_scene.return_value = MagicMock()
     world.get_env.return_value = MagicMock()
@@ -486,6 +546,11 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
     )
     monkeypatch.setattr(sim_manager_module.wp, "init", lambda: None)
     monkeypatch.setattr(sim_manager_module.dexsim, "World", lambda _cfg: world)
+    monkeypatch.setattr(
+        sim_manager_module,
+        "SpawnScene",
+        lambda *_args, **_kwargs: spawn_scene,
+    )
     monkeypatch.setattr(
         sim_manager_module.dexsim, "set_physics_config", lambda **_kwargs: None
     )
@@ -507,7 +572,7 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
     )
     monkeypatch.setattr(
         SimulationManager,
-        "_create_default_plane",
+        "_declare_spawn_default_plane",
         lambda _self: lifecycle.append("plane"),
     )
     monkeypatch.setattr(
@@ -521,14 +586,9 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
         lambda _self: lifecycle.append("lighting"),
     )
 
-    def build_arenas(sim: SimulationManager, num: int) -> None:
-        lifecycle.append("arenas")
-        sim._arenas.extend([object() for _ in range(num)])
-
     def start_visualization(sim: SimulationManager) -> None:
         lifecycle.append(f"visualization:{sim.num_envs}")
 
-    monkeypatch.setattr(SimulationManager, "_build_multiple_arenas", build_arenas)
     monkeypatch.setattr(
         SimulationManager,
         "start_visualization",
@@ -540,22 +600,402 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
 
     assert lifecycle == [
         "resources",
-        "plane",
         "background",
+        "plane",
         "lighting",
-        "arenas",
-        "visualization:3",
     ]
+    assert sim._spawn_scene is spawn_scene
+    assert sim._arenas == []
+
+
+def test_add_robot_resolves_backend_preset_before_declaration() -> None:
+    @configclass
+    class TestRobotPresetCfg(RobotPresetCfg):
+        default: RobotCfg = RobotCfg(uid="selected", fpath="selected.urdf")
+
+    sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(name="default", supports_robot=True, solver_type=None)
+    sim.sim_config = SimpleNamespace(physics_cfg=DefaultPhysicsCfg())
+    sim._robots = {}
+    sim._declare_spawn_articulation = MagicMock(return_value="robot-handle")
+
+    robot = sim.add_robot(TestRobotPresetCfg())
+
+    assert robot == "robot-handle"
+    resolved_cfg = sim._declare_spawn_articulation.call_args.args[0]
+    assert isinstance(resolved_cfg, RobotCfg)
+    assert resolved_cfg.uid == "selected"
+
+
+def test_default_plane_authors_repeated_uv_before_spawn() -> None:
+    sim = object.__new__(SimulationManager)
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.handles.return_value = []
+    sim._spawn_default_plane_material = object()
+
+    sim._declare_spawn_default_plane()
+
+    descriptor = sim._spawn_scene.declare.call_args.args[2]
+    expected_repeat = 500.0  # One two-metre texture tile across a 1000 m plane.
+    np.testing.assert_array_equal(
+        descriptor.renders[0].uv_coords,
+        np.asarray(
+            [
+                [0.0, 0.0],
+                [expected_repeat, 0.0],
+                [expected_repeat, expected_repeat],
+                [0.0, expected_repeat],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("backend", "device", "initializes_direct_gpu"),
+    [
+        pytest.param("default", torch.device("cpu"), False, id="default-host"),
+        pytest.param("default", torch.device("cuda"), True, id="default-accelerator"),
+        pytest.param("newton", torch.device("cpu"), False, id="newton-host"),
+        pytest.param("newton", torch.device("cuda"), False, id="newton-accelerator"),
+    ],
+)
+def test_prepare_initializes_runtime_for_backend_device_matrix(
+    backend: str,
+    device: torch.device,
+    initializes_direct_gpu: bool,
+) -> None:
+    result = MagicMock()
+    result.topology_revision = 3
+    spawn_scene = MagicMock()
+    spawn_scene.builder.is_finalized = False
+    spawn_scene.builder.result = None
+    spawn_scene.commit.return_value = result
+    spawn_scene.arena_names = ["arena_0"]
+    events: list[str] = []
+    spawn_scene.prepare_runtime_config.side_effect = lambda _result: events.append(
+        "runtime_config"
+    )
+    spawn_scene.bind.side_effect = lambda: events.append("bind")
+
+    sim = object.__new__(SimulationManager)
+    sync_render_state = MagicMock()
+    sim.device = device
+    sim._world = MagicMock()
+    backend_cls = (
+        DefaultPhysicsBackend if backend == "default" else NewtonPhysicsBackend
+    )
+    sim.physics = backend_cls(sim)
+    sim.physics.sync_render_state = sync_render_state
+    sim._world.init_gpu_physics.side_effect = lambda: events.append("gpu_init")
+    sim._spawn_scene = spawn_scene
+    sim._default_plane = object()
+    sim._sensors = {}
+    sim._prepared_spawn_topology_revision = -1
+    sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
+
+    sim.prepare()
+
+    spawn_scene.prepare_runtime_config.assert_called_once_with(result)
+    spawn_scene.bind.assert_called_once_with()
+    sync_render_state.assert_called_once_with(result)
+    sim._world.update.assert_not_called()
+    if initializes_direct_gpu:
+        sim._world.init_gpu_physics.assert_called_once_with()
+        assert events == ["runtime_config", "gpu_init", "bind"]
+    else:
+        sim._world.init_gpu_physics.assert_not_called()
+        assert events == ["runtime_config", "bind"]
+
+
+def test_manager_delegates_differentiable_runtime_without_backend_name() -> None:
+    """Runtime availability is capability-based rather than name-based."""
+    runtime = object()
+    sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(
+        name="third_party",
+        differentiable_runtime=runtime,
+    )
+
+    assert sim.differentiable_runtime is runtime
+
+
+def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
+    result = MagicMock()
+    result.needs_rebuild = False
+    result.topology_revision = 3
+    spawn_scene = MagicMock()
+    spawn_scene.builder.is_finalized = True
+    spawn_scene.builder.result = result
+    spawn_scene.builder.has_pending_changes = False
+
+    sim = object.__new__(SimulationManager)
+    sync_render_state = MagicMock()
+    prepare_spawn_runtime = MagicMock(side_effect=[RuntimeError("first attempt"), None])
+    sim.physics = SimpleNamespace(
+        name="default",
+        prepare_spawn_runtime=prepare_spawn_runtime,
+        sync_render_state=sync_render_state,
+    )
+    sim.device = torch.device("cuda")
+    sim._world = MagicMock()
+    sim._spawn_scene = spawn_scene
+    sim._sensors = {}
+    sim._prepared_spawn_topology_revision = -1
+    sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
+
+    with pytest.raises(RuntimeError, match="first attempt"):
+        sim.prepare()
+    sim.prepare()
+
+    spawn_scene.commit.assert_not_called()
+    assert prepare_spawn_runtime.call_count == 2
+    spawn_scene.bind.assert_called_once_with()
+    sync_render_state.assert_called_once_with(result)
+
+
+def test_prepare_retries_camera_attachment_without_recommit() -> None:
+    result = MagicMock()
+    result.needs_rebuild = False
+    result.topology_revision = 3
+    attach_parented_cameras = MagicMock(
+        side_effect=[RuntimeError("attach failed"), None]
+    )
+    spawn_scene = MagicMock()
+    spawn_scene.builder.is_finalized = True
+    spawn_scene.builder.result = result
+    spawn_scene.builder.has_pending_changes = False
+
+    sim = object.__new__(SimulationManager)
+    sync_render_state = MagicMock()
+    sim.physics = SimpleNamespace(
+        name="default",
+        prepare_spawn_runtime=MagicMock(),
+        sync_render_state=sync_render_state,
+    )
+    sim.device = torch.device("cpu")
+    sim._world = MagicMock()
+    sim._spawn_scene = spawn_scene
+    sim._sensors = {}
+    sim._attach_parented_cameras = attach_parented_cameras
+    sim._prepared_spawn_topology_revision = -1
+    sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
+
+    with pytest.raises(RuntimeError, match="attach failed"):
+        sim.prepare()
+    sim.prepare()
+    sim.prepare()
+
+    assert attach_parented_cameras.call_count == 2
+    assert sim._camera_attachment_topology_revision == 3
+    spawn_scene.commit.assert_not_called()
+    sync_render_state.assert_called_once_with(result)
+
+
+def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
+    events: list[str] = []
+    result = MagicMock()
+    result.needs_rebuild = False
+    result.topology_revision = 3
+    spawn_scene = MagicMock()
+    spawn_scene.builder.is_finalized = True
+    spawn_scene.builder.result = result
+    spawn_scene.builder.has_pending_changes = False
+    spawn_scene.bind.side_effect = lambda: events.append("bind")
+    sync_render_state = MagicMock(side_effect=lambda _result: events.append("sync"))
+
+    sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(
+        name="newton",
+        prepare_spawn_runtime=MagicMock(),
+        sync_render_state=sync_render_state,
+    )
+    sim.device = torch.device("cpu")
+    sim._world = MagicMock()
+    sim._spawn_scene = spawn_scene
+    attach_parented_cameras = MagicMock()
+    sim._attach_parented_cameras = attach_parented_cameras
+    sim._prepared_spawn_topology_revision = -1
+    sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
+
+    sim.prepare()
+    sim.prepare()
+    result.topology_revision = 4
+    sim.prepare()
+    sim.prepare()
+
+    spawn_scene.commit.assert_not_called()
+    assert spawn_scene.bind.call_count == 4
+    assert sync_render_state.call_count == 2
+    sync_render_state.assert_has_calls([call(result), call(result)])
+    assert attach_parented_cameras.call_count == 2
+    assert sim._camera_attachment_topology_revision == 4
+    sim._world.update.assert_not_called()
+    assert events == ["bind", "sync", "bind", "bind", "sync", "bind"]
+
+
+def test_prepare_retries_render_state_sync_without_recommit() -> None:
+    result = MagicMock()
+    result.needs_rebuild = False
+    result.topology_revision = 3
+    spawn_scene = MagicMock()
+    spawn_scene.builder.is_finalized = True
+    spawn_scene.builder.result = result
+    spawn_scene.builder.has_pending_changes = False
+    sync_render_state = MagicMock(
+        side_effect=[RuntimeError("sync failed"), None],
+    )
+
+    sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(
+        name="newton",
+        prepare_spawn_runtime=MagicMock(),
+        sync_render_state=sync_render_state,
+    )
+    sim.device = torch.device("cpu")
+    sim._world = MagicMock()
+    sim._spawn_scene = spawn_scene
+    sim._sensors = {}
+    sim._prepared_spawn_topology_revision = -1
+    sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
+
+    with pytest.raises(RuntimeError, match="sync failed"):
+        sim.prepare()
+    sim.prepare()
+    sim.prepare()
+
+    spawn_scene.commit.assert_not_called()
+    assert spawn_scene.bind.call_count == 3
+    assert sync_render_state.call_count == 2
+    sim._world.update.assert_not_called()
+
+
+def test_add_camera_uses_owning_manager_render_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = object()
+    arenas = [object(), object()]
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(num_envs=len(arenas))
+    sim.device = torch.device("cpu")
+    sim._world = world
+    sim._arenas = arenas
+    sim._sensors = {}
+    sim._visualization_topology_revision = 0
+    sim.SUPPORTED_SENSOR_TYPES = {"Camera": sim_manager_module.Camera}
+
+    monkeypatch.setattr(
+        sim_manager_module.Camera,
+        "_build_sensor_from_config",
+        lambda self, config, device: None,
+    )
+    monkeypatch.setattr(sim_manager_module.Camera, "reset", lambda self: None)
+
+    sensor = sim.add_sensor(CameraCfg(uid="owned_camera"))
+
+    assert sensor._world is world
+    assert sensor._arenas == arenas
+    assert sensor.num_instances == len(arenas)
+
+
+def test_camera_attachment_uses_resolved_nodes_and_tracks_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entities = [MagicMock(), MagicMock()]
+    parent_nodes = [object(), object()]
+    owner = MagicMock()
+    owner.num_envs = len(entities)
+    owner.get_world.return_value = object()
+    owner.get_env.side_effect = [object(), object()]
+
+    def build_camera(sensor, config, device) -> None:
+        sensor._entities[:] = entities
+
+    monkeypatch.setattr(
+        sim_manager_module.Camera,
+        "_build_sensor_from_config",
+        build_camera,
+    )
+    monkeypatch.setattr(sim_manager_module.Camera, "reset", lambda self: None)
+
+    sensor = sim_manager_module.Camera(
+        CameraCfg(
+            uid="attached_camera",
+            extrinsics=CameraCfg.ExtrinsicsCfg(parent="robot/tool"),
+        ),
+        owner=owner,
+    )
+
+    assert sensor.is_attached is False
+    sensor.attach_to_parent_nodes(parent_nodes)
+
+    assert sensor.is_attached is True
+    for entity, parent_node in zip(entities, parent_nodes, strict=True):
+        entity.attach_node.assert_called_once_with(parent_node)
+
+
+def test_manager_resolves_camera_parent_before_attachment() -> None:
+    parent_nodes = [object(), object()]
+    sensor = MagicMock()
+    sensor.cfg.extrinsics.parent = "robot/tool"
+
+    sim = object.__new__(SimulationManager)
+    sim._resolve_spawn_sensor_parent_nodes = MagicMock(return_value=parent_nodes)
+
+    sim._attach_camera_parent(sensor)
+
+    sim._resolve_spawn_sensor_parent_nodes.assert_called_once_with("robot/tool")
+    sensor.attach_to_parent_nodes.assert_called_once_with(parent_nodes)
+
+
+def test_parented_cameras_include_only_configured_camera_sensors() -> None:
+    parented_camera = object.__new__(sim_manager_module.Camera)
+    parented_camera.cfg = CameraCfg(
+        extrinsics=CameraCfg.ExtrinsicsCfg(parent="robot/tool")
+    )
+    root_camera = object.__new__(sim_manager_module.Camera)
+    root_camera.cfg = CameraCfg()
+    sim = object.__new__(SimulationManager)
+    sim._sensors = {
+        "parented": parented_camera,
+        "root": root_camera,
+        "custom": MagicMock(),
+    }
+    sim._attach_camera_parent = MagicMock()
+
+    sim._attach_parented_cameras()
+
+    sim._attach_camera_parent.assert_called_once_with(parented_camera)
 
 
 def test_remove_asset_marks_visualization_topology_dirty() -> None:
     sim, runtime = _make_visualization_sim_manager()
     rigid_object = MagicMock()
+    spawn_scene = MagicMock()
+    spawn_scene.__contains__.return_value = True
+    spawn_scene.result = object()
+    sim._spawn_scene = spawn_scene
+    sim.prepare = MagicMock()
     sim._rigid_objects = {"cube": rigid_object}
+    sim._rigid_object_groups = {}
+    sim._deformable_objects = {}
+    sim._articulations = {}
+    sim._robots = {}
+    sim._lights = {}
+    sim._sensors = {}
 
     assert sim.remove_asset("cube")
 
-    rigid_object.destroy.assert_called_once_with()
+    spawn_scene.remove.assert_called_once_with("cube")
+    sim.prepare.assert_called_once_with()
+    rigid_object.destroy.assert_not_called()
+    assert "cube" not in sim._rigid_objects
     assert sim._visualization_topology_revision == 3
     sim.stop_visualization()
     assert runtime.stopped
@@ -570,6 +1010,7 @@ def test_add_stereo_camera_marks_visualization_topology_dirty() -> None:
     sim.SUPPORTED_SENSOR_TYPES = {
         "StereoCamera": lambda cfg, device: sensor,
     }
+    sim.prepare = MagicMock()
     cfg = SimpleNamespace(sensor_type="StereoCamera", uid="cam_high")
 
     assert sim.add_sensor(cfg) is sensor
@@ -669,7 +1110,7 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
     assert sim._window_record_save_threads == []
 
 
-def test_reset_objects_state_includes_soft_and_cloth_assets() -> None:
+def test_reset_objects_state_includes_deformable_assets() -> None:
     sim = object.__new__(SimulationManager)
     sim._robots = {}
     sim._articulations = {}
@@ -677,10 +1118,12 @@ def test_reset_objects_state_includes_soft_and_cloth_assets() -> None:
     sim._rigid_object_groups = {}
     sim._lights = {}
     sim._sensors = {}
-    sim._soft_objects = {"soft": MagicMock()}
-    sim._cloth_objects = {"cloth": MagicMock()}
+    sim._deformable_objects = {
+        "soft": MagicMock(),
+        "cloth": MagicMock(),
+    }
 
     sim.reset_objects_state(env_ids=[1])
 
-    sim._soft_objects["soft"].reset.assert_called_once_with([1])
-    sim._cloth_objects["cloth"].reset.assert_called_once_with([1])
+    sim._deformable_objects["soft"].reset.assert_called_once_with([1])
+    sim._deformable_objects["cloth"].reset.assert_called_once_with([1])

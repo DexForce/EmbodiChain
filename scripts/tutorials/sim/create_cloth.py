@@ -33,8 +33,9 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     ClothObjectCfg,
     ClothPhysicalAttributesCfg,
 )
@@ -93,8 +94,9 @@ def main():
         headless=True,
         num_envs=args.num_envs,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device="cuda",  # soft simulation only supports cuda device
+        device="cuda",  # soft simulation only supports cuda device
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -121,7 +123,7 @@ def main():
                 mass=0.01,
                 youngs=1e9,
                 poissons=0.4,
-                thickness=0.04,
+                thickness=0.004,
                 bending_stiffness=0.01,
                 bending_damping=0.1,
                 dynamic_friction=0.95,
@@ -134,13 +136,16 @@ def main():
         shape=CubeCfg(
             size=[0.1, 0.1, 0.06],
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 1.0},
+                "rigid_props": {"min_position_iters": 32, "min_velocity_iters": 8},
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                    "restitution": 0.01,
+                },
+            }
         ),
         body_type="dynamic",
         init_pos=[0.5, 0.0, 0.04],
@@ -148,6 +153,8 @@ def main():
     )
     padding_box = sim.add_rigid_object(cfg=padding_box_cfg)
     print("[INFO]: Add soft object complete!")
+
+    sim.prepare()
 
     # Open window when the scene has been set up
     if not args.headless:
@@ -167,9 +174,6 @@ def run_simulation(sim: SimulationManager, cloth: ClothObject) -> None:
         sim: The SimulationManager instance to run
         soft_obj: soft object
     """
-
-    # Initialize GPU physics
-    sim.init_gpu_physics()
 
     step_count = 0
 

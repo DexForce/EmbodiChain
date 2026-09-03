@@ -21,11 +21,14 @@ import torch
 import dexsim.render as dr
 
 from functools import cached_property
-from typing import List, Literal, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
 from embodichain.utils import logger, configclass
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.sim_manager import SimulationManager
 
 __all__ = ["Camera", "CameraCfg"]
 
@@ -134,27 +137,32 @@ class Camera(BaseSensor):
     SUPPORTED_DATA_TYPES = ["color", "depth", "mask", "normal", "position"]
 
     def __init__(
-        self, config: CameraCfg, device: torch.device = torch.device("cpu")
+        self,
+        config: CameraCfg,
+        device: torch.device = torch.device("cpu"),
+        *,
+        owner: SimulationManager,
     ) -> None:
-        super().__init__(config, device)
+        self._world = owner.get_world()
+        self._arenas = [owner.get_env(i) for i in range(owner.num_envs)]
+        if len(self._arenas) == 0:
+            raise ValueError("Camera requires at least one materialized Arena.")
+        self._camera_names: list[tuple[dexsim.environment.Arena, str]] = []
+        self._is_attached = False
+        self._is_destroyed = False
+        super().__init__(config, device, num_instances=len(self._arenas))
+        self.reset()
 
     def _build_sensor_from_config(
         self, config: CameraCfg, device: torch.device
     ) -> None:
-        self._world = dexsim.default_world()
-        env = self._world.get_env()
-        arenas = env.get_all_arenas()
-        if len(arenas) == 0:
-            arenas = [env]
-        num_instances = len(arenas)
-
         self._frame_buffer = self._world.create_camera_group(
-            [config.width, config.height], num_instances, True
+            [config.width, config.height], self.num_instances, True
         )
 
         view_attrib = config.get_view_attrib()
-        for i, arena in enumerate(arenas):
-            view_name = f"{self.uid}_view{i + 1}"
+        for i, arena in enumerate(self._arenas):
+            view_name = f"{config.uid}_view{i + 1}"
             view = arena.create_camera(
                 view_name,
                 config.width,
@@ -167,6 +175,7 @@ class Camera(BaseSensor):
             view.set_near(config.near)
             view.set_far(config.far)
             self._entities[i] = view
+            self._camera_names.append((arena, view_name))
 
         # Define a mapping of data types to their respective shapes and dtypes
         buffer_specs = {
@@ -202,8 +211,6 @@ class Camera(BaseSensor):
                 )
 
         self.cfg: CameraCfg = config
-        if self.cfg.extrinsics.parent is not None:
-            self._attach_to_entity()
 
     @cached_property
     def group_id(self) -> int:
@@ -216,12 +223,12 @@ class Camera(BaseSensor):
 
     @property
     def is_attached(self) -> bool:
-        """Check if the camera is attached to a parent entity.
+        """Return whether all camera views are attached to parent nodes.
 
         Returns:
-            bool: True if the camera is attached to a parent entity, False otherwise.
+            True after parent attachment and extrinsics application succeed.
         """
-        return self.cfg.extrinsics.parent is not None
+        return self._is_attached
 
     def update(self, **kwargs) -> None:
         """Update the sensor data.
@@ -268,22 +275,28 @@ class Camera(BaseSensor):
                 self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
             )
 
-    def _attach_to_entity(self) -> None:
-        """Attach the sensor to the parent entity in each environment."""
-        env = self._world.get_env()
-        for i, entity in enumerate(self._entities):
+    def attach_to_parent_nodes(self, parent_nodes: Sequence[object]) -> None:
+        """Attach camera views to one resolved parent node per environment.
 
-            parent = None
-            if i == 0:
-                parent = env.find_node(f"{self.cfg.extrinsics.parent}")
-            else:
-                parent = env.find_node(f"{self.cfg.extrinsics.parent}.{i-1}")
-            if parent is None:
-                logger.log_error(
-                    f"Failed to find parent entity {self.cfg.extrinsics.parent} for sensor {self.cfg.uid}."
-                )
+        Args:
+            parent_nodes: Parent render nodes ordered by environment index.
 
+        Raises:
+            RuntimeError: If the number of parent nodes does not match the
+                number of camera instances.
+        """
+        nodes = list(parent_nodes)
+        if len(nodes) != self.num_instances:
+            raise RuntimeError(
+                f"Camera attachment received {len(nodes)} parent nodes for "
+                f"{self.num_instances} camera instances."
+            )
+        for entity, parent in zip(self._entities, nodes, strict=True):
             entity.attach_node(parent)
+        # Extrinsics are expressed in the parent frame. Reapply them after
+        # reparenting because the camera was initially reset in Arena space.
+        self.reset()
+        self._is_attached = True
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -293,7 +306,8 @@ class Camera(BaseSensor):
         Note: The pose should be in the OpenGL coordinate system, which means the Y is up and Z is forward.
 
         Args:
-            pose (torch.Tensor): The local pose to set, should be a 4x4 transformation matrix.
+            pose (torch.Tensor): The local pose as ``(N, 4, 4)`` matrices or
+                ``(N, 7)`` vectors in ``(x, y, z, qx, qy, qz, qw)`` order.
             env_ids (Sequence[int] | None): The environment IDs to set the pose for. If None, set for all environments.
         """
         if env_ids is None:
@@ -320,7 +334,8 @@ class Camera(BaseSensor):
         """Get the local pose of the camera.
 
         Args:
-            to_matrix (bool): If True, return the pose as a 4x4 matrix. If False, return as a quaternion.
+            to_matrix (bool): If True, return the pose as a 4x4 matrix. If
+                False, return ``(x, y, z, qx, qy, qz, qw)``.
 
         Returns:
             torch.Tensor: The local pose of the camera.
@@ -341,19 +356,16 @@ class Camera(BaseSensor):
         """Get the pose of the sensor in the arena frame.
 
         Args:
-            to_matrix (bool): If True, return the pose as a 4x4 transformation matrix.
+            to_matrix (bool): If True, return the pose as a 4x4 transformation
+                matrix. If False, return ``(x, y, z, qx, qy, qz, qw)``.
 
         Returns:
             A tensor representing the pose of the sensor in the arena frame.
         """
-        from embodichain.lab.sim.utility import get_dexsim_arenas
-
-        arenas = get_dexsim_arenas()
-
         poses = []
         for i, entity in enumerate(self._entities):
             pose = entity.get_world_pose()
-            pose[:2, 3] -= arenas[i].get_root_node().get_local_pose()[:2, 3]
+            pose[:2, 3] -= self._arenas[i].get_root_node().get_local_pose()[:2, 3]
             poses.append(torch.as_tensor(pose, dtype=torch.float32))
 
         poses = torch.stack(poses, dim=0).to(self.device)
@@ -362,6 +374,28 @@ class Camera(BaseSensor):
             quat = quat_from_matrix(poses[:, :3, :3])
             return torch.cat((xyz, quat), dim=-1)
         return poses
+
+    def destroy(self) -> None:
+        """Remove render cameras before releasing their World-owned group."""
+        if self._is_destroyed:
+            return
+        self._is_destroyed = True
+        for arena, camera_name in self._camera_names:
+            try:
+                arena.remove_camera(camera_name)
+            except Exception as error:
+                logger.log_warning(
+                    f"Failed to remove camera {camera_name!r}: {error!r}"
+                )
+        self._entities = []
+        self._camera_names = []
+        # DexSim currently has no public remove_camera_group API. The group is
+        # World-owned; dropping this borrowed facade after removing all views
+        # is the narrowest safe lifetime boundary available to EmbodiChain.
+        self._frame_buffer = None
+        self._is_attached = False
+        self._arenas = []
+        self._world = None
 
     def look_at(
         self,

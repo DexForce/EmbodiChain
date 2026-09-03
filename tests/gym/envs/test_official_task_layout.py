@@ -26,6 +26,7 @@ from embodichain.lab.gym.utils.registration import (
     REGISTERED_ENVS,
     discover_task_packages,
 )
+from embodichain.lab.sim.cfg import physics_cfg_for_backend
 from embodichain.learning.rl.env import get_registered_learning_env_names
 from embodichain.utils.utility import load_config
 from embodichain_tasks.classic_control.point_mass import PointMassEnv
@@ -59,6 +60,33 @@ TABLEWARE_CONFIG_TASKS = {
 TASK_CONFIG_ROOT = (
     Path(__file__).resolve().parents[3] / "embodichain_tasks/configs/tasks"
 )
+
+
+def test_official_gym_configs_own_one_explicit_physics_backend() -> None:
+    """Every runnable config resolves one backend-aligned physics mapping."""
+    for config_path in sorted(TASK_CONFIG_ROOT.rglob("*")):
+        if config_path.suffix.lower() not in {".json", ".yaml", ".yml"}:
+            continue
+        config = load_config(config_path)
+        if type(config) is not dict or not config.get("id"):
+            continue
+
+        environment = config.get("environment")
+        if type(environment) is dict and "component" in environment:
+            assert "physics" not in config, config_path
+            assert "physics_config" not in config, config_path
+            owner_path = config_path.parent / environment["component"]
+            owner = load_config(owner_path)
+        else:
+            owner_path = config_path
+            owner = config
+
+        backend = owner.get("physics")
+        assert backend in {"default", "newton"}, owner_path
+        physics_config = owner.get("physics_config", {})
+        assert type(physics_config) is dict, owner_path
+        config_type = type(physics_cfg_for_backend(backend))
+        config_type(**physics_config)
 
 
 def test_import_registered_gym_ids_resolve_to_flat_task_modules() -> None:
@@ -129,6 +157,7 @@ def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
         environment = load_config(environment_path)
         task = load_config(task_path)
         assert environment["environment_id"] == task_name
+        assert environment["physics"] in {"default", "newton"}
         assert "task_program" not in environment
         assert task["environment"] == {"component": "env.yaml"}
         assert (config_root / "task_program/program.yaml").is_file()

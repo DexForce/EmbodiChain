@@ -42,7 +42,7 @@ class StereoCameraTest:
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=sim_device,
             num_envs=num_envs,
             render_cfg=RenderCfg(renderer=renderer),
         )
@@ -61,6 +61,7 @@ class StereoCameraTest:
         }
         cfg = SensorCfg.from_dict(cfg_dict)
         self.camera: StereoCamera = self.sim.add_sensor(cfg)
+        self.sim.prepare()
 
     def test_get_data(self):
 

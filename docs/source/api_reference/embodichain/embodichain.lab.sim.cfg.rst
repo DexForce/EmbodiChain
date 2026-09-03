@@ -18,24 +18,48 @@ Entity configs form a small inheritance hierarchy rooted at ``ObjectBaseCfg``
 (``LightCfg``, ``RigidObjectCfg``, ``SoftObjectCfg``, ``ClothObjectCfg``,
 ``ArticulationCfg`` and its ``RobotCfg`` subclass), while ``URDFCfg`` and
 ``RigidConstraintCfg`` describe multi-component assembly and constraints.
+``RobotPresetCfg`` provides replace-only complete robot alternatives when a
+backend-specific asset or actuator definition is unavoidable.
+Public backend selectors use only ``default`` and ``newton``. Nested physical
+property groups may additionally use ``common`` for backend-neutral intent;
+DexSim names belong to the runtime and Spawn SDK adapter boundary.
+
+.. rubric:: Type aliases
+
+.. autosummary::
+
+   AssetPhysicsMode
+   MeshCollisionApproximation
 
 .. rubric:: Classes
 
 .. autosummary::
 
    RenderCfg
-   PhysicsCfg
+   PhysicsBackendCfg
+   DefaultPhysicsCfg
+   NewtonPhysicsCfg
+   NewtonCollisionPipelineCfg
    MarkerCfg
    WindowRecordCfg
    WindowCameraPoseCfg
    GPUMemoryCfg
-   RigidBodyAttributesCfg
-   RigidBodyAttributesOverrideCfg
+   MassPropertiesCfg
+   DefaultRigidBodyPropertiesCfg
+   CollisionPropertiesCfg
+   DefaultCollisionPropertiesCfg
+   NewtonCollisionPropertiesCfg
+   RigidBodyMaterialCfg
+   NewtonRigidBodyMaterialCfg
+   MeshCollisionCfg
+   RigidBodyPhysicsCfg
+   ArticulationRootPropertiesCfg
    LinkPhysicsOverrideCfg
    SoftbodyVoxelAttributesCfg
    SoftbodyPhysicalAttributesCfg
    ClothPhysicalAttributesCfg
    JointDrivePropertiesCfg
+   NewtonJointDrivePropertiesCfg
    ObjectBaseCfg
    LightCfg
    RigidObjectCfg
@@ -46,3 +70,4 @@ Entity configs form a small inheritance hierarchy rooted at ``ObjectBaseCfg``
    URDFCfg
    ArticulationCfg
    RobotCfg
+   RobotPresetCfg

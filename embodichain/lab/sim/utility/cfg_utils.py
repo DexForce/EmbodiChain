@@ -14,9 +14,38 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from embodichain.lab.sim.cfg import RobotCfg
+from typing import TypeVar
+
+from embodichain.lab.sim.cfg import (
+    _raise_removed_articulation_cfg_fields,
+    JointDrivePropertiesCfg,
+    RigidBodyPhysicsCfg,
+    RobotCfg,
+)
+from embodichain.lab.sim.cfg.rigid import _rigid_body_physics_from_dict
 from embodichain.lab.sim.solvers import SolverCfg
-from embodichain.utils import logger
+from embodichain.utils import is_configclass, logger
+
+_ConfigT = TypeVar("_ConfigT")
+
+
+def _merge_non_none_config(base: _ConfigT | None, override: _ConfigT) -> _ConfigT:
+    """Merge non-None configclass fields without discarding base defaults."""
+    if base is None:
+        return override
+    for field_name in override.__dataclass_fields__:
+        value = getattr(override, field_name)
+        if value is not None:
+            base_value = getattr(base, field_name)
+            if (
+                base_value is not None
+                and type(base_value) is type(value)
+                and is_configclass(base_value)
+            ):
+                _merge_non_none_config(base_value, value)
+            else:
+                setattr(base, field_name, value)
+    return base
 
 
 def merge_solver_cfg(
@@ -83,6 +112,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
         RobotCfg: The merged robot configuration.
     """
 
+    _raise_removed_articulation_cfg_fields(override_cfg_dict)
+
     # Only parse keys the base RobotCfg recognizes, so subclass-only variant
     # fields (version, ...) set by _build_defaults don't trigger
     # spurious "Key not found in RobotCfg" warnings from the base from_dict.
@@ -142,30 +173,47 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                             f"new solver entry, or ensure the part name "
                             f"matches an existing solver."
                         )
-        elif key == "drive_pros":
+        elif key == "joint_drive_props":
             # merge joint drive properties
-            user_drive_pros_dict = override_cfg_dict.get("drive_pros")
-            if isinstance(user_drive_pros_dict, dict):
-                for prop, val in user_drive_pros_dict.items():
+            user_joint_drive_props_dict = override_cfg_dict.get("joint_drive_props")
+            if isinstance(user_joint_drive_props_dict, dict):
+                if user_joint_drive_props_dict.get("backend") == "newton":
+                    base_cfg.joint_drive_props = JointDrivePropertiesCfg.from_dict(
+                        user_joint_drive_props_dict,
+                        defaults=base_cfg.joint_drive_props,
+                    )
+                    continue
+                for prop, val in user_joint_drive_props_dict.items():
+                    if prop == "backend":
+                        continue
                     # Get the current value in cfg (which has defaults)
-                    default_val = getattr(base_cfg.drive_pros, prop, None)
+                    default_val = getattr(base_cfg.joint_drive_props, prop, None)
 
                     if isinstance(val, dict) and isinstance(default_val, dict):
                         # Merge dictionaries
                         default_val.update(val)
                     else:
                         # Overwrite if not both dicts
-                        setattr(base_cfg.drive_pros, prop, val)
+                        setattr(base_cfg.joint_drive_props, prop, val)
             else:
                 logger.log_warning(
-                    "drive_pros should be a dictionary. Skipping drive_pros merge."
+                    "joint_drive_props should be a dictionary. Skipping joint_drive_props merge."
                 )
         elif key == "attrs":
             # merge physics attributes
             user_attrs_dict = override_cfg_dict.get("attrs")
             if isinstance(user_attrs_dict, dict):
-                for attr_key, attr_val in user_attrs_dict.items():
-                    setattr(base_cfg.attrs, attr_key, attr_val)
+                grouped_fields = set(RigidBodyPhysicsCfg.__dataclass_fields__)
+                parsed = _rigid_body_physics_from_dict(user_attrs_dict)
+                for field_name in grouped_fields:
+                    override = getattr(parsed, field_name)
+                    if override is None:
+                        continue
+                    base = getattr(base_cfg.attrs, field_name)
+                    if base is not None and type(base) is type(override):
+                        _merge_non_none_config(base, override)
+                    else:
+                        setattr(base_cfg.attrs, field_name, override)
             else:
                 logger.log_warning(
                     "attrs should be a dictionary. Skipping attrs merge."

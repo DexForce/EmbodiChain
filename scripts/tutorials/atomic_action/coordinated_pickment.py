@@ -43,12 +43,9 @@ from embodichain.lab.sim.atomic_actions import (
     CoordinatedPickmentOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
-    RigidObjectCfg,
-)
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.scenario_utils import (
@@ -69,6 +66,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     format_tensor,
@@ -177,7 +175,6 @@ def parse_arguments() -> argparse.Namespace:
             "headless_play",
             "visualize_axes",
         ),
-        default_device="cpu",
         default_renderer="hybrid",
     )
     parser.add_argument(
@@ -222,9 +219,14 @@ def create_pickment_object(
         cfg=RigidObjectCfg(
             uid=preset.label,
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(preset.mesh_path), compute_uv=False
+                fpath=resolve_cached_data_path(preset.mesh_path),
+                compute_uv=False,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=16,
+                ),
             ),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,
@@ -236,13 +238,14 @@ def create_pickment_object(
                 min_position_iters=32,
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
+                newton_contact=sim.is_newton_backend,
             ),
-            max_convex_hull_num=16,
             init_pos=[preset.init_xy[0], preset.init_xy[1], SUPPORT_SURFACE_Z],
             init_rot=list(preset.init_rot),
             body_scale=preset.body_scale,
         )
     )
+    sim.prepare()
     obj.cfg.init_pos = compute_supported_init_pos(obj, preset)
     obj.reset()
     return obj

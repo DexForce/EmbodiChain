@@ -159,9 +159,10 @@ embodichain run-env --gym_config config.yaml \
 | ``--gym_config`` | *(required)* | Path to a runnable gym config with ``id`` (``.json``, ``.yaml``, or ``.yml``) |
 | ``--action_config`` | ``None`` | Path to action config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--num_envs`` | ``1`` | Number of parallel environments |
-| ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
+| ``--device`` | *(config/backend default)* | Explicit device override (for example ``cpu`` or ``cuda:0``); omission preserves the configured or selected-backend default |
+| ``--physics`` | *(from config)* | File-owned physics backend (``default`` or ``newton``); this option may confirm the same value but cannot switch a Gym config to another backend |
 | ``--headless`` | ``False`` | Run in headless mode |
-| ``--renderer`` | ``auto`` | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``rt`` |
+| ``--renderer`` | *(config; ``auto`` if absent)* | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``rt`` |
 | ``--arena_space`` | ``5.0`` | Arena space size |
 | ``--gpu_id`` | ``0`` | GPU ID to use |
 | ``--preview`` | ``False`` | Enter interactive preview mode |

@@ -59,6 +59,7 @@ import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
@@ -78,14 +79,18 @@ def build_sim_cfg(args: argparse.Namespace) -> SimulationManagerCfg:
     Returns:
         SimulationManagerCfg: Simulation configuration.
     """
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
     from embodichain.lab.visualization import visualization_cfg_from_args
 
     return SimulationManagerCfg(
         headless=args.headless,
-        sim_device=args.sim_device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
+        gpu_id=args.gpu_id,
+        num_envs=args.num_envs,
+        arena_space=args.arena_space,
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -108,6 +113,7 @@ def load_assets(
     """
     from embodichain.lab.sim.cfg import (
         ArticulationCfg,
+        ArticulationRootPropertiesCfg,
         LightCfg,
         RigidObjectCfg,
     )
@@ -117,6 +123,7 @@ def load_assets(
     init_pos = tuple(args.init_pos)
     init_rot = tuple(args.init_rot)
     spacing = float(args.asset_spacing)
+    asset_physics_mode = args.asset_physics_mode
 
     loaded_assets = []
     for idx, asset_path in enumerate(asset_paths):
@@ -155,8 +162,10 @@ def load_assets(
                 fpath=asset_path,
                 init_pos=asset_init_pos,
                 init_rot=init_rot,
-                fix_base=args.fix_base,
-                use_usd_properties=args.use_usd_properties,
+                root_props=ArticulationRootPropertiesCfg(
+                    fixed_base=args.fix_base,
+                ),
+                asset_physics_mode=asset_physics_mode,
                 # The auxiliary pytorch-kinematics chain only accepts URDF XML.
                 build_pk_chain=asset_suffix not in {".usd", ".usda", ".usdc"},
             )
@@ -173,7 +182,7 @@ def load_assets(
                 init_pos=asset_init_pos,
                 init_rot=init_rot,
                 body_type=args.body_type,
-                use_usd_properties=args.use_usd_properties,
+                asset_physics_mode=asset_physics_mode,
             )
             loaded_assets.append(sim.add_rigid_object(cfg))
 
@@ -339,6 +348,7 @@ def main(args: argparse.Namespace) -> None:
             sim.set_indirect_lighting(args.env_map)
 
         assets = load_assets(sim, args)
+        sim.prepare()
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
         joint_controller = _setup_viser_joint_control(sim, assets, args)
         _publish_loaded_assets(sim, args)
@@ -354,6 +364,7 @@ def _create_parser() -> argparse.ArgumentParser:
         prog="embodichain preview-asset",
         description="Preview a USD or mesh asset in the EmbodiChain simulation.",
     )
+    add_env_launcher_args_to_parser(parser)
 
     parser.add_argument(
         "--asset_path",
@@ -408,35 +419,21 @@ def _create_parser() -> argparse.ArgumentParser:
         help="Body type for rigid objects (default: kinematic).",
     )
     parser.add_argument(
-        "--use_usd_properties",
-        action="store_true",
-        default=False,
-        help="Use physical properties from the USD file instead of defaults.",
+        "--asset_physics_mode",
+        "--asset-physics-mode",
+        dest="asset_physics_mode",
+        choices=("preserve", "overlay"),
+        default="overlay",
+        help=(
+            "Preserve source-authored physics or overlay explicitly configured "
+            "values (default: overlay)."
+        ),
     )
     parser.add_argument(
         "--fix_base",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Fix or unfix the base of articulations (default: fixed).",
-    )
-    parser.add_argument(
-        "--sim_device",
-        type=str,
-        default="cpu",
-        help="Simulation device (default: cpu).",
-    )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        default=False,
-        help="Run without rendering window.",
-    )
-    parser.add_argument(
-        "--renderer",
-        type=str,
-        choices=["hybrid", "fast-rt", "rt"],
-        default="hybrid",
-        help="Renderer backend (default: hybrid).",
     )
     parser.add_argument(
         "--env_map",
@@ -448,12 +445,6 @@ def _create_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--preview",
-        action="store_true",
-        default=False,
-        help="Enter interactive embed mode after loading.",
-    )
-    parser.add_argument(
         "--joint-control",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -463,9 +454,6 @@ def _create_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    from embodichain.lab.visualization import add_viser_args_to_parser
-
-    add_viser_args_to_parser(parser)
     return parser
 
 

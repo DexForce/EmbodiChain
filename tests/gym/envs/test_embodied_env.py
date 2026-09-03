@@ -44,6 +44,7 @@ pytestmark = pytest.mark.requires_sim
 urdf_path = get_data_path("UniversalRobots/UR5/UR5.urdf")
 METADATA = {
     "id": "EmbodiedEnv-v1",
+    "physics": "default",
     "max_episodes": 1,
     "env": {
         "events": {
@@ -75,7 +76,7 @@ METADATA = {
     ],
     "robot": {
         "fpath": urdf_path,
-        "drive_pros": {"stiffness": {"joint[1-6]": 200.0}},
+        "joint_drive_props": {"stiffness": {"joint[1-6]": 200.0}},
         "solver_cfg": {
             "class_type": "PytorchSolver",
             "end_link_name": "ee_link",
@@ -101,9 +102,12 @@ METADATA = {
             "shape": {
                 "shape_type": "Mesh",
                 "fpath": "ShopTableSimple/shop_table_simple.ply",
+                "collision": {
+                    "approximation": "convex_decomposition",
+                    "max_hulls": 2,
+                },
             },
-            "max_convex_hull_num": 2,
-            "attrs": {"mass": 10.0},
+            "attrs": {"mass_props": {"mass": 10.0}},
             "body_scale": (2, 1.6, 1),
         }
     ],
@@ -145,14 +149,14 @@ def test_visual_randomization_filter_keeps_deterministic_material_events():
 class EmbodiedEnvTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, device):
         cfg: EmbodiedEnvCfg = config_to_cfg(
             METADATA, manager_modules=DEFAULT_MANAGER_MODULES
         )
         cfg.num_envs = NUM_ENVS
         cfg.sim_cfg = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=device,
         )
 
         self.env = gym.make(id=METADATA["id"], cfg=cfg)

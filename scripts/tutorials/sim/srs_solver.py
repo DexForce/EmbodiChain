@@ -73,7 +73,7 @@ def main(
             # Keep the native window closed while planning so renderer/window
             # lifecycle events cannot terminate or perturb timed CUDA IK calls.
             headless=True,
-            sim_device=device,
+            device=device,
             width=2200,
             height=1200,
             visualization=visualization or VisualizationCfg(),
@@ -93,6 +93,7 @@ def main(
             [2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0]
         )
         robot: Robot = sim.add_robot(cfg=robot_cfg)
+        sim.prepare()
         joint_ids = robot.get_joint_ids(arm_name)
         qpos_seed = torch.tensor(
             [[np.pi / 6, 0.0, 0.0, -np.pi / 2, 0.0, 0.0, np.pi / 6]],

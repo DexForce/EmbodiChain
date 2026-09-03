@@ -29,7 +29,8 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
-    RigidBodyAttributesCfg,
+    physics_cfg_for_backend,
+    RigidBodyPhysicsCfg,
     LightCfg,
     RobotCfg,
     URDFCfg,
@@ -77,9 +78,6 @@ def resolve_asset_path(scene_name: str) -> str:
 
 def run_simulation(sim: SimulationManager):
     """Run the simulation loop."""
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     try:
         while True:
             time.sleep(0.01)
@@ -119,8 +117,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         num_envs=args.num_envs,
         arena_space=10.0,
         visualization=visualization_cfg_from_args(args),
@@ -142,11 +141,15 @@ def main():
         cfg = LightCfg(uid=uid, intensity=intensity, radius=600, init_pos=[x, y, z])
         lights.append(sim.add_light(cfg))
 
-    physics_attrs = RigidBodyAttributesCfg(
-        mass=10,
-        dynamic_friction=0.5,
-        static_friction=0.5,
-        restitution=0.1,
+    physics_attrs = RigidBodyPhysicsCfg.from_dict(
+        {
+            "mass_props": {"mass": 10},
+            "material_props": {
+                "dynamic_friction": 0.5,
+                "static_friction": 0.5,
+                "restitution": 0.1,
+            },
+        }
     )
 
     try:
@@ -178,6 +181,8 @@ def main():
     except Exception as e:
         logger.log_info(f"Failed to load scene asset: {e}")
         return
+
+    sim.prepare()
 
     logger.log_info(f"Scene '{args.scene}' setup complete!")
     logger.log_info(f"Running simulation with {args.num_envs} environment(s)")

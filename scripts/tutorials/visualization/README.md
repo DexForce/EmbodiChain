@@ -82,7 +82,7 @@ Viser is configured. It also rejects Viser startup while the native window is
 already open.
 
 Cloth uses its welded physical surface topology. DexSim does not currently
-expose the PhysX soft-body collision topology, so the soft-body preview uses
+expose the DexSim soft-body collision topology, so the soft-body preview uses
 a convex-hull surface over the live collision vertices. It follows deformation
 but intentionally omits concave render-mesh details.
 

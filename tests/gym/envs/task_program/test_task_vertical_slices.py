@@ -458,11 +458,11 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
         (
             {
                 "position": [-0.25, -0.20, 0.10],
-                "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
             },
             {
                 "position": [-0.25, 0.20, 0.10],
-                "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
             },
         )
     )
@@ -800,6 +800,7 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     assert "task_program_runtime" not in payload
     assert environment["env"]["events"] == {}
     assert environment["env"]["dataset"] == {}
+    assert environment["physics"] == "default"
     assert "physics_config" not in environment
 
 

@@ -34,7 +34,7 @@ from embodichain.data.assets.planner_assets import download_neural_planner_check
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg
+from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg, physics_cfg_for_backend
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.planners import (
@@ -207,11 +207,12 @@ def main() -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=args.headless,
-            sim_device=sim_device,
+            device=sim_device,
             num_envs=args.num_envs,
             arena_space=args.arena_space,
             gpu_id=effective_gpu_id,
             render_cfg=RenderCfg(renderer=args.renderer),
+            physics_cfg=physics_cfg_for_backend(args.physics),
             visualization=visualization_cfg_from_args(args),
         )
     )
@@ -220,8 +221,7 @@ def main() -> None:
         arm_name = "arm"
         device = robot.device
 
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
+        sim.prepare()
         if not args.headless:
             sim.open_window()
 

@@ -297,7 +297,7 @@ def _build_asset_robot_cfg(
         ValueError: If ``--ee-link`` is missing, or a USD/non-URDF asset is
             given without ``--urdf``.
     """
-    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RobotCfg
     from embodichain.lab.sim.solvers import (
         PinkSolverCfg,
         PinocchioSolverCfg,
@@ -344,8 +344,10 @@ def _build_asset_robot_cfg(
     cfg.fpath = asset
     cfg.init_pos = tuple(args.init_pos)
     cfg.init_rot = tuple(args.init_rot)
-    cfg.fix_base = args.fix_base
-    cfg.use_usd_properties = args.use_usd_properties
+    cfg.root_props = ArticulationRootPropertiesCfg(
+        fixed_base=args.fix_base,
+    )
+    cfg.asset_physics_mode = args.asset_physics_mode
     cfg.control_parts = {control_part: joints}
     cfg.solver_cfg = {control_part: solver_cfg}
     return cfg, control_part, solver_urdf
@@ -652,6 +654,7 @@ def main(args: argparse.Namespace) -> None:
         if robot is None:
             log_error("Failed to load robot into the simulation.")
             return
+        sim.prepare()
         control_part = _resolve_control_part(robot, control_part)
         joints_desc = (
             robot.control_parts.get(control_part) if control_part else "all joints"
@@ -864,10 +867,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Fix the robot base (default: fixed).",
     )
     asset_opts.add_argument(
-        "--use-usd-properties",
-        action="store_true",
-        default=False,
-        help="Use physical properties from the USD file (USD assets only).",
+        "--asset-physics-mode",
+        choices=("preserve", "overlay"),
+        default="overlay",
+        help=(
+            "How asset physics is handled: preserve source-authored values or "
+            "overlay explicitly configured values (default: overlay for robots)."
+        ),
     )
 
     # --- Analysis -----------------------------------------------------------

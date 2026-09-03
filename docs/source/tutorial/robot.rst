@@ -63,7 +63,7 @@ Drive properties control how the robot's joints behave during simulation, includ
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_robot.py
    :language: python
-   :start-at: drive_pros=JointDrivePropertiesCfg(
+   :start-at: joint_drive_props=JointDrivePropertiesCfg(
    :end-at: )
 
 You can set different stiffness values for different joint groups using regex patterns. More details on drive properties can be found in :class:`cfg.JointDrivePropertiesCfg`.

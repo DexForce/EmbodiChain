@@ -11,7 +11,7 @@ simulation:
   control_parts:
     hand:
       - gripper_finger1_joint_1
-  drive_pros:
+  joint_drive_props:
     stiffness:
       gripper_finger1_joint_1: 1000.0
     damping:

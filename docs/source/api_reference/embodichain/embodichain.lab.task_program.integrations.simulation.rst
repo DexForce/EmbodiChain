@@ -21,4 +21,3 @@ embodichain.lab.task_program.integrations.simulation
       SimulationRobotSkillProfileBinding
       SimulationSceneBinding
       SupportSurfaceAffordanceBinding
-

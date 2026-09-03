@@ -99,7 +99,7 @@ class FakeRobot:
         batch = qpos.shape[0] if qpos.dim() > 1 else 1
         if to_matrix:
             return torch.eye(4).repeat(batch, 1, 1)
-        return torch.tensor([[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]]).repeat(batch, 1)
+        return torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).repeat(batch, 1)
 
 
 class FakeSimulationManager:

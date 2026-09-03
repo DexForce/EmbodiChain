@@ -37,6 +37,7 @@ from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
@@ -98,9 +99,10 @@ def main() -> None:
     print("Creating simulation...")
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         arena_space=3.0,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         visualization=visualization_cfg_from_args(args),
@@ -109,8 +111,6 @@ def main() -> None:
 
     # Create robot configuration
     robot = create_robot(sim)
-
-    sensor = create_sensor(sim, args)
 
     # Add a cube to the scene
     cube_cfg = RigidObjectCfg(
@@ -121,9 +121,12 @@ def main() -> None:
     )
     sim.add_rigid_object(cfg=cube_cfg)
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    # Materialize all physical assets before reading robot metadata or
+    # constructing render-only sensors.
+    sim.prepare()
+    print(f"Robot created successfully with {robot.dof} joints")
+
+    sensor = create_sensor(sim, args)
 
     # Open visualization window if not headless
     if not args.headless:
@@ -147,7 +150,8 @@ def create_sensor(sim: SimulationManager, args):
 
     # extrinsics params
     pos = [0.09, 0.05, 0.04]
-    quat = R.from_euler("xyz", [-35, 135, 0], degrees=True).as_quat().tolist()
+    # CameraCfg uses xyzw; this rotation preserves the intended wrist-camera view.
+    quat = R.from_euler("xyz", [180, -45, 35], degrees=True).as_quat().tolist()
 
     # If attach_sensor is True, attach to robot end-effector; otherwise, place it in the scene
     if args.attach_sensor:
@@ -156,7 +160,6 @@ def create_sensor(sim: SimulationManager, args):
         parent = None
         pos = [1.2, -0.2, 1.5]
         quat = R.from_euler("xyz", [0, 180, 0], degrees=True).as_quat().tolist()
-        quat = [quat[3], quat[0], quat[1], quat[2]]  # Convert to (w, x, y, z)
 
     # create camera sensor and attach to robot end-effector
     camera: Camera = sim.add_sensor(
@@ -223,16 +226,16 @@ def create_robot(sim):
             ]
         ),
         control_parts=CONTROL_PARTS,
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"joint[1-6]": 1e4, "LEFT_.*": 1e3},
-            damping={"joint[1-6]": 1e3, "LEFT_.*": 1e2},
+            damping={"joint[1-6]": 1.5e3, "LEFT_.*": 1e2},
+            max_effort={"joint[1-6]": 1e4, "LEFT_.*": 1e4},
         ),
     )
 
     # Add robot to simulation
     robot: Robot = sim.add_robot(cfg=cfg)
-
-    print(f"Robot created successfully with {robot.dof} joints")
 
     return robot
 

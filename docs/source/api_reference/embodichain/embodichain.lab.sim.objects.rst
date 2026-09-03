@@ -198,3 +198,139 @@ Rigid Constraint
     :members:
     :inherited-members:
     :show-inheritance:
+
+Backend Views
+-------------
+
+Backend views normalize tensor layouts and row selection over backend-neutral
+DexSim Scene batches. The package import path exposes the common contracts,
+Scene adapters, and the Newton Scene predicate. ``Scene*View.from_entities()``
+owns Scene batch creation so object facades do not depend directly on DexSim's
+batch-factory signatures.
+
+.. currentmodule:: embodichain.lab.sim.objects.backends
+
+.. autosummary::
+
+    ArticulationViewBase
+    RigidBodyViewBase
+    is_newton_scene
+    SceneArticulationView
+    SceneRigidBodyView
+
+.. autoclass:: ArticulationViewBase
+    :members:
+
+.. autoclass:: RigidBodyViewBase
+    :members:
+
+.. autoclass:: SceneArticulationView
+    :members:
+    :show-inheritance:
+
+.. autoclass:: SceneRigidBodyView
+    :members:
+    :show-inheritance:
+
+.. autofunction:: is_newton_scene
+
+Backend implementation import paths
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.base
+
+.. autosummary::
+
+    RigidBodyViewBase
+    ArticulationViewBase
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.newton
+
+.. autosummary::
+
+    is_newton_scene
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.scene
+
+.. autosummary::
+
+    SceneArticulationView
+    SceneRigidBodyView
+
+Unified Deformable Objects
+--------------------------
+
+The deformable package provides a backend-neutral nodal-state contract and
+canonical surface/volume names. ``Cloth*`` and ``Soft*`` remain compatibility
+aliases for existing environments and tutorials.
+
+.. currentmodule:: embodichain.lab.sim.objects.deformable
+
+.. autosummary::
+
+    ClothBodyData
+    ClothObject
+    DeformableObject
+    DeformableObjectData
+    SoftBodyData
+    SoftObject
+    SurfaceDeformableData
+    SurfaceDeformableObject
+    VolumeDeformableData
+    VolumeDeformableObject
+
+.. autoclass:: DeformableObject
+    :members:
+    :show-inheritance:
+
+.. autoclass:: DeformableObjectData
+    :members:
+
+.. autoclass:: SurfaceDeformableData
+    :members:
+    :show-inheritance:
+
+.. autoclass:: SurfaceDeformableObject
+    :members:
+    :show-inheritance:
+
+.. autoclass:: VolumeDeformableData
+    :members:
+    :show-inheritance:
+
+.. autoclass:: VolumeDeformableObject
+    :members:
+    :show-inheritance:
+
+Deformable implementation import paths
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.objects.deformable.base
+
+.. autosummary::
+
+    DeformableObject
+
+.. currentmodule:: embodichain.lab.sim.objects.deformable.data
+
+.. autosummary::
+
+    DeformableObjectData
+
+.. currentmodule:: embodichain.lab.sim.objects.deformable.surface
+
+.. autosummary::
+
+    ClothBodyData
+    ClothObject
+    SurfaceDeformableData
+    SurfaceDeformableObject
+
+.. currentmodule:: embodichain.lab.sim.objects.deformable.volume
+
+.. autosummary::
+
+    SoftBodyData
+    SoftObject
+    VolumeDeformableData
+    VolumeDeformableObject

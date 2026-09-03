@@ -29,7 +29,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -58,7 +58,7 @@ class RandomReachEnv(BaseEnv):
 
         env_cfg = EnvCfg(
             sim_cfg=SimulationManagerCfg(
-                headless=headless, arena_space=2.0, sim_device=device
+                headless=headless, arena_space=2.0, device=device
             ),
             num_envs=NUM_ENVS,
         )
@@ -68,18 +68,23 @@ class RandomReachEnv(BaseEnv):
             **kwargs,
         )
 
-    def _setup_robot(self, **kwargs):
+    def _declare_robot(self, **kwargs) -> Robot:
         file_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
 
-        robot: Robot = self.sim.add_robot(
+        return self.sim.add_robot(
             cfg=RobotCfg(
                 uid="UR10",
                 fpath=file_path,
                 init_pos=(0, 0, 1),
                 init_qpos=self.robot_init_qpos,
-                drive_pros=JointDrivePropertiesCfg(drive_type=self.drive_type),
+                joint_drive_props=JointDrivePropertiesCfg(drive_type=self.drive_type),
             )
         )
+
+    def _setup_robot(self, **kwargs) -> Robot:
+        robot = self.robot
+        if robot is None:
+            raise RuntimeError("UR10 was not declared before simulation prepare.")
 
         qpos_limits = robot.body_data.qpos_limits[0].cpu().numpy()
         self.single_action_space = gym.spaces.Box(
@@ -96,7 +101,9 @@ class RandomReachEnv(BaseEnv):
             cfg=RigidObjectCfg(
                 uid="cube",
                 shape=CubeCfg(size=[size, size, size]),
-                attrs=RigidBodyAttributesCfg(enable_collision=False),
+                attrs=RigidBodyPhysicsCfg.from_dict(
+                    {"collision_props": {"collision_enabled": False}}
+                ),
                 init_pos=(0.0, 0.0, 0.5),
                 body_type="kinematic",
             ),
@@ -121,14 +128,14 @@ class BaseEnvTest:
     """Shared test logic for CPU and CUDA."""
 
     @classmethod
-    def setup_simulation_hook(cls, sim_device):
+    def setup_simulation_hook(cls, device):
         if hasattr(cls, "env"):
             return
         cls.env = gym.make(
             "RandomReach-v1",
             num_envs=NUM_ENVS,
             headless=True,
-            device=sim_device,
+            device=device,
         )
         cls.device = cls.env.get_wrapper_attr("device")
         cls.num_envs = cls.env.get_wrapper_attr("num_envs")
@@ -221,12 +228,12 @@ if __name__ == "__main__":
 import sys
 
 
-def new_setup_simulation(cls, sim_device):
+def new_setup_simulation(cls, device):
     print(">>> ENTERING setup_simulation", file=sys.stderr)
     if hasattr(cls, "env"):
         return
     cls.env = gym.make(
-        "RandomReach-v1", num_envs=NUM_ENVS, headless=True, device=sim_device
+        "RandomReach-v1", num_envs=NUM_ENVS, headless=True, device=device
     )
     cls.device = cls.env.get_wrapper_attr("device")
     cls.num_envs = cls.env.get_wrapper_attr("num_envs")

@@ -29,7 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 try:
     import psutil
@@ -82,7 +82,7 @@ class MeshObjectPreset:
     mesh_path: str = ""
     shape_type: str = "mesh"
     cube_size: tuple[float, float, float] | None = None
-    use_usd_properties: bool = False
+    asset_physics_mode: Literal["preserve", "overlay"] = "overlay"
     dynamic_friction: float = 0.97
     static_friction: float = 0.99
     restitution: float = 0.0
@@ -95,7 +95,10 @@ class MeshObjectPreset:
     min_velocity_iters: int = 1
     max_linear_velocity: float = 100.0
     max_angular_velocity: float = 100.0
-    max_convex_hull_num: int = 16
+    collision_approximation: Literal["convex_hull", "convex_decomposition"] = (
+        "convex_decomposition"
+    )
+    max_hulls: int | None = 16
     enable_ccd: bool = False
 
 
@@ -123,7 +126,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(0.8, 0.8, 0.8),
         mass=0.05,
         initial_z=0.05,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
     ),
     "coffee_cup": MeshObjectPreset(
         object_type="coffee_cup",
@@ -134,7 +137,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(4.0, 4.0, 4.0),
         mass=0.01,
         initial_z=0.01,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
     ),
     "cube": MeshObjectPreset(
         object_type="cube",
@@ -146,7 +149,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(1.0, 1.0, 1.0),
         mass=0.05,
         initial_z=0.05,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
         dynamic_friction=0.5,
         static_friction=0.5,
         contact_offset=0.003,
@@ -154,7 +157,8 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         max_depenetration_velocity=10.0,
         min_position_iters=32,
         min_velocity_iters=8,
-        max_convex_hull_num=1,
+        collision_approximation="convex_hull",
+        max_hulls=None,
     ),
     "paper_cup": MeshObjectPreset(
         object_type="paper_cup",
@@ -165,7 +169,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(0.75, 0.75, 1.0),
         mass=0.01,
         initial_z=0.05,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
         dynamic_friction=1.0,
         static_friction=1.0,
         contact_offset=0.003,
@@ -177,7 +181,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         min_velocity_iters=8,
         max_linear_velocity=5.0,
         max_angular_velocity=10.0,
-        max_convex_hull_num=8,
+        max_hulls=8,
     ),
     "scanned_bottle": MeshObjectPreset(
         object_type="scanned_bottle",
@@ -188,7 +192,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         body_scale=(1.0, 1.0, 1.0),
         mass=0.05,
         initial_z=0.05,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
     ),
 }
 COVERAGE_MESH_OBJECT_TYPES = ("sugar_box", "cube", "paper_cup")
@@ -518,11 +522,17 @@ def create_benchmark_object(
 ):
     """Create one benchmark object at a selected initial position."""
     from embodichain.data import get_data_path
-    from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
-    from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+    from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 
     if preset.shape_type == "mesh":
-        shape = MeshCfg(fpath=get_data_path(preset.mesh_path))
+        shape = MeshCfg(
+            fpath=get_data_path(preset.mesh_path),
+            collision=MeshCollisionCfg(
+                approximation=preset.collision_approximation,
+                max_hulls=preset.max_hulls,
+            ),
+        )
     elif preset.shape_type == "cube":
         if preset.cube_size is None:
             raise ValueError(f"Cube preset {preset.object_type!r} misses cube_size.")
@@ -535,27 +545,34 @@ def create_benchmark_object(
     cfg = RigidObjectCfg(
         uid=f"benchmark_{preset.label}_{position_case.name}_{uid_suffix}",
         shape=shape,
-        attrs=RigidBodyAttributesCfg(
-            mass=preset.mass,
-            dynamic_friction=preset.dynamic_friction,
-            static_friction=preset.static_friction,
-            restitution=preset.restitution,
-            contact_offset=preset.contact_offset,
-            rest_offset=preset.rest_offset,
-            linear_damping=preset.linear_damping,
-            angular_damping=preset.angular_damping,
-            max_depenetration_velocity=preset.max_depenetration_velocity,
-            min_position_iters=preset.min_position_iters,
-            min_velocity_iters=preset.min_velocity_iters,
-            max_linear_velocity=preset.max_linear_velocity,
-            max_angular_velocity=preset.max_angular_velocity,
-            enable_ccd=preset.enable_ccd,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": preset.mass},
+                "rigid_props": {
+                    "linear_damping": preset.linear_damping,
+                    "angular_damping": preset.angular_damping,
+                    "max_depenetration_velocity": preset.max_depenetration_velocity,
+                    "min_position_iters": preset.min_position_iters,
+                    "min_velocity_iters": preset.min_velocity_iters,
+                    "max_linear_velocity": preset.max_linear_velocity,
+                    "max_angular_velocity": preset.max_angular_velocity,
+                    "enable_ccd": preset.enable_ccd,
+                },
+                "collision_props": {
+                    "contact_offset": preset.contact_offset,
+                    "rest_offset": preset.rest_offset,
+                },
+                "material_props": {
+                    "dynamic_friction": preset.dynamic_friction,
+                    "static_friction": preset.static_friction,
+                    "restitution": preset.restitution,
+                },
+            }
         ),
-        max_convex_hull_num=preset.max_convex_hull_num,
         init_pos=[position_case.xy[0], position_case.xy[1], preset.initial_z],
         init_rot=preset.init_rot,
         body_scale=preset.body_scale,
-        use_usd_properties=preset.use_usd_properties,
+        asset_physics_mode=preset.asset_physics_mode,
     )
     obj = sim.add_rigid_object(cfg=cfg)
     sim.update(step=10)

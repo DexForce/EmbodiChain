@@ -23,7 +23,6 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -139,7 +138,8 @@ class URRobotCfg(RobotCfg):
             ),
         }
 
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"arm": 1e4},
             damping={"arm": 1e3},
             max_effort={"arm": _UR_MAX_EFFORT[robot_type]},
@@ -180,17 +180,33 @@ class URRobotCfg(RobotCfg):
 
 
 if __name__ == "__main__":
-    import numpy as np
+    import argparse
 
     np.set_printoptions(precision=5, suppress=True)
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+
+    parser = argparse.ArgumentParser(description="Launch a Universal Robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="default",
+        help="Physics backend to launch (default: default).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
+    args = parser.parse_args()
 
     config = SimulationManagerCfg(
-        headless=False,
-        sim_device="cpu",
+        headless=True,
+        device=args.device,
         num_envs=1,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)
@@ -200,10 +216,8 @@ if __name__ == "__main__":
         {"robot_type": "ur10e", "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0]}
     )
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     from IPython import embed
 

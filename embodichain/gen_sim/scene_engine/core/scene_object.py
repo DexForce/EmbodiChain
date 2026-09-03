@@ -26,7 +26,7 @@ class ObjectPhysics:
     """Physics and collision settings shared by settling and scene export."""
 
     body_type: Literal["dynamic", "kinematic"]  # Runtime behaviour in simulation.
-    attrs: dict[str, float | int]  # Rigid-body material and contact attributes.
+    attrs: dict[str, object]  # Grouped rigid-body physics configuration.
     max_convex_hull_num: int  # Collision-decomposition hull budget.
 
     def __post_init__(self) -> None:
@@ -37,11 +37,8 @@ class ObjectPhysics:
             raise ValueError("max_convex_hull_num must be positive.")
         if not self.attrs:
             raise ValueError("attrs must contain at least one physics attribute.")
-        if not all(
-            isinstance(name, str) and isinstance(value, (float, int))
-            for name, value in self.attrs.items()
-        ):
-            raise ValueError("attrs must map strings to numeric physics values.")
+        if not all(isinstance(name, str) for name in self.attrs):
+            raise ValueError("attrs must use string configuration keys.")
 
     def to_dict(self) -> dict[str, object]:
         """Serialize the physics settings for scene debugging artifacts."""

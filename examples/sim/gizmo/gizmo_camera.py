@@ -31,7 +31,12 @@ torch.set_printoptions(precision=4, sci_mode=False)
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.sensors import Camera, CameraCfg
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    RigidObjectCfg,
+    RigidBodyPhysicsCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -53,8 +58,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -68,11 +74,15 @@ def main():
             uid=f"cube_{i}",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.3,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.3,
+                    },
+                }
             ),
             init_pos=[0.5 + i * 0.3, 0.0, 0.5],
         )
@@ -97,6 +107,7 @@ def main():
 
     # Add camera to simulation
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
+    sim.prepare()
 
     # Wait for initialization
     time.sleep(0.2)

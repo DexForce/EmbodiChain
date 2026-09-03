@@ -70,8 +70,8 @@ def grid_sample_qpos_from_limits(
 class BaseSolverTest:
     sim = None  # Define as a class attribute
 
-    def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+    def setup_simulation(self, device):
+        config = SimulationManagerCfg(headless=True, device=device)
         self.sim = SimulationManager(config)
         self.sim.set_manual_update(False)
 
@@ -126,6 +126,7 @@ class BaseSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_ik(self, arm_name: str):

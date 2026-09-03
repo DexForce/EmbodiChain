@@ -49,7 +49,6 @@ from embodichain.lab.sim.atomic_actions import (
     TimedCommandSequence,
     TrackingPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
@@ -418,12 +417,12 @@ def main() -> None:
                     roughness=0.35,
                 ),
             ),
-            attrs=RigidBodyAttributesCfg(),
             body_type="kinematic",
             init_pos=list(OBSTACLE_START_POSITION),
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     # Initialize GPU physics before planning or recording so the first visible
     # frame and the initial planning context share the same settled state.
     sim.update(step=10)
@@ -431,6 +430,8 @@ def main() -> None:
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=robot.uid,
+                # Newton physics captures CUDA graphs on the same device.
+                use_cuda_graph=args.physics != "newton",
                 # The coarse default voxel fit under-covers the hand and
                 # fingertips. Keep the denser morphit fit, but no extra radius
                 # padding: 5 mm makes this tutorial's initial pose infeasible.

@@ -33,7 +33,7 @@ class BaseSolverTest:
 
     def setup_simulation(self, solver_type: str):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        config = SimulationManagerCfg(headless=True, device="cpu")
         self.sim = SimulationManager(config)
 
         # Load robot URDF file
@@ -61,6 +61,7 @@ class BaseSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_differential_solver(self, arm_name: str):

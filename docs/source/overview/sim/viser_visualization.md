@@ -177,7 +177,7 @@ sampled independently from rigid-body poses:
 
 - **Cloth** uses the physical cloth vertices and a welded mapping of the source
   render triangles. Its browser topology matches the simulated surface.
-- **Soft bodies** expose live PhysX collision vertices through DexSim, but
+- **Soft bodies** expose live DexSim collision vertices, but
   DexSim does not expose the collision triangle connectivity. EmbodiChain
   therefore visualizes a stable convex-hull surface over those vertices. The
   preview follows deformation but omits concave render-mesh details.

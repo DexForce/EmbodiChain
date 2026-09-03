@@ -36,11 +36,12 @@ from embodichain.lab.sim.sensors import StereoCameraCfg, SensorCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     LightCfg,
     ArticulationCfg,
     RobotCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.data import get_data_path
 from embodichain.utils import configclass
@@ -133,11 +134,15 @@ class ExampleCfg(EmbodiedEnvCfg):
                 fpath=get_data_path("CircleTableSimple/circle_table_simple.ply"),
                 compute_uv=True,
             ),
-            attrs=RigidBodyAttributesCfg(
-                mass=10.0,
-                static_friction=0.95,
-                dynamic_friction=0.85,
-                restitution=0.01,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 10.0},
+                    "material_props": {
+                        "static_friction": 0.95,
+                        "dynamic_friction": 0.85,
+                        "restitution": 0.01,
+                    },
+                }
             ),
             body_type="kinematic",
             init_pos=(0.80, 0, 0.8),
@@ -196,7 +201,9 @@ if __name__ == "__main__":
         sim_cfg=SimulationManagerCfg(
             render_cfg=RenderCfg(renderer=args.renderer),
             headless=args.headless,
-            sim_device=args.device,
+            device=args.device,
+            num_envs=args.num_envs,
+            physics_cfg=physics_cfg_for_backend(args.physics),
             visualization=visualization_cfg_from_args(args),
         ),
         num_envs=args.num_envs,

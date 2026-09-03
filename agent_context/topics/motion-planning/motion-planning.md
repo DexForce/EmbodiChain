@@ -97,6 +97,12 @@ Learning-based EEF waypoint planner. Franka Panda only.
 
 ### CuroboPlanner collision worlds
 
+EmbodiChain planner inputs and robot FK results use `xyz + xyzw`. CuRobo's
+native pose representation uses `xyz + wxyz`; `curobo_planner.py` and
+`curobo_yaml.py` perform that conversion exactly once when constructing CuRobo
+goals and obstacle YAML. Dynamic obstacle inputs expressed as homogeneous
+matrices do not need a quaternion-order convention until that boundary.
+
 `CuroboWorldCfg.rigid_objects` accepts either a mapping or a sequence. Use
 `Mapping[registry_id, RigidObject]` for a registry-backed integration. The
 mapping key is the authoritative logical/source obstacle ID used by the

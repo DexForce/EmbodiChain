@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from embodichain.utils import logger
-from embodichain.utils.math import matrix_from_quat, quat_from_matrix
+from embodichain.utils.math import convert_quat, matrix_from_quat, quat_from_matrix
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import RigidObject, Robot
@@ -404,7 +404,8 @@ def _mesh_to_obstacle_entry(
         name: Obstacle name (cuRobo key under ``cuboid``/``mesh``/``sphere``).
         vertices: Mesh vertices ``(V, 3)`` in the object's local frame.
         faces: Triangle indices ``(F, 3)`` (any integer dtype).
-        pose: Object pose as ``(x, y, z, qw, qx, qy, qz)`` ``(7,)`` or a
+        pose: EmbodiChain object pose as ``(x, y, z, qx, qy, qz, qw)``
+            ``(7,)`` or a
             homogeneous ``(4, 4)`` matrix, expressed in the cuRobo world/base
             frame (the same frame static collision YAMLs are authored in).
         representation: ``"cuboid"`` (local-frame AABB -> OBB via ``pose``,
@@ -441,12 +442,15 @@ def _mesh_to_obstacle_entry(
     pose = torch.as_tensor(pose, dtype=torch.float32).detach().to("cpu")
     if pose.shape == (4, 4):
         position = pose[:3, 3]
-        quaternion = quat_from_matrix(pose[:3, :3])  # wxyz
+        quaternion = quat_from_matrix(pose[:3, :3])
         pose = torch.cat([position, quaternion])
     if pose.shape != (7,):
         raise ValueError(
-            f"pose must be (7,) [x,y,z,qw,qx,qy,qz] or (4, 4), got {tuple(pose.shape)}."
+            f"pose must be (7,) [x,y,z,qx,qy,qz,qw] or (4, 4), got {tuple(pose.shape)}."
         )
+
+    # cuRobo world YAML stores 7D poses as xyz+wxyz.
+    curobo_pose = torch.cat([pose[:3], convert_quat(pose[3:7], to="wxyz")])
 
     if representation == "mesh":
         if vertices.numel() == 0 or faces.numel() == 0:
@@ -460,7 +464,7 @@ def _mesh_to_obstacle_entry(
                 {
                     "vertices": vertices.tolist(),
                     "faces": faces.reshape(-1).to(torch.int64).tolist(),
-                    "pose": pose.tolist(),
+                    "pose": curobo_pose.tolist(),
                 },
             )
         ]
@@ -476,9 +480,9 @@ def _mesh_to_obstacle_entry(
         vmax = vertices.amax(dim=0)
         dims = vmax - vmin
         center_local = (vmin + vmax) / 2.0
-        rotation = matrix_from_quat(pose[3:7])  # (3, 3), wxyz
+        rotation = matrix_from_quat(pose[3:7])
         center_world = rotation @ center_local + pose[:3]
-        cuboid_pose = torch.cat([center_world, pose[3:7]])
+        cuboid_pose = torch.cat([center_world, curobo_pose[3:7]])
         return [("cuboid", name, {"dims": dims.tolist(), "pose": cuboid_pose.tolist()})]
 
     # representation == "sphere": fit spheres in the local frame, then transform

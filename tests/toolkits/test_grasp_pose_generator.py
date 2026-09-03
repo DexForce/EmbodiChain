@@ -31,7 +31,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -41,7 +41,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
     URDFCfg,
 )
@@ -62,7 +62,7 @@ def initialize_simulation() -> SimulationManager:
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=torch.device("cuda"),
+        device=torch.device("cuda"),
         render_cfg=RenderCfg(renderer="auto"),
         physics_dt=1.0 / 100.0,
         arena_space=2.5,
@@ -103,7 +103,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
                 {"component_type": "hand", "urdf_path": gripper_urdf_path},
             ]
         ),
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e3},
             damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e2},
             max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e4},
@@ -136,13 +136,17 @@ def create_mug(sim: SimulationManager):
         uid="table",
         shape=MeshCfg(
             fpath=get_data_path("CoffeeCup/cup.ply"),
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=16,
+            ),
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.01,
-            dynamic_friction=0.97,
-            static_friction=0.99,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 0.01},
+                "material_props": {"dynamic_friction": 0.97, "static_friction": 0.99},
+            }
         ),
-        max_convex_hull_num=16,
         init_pos=[0.55, 0.0, 0.01],
         init_rot=[0.0, 0.0, -90],
         body_scale=(4, 4, 4),
@@ -207,6 +211,7 @@ def test_grasp_pose_generator():
     try:
         robot = create_robot(sim, position=[0.0, 0.0, 0.0])
         mug = create_mug(sim)
+        sim.prepare()
 
         # get mug grasp pose
         grasp_generator = AntipodalGraspPoseGenerator(

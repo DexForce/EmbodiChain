@@ -28,8 +28,12 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
+    DefaultRigidBodyPropertiesCfg,
+    MassPropertiesCfg,
     RenderCfg,
-    RigidBodyAttributesCfg,
+    physics_cfg_for_backend,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.sensors import (
     ContactSensorCfg,
@@ -60,12 +64,14 @@ def create_cube(
             uid=uid,
             shape=CubeCfg(size=cube_size),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=0.1,
-                dynamic_friction=0.9,
-                static_friction=0.95,
-                restitution=0.01,
-                sleep_threshold=0.0,
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=0.1),
+                rigid_props=DefaultRigidBodyPropertiesCfg(sleep_threshold=0.0),
+                material_props=RigidBodyMaterialCfg(
+                    dynamic_friction=0.9,
+                    static_friction=0.95,
+                    restitution=0.01,
+                ),
             ),
             init_pos=position,
         )
@@ -151,10 +157,10 @@ def create_robot(
         },
         "init_pos": position,
         "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
-        "drive_pros": {
-            "stiffness": {"JOINT[1-6]": 1e4, "FINGER[1-2]_JOINT": 1e2},
-            "damping": {"JOINT[1-6]": 1e3, "FINGER[1-2]_JOINT": 1e1},
-            "max_effort": {"JOINT[1-6]": 1e5, "FINGER[1-2]_JOINT": 1e3},
+        "joint_drive_props": {
+            "stiffness": {"Joint[1-6]": 1e4, "finger[1-2]_joint": 1e2},
+            "damping": {"Joint[1-6]": 1e3, "finger[1-2]_joint": 1e1},
+            "max_effort": {"Joint[1-6]": 1e5, "finger[1-2]_joint": 1e3},
         },
         "solver_cfg": {
             "arm": {
@@ -169,7 +175,7 @@ def create_robot(
                 ],
             }
         },
-        "control_parts": {"arm": ["JOINT[1-6]"], "hand": ["FINGER[1-2]_JOINT"]},
+        "control_parts": {"arm": ["Joint[1-6]"], "hand": ["finger[1-2]_joint"]},
     }
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(robot_cfg_dict))
     return robot
@@ -192,10 +198,11 @@ def main():
         num_envs=args.num_envs,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -207,6 +214,7 @@ def main():
     cube1 = create_cube(sim, "cube1", position=[0.0, 0.0, 0.06])
     cube2 = create_cube(sim, "cube2", position=[0.0, 0.0, 0.09])
     robot = create_robot(sim, "UR10_PGI", position=[0.5, 0.0, 0.0])
+    sim.prepare()
 
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
@@ -227,10 +235,6 @@ def run_simulation(sim: SimulationManager):
     Args:
         sim: The SimulationManager instance to run
     """
-
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     step_count = 0
     # contact filter config
@@ -262,13 +266,22 @@ def run_simulation(sim: SimulationManager):
                     f"[INFO]: Fetch contact cost time: {average_cost_time * 1000:.2f} ms, num_envs: {sim.num_envs}"
                 )
                 # filter contact report for a rigid object with a articulation link
-                cube2_user_ids = sim.get_rigid_object("cube2").get_user_ids()
-                finger1_user_ids = (
-                    sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
+                assert contact_sensor.item_user_ids is not None
+                filter_actor_ids = torch.as_tensor(
+                    [
+                        actor_id
+                        for actor_id in contact_sensor.item_user_ids.tolist()
+                        if contact_sensor.get_actor_info(actor_id).path.endswith(
+                            "/cube2"
+                        )
+                        or contact_sensor.get_actor_info(actor_id).link_name
+                        == "finger1_link"
+                    ],
+                    dtype=torch.int32,
+                    device=sim.device,
                 )
-                filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
                 filter_contact_report = contact_sensor.filter_by_user_ids(
-                    filter_user_ids
+                    filter_actor_ids
                 )
                 # print("filter_contact_report", filter_contact_report)
                 # visualize contact points

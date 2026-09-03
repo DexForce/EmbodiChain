@@ -25,8 +25,14 @@ import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    RenderCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+    physics_cfg_for_backend,
+)
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -42,7 +48,7 @@ def main() -> None:
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
-        "--record-steps",
+        "--max_steps",
         type=int,
         default=1000,
         help=(
@@ -68,7 +74,8 @@ def main() -> None:
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(
             renderer=args.renderer,
         ),
@@ -86,11 +93,13 @@ def main() -> None:
             uid="cube",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=0.1),
+                material_props=RigidBodyMaterialCfg(
+                    dynamic_friction=0.5,
+                    static_friction=0.5,
+                    restitution=0.1,
+                ),
             ),
             init_pos=[0, 0.0, 1.0],
         )
@@ -101,16 +110,25 @@ def main() -> None:
     chair: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="chair",
-            shape=MeshCfg(fpath=path),
+            shape=MeshCfg(
+                fpath=path,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=32,
+                ),
+            ),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=3.0,
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=10.0),
             ),
             body_scale=[0.5, 0.5, 0.5],
-            init_pos=[0.0, 0.0, 0.2],
-            init_rot=[90.0, 0.0, 0.0],
+            init_pos=[0.0, 0.0, 0.51],
+            init_rot=[0.0, 0.0, 0.0],
         )
     )
+
+    # Materialize the complete initial scene before exposing it to the viewer.
+    sim.prepare()
 
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
@@ -133,13 +151,10 @@ def main() -> None:
         print(
             "[INFO]: The output path is reported by `SimulationManager.start_window_record()`."
         )
-        print(f"[INFO]: Running {args.record_steps} steps before exporting the video")
+        print(f"[INFO]: Running {args.max_steps} steps before exporting the video")
 
     # Run the simulation
-    run_simulation(
-        sim,
-        max_steps=args.record_steps if args.headless else None,
-    )
+    run_simulation(sim, max_steps=args.max_steps)
 
 
 def run_simulation(
@@ -153,10 +168,6 @@ def run_simulation(
         max_steps: Optional maximum number of simulation steps to execute.
     """
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     step_count = 0
 
     try:
@@ -166,6 +177,9 @@ def run_simulation(
             # Update physics simulation
             sim.update(step=1)
             step_count += 1
+
+            if max_steps is not None and step_count >= max_steps:
+                break
 
             # Print FPS every second
             if step_count % 100 == 0:

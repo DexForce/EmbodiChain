@@ -38,9 +38,9 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     PickUpOptions,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_tutorial_robot,
@@ -50,6 +50,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_curobo_motion_generator,
     create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -62,6 +63,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 
 OBJECT_MESH_PATH = "PaperCup/paper_cup.ply"
 OBJECT_XY = (-0.42, -0.08)
+OBJECT_INITIAL_Z = 0.05
 MOVE_SAMPLE_INTERVAL = 60
 PICK_SAMPLE_INTERVAL = 120
 MOVE_HELD_OBJECT_SAMPLE_INTERVAL = 120
@@ -83,17 +85,24 @@ def create_pick_object(sim) -> RigidObject:
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="paper_cup",
-            shape=MeshCfg(fpath=get_data_path(OBJECT_MESH_PATH)),
-            attrs=RigidBodyAttributesCfg(
+            shape=MeshCfg(
+                fpath=get_data_path(OBJECT_MESH_PATH),
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=16,
+                ),
+            ),
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,
+                newton_contact=sim.is_newton_backend,
             ),
-            max_convex_hull_num=16,
-            init_pos=[*OBJECT_XY, 0.0],
+            init_pos=[*OBJECT_XY, OBJECT_INITIAL_Z],
             body_scale=(0.75, 0.75, 1.0),
         )
     )
+    sim.prepare()
     sim.update(step=10)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
@@ -118,6 +127,7 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
+    sim.prepare()
     motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 

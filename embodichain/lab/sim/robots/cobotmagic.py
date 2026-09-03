@@ -22,10 +22,13 @@ import numpy as np
 from typing import TYPE_CHECKING, Dict, List, Union
 
 from embodichain.lab.sim.cfg import (
+    ArticulationRootPropertiesCfg,
+    CollisionPropertiesCfg,
     RobotCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.solvers import SolverCfg, OPWSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -122,9 +125,8 @@ class CobotMagicCfg(RobotCfg):
                 ),
             ),
         }
-        self.min_position_iters = 8
-        self.min_velocity_iters = 2
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={
                 "left_joint[1-6]": 7e4,
                 "right_joint[1-6]": 7e4,
@@ -144,10 +146,19 @@ class CobotMagicCfg(RobotCfg):
                 "right_joint[7-8]": 3e3,
             },
         )
-        self.attrs = RigidBodyAttributesCfg(
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            contact_offset=0.001,
+        self.root_props = ArticulationRootPropertiesCfg(
+            min_position_iters=8,
+            min_velocity_iters=2,
+        )
+        self.attrs = RigidBodyPhysicsCfg(
+            collision_props=CollisionPropertiesCfg(
+                contact_offset=0.001,
+                rest_offset=0.0,
+            ),
+            material_props=RigidBodyMaterialCfg(
+                static_friction=0.95,
+                dynamic_friction=0.9,
+            ),
         )
 
     @property
@@ -185,27 +196,48 @@ class CobotMagicCfg(RobotCfg):
 
 
 if __name__ == "__main__":
+    import argparse
+
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
     from embodichain.lab.sim.robots import CobotMagicCfg
+
+    parser = argparse.ArgumentParser(description="Launch the CobotMagic robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="default",
+        help="Physics backend to launch (default: default).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
+    args = parser.parse_args()
 
     torch.set_printoptions(precision=5, sci_mode=False)
 
     config = SimulationManagerCfg(
         headless=True,
-        sim_device="cpu",
+        device=args.device,
         num_envs=2,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)
 
-    config = {"init_pos": [0.0, 0.0, 1.0], "init_qpos": [0.1] * 16}
+    config = {
+        "init_pos": [0.0, 0.0, 1.0],
+    }
 
     cfg = CobotMagicCfg.from_dict(config)
     robot = sim.add_robot(cfg=cfg)
-    # sim.open_window()
+    sim.prepare()
+    sim.open_window()
+    from IPython import embed
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    embed()  # noqa: E702
 
     print("CobotMagic added to the simulation.")

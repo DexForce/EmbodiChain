@@ -17,12 +17,18 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import Mock
+
 import torch
 import pytest
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import RigidBodyGroupData, RigidObjectGroup
-from embodichain.lab.sim.cfg import RigidObjectGroupCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    RigidObjectGroupCfg,
+    RigidObjectCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from dexsim.types import ActorType
@@ -31,39 +37,51 @@ DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 NUM_ARENAS = 4
 Z_TRANSLATION = 2.0
+# Newton converts principal-frame inertia diagonals through a float32 full
+# tensor, so imported non-axis-aligned COM frames are not bit-exact on readback.
+NEWTON_INERTIA_ROUND_TRIP_ATOL = 2e-4
+
+
+def _teardown_newton_physics() -> None:
+    from dexsim.engine.newton_physics import teardown_newton_physics
+
+    teardown_newton_physics()
 
 
 @pytest.mark.no_sim
 def test_cpu_body_data_reads_angular_velocity_from_angular_api():
     """CPU rigid-object groups must not report linear velocity as angular."""
-
-    class VelocityEntity:
-        def get_linear_velocity(self):
-            return [1.0, 2.0, 3.0]
-
-        def get_angular_velocity(self):
-            return [4.0, 5.0, 6.0]
-
-    body_data = object.__new__(RigidBodyGroupData)
-    body_data.entities = [[VelocityEntity(), VelocityEntity()]]
-    body_data.device = torch.device("cpu")
+    expected = torch.tensor([[[4.0, 5.0, 6.0], [4.0, 5.0, 6.0]]])
+    body_view = Mock()
+    body_view.fetch_angular_velocity.side_effect = lambda out: out.copy_(
+        expected.reshape(-1, 3)
+    )
+    body_data = RigidBodyGroupData(
+        body_view,
+        num_instances=1,
+        num_objects=2,
+        device=torch.device("cpu"),
+    )
 
     angular_velocity = body_data.ang_vel
 
-    assert torch.equal(
-        angular_velocity,
-        torch.tensor([[[4.0, 5.0, 6.0], [4.0, 5.0, 6.0]]]),
-    )
+    assert torch.equal(angular_velocity, expected)
+    body_view.fetch_angular_velocity.assert_called_once()
+    body_view.fetch_linear_velocity.assert_not_called()
 
 
 class BaseRigidObjectGroupTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, device: str, physics: str = "default") -> None:
         config = SimulationManagerCfg(
-            headless=True, sim_device=sim_device, num_envs=NUM_ARENAS
+            headless=True,
+            device=device,
+            num_envs=NUM_ARENAS,
+            physics_cfg=physics_cfg_for_backend(physics),
         )
         self.sim = SimulationManager(config)
+        self.physics = physics
 
         duck_path = get_data_path(DUCK_PATH)
         assert os.path.isfile(duck_path)
@@ -91,8 +109,7 @@ class BaseRigidObjectGroupTest:
             cfg=RigidObjectGroupCfg.from_dict(cfg_dict)
         )
 
-        if sim_device == "cuda" and self.sim.is_use_gpu_physics:
-            self.sim.init_gpu_physics()
+        self.sim.prepare()
 
         self.sim.enable_physics(True)
 
@@ -116,6 +133,118 @@ class BaseRigidObjectGroupTest:
             combined_pose[..., :3, 3],
             atol=1e-5,
         ), "FAIL: Local poses do not match after setting."
+
+        distinct_xyzw = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.sim.device
+        ) / torch.sqrt(torch.tensor(30.0, device=self.sim.device))
+        vector_pose = torch.zeros(
+            NUM_ARENAS,
+            self.obj_group.num_objects,
+            7,
+            device=self.sim.device,
+        )
+        vector_pose[..., :3] = combined_pose[..., :3, 3]
+        vector_pose[..., 3:7] = distinct_xyzw
+
+        self.obj_group.set_local_pose(vector_pose)
+
+        torch.testing.assert_close(
+            self.obj_group.get_local_pose(),
+            vector_pose,
+            atol=1e-5,
+            rtol=1e-5,
+        )
+
+    def test_body_data_exposes_mass_properties(self):
+        """Current and initialization-time properties use [env, object] layout."""
+        data = self.obj_group.body_data
+        expected_prefix = (NUM_ARENAS, self.obj_group.num_objects)
+
+        assert data.mass.shape == expected_prefix
+        assert data.inertia.shape == (*expected_prefix, 3)
+        assert data.com_pose.shape == (*expected_prefix, 7)
+        assert data.default_mass.shape == data.mass.shape
+        assert data.default_inertia.shape == data.inertia.shape
+        assert data.default_com_pose.shape == data.com_pose.shape
+
+    def test_reset_restores_default_mass_properties(self):
+        """Partial reset restores Group mass properties only in selected envs."""
+        data = self.obj_group.body_data
+        env_ids = [0, 1]
+        obj_ids = [0]
+        default_mass = data.default_mass[env_ids, :1].clone()
+        default_inertia = data.default_inertia[env_ids, :1].clone()
+        default_com_pose = data.default_com_pose[env_ids, :1].clone()
+        changed_mass = default_mass + 0.5
+        changed_inertia = default_inertia * 1.25
+        changed_com_pose = default_com_pose.clone()
+        changed_com_pose[..., 0] += 0.02
+        changed_com_pose[..., 3:7] = torch.tensor(
+            [1.0, 2.0, 3.0, 4.0], device=self.sim.device
+        ) / torch.sqrt(torch.tensor(30.0, device=self.sim.device))
+
+        self.obj_group.set_mass(changed_mass, env_ids=env_ids, obj_ids=obj_ids)
+        self.obj_group.set_inertia(
+            changed_inertia,
+            env_ids=env_ids,
+            obj_ids=obj_ids,
+        )
+        self.obj_group.set_com_pose(
+            changed_com_pose,
+            env_ids=env_ids,
+            obj_ids=obj_ids,
+        )
+
+        assert torch.allclose(data.default_mass[env_ids, :1], default_mass)
+        assert torch.allclose(data.default_inertia[env_ids, :1], default_inertia)
+        assert torch.allclose(data.default_com_pose[env_ids, :1], default_com_pose)
+
+        self.obj_group.reset(env_ids=[env_ids[0]])
+        mass_after_partial = self.obj_group.get_mass(env_ids=env_ids, obj_ids=obj_ids)
+        inertia_after_partial = self.obj_group.get_inertia(
+            env_ids=env_ids, obj_ids=obj_ids
+        )
+        com_after_partial = self.obj_group.get_com_pose(
+            env_ids=env_ids, obj_ids=obj_ids
+        )
+        inertia_atol = (
+            NEWTON_INERTIA_ROUND_TRIP_ATOL if self.physics == "newton" else 1e-5
+        )
+
+        assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
+        assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
+        assert torch.allclose(
+            inertia_after_partial[0],
+            default_inertia[0],
+            atol=inertia_atol,
+            rtol=0.0,
+        )
+        assert torch.allclose(
+            inertia_after_partial[1],
+            changed_inertia[1],
+            atol=inertia_atol,
+            rtol=0.0,
+        )
+        assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
+        assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
+
+        self.obj_group.reset(env_ids=[env_ids[1]])
+        assert torch.allclose(
+            self.obj_group.get_mass(env_ids=env_ids, obj_ids=obj_ids),
+            default_mass,
+            atol=1e-5,
+        )
+        assert torch.allclose(
+            self.obj_group.get_inertia(env_ids=env_ids, obj_ids=obj_ids),
+            default_inertia,
+            atol=inertia_atol,
+            rtol=0.0,
+        )
+        assert torch.allclose(
+            self.obj_group.get_com_pose(env_ids=env_ids, obj_ids=obj_ids),
+            default_com_pose,
+            atol=1e-5,
+        )
 
     def test_get_user_ids(self):
         """Test get_user_ids method."""
@@ -156,13 +285,12 @@ class BaseRigidObjectGroupTest:
 
     def teardown_method(self):
         """Clean up resources after each test method."""
-        self.sim.destroy()
-        import embodichain.lab.sim as om
-
-        om.SimulationManager.flush_cleanup_queue()
+        self.sim.destroy(exit_process=False)
         self.__dict__.clear()
         import gc
 
+        gc.collect()
+        SimulationManager.flush_cleanup_queue()
         gc.collect()
 
 
@@ -171,10 +299,18 @@ class TestRigidObjectGroupCPU(BaseRigidObjectGroupTest):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRigidObjectGroupCUDA(BaseRigidObjectGroupTest):
     def setup_method(self):
         self.setup_simulation("cuda")
+
+
+class TestRigidObjectGroupNewton(BaseRigidObjectGroupTest):
+    def setup_method(self):
+        self.setup_simulation("cuda", physics="newton")
+
+    def teardown_method(self):
+        super().teardown_method()
+        _teardown_newton_physics()
 
 
 if __name__ == "__main__":

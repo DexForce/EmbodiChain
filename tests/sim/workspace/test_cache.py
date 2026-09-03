@@ -508,7 +508,7 @@ def _robot_ns(**overrides) -> argparse.Namespace:
         init_pos=[0.0, 0.0, 0.0],
         init_rot=[0.0, 0.0, 0.0],
         fix_base=True,
-        use_usd_properties=False,
+        asset_physics_mode="overlay",
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -551,6 +551,7 @@ def test_build_robot_cfg_urdf_defaults_solver_urdf():
     assert cfg.control_parts == {"arm": ["fr3_joint[1-7]"]}
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
     assert cfg.solver_cfg["arm"].urdf_path == "/tmp/panda.urdf"
+    assert cfg.asset_physics_mode == "overlay"
 
 
 def test_build_robot_cfg_usd_requires_urdf():
@@ -571,6 +572,15 @@ def test_build_robot_cfg_usd_with_urdf():
     assert cfg.fpath == "/tmp/robot.usd"
     assert urdf == "/tmp/robot.urdf"
     assert cfg.solver_cfg["arm"].urdf_path == "/tmp/robot.urdf"
+
+
+def test_build_robot_cfg_accepts_source_independent_preserve_mode():
+    """The asset physics policy applies to either USD or URDF sources."""
+    from embodichain.lab.scripts.analyze_workspace import build_robot_cfg
+
+    cfg, _part, _urdf = build_robot_cfg(_robot_ns(asset_physics_mode="preserve"))
+
+    assert cfg.asset_physics_mode == "preserve"
 
 
 def test_build_robot_cfg_asset_requires_ee_link():
@@ -722,6 +732,7 @@ def _make_cobotmagic_sim(tmp_path):
         },
     }
     robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+    sim.prepare()
     return sim, robot
 
 

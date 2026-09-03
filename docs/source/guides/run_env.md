@@ -63,10 +63,17 @@ At startup, `run-env`:
    point and executes their initialization hooks;
 2. loads the runnable config, expands its selected physical components, and
    composes any declared Task Program components;
-3. applies CLI overrides such as `--num_envs`, `--device`, `--renderer`, and
-   `--max_episodes`;
+3. merges launcher runtime values; optional overrides such as `--device`,
+   `--renderer`, and `--max_episodes` apply only when supplied;
 4. creates the environment selected by the gym config's `id`; and
 5. enters rollout, preview, or replay mode.
+
+The runnable config, or its selected `environment.component`, must declare
+`physics: default` or `physics: newton`. That backend is file-owned:
+`--physics` can confirm it but cannot switch it. Omitting `--device` preserves
+an authored `device` or the selected backend's default; supplying `--device`
+overrides both environment tensors and backend execution, including an explicit
+CPU selection for Newton.
 
 Use `embodichain run-env --help` for the complete option list. The
 {ref}`CLI Reference <cli-run-environment>` also lists defaults and
