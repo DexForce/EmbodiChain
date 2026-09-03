@@ -42,6 +42,7 @@ from embodichain.lab.sim.planners import (
     PlanState,
     TrapezoidalPlannerCfg,
     TrapezoidalPlanOptions,
+    BezierPath,
 )
 from embodichain.lab.sim.planners.trapezoidal_planner import _plan_linear_profiles
 from embodichain.lab.sim.robots import CobotMagicCfg
@@ -100,7 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--profile",
         choices=(*PROFILE_SPECS, "both"),
-        default="both",
+        default="acceleration_trapezoidal",
         help=(
             "Diagnostic to run: trapezoidal velocity, jerk-limited "
             "trapezoidal acceleration, or both."
@@ -115,7 +116,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--path",
         choices=("joint", "cartesian", "both"),
-        default="both",
+        default="cartesian",
         help="Plan a synchronized multi-joint path, a straight EEF path, or both.",
     )
     parser.add_argument(
@@ -123,6 +124,12 @@ def parse_args() -> argparse.Namespace:
         type=positive_float,
         default=DEFAULT_CARTESIAN_DISTANCE,
         help="Length in metres of the diagonal straight EEF demo path.",
+    )
+    parser.add_argument(
+        "--cartesian-path",
+        choices=("bezier", "line"),
+        default="line",
+        help="Cartesian geometric path; Bézier is the default.",
     )
     parser.add_argument(
         "--cartesian-step",
@@ -405,6 +412,90 @@ def plan_cartesian_line(
     return (
         PlanResult(
             success=success,
+            xpos_list=desired_poses,
+            positions=positions,
+            velocities=velocities,
+            accelerations=accelerations,
+            dt=scalar_plan.dt,
+        ),
+        desired_poses,
+        scalar_plan,
+    )
+
+
+def plan_cartesian_bezier(
+    robot: Robot,
+    control_part: str,
+    start_qpos: torch.Tensor,
+    **kwargs,
+) -> tuple[PlanResult, torch.Tensor, PlanResult]:
+    """Plan a quintic Cartesian Bézier path with Double-S-compatible timing."""
+    distance = float(kwargs["distance"])
+    sample_count = int(kwargs["sample_count"])
+    start_pose, goal_pose = build_cartesian_line_poses(
+        robot, control_part, start_qpos, distance
+    )
+    midpoint = 0.5 * (start_pose[:, :3, 3] + goal_pose[:, :3, 3])
+    midpoint[:, 0] += 0.35 * distance
+    start_position = start_pose[:, :3, 3]
+    goal_position = goal_pose[:, :3, 3]
+    # Quintic Bézier control polygon with smooth endpoint tangents and a
+    # lateral middle section; this is the default production-style path.
+    control_points = torch.stack(
+        (
+            start_position,
+            torch.lerp(start_position, midpoint, 0.20),
+            torch.lerp(start_position, midpoint, 0.65),
+            torch.lerp(midpoint, goal_position, 0.35),
+            torch.lerp(midpoint, goal_position, 0.80),
+            goal_position,
+        ),
+        dim=1,
+    )
+    dense_count = max(1025, sample_count * 8)
+    dense_points, dense_lengths = BezierPath(control_points).sample(dense_count)
+    total_length = dense_lengths[:, -1]
+    scalar_waypoints = start_qpos.new_zeros((start_qpos.shape[0], 2, 1))
+    scalar_waypoints[:, 1, 0] = total_length
+    scalar_plan = _plan_linear_profiles(
+        scalar_waypoints,
+        TrapezoidalPlanOptions(
+            profile=str(kwargs["profile"]),
+            constraints={
+                "velocity": float(kwargs["velocity_limit"]),
+                "acceleration": float(kwargs["acceleration_limit"]),
+                "jerk": float(kwargs["jerk_limit"]),
+            },
+            sample_interval=sample_count,
+            backend=str(kwargs["backend"]),
+        ),
+    )
+    progress = scalar_plan.positions[..., 0] / total_length[:, None]
+    dense_index = progress.clamp(0.0, 1.0) * (dense_count - 1)
+    lower = dense_index.floor().long().clamp_max(dense_count - 2)
+    alpha = (dense_index - lower)[..., None]
+    gather_index = lower[..., None].expand(-1, -1, 3)
+    lower_points = dense_points.gather(1, gather_index)
+    upper_points = dense_points.gather(1, gather_index + 1)
+    translations = torch.lerp(lower_points, upper_points, alpha)
+    desired_poses = start_pose[:, None].expand(-1, sample_count, -1, -1).clone()
+    desired_poses[:, :, :3, 3] = translations
+    ik_result = robot.compute_batch_ik(
+        desired_poses, start_qpos, control_part, continuous=True
+    )
+    if ik_result is None or not bool(ik_result[0].all().item()):
+        raise RuntimeError("Cartesian Bézier IK failed.")
+    positions = ik_result[1]
+    time = scalar_plan.dt.cumsum(dim=1)
+    velocities = torch.stack(
+        [torch.gradient(positions[i], spacing=(time[i],), dim=(0,))[0] for i in range(positions.shape[0])]
+    )
+    accelerations = torch.stack(
+        [torch.gradient(velocities[i], spacing=(time[i],), dim=(0,))[0] for i in range(positions.shape[0])]
+    )
+    return (
+        PlanResult(
+            success=ik_result[0].all(dim=1),
             xpos_list=desired_poses,
             positions=positions,
             velocities=velocities,
@@ -746,21 +837,22 @@ def main() -> None:
             ) in requested_profiles:
                 scalar_plan = None
                 if path_name == "cartesian":
-                    result, desired_poses, scalar_plan = plan_cartesian_line(
-                        robot,
-                        control_part,
-                        start_qpos,
+                    planner_kwargs = dict(
                         distance=args.cartesian_distance,
                         profile=planner_profile,
-                        sample_count=max(
-                            args.samples,
-                            math.ceil(args.cartesian_distance / args.cartesian_step)
-                            + 1,
-                        ),
+                        sample_count=max(args.samples, math.ceil(args.cartesian_distance / args.cartesian_step) + 1),
                         velocity_limit=args.cartesian_velocity,
                         acceleration_limit=args.cartesian_acceleration,
                         jerk_limit=args.cartesian_jerk,
                         backend=args.backend,
+                    )
+                    cartesian_planner = (
+                        plan_cartesian_bezier
+                        if args.cartesian_path == "bezier"
+                        else plan_cartesian_line
+                    )
+                    result, desired_poses, scalar_plan = cartesian_planner(
+                        robot, control_part, start_qpos, **planner_kwargs
                     )
                 else:
                     desired_poses = None
