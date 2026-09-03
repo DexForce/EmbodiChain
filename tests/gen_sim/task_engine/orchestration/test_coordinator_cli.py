@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -46,17 +45,13 @@ from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
     SceneAdaptation,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_source import SceneSourceRef
-from embodichain.gen_sim.action_engine.generation.artifacts import artifact_paths
 from embodichain.gen_sim.action_engine.generation.models import PreparedScene
-from embodichain.gen_sim.action_engine.protocol import (
-    AGENT_CONFIG_FILENAME,
-    FAST_GYM_CONFIG_FILENAME,
+from embodichain.gen_sim.task_engine.semantic_planner import (
+    UnsupportedSemanticCapabilityError,
 )
-from embodichain.gen_sim.action_engine.runtime import (
-    ExecutionReport,
-    build_execution_provenance,
+from embodichain.gen_sim.task_engine.task_program_bundle import (
+    TaskProgramBundlePaths,
 )
-from embodichain.gen_sim.task_engine.scene import SceneEngineV1Adapter
 
 _UPRIGHT_CAN_INSTRUCTION = "test-instruction"
 
@@ -141,18 +136,6 @@ def _candidate_set() -> dict:
         "valid_response_count": 1,
         "errors": [],
     }
-
-
-def _candidate_set_with_alternative() -> dict:
-    candidates = _candidate_set()
-    alternative = deepcopy(candidates["candidates"][0])
-    alternative["candidate_id"] = "candidate_02"
-    alternative["draft"]["steps"][0]["required_arm"] = "left_arm"
-    alternative["semantic_hash"] = canonical_hash(alternative["draft"]["steps"])
-    candidates["candidates"].append(alternative)
-    candidates["requested_candidate_count"] = 2
-    candidates["valid_response_count"] = 2
-    return candidates
 
 
 def _prepared_scene(tmp_path: Path) -> PreparedScene:
@@ -270,30 +253,6 @@ def _adaptation(tmp_path: Path, *, status: str = "bound") -> SceneAdaptation:
     )
 
 
-def _adaptation_with_alternative(tmp_path: Path) -> SceneAdaptation:
-    candidate_set = _candidate_set_with_alternative()
-    adaptation = _adaptation(tmp_path)
-    alternative = candidate_set["candidates"][1]
-    alternative_audit = deepcopy(adaptation.binding_report["candidates"][0])
-    alternative_audit["candidate_id"] = "candidate_02"
-    alternative_audit["semantic_hash"] = alternative["semantic_hash"]
-    alternative_bindings = {
-        **deepcopy(adaptation.role_bindings),
-        "candidate_id": "candidate_02",
-    }
-    return replace(
-        adaptation,
-        binding_report={
-            **deepcopy(adaptation.binding_report),
-            "candidates": [
-                *deepcopy(adaptation.binding_report["candidates"]),
-                alternative_audit,
-            ],
-        },
-        candidate_bindings={"candidate_02": alternative_bindings},
-    )
-
-
 def test_artifact_transaction_rolls_back_and_preserves_existing_output(
     tmp_path: Path,
 ) -> None:
@@ -347,8 +306,6 @@ def test_prepare_rejects_output_overlapping_read_only_source(tmp_path: Path) -> 
     coordinator = TaskEngineCoordinator(
         task_agent=object(),
         scene_adapter=SimpleNamespace(robot_profile="franka"),
-        action_agent=object(),
-        feasibility_broker=object(),
     )
 
     with pytest.raises(ValueError, match="must not overlap"):
@@ -369,15 +326,13 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
         robot_profile="franka",
         adapt=lambda *args, **kwargs: adaptation,
     )
-    action_agent = SimpleNamespace(
-        plan=lambda *_args, **_kwargs: pytest.fail("Action Agent must not run")
-    )
     coordinator = TaskEngineCoordinator(
         task_agent=task_agent,
         scene_adapter=scene_adapter,
-        action_agent=action_agent,
-        bundle_generator=lambda *_args, **_kwargs: pytest.fail(
-            "legacy generator must not run"
+        semantic_planner=SimpleNamespace(
+            plan=lambda *_args, **_kwargs: pytest.fail(
+                "Semantic Task Planner must not run"
+            )
         ),
     )
 
@@ -395,7 +350,8 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
     assert not (result.output_dir / "scene_manifest.json").exists()
     assert not (result.output_dir / "role_bindings.json").exists()
     assert not (result.output_dir / "grounded_task_plan.json").exists()
-    assert not (result.output_dir / FAST_GYM_CONFIG_FILENAME).exists()
+    assert not (result.output_dir / "semantic_task_graph.json").exists()
+    assert not (result.output_dir / "task_program_deployment.yaml").exists()
 
 
 def test_prepare_reuses_precomputed_candidates_without_rerunning_task_agent(
@@ -412,7 +368,6 @@ def test_prepare_reuses_precomputed_candidates_without_rerunning_task_agent(
             robot_profile="franka",
             adapt=lambda *args, **kwargs: adaptation,
         ),
-        action_agent=object(),
     )
 
     result = coordinator.prepare(
@@ -444,7 +399,6 @@ def test_prepare_inherits_adapter_robot_profile_for_raw_scene_path(
             generate=lambda *args, **kwargs: pytest.fail("Task Agent must not rerun")
         ),
         scene_adapter=SimpleNamespace(robot_profile="ur10", adapt=adapt),
-        action_agent=object(),
     )
 
     result = coordinator.prepare(
@@ -460,164 +414,88 @@ def test_prepare_inherits_adapter_robot_profile_for_raw_scene_path(
     assert captured["source"].robot_profile == "ur10"
 
 
-def test_contradicted_feasibility_publishes_audit_without_planning(
+def test_bound_prepare_publishes_semantic_task_program_bundle(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidates = _candidate_set()
     adaptation = _adaptation(tmp_path)
-    static_manifest = SceneEngineV1Adapter().adapt_prepared_scene(
-        adaptation.prepared_scene,
-        source_format="test",
-        robot_profile="dual_franka",
-    )
-    adaptation = replace(
-        adaptation,
-        static_scene_manifest=static_manifest,
-    )
     task_agent = SimpleNamespace(generate=lambda *args, **kwargs: candidates)
     scene_adapter = SimpleNamespace(
         robot_profile="franka",
         adapt=lambda *args, **kwargs: adaptation,
     )
-    registry = SimpleNamespace(
-        catalog=lambda: {
-            name: {
-                "runtime_available": name != "PickUp",
-                "unavailable_reason": (
-                    "PickUp disabled for test." if name == "PickUp" else None
-                ),
+    graph = {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "upright_can",
+        "instruction": _UPRIGHT_CAN_INSTRUCTION,
+        "planner_route": "offline",
+        "integration_fingerprint": "0" * 64,
+        "targets": {},
+        "nodes": [
+            {
+                "id": "upright__call_01",
+                "call": {
+                    "kind": "pick",
+                    "object": "red_can",
+                    "resources": {"primary": "left"},
+                },
+                "depends_on": [],
+                "task_instance_id": "upright",
+                "task_type": "E2",
+                "role": "primary",
             }
-            for name in ("PickUp", "MoveHeldObject", "Place")
-        }
-    )
-    action_agent = SimpleNamespace(
-        registry=registry,
-        plan=lambda *_args, **_kwargs: pytest.fail("Action Agent must not plan"),
-    )
-
-    result = TaskEngineCoordinator(
-        task_agent=task_agent,
-        scene_adapter=scene_adapter,
-        action_agent=action_agent,
-        bundle_generator=lambda *_args, **_kwargs: pytest.fail(
-            "legacy generator must not run"
-        ),
-    ).prepare(
-        "upright_can",
-        _UPRIGHT_CAN_INSTRUCTION,
-        tmp_path / "scene_config.json",
-        tmp_path / "infeasible-bundle",
-        candidate_count=1,
-    )
-
-    assert result.status == "infeasible"
-    assert result.feasibility_report is not None
-    assert result.feasibility_report["status"] == "contradicted"
-    assert result.feasibility_report["remediation_class"] == "action_capability"
-    assert result.artifacts.static_scene_manifest.is_file()
-    assert result.artifacts.feasibility_report.is_file()
-    assert not result.artifacts.grounded_task_plan.exists()
-
-
-def test_feasibility_contradiction_falls_back_to_next_resolved_candidate(
-    tmp_path: Path,
-) -> None:
-    candidate_set = _candidate_set()
-    first = candidate_set["candidates"][0]
-    second = deepcopy(first)
-    second["candidate_id"] = "candidate_02"
-    second["semantic_hash"] = "b" * 64
-    candidate_set["candidates"].append(second)
-    adaptation = _adaptation(tmp_path)
-    second_audit = deepcopy(adaptation.binding_report["candidates"][0])
-    second_audit["candidate_id"] = "candidate_02"
-    second_audit["semantic_hash"] = "b" * 64
-    binding_report = deepcopy(adaptation.binding_report)
-    binding_report["candidates"].append(second_audit)
-    second_bindings = {
-        **deepcopy(adaptation.role_bindings),
-        "candidate_id": "candidate_02",
+        ],
+        "task_groups": [
+            {
+                "id": "upright",
+                "task_type": "E2",
+                "node_ids": ["upright__call_01"],
+                "depends_on": [],
+                "success": {"type": "object_upright"},
+            }
+        ],
+        "success": {"kind": "all_task_groups"},
     }
-    adaptation = replace(
-        adaptation,
-        binding_report=binding_report,
-        candidate_bindings={"candidate_02": second_bindings},
-        static_scene_manifest={},
-    )
+    generated_calls: list[dict[str, object]] = []
 
-    class _Broker:
-        @staticmethod
-        def assess(candidate, *_args, **_kwargs):
-            return {
-                "status": (
-                    "runtime_probe"
-                    if candidate["candidate_id"] == "candidate_02"
-                    else "contradicted"
-                )
-            }
-
-    registry = SimpleNamespace(catalog=lambda: {})
-    coordinator = TaskEngineCoordinator(
-        action_agent=SimpleNamespace(registry=registry),
-        feasibility_broker=_Broker(),
-    )
-
-    updated, selected, bindings, report = coordinator._fallback_feasible_candidate(
-        candidate_set,
-        adaptation,
-        first,
-        adaptation.role_bindings,
-        {"status": "contradicted"},
-    )
-
-    assert selected["candidate_id"] == "candidate_02"
-    assert bindings["candidate_id"] == "candidate_02"
-    assert report["status"] == "runtime_probe"
-    assert updated.binding_report["selected_candidate_id"] == "candidate_02"
-    assert (
-        "static feasibility contradicted candidate_01"
-        in updated.binding_report["selection_reason"]
-    )
-
-
-def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
-    tmp_path: Path,
-) -> None:
-    candidates = _candidate_set()
-    adaptation = _adaptation(tmp_path)
-    task_agent = SimpleNamespace(generate=lambda *args, **kwargs: candidates)
-    scene_adapter = SimpleNamespace(
-        robot_profile="franka",
-        adapt=lambda *args, **kwargs: adaptation,
-    )
-    graph = {"graph": "planned"}
-    action_agent = SimpleNamespace(plan=lambda _plan: deepcopy(graph))
-    generator_calls = []
-
-    def generator(_scene, output, **kwargs):
-        generator_calls.append(kwargs)
-        task_spec_path = Path(kwargs["task_spec"])
-        assert task_spec_path.is_file()
-        assert (task_spec_path.parent / "scene_requirements.json").is_file()
-        paths = artifact_paths(output)
+    def generate_bundle(planned_graph, _scene, output, **kwargs):
+        generated_calls.append({"graph": planned_graph, **kwargs})
+        root = Path(output)
+        paths = TaskProgramBundlePaths(
+            root=root,
+            deployment=root / "task_program_deployment.yaml",
+            program=root / "task_program/program.yaml",
+            integration=root / "task_program/integration.yaml",
+            scene=root / "components/scene.yaml",
+            embodiment=root / "components/embodiment.yaml",
+            execution_policy=root / "components/execution_policy.yaml",
+            semantic_task_graph=root / "semantic_task_graph.json",
+            integration_fingerprint=root / "integration_fingerprint.json",
+        )
         for path in (
-            paths.gym_config,
-            paths.agent_config,
-            paths.task_spec,
-            paths.scene_requirements,
-            paths.seed_task_graph,
+            paths.deployment,
+            paths.program,
+            paths.integration,
+            paths.scene,
+            paths.embodiment,
+            paths.execution_policy,
+            paths.semantic_task_graph,
+            paths.integration_fingerprint,
         ):
             path.parent.mkdir(parents=True, exist_ok=True)
-            value = graph if path == paths.seed_task_graph else {}
-            path.write_text(json.dumps(value), encoding="utf-8")
-        paths.seed_task_graph_png.write_bytes(b"png")
-        return paths
+            path.write_text("{}\n", encoding="utf-8")
+        return deepcopy(planned_graph), paths
+
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.coordinator.generate_task_program_bundle",
+        generate_bundle,
+    )
 
     result = TaskEngineCoordinator(
         task_agent=task_agent,
         scene_adapter=scene_adapter,
-        action_agent=action_agent,
-        bundle_generator=generator,
+        semantic_planner=SimpleNamespace(plan=lambda *_args, **_kwargs: graph),
     ).prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
@@ -627,110 +505,48 @@ def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
     )
 
     assert result.bound
-    assert generator_calls
-    assert generator_calls[0]["gripper_model"] == "pgi"
-    assert generator_calls[0]["ik_solver"] == "auto"
-    assert not (result.output_dir / ".task_engine_input").exists()
-    grounded = json.loads(
-        (result.output_dir / "grounded_task_plan.json").read_text(encoding="utf-8")
-    )
-    assert grounded["success_spec"]["terms"] == [
-        {"step_id": "task_01", "type": "object_upright"}
+    assert generated_calls == [
+        {
+            "graph": graph,
+            "robot_profile": "dual_franka",
+            "max_episodes": None,
+            "max_episode_steps": None,
+        }
     ]
-    assert (result.output_dir / "seed_task_graph.json").is_file()
+    assert result.semantic_task_graph == graph
+    assert (result.output_dir / "semantic_task_graph.json").is_file()
+    assert (result.output_dir / "task_program_deployment.yaml").is_file()
+    assert not (result.output_dir / "grounded_task_plan.json").exists()
+    assert not (result.output_dir / "seed_task_graph.json").exists()
 
 
-def test_prepare_falls_back_after_candidate_action_planning_failure(
+def test_prepare_publishes_semantic_planning_failure_context(
     tmp_path: Path,
 ) -> None:
-    candidates = _candidate_set_with_alternative()
-    adaptation = _adaptation_with_alternative(tmp_path)
-    planned_candidates: list[str] = []
-    graph = {"graph": "planned"}
-
-    def plan(grounded_plan):
-        candidate_id = grounded_plan["selected_candidate_id"]
-        planned_candidates.append(candidate_id)
-        if candidate_id == "candidate_01":
-            raise ValueError(
-                "SeedGraph TaskGroup 'task_04' requires unavailable state "
-                "{'predicate': 'arm_free', 'arm': 'right_arm'}."
-            )
-        return deepcopy(graph)
-
-    def generator(_scene, output, **_kwargs):
-        paths = artifact_paths(output)
-        for path in (
-            paths.gym_config,
-            paths.agent_config,
-            paths.task_spec,
-            paths.scene_requirements,
-            paths.seed_task_graph,
-        ):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            value = graph if path == paths.seed_task_graph else {}
-            path.write_text(json.dumps(value), encoding="utf-8")
-        paths.seed_task_graph_png.write_bytes(b"png")
-        return paths
-
-    result = TaskEngineCoordinator(
-        task_agent=SimpleNamespace(generate=lambda *args, **kwargs: candidates),
-        scene_adapter=SimpleNamespace(
-            robot_profile="franka",
-            adapt=lambda *args, **kwargs: adaptation,
-        ),
-        action_agent=SimpleNamespace(plan=plan),
-        bundle_generator=generator,
-    ).prepare(
-        "upright_can",
-        _UPRIGHT_CAN_INSTRUCTION,
-        tmp_path / "scene_config.json",
-        tmp_path / "fallback-bundle",
-        candidate_count=2,
-    )
-
-    assert result.bound
-    assert result.selected_candidate_id == "candidate_02"
-    assert planned_candidates == ["candidate_01", "candidate_02"]
-    assert (
-        "candidate_01 failed action_planning"
-        in result.adaptation.binding_report["selection_reason"]
-    )
-    assert not result.artifacts.preparation_failure.exists()
-
-
-def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
-    tmp_path: Path,
-) -> None:
-    candidates = _candidate_set_with_alternative()
-    adaptation = _adaptation_with_alternative(tmp_path)
+    candidates = _candidate_set()
+    adaptation = _adaptation(tmp_path)
     output = tmp_path / "failed-bundle"
     output.mkdir()
     (output / "stale.txt").write_text("old", encoding="utf-8")
 
+    def unsupported(*_args, **_kwargs):
+        raise UnsupportedSemanticCapabilityError(
+            "Task type E2 has no phase-one Semantic Call route."
+        )
+
     result = TaskEngineCoordinator(
         task_agent=SimpleNamespace(generate=lambda *args, **kwargs: candidates),
         scene_adapter=SimpleNamespace(
             robot_profile="franka",
             adapt=lambda *args, **kwargs: adaptation,
         ),
-        action_agent=SimpleNamespace(
-            plan=lambda _plan: (_ for _ in ()).throw(
-                ValueError(
-                    "SeedGraph TaskGroup 'task_04' requires unavailable state "
-                    "{'predicate': 'arm_free', 'arm': 'right_arm'}."
-                )
-            )
-        ),
-        bundle_generator=lambda *_args, **_kwargs: pytest.fail(
-            "bundle generation must not run"
-        ),
+        semantic_planner=SimpleNamespace(plan=unsupported),
     ).prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "scene_config.json",
         output,
-        candidate_count=2,
+        candidate_count=1,
         overwrite=True,
     )
 
@@ -741,23 +557,21 @@ def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
     failure = json.loads(
         result.artifacts.preparation_failure.read_text(encoding="utf-8")
     )
-    assert failure["schema_version"] == "action_engine_preparation_failure_v1"
+    assert failure["schema_version"] == "semantic_task_preparation_failure/v1"
     assert failure["task_id"] == "upright_can"
     assert failure["selected_candidate_id"] == "candidate_01"
-    assert [attempt["candidate_id"] for attempt in failure["attempts"]] == [
-        "candidate_01",
-        "candidate_02",
+    assert failure["status"] == "unsupported_semantic_capability"
+    assert failure["attempts"] == [
+        {
+            "candidate_id": "candidate_01",
+            "planner_route": "offline",
+            "status": "failed",
+            "error": {
+                "type": "UnsupportedSemanticCapabilityError",
+                "message": "Task type E2 has no phase-one Semantic Call route.",
+            },
+        }
     ]
-    for index, attempt in enumerate(failure["attempts"]):
-        candidate_id = f"candidate_{index + 1:02d}"
-        assert attempt["stage"] == "action_planning"
-        assert attempt["draft"] == candidates["candidates"][index]["draft"]
-        assert attempt["bindings"]["candidate_id"] == candidate_id
-        assert attempt["grounded_task_plan"]["selected_candidate_id"] == candidate_id
-        assert "unbound_action_plan" in attempt
-        assert "action_graph" in attempt
-        assert attempt["error"]["type"] == "ValueError"
-        assert "arm_free" in attempt["error"]["message"]
 
 
 def test_private_bundle_runner_forwards_arguments_without_leaking_sys_argv(
@@ -766,87 +580,43 @@ def test_private_bundle_runner_forwards_arguments_without_leaking_sys_argv(
 ) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
-    (bundle / AGENT_CONFIG_FILENAME).write_text(
-        json.dumps({"task_name": "task"}), encoding="utf-8"
-    )
-    (bundle / FAST_GYM_CONFIG_FILENAME).write_text("{}", encoding="utf-8")
-    captured = []
+    execution_output = tmp_path / "execution"
+    captured: dict[str, object] = {}
 
-    def fake_cli() -> None:
-        import sys
+    def fake_execute_bundle(path, forwarded, *, execution_output):
+        captured.update(
+            {
+                "path": path,
+                "forwarded": list(forwarded),
+                "execution_output": execution_output,
+            }
+        )
+        return 7
 
-        captured.append(list(sys.argv))
-
-    import embodichain.gen_sim.action_engine.cli as legacy_cli
-
-    monkeypatch.setattr(
-        legacy_cli,
-        "run_agent",
-        SimpleNamespace(cli=fake_cli),
-        raising=False,
-    )
+    monkeypatch.setattr(bundle_runner, "execute_bundle", fake_execute_bundle)
     import sys
 
     original = sys.argv
-    assert bundle_runner.main(["--bundle", str(bundle), "--seed", "7"]) == 0
-
-    assert sys.argv is original
-    assert captured[0][-2:] == ["--seed", "7"]
-    assert str(bundle / AGENT_CONFIG_FILENAME) in captured[0]
-
-
-def test_private_bundle_runner_normalizes_legacy_usdc_config(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / FAST_GYM_CONFIG_FILENAME
-    original = {
-        "articulation": [
-            {
-                "uid": "microwave",
-                "category": "microwave",
-                "is_articulated": True,
-                "fpath": "/scene/microwave.usdc",
-                "proxy_glb_fpath": "microwave.glb",
-            }
-        ]
-    }
-    source.write_text(json.dumps(original), encoding="utf-8")
-
-    with bundle_runner._runtime_gym_config(source) as runtime_path:
-        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-        assert runtime_path != source
-        assert runtime["articulation"] == [
-            {
-                "uid": "microwave",
-                "fpath": "/scene/microwave.usdc",
-                "build_pk_chain": False,
-            }
-        ]
-        temporary_path = runtime_path
-
-    assert not temporary_path.exists()
-    assert json.loads(source.read_text(encoding="utf-8")) == original
-
-
-def test_private_bundle_runner_reuses_normalized_gym_config(tmp_path: Path) -> None:
-    source = tmp_path / FAST_GYM_CONFIG_FILENAME
-    source.write_text(
-        json.dumps(
-            {
-                "articulation": [
-                    {
-                        "uid": "microwave",
-                        "fpath": "/scene/microwave.usdc",
-                        "build_pk_chain": False,
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
+    assert (
+        bundle_runner.main(
+            [
+                "--bundle",
+                str(bundle),
+                "--execution-output",
+                str(execution_output),
+                "--seed",
+                "7",
+            ]
+        )
+        == 7
     )
 
-    with bundle_runner._runtime_gym_config(source) as runtime_path:
-        assert runtime_path == source
+    assert sys.argv is original
+    assert captured == {
+        "path": str(bundle),
+        "forwarded": ["--seed", "7"],
+        "execution_output": str(execution_output),
+    }
 
 
 @pytest.mark.parametrize(
@@ -926,33 +696,19 @@ def test_unified_cli_accepts_exactly_four_modes(
     assert Path(payload["output_dir"]).parent == tmp_path / "history"
 
 
-def test_unified_cli_explicit_planner_mode_overrides_packaged_yaml(
+@pytest.mark.parametrize(
+    "lower_layer_option",
+    [
+        ["--planner-mode", "ik_interp"],
+        ["--ik-solver", "pytorch"],
+        ["--show-grasp-poses"],
+    ],
+)
+def test_unified_cli_rejects_lower_layer_execution_options(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    lower_layer_option: list[str],
 ) -> None:
-    captured: dict[str, object] = {}
-
-    class FakeWorkflow:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def run(self, request, **kwargs):
-            captured.update(kwargs)
-            output = Path(request["output_dir"])
-            return SimpleNamespace(
-                status="prepared",
-                succeeded=False,
-                failure_class=None,
-                output_dir=output,
-                manifest_path=output / "run_manifest.json",
-                final_bundle=output / "final" / "bundle",
-            )
-
-    monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
-    monkeypatch.setattr(cli, "TaskEngineWorkflow", FakeWorkflow)
-
-    assert (
+    with pytest.raises(SystemExit, match="2"):
         cli.main(
             [
                 "prepare",
@@ -966,19 +722,9 @@ def test_unified_cli_explicit_planner_mode_overrides_packaged_yaml(
                 str(tmp_path / "input.png"),
                 "--output-root",
                 str(tmp_path / "history"),
-                "--planner-mode",
-                "ik_interp",
-                "--ik-solver",
-                "pytorch",
+                *lower_layer_option,
             ]
         )
-        == 0
-    )
-
-    planning_cfg = captured["planning_cfg"]
-    assert planning_cfg.planner == {"mode": "ik_interp"}
-    assert planning_cfg.ik_solver == "pytorch"
-    assert json.loads(capsys.readouterr().out)["status"] == "prepared"
 
 
 def test_unified_cli_reuses_history_root_without_modifying_prior_scene(
@@ -1116,12 +862,12 @@ def test_public_cli_exposes_prepare_run_and_run_all_modes() -> None:
     assert arguments.command == "prepare"
     assert arguments.dataset_saving is True
     assert arguments.failure_policy == "stop"
-    assert arguments.planner_mode is None
-    assert arguments.ik_solver is None
-    assert arguments.show_grasp_poses is False
+    assert not hasattr(arguments, "planner_mode")
+    assert not hasattr(arguments, "ik_solver")
+    assert not hasattr(arguments, "show_grasp_poses")
 
 
-def test_run_all_cli_accepts_execution_visualization_options() -> None:
+def test_run_all_cli_accepts_runtime_window_option() -> None:
     arguments = cli.build_parser().parse_args(
         [
             "run-all",
@@ -1135,12 +881,10 @@ def test_run_all_cli_accepts_execution_visualization_options() -> None:
             "scene",
             "--output-root",
             "history",
-            "--show-grasp-poses",
             "--open-window",
         ]
     )
 
-    assert arguments.show_grasp_poses is True
     assert arguments.open_window is True
 
 
@@ -1275,47 +1019,3 @@ def test_run_cli_executes_an_existing_bundle(
     )
 
     assert result == 0
-
-
-def test_private_bundle_runner_publishes_rejected_preflight_report(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    bundle = tmp_path / "bundle"
-    bundle.mkdir()
-    (bundle / AGENT_CONFIG_FILENAME).write_text(
-        json.dumps({"task_name": "task"}), encoding="utf-8"
-    )
-    (bundle / FAST_GYM_CONFIG_FILENAME).write_text("{}", encoding="utf-8")
-    report = ExecutionReport(
-        task_id="task",
-        plan_hash="0" * 64,
-        action_graph_hash="1" * 64,
-        status="rejected",
-        run_id="preflight",
-        episode_id="0",
-        provenance=build_execution_provenance(),
-        environments=(
-            {
-                "env_id": "0",
-                "success": False,
-                "semantic_success": {},
-                "action_count": 0,
-                "retry_count": 0,
-                "recovery_count": 0,
-                "revision_count": 0,
-                "failures": [],
-            },
-        ),
-        error="ValueError: planning-only action",
-    )
-    monkeypatch.setattr(
-        bundle_runner,
-        "_preflight_bundle",
-        lambda *args, **kwargs: report,
-    )
-
-    assert bundle_runner.main(["--bundle", str(bundle)]) == 2
-    payload = json.loads((bundle / "execution_report.json").read_text(encoding="utf-8"))
-    assert payload["status"] == "rejected"
-    assert payload["action_count"] == 0

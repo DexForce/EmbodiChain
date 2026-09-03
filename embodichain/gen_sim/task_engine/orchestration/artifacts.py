@@ -27,10 +27,11 @@ import shutil
 import tempfile
 from typing import Any
 
-from embodichain.gen_sim.action_engine.runtime import (
+from embodichain.gen_sim.task_engine.reporting import (
     EXECUTION_REPORT_FILENAME,
     write_execution_report as _write_execution_report,
 )
+from embodichain.utils.utility import load_config, save_config
 
 __all__ = [
     "BINDING_REPORT_FILENAME",
@@ -152,7 +153,7 @@ class ArtifactTransaction:
             raise RuntimeError("ArtifactTransaction has already been committed.")
         staging = self.staging_dir
         destination = self.output_dir
-        _relocate_json_paths(staging, destination)
+        _relocate_artifact_paths(staging, destination)
 
         backup: Path | None = None
         if destination.exists():
@@ -285,8 +286,8 @@ def _write_json(path: Path, value: Any) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _relocate_json_paths(staging: Path, destination: Path) -> None:
-    """Replace staging-root absolute paths embedded by the legacy generator."""
+def _relocate_artifact_paths(staging: Path, destination: Path) -> None:
+    """Replace staging-root absolute paths embedded in JSON and YAML artifacts."""
     source_prefix = staging.resolve().as_posix()
     destination_prefix = destination.resolve().as_posix()
 
@@ -314,6 +315,12 @@ def _relocate_json_paths(staging: Path, destination: Path) -> None:
         relocated = relocate(value)
         if relocated != value:
             _write_json(path, relocated)
+    for suffix in ("*.yaml", "*.yml"):
+        for path in staging.rglob(suffix):
+            value = load_config(path)
+            relocated = relocate(value)
+            if relocated != value:
+                save_config(path, relocated)
 
 
 def _remove_path(path: Path) -> None:

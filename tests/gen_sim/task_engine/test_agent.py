@@ -36,9 +36,10 @@ from embodichain.gen_sim.task_engine.agent import (
     derive_success_spec,
 )
 from embodichain.gen_sim.task_engine.interpretation import InstructionDraftResult
-from embodichain.gen_sim.task_engine.orchestration.coordinator import (
-    lower_task_candidate,
+from embodichain.gen_sim.task_engine.orchestration.contracts import (
+    ROLE_BINDINGS_SCHEMA,
 )
+from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
 
 _TEST_INSTRUCTION = "test-instruction"
 
@@ -181,7 +182,7 @@ def test_target_requirements_describe_capabilities_not_concrete_roles(
     assert target["affordances"] == expected_affordances
 
 
-def test_lower_task_candidate_expands_success_for_all_binding():
+def test_semantic_planner_rejects_implicit_multi_object_expansion():
     def interpreter(_instruction, **_kwargs):
         step = _step(reference="all cans")
         step["object"].update(quantifier="all")
@@ -190,21 +191,72 @@ def test_lower_task_candidate_expands_success_for_all_binding():
     candidate = TaskAgent(interpreter=interpreter).generate(
         "upright", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
-    grounded = lower_task_candidate(
+    with pytest.raises(ValueError, match="must resolve to exactly one scene entity"):
+        SemanticTaskPlanner().plan(
+            candidate,
+            {
+                "schema_version": ROLE_BINDINGS_SCHEMA,
+                "task_id": "upright",
+                "candidate_id": candidate["candidate_id"],
+                "reference_bindings": {"step_01.object": ["can_a", "can_b"]},
+                "role_bindings": {},
+            },
+            [
+                {"uid": "can_a", "init_pos": [0.0, -0.2, 0.7]},
+                {"uid": "can_b", "init_pos": [0.0, 0.2, 0.7]},
+            ],
+        )
+
+
+def test_semantic_planner_adds_profile_bound_cleanup_without_joint_data() -> None:
+    """Task-group cleanup stays a semantic call and never embeds robot qpos."""
+
+    def interpreter(_instruction, **_kwargs):
+        step = _step(step_id="place", reference="cube")
+        step.update(
+            task_type="E1",
+            target=_selector("scene_ref", reference="tray"),
+            relation="inside",
+            required_arm="left_arm",
+            orientation_goal="preserve",
+        )
+        return _result(step)
+
+    candidate = TaskAgent(interpreter=interpreter).generate(
+        "place_cube", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
         candidate,
-        {"step_01.object": ["can_a", "can_b"]},
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "place_cube",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {
+                "step_01.object": ["cube"],
+                "step_01.target": ["tray"],
+            },
+            "role_bindings": {},
+        },
         [
-            {"uid": "can_a", "role": "rigid_object", "description": "A can."},
-            {"uid": "can_b", "role": "rigid_object", "description": "A can."},
+            {"runtime_uid": "cube", "init_pos": [0.0, -0.2, 0.7]},
+            {"runtime_uid": "tray", "init_pos": [0.0, 0.0, 0.7]},
         ],
-        "dual_franka",
     )
 
-    assert grounded.task_spec["level"] == "L2"
-    assert [term["type"] for term in grounded.task_spec["success"]["terms"]] == [
-        "object_upright",
-        "object_upright",
+    assert [node["call"]["kind"] for node in graph["nodes"]] == [
+        "pick",
+        "place",
+        "registered",
     ]
+    cleanup = graph["nodes"][-1]
+    assert cleanup["role"] == "cleanup"
+    assert cleanup["call"] == {
+        "kind": "registered",
+        "call_id": "simulation.park",
+        "arguments": {},
+        "resources": {"primary": "left"},
+    }
+    assert "qpos" not in repr(graph).lower()
 
 
 def test_draft_rejects_grounded_fields_and_task_agent_fails_closed():

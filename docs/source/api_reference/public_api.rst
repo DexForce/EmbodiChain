@@ -228,6 +228,64 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.task_engine.reporting
+------------------------------------------
+
+Tensor-free Task Engine reports retain the canonical Task Program runtime
+result and its per-environment semantic outcomes without reconstructing
+physical execution state.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.reporting
+
+.. autosummary::
+
+   EXECUTION_REPORT_FILENAME
+   TASK_PROGRAM_EXECUTION_REPORT_SCHEMA
+   TaskProgramExecutionReport
+   validate_execution_report
+   write_execution_report
+
+embodichain.gen_sim.task_engine.semantic_graph
+-----------------------------------------------
+
+Semantic task graphs are immutable, JSON-safe planning artifacts whose nodes
+contain canonical Semantic Calls and exclude grounded action data.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_graph
+
+.. autosummary::
+
+   SEMANTIC_TASK_GRAPH_SCHEMA
+   SemanticTaskGraph
+   semantic_task_graph_hash
+   validate_semantic_task_graph
+
+embodichain.gen_sim.task_engine.semantic_planner
+-------------------------------------------------
+
+The semantic planner lowers validated Task Engine candidates and canonical
+scene bindings into provider-free semantic task graphs.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_planner
+
+.. autosummary::
+
+   SemanticTaskPlanner
+   UnsupportedSemanticCapabilityError
+
+embodichain.gen_sim.task_engine.task_program_bundle
+----------------------------------------------------
+
+Bundle generation materializes and preflights a fingerprint-bound configured
+Task Program deployment from a semantic task graph and prepared scene.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.task_program_bundle
+
+.. autosummary::
+
+   TaskProgramBundlePaths
+   generate_task_program_bundle
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -619,6 +677,7 @@ embodichain.lab.sim.atomic_actions.control
    GRASP_COMMAND
    JointPositionCommand
    OPEN_COMMAND
+   PARK_COMMAND
 
 embodichain.lab.sim.atomic_actions.core
 ---------------------------------------
@@ -1295,6 +1354,16 @@ embodichain.lab.sim.solvers.null_space_posture_task
 .. autosummary::
 
    NullSpacePostureTask
+
+embodichain.lab.sim.solvers.pytorch_solver
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.pytorch_solver
+
+.. autosummary::
+
+   PytorchSolverCfg
+   PytorchSolver
 
 embodichain.lab.sim.solvers.pink_solver
 ---------------------------------------

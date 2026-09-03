@@ -19,16 +19,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
 import json
 from pathlib import Path
 import sys
 from typing import Any, Final, Sequence
-
-from embodichain.gen_sim.action_engine.config.runtime_policy import (
-    _PLANNER_MODES,
-    _planner_policy_with_mode,
-)
 
 from .config import load_task_engine_config
 from .orchestration.scene_adapter import SceneAdapter
@@ -79,7 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--seed", type=int, default=0)
     run_parser.add_argument("--num-envs", type=int, default=None)
     run_parser.add_argument("--dataset-saving", action="store_true")
-    run_parser.add_argument("--show-grasp-poses", action="store_true")
     _add_open_window_argument(run_parser)
     _add_failure_policy_argument(run_parser)
     return parser
@@ -97,7 +90,6 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--config", default=None)
     parser.add_argument("--model", default=None)
-    parser.add_argument("--vlm-model", default=None)
     parser.add_argument("--base-seed", type=int, default=0)
     parser.add_argument(
         "--dataset_saving",
@@ -108,29 +100,6 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
         "--robot-profile",
         choices=_ROBOT_PROFILES,
         default="franka",
-    )
-    parser.add_argument(
-        "--gripper-model",
-        choices=("pgi", "robotiq"),
-        default=None,
-        help="Override the Task Engine planning gripper profile.",
-    )
-    parser.add_argument(
-        "--ik-solver",
-        choices=("auto", "ur", "pytorch"),
-        default=None,
-        help="Override the generation-time IK solver for both arms.",
-    )
-    parser.add_argument(
-        "--show-grasp-poses",
-        action="store_true",
-        help="Write one static PNG for the valid grasp pair selected by E5.",
-    )
-    parser.add_argument(
-        "--planner-mode",
-        choices=_PLANNER_MODES,
-        default=None,
-        help="Override planning.planner.mode from the Task Engine YAML.",
     )
     _add_failure_policy_argument(parser)
 
@@ -193,18 +162,6 @@ def _run_workflow(
     adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
     workflow = TaskEngineWorkflow(scene_adapter=adapter)
     workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
-    if args.gripper_model is not None:
-        planning_cfg = replace(planning_cfg, gripper_model=args.gripper_model)
-    if args.ik_solver is not None:
-        planning_cfg = replace(planning_cfg, ik_solver=args.ik_solver)
-    if args.planner_mode is not None:
-        planning_cfg = replace(
-            planning_cfg,
-            planner=_planner_policy_with_mode(
-                planning_cfg.planner,
-                args.planner_mode,
-            ),
-        )
     with reserve_run_directory(args.output_root) as allocation:
         if scene is not None:
             validate_scene_output_separation(scene, allocation.path)
@@ -223,11 +180,9 @@ def _run_workflow(
             planning_cfg=planning_cfg,
             execution_cfg=execution_cfg,
             model=args.model,
-            vlm_model=args.vlm_model,
             base_seed=args.base_seed,
             dataset_saving=args.dataset_saving,
             failure_policy=args.failure_policy,
-            show_grasp_poses=args.show_grasp_poses,
             open_window=bool(getattr(args, "open_window", False)),
             run_id=allocation.run_id,
             created_at=allocation.created_at,
@@ -262,7 +217,6 @@ def _run_prepared_bundle(args: argparse.Namespace) -> int:
             num_envs=num_envs,
             dataset_saving=bool(args.dataset_saving),
             failure_policy=args.failure_policy,
-            show_grasp_poses=bool(args.show_grasp_poses),
             open_window=bool(args.open_window),
         )
     environments = report.get("environments", ())

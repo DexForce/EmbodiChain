@@ -31,7 +31,7 @@ from .models import PreparedScene
 
 __all__ = ["normalize_scene_assets"]
 
-_POLICY = "action_engine_glb_geometry_v2"
+_POLICY = "action_engine_glb_geometry_v3"
 
 
 def normalize_scene_assets(
@@ -139,6 +139,11 @@ def _bake_glb(source: Path, destination: Path, sim_scale: list[float]) -> None:
         node_transform, geometry_name = source_scene.graph.get(node_name)
         mesh = source_scene.geometry[geometry_name].copy()
         mesh.apply_transform(scale @ node_transform)
+        if _has_inconsistent_shading_normals(mesh):
+            # DexSim rejects ray-traced meshes when a smoothed vertex normal
+            # points away from an adjacent triangle. Split only affected
+            # meshes; preserving safe topology keeps grasp sampling stable.
+            mesh.unmerge_vertices()
         baked.add_geometry(
             mesh,
             node_name=str(node_name),
@@ -148,6 +153,45 @@ def _bake_glb(source: Path, destination: Path, sim_scale: list[float]) -> None:
         raise ValueError(f"GLB contains no mesh geometry: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     baked.export(destination.as_posix(), file_type="glb")
+
+
+def _has_inconsistent_shading_normals(mesh: Any) -> bool:
+    """Return whether any face corner normal points away from its triangle."""
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces)
+    if faces.size == 0:
+        return False
+    triangles = vertices[faces]
+    crosses = np.cross(
+        triangles[:, 1] - triangles[:, 0],
+        triangles[:, 2] - triangles[:, 0],
+    )
+    face_lengths = np.linalg.norm(crosses, axis=1)
+    face_normals = np.zeros_like(crosses)
+    np.divide(
+        crosses,
+        face_lengths[:, None],
+        out=face_normals,
+        where=face_lengths[:, None] > 0.0,
+    )
+    vertex_normals = np.zeros((len(vertices), 3), dtype=np.float64)
+    np.add.at(
+        vertex_normals,
+        faces.reshape(-1),
+        np.repeat(face_normals, 3, axis=0),
+    )
+    vertex_lengths = np.linalg.norm(vertex_normals, axis=1)
+    np.divide(
+        vertex_normals,
+        vertex_lengths[:, None],
+        out=vertex_normals,
+        where=vertex_lengths[:, None] > 0.0,
+    )
+    corner_normals = vertex_normals[faces]
+    if not np.isfinite(face_normals).all() or not np.isfinite(corner_normals).all():
+        return True
+    alignments = np.einsum("fci,fi->fc", corner_normals, face_normals)
+    return bool(np.any(alignments < 0.0))
 
 
 def _file_hash(path: Path) -> str:

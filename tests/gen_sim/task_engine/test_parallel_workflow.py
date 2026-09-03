@@ -26,12 +26,6 @@ from threading import Barrier
 
 import pytest
 
-from embodichain.gen_sim.action_engine.unbound import build_unbound_action_plan
-from embodichain.gen_sim.action_engine.unbound import ActionCapabilityError
-from embodichain.gen_sim.action_engine.runtime import (
-    ExecutionReport,
-    build_execution_provenance,
-)
 from embodichain.gen_sim.scene_engine.errors import SceneServiceError
 from embodichain.gen_sim.task_engine.config import (
     TaskEngineExecutionCfg,
@@ -127,21 +121,6 @@ class _TaskAgent:
         return self.candidates
 
 
-class _ActionAgent:
-    def __init__(self, barrier: Barrier | None = None) -> None:
-        self.barrier = barrier
-
-    def draft(self, candidate: Mapping[str, object]) -> dict:
-        if self.barrier is not None:
-            self.barrier.wait(timeout=2)
-        return build_unbound_action_plan(candidate)
-
-
-class _FailingActionAgent:
-    def draft(self, _candidate: Mapping[str, object]) -> dict:
-        raise ActionCapabilityError("missing AtomicAction")
-
-
 class _SceneBackend:
     def __init__(
         self,
@@ -232,8 +211,8 @@ class _Coordinator:
         root.mkdir(parents=True)
         for name in (
             "conservative_scene_graph.json",
-            "seed_task_graph.json",
-            "grounded_task_plan.json",
+            "semantic_task_graph.json",
+            "task_program_deployment.yaml",
         ):
             (root / name).write_text("{}\n", encoding="utf-8")
         return SimpleNamespace(
@@ -262,7 +241,19 @@ class _RebindingCoordinator(_Coordinator):
     def prepare(self, *args, **kwargs):
         result = super().prepare(*args, **kwargs)
         result.selected_candidate_id = str(self.final_candidate["candidate_id"])
-        result.unbound_action_plan = build_unbound_action_plan(self.final_candidate)
+        result.unbound_action_plan = {
+            "schema_version": "semantic_task_plan_draft/v1",
+            "task_id": str(self.final_candidate["draft"]["task_id"]),
+            "candidate_id": str(self.final_candidate["candidate_id"]),
+            "steps": [
+                {
+                    "id": str(step["id"]),
+                    "task_type": str(step["task_type"]),
+                    "depends_on": list(step["depends_on"]),
+                }
+                for step in self.final_candidate["draft"]["steps"]
+            ],
+        }
         return result
 
 
@@ -278,12 +269,10 @@ class _Executor:
         successes: list[list[bool]],
         *,
         expected_dataset_saving: bool = False,
-        expected_show_grasp_poses: bool = False,
         expected_open_window: bool = False,
     ) -> None:
         self.successes = successes
         self.expected_dataset_saving = expected_dataset_saving
-        self.expected_show_grasp_poses = expected_show_grasp_poses
         self.expected_open_window = expected_open_window
         self.calls = 0
 
@@ -296,14 +285,12 @@ class _Executor:
         num_envs: int,
         dataset_saving: bool = False,
         failure_policy: str = "stop",
-        show_grasp_poses: bool = False,
         open_window: bool = False,
     ):
         values = self.successes[min(self.calls, len(self.successes) - 1)]
         self.calls += 1
         assert len(values) == num_envs
         assert dataset_saving is self.expected_dataset_saving
-        assert show_grasp_poses is self.expected_show_grasp_poses
         assert open_window is self.expected_open_window
         assert failure_policy == "stop"
         return {
@@ -316,38 +303,11 @@ class _Executor:
         }
 
 
-def test_parallel_workflow_propagates_grasp_pose_visualization(
-    tmp_path: Path,
-) -> None:
-    candidates = _candidate_set()
-    workflow = TaskEngineWorkflow(
-        task_agent=_TaskAgent(candidates),
-        scene_backend=_SceneBackend(_selection(candidates)),
-        action_agent=_ActionAgent(),
-        coordinator=_Coordinator(["bound"]),
-        action_executor=_Executor(
-            [[True]],
-            expected_show_grasp_poses=True,
-        ),
-    )
-
-    result = workflow.run(
-        _request(tmp_path),
-        workflow_cfg=TaskEngineWorkflowCfg(),
-        planning_cfg=TaskEnginePlanningCfg(),
-        execution_cfg=TaskEngineExecutionCfg(num_envs=1),
-        show_grasp_poses=True,
-    )
-
-    assert result.succeeded
-
-
 def test_parallel_workflow_propagates_open_window(tmp_path: Path) -> None:
     candidates = _candidate_set()
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=_SceneBackend(_selection(candidates)),
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=_Executor(
             [[True]],
@@ -381,7 +341,6 @@ def test_parallel_workflow_supports_all_four_scene_inputs(
             _selection(candidates),
             input_kind="gym_project" if existing else "image",
         ),
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=_Executor(
             [[True, False, False, False]],
@@ -410,7 +369,6 @@ def test_candidate_selection_programming_error_is_internal_failure(
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=_Executor([[True]]),
     )
@@ -436,7 +394,6 @@ def test_candidate_selection_protocol_error_is_not_input_conflict(
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=_Executor([[True]]),
     )
@@ -454,7 +411,6 @@ def test_parallel_workflow_preserves_requested_robot_profile(tmp_path: Path) -> 
         task_agent=_TaskAgent(candidates),
         scene_adapter=SimpleNamespace(robot_profile="ur10"),
         scene_backend=_SceneBackend(_selection(candidates)),
-        action_agent=_ActionAgent(),
         coordinator=coordinator,
         action_executor=_Executor([[True]]),
     )
@@ -475,17 +431,14 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
 ) -> None:
     candidates = _candidate_set()
     input_barrier = Barrier(2)
-    work_barrier = Barrier(2)
     scene = _SceneBackend(
         _selection(candidates),
         input_barrier=input_barrier,
-        materialize_barrier=work_barrier,
     )
     coordinator = _Coordinator(["bound"])
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates, input_barrier),
         scene_backend=scene,
-        action_agent=_ActionAgent(work_barrier),
         coordinator=coordinator,
         action_executor=_Executor([[False, True, False, False]]),
     )
@@ -508,22 +461,18 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
     assert scene.seeds == [11]
     assert result.final_bundle is not None
     assert (result.final_bundle / "conservative_scene_graph.json").is_file()
-    assert (result.final_bundle / "seed_task_graph.json").is_file()
-    assert (result.final_bundle / "grounded_task_plan.json").is_file()
+    assert (result.final_bundle / "semantic_task_graph.json").is_file()
+    assert (result.final_bundle / "task_program_deployment.yaml").is_file()
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["run_id"] == "20260820_072436"
     assert manifest["configuration"]["planning"] == {
         "candidate_count": 3,
         "planning_mode": "offline",
-        "gripper_model": "pgi",
-        "ik_solver": "auto",
         "max_episodes": 1,
         "max_episode_steps": 6000,
     }
     assert manifest["configuration"]["execution"]["dataset_saving"] is False
     assert coordinator.kwargs[0]["max_episode_steps"] == 6000
-    assert coordinator.kwargs[0]["gripper_model"] == "pgi"
-    assert coordinator.kwargs[0]["ik_solver"] == "auto"
     assert coordinator.kwargs[0]["final_inspection"]["scene_revision_id"] == "0" * 64
     assert (
         coordinator.kwargs[0]["unbound_action_plan"]["candidate_id"] == "candidate_01"
@@ -555,7 +504,6 @@ def test_prepare_only_publishes_bundle_without_action_execution(
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=_SceneBackend(_selection(candidates)),
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=fail_execution,
     )
@@ -582,7 +530,6 @@ def test_final_candidate_rebinding_updates_attempt_unbound_audit(
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=_SceneBackend(_selection(candidates)),
-        action_agent=_ActionAgent(),
         coordinator=_RebindingCoordinator(final_candidate),
         action_executor=_Executor([[True, False, False, False]]),
     )
@@ -625,38 +572,32 @@ def test_subprocess_executor_controls_launch_options_and_copies_trajectory(
     grasp_image.parent.mkdir(parents=True)
     grasp_image.write_bytes(b"grasp-pose-png")
     captured = {}
-    provenance = build_execution_provenance(episode_seed=7)
 
     def fake_run(command, log_path):
         captured["command"] = command
         captured["log_path"] = Path(log_path)
         Path(log_path).write_text("child output\n", encoding="utf-8")
-        report = ExecutionReport(
-            task_id="place_can",
-            plan_hash="0" * 64,
-            action_graph_hash="1" * 64,
-            status="succeeded",
-            run_id="run",
-            episode_id="0",
-            provenance=provenance,
-            environments=tuple(
+        report = {
+            "schema_version": "task_program_execution_report/v1",
+            "status": "succeeded",
+            "task_id": "place_can",
+            "semantic_call_count": 1,
+            "integration_fingerprint": "0" * 64,
+            "record_dir": trajectory.as_posix(),
+            "environments": [
                 {
-                    "env_id": str(index),
+                    "env_id": index,
                     "success": True,
+                    "terminal_reason": "success",
                     "semantic_success": {},
-                    "action_count": 1,
-                    "retry_count": 0,
-                    "recovery_count": 0,
-                    "revision_count": 0,
-                    "failures": [],
                 }
                 for index in range(4)
-            ),
-            action_count=4,
-            record_dir=trajectory.as_posix(),
-        )
-        (bundle / "execution_report.json").write_text(
-            json.dumps(report.as_mapping()), encoding="utf-8"
+            ],
+            "runtime_result": {},
+            "failure": None,
+        }
+        (Path(log_path).parent / "execution_report.json").write_text(
+            json.dumps(report), encoding="utf-8"
         )
         return SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
@@ -673,7 +614,6 @@ def test_subprocess_executor_controls_launch_options_and_copies_trajectory(
         num_envs=4,
         dataset_saving=dataset_saving,
         failure_policy="continue",
-        show_grasp_poses=True,
         open_window=open_window,
     )
 
@@ -688,7 +628,15 @@ def test_subprocess_executor_controls_launch_options_and_copies_trajectory(
     assert " workflow" not in " ".join(captured["command"])
     assert ("--filter_dataset_saving" in captured["command"]) is expects_filter
     assert ("--headless" in captured["command"]) is expects_headless
-    assert "--show-grasp-poses" in captured["command"]
+    if expects_headless:
+        renderer_index = captured["command"].index("--renderer")
+        assert captured["command"][renderer_index : renderer_index + 2] == [
+            "--renderer",
+            "fast-rt",
+        ]
+    else:
+        assert "--renderer" not in captured["command"]
+    assert "--show-grasp-poses" not in captured["command"]
     assert captured["command"][-2:] == ["--failure-policy", "continue"]
     assert captured["log_path"] == attempt / "action.log"
     assert (attempt / "action.log").read_text(encoding="utf-8") == "child output\n"
@@ -736,7 +684,6 @@ def test_scene_remediation_changes_seed_before_action_execution(tmp_path: Path) 
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=coordinator,
         action_executor=_Executor([[True, False, False, False]]),
     )
@@ -764,7 +711,6 @@ def test_input_conflict_feasibility_does_not_regenerate_scene(tmp_path: Path) ->
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(
             ["infeasible", "bound"],
             infeasible_remediation="input_conflict",
@@ -788,7 +734,6 @@ def test_scene_service_retry_keeps_completed_unbound_plan(tmp_path: Path) -> Non
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=_Executor([[True, False, False, False]]),
     )
@@ -814,7 +759,6 @@ def test_nonremediable_scene_error_does_not_change_scene_attempt_seed(
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=_Executor([[True, False, False, False]]),
     )
@@ -850,13 +794,15 @@ def test_execution_acceptance_requires_every_success_spec_term() -> None:
     ) == [False, True]
 
 
-def test_unbound_failure_retains_completed_parallel_scene(tmp_path: Path) -> None:
+def test_unsupported_semantic_draft_retains_completed_parallel_scene(
+    tmp_path: Path,
+) -> None:
     candidates = _candidate_set()
+    candidates["candidates"][0]["draft"]["steps"][0]["task_type"] = "E2"
     scene = _SceneBackend(_selection(candidates))
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_FailingActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=_Executor([[True, False, False, False]]),
     )
@@ -882,7 +828,6 @@ def test_preparation_exception_is_published_as_audited_failure(tmp_path: Path) -
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=_SceneBackend(_selection(candidates)),
-        action_agent=_ActionAgent(),
         coordinator=_FailingCoordinator(),
         action_executor=_Executor([[True, False, False, False]]),
     )
@@ -919,7 +864,6 @@ def test_explicit_edit_may_materialize_initially_missing_reference(
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=_Executor([[True, False, False, False]]),
     )
@@ -950,7 +894,6 @@ def test_action_failure_retries_action_only_and_retains_attempts(
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=executor,
     )
@@ -981,7 +924,6 @@ def test_action_retry_stops_after_first_success(tmp_path: Path) -> None:
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=_SceneBackend(_selection(candidates)),
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["bound"]),
         action_executor=executor,
     )
@@ -1009,7 +951,6 @@ def test_existing_edit_binding_conflict_does_not_invent_scene_repair(
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["unsatisfied"]),
         action_executor=_Executor([[True, False, False, False]]),
     )
@@ -1031,7 +972,6 @@ def test_image_binding_conflict_does_not_regenerate_scene(tmp_path: Path) -> Non
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),
         scene_backend=scene,
-        action_agent=_ActionAgent(),
         coordinator=_Coordinator(["unsatisfied"]),
         action_executor=_Executor([[True, False, False, False]]),
     )

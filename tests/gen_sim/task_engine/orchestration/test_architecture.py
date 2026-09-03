@@ -69,6 +69,58 @@ def test_task_semantic_core_does_not_import_scene_action_or_orchestration() -> N
     assert offenders == []
 
 
+def test_task_engine_does_not_import_atomic_execution_layer() -> None:
+    forbidden = "embodichain.lab.sim.atomic_actions"
+    offenders: list[str] = []
+    task_root = _GEN_SIM_ROOT / "task_engine"
+    for path in task_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            if any(
+                module == forbidden or module.startswith(forbidden + ".")
+                for module in modules
+            ):
+                offenders.append(path.relative_to(task_root).as_posix())
+                break
+    assert offenders == []
+
+
+def test_default_task_runtime_has_no_legacy_physical_executor() -> None:
+    task_root = _GEN_SIM_ROOT / "task_engine"
+    default_runtime = (
+        task_root / "workflow.py",
+        task_root / "_bundle_runner.py",
+        task_root / "semantic_planner.py",
+        task_root / "task_program_bundle.py",
+        task_root / "orchestration/coordinator.py",
+    )
+    forbidden_names = {
+        "ActionAgent",
+        "ActionGrounder",
+        "AtomicActionAdapter",
+        "ProgramExecutor",
+    }
+    offenders = {
+        path.relative_to(task_root).as_posix(): sorted(
+            forbidden_names.intersection(
+                node.id
+                for node in ast.walk(
+                    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                )
+                if isinstance(node, ast.Name)
+            )
+        )
+        for path in default_runtime
+    }
+    assert {path: names for path, names in offenders.items() if names} == {}
+
+
 def test_cross_engine_owners_are_explicit() -> None:
     assert TaskAgent.__module__ == "embodichain.gen_sim.task_engine.agent"
     assert ActionAgent.__module__ == "embodichain.gen_sim.action_engine.agent"
