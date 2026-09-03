@@ -137,6 +137,10 @@ The {class}`ContactSensorCfg` class defines the configuration for contact sensor
 | `filter_need_both_actor` | `bool` | `True` | Whether to filter contact only when both actors are in the filter list. If `False`, contact is reported if either actor is in the filter. |
 | `max_contacts_per_env` | `int` | `64` | Maximum number of contacts per environment that the sensor can handle. |
 
+The sensor forwards `max_contacts_per_env` to DexSim as a per-Arena query
+quota. If the global contact buffer is also full, DexSim distributes retained
+rows across Arenas before filling later rows from the same Arena.
+
 ### Articulation Contact Filter Configuration
 
 The `ArticulationContactFilterCfg` class specifies which articulation links to monitor for contacts.
@@ -223,7 +227,7 @@ Retrieve contact data using `contact_sensor.get_data()`. The data is returned as
 | `position` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact positions in arena frame (world coordinates minus arena offset). |
 | `normal` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Unit normal vectors pointing from actor 0 toward actor 1. |
 | `friction` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Tangential contact impulse applied to actor 0. Availability is reported by `contact_capabilities.friction`. |
-| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Contact impulse magnitudes. |
+| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Normal contact impulse magnitudes. |
 | `distance` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Signed contact separation (negative means penetration). |
 | `user_ids` | `torch.int32` | `(num_envs, max_contacts_per_env, 2)` | Pair of query-local, backend-neutral contact actor IDs. The legacy field name is retained; resolve IDs with `get_actor_info()`. |
 | `is_valid` | `torch.bool` | `(num_envs, max_contacts_per_env)` | Boolean mask indicating which contact slots contain valid data. Use this mask to filter out unused slots. |
@@ -240,6 +244,12 @@ num_valid = contact_report["is_valid"][env_id].sum().item()
 env_positions = contact_report["position"][env_id, :num_valid]
 ```
 
+Each valid row is the strongest-normal-impulse representative for one ordered
+native collision-shape pair. Multiple shape pairs can map to the same actor
+pair, and geometry-only contacts with zero impulse remain valid. The fixed-size
+numeric buffers are not cleared every update; values where `is_valid=False`
+are unspecified and may be left over from an earlier update.
+
 ### Additional Methods
 
 - **`get_actor_info(actor_id)`**: Resolve a contact actor ID to its Spawn path, articulation link, Arena, and environment ID.
@@ -247,6 +257,6 @@ env_positions = contact_report["position"][env_id, :num_valid]
 - **`filter_by_user_ids(item_user_ids, env_ids=None)`**: Filter contact report by contact actor IDs. The method name is retained for compatibility. Optionally filter by specific environment IDs.
 - **`set_contact_point_visibility(visible, rgba, point_size, env_ids=None)`**: Enable/disable visualization of contact points with customizable color and size. Optionally visualize only specific environments.
 
-Newton MuJoCo-Warp and MJVBD expose contact forces, so both impulse fields are available. Other Newton solvers currently expose contact geometry with zero-valued impulse fields. MuJoCo CPU mode does not expose device contact buffers and is therefore unsupported by this sensor.
+Newton MuJoCo-Warp exposes contact forces, so both impulse fields are available. Other supported Newton rigid solvers currently expose contact geometry with zero-valued impulse fields. MuJoCo CPU mode does not expose device contact buffers, and MJVBD does not currently publish rigid contacts through `ContactQuery`; those modes are therefore unsupported by this sensor.
 
 PhysX Direct GPU reports static counterparts with actor ID `-1` because its raw contact buffer does not expose their object identity. To monitor a dynamic body or articulation link against arbitrary static geometry, select the dynamic/link object and set `filter_need_both_actor=False`. Default CPU and Newton can identify registered static shapes.

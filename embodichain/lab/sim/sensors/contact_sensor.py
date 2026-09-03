@@ -223,6 +223,7 @@ class ContactSensor(BaseSensor):
             targets,
             match="all" if config.filter_need_both_actor else "any",
             capacity=self.max_total_contacts,
+            capacity_per_env=config.max_contacts_per_env,
             device=device,
             frame="arena",
         )
@@ -378,7 +379,8 @@ class ContactSensor(BaseSensor):
             ``normal`` points from actor 0 toward actor 1; ``friction`` and
             ``impulse`` are impulses; ``distance`` is signed separation;
             ``user_ids`` contains backend-neutral contact actor IDs; and
-            ``is_valid`` marks populated rows.
+            ``is_valid`` marks rows populated by the latest update. Values in
+            invalid rows are unspecified and may come from an earlier update.
         """
         return self._data_buffer
 

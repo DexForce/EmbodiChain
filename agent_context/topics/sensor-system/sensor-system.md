@@ -130,6 +130,9 @@ resolves every configured UID to per-Arena Spawn handles and creates one
 
 - `filter_need_both_actor=True` maps to `match="all"`; `False` maps to
   `match="any"`.
+- `max_contacts_per_env` is passed as the query's per-Arena quota, while the
+  total query capacity remains `num_envs * max_contacts_per_env`. This keeps a
+  busy Arena from consuming every row before other Arenas are represented.
 - The query returns positions in each Arena frame and supplies an explicit
   `env_ids` row for every contact. Environment assignment therefore works
   when the selected actor is either actor 0 or actor 1 and when the other
@@ -137,15 +140,20 @@ resolves every configured UID to per-Arena Spawn handles and creates one
 - Query targets and actor IDs survive Newton topology rebuilds by semantic
   Spawn path/link identity.
 - `contact_capabilities` reports whether the backend supplies geometry,
-  normal impulse, and friction impulse. MuJoCo-Warp and MJVBD provide all
-  three; other Newton solvers may provide geometry only.
+  normal impulse, and friction impulse. Newton MuJoCo-Warp provides all three;
+  other supported Newton rigid solvers may provide geometry only. MJVBD does
+  not currently publish rigid contacts through `ContactQuery`.
 
 The existing TensorDict shape and field names remain stable. `user_ids` now
 contains backend-neutral contact actor IDs rather than PhysX render user IDs;
 resolve one with `ContactSensor.get_actor_info()`. `item_user_ids` contains the
 IDs selected by the sensor, and `filter_by_user_ids()` accepts those same IDs.
 Normals consistently point from `user_ids[..., 0]` toward
-`user_ids[..., 1]`.
+`user_ids[..., 1]`. Each valid row is the strongest-normal-impulse
+representative of one ordered native collision-shape pair; several shape pairs
+may therefore map to the same actor pair. Geometry-only contacts with zero
+impulse remain valid. Only `is_valid` and the per-environment counts are reset
+on each update, so values in invalid fixed-buffer slots are unspecified.
 PhysX Direct GPU does not identify static counterparts in its raw contact
 buffer; those rows use actor ID `-1`. Monitor the dynamic/link side with
 `filter_need_both_actor=False` when contacts against arbitrary static geometry
