@@ -41,6 +41,15 @@ embodichain.lab.sim.atomic_actions
       ActionPlan
       CompiledTrajectory
 
+   .. rubric:: Articulation geometry adaptation
+
+   .. autosummary::
+
+      ArticulationAffordanceGeometry
+      ArticulationGeometryProvider
+      ArticulationJointGeometry
+      sample_initial_articulation_geometry
+
    .. rubric:: Semantic resource contracts
 
    .. autosummary::
@@ -142,6 +151,29 @@ embodichain.lab.sim.atomic_actions
 
    embodichain.lab.sim.atomic_actions.primitives
    embodichain.lab.sim.atomic_actions.tracking
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Articulation geometry adaptation
+--------------------------------
+
+The adapter converts deterministic articulation meshes, FK, and parent-joint
+topology into sampled Atomic Action affordance geometry. Initial state and scale
+are explicit inputs; the simulation object does not own sampling or semantic
+geometry keys.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.articulation_geometry
+
+.. autoclass:: ArticulationGeometryProvider
+   :members:
+
+.. autoclass:: ArticulationJointGeometry
+   :members:
+
+.. autoclass:: ArticulationAffordanceGeometry
+   :members:
+
+.. autofunction:: sample_initial_articulation_geometry
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
 

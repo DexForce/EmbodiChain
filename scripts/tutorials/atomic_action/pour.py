@@ -38,6 +38,7 @@ from embodichain.lab.sim.atomic_actions import (
     PourGoal,
     PourOptions,
 )
+from embodichain.lab.sim.planners import ToppraPlanOptions, TrajectorySampleMethod
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.axis_align import (
     create_align_object,
@@ -64,6 +65,7 @@ PICK_SAMPLE_INTERVAL = 120
 POUR_SAMPLE_INTERVAL = 80
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
+PICK_MOTION_SAMPLE_COUNT = PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS
 OBJ_POSITION = (-0.5, 0.0, 0.0)
 RECORD_LOOK_AT = (
     (-1.5, 0.2, 1.2),
@@ -85,6 +87,18 @@ def parse_arguments() -> argparse.Namespace:
         help="Signed pouring rotation in radians.",
     )
     return parser.parse_args()
+
+
+def _create_pick_motion_policy() -> MotionPolicy:
+    """Create the PickUp policy with an explicit valid TOPPRA sample count."""
+    return MotionPolicy(
+        strategy="motion_gen",
+        sample_count=PICK_SAMPLE_INTERVAL,
+        plan_opts=ToppraPlanOptions(
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=PICK_MOTION_SAMPLE_COUNT,
+        ),
+    )
 
 
 def main() -> None:
@@ -132,10 +146,7 @@ def main() -> None:
                 "pick_up",
                 GraspGoal(semantics),
                 control_parts=control_parts,
-                motion_policy=MotionPolicy(
-                    strategy="motion_gen",
-                    sample_count=PICK_SAMPLE_INTERVAL,
-                ),
+                motion_policy=_create_pick_motion_policy(),
                 skill_options=PickUpOptions(
                     approach_direction=torch.tensor(
                         APPROACH_DIRECTION,

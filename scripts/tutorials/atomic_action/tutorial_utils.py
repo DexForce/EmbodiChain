@@ -93,7 +93,7 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     finger_thickness=0.01,
     palm_depth=0.096,
 )
-DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
+DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
 DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _DEFAULT_GRIPPER_TCP_Z = 0.17
@@ -924,12 +924,15 @@ def create_ur5_gripper_robot_cfg(
             },
             "drive_pros": {
                 "stiffness": {
+                    "arm": 5e4,
                     GRIPPER_HAND_JOINT_PATTERN: 1e3,
                 },
                 "damping": {
+                    "arm": 5e3,
                     GRIPPER_HAND_JOINT_PATTERN: 1e2,
                 },
                 "max_effort": {
+                    "arm": 1e6,
                     GRIPPER_HAND_JOINT_PATTERN: 1e4,
                 },
             },
