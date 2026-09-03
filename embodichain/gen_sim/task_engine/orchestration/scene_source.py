@@ -29,9 +29,7 @@ from urllib.parse import unquote, urlparse
 import xml.etree.ElementTree as ET
 
 from embodichain.data import get_data_path
-from embodichain.gen_sim.action_engine.generation.source_scene import (
-    resolve_source_scene,
-)
+from .source_scene import resolve_source_scene
 
 __all__ = [
     "SceneSourceFingerprint",

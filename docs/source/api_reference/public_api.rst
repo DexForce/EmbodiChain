@@ -228,6 +228,67 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.task_engine.orchestration.grounding
+--------------------------------------------------------
+
+Task-conditioned grounding selects canonical scene UIDs from a redacted
+semantic inventory. It does not construct physical goals or action
+invocations.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.grounding
+
+.. autosummary::
+
+   GroundingCaller
+   GroundingResult
+   ground_scene_references
+
+embodichain.gen_sim.task_engine.orchestration.scene_assets
+-----------------------------------------------------------
+
+Generated GLB assets are normalized into renderer-safe runtime geometry while
+the source files and their provenance remain unchanged.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.scene_assets
+
+.. autosummary::
+
+   normalize_scene_assets
+
+embodichain.gen_sim.task_engine.orchestration.scene_inventory
+--------------------------------------------------------------
+
+The structural inventory preserves source semantics and validates only
+explicit task/scene compatibility. It deliberately avoids language matching
+and physical goal grounding.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.scene_inventory
+
+.. autosummary::
+
+   SceneEntity
+   SceneInventory
+   validate_source_compatibility
+   validate_target_compatibility
+
+embodichain.gen_sim.task_engine.orchestration.source_scene
+-----------------------------------------------------------
+
+Source-scene utilities resolve supported exports and normalize their stable
+identities, paths, transforms, and conservative physics metadata for Task
+Engine planning and simulator loading.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.source_scene
+
+.. autosummary::
+
+   PreparedScene
+   ResolvedSceneSource
+   is_prompt2scene_export
+   prepare_scene
+   resolve_gym_config_path
+   resolve_source_scene
+
 embodichain.gen_sim.task_engine.reporting
 ------------------------------------------
 

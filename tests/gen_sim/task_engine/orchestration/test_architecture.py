@@ -20,7 +20,6 @@ import ast
 from pathlib import Path
 
 import embodichain.gen_sim as gen_sim_package
-from embodichain.gen_sim.action_engine.agent import ActionAgent
 from embodichain.gen_sim.task_engine import TaskAgent
 from embodichain.gen_sim.task_engine import __main__ as task_engine_main
 from embodichain.gen_sim.task_engine import cli as task_engine_cli
@@ -123,7 +122,6 @@ def test_default_task_runtime_has_no_legacy_physical_executor() -> None:
 
 def test_cross_engine_owners_are_explicit() -> None:
     assert TaskAgent.__module__ == "embodichain.gen_sim.task_engine.agent"
-    assert ActionAgent.__module__ == "embodichain.gen_sim.action_engine.agent"
     assert SceneAdapter.__module__.startswith(
         "embodichain.gen_sim.task_engine.orchestration"
     )
@@ -137,6 +135,6 @@ def test_task_engine_owns_its_module_entry_point() -> None:
 
 
 def test_legacy_cross_engine_packages_are_deleted() -> None:
+    assert not any((_GEN_SIM_ROOT / "action_engine").rglob("*.py"))
     assert not (_GEN_SIM_ROOT / "scene_bridge").exists()
     assert not (_GEN_SIM_ROOT / "collaboration").exists()
-    assert not (_GEN_SIM_ROOT / "action_engine" / "collaboration").exists()

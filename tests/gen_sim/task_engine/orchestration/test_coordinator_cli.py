@@ -45,7 +45,7 @@ from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
     SceneAdaptation,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_source import SceneSourceRef
-from embodichain.gen_sim.action_engine.generation.models import PreparedScene
+from embodichain.gen_sim.task_engine.orchestration.source_scene import PreparedScene
 from embodichain.gen_sim.task_engine.semantic_planner import (
     UnsupportedSemanticCapabilityError,
 )

@@ -119,10 +119,7 @@ def generate_task_program_bundle(
     component_root.mkdir(parents=True, exist_ok=True)
     task_program_root.mkdir(parents=True, exist_ok=True)
 
-    # Asset flattening is scene-authoring preparation. The implementation still
-    # lives in the legacy generation package during this first migration slice;
-    # no Action Agent, goal, policy, or execution runtime crosses this boundary.
-    from embodichain.gen_sim.action_engine.generation.assets import (
+    from embodichain.gen_sim.task_engine.orchestration.scene_assets import (
         normalize_scene_assets,
     )
 
