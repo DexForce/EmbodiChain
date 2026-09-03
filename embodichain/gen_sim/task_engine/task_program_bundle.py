@@ -294,28 +294,28 @@ def _program_node(
         "steps": {"kind": "invoke", "call": call},
     }
     settle_entities: list[str] = []
+    settle_preset = "rigid_object"
     if call["kind"] == "place":
         inside = call.get("inside")
         if inside is not None:
             parts = str(inside).split("__")
             if len(parts) != 3 or parts[0] != "inside":
                 raise ValueError(f"Unsupported generated inside affordance {inside!r}.")
+            settle_preset = "contained_rigid_object"
         settle_entities.append(str(call["object"]))
     elif call["kind"] == "registered" and call["call_id"] in {
         _COORDINATED_TRANSPORT_CALL_ID,
         _PLACE_RELATIVE_CALL_ID,
     }:
+        if call["call_id"] == _COORDINATED_TRANSPORT_CALL_ID:
+            settle_preset = "transported_rigid_object"
         settle_entities.append(str(call["arguments"]["object"]))
     if settle_entities:
         segment["post"] = [
             {
                 "kind": "wait_stable",
                 "entity": settle_entity,
-                "preset": (
-                    "contained_rigid_object"
-                    if call["kind"] == "place" and call.get("inside") is not None
-                    else "rigid_object"
-                ),
+                "preset": settle_preset,
             }
             for settle_entity in dict.fromkeys(settle_entities)
         ]

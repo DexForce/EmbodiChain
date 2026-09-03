@@ -363,6 +363,7 @@ def test_default_settle_presets_cover_rigid_objects_and_articulations() -> None:
     assert port.settle_preset_ids == (
         "rigid_object",
         "contained_rigid_object",
+        "transported_rigid_object",
         "articulation",
     )
 
@@ -452,9 +453,14 @@ def test_wait_stable_yields_fresh_target_qpos_holds_through_gym() -> None:
     ).tolist() == [True, True]
 
 
-def test_contained_wait_stable_uses_observed_pose_delta() -> None:
-    """Contained objects ignore stale solver velocities when poses are stable."""
-    preset_id = "contained_rigid_object"
+@pytest.mark.parametrize(
+    "preset_id",
+    ["contained_rigid_object", "transported_rigid_object"],
+)
+def test_contact_sensitive_wait_stable_uses_observed_pose_delta(
+    preset_id: str,
+) -> None:
+    """Contact-sensitive objects use pose motion over stale solver velocity."""
     segment = _compiled_segment(settle_preset=preset_id)
     port, entity, _ = _port(
         torch.zeros(2, 3),

@@ -67,7 +67,9 @@ class _SimulationSettleTarget:
     native_entity: Any
 
 
-_POSE_DELTA_SETTLE_PRESETS = frozenset({"contained_rigid_object"})
+_POSE_DELTA_SETTLE_PRESETS = frozenset(
+    {"contained_rigid_object", "transported_rigid_object"}
+)
 
 
 def default_simulation_settle_presets() -> Mapping[str, DynamicSettleMonitorCfg]:
@@ -85,6 +87,14 @@ def default_simulation_settle_presets() -> Mapping[str, DynamicSettleMonitorCfg]
             "contained_rigid_object": DynamicSettleMonitorCfg(
                 linear_velocity_threshold=0.03,
                 angular_velocity_threshold=1.0,
+                min_steps=10,
+                max_steps=240,
+                check_interval_steps=2,
+                required_stable_checks=3,
+            ),
+            "transported_rigid_object": DynamicSettleMonitorCfg(
+                linear_velocity_threshold=0.03,
+                angular_velocity_threshold=0.20,
                 min_steps=10,
                 max_steps=240,
                 check_interval_steps=2,
@@ -121,8 +131,8 @@ class SimulationSegmentPolicyPort:
         scene_binding: Exact canonical-to-native scene declaration.
         step_dt: Duration in seconds between environment control steps.
         settle_presets: Named settling policies. ``None`` installs the shared
-            ``rigid_object``, ``contained_rigid_object``, and ``articulation``
-            presets.
+            ``rigid_object``, ``contained_rigid_object``,
+            ``transported_rigid_object``, and ``articulation`` presets.
         env_ids: Optional stable logical row IDs. They describe correlation,
             not simulator row indices; simulator rows remain ordered exactly as
             returned by the robot and bound entities.
@@ -928,10 +938,10 @@ class SimulationSegmentPolicyPort:
         """Derive rigid-object speed from consecutive observed poses.
 
         Contact solvers can retain non-zero velocity-cache values for an object
-        that is geometrically stationary inside a container.  Pose deltas are
-        therefore the canonical settling evidence for the contained-object
-        preset.  The first observation is deliberately unresolved because no
-        temporal evidence exists yet.
+        that is geometrically stationary inside a container or after a
+        coordinated release. Pose deltas are therefore the canonical settling
+        evidence for contact-sensitive presets. The first observation is
+        deliberately unresolved because no temporal evidence exists yet.
         """
         if target.kind != "rigid_object":
             raise ValueError("Pose-delta settling requires a rigid-object target.")

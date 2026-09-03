@@ -182,6 +182,30 @@ def test_inside_place_waits_for_released_object() -> None:
     ]
 
 
+def test_coordinated_transport_waits_for_observed_object_motion() -> None:
+    node = {
+        "id": "move_tray",
+        "call": {
+            "kind": "registered",
+            "call_id": "simulation.coordinated_transport",
+            "arguments": {
+                "object": "tray",
+                "target": "tray_forward",
+            },
+        },
+    }
+
+    program_node = _program_node(node, relative_routes={})
+
+    assert program_node["post"] == [
+        {
+            "kind": "wait_stable",
+            "entity": "tray",
+            "preset": "transported_rigid_object",
+        },
+    ]
+
+
 def test_relative_place_waits_and_validates_fresh_reference_pose() -> None:
     node = {
         "id": "place_cube_left_of_tray",
