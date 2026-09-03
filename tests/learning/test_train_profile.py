@@ -18,10 +18,15 @@
 
 from __future__ import annotations
 
+import random
+
+import numpy as np
 import pytest
+import torch
 
 from embodichain.learning.rl.train import (
     _resolve_profile_output,
+    _seed_training_rng,
     parse_args,
     train_from_config,
 )
@@ -52,6 +57,17 @@ def test_resolve_profile_output_disambiguates_ranks():
     assert _resolve_profile_output("out/prof.json", rank=1, world_size=2) == (
         "out/prof_rank1.json"
     )
+
+
+def test_seed_training_rng_replays_all_policy_rngs() -> None:
+    _seed_training_rng(73, torch.device("cpu"))
+    first = (random.random(), float(np.random.random()), torch.rand(3))
+
+    _seed_training_rng(73, torch.device("cpu"))
+    second = (random.random(), float(np.random.random()), torch.rand(3))
+
+    assert first[:2] == second[:2]
+    torch.testing.assert_close(first[2], second[2])
 
 
 def test_learning_env_rejects_profile(tmp_path):
