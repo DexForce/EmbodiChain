@@ -612,8 +612,10 @@ class BenchmarkRunner:
                 "cold_plan_ms is reported only on the Time & Memory row whose waypoint_count "
                 "matches the first real case measured for that batch; other waypoint rows "
                 "show N/A. planner_construct_ms / backend_prepare_ms are one-time batch costs.",
-                "Waypoint continuous errors use the same threshold-greedy arrival matching "
-                "as ordered_waypoints_reached / motion_valid.",
+                "Cartesian tasks use the same threshold-greedy pose matching for "
+                "continuous errors and motion validity. Joint tasks use ordered joint "
+                "waypoint error for motion validity and retain Cartesian errors as "
+                "auxiliary diagnostics.",
                 *self.notes,
             ],
         )

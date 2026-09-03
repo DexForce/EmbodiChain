@@ -38,6 +38,7 @@ from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
     compute_waypoint_errors,
+    match_ordered_joint_waypoints,
     match_ordered_waypoints,
 )
 from scripts.benchmark.motion_generation import (
@@ -123,6 +124,28 @@ def test_ordered_waypoint_requires_position_and_rotation_at_same_sample():
 
     assert result["ordered_waypoints_reached"] is False
     assert result["arrival_indices"] == []
+
+
+def test_ordered_joint_waypoints_use_max_error_and_ordered_arrivals():
+    waypoints = torch.tensor([[0.1, 0.0], [0.2, -0.1]])
+    trajectory = torch.tensor(
+        [
+            [0.0, 0.0],
+            [0.195, -0.095],
+            [0.105, 0.005],
+            [0.195, -0.095],
+        ]
+    )
+
+    result = match_ordered_joint_waypoints(
+        trajectory,
+        waypoints,
+        joint_threshold_rad=0.01,
+    )
+
+    assert result["ordered_waypoints_reached"] is True
+    assert result["arrival_indices"] == [2, 3]
+    assert result["joint_errors_rad"] == pytest.approx([0.005, 0.005], abs=2.0e-8)
 
 
 def test_press_waypoint_validation_accepts_half_turn_about_z_symmetry():
@@ -292,6 +315,37 @@ def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregate
     assert row["success_rate"] == pytest.approx(1.0)
     assert row["planning_success_rate"] == pytest.approx(0.0)
     assert row["top_failure"] is None
+
+
+def test_joint_motion_validity_does_not_require_cartesian_waypoint_accuracy():
+    case = _case()
+    case.target_waypoints[0, 0, 0, 3] = 0.1
+    case.reference_qpos[0, 0, 0] = 0.1
+    case.case_parameters.update(
+        {
+            "motion_validity": "ordered_joint_waypoints",
+            "joint_threshold_rad": 0.02,
+        }
+    )
+    positions = torch.zeros(1, 2, 7)
+    positions[0, 1, 0] = 0.085
+
+    outcomes = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=0.001,
+        rotation_threshold_rad=0.001,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+
+    assert outcomes[0].ordered_waypoints_reached is True
+    assert outcomes[0].motion_valid is True
+    assert outcomes[0].completed_waypoint_ratio == pytest.approx(1.0)
+    assert outcomes[0].final_translation_err_mm == pytest.approx(15.0)
+    assert outcomes[0].waypoint_translation_err_mm_mean is None
 
 
 def test_missing_positions_and_joint_limit_violation_fail_motion_valid():

@@ -37,6 +37,7 @@ __all__ = [
     "compute_waypoint_errors",
     "get_pose_err",
     "make_failure_outcomes",
+    "match_ordered_joint_waypoints",
     "match_ordered_waypoints",
 ]
 
@@ -206,6 +207,75 @@ def match_ordered_waypoints(
         ],
         "min_rotation_errors_at_position_rad": min_rotation_at_position,
         "min_position_errors_at_orientation_m": min_position_at_orientation,
+    }
+
+
+def match_ordered_joint_waypoints(
+    trajectory_qpos: torch.Tensor,
+    waypoints_qpos: torch.Tensor,
+    *,
+    joint_threshold_rad: float,
+) -> dict[str, object]:
+    """Evaluate ordered joint-waypoint arrival with an L-infinity threshold.
+
+    Each waypoint must be reached after the previous arrival by one trajectory
+    sample whose maximum absolute per-joint error is within the task threshold.
+    The function mirrors :func:`match_ordered_waypoints` while retaining joint
+    task semantics instead of projecting the targets through FK.
+    """
+    trajectory_qpos = torch.as_tensor(trajectory_qpos, dtype=torch.float64)
+    waypoints_qpos = torch.as_tensor(
+        waypoints_qpos,
+        dtype=torch.float64,
+        device=trajectory_qpos.device,
+    )
+    if not math.isfinite(joint_threshold_rad) or joint_threshold_rad <= 0.0:
+        raise ValueError("joint_threshold_rad must be finite and positive.")
+    if trajectory_qpos.ndim != 2 or waypoints_qpos.ndim != 2:
+        raise ValueError("Joint trajectories and waypoints must both be 2D.")
+    if trajectory_qpos.shape[-1] != waypoints_qpos.shape[-1]:
+        raise ValueError(
+            "Joint trajectories and waypoints must have the same trailing DoF."
+        )
+    if trajectory_qpos.shape[0] == 0 or waypoints_qpos.shape[0] == 0:
+        return {
+            "ordered_waypoints_reached": False,
+            "completed_waypoint_ratio": 0.0,
+            "arrival_indices": [],
+            "joint_errors_rad": [],
+            "min_joint_errors_rad": [],
+        }
+
+    joint_error = torch.amax(
+        torch.abs(waypoints_qpos[:, None, :] - trajectory_qpos[None, :, :]),
+        dim=-1,
+    )
+    arrival_indices: list[int] = []
+    next_sample = 0
+    for waypoint_index in range(waypoints_qpos.shape[0]):
+        valid = torch.nonzero(
+            joint_error[waypoint_index, next_sample:] <= joint_threshold_rad,
+            as_tuple=False,
+        ).flatten()
+        if valid.numel() == 0:
+            break
+        sample_index = next_sample + int(valid[0].item())
+        arrival_indices.append(sample_index)
+        next_sample = sample_index + 1
+
+    completed = len(arrival_indices)
+    total = int(waypoints_qpos.shape[0])
+    return {
+        "ordered_waypoints_reached": completed == total,
+        "completed_waypoint_ratio": completed / max(total, 1),
+        "arrival_indices": arrival_indices,
+        "joint_errors_rad": [
+            float(joint_error[index, sample].item())
+            for index, sample in enumerate(arrival_indices)
+        ],
+        "min_joint_errors_rad": [
+            float(value) for value in joint_error.min(dim=1).values.tolist()
+        ],
     }
 
 
@@ -460,7 +530,7 @@ def compute_case_outcomes(
         rotation_symmetry = case.case_parameters.get("waypoint_rotation_symmetry")
         if rotation_symmetry is not None and not isinstance(rotation_symmetry, str):
             raise TypeError("waypoint_rotation_symmetry must be a string or None.")
-        matching = match_ordered_waypoints(
+        cartesian_matching = match_ordered_waypoints(
             poses,
             waypoints,
             position_threshold_m=position_threshold_m,
@@ -468,10 +538,11 @@ def compute_case_outcomes(
             rotation_symmetry=rotation_symmetry,
         )
         pos_errors_mm = [
-            float(value) * 1000.0 for value in matching["position_errors_m"]
+            float(value) * 1000.0 for value in cartesian_matching["position_errors_m"]
         ]
         rot_errors_deg = [
-            float(value) * 180.0 / math.pi for value in matching["rotation_errors_rad"]
+            float(value) * 180.0 / math.pi
+            for value in cartesian_matching["rotation_errors_rad"]
         ]
         if finite:
             joint_violation, normalized_violation = _joint_limit_metrics(
@@ -481,7 +552,25 @@ def compute_case_outcomes(
             )
         else:
             joint_violation, normalized_violation = False, None
-        ordered = bool(matching["ordered_waypoints_reached"])
+        validity_space = case.case_parameters.get(
+            "motion_validity", "ordered_cartesian_waypoints"
+        )
+        if validity_space == "ordered_joint_waypoints":
+            threshold = case.case_parameters.get("joint_threshold_rad")
+            if not isinstance(threshold, (int, float)):
+                raise TypeError(
+                    "ordered_joint_waypoints requires numeric joint_threshold_rad."
+                )
+            semantic_matching = match_ordered_joint_waypoints(
+                validation_qpos,
+                case.reference_qpos[env_index],
+                joint_threshold_rad=float(threshold),
+            )
+        elif validity_space == "ordered_cartesian_waypoints":
+            semantic_matching = cartesian_matching
+        else:
+            raise ValueError(f"Unknown motion_validity mode {validity_space!r}.")
+        ordered = bool(semantic_matching["ordered_waypoints_reached"])
         planner_ok = bool(planning_success[env_index].item())
         # ``PlanResult.success`` is retained as a planner-stage outcome, but it
         # is not external ground truth.  A trajectory can therefore be motion
@@ -531,7 +620,9 @@ def compute_case_outcomes(
                 finite=finite,
                 ordered_waypoints_reached=ordered,
                 motion_valid=motion_valid,
-                completed_waypoint_ratio=float(matching["completed_waypoint_ratio"]),
+                completed_waypoint_ratio=float(
+                    semantic_matching["completed_waypoint_ratio"]
+                ),
                 final_translation_err_mm=(
                     final_pos_m * 1000.0 if final_pos_m is not None else None
                 ),
@@ -575,19 +666,24 @@ def compute_case_outcomes(
                 ),
                 trajectory_moved=trajectory_moved,
                 waypoint_min_translation_err_mm=tuple(
-                    float(value) * 1000.0 for value in matching["min_position_errors_m"]
+                    float(value) * 1000.0
+                    for value in cartesian_matching["min_position_errors_m"]
                 ),
                 waypoint_min_rotation_err_deg=tuple(
                     float(value) * 180.0 / math.pi
-                    for value in matching["min_rotation_errors_rad"]
+                    for value in cartesian_matching["min_rotation_errors_rad"]
                 ),
                 waypoint_min_rotation_err_deg_at_position=tuple(
                     None if value is None else float(value) * 180.0 / math.pi
-                    for value in matching["min_rotation_errors_at_position_rad"]
+                    for value in cartesian_matching[
+                        "min_rotation_errors_at_position_rad"
+                    ]
                 ),
                 waypoint_min_translation_err_mm_at_orientation=tuple(
                     None if value is None else float(value) * 1000.0
-                    for value in matching["min_position_errors_at_orientation_m"]
+                    for value in cartesian_matching[
+                        "min_position_errors_at_orientation_m"
+                    ]
                 ),
             )
         )

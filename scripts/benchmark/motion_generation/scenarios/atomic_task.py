@@ -791,6 +791,7 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
                 "target_offsets_rad": offsets,
                 "target_qpos": targets.detach().cpu().tolist(),
                 "joint_threshold_rad": float(config.get("joint_threshold_rad", 0.02)),
+                "motion_validity": "ordered_joint_waypoints",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
