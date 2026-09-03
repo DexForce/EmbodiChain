@@ -526,6 +526,7 @@ class _AntipodalMeshBackend:
         if obj_longest_axis is None:
             origin_points_masked = origin_points_
             hit_points_masked = hit_points_
+            part_verts = mesh_vert_transformed
         else:
             axis = torch.as_tensor(
                 obj_longest_axis,
@@ -552,16 +553,20 @@ class _AntipodalMeshBackend:
             pair_projection = torch.matmul(pair_centers, axis)
             if is_positive_part:
                 part_mask = pair_projection > projection_posi_threshold
+                part_vert_mask = mesh_projection > projection_posi_threshold
             else:
                 part_mask = pair_projection < projection_nega_threshold
+                part_vert_mask = mesh_projection < projection_nega_threshold
             origin_points_masked = origin_points_[part_mask]
             hit_points_masked = hit_points_[part_mask]
+            part_verts = mesh_vert_transformed[part_vert_mask]
+
         return self._filter_valid_grasp_poses(
             origin_points_=origin_points_masked,
             hit_points_=hit_points_masked,
             object_pose=object_pose,
             approach_direction=approach_direction,
-            mesh_vert_transformed=mesh_vert_transformed,
+            mesh_vert_transformed=part_verts,
             visualize_collision=visualize_collision,
         )
 
@@ -599,6 +604,11 @@ class _AntipodalMeshBackend:
             0.5 - middle_empty_ratio / 2
         )
 
+        left_vert_mask = projected < left_threshold
+        right_vert_mask = projected > right_threshold
+        left_vertices = mesh_vert_transformed[left_vert_mask]
+        right_vertices = mesh_vert_transformed[right_vert_mask]
+
         origin_projected = (
             origin_points_
             * left_to_right_arm_direction.repeat(origin_points_.shape[0], 1)
@@ -623,7 +633,7 @@ class _AntipodalMeshBackend:
                 origin_points_=origin_left,
                 object_pose=object_pose,
                 approach_direction=approach_direction,
-                mesh_vert_transformed=mesh_vert_transformed,
+                mesh_vert_transformed=left_vertices,
                 visualize_collision=visualize_collision,
             )
         )
@@ -633,7 +643,7 @@ class _AntipodalMeshBackend:
                 origin_points_=origin_right,
                 object_pose=object_pose,
                 approach_direction=approach_direction,
-                mesh_vert_transformed=mesh_vert_transformed,
+                mesh_vert_transformed=right_vertices,
                 visualize_collision=visualize_collision,
             )
         )

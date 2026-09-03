@@ -211,7 +211,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             link_pose,
             grasp_xpos,
             affordance.twist_axis,
-            affordance.axis_origin,
+            affordance.require_axis_origin(),
             options.twist_angle,
             options.twist_waypoint_count,
         )
