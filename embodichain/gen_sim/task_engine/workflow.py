@@ -30,9 +30,7 @@ import subprocess
 import sys
 from typing import Any, Final
 
-from embodichain.gen_sim.action_engine.agent import ActionAgent
-from embodichain.gen_sim.action_engine.unbound import ActionCapabilityError
-from embodichain.gen_sim.action_engine.runtime import (
+from embodichain.gen_sim.task_engine.reporting import (
     EXECUTION_REPORT_FILENAME,
     validate_execution_report,
 )
@@ -54,6 +52,7 @@ from .orchestration.scene_adapter import (
     SceneAdapterProtocolError,
 )
 from .orchestration.scene_source import SceneSourceRef
+from .semantic_planner import UnsupportedSemanticCapabilityError
 from .scene_backend import (
     SceneAnalysis,
     SceneEngineBackend,
@@ -111,31 +110,27 @@ class SubprocessActionExecutor:
         num_envs: int,
         dataset_saving: bool = False,
         failure_policy: str = "stop",
-        show_grasp_poses: bool = False,
         open_window: bool = False,
     ) -> Mapping[str, Any]:
         """Run one simulator attempt and preserve its report and trajectory.
 
         Args:
-            bundle: Prepared Action Engine bundle.
+            bundle: Prepared Task Program bundle.
             output_root: Fresh directory for this execution attempt.
-            seed: Action Engine random seed.
+            seed: Simulator random seed.
             num_envs: Number of vectorized scene replicas.
             dataset_saving: Whether to enable the Gym project's dataset recorder.
             failure_policy: Whether failed dependencies stop or permit downstream
                 diagnostic execution.
-            show_grasp_poses: Whether to write the valid E5 grasp pair as a PNG.
             open_window: Whether to open the native DexSim execution window.
 
         Returns:
-            Validated Action Engine execution report.
+            Validated Task Program execution report.
         """
         bundle_root = Path(bundle).expanduser().resolve()
         attempt_root = Path(output_root).expanduser().resolve()
         if failure_policy not in {"stop", "continue"}:
             raise ValueError("failure_policy must be 'stop' or 'continue'.")
-        if not isinstance(show_grasp_poses, bool):
-            raise TypeError("show_grasp_poses must be a boolean.")
         if not isinstance(open_window, bool):
             raise TypeError("open_window must be a boolean.")
         attempt_root.mkdir(parents=True, exist_ok=False)
@@ -146,17 +141,17 @@ class SubprocessActionExecutor:
             "embodichain.gen_sim.task_engine._bundle_runner",
             "--bundle",
             bundle_root.as_posix(),
+            "--execution-output",
+            attempt_root.as_posix(),
             "--num_envs",
             str(num_envs),
             "--seed",
             str(seed),
         ]
         if not open_window:
-            command.append("--headless")
+            command.extend(["--headless", "--renderer", "fast-rt"])
         if not dataset_saving:
             command.append("--filter_dataset_saving")
-        if show_grasp_poses:
-            command.append("--show-grasp-poses")
         command.extend(["--failure-policy", failure_policy])
         log_path = attempt_root / "action.log"
         print(
@@ -172,7 +167,7 @@ class SubprocessActionExecutor:
             f"returncode={completed.returncode}",
             flush=True,
         )
-        report_path = bundle_root / EXECUTION_REPORT_FILENAME
+        report_path = attempt_root / EXECUTION_REPORT_FILENAME
         process_record = {
             "command": command,
             "returncode": completed.returncode,
@@ -183,15 +178,14 @@ class SubprocessActionExecutor:
         _write_json(attempt_root / "process.json", process_record)
         if not report_path.is_file():
             raise RuntimeError(
-                "Action execution did not publish execution_report.json; "
+                "Task Program execution did not publish execution_report.json; "
                 f"returncode={completed.returncode}."
             )
         report = validate_execution_report(_read_json(report_path))
-        shutil.copy2(report_path, attempt_root / EXECUTION_REPORT_FILENAME)
         trajectory_copy = _copy_trajectory_record(report, attempt_root)
-        if report["action_count"] > 0 and trajectory_copy is None:
+        if report["semantic_call_count"] > 0 and trajectory_copy is None:
             raise RuntimeError(
-                "Action execution report did not expose a readable trajectory record."
+                "Task Program report did not expose a readable trajectory record."
             )
         _write_json(
             attempt_root / "execution_attempt.json",
@@ -283,18 +277,15 @@ class TaskEngineWorkflow:
         *,
         task_agent: TaskAgent | None = None,
         scene_adapter: SceneAdapter | None = None,
-        action_agent: ActionAgent | None = None,
         coordinator: TaskEngineCoordinator | None = None,
         scene_backend: SceneEngineBackend | None = None,
         action_executor: ActionExecutor | None = None,
     ) -> None:
         self.task_agent = task_agent or TaskAgent()
         self.scene_adapter = scene_adapter or SceneAdapter()
-        self.action_agent = action_agent or ActionAgent()
         self.coordinator = coordinator or TaskEngineCoordinator(
             task_agent=self.task_agent,
             scene_adapter=self.scene_adapter,
-            action_agent=self.action_agent,
         )
         self.scene_backend = scene_backend or SceneEngineBackend()
         self.action_executor = action_executor or SubprocessActionExecutor()
@@ -308,11 +299,9 @@ class TaskEngineWorkflow:
         execution_cfg: TaskEngineExecutionCfg | None = None,
         config_path: str | Path | None = None,
         model: str | None = None,
-        vlm_model: str | None = None,
         base_seed: int = 0,
         dataset_saving: bool = False,
         failure_policy: str = "stop",
-        show_grasp_poses: bool = False,
         open_window: bool = False,
         run_id: str | None = None,
         created_at: datetime | None = None,
@@ -328,12 +317,10 @@ class TaskEngineWorkflow:
             execution_cfg: Optional vectorized success policy.
             config_path: YAML used for omitted workflow or execution config.
             model: Optional Task and grounding model override.
-            vlm_model: Optional Action Engine VLM override.
             base_seed: First audited scene and action attempt seed.
             dataset_saving: Whether Action attempts may initialize dataset recording.
             failure_policy: Whether failed dependencies stop or permit downstream
                 diagnostic execution.
-            show_grasp_poses: Whether to write the valid E5 grasp pair as a PNG.
             open_window: Whether simulator attempts open the native DexSim window.
             run_id: Optional externally allocated run identifier.
             created_at: Optional timezone-aware run creation timestamp.
@@ -346,8 +333,6 @@ class TaskEngineWorkflow:
         normalized = validate_task_run_request(request)
         if not isinstance(dataset_saving, bool):
             raise TypeError("dataset_saving must be a boolean.")
-        if not isinstance(show_grasp_poses, bool):
-            raise TypeError("show_grasp_poses must be a boolean.")
         if not isinstance(open_window, bool):
             raise TypeError("open_window must be a boolean.")
         if failure_policy not in {"stop", "continue"}:
@@ -694,12 +679,8 @@ class TaskEngineWorkflow:
                         model=model,
                         candidate_count=effective_candidate_count,
                         planning_mode=planning_cfg.planning_mode,
-                        gripper_model=planning_cfg.gripper_model,
-                        ik_solver=planning_cfg.ik_solver,
-                        vlm_model=vlm_model,
                         max_episodes=planning_cfg.max_episodes,
                         max_episode_steps=planning_cfg.max_episode_steps,
-                        planner_policy=planning_cfg.planner,
                         candidate_set=candidate_set,
                         force_most_likely=True,
                         final_inspection=final_inspection,
@@ -736,7 +717,7 @@ class TaskEngineWorkflow:
                 failure_class = (
                     "action_capability"
                     if unbound_error is not None
-                    or isinstance(preparation_error, ActionCapabilityError)
+                    or isinstance(preparation_error, UnsupportedSemanticCapabilityError)
                     else (
                         "preparation_error"
                         if preparation_error is not None
@@ -817,7 +798,7 @@ class TaskEngineWorkflow:
                     for item in candidate_set["candidates"]
                     if item["candidate_id"] == final_candidate_id
                 )
-                final_unbound = self.action_agent.draft(final_candidate)
+                final_unbound = _semantic_draft(final_candidate)
             elif final_unbound is None:
                 final_unbound = unbound_plan
             if str(final_unbound.get("candidate_id")) != final_candidate_id:
@@ -910,8 +891,6 @@ class TaskEngineWorkflow:
                         "dataset_saving": bool(dataset_saving),
                         "failure_policy": failure_policy,
                     }
-                    if show_grasp_poses:
-                        execution_options["show_grasp_poses"] = True
                     if open_window:
                         execution_options["open_window"] = True
                     report = self.action_executor(
@@ -958,7 +937,7 @@ class TaskEngineWorkflow:
                 state = fail_stage(
                     state,
                     WorkflowStage.EXECUTION,
-                    reason="All bounded Action Engine execution attempts failed.",
+                    reason="All bounded Task Program execution attempts failed.",
                 )
                 return self._publish(
                     transaction,
@@ -1033,8 +1012,8 @@ class TaskEngineWorkflow:
                 if item["candidate_id"] == candidate_id
             )
             try:
-                return self.action_agent.draft(candidate), failures
-            except ActionCapabilityError:
+                return _semantic_draft(candidate), failures
+            except UnsupportedSemanticCapabilityError:
                 raise
             except (TypeError, ValueError) as exc:
                 failures.append(
@@ -1046,7 +1025,7 @@ class TaskEngineWorkflow:
                     }
                 )
         raise ValueError(
-            "No selected task candidate can be represented by Action Engine."
+            "No selected task candidate can be represented by Semantic Skill."
         )
 
     @staticmethod
@@ -1088,11 +1067,8 @@ class TaskEngineWorkflow:
                     "planning": {
                         "candidate_count": planning_cfg.candidate_count,
                         "planning_mode": planning_cfg.planning_mode,
-                        "gripper_model": planning_cfg.gripper_model,
-                        "ik_solver": planning_cfg.ik_solver,
                         "max_episodes": planning_cfg.max_episodes,
                         "max_episode_steps": planning_cfg.max_episode_steps,
-                        "planner": deepcopy(planning_cfg.planner),
                     },
                     "execution": {
                         "num_envs": execution_cfg.num_envs,
@@ -1248,17 +1224,16 @@ def _environment_successes(
 
 
 def _bundle_success_terms(bundle: Path) -> tuple[str, ...]:
-    path = bundle / "grounded_task_plan.json"
+    path = bundle / "success_spec.json"
     if not path.is_file():
         return ()
     try:
         value = _read_json(path)
-        success_spec = value.get("success_spec")
-        terms = success_spec.get("terms") if isinstance(success_spec, Mapping) else None
+        terms = value.get("terms")
         strict = isinstance(value.get("schema_version"), str)
         if not isinstance(terms, Sequence) or isinstance(terms, (str, bytes)):
             if strict:
-                raise ValueError("GroundedTaskPlan has no valid SuccessSpec terms.")
+                raise ValueError("Task Program bundle has no valid SuccessSpec terms.")
             return ()
         result = tuple(
             str(item["step_id"])
@@ -1267,11 +1242,48 @@ def _bundle_success_terms(bundle: Path) -> tuple[str, ...]:
         )
         if len(result) != len(terms) or (strict and not result):
             if strict:
-                raise ValueError("GroundedTaskPlan SuccessSpec terms are invalid.")
+                raise ValueError("Task Program bundle SuccessSpec terms are invalid.")
             return ()
         return result
     except OSError:
         return ()
+
+
+def _semantic_draft(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a scene-independent call-coverage draft without physical actions."""
+    draft = candidate.get("draft")
+    if not isinstance(draft, Mapping):
+        raise TypeError("TaskCandidate.draft must be a mapping.")
+    steps = draft.get("steps")
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
+        raise TypeError("TaskDraft.steps must be a sequence.")
+    supported = {"E1", "E2", "E4", "E5"}
+    unsupported = sorted(
+        {
+            str(step.get("task_type"))
+            for step in steps
+            if isinstance(step, Mapping) and str(step.get("task_type")) not in supported
+        }
+    )
+    if unsupported:
+        raise UnsupportedSemanticCapabilityError(
+            "Phase-one Semantic Skill planning does not support task types "
+            f"{unsupported}."
+        )
+    return {
+        "schema_version": "semantic_task_plan_draft/v1",
+        "task_id": str(draft.get("task_id")),
+        "candidate_id": str(candidate.get("candidate_id")),
+        "steps": [
+            {
+                "id": str(step["id"]),
+                "task_type": str(step["task_type"]),
+                "depends_on": [str(value) for value in step["depends_on"]],
+            }
+            for step in steps
+            if isinstance(step, Mapping)
+        ],
+    }
 
 
 def _highest_vote_candidate(candidate_set: Mapping[str, Any]) -> Mapping[str, Any]:

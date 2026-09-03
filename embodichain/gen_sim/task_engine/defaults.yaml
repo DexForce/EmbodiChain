@@ -24,12 +24,8 @@ workflow:
 planning:
   candidate_count: 3
   planning_mode: offline
-  gripper_model: robotiq
-  ik_solver: auto
   max_episodes: 1
   max_episode_steps: 6000
-  planner:
-    mode: ik_interp
 
 execution:
   num_envs: 1

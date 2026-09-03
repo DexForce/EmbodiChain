@@ -269,21 +269,13 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     workflow, planning, execution = load_task_engine_config()
 
     assert workflow.max_scene_attempts == 2
-    assert workflow.max_action_attempts == 3
+    assert workflow.max_action_attempts == 1
     assert planning.candidate_count == 3
     assert planning.planning_mode == "offline"
-    assert planning.gripper_model == "pgi"
-    assert planning.ik_solver == "auto"
     assert planning.max_episodes == 1
     assert planning.max_episode_steps == 6000
     assert execution.num_envs == 1
     assert execution.required_successes == 1
-
-
-def test_packaged_planner_mode_defaults_to_curobo() -> None:
-    _, planning, _ = load_task_engine_config()
-
-    assert planning.planner == {"mode": "curobo"}
 
 
 def test_workflow_configuration_can_be_tuned_from_yaml(tmp_path: Path) -> None:
@@ -298,12 +290,8 @@ workflow:
 planning:
   candidate_count: 7
   planning_mode: offline
-  gripper_model: robotiq
-  ik_solver: pytorch
   max_episodes: 2
   max_episode_steps: 5000
-  planner:
-    mode: toppra
 execution:
   num_envs: 6
   success_policy: at_least
@@ -318,11 +306,8 @@ execution:
     assert workflow.max_scene_attempts == 4
     assert workflow.max_action_attempts == 5
     assert planning.candidate_count == 7
-    assert planning.gripper_model == "robotiq"
-    assert planning.ik_solver == "pytorch"
     assert planning.max_episodes == 2
     assert planning.max_episode_steps == 5000
-    assert planning.planner == {"mode": "toppra"}
     assert execution.num_envs == 6
     assert execution.required_successes == 2
 
@@ -350,9 +335,9 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(candidate_count=0)
     with pytest.raises(ValueError, match="planning_mode"):
         TaskEnginePlanningCfg(planning_mode="unsupported")
-    with pytest.raises(ValueError, match="pgi.*robotiq"):
+    with pytest.raises(TypeError):
         TaskEnginePlanningCfg(gripper_model="unsupported")
-    with pytest.raises(ValueError, match="auto.*ur.*pytorch"):
+    with pytest.raises(TypeError):
         TaskEnginePlanningCfg(ik_solver="unsupported")
-    with pytest.raises(ValueError, match="mode cannot be combined"):
+    with pytest.raises(TypeError):
         TaskEnginePlanningCfg(planner={"mode": "toppra", "dynamic_collision": True})

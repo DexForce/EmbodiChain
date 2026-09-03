@@ -133,7 +133,6 @@ def main():
         package_dir=get_package_dir(),
         package_data={
             "embodichain": ["VERSION"],
-            "embodichain.gen_sim.action_engine.config": ["*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain.gen_sim.task_engine": ["*.yaml"],
             "embodichain_tasks.configs": ["**/*.json", "**/*.yaml", "**/*.yml"],

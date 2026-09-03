@@ -21,7 +21,7 @@ from pathlib import Path
 
 import trimesh
 
-from embodichain.gen_sim.action_engine.generation.source_scene import prepare_scene
+from embodichain.gen_sim.task_engine.orchestration.source_scene import prepare_scene
 from embodichain.gen_sim.task_engine.orchestration.legacy_scene import (
     convert_legacy_gym_project,
     restore_locked_scene_entities,
