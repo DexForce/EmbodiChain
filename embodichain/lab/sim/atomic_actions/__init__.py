@@ -28,6 +28,12 @@ completion criteria, diagnostics, and uncommitted expected task-state effects.
 
 from __future__ import annotations
 
+from .articulation_geometry import (
+    ArticulationAffordanceGeometry,
+    ArticulationGeometryProvider,
+    ArticulationJointGeometry,
+    sample_initial_articulation_geometry,
+)
 from .affordance import (
     Affordance,
     AntipodalAffordance,
@@ -253,6 +259,9 @@ __all__ = [
     "ActionPlanningServices",
     "Affordance",
     "AntipodalAffordance",
+    "ArticulationAffordanceGeometry",
+    "ArticulationGeometryProvider",
+    "ArticulationJointGeometry",
     "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
@@ -401,6 +410,7 @@ __all__ = [
     "SkillResourceSlot",
     "StateDelta",
     "SimulationExecutionAdapter",
+    "sample_initial_articulation_geometry",
     "TaskState",
     "TimedCommandSequence",
     "TimedTerminalAcceptance",

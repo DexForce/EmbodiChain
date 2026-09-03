@@ -99,7 +99,7 @@ class ObjectSemantics:
     """Affordance data describing supported interactions."""
 
     geometry: dict[str, Any]
-    """Non-affordance geometric metadata."""
+    """Non-affordance metadata used to resolve geometry-derived affordance data."""
 
     entity_id: str
     """Stable scene identifier used by snapshot grounding and object identity."""
@@ -121,6 +121,7 @@ class ObjectSemantics:
             raise ValueError("label must be a non-empty string.")
         if not isinstance(self.entity_id, str) or not self.entity_id.strip():
             raise ValueError("entity_id must be a non-empty string.")
+        self.affordance.resolve_from_object_geometry(self.geometry)
         self.affordance.object_label = self.label
 
 

@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.data import get_data_path
 
@@ -63,6 +64,30 @@ def test_get_qf_selects_control_part_joint_efforts():
     actual_qf = robot.get_qf(name="arm")
 
     assert torch.equal(actual_qf, full_qf[:, [3, 1]])
+
+
+@pytest.mark.no_sim
+def test_compute_fk_forwards_named_joint_state_to_articulation():
+    robot = object.__new__(Robot)
+    qpos = torch.tensor(((2.0, 1.0),))
+    expected = torch.eye(4).reshape(1, 1, 4, 4)
+
+    with patch.object(Articulation, "compute_fk", return_value=expected) as compute_fk:
+        result = robot.compute_fk(
+            qpos,
+            link_names=["target"],
+            env_ids=(),
+            qpos_joint_names=("joint_b", "joint_a"),
+        )
+
+    assert result is expected
+    compute_fk.assert_called_once_with(
+        qpos=qpos,
+        link_names=["target"],
+        end_link_name=None,
+        root_link_name=None,
+        qpos_joint_names=("joint_b", "joint_a"),
+    )
 
 
 # Base test class for CPU and CUDA

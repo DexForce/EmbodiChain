@@ -1750,10 +1750,9 @@ def _decode_registered_lowerer(
                     "articulation_id",
                     "articulation_simulation_uid",
                     "link_entity_id",
-                    "translation_axis",
                 }
             ),
-            optional=frozenset({"target_pose_mode"}),
+            optional=frozenset({"target_pose_mode", "translation_axis"}),
         )
         target_pose_mode = _identifier(
             config.get("target_pose_mode", "live"),
@@ -1776,10 +1775,14 @@ def _decode_registered_lowerer(
                 config["link_entity_id"],
                 path=f"{path}.link_entity_id",
             ),
-            translation_axis=_finite_tuple(
-                config["translation_axis"],
-                path=f"{path}.translation_axis",
-                expected_length=3,
+            translation_axis=(
+                _finite_tuple(
+                    config["translation_axis"],
+                    path=f"{path}.translation_axis",
+                    expected_length=3,
+                )
+                if "translation_axis" in config
+                else None
             ),
             target_pose_mode=target_pose_mode,
         )

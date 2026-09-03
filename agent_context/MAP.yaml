@@ -33,6 +33,8 @@ topics:
       - simulation lifecycle
       - ArticulationJointKinematics
       - get_parent_joint_chain
+      - ArticulationCfg
+      - enable_gravity
     paths:
       - topics/simulation-system/simulation-system.md
     source_of_truth:
@@ -253,6 +255,7 @@ topics:
       - dexforce_w1
       - gripper
       - arm
+      - enable_gravity
     paths:
       - topics/robot-system/robot-system.md
     source_of_truth:
@@ -626,6 +629,12 @@ topics:
       - RigidObjectSceneProvider
       - create_simulation_atomic_action_engine
       - ObjectSemantics
+      - ArticulationAffordanceGeometry
+      - ArticulationGeometryProvider
+      - ArticulationJointGeometry
+      - sample_initial_articulation_geometry
+      - articulation geometry adapter
+      - non_target_articulation_point_cloud
       - entity_id
       - frozen ObjectSemantics
       - canonical entity identity
@@ -736,6 +745,8 @@ topics:
       - embodichain/lab/sim/atomic_actions/goals.py
       - embodichain/lab/sim/atomic_actions/effects.py
       - embodichain/lab/sim/atomic_actions/affordance.py
+      - embodichain/lab/sim/atomic_actions/_articulation_geometry_keys.py
+      - embodichain/lab/sim/atomic_actions/articulation_geometry.py
       - embodichain/lab/sim/atomic_actions/bindings.py
       - embodichain/lab/sim/atomic_actions/control.py
       - embodichain/lab/sim/atomic_actions/invocation.py

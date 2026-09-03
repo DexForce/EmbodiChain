@@ -770,6 +770,8 @@ class Robot(Articulation):
         root_link_name: str | None = None,
         env_ids: Sequence[int] | None = None,
         to_matrix: bool = False,
+        *,
+        qpos_joint_names: Sequence[str] | None = None,
     ) -> torch.Tensor:
         """Compute the forward kinematics of the robot given joint positions and optionally a specific part name.
         The output pose will be in the local arena frame.
@@ -782,6 +784,8 @@ class Robot(Articulation):
             root_link_name (str | None): The name of the root link to compute the FK for. If None, the default root link is used.
             env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
+            qpos_joint_names: Optional names corresponding to the last dimension
+                of ``qpos`` for full-articulation FK.
 
         Returns:
             torch.Tensor: The forward kinematics result with shape (num_envs, 7) or (num_envs, 4, 4) if `to_matrix` is True.
@@ -794,6 +798,12 @@ class Robot(Articulation):
                 link_names=link_names,
                 end_link_name=end_link_name,
                 root_link_name=root_link_name,
+                qpos_joint_names=qpos_joint_names,
+            )
+
+        if qpos_joint_names is not None:
+            raise ValueError(
+                "qpos_joint_names cannot be combined with named robot control-part FK."
             )
 
         if not self._solvers:

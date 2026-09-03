@@ -159,6 +159,14 @@ Gym tasks. Task Program integration and nested scene-binding composition is
 owned by `task_program/integrations/_configured_composition.py`. An embodiment
 component may omit `skill_profile`, while a scene component never owns Task
 Program metadata.
+
+Configured articulation-link Slide services sample initial articulation
+geometry only when `translation_axis` is omitted. Supplying the compatibility
+axis preserves the mesh-only legacy path and bypasses initial point-cloud
+sampling. This keeps the explicit axis usable when non-unit `body_scale` is
+rejected by the point-cloud adapter; it does not make automatic sampling
+scale-aware.
+
 Selecting a physical component does not by itself parameterize hard-coded
 Python control-part names or trajectory dimensions. A configured Task Program
 must select an embodiment `skill_profile`; its integration must declare a

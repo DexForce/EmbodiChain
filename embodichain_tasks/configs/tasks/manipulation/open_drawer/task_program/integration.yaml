@@ -42,5 +42,4 @@ runtime_services:
       articulation_id: drawer
       articulation_simulation_uid: drawer
       link_entity_id: drawer_handle
-      translation_axis: [0.0, 1.0, 0.0]
       target_pose_mode: snapshot
