@@ -680,12 +680,15 @@ Plans **close hand -> approach target -> contact -> press along axis -> return
 to the approach pose**. For an articulation link,
 `sample_initial_articulation_geometry()` builds typed target-link-local target
 and whole-articulation geometry. Its `to_object_geometry()` conversion stores
-the two clouds and the nearest parent prismatic joint axis in
+the target, complete-articulation, and non-target-articulation clouds plus the
+nearest parent prismatic joint axis in
 `ObjectSemantics.geometry`.
 `PressAffordance` uses `target_link_prismatic_joint_axis` for its axis direction;
-the point-cloud neighborhood selects only the sign. It can also derive the
-outer-surface `press_position` when it is omitted. `PressGoal.target_pose` is
-either a pose snapshot or `SceneEntityPose`, which resolves through the current
+only nearby non-target link surfaces select the sign. It can also derive the
+outer-surface `press_position` when it is omitted. If no non-target surface lies
+in the target neighborhood, direction is ambiguous and must be configured
+without automatic axis inference. `PressGoal.target_pose` is either a pose
+snapshot or `SceneEntityPose`, which resolves through the current
 `PlanningContext.scene` and participates in dynamic-goal recovery.
 
 The contact, press, and retract segments use axis-aligned Cartesian keyframes;
@@ -726,27 +729,33 @@ push/close; pull/open uses its negative direction. The affordance inherits
 grasp approach direction is the resolved link-frame translation axis
 transformed by the current link rotation.
 
-The Atomic Action articulation-geometry adapter samples the target link and the
-merged articulation surface at `ArticulationCfg.init_qpos`, expressed in the
-target link's initial local frame.
-Both clouds use Open3D uniform surface sampling. Sampling the whole articulation
-as one merged mesh preserves triangle-area weighting instead of giving every
-link an equal point budget, which would over-represent tiny decorative links.
+The Atomic Action articulation-geometry adapter samples the target link, the
+merged articulation surface, and the merged surface of every non-target link at
+`ArticulationCfg.init_qpos`, expressed in the target link's initial local frame.
+Every non-empty surface cloud uses Open3D uniform sampling; a target-only
+articulation records an explicit empty non-target cloud. Sampling each merged
+mesh preserves triangle-area weighting instead of giving every link an equal
+point budget, which would over-represent tiny decorative links.
 To keep the target and merged clouds geometrically consistent, every non-empty
 link mesh must contain at least one non-degenerate triangle surface; the adapter
 rejects vertices-only and fully degenerate link meshes before merging.
 The sampler also walks the target's parent chain and transforms the nearest
 prismatic joint axis into the target link's initial local frame. The target
 cloud center and twice its distribution radius define a spherical neighborhood
-in the full cloud. The dot product between the neighborhood-center offset and
-the normalized joint axis selects its sign. It does not quantize an oblique
-joint axis to a Cartesian basis direction; an offset perpendicular to the joint
-axis is rejected as directionally ambiguous.
+in the non-target cloud. The dot product between that neighborhood-center
+offset and the normalized joint axis selects its sign. Target-link samples from
+the complete cloud never contribute direction evidence, so independent Open3D
+sampling cannot randomly flip the axis when no other link is nearby. It does
+not quantize an oblique joint axis to a Cartesian basis direction. A missing or
+empty non-target neighborhood, or an axial offset that does not exceed both one
+percent of the target radius and four estimated standard errors, is rejected as
+directionally ambiguous.
 
-Automatic resolution requires all three entries:
-`target_link_point_cloud`, `articulation_point_cloud`, and
+Automatic resolution requires all four entries: `target_link_point_cloud`,
+`articulation_point_cloud`, `non_target_articulation_point_cloud`, and
 `target_link_prismatic_joint_axis`. With none of those inference entries, an
-explicit compatibility axis is preserved; a partial set is rejected.
+explicit compatibility axis is preserved; missing provenance or another
+partial set is rejected.
 
 With `direction="pull"`, the sequence is **approach -> reach -> close -> pull ->
 open**. With `direction="push"`, it is **approach -> reach -> close -> push -> open
@@ -845,14 +854,15 @@ initial local frame. Resolution walks through fixed parent joints. The sampled
 target-link centroid is only a neighborhood/contact reference; it is never used
 as the rotation origin.
 
-Automatic axis resolution requires the revolute joint-axis entry and both point
-clouds. When all three axis-inference entries are absent, the legacy
-`twist_axis` fallback is preserved; a partial set is rejected. Axis-origin
-resolution is independent, so missing origin metadata does not overwrite an
-explicit `axis_origin`. If neither source supplies an origin, planning reports
-the missing rotation-axis point. A rigid object without articulation context
-may still provide explicit compatibility values. `TwistGoal.target_pose`
-supplies the grounded target pose.
+Automatic axis resolution requires the revolute joint-axis entry plus the
+target, complete-articulation, and non-target-articulation clouds. When all four
+axis-inference entries are absent, the legacy `twist_axis` fallback is
+preserved; missing non-target provenance or another partial set is rejected.
+Axis-origin resolution is independent, so missing origin metadata does not
+overwrite an explicit `axis_origin`. If neither source supplies an origin,
+planning reports the missing rotation-axis point. A rigid object without
+articulation context may still provide explicit compatibility values.
+`TwistGoal.target_pose` supplies the grounded target pose.
 
 The grasp frame's z-axis follows the world-transformed twist axis; an adaptive
 reference completes a right-handed orthonormal frame. Twist keyframes rotate

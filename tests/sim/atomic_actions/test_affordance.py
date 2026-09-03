@@ -60,6 +60,7 @@ TARGET_POINT_OFFSETS = torch.tensor(
 )
 TARGET_LINK_POINT_CLOUD_KEY = "target_link_point_cloud"
 ARTICULATION_POINT_CLOUD_KEY = "articulation_point_cloud"
+NON_TARGET_ARTICULATION_POINT_CLOUD_KEY = "non_target_articulation_point_cloud"
 TARGET_LINK_PRISMATIC_JOINT_AXIS_KEY = "target_link_prismatic_joint_axis"
 TARGET_LINK_REVOLUTE_JOINT_AXIS_KEY = "target_link_revolute_joint_axis"
 TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY = "target_link_revolute_axis_origin"
@@ -70,16 +71,17 @@ def _axis_geometry(neighbor_offset: tuple[float, float, float]) -> dict[str, obj
     target_points = POINT_CLOUD_CENTER + TARGET_POINT_OFFSETS
     neighbor = POINT_CLOUD_CENTER + torch.tensor(neighbor_offset)
     distant_outlier = POINT_CLOUD_CENTER + torch.tensor([8.0, 8.0, 8.0])
+    non_target_points = torch.stack((neighbor, distant_outlier))
     return {
         TARGET_LINK_POINT_CLOUD_KEY: target_points.clone(),
         ARTICULATION_POINT_CLOUD_KEY: torch.cat(
             (
                 target_points,
-                neighbor.unsqueeze(0),
-                distant_outlier.unsqueeze(0),
+                non_target_points,
             ),
             dim=0,
         ),
+        NON_TARGET_ARTICULATION_POINT_CLOUD_KEY: non_target_points,
         TARGET_LINK_PRISMATIC_JOINT_AXIS_KEY: PRISMATIC_JOINT_AXIS.clone(),
         TARGET_LINK_REVOLUTE_JOINT_AXIS_KEY: REVOLUTE_JOINT_AXIS.clone(),
         TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY: REVOLUTE_AXIS_ORIGIN.clone(),
@@ -297,6 +299,114 @@ class TestArticulationGeometryAxisInference:
         assert torch.count_nonzero(actual_axis).item() == 3
 
     @pytest.mark.parametrize("kind", ("slide", "press", "twist"))
+    @pytest.mark.parametrize("direction", (1.0, -1.0), ids=("positive", "negative"))
+    def test_non_target_neighbor_sign_ignores_biased_target_samples_in_full_cloud(
+        self,
+        kind: str,
+        direction: float,
+    ) -> None:
+        axis_key, raw_joint_axis = _joint_axis_metadata(kind)
+        joint_axis = raw_joint_axis / torch.linalg.vector_norm(raw_joint_axis)
+        target_points = POINT_CLOUD_CENTER + TARGET_POINT_OFFSETS
+        non_target_neighbor = POINT_CLOUD_CENTER + 1.5 * direction * joint_axis
+        biased_target_sample_count = 12
+        biased_target_samples = (POINT_CLOUD_CENTER - direction * joint_axis).repeat(
+            biased_target_sample_count, 1
+        )
+        geometry = {
+            TARGET_LINK_POINT_CLOUD_KEY: target_points,
+            ARTICULATION_POINT_CLOUD_KEY: torch.cat(
+                (biased_target_samples, non_target_neighbor.unsqueeze(0))
+            ),
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY: (non_target_neighbor.unsqueeze(0)),
+            axis_key: raw_joint_axis.clone(),
+        }
+        affordance, axis_field = _axis_affordance(
+            kind,
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=geometry,
+            entity_id=f"biased-full-cloud-{kind}-target",
+        )
+
+        assert torch.allclose(
+            getattr(affordance, axis_field),
+            direction * joint_axis,
+            atol=1.0e-6,
+        )
+
+    @pytest.mark.parametrize("kind", ("slide", "press", "twist"))
+    @pytest.mark.parametrize(
+        "include_distant_non_target",
+        (False, True),
+        ids=("empty", "outside-neighborhood"),
+    )
+    def test_biased_target_samples_cannot_select_sign_without_nearby_non_target(
+        self,
+        kind: str,
+        include_distant_non_target: bool,
+    ) -> None:
+        axis_key, raw_joint_axis = _joint_axis_metadata(kind)
+        joint_axis = raw_joint_axis / torch.linalg.vector_norm(raw_joint_axis)
+        target_points = POINT_CLOUD_CENTER + TARGET_POINT_OFFSETS
+        independently_sampled_target_points = POINT_CLOUD_CENTER + torch.stack(
+            (joint_axis, joint_axis, -joint_axis)
+        )
+        distant_non_target_point = POINT_CLOUD_CENTER + 4.0 * joint_axis
+        non_target_points = (
+            distant_non_target_point.unsqueeze(0)
+            if include_distant_non_target
+            else torch.empty((0, 3))
+        )
+        geometry = {
+            TARGET_LINK_POINT_CLOUD_KEY: target_points,
+            ARTICULATION_POINT_CLOUD_KEY: torch.cat(
+                (
+                    independently_sampled_target_points,
+                    non_target_points,
+                )
+            ),
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY: non_target_points,
+            axis_key: raw_joint_axis.clone(),
+        }
+        affordance, _ = _axis_affordance(
+            kind,
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="direction is ambiguous.*non-target",
+        ):
+            ObjectSemantics(
+                affordance=affordance,
+                geometry=geometry,
+                entity_id=f"distant-{kind}-geometry-target",
+            )
+
+    @pytest.mark.parametrize("kind", ("slide", "press", "twist"))
+    def test_missing_non_target_provenance_is_rejected(self, kind: str) -> None:
+        geometry = _axis_geometry((1.0, 1.0, 0.5))
+        geometry.pop(NON_TARGET_ARTICULATION_POINT_CLOUD_KEY)
+        affordance, _ = _axis_affordance(
+            kind,
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=NON_TARGET_ARTICULATION_POINT_CLOUD_KEY,
+        ):
+            ObjectSemantics(
+                affordance=affordance,
+                geometry=geometry,
+                entity_id=f"missing-provenance-{kind}-target",
+            )
+
+    @pytest.mark.parametrize("kind", ("slide", "press", "twist"))
     def test_empty_geometry_preserves_explicit_fallback_axis(self, kind: str) -> None:
         fallback_axis = torch.tensor([-1.0, 0.0, 0.0])
         affordance, axis_field = _axis_affordance(
@@ -468,7 +578,7 @@ class TestArticulationGeometryAxisInference:
         (
             ("slide", (1.0, -1.0, 0.0)),
             ("press", (1.0, -1.0, 0.0)),
-            ("twist", (2.0, 1.0, 0.0)),
+            ("twist", (1.0, 0.5, 0.0)),
         ),
     )
     def test_neighborhood_offset_perpendicular_to_joint_axis_is_ambiguous(
@@ -481,11 +591,107 @@ class TestArticulationGeometryAxisInference:
             fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
         )
 
-        with pytest.raises(ValueError, match="direction is ambiguous"):
+        with pytest.raises(
+            ValueError,
+            match="direction is ambiguous.*non-target.*statistically",
+        ):
             ObjectSemantics(
                 affordance=affordance,
                 geometry=_axis_geometry(perpendicular_offset),
                 entity_id=f"ambiguous-{kind}-geometry-target",
+            )
+
+    @pytest.mark.parametrize("kind", ("slide", "press", "twist"))
+    def test_sampled_orthogonal_neighborhood_noise_is_ambiguous(
+        self,
+        kind: str,
+    ) -> None:
+        axis_key, raw_joint_axis = _joint_axis_metadata(kind)
+        joint_axis = raw_joint_axis / torch.linalg.vector_norm(raw_joint_axis)
+        perpendicular_axis = torch.linalg.cross(
+            joint_axis,
+            torch.tensor([1.0, 0.0, 0.0]),
+            dim=0,
+        )
+        perpendicular_axis /= torch.linalg.vector_norm(perpendicular_axis)
+        sample_pair_count = 50
+        target_points = POINT_CLOUD_CENTER + TARGET_POINT_OFFSETS.repeat(
+            sample_pair_count,
+            1,
+        )
+        axial_sampling_offsets = torch.tensor([0.5, -0.48]).repeat(sample_pair_count)
+        non_target_points = (
+            POINT_CLOUD_CENTER
+            + 0.5 * perpendicular_axis
+            + axial_sampling_offsets.unsqueeze(1) * joint_axis
+        )
+        geometry = {
+            TARGET_LINK_POINT_CLOUD_KEY: target_points,
+            ARTICULATION_POINT_CLOUD_KEY: torch.cat((target_points, non_target_points)),
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY: non_target_points,
+            axis_key: raw_joint_axis.clone(),
+        }
+        affordance, _ = _axis_affordance(
+            kind,
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="direction is ambiguous.*non-target.*statistically",
+        ):
+            ObjectSemantics(
+                affordance=affordance,
+                geometry=geometry,
+                entity_id=f"sampled-orthogonal-{kind}-target",
+            )
+
+    @pytest.mark.parametrize("kind", ("slide", "press", "twist"))
+    def test_subpercent_axial_offset_is_ambiguous_when_variance_is_zero(
+        self,
+        kind: str,
+    ) -> None:
+        axis_key, raw_joint_axis = _joint_axis_metadata(kind)
+        joint_axis = raw_joint_axis / torch.linalg.vector_norm(raw_joint_axis)
+        first_perpendicular = torch.linalg.cross(
+            joint_axis,
+            torch.tensor([1.0, 0.0, 0.0]),
+            dim=0,
+        )
+        first_perpendicular /= torch.linalg.vector_norm(first_perpendicular)
+        second_perpendicular = torch.linalg.cross(
+            joint_axis,
+            first_perpendicular,
+            dim=0,
+        )
+        target_points = POINT_CLOUD_CENTER + torch.stack(
+            (
+                first_perpendicular,
+                -first_perpendicular,
+                second_perpendicular,
+                -second_perpendicular,
+            )
+        )
+        non_target_points = (POINT_CLOUD_CENTER + 0.005 * joint_axis).unsqueeze(0)
+        geometry = {
+            TARGET_LINK_POINT_CLOUD_KEY: target_points,
+            ARTICULATION_POINT_CLOUD_KEY: torch.cat((target_points, non_target_points)),
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY: non_target_points,
+            axis_key: raw_joint_axis.clone(),
+        }
+        affordance, _ = _axis_affordance(
+            kind,
+            fallback_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="direction is ambiguous.*non-target.*statistically",
+        ):
+            ObjectSemantics(
+                affordance=affordance,
+                geometry=geometry,
+                entity_id=f"subpercent-offset-{kind}-target",
             )
 
     def test_press_without_position_uses_outer_surface_opposite_inferred_axis(

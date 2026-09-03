@@ -126,6 +126,7 @@ def _drawer_handle_point_cloud_geometry() -> dict[str, torch.Tensor]:
     return {
         "target_link_point_cloud": target_points,
         "articulation_point_cloud": torch.cat((target_points, body_points), dim=0),
+        "non_target_articulation_point_cloud": body_points,
         "target_link_prismatic_joint_axis": torch.tensor(
             [0.0, 1.0, 0.0],
             dtype=torch.float32,
@@ -140,6 +141,9 @@ def _drawer_handle_articulation_geometry() -> ArticulationAffordanceGeometry:
         target_link_point_cloud=geometry["target_link_point_cloud"],
         articulation_point_cloud=geometry["articulation_point_cloud"],
         prismatic_joint_axis=geometry["target_link_prismatic_joint_axis"],
+        non_target_articulation_point_cloud=geometry[
+            "non_target_articulation_point_cloud"
+        ],
     )
 
 

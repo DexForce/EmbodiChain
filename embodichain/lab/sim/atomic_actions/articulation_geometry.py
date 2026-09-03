@@ -26,6 +26,7 @@ import torch
 
 from ._articulation_geometry_keys import (
     _ARTICULATION_POINT_CLOUD_KEY,
+    _NON_TARGET_ARTICULATION_POINT_CLOUD_KEY,
     _TARGET_LINK_POINT_CLOUD_KEY,
     _TARGET_LINK_PRISMATIC_JOINT_AXIS_KEY,
     _TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY,
@@ -137,6 +138,10 @@ class ArticulationAffordanceGeometry:
         prismatic_joint_axis: Optional nearest prismatic ancestor axis.
         revolute_joint_axis: Optional nearest revolute ancestor axis.
         revolute_axis_origin: Optional matching revolute-joint origin.
+        non_target_articulation_point_cloud: Sampled merged surface of every
+            link except the target, shape ``(K, 3)``. An empty tensor records
+            that the articulation has no non-target link surface. ``None`` is
+            accepted only for geometry created without source-link provenance.
     """
 
     target_link_point_cloud: torch.Tensor
@@ -144,6 +149,7 @@ class ArticulationAffordanceGeometry:
     prismatic_joint_axis: torch.Tensor | None = None
     revolute_joint_axis: torch.Tensor | None = None
     revolute_axis_origin: torch.Tensor | None = None
+    non_target_articulation_point_cloud: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         """Validate and own all tensor fields."""
@@ -156,6 +162,17 @@ class ArticulationAffordanceGeometry:
             field_name="articulation_point_cloud",
         )
         if target_points.device != articulation_points.device:
+            raise ValueError(
+                "Articulation affordance point clouds must share a device."
+            )
+        non_target_points = _owned_optional_point_cloud(
+            self.non_target_articulation_point_cloud,
+            field_name="non_target_articulation_point_cloud",
+        )
+        if (
+            non_target_points is not None
+            and non_target_points.device != target_points.device
+        ):
             raise ValueError(
                 "Articulation affordance point clouds must share a device."
             )
@@ -189,6 +206,11 @@ class ArticulationAffordanceGeometry:
 
         object.__setattr__(self, "target_link_point_cloud", target_points)
         object.__setattr__(self, "articulation_point_cloud", articulation_points)
+        object.__setattr__(
+            self,
+            "non_target_articulation_point_cloud",
+            non_target_points,
+        )
         object.__setattr__(self, "prismatic_joint_axis", prismatic_axis)
         object.__setattr__(self, "revolute_joint_axis", revolute_axis)
         object.__setattr__(self, "revolute_axis_origin", revolute_origin)
@@ -204,6 +226,10 @@ class ArticulationAffordanceGeometry:
             _TARGET_LINK_POINT_CLOUD_KEY: self.target_link_point_cloud.clone(),
             _ARTICULATION_POINT_CLOUD_KEY: self.articulation_point_cloud.clone(),
         }
+        if self.non_target_articulation_point_cloud is not None:
+            geometry[_NON_TARGET_ARTICULATION_POINT_CLOUD_KEY] = (
+                self.non_target_articulation_point_cloud.clone()
+            )
         if self.prismatic_joint_axis is not None:
             geometry[_TARGET_LINK_PRISMATIC_JOINT_AXIS_KEY] = (
                 self.prismatic_joint_axis.clone()
@@ -246,6 +272,8 @@ def sample_initial_articulation_geometry(
         body_scale: Configured articulation scale. Only unit scale is currently
             supported because raw meshes and FK must share one metric frame.
         articulation_point_count: Merged-articulation surface sample count.
+            The same count is used for the non-target merged surface when one
+            exists.
         target_point_count: Target-link surface sample count.
 
     Returns:
@@ -305,6 +333,8 @@ def sample_initial_articulation_geometry(
         target_triangles,
         articulation_vertices,
         articulation_triangles,
+        non_target_vertices,
+        non_target_triangles,
     ) = _merge_initial_link_meshes(
         provider,
         target_link_name=target_link_name,
@@ -314,20 +344,32 @@ def sample_initial_articulation_geometry(
         device=device,
     )
 
-    return ArticulationAffordanceGeometry(
-        target_link_point_cloud=_sample_mesh_surface_points(
-            target_vertices,
-            target_triangles,
-            target_point_count,
-        ),
-        articulation_point_cloud=_sample_mesh_surface_points(
-            articulation_vertices,
-            articulation_triangles,
+    target_points = _sample_mesh_surface_points(
+        target_vertices,
+        target_triangles,
+        target_point_count,
+    )
+    articulation_points = _sample_mesh_surface_points(
+        articulation_vertices,
+        articulation_triangles,
+        articulation_point_count,
+    )
+    non_target_points = (
+        _sample_mesh_surface_points(
+            non_target_vertices,
+            non_target_triangles,
             articulation_point_count,
-        ),
+        )
+        if non_target_vertices.shape[0] > 0
+        else torch.empty((0, 3), dtype=target_points.dtype, device=device)
+    )
+    return ArticulationAffordanceGeometry(
+        target_link_point_cloud=target_points,
+        articulation_point_cloud=articulation_points,
         prismatic_joint_axis=prismatic_axis,
         revolute_joint_axis=revolute_axis,
         revolute_axis_origin=revolute_origin,
+        non_target_articulation_point_cloud=non_target_points,
     )
 
 
@@ -493,11 +535,21 @@ def _merge_initial_link_meshes(
     initial_link_poses: torch.Tensor,
     target_from_root: torch.Tensor,
     device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+]:
     """Transform and merge raw link meshes in the target-link frame."""
     merged_vertices: list[torch.Tensor] = []
     merged_triangles: list[torch.Tensor] = []
     vertex_offset = 0
+    non_target_vertices: list[torch.Tensor] = []
+    non_target_triangles: list[torch.Tensor] = []
+    non_target_vertex_offset = 0
     target_vertices: torch.Tensor | None = None
     target_triangles: torch.Tensor | None = None
     for link_index, link_name in enumerate(link_names):
@@ -533,6 +585,11 @@ def _merge_initial_link_meshes(
         if link_name == target_link_name:
             target_vertices = transformed_vertices
             target_triangles = triangles
+        else:
+            non_target_vertices.append(transformed_vertices)
+            if triangles.shape[0] > 0:
+                non_target_triangles.append(triangles + non_target_vertex_offset)
+            non_target_vertex_offset += vertices.shape[0]
         vertex_offset += vertices.shape[0]
 
     if target_vertices is None or target_vertices.shape[0] == 0:
@@ -547,12 +604,24 @@ def _merge_initial_link_meshes(
         if merged_triangles
         else torch.empty((0, 3), dtype=torch.long, device=device)
     )
+    non_target_articulation_vertices = (
+        torch.cat(non_target_vertices, dim=0)
+        if non_target_vertices
+        else torch.empty((0, 3), dtype=articulation_vertices.dtype, device=device)
+    )
+    non_target_articulation_triangles = (
+        torch.cat(non_target_triangles, dim=0)
+        if non_target_triangles
+        else torch.empty((0, 3), dtype=torch.long, device=device)
+    )
     assert target_triangles is not None
     return (
         target_vertices,
         target_triangles,
         articulation_vertices,
         articulation_triangles,
+        non_target_articulation_vertices,
+        non_target_articulation_triangles,
     )
 
 
@@ -686,6 +755,28 @@ def _owned_point_cloud(value: object, *, field_name: str) -> torch.Tensor:
         raise ValueError(
             f"{field_name} must be a non-empty finite floating tensor with "
             "shape (N, 3)."
+        )
+    return value.to(dtype=torch.float32).clone()
+
+
+def _owned_optional_point_cloud(
+    value: object | None,
+    *,
+    field_name: str,
+) -> torch.Tensor | None:
+    """Validate and clone one optional point cloud that may be empty."""
+    if value is None:
+        return None
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{field_name} must be a torch.Tensor.")
+    if (
+        not value.is_floating_point()
+        or value.dim() != 2
+        or value.shape[1:] != (3,)
+        or not bool(torch.isfinite(value).all().item())
+    ):
+        raise ValueError(
+            f"{field_name} must be a finite floating tensor with shape (N, 3)."
         )
     return value.to(dtype=torch.float32).clone()
 

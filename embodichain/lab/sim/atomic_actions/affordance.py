@@ -24,11 +24,17 @@ import torch
 
 from ._articulation_geometry_keys import (
     _ARTICULATION_POINT_CLOUD_KEY,
+    _NON_TARGET_ARTICULATION_POINT_CLOUD_KEY,
     _TARGET_LINK_POINT_CLOUD_KEY,
     _TARGET_LINK_PRISMATIC_JOINT_AXIS_KEY,
     _TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY,
     _TARGET_LINK_REVOLUTE_JOINT_AXIS_KEY,
 )
+
+# Direction evidence must clear both a geometry-scale floor and an estimated
+# four-standard-error confidence bound for the independently sampled clouds.
+_DIRECTION_RADIUS_TOLERANCE_RATIO = 0.01
+_DIRECTION_STANDARD_ERROR_MULTIPLIER = 4.0
 
 
 @dataclass
@@ -756,9 +762,13 @@ def _infer_articulation_neighborhood_axis(
     """Resolve one signed joint axis from target-centered local geometry.
 
     The target-link point-cloud center defines a spherical neighborhood in the
-    complete articulation cloud. Its radius is twice the target cloud's maximum
-    distance from that center. The neighborhood-center offset disambiguates the
-    sign of the normalized joint axis supplied in target-link coordinates.
+    non-target articulation cloud. Its radius is twice the target cloud's
+    maximum distance from that center. The neighborhood-center offset
+    disambiguates the sign of the normalized joint axis supplied in target-link
+    coordinates. The complete articulation cloud remains required geometry but
+    never contributes target-link samples to the direction decision. A
+    projected-mean confidence bound rejects offsets that are not meaningfully
+    larger than the two independent clouds' estimated sampling error.
 
     Args:
         geometry: Object geometry containing joint-axis and point-cloud entries.
@@ -779,14 +789,16 @@ def _infer_articulation_neighborhood_axis(
         raise TypeError("geometry must be a mapping.")
     has_target = _TARGET_LINK_POINT_CLOUD_KEY in geometry
     has_articulation = _ARTICULATION_POINT_CLOUD_KEY in geometry
+    has_non_target = _NON_TARGET_ARTICULATION_POINT_CLOUD_KEY in geometry
     has_axis = axis_key in geometry
-    if not has_target and not has_articulation and not has_axis:
+    if not has_target and not has_articulation and not has_non_target and not has_axis:
         return None
-    if not has_target or not has_articulation or not has_axis:
+    if not has_target or not has_articulation or not has_non_target or not has_axis:
         raise ValueError(
             f"{field_name} inference requires "
             f"{_TARGET_LINK_POINT_CLOUD_KEY!r}, "
-            f"{_ARTICULATION_POINT_CLOUD_KEY!r}, and {axis_key!r}."
+            f"{_ARTICULATION_POINT_CLOUD_KEY!r}, "
+            f"{_NON_TARGET_ARTICULATION_POINT_CLOUD_KEY!r}, and {axis_key!r}."
         )
 
     target_points = _validate_local_point_cloud(
@@ -797,9 +809,18 @@ def _infer_articulation_neighborhood_axis(
         geometry[_ARTICULATION_POINT_CLOUD_KEY],
         field_name=f"geometry[{_ARTICULATION_POINT_CLOUD_KEY!r}]",
     )
-    if target_points.device != articulation_points.device:
+    non_target_points = _validate_local_point_cloud(
+        geometry[_NON_TARGET_ARTICULATION_POINT_CLOUD_KEY],
+        field_name=(f"geometry[{_NON_TARGET_ARTICULATION_POINT_CLOUD_KEY!r}]"),
+        allow_empty=True,
+    )
+    if (
+        target_points.device != articulation_points.device
+        or target_points.device != non_target_points.device
+    ):
         raise ValueError(
-            "Articulation and target-link point clouds must share a device."
+            "Articulation, non-target articulation, and target-link point "
+            "clouds must share a device."
         )
     joint_axis = _validate_geometry_axis(
         geometry[axis_key],
@@ -808,7 +829,7 @@ def _infer_articulation_neighborhood_axis(
     if joint_axis.device != target_points.device:
         raise ValueError("Joint axis and point clouds must share a device.")
     target_points = target_points.to(dtype=torch.float32)
-    articulation_points = articulation_points.to(dtype=torch.float32)
+    non_target_points = non_target_points.to(dtype=torch.float32)
     joint_axis = joint_axis.to(dtype=torch.float32)
     joint_axis = joint_axis / torch.linalg.vector_norm(joint_axis)
 
@@ -827,21 +848,41 @@ def _infer_articulation_neighborhood_axis(
     neighborhood_radius = target_radius * 2.0
     neighborhood_mask = (
         torch.linalg.vector_norm(
-            articulation_points - target_center,
+            non_target_points - target_center,
             dim=1,
         )
         <= neighborhood_radius
     )
     if not bool(neighborhood_mask.any().item()):
-        raise ValueError(f"{field_name} point-cloud neighborhood is empty.")
-    neighborhood_center = articulation_points[neighborhood_mask].mean(dim=0)
+        raise ValueError(
+            f"{field_name} direction is ambiguous because no non-target "
+            "articulation surface lies within the target-link neighborhood."
+        )
+    neighborhood_points = non_target_points[neighborhood_mask]
+    neighborhood_center = neighborhood_points.mean(dim=0)
     center_offset = neighborhood_center - target_center
     direction_score = torch.dot(center_offset, joint_axis)
-    offset_tolerance = max(1.0e-8, float(target_radius.item()) * 1.0e-6)
+    target_standard_error = _projected_mean_standard_error(
+        target_points,
+        joint_axis,
+    )
+    neighborhood_standard_error = _projected_mean_standard_error(
+        neighborhood_points,
+        joint_axis,
+    )
+    direction_standard_error = (
+        target_standard_error**2 + neighborhood_standard_error**2
+    ) ** 0.5
+    offset_tolerance = max(
+        1.0e-8,
+        float(target_radius.item()) * _DIRECTION_RADIUS_TOLERANCE_RATIO,
+        _DIRECTION_STANDARD_ERROR_MULTIPLIER * direction_standard_error,
+    )
     if abs(float(direction_score.item())) <= offset_tolerance:
         raise ValueError(
-            f"{field_name} direction is ambiguous because the articulation "
-            "neighborhood-center offset is orthogonal to the joint axis."
+            f"{field_name} direction is ambiguous because the non-target "
+            "articulation neighborhood does not provide a statistically "
+            "meaningful projection onto the joint axis."
         )
 
     if float(direction_score.item()) < 0.0:
@@ -849,19 +890,38 @@ def _infer_articulation_neighborhood_axis(
     return joint_axis, target_points
 
 
-def _validate_local_point_cloud(value: Any, *, field_name: str) -> torch.Tensor:
-    """Validate one non-empty finite floating point cloud."""
+def _projected_mean_standard_error(
+    points: torch.Tensor,
+    axis: torch.Tensor,
+) -> float:
+    """Estimate sampling error for a point-cloud center projected on an axis."""
+    if points.shape[0] < 2:
+        return 0.0
+    centered_points = points - points.mean(dim=0, keepdim=True)
+    projections = torch.matmul(centered_points, axis)
+    variance = torch.var(projections, correction=1)
+    return float(torch.sqrt(variance / points.shape[0]).item())
+
+
+def _validate_local_point_cloud(
+    value: Any,
+    *,
+    field_name: str,
+    allow_empty: bool = False,
+) -> torch.Tensor:
+    """Validate one finite floating point cloud."""
     if not isinstance(value, torch.Tensor):
         raise TypeError(f"{field_name} must be a torch.Tensor.")
     if (
         not value.is_floating_point()
         or value.dim() != 2
         or value.shape[1:] != (3,)
-        or value.shape[0] == 0
+        or (not allow_empty and value.shape[0] == 0)
         or not bool(torch.isfinite(value).all().item())
     ):
+        non_empty = "non-empty " if not allow_empty else ""
         raise ValueError(
-            f"{field_name} must be a non-empty finite floating tensor with "
+            f"{field_name} must be a {non_empty}finite floating tensor with "
             "shape (N, 3)."
         )
     return value

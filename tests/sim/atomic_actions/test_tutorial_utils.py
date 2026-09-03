@@ -153,14 +153,16 @@ def _tutorial_axis_geometry(
             [0.0, 0.0, -1.0],
         ]
     )
+    non_target_points = (center + torch.tensor(neighbor_offset)).unsqueeze(0)
     return {
         "target_link_point_cloud": target_points,
         "articulation_point_cloud": torch.cat(
             (
                 target_points,
-                (center + torch.tensor(neighbor_offset)).unsqueeze(0),
+                non_target_points,
             )
         ),
+        "non_target_articulation_point_cloud": non_target_points,
         "target_link_prismatic_joint_axis": TUTORIAL_PRISMATIC_JOINT_AXIS.clone(),
         "target_link_revolute_joint_axis": TUTORIAL_REVOLUTE_JOINT_AXIS.clone(),
         "target_link_revolute_axis_origin": TUTORIAL_REVOLUTE_AXIS_ORIGIN.clone(),
@@ -177,6 +179,9 @@ def _tutorial_articulation_geometry(
         prismatic_joint_axis=geometry["target_link_prismatic_joint_axis"],
         revolute_joint_axis=geometry["target_link_revolute_joint_axis"],
         revolute_axis_origin=geometry["target_link_revolute_axis_origin"],
+        non_target_articulation_point_cloud=geometry[
+            "non_target_articulation_point_cloud"
+        ],
     )
 
 

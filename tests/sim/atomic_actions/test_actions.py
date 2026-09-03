@@ -158,6 +158,7 @@ def _automatic_twist_geometry() -> dict[str, torch.Tensor]:
             (target_points, articulation_neighbor.unsqueeze(0)),
             dim=0,
         ),
+        "non_target_articulation_point_cloud": articulation_neighbor.unsqueeze(0),
         "target_link_revolute_joint_axis": AUTOMATIC_TWIST_JOINT_AXIS.clone(),
         "target_link_revolute_axis_origin": AUTOMATIC_TWIST_AXIS_ORIGIN.clone(),
     }

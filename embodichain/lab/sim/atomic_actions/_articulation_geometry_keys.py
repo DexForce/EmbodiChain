@@ -20,6 +20,7 @@ from __future__ import annotations
 
 _TARGET_LINK_POINT_CLOUD_KEY = "target_link_point_cloud"
 _ARTICULATION_POINT_CLOUD_KEY = "articulation_point_cloud"
+_NON_TARGET_ARTICULATION_POINT_CLOUD_KEY = "non_target_articulation_point_cloud"
 _TARGET_LINK_PRISMATIC_JOINT_AXIS_KEY = "target_link_prismatic_joint_axis"
 _TARGET_LINK_REVOLUTE_JOINT_AXIS_KEY = "target_link_revolute_joint_axis"
 _TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY = "target_link_revolute_axis_origin"

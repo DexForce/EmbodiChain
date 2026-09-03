@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_actions.articulation_geometry import (
 from embodichain.lab.sim.objects import ArticulationJointKinematics
 
 POINT_CLOUD_TOLERANCE = 1.0e-6
+NON_TARGET_ARTICULATION_POINT_CLOUD_KEY = "non_target_articulation_point_cloud"
 
 
 class _ArticulationGeometryProvider:
@@ -147,6 +148,59 @@ class TestInitialArticulationGeometrySampling:
         assert torch.equal(fk_qpos, torch.tensor(((2.0, 1.0),)))
         assert fk_link_names == ["target"]
         assert fk_qpos_joint_names == ("joint_b", "joint_a")
+
+    def test_target_only_geometry_round_trips_empty_non_target_cloud(self):
+        articulation, _ = _make_point_cloud_articulation()
+
+        geometry = sample_initial_articulation_geometry(
+            articulation,
+            "target",
+            initial_qpos=articulation.initial_qpos,
+            initial_qpos_joint_names=articulation.initial_qpos_joint_names,
+            body_scale=articulation.body_scale,
+            articulation_point_count=13,
+            target_point_count=7,
+        )
+
+        non_target_points = geometry.non_target_articulation_point_cloud
+        assert non_target_points is not None
+        assert non_target_points.shape == (0, 3)
+        assert non_target_points.dtype == geometry.articulation_point_cloud.dtype
+        assert non_target_points.device == geometry.articulation_point_cloud.device
+
+        first_object_geometry = geometry.to_object_geometry()
+        second_object_geometry = geometry.to_object_geometry()
+        assert set(first_object_geometry) == {
+            "target_link_point_cloud",
+            "articulation_point_cloud",
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY,
+        }
+        assert torch.equal(
+            first_object_geometry[NON_TARGET_ARTICULATION_POINT_CLOUD_KEY],
+            non_target_points,
+        )
+        assert (
+            first_object_geometry[NON_TARGET_ARTICULATION_POINT_CLOUD_KEY]
+            is not non_target_points
+        )
+        assert (
+            first_object_geometry[NON_TARGET_ARTICULATION_POINT_CLOUD_KEY]
+            is not second_object_geometry[NON_TARGET_ARTICULATION_POINT_CLOUD_KEY]
+        )
+
+    def test_typed_geometry_omits_unknown_non_target_provenance(self):
+        target_points = torch.tensor(((0.0, 0.0, 0.0),), dtype=torch.float32)
+        articulation_points = target_points.clone()
+
+        geometry = ArticulationAffordanceGeometry(
+            target_link_point_cloud=target_points,
+            articulation_point_cloud=articulation_points,
+        )
+
+        assert geometry.non_target_articulation_point_cloud is None
+        assert (
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY not in geometry.to_object_geometry()
+        )
 
     def test_uses_nearest_revolute_ancestor_after_fixed_descendants(self):
         triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
@@ -457,6 +511,7 @@ class TestInitialArticulationGeometrySampling:
         assert set(first_object_geometry) == {
             "target_link_point_cloud",
             "articulation_point_cloud",
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY,
         }
         assert geometry.prismatic_joint_axis is None
         assert geometry.revolute_joint_axis is None
@@ -552,7 +607,7 @@ class TestInitialArticulationGeometrySampling:
                 target_point_count=3,
             )
 
-    def test_returns_both_clouds_in_target_link_initial_frame(self):
+    def test_non_target_cloud_excludes_target_link_in_target_initial_frame(self):
         triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
         link_meshes = {
             "body": (
@@ -594,6 +649,7 @@ class TestInitialArticulationGeometrySampling:
         assert set(geometry.to_object_geometry()) == {
             "target_link_point_cloud",
             "articulation_point_cloud",
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY,
         }
         target_points = geometry.target_link_point_cloud
         assert target_points.shape == (32, 3)
@@ -631,6 +687,30 @@ class TestInitialArticulationGeometrySampling:
                 <= 1.0 + POINT_CLOUD_TOLERANCE
             ).all()
         )
+
+        non_target_points = geometry.non_target_articulation_point_cloud
+        assert non_target_points is not None
+        assert non_target_points.shape == (256, 3)
+        assert bool((non_target_points[:, 0] < -0.5).all())
+        assert bool(
+            (
+                (non_target_points[:, 0] >= -2.0 - POINT_CLOUD_TOLERANCE)
+                & (non_target_points[:, 0] <= -1.0 + POINT_CLOUD_TOLERANCE)
+                & (non_target_points[:, 1] >= -4.0 - POINT_CLOUD_TOLERANCE)
+                & (non_target_points[:, 1] <= -3.0 + POINT_CLOUD_TOLERANCE)
+            ).all()
+        )
+        assert torch.allclose(
+            non_target_points[:, 2],
+            torch.zeros(256),
+            atol=POINT_CLOUD_TOLERANCE,
+        )
+        exported_non_target_points = geometry.to_object_geometry()[
+            NON_TARGET_ARTICULATION_POINT_CLOUD_KEY
+        ]
+        assert exported_non_target_points is not non_target_points
+        exported_non_target_points.zero_()
+        assert not torch.equal(exported_non_target_points, non_target_points)
 
     def test_sampling_consumes_open3d_rng_without_resetting_it(self):
         import open3d as o3d
@@ -791,6 +871,49 @@ class TestInitialArticulationGeometrySampling:
 
         articulation_points = geometry.articulation_point_cloud
         small_face_fraction = float((articulation_points[:, 0] < -9.0).float().mean())
+        assert small_face_fraction == pytest.approx(0.2, abs=0.03)
+
+    def test_non_target_merged_sampling_is_weighted_by_face_area(self):
+        triangle = torch.tensor(((0, 1, 2),), dtype=torch.long)
+        articulation, _ = _make_point_cloud_articulation(
+            link_meshes={
+                "small": (
+                    torch.tensor(
+                        ((-10.0, 0.0, 0.0), (-9.0, 0.0, 0.0), (-10.0, 1.0, 0.0)),
+                        dtype=torch.float32,
+                    ),
+                    triangle,
+                ),
+                "large": (
+                    torch.tensor(
+                        ((-20.0, 0.0, 0.0), (-18.0, 0.0, 0.0), (-20.0, 2.0, 0.0)),
+                        dtype=torch.float32,
+                    ),
+                    triangle,
+                ),
+                "target": (
+                    torch.tensor(
+                        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                        dtype=torch.float32,
+                    ),
+                    triangle,
+                ),
+            }
+        )
+
+        geometry = sample_initial_articulation_geometry(
+            articulation,
+            "target",
+            initial_qpos=articulation.initial_qpos,
+            initial_qpos_joint_names=articulation.initial_qpos_joint_names,
+            body_scale=articulation.body_scale,
+            articulation_point_count=5_000,
+            target_point_count=3,
+        )
+
+        non_target_points = geometry.non_target_articulation_point_cloud
+        assert non_target_points is not None
+        small_face_fraction = float((non_target_points[:, 0] > -15.0).float().mean())
         assert small_face_fraction == pytest.approx(0.2, abs=0.03)
 
     @pytest.mark.parametrize(

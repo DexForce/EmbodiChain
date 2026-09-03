@@ -634,6 +634,7 @@ topics:
       - ArticulationJointGeometry
       - sample_initial_articulation_geometry
       - articulation geometry adapter
+      - non_target_articulation_point_cloud
       - entity_id
       - frozen ObjectSemantics
       - canonical entity identity
