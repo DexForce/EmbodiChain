@@ -303,6 +303,7 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     sim._arenas = []
     sim._spawn_scene = spawn_scene
     sim._default_plane = object()
+    sim._sensors = {}
     sim._env = SimpleNamespace(clean=lambda: events.append("env_clean"))
     sim._world = SimpleNamespace(quit=lambda: events.append("world_quit"))
     sim.instance_id = 0
@@ -689,9 +690,10 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     sim._world.init_gpu_physics.side_effect = lambda: events.append("gpu_init")
     sim._spawn_scene = spawn_scene
     sim._default_plane = object()
-    sim._pending_sensor_attachments = []
+    sim._sensors = {}
     sim._prepared_spawn_topology_revision = -1
     sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
 
     sim.prepare()
 
@@ -739,9 +741,10 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     sim.device = torch.device("cuda")
     sim._world = MagicMock()
     sim._spawn_scene = spawn_scene
-    sim._pending_sensor_attachments = []
+    sim._sensors = {}
     sim._prepared_spawn_topology_revision = -1
     sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
 
     with pytest.raises(RuntimeError, match="first attempt"):
         sim.prepare()
@@ -753,14 +756,12 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     sync_render_state.assert_called_once_with(result)
 
 
-def test_prepare_removes_each_sensor_after_successful_attachment() -> None:
+def test_prepare_retries_camera_attachment_without_recommit() -> None:
     result = MagicMock()
     result.needs_rebuild = False
     result.topology_revision = 3
-    first_sensor = MagicMock()
-    second_sensor = MagicMock()
-    attach_camera_parent = MagicMock(
-        side_effect=[None, RuntimeError("attach failed"), None]
+    attach_parented_cameras = MagicMock(
+        side_effect=[RuntimeError("attach failed"), None]
     )
     spawn_scene = MagicMock()
     spawn_scene.builder.is_finalized = True
@@ -777,21 +778,20 @@ def test_prepare_removes_each_sensor_after_successful_attachment() -> None:
     sim.device = torch.device("cpu")
     sim._world = MagicMock()
     sim._spawn_scene = spawn_scene
-    sim._attach_camera_parent = attach_camera_parent
-    sim._pending_sensor_attachments = [first_sensor, second_sensor]
+    sim._sensors = {}
+    sim._attach_parented_cameras = attach_parented_cameras
     sim._prepared_spawn_topology_revision = -1
     sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
 
     with pytest.raises(RuntimeError, match="attach failed"):
         sim.prepare()
     sim.prepare()
+    sim.prepare()
 
-    assert attach_camera_parent.call_args_list == [
-        call(first_sensor),
-        call(second_sensor),
-        call(second_sensor),
-    ]
-    assert sim._pending_sensor_attachments == []
+    assert attach_parented_cameras.call_count == 2
+    assert sim._camera_attachment_topology_revision == 3
+    spawn_scene.commit.assert_not_called()
     sync_render_state.assert_called_once_with(result)
 
 
@@ -816,9 +816,11 @@ def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
     sim.device = torch.device("cpu")
     sim._world = MagicMock()
     sim._spawn_scene = spawn_scene
-    sim._pending_sensor_attachments = []
+    attach_parented_cameras = MagicMock()
+    sim._attach_parented_cameras = attach_parented_cameras
     sim._prepared_spawn_topology_revision = -1
     sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
 
     sim.prepare()
     sim.prepare()
@@ -830,6 +832,8 @@ def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
     assert spawn_scene.bind.call_count == 4
     assert sync_render_state.call_count == 2
     sync_render_state.assert_has_calls([call(result), call(result)])
+    assert attach_parented_cameras.call_count == 2
+    assert sim._camera_attachment_topology_revision == 4
     sim._world.update.assert_not_called()
     assert events == ["bind", "sync", "bind", "bind", "sync", "bind"]
 
@@ -855,9 +859,10 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     sim.device = torch.device("cpu")
     sim._world = MagicMock()
     sim._spawn_scene = spawn_scene
-    sim._pending_sensor_attachments = []
+    sim._sensors = {}
     sim._prepared_spawn_topology_revision = -1
     sim._synced_spawn_render_topology_revision = -1
+    sim._camera_attachment_topology_revision = -1
 
     with pytest.raises(RuntimeError, match="sync failed"):
         sim.prepare()
@@ -882,7 +887,6 @@ def test_add_camera_uses_owning_manager_render_context(
     sim._world = world
     sim._arenas = arenas
     sim._sensors = {}
-    sim._pending_sensor_attachments = []
     sim._visualization_topology_revision = 0
     sim.SUPPORTED_SENSOR_TYPES = {"Camera": sim_manager_module.Camera}
 
@@ -948,6 +952,26 @@ def test_manager_resolves_camera_parent_before_attachment() -> None:
 
     sim._resolve_spawn_sensor_parent_nodes.assert_called_once_with("robot/tool")
     sensor.attach_to_parent_nodes.assert_called_once_with(parent_nodes)
+
+
+def test_parented_cameras_include_only_configured_camera_sensors() -> None:
+    parented_camera = object.__new__(sim_manager_module.Camera)
+    parented_camera.cfg = CameraCfg(
+        extrinsics=CameraCfg.ExtrinsicsCfg(parent="robot/tool")
+    )
+    root_camera = object.__new__(sim_manager_module.Camera)
+    root_camera.cfg = CameraCfg()
+    sim = object.__new__(SimulationManager)
+    sim._sensors = {
+        "parented": parented_camera,
+        "root": root_camera,
+        "custom": MagicMock(),
+    }
+    sim._attach_camera_parent = MagicMock()
+
+    sim._attach_parented_cameras()
+
+    sim._attach_camera_parent.assert_called_once_with(parented_camera)
 
 
 def test_remove_asset_marks_visualization_topology_dirty() -> None:

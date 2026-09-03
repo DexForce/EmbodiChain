@@ -230,17 +230,7 @@ class ContactTest:
                 # Remaining slots should be False
                 assert not contact_report["is_valid"][env_id, num_contacts:].any()
 
-        cube2_user_ids = self.sim.get_rigid_object("cube2").get_user_ids()
-        finger1_user_ids = (
-            self.sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
-        )
-        filter_user_ids = torch.cat(
-            [
-                cube2_user_ids,
-                self.sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1),
-                self.sim.get_robot("UR10_PGI").get_user_ids("finger2_link").reshape(-1),
-            ]
-        )
+        filter_user_ids = self.contact_sensor.item_user_ids
         filter_contact_report = self.contact_sensor.filter_by_user_ids(filter_user_ids)
         n_filtered_contact = filter_contact_report["position"].shape[0]
         assert n_filtered_contact > 0, "No contact detected between gripper and cube."

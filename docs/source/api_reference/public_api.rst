@@ -1177,6 +1177,17 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
+embodichain.lab.sim.sensors.contact_sensor
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+
+.. autosummary::
+
+   ArticulationContactFilterCfg
+   ContactSensor
+   ContactSensorCfg
+
 embodichain.lab.sim.sim_manager
 -------------------------------
 

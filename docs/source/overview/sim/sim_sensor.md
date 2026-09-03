@@ -128,7 +128,7 @@ stereo_camera: StereoCamera = sim.add_sensor(sensor_cfg=stereo_cfg)
 
 ### Configuration
 
-The {class}`ContactSensorCfg` class defines the configuration for contact sensors. It inherits from {class}`~SensorCfg` and enables filtering and monitoring of contact events between specific rigid bodies and articulation links in the simulation.
+The {class}`ContactSensorCfg` class defines the configuration for contact sensors. It inherits from {class}`~SensorCfg` and enables filtering and monitoring of contact events between specific rigid bodies and articulation links in the simulation. The same API works with the Default (DexSim adapter) and Newton physics backends.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -136,6 +136,10 @@ The {class}`ContactSensorCfg` class defines the configuration for contact sensor
 | `articulation_cfg_list` | `List[ArticulationContactFilterCfg]` | `[]` | List of articulation link contact filter configurations. |
 | `filter_need_both_actor` | `bool` | `True` | Whether to filter contact only when both actors are in the filter list. If `False`, contact is reported if either actor is in the filter. |
 | `max_contacts_per_env` | `int` | `64` | Maximum number of contacts per environment that the sensor can handle. |
+
+The sensor forwards `max_contacts_per_env` to DexSim as a per-Arena query
+quota. If the global contact buffer is also full, DexSim distributes retained
+rows across Arenas before filling later rows from the same Arena.
 
 ### Articulation Contact Filter Configuration
 
@@ -191,10 +195,17 @@ env_contact_positions = contact_report["position"][env_id][env_valid_mask]
 valid_mask = contact_report["is_valid"]
 all_valid_positions = contact_report["position"][valid_mask]  # Shape: (total_valid_contacts, 3)
 
-# 4. Filter contacts by specific user IDs
-cube2_user_ids = sim.get_rigid_object("cube2").get_user_ids()
-finger1_user_ids = sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
-filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
+# 4. Filter contacts by backend-neutral contact actor IDs
+filter_user_ids = torch.as_tensor(
+    [
+        actor_id
+        for actor_id in contact_sensor.item_user_ids.tolist()
+        if contact_sensor.get_actor_info(actor_id).path.endswith("/cube2")
+        or contact_sensor.get_actor_info(actor_id).link_name == "finger1_link"
+    ],
+    dtype=torch.int32,
+    device=sim.device,
+)
 # Filter for specific environments
 filter_contact_report = contact_sensor.filter_by_user_ids(filter_user_ids, env_ids=[env_id])
 
@@ -214,11 +225,11 @@ Retrieve contact data using `contact_sensor.get_data()`. The data is returned as
 | Key | Data Type | Shape | Description |
 | :--- | :--- | :--- | :--- |
 | `position` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact positions in arena frame (world coordinates minus arena offset). |
-| `normal` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact normal vectors. |
-| `friction` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact friction forces. *Note: Currently this value may not be accurate.* |
-| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Contact impulse magnitudes. |
-| `distance` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Contact penetration distances. |
-| `user_ids` | `torch.int32` | `(num_envs, max_contacts_per_env, 2)` | Pair of user IDs for the two actors in contact. Use with `rigid_object.get_user_ids()` to identify objects. |
+| `normal` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Unit normal vectors pointing from actor 0 toward actor 1. |
+| `friction` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Tangential contact impulse applied to actor 0. Availability is reported by `contact_capabilities.friction`. |
+| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Normal contact impulse magnitudes. |
+| `distance` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Signed contact separation (negative means penetration). |
+| `user_ids` | `torch.int32` | `(num_envs, max_contacts_per_env, 2)` | Pair of query-local, backend-neutral contact actor IDs. The legacy field name is retained; resolve IDs with `get_actor_info()`. |
 | `is_valid` | `torch.bool` | `(num_envs, max_contacts_per_env)` | Boolean mask indicating which contact slots contain valid data. Use this mask to filter out unused slots. |
 
 **Note**: Use the `is_valid` mask to access only valid contacts:
@@ -233,7 +244,19 @@ num_valid = contact_report["is_valid"][env_id].sum().item()
 env_positions = contact_report["position"][env_id, :num_valid]
 ```
 
+Each valid row is the strongest-normal-impulse representative for one ordered
+native collision-shape pair. Multiple shape pairs can map to the same actor
+pair, and geometry-only contacts with zero impulse remain valid. The fixed-size
+numeric buffers are not cleared every update; values where `is_valid=False`
+are unspecified and may be left over from an earlier update.
+
 ### Additional Methods
 
-- **`filter_by_user_ids(item_user_ids, env_ids=None)`**: Filter contact report to include only contacts involving specific user IDs. Optionally filter by specific environment IDs.
+- **`get_actor_info(actor_id)`**: Resolve a contact actor ID to its Spawn path, articulation link, Arena, and environment ID.
+- **`contact_capabilities`**: Report whether geometry, normal impulse, and friction impulse are available for the active backend/solver.
+- **`filter_by_user_ids(item_user_ids, env_ids=None)`**: Filter contact report by contact actor IDs. The method name is retained for compatibility. Optionally filter by specific environment IDs.
 - **`set_contact_point_visibility(visible, rgba, point_size, env_ids=None)`**: Enable/disable visualization of contact points with customizable color and size. Optionally visualize only specific environments.
+
+Newton MuJoCo-Warp exposes contact forces, so both impulse fields are available. Other supported Newton rigid solvers currently expose contact geometry with zero-valued impulse fields. MuJoCo CPU mode does not expose device contact buffers, and MJVBD does not currently publish rigid contacts through `ContactQuery`; those modes are therefore unsupported by this sensor.
+
+PhysX Direct GPU reports static counterparts with actor ID `-1` because its raw contact buffer does not expose their object identity. To monitor a dynamic body or articulation link against arbitrary static geometry, select the dynamic/link object and set `filter_need_both_actor=False`. Default CPU and Newton can identify registered static shapes.

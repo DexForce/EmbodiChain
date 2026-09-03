@@ -551,7 +551,6 @@ class SimulationManager:
         self._robots: Dict[str, Robot] = dict()
 
         self._sensors: Dict[str, BaseSensor] = dict()
-        self._pending_sensor_attachments: list[Camera] = []
         self._lights: Dict[str, Light] = dict()
 
         self._spawn_scene = SpawnScene(
@@ -562,6 +561,7 @@ class SimulationManager:
         self._arenas = list(self._spawn_scene.builder.prepare_arenas())
         self._prepared_spawn_topology_revision = -1
         self._synced_spawn_render_topology_revision = -1
+        self._camera_attachment_topology_revision = -1
 
         self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
@@ -1016,7 +1016,7 @@ class SimulationManager:
         self._default_resources = SimResources()
 
     def prepare(self) -> None:
-        """Materialize declarations, bind state, and resolve sensor parents."""
+        """Materialize declarations, bind state, and restore camera parents."""
         scene = self._spawn_scene
         result = scene.builder.result
         if (
@@ -1040,10 +1040,13 @@ class SimulationManager:
         scene.bind()
         self._sync_spawn_render_state(result)
 
-        while self._pending_sensor_attachments:
-            sensor = self._pending_sensor_attachments[0]
-            self._attach_camera_parent(sensor)
-            self._pending_sensor_attachments.pop(0)
+        topology_revision = int(result.topology_revision)
+        if (
+            getattr(self, "_camera_attachment_topology_revision", -1)
+            != topology_revision
+        ):
+            self._attach_parented_cameras()
+            self._camera_attachment_topology_revision = topology_revision
 
     def _prepare_spawn_runtime(self, result: Scene) -> None:
         """Prepare backend runtime buffers for one Spawn topology revision."""
@@ -2812,8 +2815,9 @@ class SimulationManager:
 
         Cameras keep EmbodiChain's native CameraGroup implementation. A camera
         attached to an articulation link is created immediately and attached
-        after the physical Spawn scene is prepared. ContactSensor still
-        requires the Default backend scene and therefore prepares physics first.
+        after the physical Spawn scene is prepared. Contact sensors are created
+        after preparation and query contacts through the backend-neutral Spawn
+        Scene API.
 
         Args:
             sensor_cfg (SensorCfg): configuration for the sensor.
@@ -2835,12 +2839,6 @@ class SimulationManager:
                 f"Unsupported sensor type {sensor_type!r}. Supported types: "
                 f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
             )
-        if sensor_type == "ContactSensor" and not self.physics.supports_contact_sensor:
-            raise NotImplementedError(
-                f"ContactSensor is not supported by the {self.physics.name} backend; "
-                "it requires a backend-neutral contact query implementation."
-            )
-
         if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
@@ -2853,14 +2851,20 @@ class SimulationManager:
                 owner=self,
             )
             if sensor_cfg.extrinsics.parent is not None:
-                scene = self._spawn_scene
-                if scene.builder.result is not None:
+                if self._spawn_scene.builder.result is not None:
                     self._attach_camera_parent(sensor)
-                else:
-                    self._pending_sensor_attachments.append(sensor)
+        elif isinstance(sensor_factory, type) and issubclass(
+            sensor_factory, ContactSensor
+        ):
+            self.prepare()
+            sensor = sensor_factory(
+                sensor_cfg,
+                self.device,
+                owner=self,
+            )
         else:
-            # ContactSensor and custom native sensors require a prepared
-            # physics scene; cameras only depend on the pre-created Arenas.
+            # Custom native sensors require a prepared physics scene; cameras
+            # only depend on the pre-created Arenas.
             self.prepare()
             # Preserve custom test/plugin factories whose two-argument
             # constructor predates the manager-owned render context.
@@ -2877,6 +2881,12 @@ class SimulationManager:
             return
         parent_nodes = self._resolve_spawn_sensor_parent_nodes(parent)
         sensor.attach_to_parent_nodes(parent_nodes)
+
+    def _attach_parented_cameras(self) -> None:
+        """Restore parented cameras after a Spawn topology change."""
+        for sensor in self._sensors.values():
+            if isinstance(sensor, Camera) and sensor.cfg.extrinsics.parent is not None:
+                self._attach_camera_parent(sensor)
 
     def _resolve_spawn_sensor_parent_nodes(self, parent: str) -> list[object]:
         """Resolve one canonical articulation link to a render node per Arena.
@@ -2974,8 +2984,6 @@ class SimulationManager:
         """
         if uid in self._sensors:
             sensor = self._sensors.pop(uid)
-            if sensor in self._pending_sensor_attachments:
-                self._pending_sensor_attachments.remove(sensor)
             destroy = getattr(sensor, "destroy", None)
             if callable(destroy):
                 destroy()

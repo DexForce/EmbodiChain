@@ -27,6 +27,12 @@ Spawn topology revision. EmbodiChain registry objects are stable facades:
 `add_*()` returns a declared facade and `prepare()` binds that same object in
 place.
 
+Backend-neutral contact access follows the same ownership boundary.
+`ContactSensor` resolves configured logical UIDs through `SpawnScene.handles()`
+after `prepare()`, then creates a DexSim `Scene.create_contact_query(...)`.
+PhysX user IDs and Newton shape/body IDs are backend-binding details; neither
+the sensor nor `SimulationManager` reads them directly.
+
 The registries cover:
 
 - rigid objects and rigid-object groups;
@@ -61,7 +67,7 @@ EnvCfg.sim_cfg
        → delegate runtime-buffer preparation to the active PhysicsBackend
        → bind declared EmbodiChain facades in place
        → publish bound state through the backend render-sync hook
-       → attach sensors whose parents are now materialized
+       → attach parented cameras for the committed topology revision
   → initialize metadata-dependent robot, action, and render-only resources
   → BaseEnv.step()
        → preprocess/apply action
@@ -177,6 +183,20 @@ simulation time. Facade binding, render publication, and sensor attachment
 remain retryable; already completed declarations are not reconfigured or
 rebound. `init_gpu_physics()` and `finalize_newton_physics()` remain
 compatibility aliases, but new code should call `prepare()`.
+
+`CameraCfg.extrinsics.parent` accepts either an unambiguous articulation link
+name or `"<asset_uid>/<link_name>"`; the resolver returns the corresponding
+public render node in every Arena. Cameras continue to use the manager-owned
+`CameraGroup` plus one native camera view per Arena—attachment only reparents
+those views, and extrinsics are local to the resolved link.
+
+`prepare()` records camera attachment completion by committed Spawn
+`topology_revision`; a new revision reparents all configured cameras to the
+rebuilt render nodes. The revision marker advances only after every attachment
+succeeds, so a partial failure is retried on the next `prepare()`. The camera
+registry remains the only source of attachment intent; there is no separate
+pending list or physical dependency graph. `LightCfg` has no parent-attachment
+contract in EmbodiChain.
 
 Standalone callers must call `prepare()` after their last `add_*()` and before
 reading link/joint metadata, object state, or advancing physics. `BaseEnv`
@@ -581,6 +601,8 @@ where `None` means “leave the source/backend value unchanged.”
   `SimulationManager.flush_cleanup_queue()`.
 - Resolve articulation ancestry through `get_parent_joint_chain()`; keep
   DexSim topology access encapsulated by `Articulation`.
+- Resolve rigid contacts through the Spawn result's `ContactQuery`; do not add
+  a second PhysicsScene/Newton contact path in `SimulationManager` or sensors.
 
 ## Common Failure Modes
 
