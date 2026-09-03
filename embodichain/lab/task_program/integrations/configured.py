@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, TypeVar
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
     _ArticulationLinkSlideLowererFactory,
+    _AxisAlignLowererFactory,
     _CoordinatedTransportLowererFactory,
     _CoordinatedTransportRoute,
     _JointPositionConstraintEvidenceProviderFactory,
@@ -36,6 +37,8 @@ from ._configured_services import (
     _ParkLowererFactory,
     _PourLowererFactory,
     _PushObjectLowererFactory,
+    _RelativePlaceLowererFactory,
+    _RelativePlaceRoute,
 )
 from .catalog import (
     SimulationTaskProgramRegistration,
@@ -61,6 +64,7 @@ from .simulation.handover import (
 )
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
+    AxisAlignOptions,
     CoordinatedPickmentOptions,
     DynamicCollisionMode,
     ExecutionRunnerCfg,
@@ -813,11 +817,12 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "support_frame_planar_contact_offset",
                 "contact_frame_to_eef",
                 "tool_calibrations",
+                "target_axis",
             }
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
-    if kind == "pick_up":
+    if kind in {"axis_align", "pick_up"}:
         config = _mapping(
             value,
             path=path,
@@ -836,6 +841,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "rotate_upright",
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
+                    *(("target_axis",) if kind == "axis_align" else ()),
                 }
             ),
         )
@@ -927,6 +933,19 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 ),
                 dtype=torch.float32,
             ).reshape(4, 4)
+        if kind == "axis_align":
+            if "target_axis" in config:
+                import torch
+
+                kwargs["target_axis"] = torch.tensor(
+                    _finite_tuple(
+                        config["target_axis"],
+                        path=f"{path}.target_axis",
+                        expected_length=3,
+                    ),
+                    dtype=torch.float32,
+                )
+            return AxisAlignOptions(**kwargs)
         return PickUpOptions(**kwargs)
     if kind == "place":
         config = _mapping(
@@ -1887,11 +1906,13 @@ def _decode_registered_lowerer(
     path: str,
 ) -> (
     _ArticulationLinkSlideLowererFactory
+    | _AxisAlignLowererFactory
     | _CoordinatedTransportLowererFactory
     | _MoveHeldObjectLowererFactory
     | _ParkLowererFactory
     | _PourLowererFactory
     | _PushObjectLowererFactory
+    | _RelativePlaceLowererFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
     common = _mapping(
@@ -1909,11 +1930,24 @@ def _decode_registered_lowerer(
                 "reference_entity_id",
                 "relative_pose",
                 "object_id",
+                "object_ids",
                 "routes",
             }
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind == "axis_align":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "object_ids"}),
+        )
+        return _AxisAlignLowererFactory(
+            object_ids=_identifier_tuple(
+                config["object_ids"],
+                path=f"{path}.object_ids",
+            )
+        )
     if kind == "articulation_link_slide":
         config = _mapping(
             value,
@@ -2051,6 +2085,51 @@ def _decode_registered_lowerer(
                 )
             )
         return _CoordinatedTransportLowererFactory(routes=tuple(routes))
+    if kind == "place_relative":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes"}),
+        )
+        routes: list[_RelativePlaceRoute] = []
+        for index, route_value in enumerate(
+            _sequence(config["routes"], path=f"{path}.routes")
+        ):
+            route_path = f"{path}.routes[{index}]"
+            route = _mapping(
+                route_value,
+                path=route_path,
+                required=frozenset(
+                    {
+                        "object_id",
+                        "reference_entity_id",
+                        "relation",
+                        "world_displacement",
+                    }
+                ),
+            )
+            routes.append(
+                _RelativePlaceRoute(
+                    object_id=_identifier(
+                        route["object_id"],
+                        path=f"{route_path}.object_id",
+                    ),
+                    reference_entity_id=_identifier(
+                        route["reference_entity_id"],
+                        path=f"{route_path}.reference_entity_id",
+                    ),
+                    relation=_identifier(
+                        route["relation"],
+                        path=f"{route_path}.relation",
+                    ),
+                    world_displacement=_finite_tuple(
+                        route["world_displacement"],
+                        path=f"{route_path}.world_displacement",
+                        expected_length=3,
+                    ),
+                )
+            )
+        return _RelativePlaceLowererFactory(routes=tuple(routes))
     if kind == "park":
         _mapping(
             value,
@@ -2098,8 +2177,8 @@ def _decode_registered_lowerer(
         return _PushObjectLowererFactory(routes=tuple(routes))
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['articulation_link_slide', 'coordinated_transport', "
-        "'move_held_object', 'park', 'pour', 'push_object']."
+        "['articulation_link_slide', 'axis_align', 'coordinated_transport', "
+        "'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
     )
 
 
@@ -2161,11 +2240,13 @@ class _DecodedRuntimeServices:
     handover_pose_providers: tuple[ConfiguredHandOverPoseProvider, ...] = ()
     registered_semantic_lowerers: tuple[
         _ArticulationLinkSlideLowererFactory
+        | _AxisAlignLowererFactory
         | _CoordinatedTransportLowererFactory
         | _MoveHeldObjectLowererFactory
         | _ParkLowererFactory
         | _PourLowererFactory
-        | _PushObjectLowererFactory,
+        | _PushObjectLowererFactory
+        | _RelativePlaceLowererFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None

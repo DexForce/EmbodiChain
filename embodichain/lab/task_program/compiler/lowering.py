@@ -558,11 +558,13 @@ class RegisteredSemanticLowerer(ABC):
         """Declare retained-object poses used to screen an earlier pickup.
 
         ``None`` keeps the registered call opaque and stops pickup look-ahead.
-        An exact tuple certifies that the call retains ``picked_object`` on its
-        bound ``primary`` resource; each item is an object pose that the
-        selected grasp must make reachable. ``previous_target`` is the latest
-        pose declared earlier in the retained chain. An empty tuple therefore
-        means retained attachment without an additional pose target.
+        Each item in an exact tuple is an object pose that the selected grasp
+        must make reachable. Calls without a release/transfer effect certify
+        that they retain ``picked_object`` on their bound ``primary`` resource;
+        a release/transfer call contributes its terminal target and ends the
+        chain. ``previous_target`` is the latest pose declared earlier in the
+        retained chain. An empty tuple therefore means retained attachment
+        without an additional pose target.
 
         Args:
             call: Registered semantic call being analyzed.
@@ -1702,6 +1704,11 @@ class SemanticCallCompiler:
                         "None."
                     )
                 targets.extend(registered_targets)
+                if lowerer.effect_contract_kind in {
+                    SemanticEffectKind.RELEASE,
+                    SemanticEffectKind.TRANSFER,
+                }:
+                    break
                 continue
             call_object = getattr(call, "object", None)
             if type(call_object) is not SceneObjectRef or (

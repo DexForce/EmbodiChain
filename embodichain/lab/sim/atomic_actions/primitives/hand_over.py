@@ -111,7 +111,7 @@ class HandOverOptions(ActionOptions):
     """Waypoints used while the source hand retreats after release."""
 
     retreat_distance: float = 0.10
-    """Planar clearance travelled away from the receiving grasp before lift."""
+    """Distance retraced opposite the source TCP approach before lifting."""
 
     receive_pick_object_part: Literal["center", "top", "bottom"] = "bottom"
     """Object end selected by the receiving gripper for an existing hold."""
@@ -198,16 +198,21 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
     approaches point toward the object horizontally and tilt downward by 45
     degrees. Otherwise both approaches are world-Z downward.
 
-    The first arm grasps the projected end of ``obj_longest_axis`` nearest its
-    current TCP; the receiving arm grasps the opposite end at the predicted
-    middle object pose. This keeps the two hands from selecting the same object
-    region regardless of whether a long object is standing or lying down.
+    For a free object, the first arm grasps the projected end of
+    ``obj_longest_axis`` nearest its current TCP.  For an existing hold, that
+    source grasp is inherited from the preceding action and the receiving arm
+    uses the configured center, top, or bottom region at the predicted middle
+    object pose.  A center request is filtered to the object's middle third;
+    top and bottom requests let Semantic Call look-ahead reserve the opposite
+    source end.
 
     After each grasp waypoint, subsequent EEF waypoints preserve that grasp
-    rotation and change translation only. With ``release_at_target=True``, the
-    receiving arm additionally moves horizontally at handover height, lowers to
-    the final target pose, and releases. Transfer-only mode stops with the
-    receiving arm recorded as the verified holder for a later Semantic Call.
+    rotation and change translation only.  The released source TCP first
+    retraces its grasp approach before lifting.  With
+    ``release_at_target=True``, the receiving arm additionally moves
+    horizontally at handover height, lowers to the final target pose, and
+    releases. Transfer-only mode stops with the receiving arm recorded as the
+    verified holder for a later Semantic Call.
     """
 
     skill_id: ClassVar[str] = "hand_over"
@@ -545,17 +550,33 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             grasp_xpos=second_grasp_xpos,
             env_mask=(None if options.release_at_target else first_is_handover),
         )
-        terminal_updates = (
-            {
+        first_effect_candidate = HeldObjectState(
+            semantics=goal.semantics,
+            object_to_eef=first_object_to_eef,
+            grasp_xpos=first_grasp_xpos,
+            env_mask=eligible,
+        )
+        second_effect_candidate = HeldObjectState(
+            semantics=goal.semantics,
+            object_to_eef=second_object_to_eef,
+            grasp_xpos=second_grasp_xpos,
+            env_mask=eligible,
+        )
+        if options.release_at_target:
+            terminal_updates = {
                 resources.first.task_state_key: None,
                 resources.second.task_state_key: None,
             }
-            if options.release_at_target
-            else {
+        elif options.arm_selection == "bound":
+            terminal_updates = {
+                resources.first.task_state_key: None,
+                resources.second.task_state_key: second_effect_candidate,
+            }
+        else:
+            terminal_updates = {
                 resources.first.task_state_key: first_candidate,
                 resources.second.task_state_key: second_candidate,
             }
-        )
 
         return self.build_plan(
             request,
@@ -571,8 +592,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             ),
             effect_candidates=StateDelta(
                 held_object_updates={
-                    resources.first.task_state_key: first_candidate,
-                    resources.second.task_state_key: second_candidate,
+                    resources.first.task_state_key: first_effect_candidate,
+                    resources.second.task_state_key: second_effect_candidate,
                 },
             ),
             segment_lengths=segment_lengths,
@@ -649,13 +670,17 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         current_object_pose = torch.bmm(source_eef, pose_inv(source_object_to_eef))
 
-        # The provider target supplies the exchange x/y location and a safe
-        # *absolute* exchange height.  Do not add the lift twice: a configured
-        # provider may already choose a staging height above the table.  The
-        # measured attachment still wins when it is higher than that hint.
-        # Keeping this as an object-frame target (rather than an EEF target)
-        # is important: the Task Program owns only semantic intent while the
-        # Atomic Action owns the physical transfer geometry.
+        source_root = self._root_link_pose(resources.first.arm, context.env_ids)
+        destination_root = self._root_link_pose(
+            resources.second.arm,
+            context.env_ids,
+        )
+        # A continuation transfer derives its shared-workspace coordinate from
+        # the two bound arm roots, just like the unified free-arm route.  The
+        # configured final target supplies only a safe absolute height because
+        # this mode deliberately leaves the destination holding the object.
+        # This keeps both transfer directions reachable without task-owned arm
+        # poses or direction-specific provider constants.
         exchange_pose = current_object_pose.clone()
         target_pose = resolve_batched_pose(
             resolve_pose_goal(
@@ -667,10 +692,14 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             device=self.device,
             name="handover_exchange_pose",
         )
-        exchange_pose[:, :2, 3] = target_pose[:, :2, 3]
         exchange_pose[:, 2, 3] = torch.maximum(
             current_object_pose[:, 2, 3],
             target_pose[:, 2, 3],
+        )
+        exchange_pose = self._middle_object_pose(
+            exchange_pose,
+            source_root,
+            destination_root,
         )
         exchange_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
@@ -679,11 +708,6 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             qpos=destination_start_qpos,
             name=resources.second.arm.control_part,
             to_matrix=True,
-        )
-        source_root = self._root_link_pose(resources.first.arm, context.env_ids)
-        destination_root = self._root_link_pose(
-            resources.second.arm,
-            context.env_ids,
         )
         # Approach diagonally from the receiver's side of the embodiment.  A
         # top-down receiver places two bulky parallel grippers in the same
@@ -704,9 +728,12 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             exchange_pose,
             max_points=self._SURFACE_POINT_COUNT,
         )
+        receive_center_axis: torch.Tensor | None = None
         if options.receive_pick_object_part != "center":
             local_axis = exchange_pose.new_tensor([0.0, 0.0, 1.0])
-            receive_axis = torch.matmul(exchange_pose[:, :3, :3], local_axis)
+            receive_axis: torch.Tensor | None = torch.matmul(
+                exchange_pose[:, :3, :3], local_axis
+            )
             receive_positive = torch.full(
                 (self.num_envs,),
                 options.receive_pick_object_part == "top",
@@ -714,7 +741,12 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 device=self.device,
             )
         else:
-            receive_axis = longest_axis
+            # Ask the grasp service for all collision-free candidates, then
+            # retain only candidates through the object's middle third.  The
+            # grasp-service axis selector can choose only one outer end, so it
+            # cannot represent a true center grasp by itself.
+            receive_axis = None
+            receive_center_axis = longest_axis
             receive_positive = torch.ones(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
@@ -725,6 +757,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             resources.second.hand.target_id,
             obj_longest_axis=receive_axis,
             is_positive_part=receive_positive,
+            center_axis=receive_center_axis,
         )
         destination_pre_grasp = translate_pose_world(
             destination_grasp,
@@ -738,7 +771,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             destination_grasp,
             source_fallback=source_eef,
             destination_fallback=destination_eef,
-            planar_distance=options.retreat_distance,
+            retreat_distance=options.retreat_distance,
             lift_height=options.lift_height,
         )
 
@@ -951,17 +984,17 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         *,
         source_fallback: torch.Tensor,
         destination_fallback: torch.Tensor,
-        planar_distance: float,
+        retreat_distance: float,
         lift_height: float,
     ) -> torch.Tensor:
-        """Clear the receiving grasp laterally before lifting the source TCP.
+        """Retrace the source grasp approach before lifting its open TCP.
 
-        A single upward IK target can produce a joint-space interpolation that
-        first bows inward between the two grippers.  Once the source fingers
-        open, that transient motion can knock the object out of an otherwise
-        valid receiving grasp.  Resolve the horizontal separation axis from
-        the exchange geometry and constrain the planner with intermediate
-        Cartesian waypoints before adding vertical clearance.
+        Moving along the line between the two TCP origins is not generally a
+        valid withdrawal direction: for a top grasp it sweeps the open source
+        fingers sideways through the transferred object.  TCP ``-z`` is the
+        inverse of the source grasp approach, so intermediate Cartesian
+        waypoints on that ray clear the fingers before adding world-up
+        clearance.  Root separation remains only a degenerate-pose fallback.
         """
         if source_exchange_eef.shape != destination_grasp.shape:
             raise ValueError(
@@ -973,8 +1006,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         if destination_fallback.shape != destination_grasp.shape:
             raise ValueError("Destination fallback poses must match grasp poses.")
 
-        direction = source_exchange_eef[:, :3, 3] - destination_grasp[:, :3, 3]
-        direction[:, 2] = 0.0
+        direction = -source_exchange_eef[:, :3, 2]
         fallback = source_fallback[:, :3, 3] - destination_fallback[:, :3, 3]
         fallback[:, 2] = 0.0
         direction_norm = torch.linalg.vector_norm(direction, dim=1, keepdim=True)
@@ -992,33 +1024,14 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             direction, dim=1, keepdim=True
         ).clamp_min(1.0e-6)
 
-        planar_fractions = source_exchange_eef.new_tensor([1.0 / 3.0, 2.0 / 3.0, 1.0])
-        planar = source_exchange_eef[:, None].repeat(1, 3, 1, 1)
-        planar[:, :, :3, 3] += (
-            direction[:, None] * planar_fractions[None, :, None] * planar_distance
+        retreat_fractions = source_exchange_eef.new_tensor([1.0 / 3.0, 2.0 / 3.0, 1.0])
+        retreat = source_exchange_eef[:, None].repeat(1, 3, 1, 1)
+        retreat[:, :, :3, 3] += (
+            direction[:, None] * retreat_fractions[None, :, None] * retreat_distance
         )
-        lifted = planar[:, -1:].repeat(1, 2, 1, 1)
+        lifted = retreat[:, -1:].repeat(1, 2, 1, 1)
         lifted[:, :, 2, 3] += lifted.new_tensor([0.5, 1.0])[None] * lift_height
-        local_clearance = torch.linalg.vector_norm(
-            lifted[:, -1, :2, 3] - destination_grasp[:, :2, 3],
-            dim=1,
-        )
-        fallback_clearance = torch.linalg.vector_norm(
-            source_fallback[:, :2, 3] - destination_fallback[:, :2, 3],
-            dim=1,
-        )
-        # Returning to the pre-transfer source pose is both already reachable
-        # and a better shared-workspace exit when the two starting endpoints
-        # were farther apart than a short local retreat.  Keep the local
-        # lifted endpoint otherwise (for example when transfer began in the
-        # exchange region already).
-        use_source_workspace = fallback_clearance > local_clearance
-        lifted[:, -1] = torch.where(
-            use_source_workspace[:, None, None],
-            source_fallback,
-            lifted[:, -1],
-        )
-        return torch.cat((planar, lifted), dim=1)
+        return torch.cat((retreat, lifted), dim=1)
 
     @staticmethod
     def _same_object(
@@ -1683,10 +1696,11 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         approach_direction: torch.Tensor,
         grasp_target_id: str,
         *,
-        obj_longest_axis: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None,
         is_positive_part: torch.Tensor,
+        center_axis: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Select the lowest-cost grasp on one projected end of the object."""
+        """Select the lowest-cost grasp in the requested projected region."""
         if object_pose.shape != (self.num_envs, 4, 4):
             raise ValueError(
                 "HandOver grasp object_pose must have shape "
@@ -1697,9 +1711,16 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 "HandOver grasp approach_direction must have shape "
                 f"({self.num_envs}, 3)."
             )
-        if obj_longest_axis.shape != (self.num_envs, 3):
+        if obj_longest_axis is not None and obj_longest_axis.shape != (
+            self.num_envs,
+            3,
+        ):
             raise ValueError(
                 f"HandOver obj_longest_axis must have shape ({self.num_envs}, 3)."
+            )
+        if center_axis is not None and center_axis.shape != (self.num_envs, 3):
+            raise ValueError(
+                f"HandOver center_axis must have shape ({self.num_envs}, 3)."
             )
         if is_positive_part.dtype != torch.bool or is_positive_part.shape != (
             self.num_envs,
@@ -1731,6 +1752,14 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         for env_index, (candidates, costs) in enumerate(sampled):
             candidates = candidates.to(device=self.device, dtype=torch.float32)
             costs = costs.to(device=self.device, dtype=torch.float32)
+            if center_axis is not None:
+                candidates, costs = self._center_grasp_candidates(
+                    affordance,
+                    object_pose[env_index],
+                    center_axis[env_index],
+                    candidates,
+                    costs,
+                )
             if candidates.shape[0] == 0 or not torch.isfinite(costs).any():
                 continue
             finite_costs = torch.where(
@@ -1741,6 +1770,38 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             poses[env_index] = candidates[torch.argmin(finite_costs)]
             success[env_index] = True
         return poses, success
+
+    def _center_grasp_candidates(
+        self,
+        affordance: AntipodalAffordance,
+        object_pose: torch.Tensor,
+        center_axis: torch.Tensor,
+        candidates: torch.Tensor,
+        costs: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Keep grasp centers in the middle third of the object's long axis."""
+        vertices = affordance.mesh_vertices
+        if vertices is None:
+            raise ValueError("Center HandOver grasp selection requires mesh vertices.")
+        axis = center_axis.to(device=self.device, dtype=torch.float32)
+        axis_norm = torch.linalg.vector_norm(axis)
+        if not torch.isfinite(axis).all() or axis_norm <= 1.0e-8:
+            raise ValueError("HandOver center_axis must be finite and non-zero.")
+        axis = axis / axis_norm
+        vertices = vertices.to(device=self.device, dtype=torch.float32)
+        world_vertices = (
+            torch.matmul(vertices, object_pose[:3, :3].transpose(0, 1))
+            + object_pose[:3, 3]
+        )
+        projections = torch.matmul(world_vertices, axis)
+        span = projections.max() - projections.min()
+        if not torch.isfinite(span) or span <= 1.0e-8:
+            raise ValueError("Center HandOver grasp selection requires finite extent.")
+        lower = projections.min() + span / 3.0
+        upper = projections.max() - span / 3.0
+        candidate_projections = torch.matmul(candidates[:, :3, 3], axis)
+        middle = (candidate_projections >= lower) & (candidate_projections <= upper)
+        return candidates[middle], costs[middle]
 
     @staticmethod
     def _downward_diagonal_approach_direction(

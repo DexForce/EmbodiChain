@@ -21,9 +21,12 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, replace
 import json
+import math
 from pathlib import Path
 import shutil
 from typing import Any, Final
+
+import numpy as np
 
 from embodichain.lab.task_program.integrations._configured_composition import (
     _load_configured_task_program_deployment,
@@ -46,6 +49,23 @@ _EMBODIMENT_COMPONENTS: Final = {
 # target in the integration builder: the Atomic Action must execute the exact
 # grounded goal and must not silently clamp an unreachable caller request.
 _DUAL_FRANKA_COORDINATED_TRANSPORT_DISTANCE: Final = 0.14
+_DUAL_FRANKA_HANDOVER_CLEARANCE: Final = 0.193
+_DUAL_FRANKA_TABLE_MOUNT_OFFSET: Final = 0.35
+_LATERAL_RELATION_DISTANCE: Final = 0.10
+_FRONT_RELATION_DISTANCE: Final = 0.18
+# Leave enough free space around a placed object's support reference for the
+# configured parallel-jaw fingers to close during a later semantic Pick.  A
+# tall object aligned by E2 needs the larger margin because its side grasp
+# sweeps the finger length through the support plane.  Both routes still come
+# from scene geometry rather than task-owned robot poses.
+_RELATION_CLEARANCE: Final = 0.02
+_AXIS_ALIGNED_RELATION_CLEARANCE: Final = 0.04
+_PLACEMENT_CLEARANCE: Final = 0.01
+_RELATIVE_POSITION_TOLERANCE: Final = 0.04
+_AXIS_ALIGN_CALL_ID: Final = "simulation.axis_align"
+_COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
+_PARK_CALL_ID: Final = "simulation.park"
+_PLACE_RELATIVE_CALL_ID: Final = "simulation.place_relative"
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,12 +166,14 @@ def generate_task_program_bundle(
         / "embodichain_tasks/configs/components/execution_policies"
         / "dual_arm_trajectory_verified.yaml"
     )
-    shutil.copy2(embodiment_source, paths.embodiment)
+    embodiment_payload = load_config(embodiment_source)
+    _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
+    save_config(paths.embodiment, embodiment_payload)
     shutil.copy2(policy_source, paths.execution_policy)
 
     program_id = _program_identifier(selected_graph["task_id"])
     scene_contract = f"{program_id}_scene_v1"
-    save_config(paths.program, _program_payload(selected_graph, program_id))
+    save_config(paths.program, _program_payload(selected_graph, program_id, scene))
     save_config(
         paths.integration,
         _integration_payload(
@@ -183,7 +205,9 @@ def generate_task_program_bundle(
                                 for item in scene.rigid_objects
                             ],
                             "min_steps": 10,
-                            "max_steps": 120,
+                            # Tall generated objects may need several seconds
+                            # to finish a final low-energy roll after import.
+                            "max_steps": 600,
                             "check_interval_steps": 2,
                             "required_stable_checks": 3,
                             "timeout_behavior": "raise",
@@ -231,18 +255,37 @@ def generate_task_program_bundle(
     return selected_graph, paths
 
 
-def _program_payload(graph: SemanticTaskGraph, program_id: str) -> dict[str, Any]:
+def _program_payload(
+    graph: SemanticTaskGraph,
+    program_id: str,
+    scene: Any,
+) -> dict[str, Any]:
+    relative_routes = {
+        (
+            route["object_id"],
+            route["reference_entity_id"],
+            route["relation"],
+        ): route
+        for route in _relative_place_route_payloads(graph, scene)
+    }
     return {
         "program_id": program_id,
         "targets": deepcopy(graph["targets"]),
         "program": {
             "kind": "sequence",
-            "items": [_program_node(node) for node in graph["nodes"]],
+            "items": [
+                _program_node(node, relative_routes=relative_routes)
+                for node in graph["nodes"]
+            ],
         },
     }
 
 
-def _program_node(node: dict[str, Any]) -> dict[str, Any]:
+def _program_node(
+    node: dict[str, Any],
+    *,
+    relative_routes: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
     """Materialize one task node as one canonical runtime segment."""
     call = deepcopy(node["call"])
     segment: dict[str, Any] = {
@@ -258,10 +301,10 @@ def _program_node(node: dict[str, Any]) -> dict[str, Any]:
             if len(parts) != 3 or parts[0] != "inside":
                 raise ValueError(f"Unsupported generated inside affordance {inside!r}.")
         settle_entities.append(str(call["object"]))
-    elif (
-        call["kind"] == "registered"
-        and call["call_id"] == "simulation.coordinated_transport"
-    ):
+    elif call["kind"] == "registered" and call["call_id"] in {
+        _COORDINATED_TRANSPORT_CALL_ID,
+        _PLACE_RELATIVE_CALL_ID,
+    }:
         settle_entities.append(str(call["arguments"]["object"]))
     if settle_entities:
         segment["post"] = [
@@ -275,6 +318,28 @@ def _program_node(node: dict[str, Any]) -> dict[str, Any]:
                 ),
             }
             for settle_entity in dict.fromkeys(settle_entities)
+        ]
+    if call["kind"] == "registered" and call["call_id"] == _PLACE_RELATIVE_CALL_ID:
+        arguments = call["arguments"]
+        selector = (
+            str(arguments["object"]),
+            str(arguments["reference"]),
+            str(arguments["relation"]),
+        )
+        try:
+            route = relative_routes[selector]
+        except KeyError as exc:
+            raise ValueError(
+                f"Relative placement has no generated route for {selector!r}."
+            ) from exc
+        segment["validators"] = [
+            {
+                "kind": "object_near_relative_target",
+                "object": route["object_id"],
+                "reference": route["reference_entity_id"],
+                "displacement": deepcopy(route["world_displacement"]),
+                "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
+            }
         ]
     return segment
 
@@ -290,6 +355,8 @@ def _integration_payload(
     referenced_objects: set[str] = set()
     inside_routes: list[tuple[str, str, str]] = []
     coordinated_routes: list[tuple[str, str]] = []
+    axis_align_objects: set[str] = set()
+    relative_place_routes: set[tuple[str, str, str]] = set()
     has_park_call = False
     for node in graph["nodes"]:
         call = node["call"]
@@ -307,13 +374,26 @@ def _integration_payload(
             inside_routes.append((affordance, container_id, object_id))
         if (
             call["kind"] == "registered"
-            and call["call_id"] == "simulation.coordinated_transport"
+            and call["call_id"] == _COORDINATED_TRANSPORT_CALL_ID
         ):
             arguments = call["arguments"]
             object_id = str(arguments["object"])
             referenced_objects.add(object_id)
             coordinated_routes.append((object_id, str(arguments["target"])))
-        elif call["kind"] == "registered" and call["call_id"] == "simulation.park":
+        elif call["kind"] == "registered" and call["call_id"] == _AXIS_ALIGN_CALL_ID:
+            object_id = str(call["arguments"]["object"])
+            referenced_objects.add(object_id)
+            axis_align_objects.add(object_id)
+        elif (
+            call["kind"] == "registered" and call["call_id"] == _PLACE_RELATIVE_CALL_ID
+        ):
+            arguments = call["arguments"]
+            object_id = str(arguments["object"])
+            reference_id = str(arguments["reference"])
+            relation = str(arguments["relation"])
+            referenced_objects.update((object_id, reference_id))
+            relative_place_routes.add((object_id, reference_id, relation))
+        elif call["kind"] == "registered" and call["call_id"] == _PARK_CALL_ID:
             has_park_call = True
         elif call["kind"] == "registered":
             raise ValueError(
@@ -329,12 +409,13 @@ def _integration_payload(
             )
         affordances: list[dict[str, Any]] = []
         if str(source["role"]) == "rigid_object":
-            affordances.append(
-                {
-                    "entity_id": f"{entity_id}_grasp",
-                    "kind": "antipodal_grasp",
-                }
-            )
+            grasp: dict[str, Any] = {
+                "entity_id": f"{entity_id}_grasp",
+                "kind": "antipodal_grasp",
+            }
+            if entity_id in axis_align_objects:
+                grasp["internal_axis"] = _dominant_local_axis(source)
+            affordances.append(grasp)
         for affordance_id, container_id, object_id in inside_routes:
             if container_id != entity_id:
                 continue
@@ -360,9 +441,9 @@ def _integration_payload(
             }
         )
 
-    lowerer_routes = []
+    coordinated_lowerer_routes = []
     for object_id, target_id in coordinated_routes:
-        lowerer_routes.append(
+        coordinated_lowerer_routes.append(
             {
                 "object_id": object_id,
                 "target_id": target_id,
@@ -373,6 +454,8 @@ def _integration_payload(
                 ],
             }
         )
+    relative_lowerer_routes = _relative_place_route_payloads(graph, scene)
+    handover_position_z = _handover_position_z(scene.table_top_z)
     return {
         "integration_id": f"{program_id}_integration_v1",
         "program_id": program_id,
@@ -390,6 +473,7 @@ def _integration_payload(
                 "pick_up": {"primary": "left"},
                 "place": {"primary": "left"},
                 "hand_over": {"source": "left", "destination": "right"},
+                "axis_align": {"primary": "left"},
                 "coordinated_pickment": {"left": "left", "right": "right"},
             },
             "action_options": {
@@ -411,7 +495,7 @@ def _integration_payload(
                 "hand_over": {
                     "kind": "hand_over",
                     "pre_grasp_distance": 0.08,
-                    "lift_height": 0.08,
+                    "lift_height": 0.04,
                     "hand_interp_steps": 10,
                     "hold_steps": 4,
                     "retreat_steps": 28,
@@ -421,13 +505,37 @@ def _integration_payload(
                     "arm_selection": "bound",
                 },
                 **(
-                    {"simulation.park": {"kind": "move_joints"}}
-                    if has_park_call
+                    {
+                        _AXIS_ALIGN_CALL_ID: {
+                            "kind": "axis_align",
+                            "pre_grasp_distance": 0.15,
+                            "lift_height": 0.16,
+                            "hand_interp_steps": 5,
+                            "grasp_settle_steps": 0,
+                            "grasp_commit_fraction": 1.0,
+                            "target_axis": [0.0, 0.0, 1.0],
+                        }
+                    }
+                    if axis_align_objects
                     else {}
                 ),
                 **(
                     {
-                        "simulation.coordinated_transport": {
+                        _PLACE_RELATIVE_CALL_ID: {
+                            "kind": "place",
+                            "hand_interp_steps": 12,
+                            "release_settle_steps": 60,
+                            "cartesian_waypoint_count": 2,
+                            "preserve_current_object_orientation": True,
+                        }
+                    }
+                    if relative_lowerer_routes
+                    else {}
+                ),
+                **({_PARK_CALL_ID: {"kind": "move_joints"}} if has_park_call else {}),
+                **(
+                    {
+                        _COORDINATED_TRANSPORT_CALL_ID: {
                             "kind": "coordinated_pickment",
                             "object_motion_keyframes": 8,
                             "pre_grasp_distance": 0.10,
@@ -443,7 +551,7 @@ def _integration_payload(
                             "middle_empty_ratio": 0.4,
                         }
                     }
-                    if lowerer_routes
+                    if coordinated_lowerer_routes
                     else {}
                 ),
             },
@@ -471,7 +579,9 @@ def _integration_payload(
                     "pick",
                     "place",
                     "hand_over",
-                    "simulation.coordinated_transport",
+                    _AXIS_ALIGN_CALL_ID,
+                    _COORDINATED_TRANSPORT_CALL_ID,
+                    _PLACE_RELATIVE_CALL_ID,
                 )
                 if any(
                     node["call"].get("kind") == semantic_id
@@ -488,7 +598,7 @@ def _integration_payload(
                     # Keep the exchange above the tray rim.  This is a
                     # semantic object-space staging target; the Atomic Action
                     # derives all arm/EEF poses from it at runtime.
-                    "final_position": [0.0, -0.08, 0.866],
+                    "final_position": [0.0, -0.08, handover_position_z],
                     "final_quaternion_wxyz": [
                         0.7071067812,
                         0.7071067812,
@@ -498,10 +608,30 @@ def _integration_payload(
                 }
             ],
             "registered_semantic_lowerers": [
+                *(
+                    [
+                        {
+                            "kind": "axis_align",
+                            "object_ids": sorted(axis_align_objects),
+                        }
+                    ]
+                    if axis_align_objects
+                    else []
+                ),
                 *([{"kind": "park"}] if has_park_call else []),
                 *(
-                    [{"kind": "coordinated_transport", "routes": lowerer_routes}]
-                    if lowerer_routes
+                    [{"kind": "place_relative", "routes": relative_lowerer_routes}]
+                    if relative_lowerer_routes
+                    else []
+                ),
+                *(
+                    [
+                        {
+                            "kind": "coordinated_transport",
+                            "routes": coordinated_lowerer_routes,
+                        }
+                    ]
+                    if coordinated_lowerer_routes
                     else []
                 ),
             ],
@@ -529,6 +659,330 @@ def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
             "articulation": [deepcopy(value) for value in scene.articulations],
         },
     }
+
+
+def _bind_embodiment_to_scene(
+    embodiment: dict[str, Any],
+    *,
+    table_top_z: float | None,
+) -> None:
+    """Bind the generated deployment's robot mount to the current tabletop."""
+    if table_top_z is None or not math.isfinite(float(table_top_z)):
+        raise ValueError("Dual-Franka deployment requires a derived tabletop height.")
+    simulation = embodiment.get("simulation")
+    if not isinstance(simulation, dict):
+        raise ValueError("Embodiment component has no simulation mapping.")
+    init_pos = simulation.get("init_pos")
+    if not isinstance(init_pos, list) or len(init_pos) != 3:
+        raise ValueError("Embodiment simulation.init_pos must contain three values.")
+    simulation["init_pos"] = [
+        float(init_pos[0]),
+        float(init_pos[1]),
+        float(table_top_z) - _DUAL_FRANKA_TABLE_MOUNT_OFFSET,
+    ]
+
+
+def _relative_place_route_payloads(
+    graph: SemanticTaskGraph,
+    scene: Any,
+) -> list[dict[str, Any]]:
+    """Build the single route projection shared by lowering and validation."""
+    axis_align_objects: set[str] = set()
+    selectors: set[tuple[str, str, str]] = set()
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] != "registered":
+            continue
+        if call["call_id"] == _AXIS_ALIGN_CALL_ID:
+            axis_align_objects.add(str(call["arguments"]["object"]))
+        elif call["call_id"] == _PLACE_RELATIVE_CALL_ID:
+            arguments = call["arguments"]
+            selectors.add(
+                (
+                    str(arguments["object"]),
+                    str(arguments["reference"]),
+                    str(arguments["relation"]),
+                )
+            )
+    scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    return [
+        {
+            "object_id": object_id,
+            "reference_entity_id": reference_id,
+            "relation": relation,
+            "world_displacement": _relative_world_displacement(
+                relation,
+                object_id=object_id,
+                reference_id=reference_id,
+                scene_objects=scene_objects,
+                axis_align_objects=axis_align_objects,
+                table_top_z=scene.table_top_z,
+            ),
+        }
+        for object_id, reference_id, relation in sorted(selectors)
+    ]
+
+
+def _relative_world_displacement(
+    relation: str,
+    *,
+    object_id: str,
+    reference_id: str,
+    scene_objects: dict[str, Any],
+    axis_align_objects: set[str],
+    table_top_z: float | None,
+) -> list[float]:
+    """Derive one world-frame semantic relation from trusted scene geometry."""
+    try:
+        obj = scene_objects[object_id]
+        reference = scene_objects[reference_id]
+    except KeyError as exc:
+        raise ValueError(
+            f"Relative placement references missing scene entity {exc.args[0]!r}."
+        ) from exc
+    if relation in {"on", "above"}:
+        object_bottom, _ = _vertical_mesh_bounds(
+            obj,
+            axis_aligned=object_id in axis_align_objects,
+        )
+        if reference_id == "table":
+            if table_top_z is None:
+                raise ValueError(
+                    "Relative placement on the table requires a derived tabletop height."
+                )
+            reference_position = _position(reference)
+            reference_top = float(table_top_z) - reference_position[2]
+            object_position = _position(obj)
+            x_offset = object_position[0] - reference_position[0]
+            y_offset = object_position[1] - reference_position[1]
+        else:
+            _, reference_top = _vertical_mesh_bounds(
+                reference,
+                axis_aligned=reference_id in axis_align_objects,
+            )
+            x_offset = 0.0
+            y_offset = 0.0
+        return [
+            x_offset,
+            y_offset,
+            reference_top - object_bottom + _PLACEMENT_CLEARANCE,
+        ]
+
+    object_support_z = _support_origin_z(
+        obj,
+        axis_aligned=object_id in axis_align_objects,
+        table_top_z=table_top_z,
+    )
+    reference_support_z = _support_origin_z(
+        reference,
+        axis_aligned=reference_id in axis_align_objects,
+        table_top_z=table_top_z,
+    )
+    displacement = [
+        0.0,
+        0.0,
+        object_support_z - reference_support_z + _PLACEMENT_CLEARANCE,
+    ]
+    if relation == "right_of":
+        displacement[1] = _horizontal_relation_distance(
+            obj,
+            reference,
+            world_axis=1,
+            object_axis_aligned=object_id in axis_align_objects,
+            reference_axis_aligned=reference_id in axis_align_objects,
+            minimum=_LATERAL_RELATION_DISTANCE,
+        )
+    elif relation == "left_of":
+        displacement[1] = -_horizontal_relation_distance(
+            obj,
+            reference,
+            world_axis=1,
+            object_axis_aligned=object_id in axis_align_objects,
+            reference_axis_aligned=reference_id in axis_align_objects,
+            minimum=_LATERAL_RELATION_DISTANCE,
+        )
+    elif relation == "front_of":
+        displacement[0] = -_horizontal_relation_distance(
+            obj,
+            reference,
+            world_axis=0,
+            object_axis_aligned=object_id in axis_align_objects,
+            reference_axis_aligned=reference_id in axis_align_objects,
+            minimum=_FRONT_RELATION_DISTANCE,
+        )
+    elif relation == "behind":
+        displacement[0] = _horizontal_relation_distance(
+            obj,
+            reference,
+            world_axis=0,
+            object_axis_aligned=object_id in axis_align_objects,
+            reference_axis_aligned=reference_id in axis_align_objects,
+            minimum=_FRONT_RELATION_DISTANCE,
+        )
+    else:
+        raise ValueError(f"Unsupported relative placement relation {relation!r}.")
+    return displacement
+
+
+def _horizontal_relation_distance(
+    obj: dict[str, Any],
+    reference: dict[str, Any],
+    *,
+    world_axis: int,
+    object_axis_aligned: bool,
+    reference_axis_aligned: bool,
+    minimum: float,
+) -> float:
+    """Return geometry-aware center separation for one planar relation."""
+    return max(
+        minimum,
+        _horizontal_half_extent(
+            obj,
+            world_axis=world_axis,
+            axis_aligned=object_axis_aligned,
+        )
+        + _horizontal_half_extent(
+            reference,
+            world_axis=world_axis,
+            axis_aligned=reference_axis_aligned,
+        )
+        + (
+            _AXIS_ALIGNED_RELATION_CLEARANCE
+            if object_axis_aligned
+            else _RELATION_CLEARANCE
+        ),
+    )
+
+
+def _horizontal_half_extent(
+    source: dict[str, Any],
+    *,
+    world_axis: int,
+    axis_aligned: bool,
+) -> float:
+    """Return a conservative horizontal half extent in the intended pose."""
+    vertices = _mesh_vertices(source)
+    if axis_aligned:
+        dominant_axis = int(np.argmax(np.ptp(vertices, axis=0)))
+        horizontal_extents = np.delete(np.ptp(vertices, axis=0), dominant_axis)
+        return 0.5 * float(horizontal_extents.max())
+    from scipy.spatial.transform import Rotation
+
+    world_vertices = Rotation.from_euler(
+        "XYZ",
+        source.get("init_rot", [0.0, 0.0, 0.0]),
+        degrees=True,
+    ).apply(vertices)
+    return 0.5 * float(np.ptp(world_vertices[:, world_axis]))
+
+
+def _support_origin_z(
+    source: dict[str, Any],
+    *,
+    axis_aligned: bool,
+    table_top_z: float | None,
+) -> float:
+    """Return the object-origin height when resting on the scene table."""
+    if not axis_aligned:
+        return _position(source)[2]
+    if table_top_z is None:
+        raise ValueError("Axis-aligned placement requires a derived tabletop height.")
+    bottom, _ = _vertical_mesh_bounds(source, axis_aligned=True)
+    return float(table_top_z) - bottom + _PLACEMENT_CLEARANCE
+
+
+def _dominant_local_axis(source: dict[str, Any]) -> list[float]:
+    """Return the unique major mesh axis in DexSim's object-local basis."""
+    vertices = _mesh_vertices(source)
+    extents = np.ptp(vertices, axis=0)
+    order = np.argsort(extents)
+    major = int(order[-1])
+    if extents[major] <= max(float(extents[order[-2]]) * 1.25, 1.0e-6):
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has no unique dominant "
+            "local axis for semantic upright alignment."
+        )
+    axis = [0.0, 0.0, 0.0]
+    axis[major] = 1.0
+    return axis
+
+
+def _vertical_mesh_bounds(
+    source: dict[str, Any],
+    *,
+    axis_aligned: bool,
+) -> tuple[float, float]:
+    """Return bottom/top offsets for the intended object orientation."""
+    vertices = _mesh_vertices(source)
+    if axis_aligned:
+        axis = np.asarray(_dominant_local_axis(source), dtype=np.float64)
+        heights = vertices @ axis
+    else:
+        from scipy.spatial.transform import Rotation
+
+        heights = Rotation.from_euler(
+            "XYZ",
+            source.get("init_rot", [0.0, 0.0, 0.0]),
+            degrees=True,
+        ).apply(vertices)[:, 2]
+    return float(heights.min()), float(heights.max())
+
+
+def _mesh_vertices(source: dict[str, Any]) -> np.ndarray:
+    """Load one configured mesh in DexSim's object-local coordinate basis."""
+    shape = source.get("shape")
+    if not isinstance(shape, dict) or not shape.get("fpath"):
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has no mesh geometry."
+        )
+    try:
+        import trimesh
+
+        loaded = trimesh.load(str(shape["fpath"]), force="scene")
+        geometry = (
+            loaded.to_geometry()
+            if hasattr(loaded, "to_geometry")
+            else loaded.dump(concatenate=True)
+        )
+        vertices = np.asarray(geometry.vertices, dtype=np.float64)
+    except Exception as exc:
+        raise ValueError(
+            f"Could not inspect scene mesh for {source.get('runtime_uid')!r}: {exc}"
+        ) from exc
+    if vertices.ndim != 2 or vertices.shape[1] != 3 or not vertices.size:
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has empty mesh geometry."
+        )
+    # DexSim converts glTF's Y-up vertices into its Z-up object-local basis.
+    result = np.column_stack((vertices[:, 0], -vertices[:, 2], vertices[:, 1]))
+    scale = np.asarray(source.get("body_scale", [1.0, 1.0, 1.0]), dtype=np.float64)
+    if scale.shape != (3,) or not np.isfinite(scale).all():
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has invalid body_scale."
+        )
+    return result * scale
+
+
+def _position(source: dict[str, Any]) -> tuple[float, float, float]:
+    """Return one finite source position."""
+    value = source.get("init_pos")
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has no three-value init_pos."
+        )
+    result = tuple(float(item) for item in value)
+    if not all(math.isfinite(item) for item in result):
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has invalid init_pos."
+        )
+    return result
+
+
+def _handover_position_z(table_top_z: float | None) -> float:
+    """Place the dual-arm exchange at a scene-relative reachable clearance."""
+    if table_top_z is None or not math.isfinite(float(table_top_z)):
+        raise ValueError("Hand-over grounding requires a derived tabletop height.")
+    return float(table_top_z) + _DUAL_FRANKA_HANDOVER_CLEARANCE
 
 
 def _translation_pose(x: float, y: float, z: float) -> list[float]:

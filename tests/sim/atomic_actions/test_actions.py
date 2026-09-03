@@ -1866,6 +1866,7 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
     torch.testing.assert_close(held.grasp_xpos, solved_poses[-1])
     assert context.task is original_task
     assert plan.scene_dependencies == ("target",)
+    assert plan.scene_dependency_monitor_until == {"target": plan.segments[0].stop}
     final_object_rotation = solved_poses[-1][:, :3, :3]
     final_world_axis = torch.matmul(
         final_object_rotation,
@@ -4199,6 +4200,7 @@ def test_handover_can_end_with_receiving_resource_holding_object(
         skill_options=HandOverOptions(
             hand_interp_steps=2,
             release_at_target=False,
+            arm_selection="bound",
         ),
     )
     context = _handover_context(object_pose)
@@ -4218,10 +4220,16 @@ def test_handover_can_end_with_receiving_resource_holding_object(
         context.task,
         torch.ones(NUM_ENVS, dtype=torch.bool),
     )
+    assert plan.expected_effects.held_object_updates["left_arm"] is None
     assert projected.get_held_object("left_arm") is None
     received = projected.get_held_object("right_arm")
     assert isinstance(received, HeldObjectState)
     assert received.env_mask is not None and received.env_mask.tolist() == [True, True]
+    assert all(
+        candidate.env_mask is not None and candidate.env_mask.tolist() == [True, True]
+        for candidate in plan.effect_candidates.held_object_updates.values()
+        if isinstance(candidate, HeldObjectState)
+    )
     assert plan.scene_dependency_monitor_until == {
         "handover_object": plan.segment("pickup_close").start
     }
@@ -4230,7 +4238,7 @@ def test_handover_can_end_with_receiving_resource_holding_object(
     assert torch.all(trajectory.positions[:, -1, DUAL_ARM_DOF + 2 :] == 1)
 
 
-def test_handover_existing_hold_uses_absolute_exchange_and_root_approach(
+def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The receiver enters diagonally from its embodiment side."""
@@ -4270,6 +4278,8 @@ def test_handover_existing_hold_uses_absolute_exchange_and_root_approach(
         plan_from_start,
     )
     exchange = torch.eye(4)
+    exchange[0, 3] = 0.6
+    exchange[1, 3] = 0.4
     exchange[2, 3] = 0.05
 
     plan = _plan_action(
@@ -4279,7 +4289,10 @@ def test_handover_existing_hold_uses_absolute_exchange_and_root_approach(
             goal=HandOverGoal(semantics, target_pose=exchange),
             binding=_dual_binding(action, "source", "destination"),
             motion_policy=MotionPolicy(sample_count=60),
-            skill_options=HandOverOptions(release_at_target=False),
+            skill_options=HandOverOptions(
+                release_at_target=False,
+                receive_pick_object_part="center",
+            ),
         ),
         _handover_context(torch.eye(4).repeat(NUM_ENVS, 1, 1), task),
     )
@@ -4289,8 +4302,19 @@ def test_handover_existing_hold_uses_absolute_exchange_and_root_approach(
     component = math.sqrt(0.5)
     expected = torch.tensor([-component, 0.0, -component]).expand(NUM_ENVS, -1)
     torch.testing.assert_close(grasp_call.args[2], expected)
-    # The configured provider owns an absolute safe exchange height.  Existing
-    # hold mode must not add lift_height once more before the transfer.
+    assert grasp_call.kwargs["obj_longest_axis"] is None
+    torch.testing.assert_close(
+        grasp_call.kwargs["center_axis"],
+        torch.tensor([[0.0, 0.0, 1.0]]).expand(NUM_ENVS, -1),
+    )
+    # Root geometry owns the shared-workspace coordinate. The provider's x/y
+    # values are final-delivery hints and cannot bias a transfer-only route.
+    torch.testing.assert_close(
+        planned_targets[0][:, 0, :2, 3],
+        torch.zeros(NUM_ENVS, 2),
+    )
+    # The configured provider still owns the absolute safe exchange height;
+    # existing-hold mode must not add lift_height once more.
     torch.testing.assert_close(
         planned_targets[0][:, 0, 2, 3],
         torch.full((NUM_ENVS,), 0.05),
@@ -4303,6 +4327,43 @@ def test_handover_existing_hold_uses_absolute_exchange_and_root_approach(
         "handover_release",
         "source_retreat",
     ]
+
+
+def test_handover_center_grasp_rejects_lower_cost_outer_candidates() -> None:
+    """Center mode selects the object's middle third, not either end."""
+    action = _bind_action(_dual_motion_generator(), HandOver())
+    vertices = torch.tensor(
+        [
+            [-0.1, -0.1, -1.0],
+            [0.1, -0.1, -1.0],
+            [0.1, 0.1, 1.0],
+            [-0.1, 0.1, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+    affordance = AntipodalAffordance(
+        mesh_vertices=vertices,
+        mesh_triangles=torch.tensor([[0, 1, 2], [0, 2, 3]]),
+    )
+    candidates = torch.eye(4).repeat(3, 1, 1)
+    candidates[:, 2, 3] = torch.tensor([0.8, 0.0, -0.8])
+    costs = torch.tensor([0.0, 1.0, 0.5])
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[(candidates, costs) for _ in range(NUM_ENVS)]
+    )
+
+    poses, success = action._resolve_grasp(
+        affordance,
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        torch.tensor([[1.0, 0.0, -1.0]]).expand(NUM_ENVS, -1),
+        "right_hand",
+        obj_longest_axis=None,
+        is_positive_part=torch.ones(NUM_ENVS, dtype=torch.bool),
+        center_axis=torch.tensor([[0.0, 0.0, 1.0]]).expand(NUM_ENVS, -1),
+    )
+
+    assert success.tolist() == [True, True]
+    torch.testing.assert_close(poses[:, 2, 3], torch.zeros(NUM_ENVS))
 
 
 def test_handover_horizontal_mode_uses_downward_opposite_end_grasps() -> None:
@@ -4565,10 +4626,11 @@ def test_handover_requires_antipodal_affordance_and_valid_options() -> None:
         HandOverOptions(retreat_distance=float("nan"))
 
 
-def test_handover_source_retreat_clears_receiver_before_lifting() -> None:
+def test_handover_source_retreat_retraces_grasp_before_lifting() -> None:
     source = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     source[:, 1, 3] = -0.06
     source[:, 2, 3] = 0.90
+    source[:, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
     destination = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     destination[:, 2, 3] = 0.88
 
@@ -4577,13 +4639,13 @@ def test_handover_source_retreat_clears_receiver_before_lifting() -> None:
         destination,
         source_fallback=source,
         destination_fallback=destination,
-        planar_distance=0.12,
+        retreat_distance=0.12,
         lift_height=0.08,
     )
 
     assert waypoints.shape == (NUM_ENVS, 5, 4, 4)
-    expected_y = torch.tensor([-0.10, -0.14, -0.18, -0.18, -0.18])
-    expected_z = torch.tensor([0.90, 0.90, 0.90, 0.94, 0.98])
+    expected_y = torch.full((5,), -0.06)
+    expected_z = torch.tensor([0.94, 0.98, 1.02, 1.06, 1.10])
     torch.testing.assert_close(
         waypoints[:, :, 1, 3],
         expected_y.expand(NUM_ENVS, -1),
@@ -4598,9 +4660,10 @@ def test_handover_source_retreat_clears_receiver_before_lifting() -> None:
     )
 
 
-def test_handover_source_retreat_returns_to_a_safer_source_workspace() -> None:
+def test_handover_source_retreat_does_not_sweep_toward_receiver() -> None:
     source_exchange = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     source_exchange[:, 1, 3] = -0.06
+    source_exchange[:, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
     destination_grasp = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     source_start = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     source_start[:, 1, 3] = -0.5
@@ -4612,11 +4675,16 @@ def test_handover_source_retreat_returns_to_a_safer_source_workspace() -> None:
         destination_grasp,
         source_fallback=source_start,
         destination_fallback=destination_start,
-        planar_distance=0.12,
+        retreat_distance=0.12,
         lift_height=0.08,
     )
 
-    torch.testing.assert_close(waypoints[:, -1], source_start)
+    torch.testing.assert_close(
+        waypoints[:, -1, :2, 3],
+        torch.tensor([[0.0, -0.06]]).expand(NUM_ENVS, -1),
+    )
+    torch.testing.assert_close(waypoints[:, -1, 2, 3], torch.full((NUM_ENVS,), 0.20))
+    torch.testing.assert_close(waypoints[:, -1, :3, :3], source_exchange[:, :3, :3])
 
 
 @pytest.mark.parametrize(

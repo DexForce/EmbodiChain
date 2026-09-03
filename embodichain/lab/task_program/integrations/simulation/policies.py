@@ -45,6 +45,7 @@ from embodichain.lab.gym.envs.settling import (
 
 from embodichain.lab.task_program.compiler import (
     CompiledArticulationJointPositionValidator,
+    CompiledObjectNearRelativeTargetValidator,
     CompiledObjectNearTargetValidator,
     CompiledPostPolicy,
     CompiledTaskProgramSegment,
@@ -404,6 +405,7 @@ class SimulationSegmentPolicyPort:
         """Validate one validator against static bindings without observation."""
         if type(validator) not in (
             CompiledObjectNearTargetValidator,
+            CompiledObjectNearRelativeTargetValidator,
             CompiledArticulationJointPositionValidator,
         ):
             raise TypeError("validator must be an exact compiled validator.")
@@ -419,6 +421,22 @@ class SimulationSegmentPolicyPort:
                     f"Canonical validator object {entity_id!r} has no explicit "
                     "rigid-object binding."
                 )
+            return
+
+        if type(validator) is CompiledObjectNearRelativeTargetValidator:
+            if validator.cfg.kind != "object_near_relative_target":
+                raise ValueError(
+                    f"Unsupported compiled validator kind {validator.cfg.kind!r}."
+                )
+            for role, entity_id in (
+                ("object", validator.object.entity_id),
+                ("reference", validator.reference.entity_id),
+            ):
+                if entity_id not in self._rigid_objects:
+                    raise KeyError(
+                        f"Canonical validator {role} {entity_id!r} has no explicit "
+                        "rigid-object binding."
+                    )
             return
 
         if validator.cfg.kind != "articulation_joint_position":
@@ -451,6 +469,8 @@ class SimulationSegmentPolicyPort:
         self.validate_validator(validator, segment=segment)
         if type(validator) is CompiledArticulationJointPositionValidator:
             return self._validate_articulation_joint_position(validator)
+        if type(validator) is CompiledObjectNearRelativeTargetValidator:
+            return self._validate_object_near_relative_target(validator)
         if type(validator) is not CompiledObjectNearTargetValidator:
             raise TypeError("validator must be an exact compiled validator.")
         entity_id = validator.object.entity_id
@@ -495,6 +515,7 @@ class SimulationSegmentPolicyPort:
         """Return an owned JSON-safe trace for one completed validator."""
         if type(validator) not in (
             CompiledObjectNearTargetValidator,
+            CompiledObjectNearRelativeTargetValidator,
             CompiledArticulationJointPositionValidator,
         ):
             raise TypeError("validator must be an exact compiled validator.")
@@ -503,6 +524,45 @@ class SimulationSegmentPolicyPort:
         if metadata is None:
             raise RuntimeError("Validator metadata is unavailable before validation.")
         return deepcopy(metadata)
+
+    def _validate_object_near_relative_target(
+        self,
+        validator: CompiledObjectNearRelativeTargetValidator,
+    ) -> torch.Tensor:
+        """Compare one object with a fresh reference pose plus displacement."""
+        object_id = validator.object.entity_id
+        reference_id = validator.reference.entity_id
+        object_pose = self._read_pose(
+            self._rigid_objects[object_id],
+            entity_id=object_id,
+        )
+        reference_pose = self._read_pose(
+            self._rigid_objects[reference_id],
+            entity_id=reference_id,
+        )
+        object_position = object_pose[:, :3, 3]
+        reference_position = reference_pose[:, :3, 3]
+        displacement = object_position.new_tensor(validator.cfg.displacement)
+        target_position = reference_position + displacement
+        error = torch.linalg.vector_norm(object_position - target_position, dim=1)
+        accepted = torch.isfinite(error) & (
+            error <= float(validator.cfg.position_tolerance)
+        )
+        self._validator_results[id(validator)] = {
+            "kind": validator.cfg.kind,
+            "object_id": object_id,
+            "reference_id": reference_id,
+            "source_path": list(validator.source_path),
+            "displacement": list(validator.cfg.displacement),
+            "position_tolerance": float(validator.cfg.position_tolerance),
+            "env_ids": self._env_ids.detach().cpu().tolist(),
+            "object_position": object_position.detach().cpu().tolist(),
+            "reference_position": reference_position.detach().cpu().tolist(),
+            "target_position": target_position.detach().cpu().tolist(),
+            "position_error": error.detach().cpu().tolist(),
+            "accepted_mask": accepted.detach().cpu().tolist(),
+        }
+        return accepted
 
     def _validate_articulation_joint_position(
         self,

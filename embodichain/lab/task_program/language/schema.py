@@ -440,6 +440,40 @@ class ObjectNearTargetValidatorCfg:
 
 
 @configclass
+class ObjectNearRelativeTargetValidatorCfg:
+    """Validate an object's position relative to a freshly observed object."""
+
+    object: str = MISSING
+    reference: str = MISSING
+    displacement: tuple[float, float, float] = MISSING
+    position_tolerance: float = 0.03
+    kind: str = "object_near_relative_target"
+
+    def __post_init__(self) -> None:
+        """Validate scene identities, displacement, and tolerance."""
+        _validate_identifier(self.object, field_name="object")
+        _validate_identifier(self.reference, field_name="reference")
+        if type(self.displacement) not in (list, tuple) or len(self.displacement) != 3:
+            raise ValueError("displacement must contain exactly three finite numbers.")
+        self.displacement = tuple(  # type: ignore[assignment]
+            _validate_number(value, field_name=f"displacement[{index}]")
+            for index, value in enumerate(self.displacement)
+        )
+        tolerance = _validate_number(
+            self.position_tolerance,
+            field_name="position_tolerance",
+        )
+        if tolerance <= 0.0:
+            raise ValueError("position_tolerance must be positive.")
+        self.position_tolerance = tolerance
+        _validate_kind(
+            self.kind,
+            expected="object_near_relative_target",
+            field_name="kind",
+        )
+
+
+@configclass
 class ArticulationJointPositionValidatorCfg:
     """Validate one articulation joint against an inclusive position interval."""
 
@@ -483,7 +517,9 @@ class ArticulationJointPositionValidatorCfg:
 
 
 ValidatorCfg: TypeAlias = (
-    ObjectNearTargetValidatorCfg | ArticulationJointPositionValidatorCfg
+    ObjectNearTargetValidatorCfg
+    | ObjectNearRelativeTargetValidatorCfg
+    | ArticulationJointPositionValidatorCfg
 )
 
 
@@ -623,6 +659,7 @@ _SEMANTIC_CALL_TYPES = (
 _POST_POLICY_TYPES = (WaitStablePostCfg,)
 _VALIDATOR_TYPES = (
     ObjectNearTargetValidatorCfg,
+    ObjectNearRelativeTargetValidatorCfg,
     ArticulationJointPositionValidatorCfg,
 )
 _PROGRAM_NODE_TYPES = (

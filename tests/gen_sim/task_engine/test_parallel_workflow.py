@@ -798,7 +798,7 @@ def test_unsupported_semantic_draft_retains_completed_parallel_scene(
     tmp_path: Path,
 ) -> None:
     candidates = _candidate_set()
-    candidates["candidates"][0]["draft"]["steps"][0]["task_type"] = "E2"
+    candidates["candidates"][0]["draft"]["steps"][0]["task_type"] = "E3"
     scene = _SceneBackend(_selection(candidates))
     workflow = TaskEngineWorkflow(
         task_agent=_TaskAgent(candidates),

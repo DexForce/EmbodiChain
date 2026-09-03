@@ -29,7 +29,9 @@ from .semantic_graph import SemanticTaskGraph, validate_semantic_task_graph
 __all__ = ["SemanticTaskPlanner", "UnsupportedSemanticCapabilityError"]
 
 _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
+_AXIS_ALIGN_CALL_ID: Final = "simulation.axis_align"
 _PARK_CALL_ID: Final = "simulation.park"
+_PLACE_RELATIVE_CALL_ID: Final = "simulation.place_relative"
 
 
 class UnsupportedSemanticCapabilityError(ValueError):
@@ -37,30 +39,7 @@ class UnsupportedSemanticCapabilityError(ValueError):
 
 
 class SemanticTaskPlanner:
-    """Lower Task Engine ontology steps into one immutable semantic task DAG.
-
-    Args:
-        lateral_relation_distance: World-frame offset used for ``right_of``.
-        front_relation_distance: World-frame offset used for ``front_of``.
-
-    Raises:
-        ValueError: If either relation distance is not positive.
-    """
-
-    def __init__(
-        self,
-        *,
-        lateral_relation_distance: float = 0.10,
-        front_relation_distance: float = 0.18,
-    ) -> None:
-        for field_name, value in (
-            ("lateral_relation_distance", lateral_relation_distance),
-            ("front_relation_distance", front_relation_distance),
-        ):
-            if not isinstance(value, (int, float)) or value <= 0:
-                raise ValueError(f"{field_name} must be positive.")
-        self.lateral_relation_distance = float(lateral_relation_distance)
-        self.front_relation_distance = float(front_relation_distance)
+    """Lower Task Engine ontology steps into one immutable semantic task DAG."""
 
     def plan(
         self,
@@ -117,7 +96,35 @@ class SemanticTaskPlanner:
             )
             calls: list[dict[str, Any]]
             cleanup_resources: tuple[str, ...] = ()
-            if task_type == "E4":
+            if task_type == "E2":
+                if str(step.get("orientation_goal")) != "upright":
+                    raise UnsupportedSemanticCapabilityError(
+                        f"Step {step_id!r} E2 currently requires "
+                        "orientation_goal='upright'."
+                    )
+                requested = str(step.get("required_arm", "auto"))
+                resource = (
+                    self._nearest_resource(object_id, objects)
+                    if requested == "auto"
+                    else _resource(requested, field="required_arm")
+                )
+                calls = [
+                    {
+                        "kind": "registered",
+                        "call_id": _AXIS_ALIGN_CALL_ID,
+                        "arguments": {"object": object_id},
+                        "resources": {"primary": resource},
+                    },
+                    _relative_place_call(
+                        object_id,
+                        reference_id="table",
+                        relation="on",
+                        resource=resource,
+                    ),
+                ]
+                held_by.pop(object_id, None)
+                cleanup_resources = (resource,)
+            elif task_type == "E4":
                 source = _resource(step.get("transfer_arm"), field="transfer_arm")
                 destination = _resource(step.get("receive_arm"), field="receive_arm")
                 calls = [
@@ -133,7 +140,12 @@ class SemanticTaskPlanner:
                     },
                 ]
                 held_by[object_id] = destination
-                cleanup_resources = (source,)
+                # HandOver already clears and retreats the source participant.
+                # Parking it as a separate call delays the receiver's next
+                # operation while a friction-held object can drift, and also
+                # leaves the following Place with a stale attachment transform.
+                # Defer parking until that resource next owns explicit work.
+                cleanup_resources = ()
             elif task_type == "E1":
                 target_id = self._resolve_step_entity(
                     step,
@@ -167,36 +179,39 @@ class SemanticTaskPlanner:
                     placement: dict[str, Any] = {
                         "inside": _inside_affordance(target_id, object_id)
                     }
-                elif relation in {"right_of", "front_of"}:
-                    target_name = f"{step_id}_{relation}_target"
-                    targets[target_name] = {
-                        "kind": "cyclic_pose",
-                        "values": [
-                            {
-                                "position": self._relative_target_position(
-                                    relation,
-                                    object_id=object_id,
-                                    target_id=target_id,
-                                    objects=objects,
-                                ),
-                                "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
-                            }
-                        ],
-                    }
-                    placement = {"at": {"kind": "target_ref", "target": target_name}}
+                elif relation in {
+                    "above",
+                    "behind",
+                    "front_of",
+                    "left_of",
+                    "on",
+                    "right_of",
+                }:
+                    calls.append(
+                        _relative_place_call(
+                            object_id,
+                            reference_id=target_id,
+                            relation=relation,
+                            resource=resource,
+                        )
+                    )
+                    held_by.pop(object_id, None)
+                    cleanup_resources = (resource,)
+                    placement = None
                 else:
                     raise UnsupportedSemanticCapabilityError(
                         f"Step {step_id!r} E1 relation {relation!r} has no canonical "
                         "Semantic Call route."
                     )
-                calls.append(
-                    {
-                        "kind": "place",
-                        "object": object_id,
-                        **placement,
-                        "resources": {"primary": resource},
-                    }
-                )
+                if placement is not None:
+                    calls.append(
+                        {
+                            "kind": "place",
+                            "object": object_id,
+                            **placement,
+                            "resources": {"primary": resource},
+                        }
+                    )
                 held_by.pop(object_id, None)
                 cleanup_resources = (resource,)
             elif task_type == "E5":
@@ -322,39 +337,6 @@ class SemanticTaskPlanner:
         # base is on +Y and its left arm base is on -Y.
         return "right" if float(position[1]) >= 0.0 else "left"
 
-    def _relative_target_position(
-        self,
-        relation: str,
-        *,
-        object_id: str,
-        target_id: str,
-        objects: Mapping[str, Mapping[str, Any]],
-    ) -> list[float]:
-        target = objects.get(target_id)
-        obj = objects.get(object_id)
-        if target is None or obj is None:
-            raise ValueError(
-                f"Scene metadata is missing relation participants {object_id!r}, {target_id!r}."
-            )
-        target_position = target.get("init_pos")
-        object_position = obj.get("init_pos")
-        if (
-            not isinstance(target_position, Sequence)
-            or len(target_position) != 3
-            or not isinstance(object_position, Sequence)
-            or len(object_position) != 3
-        ):
-            raise ValueError(
-                "Relation participants require three-value init_pos fields."
-            )
-        result = [float(value) for value in target_position]
-        result[2] = float(object_position[2])
-        if relation == "right_of":
-            result[1] += self.lateral_relation_distance
-        else:
-            result[0] -= self.front_relation_distance
-        return result
-
 
 def _resource(value: Any, *, field: str) -> str:
     normalized = str(value).strip()
@@ -377,6 +359,26 @@ def _park_call(resource: str) -> dict[str, Any]:
         "kind": "registered",
         "call_id": _PARK_CALL_ID,
         "arguments": {},
+        "resources": {"primary": resource},
+    }
+
+
+def _relative_place_call(
+    object_id: str,
+    *,
+    reference_id: str,
+    relation: str,
+    resource: str,
+) -> dict[str, Any]:
+    """Build one provider-free object relation for JIT runtime grounding."""
+    return {
+        "kind": "registered",
+        "call_id": _PLACE_RELATIVE_CALL_ID,
+        "arguments": {
+            "object": object_id,
+            "reference": reference_id,
+            "relation": relation,
+        },
         "resources": {"primary": resource},
     }
 

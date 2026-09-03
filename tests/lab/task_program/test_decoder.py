@@ -29,6 +29,7 @@ from embodichain.lab.task_program import (
     TaskProgramIntegrationCfg,
     TaskProgramValidationError,
     HandOverCfg,
+    ObjectNearRelativeTargetValidatorCfg,
     PickCfg,
     PlaceCfg,
     RegisteredSemanticCallCfg,
@@ -164,6 +165,30 @@ def test_decoder_supports_articulation_joint_position_validator() -> None:
     assert validator.joint == "cabinet_to_drawer"
     assert validator.minimum_position == pytest.approx(0.10)
     assert validator.maximum_position is None
+
+
+def test_decoder_supports_relative_object_validator() -> None:
+    """Relative validators own only scene identities and a finite offset."""
+    data = _program_data()
+    segment = data["program"]["body"]
+    segment["validators"] = [
+        {
+            "kind": "object_near_relative_target",
+            "object": "cube",
+            "reference": "tray_top",
+            "displacement": [0.0, -0.1, 0.04],
+            "position_tolerance": 0.05,
+        }
+    ]
+
+    config = decode_task_program(data)
+
+    validator = config.program.body.validators[0]
+    assert type(validator) is ObjectNearRelativeTargetValidatorCfg
+    assert validator.object == "cube"
+    assert validator.reference == "tray_top"
+    assert validator.displacement == pytest.approx((0.0, -0.1, 0.04))
+    assert validator.position_tolerance == pytest.approx(0.05)
 
 
 def test_decoder_supports_every_builtin_semantic_call() -> None:

@@ -19,8 +19,10 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+import embodichain.gen_sim.task_engine.task_program_bundle as task_program_bundle
 from embodichain.gen_sim.task_engine._bundle_runner import (
     _semantic_success_by_env,
     _verify_program_projection,
@@ -30,6 +32,7 @@ from embodichain.gen_sim.task_engine.semantic_graph import (
     validate_semantic_task_graph,
 )
 from embodichain.gen_sim.task_engine.task_program_bundle import (
+    _bind_embodiment_to_scene,
     _program_node,
     generate_task_program_bundle,
 )
@@ -168,7 +171,7 @@ def test_inside_place_waits_for_released_object() -> None:
         },
     }
 
-    program_node = _program_node(node)
+    program_node = _program_node(node, relative_routes={})
 
     assert program_node["post"] == [
         {
@@ -176,6 +179,43 @@ def test_inside_place_waits_for_released_object() -> None:
             "entity": "cube",
             "preset": "contained_rigid_object",
         },
+    ]
+
+
+def test_relative_place_waits_and_validates_fresh_reference_pose() -> None:
+    node = {
+        "id": "place_cube_left_of_tray",
+        "call": {
+            "kind": "registered",
+            "call_id": "simulation.place_relative",
+            "arguments": {
+                "object": "cube",
+                "reference": "tray",
+                "relation": "left_of",
+            },
+        },
+    }
+    route = {
+        "object_id": "cube",
+        "reference_entity_id": "tray",
+        "relation": "left_of",
+        "world_displacement": [0.0, -0.12, 0.04],
+    }
+
+    program_node = _program_node(
+        node,
+        relative_routes={("cube", "tray", "left_of"): route},
+    )
+
+    assert program_node["post"][0]["kind"] == "wait_stable"
+    assert program_node["validators"] == [
+        {
+            "kind": "object_near_relative_target",
+            "object": "cube",
+            "reference": "tray",
+            "displacement": [0.0, -0.12, 0.04],
+            "position_tolerance": 0.04,
+        }
     ]
 
 
@@ -187,3 +227,58 @@ def test_phase_one_bundle_rejects_unsupported_robot_profile(tmp_path: Path) -> N
             tmp_path,
             robot_profile="franka",
         )
+
+
+def test_dual_franka_mount_is_bound_to_the_scene_table() -> None:
+    embodiment = {"simulation": {"init_pos": [-0.7, 0.0, 0.322894]}}
+
+    _bind_embodiment_to_scene(embodiment, table_top_z=1.054499)
+
+    assert embodiment["simulation"]["init_pos"] == pytest.approx([-0.7, 0.0, 0.704499])
+
+
+def test_horizontal_relation_distance_keeps_gripper_clearance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scene extents retain free space for a later parallel-jaw Pick."""
+    meshes = {
+        "can": np.asarray(
+            [
+                [-0.03, -0.03, -0.06],
+                [0.03, 0.03, 0.06],
+            ]
+        ),
+        "notebook": np.asarray(
+            [
+                [-0.09, -0.07, -0.01],
+                [0.09, 0.07, 0.01],
+            ]
+        ),
+    }
+    monkeypatch.setattr(
+        task_program_bundle,
+        "_mesh_vertices",
+        lambda source: meshes[source["runtime_uid"]],
+    )
+
+    distance = task_program_bundle._horizontal_relation_distance(
+        {"runtime_uid": "can"},
+        {"runtime_uid": "notebook", "init_rot": [0.0, 0.0, 0.0]},
+        world_axis=1,
+        object_axis_aligned=True,
+        reference_axis_aligned=False,
+        minimum=0.10,
+    )
+
+    assert distance == pytest.approx(0.14)
+
+    ordinary_distance = task_program_bundle._horizontal_relation_distance(
+        {"runtime_uid": "can", "init_rot": [0.0, 0.0, 0.0]},
+        {"runtime_uid": "notebook", "init_rot": [0.0, 0.0, 0.0]},
+        world_axis=1,
+        object_axis_aligned=False,
+        reference_axis_aligned=False,
+        minimum=0.10,
+    )
+
+    assert ordinary_distance == pytest.approx(0.12)

@@ -123,13 +123,19 @@ class _Simulation:
     def __init__(
         self,
         entity: _RigidObject | None = None,
+        reference: _RigidObject | None = None,
         articulation: _Articulation | None = None,
     ) -> None:
         self.entity = entity
+        self.reference = reference
         self.articulation = articulation
 
     def get_rigid_object(self, uid: str) -> _RigidObject | None:
-        return self.entity if uid == "native_cube" else None
+        if uid == "native_cube":
+            return self.entity
+        if uid == "native_reference":
+            return self.reference
+        return None
 
     def get_articulation(self, uid: str) -> _Articulation | None:
         return self.articulation if uid == "native_drawer" else None
@@ -232,6 +238,52 @@ def _compiled_articulation_segment():
         (
             SceneEntityRegistration(
                 ref=SceneArticulationRef("drawer"),
+                state_provider=_StaticStateProvider(),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
+        decode_task_program(payload)
+    )
+    return next(compiled.iter_segments())
+
+
+def _compiled_relative_segment():
+    """Compile one validator with two late-observed object identities."""
+    payload = {
+        "program_id": "relative_policy_test",
+        "integration": {
+            "robot_profile": "test_robot",
+            "scene_registry": "test_scene",
+            "runtime_preset": "safe",
+        },
+        "targets": {},
+        "program": {
+            "kind": "segment",
+            "name": "place_relative",
+            "steps": {
+                "kind": "invoke",
+                "call": {"kind": "pick", "object": "cube"},
+            },
+            "validators": [
+                {
+                    "kind": "object_near_relative_target",
+                    "object": "cube",
+                    "reference": "reference",
+                    "displacement": [0.0, -0.1, 0.04],
+                    "position_tolerance": 0.05,
+                }
+            ],
+        },
+    }
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneObjectRef("cube"),
+                state_provider=_StaticStateProvider(),
+            ),
+            SceneEntityRegistration(
+                ref=SceneObjectRef("reference"),
                 state_provider=_StaticStateProvider(),
             ),
         )
@@ -661,6 +713,45 @@ def test_object_near_target_validates_rows_independently() -> None:
     assert metadata["position_tolerance"] == 0.05
     assert metadata["position_error"] == pytest.approx([0.01, 0.20])
     assert metadata["accepted_mask"] == [True, False]
+
+
+def test_object_near_relative_target_observes_both_rows_independently() -> None:
+    """The validator derives each target from the current reference pose."""
+    segment = _compiled_relative_segment()
+    obj = _RigidObject(torch.tensor([[0.01, -0.1, 0.04], [0.20, -0.1, 0.04]]))
+    reference = _RigidObject(torch.tensor([[0.0, 0.0, 0.0], [0.10, 0.0, 0.0]]))
+    port = SimulationSegmentPolicyPort(
+        _Simulation(entity=obj, reference=reference),
+        _Robot(torch.zeros(2, 2)),
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            rigid_objects=(
+                SimulationRigidObjectBinding(
+                    entity_id="cube",
+                    simulation_uid="native_cube",
+                ),
+                SimulationRigidObjectBinding(
+                    entity_id="reference",
+                    simulation_uid="native_reference",
+                ),
+            ),
+        ),
+        step_dt=0.04,
+    )
+
+    validator = segment.validators[0]
+    result = port.validate(validator, segment=segment)
+    metadata = port.validator_metadata(validator, segment=segment)
+
+    assert result.tolist() == [True, False]
+    assert metadata["kind"] == "object_near_relative_target"
+    assert metadata["object_id"] == "cube"
+    assert metadata["reference_id"] == "reference"
+    assert metadata["displacement"] == pytest.approx([0.0, -0.1, 0.04])
+    assert metadata["position_error"] == pytest.approx([0.01, 0.10])
+    assert metadata["accepted_mask"] == [True, False]
+    assert obj.pose_reads == 1
+    assert reference.pose_reads == 1
 
 
 def test_articulation_joint_position_validates_measured_rows() -> None:

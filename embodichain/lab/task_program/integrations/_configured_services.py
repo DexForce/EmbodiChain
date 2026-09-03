@@ -34,7 +34,10 @@ from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
     Affordance,
     AtomicActionEngine,
+    AxisAlign,
     AxisAlignAffordance,
+    AxisAlignGoal,
+    AxisAlignOptions,
     CoordinatedPickGoal,
     CoordinatedPickment,
     CoordinatedPickmentOptions,
@@ -46,6 +49,9 @@ from embodichain.lab.sim.atomic_actions import (
     MoveJointsOptions,
     ObjectSemantics,
     PARK_COMMAND,
+    Place,
+    PlaceGoal,
+    PlaceOptions,
     PlanningContext,
     Pour,
     PourGoal,
@@ -97,9 +103,11 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _ARTICULATION_LINK_SLIDE_CALL_ID = "simulation.articulation_link_slide"
+_AXIS_ALIGN_CALL_ID = "simulation.axis_align"
 _COORDINATED_TRANSPORT_CALL_ID = "simulation.coordinated_transport"
 _MOVE_HELD_OBJECT_CALL_ID = "simulation.move_held_object"
 _PARK_CALL_ID = "simulation.park"
+_PLACE_RELATIVE_CALL_ID = "simulation.place_relative"
 _POUR_CALL_ID = "simulation.pour"
 _PUSH_OBJECT_CALL_ID = "simulation.push_object"
 _SLIDE_TARGET_POSE_MODES = frozenset({"live", "snapshot"})
@@ -209,6 +217,118 @@ class _ParkLowerer(RegisteredSemanticLowerer):
                 "owns the parked posture."
             )
         return SemanticLowering(goal=JointPositionGoal(PARK_COMMAND))
+
+
+class _AxisAlignLowerer(RegisteredSemanticLowerer):
+    """Lower one configured object-upright request to ``AxisAlign``."""
+
+    call_id: ClassVar[str] = _AXIS_ALIGN_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = AxisAlign.descriptor()
+    effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.ATTACH
+
+    def __init__(self, semantics: tuple[ObjectSemantics, ...]) -> None:
+        if type(semantics) is not tuple or not semantics:
+            raise ValueError("AxisAlign semantics must be a non-empty exact tuple.")
+        self._semantics = {
+            value.entity_id: value
+            for value in semantics
+            if isinstance(value.entity_id, str)
+        }
+        if len(self._semantics) != len(semantics):
+            raise ValueError("AxisAlign semantics require unique scene entity IDs.")
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Construct one typed axis-alignment goal and attach effect."""
+        del context, bound
+        if type(option_template) is not AxisAlignOptions:
+            raise TypeError(
+                "Configured semantic axis alignment requires an exact "
+                "AxisAlignOptions template."
+            )
+        arguments = dict(call.arguments)
+        if set(arguments) != {"object"}:
+            raise ValueError(f"{self.call_id} arguments must contain only 'object'.")
+        object_id = arguments["object"]
+        semantics = self._semantics.get(object_id)
+        if semantics is None:
+            raise ValueError(f"{self.call_id} does not declare object {object_id!r}.")
+        return SemanticLowering(
+            goal=AxisAlignGoal(semantics=semantics),
+            registered_effect=RegisteredSemanticEffect(
+                effect_kind=SemanticEffectKind.ATTACH,
+                held_objects=(
+                    RegisteredHeldObjectEffect(
+                        expectation_id="primary",
+                        relation=HeldObjectRelation.ATTACHED,
+                        object_id=object_id,
+                        slot_id="primary",
+                    ),
+                ),
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _AxisAlignLowererFactory(RegisteredSemanticLowererFactory):
+    """Create an axis-alignment lowerer from configured scene objects."""
+
+    call_id: ClassVar[str] = _AXIS_ALIGN_CALL_ID
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = AxisAlign.descriptor()
+
+    object_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.object_ids) is not tuple or not self.object_ids:
+            raise ValueError("AxisAlign object_ids must be a non-empty exact tuple.")
+        normalized = tuple(
+            _identifier(value, field_name=f"object_ids[{index}]")
+            for index, value in enumerate(self.object_ids)
+        )
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("AxisAlign object_ids must be unique.")
+        object.__setattr__(self, "object_ids", normalized)
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Resolve exact axis-aware grasp semantics for every allowed object."""
+        del simulation
+        if engine.robot is not robot:
+            raise ValueError("AxisAlign lowerer requires the engine's exact robot.")
+        semantics: list[ObjectSemantics] = []
+        for object_id in self.object_ids:
+            object_ref = scene_registry.resolve(
+                object_id,
+                expected_type=SceneObjectRef,
+            )
+            grasp_ref = scene_registry.resolve_affordance(
+                object_ref,
+                capability=GRASP_AFFORDANCE_CAPABILITY,
+            )
+            object_semantics = scene_registry.object_semantics(
+                object_ref,
+                affordance=grasp_ref,
+            )
+            if type(object_semantics.affordance) is not AxisAlignAffordance:
+                raise TypeError(
+                    "Configured AxisAlign requires an AxisAlignAffordance grasp "
+                    f"payload for {object_ref.entity_id!r}."
+                )
+            semantics.append(object_semantics)
+        return _AxisAlignLowerer(tuple(semantics))
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,6 +698,263 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
             self.reference_entity_id,
             self.relative_pose,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _RelativePlaceRoute:
+    """One configured object relation expressed in the world frame."""
+
+    object_id: str
+    reference_entity_id: str
+    relation: str
+    world_displacement: tuple[float, float, float]
+
+    def __post_init__(self) -> None:
+        for field_name in ("object_id", "reference_entity_id", "relation"):
+            object.__setattr__(
+                self,
+                field_name,
+                _identifier(getattr(self, field_name), field_name=field_name),
+            )
+        if self.relation not in {
+            "above",
+            "behind",
+            "front_of",
+            "left_of",
+            "on",
+            "right_of",
+        }:
+            raise ValueError(
+                "Relative Place relation must be one of above, behind, front_of, "
+                "left_of, on, or right_of."
+            )
+        object.__setattr__(
+            self,
+            "world_displacement",
+            _world_displacement(self.world_displacement),
+        )
+
+    @property
+    def selector(self) -> tuple[str, str, str]:
+        """Return the semantic arguments selecting this immutable route."""
+        return self.object_id, self.reference_entity_id, self.relation
+
+
+class _RelativePlaceLowerer(RegisteredSemanticLowerer):
+    """JIT-ground one object relation to the canonical ``Place`` skill."""
+
+    call_id: ClassVar[str] = _PLACE_RELATIVE_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
+    effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.RELEASE
+
+    def __init__(self, routes: tuple[_RelativePlaceRoute, ...]) -> None:
+        if type(routes) is not tuple or not routes:
+            raise ValueError("Relative Place routes must be a non-empty exact tuple.")
+        self._routes = {route.selector: route for route in routes}
+        if len(self._routes) != len(routes):
+            raise ValueError("Relative Place routes must be unique.")
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Resolve fresh object/reference poses and preserve the held grasp."""
+        if type(option_template) is not PlaceOptions:
+            raise TypeError(
+                "Configured semantic relative placement requires an exact "
+                "PlaceOptions template."
+            )
+        route = self._resolve_route(call)
+
+        resource = bound.binding.resources.get("primary")
+        if resource is None:
+            raise ValueError("Relative Place requires a bound primary resource.")
+        motion_endpoint = resource.endpoints.get("motion")
+        if motion_endpoint is None:
+            raise ValueError("Relative Place requires a primary motion endpoint.")
+        task_state_key = motion_endpoint.task_state_key
+        if not isinstance(task_state_key, str):
+            raise TypeError("Relative Place motion endpoint has no task-state key.")
+        held = context.task.get_held_object(task_state_key)
+        if held is None or held.semantics.entity_id != route.object_id:
+            raise ValueError(
+                f"Relative Place requires verified object {route.object_id!r} "
+                f"held under task-state key {task_state_key!r}."
+            )
+
+        object_pose = self._observed_pose(context, route.object_id)
+        reference_pose = self._observed_pose(context, route.reference_entity_id)
+        object_target = object_pose.clone()
+        displacement = torch.tensor(
+            route.world_displacement,
+            dtype=object_target.dtype,
+            device=object_target.device,
+        )
+        object_target[:, :3, 3] = reference_pose[:, :3, 3] + displacement
+        object_to_eef = held.object_to_eef.to(
+            dtype=object_target.dtype,
+            device=object_target.device,
+        )
+        if object_to_eef.shape == (4, 4):
+            object_to_eef = object_to_eef.unsqueeze(0).expand(
+                context.batch_size,
+                -1,
+                -1,
+            )
+        if object_to_eef.shape != (context.batch_size, 4, 4):
+            raise ValueError(
+                "Relative Place held-object transform must match the planning batch."
+            )
+        return SemanticLowering(
+            goal=PlaceGoal(xpos=torch.bmm(object_target, object_to_eef)),
+            registered_effect=RegisteredSemanticEffect(
+                effect_kind=SemanticEffectKind.RELEASE,
+                held_objects=(
+                    RegisteredHeldObjectEffect(
+                        expectation_id="primary",
+                        relation=HeldObjectRelation.DETACHED,
+                        object_id=route.object_id,
+                        slot_id="primary",
+                    ),
+                ),
+            ),
+        )
+
+    def pick_lookahead_targets(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        picked_object: SceneObjectRef,
+        bound: BoundSemanticCall,
+        previous_target: SemanticObjectTarget | None,
+    ) -> tuple[SemanticObjectTarget, ...] | None:
+        """Expose the live-relative release target to an earlier Pick."""
+        del previous_target
+        route = self._resolve_route(call)
+        if picked_object.entity_id != route.object_id:
+            return None
+        options = bound.preset.action_option_template(call.semantic_id)
+        if type(options) is not PlaceOptions:
+            raise TypeError(
+                "Relative Place look-ahead requires an exact PlaceOptions template."
+            )
+        return (
+            SemanticObjectTarget(
+                pose=SceneEntityPose(
+                    route.reference_entity_id,
+                    world_displacement=torch.tensor(
+                        route.world_displacement,
+                        dtype=torch.float32,
+                    ),
+                ),
+                preserve_current_object_orientation=(
+                    options.preserve_current_object_orientation
+                ),
+            ),
+        )
+
+    def _resolve_route(self, call: RegisteredSemanticCall) -> _RelativePlaceRoute:
+        """Validate one call and return its exact configured route."""
+        arguments = dict(call.arguments)
+        if set(arguments) != {"object", "reference", "relation"}:
+            raise ValueError(
+                f"{self.call_id} arguments must contain only 'object', "
+                "'reference', and 'relation'."
+            )
+        selector = (
+            arguments["object"],
+            arguments["reference"],
+            arguments["relation"],
+        )
+        route = self._routes.get(selector)
+        if route is None:
+            raise ValueError(
+                f"{self.call_id} does not declare relation route {selector!r}."
+            )
+        return route
+
+    @staticmethod
+    def _observed_pose(context: PlanningContext, entity_id: str) -> torch.Tensor:
+        """Return one positive-confidence entity pose in the planning batch."""
+        try:
+            observed = context.scene.entities[entity_id]
+        except KeyError as exc:
+            raise KeyError(
+                f"Relative Place references unobserved entity {entity_id!r}."
+            ) from exc
+        if observed.confidence <= 0.0:
+            raise ValueError(
+                f"Relative Place requires positive confidence for {entity_id!r}."
+            )
+        pose = observed.pose.to(
+            device=context.robot.qpos.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        if pose.shape == (4, 4):
+            return pose.unsqueeze(0).expand(context.batch_size, -1, -1).clone()
+        if pose.shape != (context.batch_size, 4, 4):
+            raise ValueError(
+                f"Relative Place entity {entity_id!r} pose must match the "
+                "planning batch."
+            )
+        return pose.clone()
+
+
+@dataclass(frozen=True, slots=True)
+class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
+    """Create fresh relative-placement lowerers from canonical scene refs."""
+
+    call_id: ClassVar[str] = _PLACE_RELATIVE_CALL_ID
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
+
+    routes: tuple[_RelativePlaceRoute, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.routes) is not tuple or not self.routes:
+            raise ValueError("Relative Place routes must be a non-empty exact tuple.")
+        if not all(type(route) is _RelativePlaceRoute for route in self.routes):
+            raise TypeError("Relative Place routes must be _RelativePlaceRoute values.")
+        if len({route.selector for route in self.routes}) != len(self.routes):
+            raise ValueError("Relative Place routes must be unique.")
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Canonicalize all object/reference IDs before constructing a lowerer."""
+        del simulation
+        if engine.robot is not robot:
+            raise ValueError(
+                "Relative Place lowerer requires the engine's exact robot."
+            )
+        routes: list[_RelativePlaceRoute] = []
+        for route in self.routes:
+            object_ref = scene_registry.resolve(
+                route.object_id,
+                expected_type=SceneObjectRef,
+            )
+            reference_ref = scene_registry.resolve(
+                route.reference_entity_id,
+                expected_type=SceneObjectRef,
+            )
+            routes.append(
+                _RelativePlaceRoute(
+                    object_id=object_ref.entity_id,
+                    reference_entity_id=reference_ref.entity_id,
+                    relation=route.relation,
+                    world_displacement=route.world_displacement,
+                )
+            )
+        return _RelativePlaceLowerer(tuple(routes))
 
 
 @dataclass(frozen=True, slots=True)

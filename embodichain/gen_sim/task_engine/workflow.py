@@ -1257,7 +1257,7 @@ def _semantic_draft(candidate: Mapping[str, Any]) -> dict[str, Any]:
     steps = draft.get("steps")
     if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
         raise TypeError("TaskDraft.steps must be a sequence.")
-    supported = {"E1", "E4", "E5"}
+    supported = {"E1", "E2", "E4", "E5"}
     unsupported = sorted(
         {
             str(step.get("task_type"))
