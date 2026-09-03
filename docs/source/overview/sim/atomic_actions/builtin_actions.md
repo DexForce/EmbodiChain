@@ -678,10 +678,19 @@ migration.
 ## `Press`
 
 Plans **close hand -> approach target -> contact -> press along axis -> return
-to the approach pose**. `PressAffordance` is entity-free and stores an explicit
-target-local surface `press_position` and `press_axis`. `PressGoal.target_pose`
-is either a pose snapshot or `SceneEntityPose`, which resolves through the
-current `PlanningContext.scene` and participates in dynamic-goal recovery.
+to the approach pose**. For an articulation link,
+`sample_initial_articulation_geometry()` builds typed target-link-local target
+and whole-articulation geometry. Its `to_object_geometry()` conversion stores
+the target, complete-articulation, and non-target-articulation clouds plus the
+nearest parent prismatic joint axis in
+`ObjectSemantics.geometry`.
+`PressAffordance` uses `target_link_prismatic_joint_axis` for its axis direction;
+only nearby non-target link surfaces select the sign. It can also derive the
+outer-surface `press_position` when it is omitted. If no non-target surface lies
+in the target neighborhood, direction is ambiguous and must be configured
+without automatic axis inference. `PressGoal.target_pose` is either a pose
+snapshot or `SceneEntityPose`, which resolves through the current
+`PlanningContext.scene` and participates in dynamic-goal recovery.
 
 The contact, press, and retract segments use axis-aligned Cartesian keyframes;
 each output sample is grounded with IK instead of being interpolated only in
@@ -699,7 +708,7 @@ right-handed orthonormal rotation even for vertical or oblique press axes.
 
 `PressOptions` controls hand-close interpolation, approach distance,
 press distance, and an optional target-local `press_position`. An options-level
-position overrides the affordance's explicit surface point. The bound
+position overrides the affordance's resolved surface point. The bound
 `primary.grasp` endpoint must provide `grasp`; both endpoints come from the
 generic `ActionBinding`, and the action keeps the gripper closed for all arm
 motion segments. Applications that require force/contact confirmation must
@@ -712,13 +721,42 @@ verify it externally.
 ## `Slide`
 
 Plans a grasped linear interaction for one articulation link. The entity-free
-`SlideAffordance` stores the link-local grasp mesh, `translation_axis`, and
+`SlideAffordance` stores the link-local grasp mesh and resolves its
+`translation_axis` from initial articulation point-cloud geometry, plus
 optional joint name/limits. `SlideGoal.target_pose` supplies the link pose as a
 snapshot or `SceneEntityPose`. The positive axis direction means approach and
 push/close; pull/open uses its negative direction. The affordance inherits
-`AntipodalAffordance` and selects a grasp with `get_best_grasp_poses()`. The grasp
-approach direction is the link-frame translation axis transformed by the
-current link rotation.
+`AntipodalAffordance` and selects a grasp with `get_best_grasp_poses()`. The
+grasp approach direction is the resolved link-frame translation axis
+transformed by the current link rotation.
+
+The Atomic Action articulation-geometry adapter samples the target link, the
+merged articulation surface, and the merged surface of every non-target link at
+`ArticulationCfg.init_qpos`, expressed in the target link's initial local frame.
+Every non-empty surface cloud uses Open3D uniform sampling; a target-only
+articulation records an explicit empty non-target cloud. Sampling each merged
+mesh preserves triangle-area weighting instead of giving every link an equal
+point budget, which would over-represent tiny decorative links.
+To keep the target and merged clouds geometrically consistent, every non-empty
+link mesh must contain at least one non-degenerate triangle surface; the adapter
+rejects vertices-only and fully degenerate link meshes before merging.
+The sampler also walks the target's parent chain and transforms the nearest
+prismatic joint axis into the target link's initial local frame. The target
+cloud center and twice its distribution radius define a spherical neighborhood
+in the non-target cloud. The dot product between that neighborhood-center
+offset and the normalized joint axis selects its sign. Target-link samples from
+the complete cloud never contribute direction evidence, so independent Open3D
+sampling cannot randomly flip the axis when no other link is nearby. It does
+not quantize an oblique joint axis to a Cartesian basis direction. A missing or
+empty non-target neighborhood, or an axial offset that does not exceed both one
+percent of the target radius and four estimated standard errors, is rejected as
+directionally ambiguous.
+
+Automatic resolution requires all four entries: `target_link_point_cloud`,
+`articulation_point_cloud`, `non_target_articulation_point_cloud`, and
+`target_link_prismatic_joint_axis`. With none of those inference entries, an
+explicit compatibility axis is preserved; missing provenance or another
+partial set is rejected.
 
 With `direction="pull"`, the sequence is **approach -> reach -> close -> pull ->
 open**. With `direction="push"`, it is **approach -> reach -> close -> push -> open
@@ -807,8 +845,25 @@ normalized against the resolved hinge limits and passed as the goal's
 
 Plans **approach -> reach -> close -> twist -> open -> retract** for an
 articulation link or a rigid object. The entity-free `TwistAffordance` stores an
-explicit local `grasp_position`, `twist_axis`, and `axis_origin`, plus optional
-joint name/limits. `TwistGoal.target_pose` supplies the grounded target pose.
+explicit local `grasp_position`, plus optional joint name/limits. For an
+articulation link, the same initial target-neighborhood geometry used by
+`Slide` and `Press` signs the normalized `target_link_revolute_joint_axis` to
+resolve `twist_axis`. The independent
+`target_link_revolute_axis_origin` geometry entry sets `axis_origin` to the
+nearest parent revolute joint's initial origin, expressed in the target link's
+initial local frame. Resolution walks through fixed parent joints. The sampled
+target-link centroid is only a neighborhood/contact reference; it is never used
+as the rotation origin.
+
+Automatic axis resolution requires the revolute joint-axis entry plus the
+target, complete-articulation, and non-target-articulation clouds. When all four
+axis-inference entries are absent, the legacy `twist_axis` fallback is
+preserved; missing non-target provenance or another partial set is rejected.
+Axis-origin resolution is independent, so missing origin metadata does not
+overwrite an explicit `axis_origin`. If neither source supplies an origin,
+planning reports the missing rotation-axis point. A rigid object without
+articulation context may still provide explicit compatibility values.
+`TwistGoal.target_pose` supplies the grounded target pose.
 
 The grasp frame's z-axis follows the world-transformed twist axis; an adaptive
 reference completes a right-handed orthonormal frame. Twist keyframes rotate

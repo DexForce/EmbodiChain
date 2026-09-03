@@ -24,6 +24,7 @@ import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import call, patch
 
 import pytest
 import torch
@@ -48,6 +49,7 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
+    ArticulationAffordanceGeometry,
     AtomicActionEngine,
     DynamicCollisionMode,
     EntityState,
@@ -99,6 +101,50 @@ _LIFECYCLE_ROBOT_DOF = 3
 _LIFECYCLE_STEP_DT = 0.02
 _EXPECTED_TRAJECTORY_SAMPLE_COUNT = 40
 _EXPECTED_GRASP_SAMPLES = 1_000
+
+
+def _drawer_handle_point_cloud_geometry() -> dict[str, torch.Tensor]:
+    """Return target-local clouds and a prismatic axis oriented toward +Y."""
+    target_points = torch.tensor(
+        [
+            [-0.10, 0.0, 0.0],
+            [0.10, 0.0, 0.0],
+            [0.0, 0.0, -0.05],
+            [0.0, 0.0, 0.05],
+        ],
+        dtype=torch.float32,
+    )
+    body_points = torch.tensor(
+        [
+            [-0.05, 0.15, -0.05],
+            [0.05, 0.15, -0.05],
+            [-0.05, 0.15, 0.05],
+            [0.05, 0.15, 0.05],
+        ],
+        dtype=torch.float32,
+    )
+    return {
+        "target_link_point_cloud": target_points,
+        "articulation_point_cloud": torch.cat((target_points, body_points), dim=0),
+        "non_target_articulation_point_cloud": body_points,
+        "target_link_prismatic_joint_axis": torch.tensor(
+            [0.0, 1.0, 0.0],
+            dtype=torch.float32,
+        ),
+    }
+
+
+def _drawer_handle_articulation_geometry() -> ArticulationAffordanceGeometry:
+    """Return the typed adapter result used by the configured lowerer."""
+    geometry = _drawer_handle_point_cloud_geometry()
+    return ArticulationAffordanceGeometry(
+        target_link_point_cloud=geometry["target_link_point_cloud"],
+        articulation_point_cloud=geometry["articulation_point_cloud"],
+        prismatic_joint_axis=geometry["target_link_prismatic_joint_axis"],
+        non_target_articulation_point_cloud=geometry[
+            "non_target_articulation_point_cloud"
+        ],
+    )
 
 
 class _NeverObserveProvider:
@@ -524,6 +570,11 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
 
     class Drawer:
         link_names = (_OPEN_DRAWER_HANDLE_LINK_NAME,)
+        joint_names = ("drawer_joint",)
+        cfg = SimpleNamespace(
+            init_qpos=(0.0,),
+            body_scale=(1.0, 1.0, 1.0),
+        )
 
         @staticmethod
         def get_link_vert_face(name: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -554,28 +605,155 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
         robot=robot,
         device=torch.device("cpu"),
     )
+    drawer = Drawer()
     simulation = SimpleNamespace(
-        get_articulation=lambda identifier: (
-            Drawer() if identifier == "drawer" else None
-        )
+        get_articulation=lambda identifier: drawer if identifier == "drawer" else None
     )
+    sampled_geometry = _drawer_handle_articulation_geometry()
 
-    first = registration.create_registered_semantic_lowerers(
-        simulation=simulation,
-        robot=robot,
-        scene_registry=registry,
-        engine=engine,
-    )
-    second = registration.create_registered_semantic_lowerers(
-        simulation=simulation,
-        robot=robot,
-        scene_registry=registry,
-        engine=engine,
-    )
+    with patch(
+        "embodichain.lab.task_program.integrations._configured_services."
+        "sample_initial_articulation_geometry",
+        return_value=sampled_geometry,
+    ) as sampler:
+        first = registration.create_registered_semantic_lowerers(
+            simulation=simulation,
+            robot=robot,
+            scene_registry=registry,
+            engine=engine,
+        )
+        second = registration.create_registered_semantic_lowerers(
+            simulation=simulation,
+            robot=robot,
+            scene_registry=registry,
+            engine=engine,
+        )
+
+    assert sampler.call_args_list == [
+        call(
+            drawer,
+            _OPEN_DRAWER_HANDLE_LINK_NAME,
+            initial_qpos=drawer.cfg.init_qpos,
+            initial_qpos_joint_names=drawer.joint_names,
+            body_scale=drawer.cfg.body_scale,
+        ),
+        call(
+            drawer,
+            _OPEN_DRAWER_HANDLE_LINK_NAME,
+            initial_qpos=drawer.cfg.init_qpos,
+            initial_qpos_joint_names=drawer.joint_names,
+            body_scale=drawer.cfg.body_scale,
+        ),
+    ]
 
     assert type(first[0]) is type(second[0])
     assert type(first[0]).call_id == _OPEN_DRAWER_CALL_ID
     assert first[0] is not second[0]
+    first_affordance = first[0]._semantics.affordance
+    assert isinstance(first_affordance, SlideAffordance)
+    assert torch.equal(
+        first_affordance.translation_axis,
+        torch.tensor([0.0, 1.0, 0.0]),
+    )
+
+
+def test_open_drawer_lowerer_keeps_optional_legacy_axis_compatibility() -> None:
+    """Configured Slide accepts an old axis while new deployments omit it."""
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    config = {
+        "kind": "articulation_link_slide",
+        "articulation_id": _OPEN_DRAWER_ENTITY_ID,
+        "articulation_simulation_uid": _OPEN_DRAWER_ENTITY_ID,
+        "link_entity_id": _OPEN_DRAWER_HANDLE_ID,
+    }
+    automatic = _decode_registered_lowerer(config, path="runtime_services.lowerer")
+    legacy = _decode_registered_lowerer(
+        {**config, "translation_axis": [0.0, 1.0, 0.0]},
+        path="runtime_services.lowerer",
+    )
+
+    assert automatic.revision == "4"
+    assert automatic.translation_axis is None
+    assert legacy.translation_axis == (0.0, 1.0, 0.0)
+
+
+def test_explicit_slide_axis_bypasses_sampling_with_non_unit_scale() -> None:
+    """A non-unit scale cannot block the explicit-axis legacy branch."""
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    factory = _decode_registered_lowerer(
+        {
+            "kind": "articulation_link_slide",
+            "articulation_id": _OPEN_DRAWER_ENTITY_ID,
+            "articulation_simulation_uid": _OPEN_DRAWER_ENTITY_ID,
+            "link_entity_id": _OPEN_DRAWER_HANDLE_ID,
+            "translation_axis": [0.0, -2.0, 0.0],
+        },
+        path="runtime_services.lowerer",
+    )
+    vertices = torch.tensor(
+        [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]],
+    )
+    triangles = torch.tensor([[0, 1, 2]])
+    drawer = SimpleNamespace(
+        link_names=(_OPEN_DRAWER_HANDLE_LINK_NAME,),
+        joint_names=("drawer_joint",),
+        cfg=SimpleNamespace(
+            init_qpos=(0.0,),
+            body_scale=(1.0, 2.0, 1.0),
+        ),
+        get_link_vert_face=lambda name: (vertices, triangles),
+    )
+    drawer_ref = SceneArticulationRef(_OPEN_DRAWER_ENTITY_ID)
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=drawer_ref,
+                state_provider=_NeverObserveProvider(),
+            ),
+            SceneEntityRegistration(
+                ref=SceneLinkRef(_OPEN_DRAWER_HANDLE_ID),
+                state_provider=_NeverObserveProvider(),
+                parent=drawer_ref,
+                native_name=_OPEN_DRAWER_HANDLE_LINK_NAME,
+            ),
+        )
+    )
+    robot = object()
+    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
+        robot=robot,
+        device=torch.device("cpu"),
+    )
+    simulation = SimpleNamespace(
+        get_articulation=lambda identifier: (
+            drawer if identifier == _OPEN_DRAWER_ENTITY_ID else None
+        )
+    )
+
+    with patch(
+        "embodichain.lab.task_program.integrations._configured_services."
+        "sample_initial_articulation_geometry",
+        side_effect=AssertionError("explicit axes must not sample geometry"),
+    ) as sampler:
+        lowerer = factory.create(
+            simulation=simulation,
+            robot=robot,
+            scene_registry=registry,
+            engine=engine,
+        )
+
+    sampler.assert_not_called()
+    assert lowerer._semantics.geometry == {}
+    assert torch.equal(
+        lowerer._semantics.affordance.translation_axis,
+        torch.tensor([0.0, -2.0, 0.0]),
+    )
 
 
 def test_open_drawer_lowerer_accepts_only_canonical_payload() -> None:
@@ -594,13 +772,13 @@ def test_open_drawer_lowerer_accepts_only_canonical_payload() -> None:
         ObjectSemantics(
             label="drawer_handle",
             entity_id=_OPEN_DRAWER_HANDLE_ID,
-            geometry={},
+            geometry=_drawer_handle_point_cloud_geometry(),
             affordance=SlideAffordance(
                 mesh_vertices=torch.tensor(
                     [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]
                 ),
                 mesh_triangles=torch.tensor([[0, 1, 2]]),
-                translation_axis=torch.tensor([0.0, 1.0, 0.0]),
+                translation_axis=torch.tensor([-1.0, 0.0, 0.0]),
             ),
         ),
         _OPEN_DRAWER_HANDLE_ID,
@@ -640,13 +818,13 @@ def test_open_drawer_lowerer_owns_a_snapshot_of_the_current_target_pose() -> Non
         ObjectSemantics(
             label="drawer_handle",
             entity_id=_OPEN_DRAWER_HANDLE_ID,
-            geometry={},
+            geometry=_drawer_handle_point_cloud_geometry(),
             affordance=SlideAffordance(
                 mesh_vertices=torch.tensor(
                     [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]
                 ),
                 mesh_triangles=torch.tensor([[0, 1, 2]]),
-                translation_axis=torch.tensor([0.0, 1.0, 0.0]),
+                translation_axis=torch.tensor([-1.0, 0.0, 0.0]),
             ),
         ),
         _OPEN_DRAWER_HANDLE_ID,

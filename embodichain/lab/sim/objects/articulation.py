@@ -654,6 +654,10 @@ class Articulation(BatchEntity):
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
 
+        # Apply gravity before the first physics update. Unlike asset-backed
+        # physical properties, this config field is an explicit runtime flag.
+        self.set_gravity(self.cfg.enable_gravity)
+
         if device.type == "cuda":
             self._world.update(0.001)
 
@@ -2180,10 +2184,12 @@ class Articulation(BatchEntity):
     def compute_fk(
         self,
         qpos: torch.Tensor | np.ndarray | None,
-        link_names: str | list[str] | tuple[str] | None = None,
+        link_names: str | list[str] | tuple[str, ...] | None = None,
         end_link_name: str | None = None,
         root_link_name: str | None = None,
         to_dict: bool = False,
+        *,
+        qpos_joint_names: Sequence[str] | None = None,
         **kwargs,
     ) -> Union[torch.Tensor, dict[str, "pk.Transform3d"]]:
         """Compute the forward kinematics (FK) for the given joint positions.
@@ -2196,6 +2202,9 @@ class Articulation(BatchEntity):
             end_link_name (str, optional): Name of the end link for which FK is computed. If None, all links are considered.
             root_link_name (str, optional): Name of the root link for which FK is computed. Defaults to None.
             to_dict (bool, optional): If True, returns the FK result as a dictionary of Transform3d objects. Defaults to False.
+            qpos_joint_names: Optional names corresponding to the last dimension
+                of ``qpos``. When supplied, the values are reordered into the
+                kinematic chain's parameter order before FK.
             **kwargs: Additional keyword arguments for customization.
 
         Raises:
@@ -2211,6 +2220,52 @@ class Articulation(BatchEntity):
         frame_indices = None
         if self.pk_chain is None:
             logger.log_error("pk_chain is not initialized for this articulation.")
+
+        if qpos_joint_names is not None:
+            if end_link_name is not None or root_link_name is not None:
+                raise ValueError(
+                    "qpos_joint_names cannot be combined with serial-chain FK."
+                )
+            if isinstance(qpos_joint_names, (str, bytes)) or not isinstance(
+                qpos_joint_names,
+                Sequence,
+            ):
+                raise TypeError("qpos_joint_names must be a sequence of names.")
+            supplied_joint_names = tuple(qpos_joint_names)
+            if any(
+                type(name) is not str or not name or name != name.strip()
+                for name in supplied_joint_names
+            ):
+                raise ValueError(
+                    "qpos_joint_names must contain non-empty string names."
+                )
+            if len(set(supplied_joint_names)) != len(supplied_joint_names):
+                raise ValueError("qpos_joint_names must not contain duplicates.")
+            if qpos is None:
+                raise ValueError("qpos is required when qpos_joint_names is supplied.")
+            qpos_tensor = torch.as_tensor(qpos, device=self.device)
+            if qpos_tensor.dim() not in (1, 2) or qpos_tensor.shape[-1] != len(
+                supplied_joint_names
+            ):
+                raise ValueError("qpos last dimension must match qpos_joint_names.")
+            kinematic_joint_names = tuple(self.pk_chain.get_joint_parameter_names())
+            if len(supplied_joint_names) != len(kinematic_joint_names) or set(
+                supplied_joint_names
+            ) != set(kinematic_joint_names):
+                raise ValueError(
+                    "qpos_joint_names must match the kinematic-chain joint names."
+                )
+            if kinematic_joint_names:
+                qpos_by_name = {
+                    name: qpos_tensor[..., index]
+                    for index, name in enumerate(supplied_joint_names)
+                }
+                qpos = torch.stack(
+                    [qpos_by_name[name] for name in kinematic_joint_names],
+                    dim=-1,
+                )
+            else:
+                qpos = qpos_tensor[..., :0].clone()
 
         # Adapt link_names to work with get_frame_indices
         if link_names is not None:
@@ -2675,6 +2730,21 @@ class Articulation(BatchEntity):
             self._entities[env_idx].set_articulation_flag(
                 ArticulationFlag.DISABLE_SELF_COLLISION, not enable
             )
+
+    def set_gravity(
+        self,
+        enable: bool = True,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set whether gravity is enabled for the articulation.
+
+        Args:
+            enable: Whether to enable gravity. Defaults to True.
+            env_ids: Environment indices. If None, all environments are used.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for env_idx in local_env_ids:
+            self._entities[env_idx].enable_gravity(bool(enable))
 
     def destroy(self) -> None:
         env = self._world.get_env()

@@ -43,6 +43,47 @@ ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
 
 
+class _GravityEntity:
+    """Record native gravity calls for an articulation test double."""
+
+    def __init__(self) -> None:
+        self.calls: list[bool] = []
+
+    def enable_gravity(self, flag: bool) -> None:
+        self.calls.append(flag)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("enable", [True, False])
+def test_set_gravity_updates_only_selected_environments(enable: bool) -> None:
+    """Runtime gravity updates are dispatched to the requested native entities."""
+    articulation = object.__new__(Articulation)
+    articulation._entities = [_GravityEntity() for _ in range(3)]
+    articulation._all_indices = torch.arange(3, dtype=torch.int32)
+
+    articulation.set_gravity(enable, env_ids=(2, 0))
+
+    assert articulation._entities[0].calls == [enable]
+    assert articulation._entities[1].calls == []
+    assert articulation._entities[2].calls == [enable]
+
+
+@pytest.mark.no_sim
+def test_set_gravity_updates_all_environments_by_default() -> None:
+    """Omitting environment indices applies gravity to every native entity."""
+    articulation = object.__new__(Articulation)
+    articulation._entities = [_GravityEntity() for _ in range(3)]
+    articulation._all_indices = torch.arange(3, dtype=torch.int32)
+
+    articulation.set_gravity(False)
+
+    assert [entity.calls for entity in articulation._entities] == [
+        [False],
+        [False],
+        [False],
+    ]
+
+
 def test_get_qf_returns_all_articulation_joint_efforts():
     expected_qf = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
     articulation = object.__new__(Articulation)
@@ -51,6 +92,52 @@ def test_get_qf_returns_all_articulation_joint_efforts():
     actual_qf = articulation.get_qf()
 
     assert torch.equal(actual_qf, expected_qf)
+
+
+@pytest.mark.no_sim
+def test_compute_fk_reorders_named_qpos_into_kinematic_joint_order():
+    articulation = object.__new__(Articulation)
+    captured: dict[str, object] = {}
+    expected_result = {"target": object()}
+
+    def forward_kinematics(
+        *,
+        th: torch.Tensor,
+        frame_indices: object,
+    ) -> dict[str, object]:
+        captured["qpos"] = th.clone()
+        captured["frame_indices"] = frame_indices
+        return expected_result
+
+    articulation.pk_chain = SimpleNamespace(
+        get_joint_parameter_names=lambda: ["joint_a", "joint_b"],
+        forward_kinematics=forward_kinematics,
+    )
+
+    result = articulation.compute_fk(
+        torch.tensor(((2.0, 1.0),)),
+        qpos_joint_names=("joint_b", "joint_a"),
+        to_dict=True,
+    )
+
+    assert result is expected_result
+    assert torch.equal(captured["qpos"], torch.tensor(((1.0, 2.0),)))
+    assert captured["frame_indices"] is None
+
+
+@pytest.mark.no_sim
+def test_compute_fk_rejects_named_qpos_for_serial_chain():
+    articulation = object.__new__(Articulation)
+    articulation.pk_chain = SimpleNamespace(
+        get_joint_parameter_names=lambda: ["joint"],
+    )
+
+    with pytest.raises(ValueError, match="cannot be combined with serial-chain FK"):
+        articulation.compute_fk(
+            torch.tensor((0.0,)),
+            end_link_name="target",
+            qpos_joint_names=("joint",),
+        )
 
 
 @pytest.mark.no_sim
