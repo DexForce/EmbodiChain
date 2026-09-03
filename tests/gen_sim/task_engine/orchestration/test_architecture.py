@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import fields
+from inspect import signature
 from pathlib import Path
 
 import embodichain.gen_sim as gen_sim_package
@@ -25,6 +27,10 @@ from embodichain.gen_sim.task_engine import __main__ as task_engine_main
 from embodichain.gen_sim.task_engine import cli as task_engine_cli
 from embodichain.gen_sim.task_engine.orchestration.coordinator import (
     TaskEngineCoordinator,
+)
+from embodichain.gen_sim.task_engine.orchestration.artifacts import (
+    TaskEngineArtifactPaths,
+    write_task_engine_artifacts,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_adapter import SceneAdapter
 
@@ -132,6 +138,13 @@ def test_cross_engine_owners_are_explicit() -> None:
 
 def test_task_engine_owns_its_module_entry_point() -> None:
     assert task_engine_main.main is task_engine_cli.main
+
+
+def test_task_engine_artifacts_have_no_legacy_grounded_plan_boundary() -> None:
+    assert "grounded_task_plan" not in {
+        field.name for field in fields(TaskEngineArtifactPaths)
+    }
+    assert "grounded_task_plan" not in signature(write_task_engine_artifacts).parameters
 
 
 def test_legacy_cross_engine_packages_are_deleted() -> None:
