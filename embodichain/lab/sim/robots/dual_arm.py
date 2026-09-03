@@ -410,6 +410,7 @@ def _populate_dual_cfg(
     cfg.min_velocity_iters = base_cfg.min_velocity_iters
     cfg.fix_base = base_cfg.fix_base
     cfg.disable_self_collision = base_cfg.disable_self_collision
+    cfg.enable_gravity = base_cfg.enable_gravity
     cfg.sleep_threshold = base_cfg.sleep_threshold
 
 

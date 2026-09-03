@@ -70,6 +70,12 @@ then advances the world for the requested number of physics steps. Each
 environment control step normally calls it with
 `sim_steps_per_control`.
 
+`ArticulationCfg.enable_gravity` defaults to `True`. During articulation
+construction, `Articulation` applies this explicit runtime flag to every native
+entity before the first physics update, including when
+`use_usd_properties=True`. Use `Articulation.set_gravity(...)` to change the
+flag later for all or selected environment indices.
+
 ## Module Boundaries
 
 | Area | Owner | Routed topic |
@@ -95,6 +101,12 @@ for integrations that need link ancestry. It returns immediate-parent-first
 `ArticulationJointKinematics` values containing copied names, joint type,
 origin, axis, and optional limits. Consumers must not reach into
 `BatchEntity._entities` or retain backend-native joint-info objects.
+
+`Articulation` also exposes deterministic link meshes through
+`get_link_vert_face()` and named-state FK through `compute_fk()` with
+`qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
+do not belong to the simulation object; use
+`atomic_actions.sample_initial_articulation_geometry()` for that adaptation.
 
 ## Configuration Flow
 
@@ -141,6 +153,8 @@ corresponding robot/sensor module. Scene composition belongs in
   `SimulationManager.flush_cleanup_queue()`.
 - Resolve articulation ancestry through `get_parent_joint_chain()`; keep
   DexSim topology access encapsulated by `Articulation`.
+- Keep articulation mesh access, FK, and topology domain-neutral. Perform
+  affordance sampling and semantic-key conversion in the Atomic Action adapter.
 
 ## Common Failure Modes
 
