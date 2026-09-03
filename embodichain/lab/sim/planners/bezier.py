@@ -72,6 +72,24 @@ class BezierPath:
         """Return the second geometric derivative, matching ``PathBase`` semantics."""
         return self.derivative(parameter, order=2)
 
+    def arc_tangent(self, parameter: torch.Tensor) -> torch.Tensor:
+        """Return the unit tangent with respect to geometric arc length."""
+        first = self.tangent(parameter)
+        speed = torch.linalg.vector_norm(first, dim=-1, keepdim=True)
+        if bool((speed <= torch.finfo(first.dtype).eps).any().item()):
+            raise ValueError("Arc-length tangent is undefined at a stationary point.")
+        return first / speed
+
+    def arc_curvature(self, parameter: torch.Tensor) -> torch.Tensor:
+        """Return the second derivative with respect to geometric arc length."""
+        first = self.tangent(parameter)
+        second = self.curvature(parameter)
+        speed = torch.linalg.vector_norm(first, dim=-1, keepdim=True)
+        if bool((speed <= torch.finfo(first.dtype).eps).any().item()):
+            raise ValueError("Arc-length curvature is undefined at a stationary point.")
+        speed_derivative = (first * second).sum(dim=-1, keepdim=True) / speed
+        return second / speed.square() - first * speed_derivative / speed.pow(3)
+
     def sample(
         self, sample_count: int, *, arc_length: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:

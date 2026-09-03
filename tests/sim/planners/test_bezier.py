@@ -33,11 +33,16 @@ def test_bezier_path_encapsulates_geometry_without_changing_tensor_shape() -> No
 
     assert path.degree == 2
     assert path.dimension == 1
-    assert torch.allclose(path.evaluate(torch.tensor([0.5])), torch.tensor([[1.0]]))
+    assert torch.allclose(
+        path.evaluate(torch.tensor([0.5])),
+        torch.tensor([[1.0]], dtype=control_points.dtype),
+    )
     assert path.control_points is control_points
     parameter = torch.tensor([0.5], dtype=torch.float64)
     assert torch.allclose(path.tangent(parameter), path.derivative(parameter, 1))
     assert torch.allclose(path.curvature(parameter), path.derivative(parameter, 2))
+    assert torch.allclose(path.arc_tangent(parameter), torch.tensor([[1.0]], dtype=torch.float64))
+    assert torch.allclose(path.arc_curvature(parameter), torch.zeros((1, 1), dtype=torch.float64))
 
 
 def test_quintic_bezier_reaches_endpoints_and_endpoint_derivatives() -> None:
@@ -128,3 +133,11 @@ def test_public_evaluation_rejects_unsupported_degree_and_nonfinite_parameter() 
 
     with pytest.raises(ValueError, match="finite"):
         bezier_evaluate(torch.tensor([[0.0], [float("inf")], [1.0]]), torch.tensor(0.5))
+
+
+def test_arc_derivatives_reject_stationary_curve() -> None:
+    path = BezierPath(torch.ones((3, 2), dtype=torch.float64))
+    with pytest.raises(ValueError, match="stationary"):
+        path.arc_tangent(torch.tensor(0.5, dtype=torch.float64))
+    with pytest.raises(ValueError, match="stationary"):
+        path.arc_curvature(torch.tensor(0.5, dtype=torch.float64))

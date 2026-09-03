@@ -46,6 +46,7 @@ from embodichain.lab.sim.planners import (
 )
 from embodichain.lab.sim.planners.trapezoidal_planner import _plan_linear_profiles
 from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.utils.math import euler_xyz_from_quat
 
@@ -242,6 +243,7 @@ def joint_derivatives_from_path_time_law(
     path_velocities: torch.Tensor,
     path_accelerations: torch.Tensor,
     cartesian_tangent: torch.Tensor,
+    cartesian_curvature: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Convert scalar path derivatives into joint derivatives.
 
@@ -267,7 +269,7 @@ def joint_derivatives_from_path_time_law(
         path_positions.shape != expected_scalar_shape
         or path_velocities.shape != expected_scalar_shape
         or path_accelerations.shape != expected_scalar_shape
-        or cartesian_tangent.shape != (batch_size, 6)
+        or cartesian_tangent.shape not in ((batch_size, 6), (batch_size, sample_count, 6))
     ):
         raise ValueError("Path derivative tensors have incompatible shapes.")
     if sample_count < 3:
@@ -275,8 +277,24 @@ def joint_derivatives_from_path_time_law(
     if bool((torch.diff(path_positions, dim=1) <= 0.0).any().item()):
         raise ValueError("Path positions must be strictly increasing.")
 
-    jacobian_pinv = torch.linalg.pinv(jacobians)
-    tangent = cartesian_tangent[:, None, :, None].expand(-1, sample_count, -1, -1)
+    if cartesian_curvature is None:
+        jacobian_pinv = torch.linalg.pinv(jacobians)
+    else:
+        damping = 1e-4
+        identity = torch.eye(6, dtype=jacobians.dtype, device=jacobians.device)
+        identity = identity.expand(batch_size, sample_count, -1, -1)
+        normal = (
+            torch.matmul(jacobians, jacobians.transpose(-1, -2))
+            + damping**2 * identity
+        )
+        jacobian_pinv = torch.matmul(
+            jacobians.transpose(-1, -2), torch.linalg.solve(normal, identity)
+        )
+    if cartesian_tangent.dim() == 2:
+        tangent = cartesian_tangent[:, None].expand(-1, sample_count, -1)
+    else:
+        tangent = cartesian_tangent
+    tangent = tangent[..., None]
     q_s = torch.matmul(jacobian_pinv, tangent).squeeze(-1)
     jacobian_s_rows: list[torch.Tensor] = []
     for batch_index in range(batch_size):
@@ -289,8 +307,14 @@ def joint_derivatives_from_path_time_law(
             )[0]
         )
     jacobian_s = torch.stack(jacobian_s_rows)
-    curvature_twist = torch.matmul(jacobian_s, q_s.unsqueeze(-1))
-    q_ss = -torch.matmul(jacobian_pinv, curvature_twist).squeeze(-1)
+    jacobian_term = torch.matmul(jacobian_s, q_s.unsqueeze(-1))
+    if cartesian_curvature is None:
+        curvature = torch.zeros_like(jacobian_term)
+    else:
+        if cartesian_curvature.shape != (batch_size, sample_count, 6):
+            raise ValueError("Cartesian curvature must have shape (B, N, 6).")
+        curvature = cartesian_curvature[..., None]
+    q_ss = torch.matmul(jacobian_pinv, curvature - jacobian_term).squeeze(-1)
     velocities = q_s * path_velocities[..., None]
     accelerations = (
         q_ss * path_velocities.square()[..., None] + q_s * path_accelerations[..., None]
@@ -453,7 +477,8 @@ def plan_cartesian_bezier(
         dim=1,
     )
     dense_count = max(1025, sample_count * 8)
-    dense_points, dense_lengths = BezierPath(control_points).sample(dense_count)
+    path = BezierPath(control_points)
+    dense_points, dense_lengths = path.sample(dense_count)
     total_length = dense_lengths[:, -1]
     scalar_waypoints = start_qpos.new_zeros((start_qpos.shape[0], 2, 1))
     scalar_waypoints[:, 1, 0] = total_length
@@ -486,12 +511,30 @@ def plan_cartesian_bezier(
     if ik_result is None or not bool(ik_result[0].all().item()):
         raise RuntimeError("Cartesian Bézier IK failed.")
     positions = ik_result[1]
-    time = scalar_plan.dt.cumsum(dim=1)
-    velocities = torch.stack(
-        [torch.gradient(positions[i], spacing=(time[i],), dim=(0,))[0] for i in range(positions.shape[0])]
+    solver = robot.get_solver(control_part)
+    if solver is None:
+        raise RuntimeError(f"Kinematic solver is unavailable for {control_part!r}.")
+    jacobians = solver.get_jacobian(
+        positions.reshape(start_qpos.shape[0] * sample_count, -1), jac_type="full"
+    ).reshape(start_qpos.shape[0], sample_count, 6, -1)
+    parameter = dense_index / (dense_count - 1)
+    world_tangent = path.arc_tangent(parameter)
+    world_curvature = path.arc_curvature(parameter)
+    base_pose = robot.get_control_part_base_pose(control_part, to_matrix=True)
+    world_to_root = base_pose[:, None, :3, :3].transpose(-1, -2)
+    root_tangent = torch.matmul(world_to_root, world_tangent[..., None]).squeeze(-1)
+    root_curvature = torch.matmul(world_to_root, world_curvature[..., None]).squeeze(-1)
+    cartesian_tangent = torch.cat((root_tangent, torch.zeros_like(root_tangent)), dim=-1)
+    cartesian_curvature = torch.cat(
+        (root_curvature, torch.zeros_like(root_curvature)), dim=-1
     )
-    accelerations = torch.stack(
-        [torch.gradient(velocities[i], spacing=(time[i],), dim=(0,))[0] for i in range(positions.shape[0])]
+    velocities, accelerations = joint_derivatives_from_path_time_law(
+        jacobians,
+        scalar_plan.positions[..., 0],
+        scalar_plan.velocities[..., 0],
+        scalar_plan.accelerations[..., 0],
+        cartesian_tangent,
+        cartesian_curvature,
     )
     return (
         PlanResult(
@@ -892,6 +935,25 @@ def main() -> None:
                 eef_poses = compute_eef_trajectory(
                     robot, control_part, result.positions, args.plot_env
                 )
+                marker_poses = robot.compute_fk(
+                    qpos=result.positions[args.plot_env],
+                    name=control_part,
+                    env_ids=[args.plot_env] * result.positions.shape[1],
+                    to_matrix=True,
+                )
+                if marker_poses is not None:
+                    marker_step = max(1, marker_poses.shape[0] // 20)
+                    for marker_index in range(0, marker_poses.shape[0], marker_step):
+                        sim.draw_marker(
+                            cfg=MarkerCfg(
+                                name=f"{path_name}_{profile_name}_eef_{marker_index}",
+                                marker_type="axis",
+                                axis_xpos=marker_poses[marker_index : marker_index + 1],
+                                axis_len=0.025,
+                                axis_size=0.002,
+                                arena_index=args.plot_env,
+                            )
+                        )
                 if path_name == "cartesian":
                     line_error = maximum_line_deviation(eef_poses[:, :3])
                     assert scalar_plan is not None

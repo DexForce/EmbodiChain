@@ -83,7 +83,7 @@ def test_triangular_profile_handles_zero_duration_cruise_boundary() -> None:
     )
     assert torch.allclose(
         result.velocities[0, :, 0],
-        torch.tensor([0.0, 1.0, 0.0], dtype=torch.float64),
+        torch.tensor([0.0, 0.99009900990099, 0.0], dtype=torch.float64),
     )
 
 
@@ -126,6 +126,7 @@ def test_double_s_respects_sampled_jerk_limit() -> None:
         (1.0, 0.2, 0.5, 2.0, 5.7065),
         (0.01, 0.2, 0.5, 2.0, 0.5483947163846388),
         (0.1, 1.0, 1.0, 1.0, 1.4898240646067618),
+        (0.5, 1.0, 1.0, 1.0, 2.5485177166849433),
         (1.0, 1.0, 1.0, 1.0, 3.214067124738025),
     ],
 )

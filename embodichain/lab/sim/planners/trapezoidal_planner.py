@@ -493,10 +493,9 @@ def _build_scalar_profile(
             else _build_trapezoidal_profile(velocity_limit, acceleration_limit)
         )
 
-    if profile_name == "double_s":
-        # The joint-limit projection leaves a 1% margin whenever a
-        # sampled derivative reaches a limit. Linear Double-S segments always
-        # reach their projected jerk limit, so the resulting scale is 1.01.
+    if profile_name in {"double_s", "trapezoidal"}:
+        # HolisticMotion applies a 1% duration margin after limit projection
+        # so sampled derivatives remain strictly inside their constraints.
         margin = torch.where(
             velocity_limit > 0.0,
             torch.full_like(velocity_limit, 1.01),
