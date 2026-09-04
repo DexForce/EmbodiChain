@@ -14,13 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the extensible free-space motion-generation benchmark.
+"""Run the extensible planner motion-generation benchmark.
 
 cuRobo is the default primary baseline. IK interpolation and TOPPRA are
-optional diagnostic baselines. NMG remains an explicitly configurable,
-unsupported adapter stub until its production checkpoint contract is ready.
+optional diagnostic baselines. NMG is loaded from a standalone ONNX policy.
 
-Run: ``embodichain benchmark motion-generation --suite smoke``
+Run: ``python -m scripts.benchmark.motion_generation.run_benchmark --suite
+smoke`` or select the Franka + PGI Atomic Task slice with
+``--suite atomic_franka_pgi_curobo``.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .config import PlannerSpecCfg, SuiteCfg, load_suite
+from .video import VideoRecordCfg, video_cfg_from_args
 
 if TYPE_CHECKING:
     from .runner import BenchmarkRunResult
@@ -43,11 +45,15 @@ __all__ = [
 
 
 def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add free-space benchmark options to an existing argument parser."""
+    """Add planner benchmark options to an existing argument parser."""
     parser.add_argument(
         "--suite",
         default="smoke",
-        help="Suite short name (smoke/coverage) or an explicit YAML path.",
+        help=(
+            "Suite short name (smoke/coverage/atomic_franka_pgi_curobo/"
+            "atomic_franka_pgi_curobo_randomized) "
+            "or an explicit YAML path."
+        ),
     )
     parser.add_argument(
         "--algorithms",
@@ -92,9 +98,9 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
         help="NMG internal waypoint rotation threshold in radians.",
     )
     parser.add_argument(
-        "--checkpoint-path",
+        "--nmg-onnx-path",
         default=None,
-        help="Reserved NMG checkpoint path; the current NMG adapter remains a stub.",
+        help="Path to the standalone NMG ONNX policy.",
     )
     parser.add_argument(
         "--output-root", default="outputs/benchmarks", help="Artifact root directory."
@@ -104,6 +110,36 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--no-headless", action="store_false", dest="headless", help="Open a viewer."
+    )
+    parser.add_argument(
+        "--record-video",
+        action="store_true",
+        help="Record Atomic Task measured physics-replay videos after evaluation.",
+    )
+    parser.add_argument(
+        "--record-failed-video",
+        action="store_true",
+        help="With --record-video, also record failed cases as static debug scenes.",
+    )
+    parser.add_argument(
+        "--video-case-limit",
+        type=int,
+        default=0,
+        help="Maximum recorded videos. Use 0 to record every selected case.",
+    )
+    parser.add_argument(
+        "--video-dir",
+        default=None,
+        help="Override video directory. Default is <run_dir>/videos.",
+    )
+    parser.add_argument("--video-fps", type=int, default=20)
+    parser.add_argument("--video-width", type=int, default=640)
+    parser.add_argument("--video-height", type=int, default=480)
+    parser.add_argument(
+        "--video-max-memory",
+        type=int,
+        default=2048,
+        help="Maximum recorder frame-buffer memory in MB.",
     )
 
 
@@ -154,7 +190,7 @@ def _apply_overrides(
     rotation_threshold_rad: float | None = None,
     nmg_pos_eps: float | None = None,
     nmg_rot_eps: float | None = None,
-    checkpoint_path: str | None = None,
+    nmg_onnx_path: str | None = None,
 ) -> None:
     """Apply explicit CLI/programmatic overrides to a loaded suite."""
     if batch_sizes is not None:
@@ -167,6 +203,9 @@ def _apply_overrides(
         suite.free_space.start_state_bins = start_state_bins
     if seeds is not None:
         suite.free_space.seeds = seeds
+        for track in suite.tracks:
+            if track.scenario != "free_space" and "seeds" in track.config:
+                track.config["seeds"] = list(seeds)
     if num_trials is not None:
         suite.protocol.measured_trials = num_trials
     if warmup_trials is not None:
@@ -186,8 +225,8 @@ def _apply_overrides(
             nmg.config["pos_eps"] = nmg_pos_eps
         if nmg_rot_eps is not None:
             nmg.config["rot_eps"] = nmg_rot_eps
-        if checkpoint_path is not None:
-            nmg.config["checkpoint_path"] = str(Path(checkpoint_path))
+        if nmg_onnx_path is not None:
+            nmg.config["onnx_model_path"] = str(Path(nmg_onnx_path))
     suite.validate_benchmark()
 
 
@@ -195,7 +234,7 @@ def run_all_benchmarks(
     num_waypoints_list: list[int] | None = None,
     sim_device: str = "auto",
     headless: bool = True,
-    checkpoint_path: str | None = None,
+    nmg_onnx_path: str | None = None,
     *,
     suite_name: str = "smoke",
     algorithms: list[str] | None = None,
@@ -213,8 +252,9 @@ def run_all_benchmarks(
     nmg_pos_eps: float | None = None,
     nmg_rot_eps: float | None = None,
     output_root: str | Path = "outputs/benchmarks",
+    video: VideoRecordCfg | None = None,
 ) -> BenchmarkRunResult:
-    """Resolve configuration and run all selected free-space benchmarks."""
+    """Resolve configuration and run all selected benchmark tracks."""
     from .runner import BenchmarkRunner
 
     suite = load_suite(suite_name)
@@ -233,7 +273,7 @@ def run_all_benchmarks(
         rotation_threshold_rad=rotation_threshold_rad,
         nmg_pos_eps=nmg_pos_eps,
         nmg_rot_eps=nmg_rot_eps,
-        checkpoint_path=checkpoint_path,
+        nmg_onnx_path=nmg_onnx_path,
     )
     specs = _resolve_planners(suite, algorithms, list(extra_baselines or []))
     return BenchmarkRunner(
@@ -242,6 +282,7 @@ def run_all_benchmarks(
         device=sim_device,
         headless=headless,
         output_root=output_root,
+        video=video,
     ).run()
 
 
@@ -251,7 +292,7 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
         num_waypoints_list=args.num_waypoints,
         sim_device=args.device,
         headless=args.headless,
-        checkpoint_path=args.checkpoint_path,
+        nmg_onnx_path=args.nmg_onnx_path,
         suite_name=args.suite,
         algorithms=args.algorithms,
         extra_baselines=args.extra_baselines,
@@ -268,13 +309,14 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
         nmg_pos_eps=args.nmg_pos_eps,
         nmg_rot_eps=args.nmg_rot_eps,
         output_root=args.output_root,
+        video=video_cfg_from_args(args),
     )
 
 
 def _parse_args() -> argparse.Namespace:
     """Parse standalone module arguments using the unified option schema."""
     parser = argparse.ArgumentParser(
-        description="Benchmark motion generation on fixed free-space cases."
+        description="Benchmark planners on fixed motion and Atomic Task cases."
     )
     add_parser_arguments(parser)
     return parser.parse_args()

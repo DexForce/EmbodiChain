@@ -70,6 +70,51 @@ def _case_macro_rate(
     return sum(case_rates) / len(case_rates)
 
 
+def _case_supports_attribute(case: BenchmarkCase, attribute: str) -> bool:
+    """Return whether a staged outcome applies to one case protocol."""
+    if attribute == "task_success":
+        return case.primary_success == "task_success"
+    if attribute == "execution_success":
+        return case.primary_success in {"execution_success", "task_success"}
+    return True
+
+
+def _case_macro_optional_rate(
+    measured: list[TrialRecord],
+    track_cases: list[BenchmarkCase],
+    attribute: str,
+) -> float | None:
+    """Macro-average an applicable staged boolean, otherwise return ``None``."""
+    applicable = [
+        case for case in track_cases if _case_supports_attribute(case, attribute)
+    ]
+    if not applicable:
+        return None
+    return _case_macro_rate(measured, applicable, attribute)
+
+
+def _case_macro_primary_rate(
+    measured: list[TrialRecord], track_cases: list[BenchmarkCase]
+) -> float:
+    """Macro-average each case's explicitly declared primary success stage."""
+    if not track_cases:
+        return 0.0
+    outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
+    for record in measured:
+        outcomes_by_case[record.case_id].extend(record.outcomes)
+    case_rates: list[float] = []
+    for case in track_cases:
+        outcomes = outcomes_by_case.get(case.case_id, [])
+        if not outcomes:
+            case_rates.append(0.0)
+            continue
+        case_rates.append(
+            sum(bool(getattr(outcome, case.primary_success)) for outcome in outcomes)
+            / len(outcomes)
+        )
+    return sum(case_rates) / len(case_rates)
+
+
 def _case_macro_mean(
     measured: list[TrialRecord],
     track_cases: list[BenchmarkCase],
@@ -183,15 +228,20 @@ def _performance_rows(
     cases: list[BenchmarkCase],
 ) -> list[dict[str, object]]:
     """Aggregate steady-state time and memory by track, algorithm, and input shape."""
-    measured_groups: dict[tuple[str, str, int, int], list[TrialRecord]] = defaultdict(
-        list
-    )
+    measured_groups: dict[
+        tuple[str, str, str, str, str | None, str | None, int, int],
+        list[TrialRecord],
+    ] = defaultdict(list)
     for record in records:
         if record.phase is TrialPhase.MEASURED:
             measured_groups[
                 (
                     record.track,
                     record.algorithm_id,
+                    record.robot_id,
+                    record.skill_id,
+                    record.object_id,
+                    record.task_difficulty,
                     record.batch_size,
                     record.waypoint_count,
                 )
@@ -199,8 +249,29 @@ def _performance_rows(
 
     metadata_by_id = {item.algorithm_id: item for item in metadata}
     rows: list[dict[str, object]] = []
-    for key in sorted(measured_groups):
-        track, algorithm_id, batch_size, waypoint_count = key
+    for key in sorted(
+        measured_groups,
+        key=lambda item: (
+            item[0],
+            item[1],
+            item[2],
+            item[3],
+            item[4] or "",
+            item[5] or "",
+            item[6],
+            item[7],
+        ),
+    ):
+        (
+            track,
+            algorithm_id,
+            robot_id,
+            skill_id,
+            object_id,
+            task_difficulty,
+            batch_size,
+            waypoint_count,
+        ) = key
         group = measured_groups[key]
         info = metadata_by_id[algorithm_id]
         costs = [record.cost_time_ms for record in group]
@@ -210,6 +281,10 @@ def _performance_rows(
                 "track": track,
                 "algorithm": algorithm_id,
                 "algorithm_role": info.algorithm_role.value,
+                "robot": robot_id,
+                "skill": skill_id,
+                "object": object_id,
+                "task_difficulty": task_difficulty,
                 "batch_size": batch_size,
                 "waypoint_count": waypoint_count,
                 "num_trials": len(group),
@@ -244,6 +319,23 @@ def _performance_rows(
                 "cpu_delta_mb": _mean(record.cpu_delta_mb for record in group),
                 "gpu_delta_mb": _mean(record.gpu_delta_mb for record in group),
                 "peak_gpu_mb": _peak_gpu(group),
+                "execution_time_ms": _mean(
+                    record.execution_time_ms for record in group
+                ),
+                "end_to_end_time_ms": _mean(
+                    record.end_to_end_time_ms for record in group
+                ),
+                "trajectory_duration_s": _mean(
+                    record.trajectory_duration_s for record in group
+                ),
+                "trajectory_waypoints": _mean(
+                    (
+                        float(record.trajectory_waypoints)
+                        if record.trajectory_waypoints is not None
+                        else None
+                    )
+                    for record in group
+                ),
             }
         )
 
@@ -257,6 +349,10 @@ def _performance_rows(
                     "track": track,
                     "algorithm": info.algorithm_id,
                     "algorithm_role": info.algorithm_role.value,
+                    "robot": None,
+                    "skill": None,
+                    "object": None,
+                    "task_difficulty": None,
                     "batch_size": None,
                     "waypoint_count": None,
                     "num_trials": 0,
@@ -272,6 +368,10 @@ def _performance_rows(
                     "cpu_delta_mb": None,
                     "gpu_delta_mb": None,
                     "peak_gpu_mb": None,
+                    "execution_time_ms": None,
+                    "end_to_end_time_ms": None,
+                    "trajectory_duration_s": None,
+                    "trajectory_waypoints": None,
                 }
             )
     return sorted(
@@ -281,6 +381,8 @@ def _performance_rows(
             str(row["algorithm"]),
             int(row["batch_size"] or 0),
             int(row["waypoint_count"] or 0),
+            str(row["skill"] or ""),
+            str(row["object"] or ""),
         ),
     )
 
@@ -298,7 +400,21 @@ def _metric_rows(
     remain conditioned on externally motion-valid outcomes.
     """
     measured_by_key: dict[
-        tuple[str, str, str, int, int, str, str], list[TrialRecord]
+        tuple[
+            str,
+            str,
+            str,
+            str,
+            str,
+            str | None,
+            str | None,
+            str,
+            int,
+            int,
+            str,
+            str,
+        ],
+        list[TrialRecord],
     ] = defaultdict(list)
     for record in records:
         if record.phase is not TrialPhase.MEASURED:
@@ -307,6 +423,11 @@ def _metric_rows(
             record.track,
             record.algorithm_id,
             record.scenario_id,
+            record.robot_id,
+            record.skill_id,
+            record.object_id,
+            record.task_difficulty,
+            record.primary_success,
             record.batch_size,
             record.waypoint_count,
             record.path_shape,
@@ -314,14 +435,46 @@ def _metric_rows(
         )
         measured_by_key[key].append(record)
 
-    expected_by_group: Counter[tuple[str, str, int, int, str, str]] = Counter()
-    cases_by_group: dict[tuple[str, str, int, int, str, str], list[BenchmarkCase]] = (
-        defaultdict(list)
-    )
+    expected_by_group: Counter[
+        tuple[
+            str,
+            str,
+            str,
+            str,
+            str | None,
+            str | None,
+            str,
+            int,
+            int,
+            str,
+            str,
+        ]
+    ] = Counter()
+    cases_by_group: dict[
+        tuple[
+            str,
+            str,
+            str,
+            str,
+            str | None,
+            str | None,
+            str,
+            int,
+            int,
+            str,
+            str,
+        ],
+        list[BenchmarkCase],
+    ] = defaultdict(list)
     for case in cases:
         key = (
             case.track,
             case.scenario_id,
+            case.robot_id,
+            case.skill_id,
+            case.object_id,
+            case.task_difficulty,
+            case.primary_success,
             case.batch_size,
             case.num_waypoints,
             case.path_shape,
@@ -332,10 +485,30 @@ def _metric_rows(
 
     rows: list[dict[str, object]] = []
     for info in metadata:
-        for group_key in sorted(expected_by_group):
+        for group_key in sorted(
+            expected_by_group,
+            key=lambda item: (
+                item[0],
+                item[1],
+                item[2],
+                item[3],
+                item[4] or "",
+                item[5] or "",
+                item[6],
+                item[7],
+                item[8],
+                item[9],
+                item[10],
+            ),
+        ):
             (
                 track,
                 scenario_id,
+                robot_id,
+                skill_id,
+                object_id,
+                task_difficulty,
+                primary_success,
                 batch_size,
                 waypoint_count,
                 path_shape,
@@ -347,6 +520,11 @@ def _metric_rows(
                     track,
                     info.algorithm_id,
                     scenario_id,
+                    robot_id,
+                    skill_id,
+                    object_id,
+                    task_difficulty,
+                    primary_success,
                     batch_size,
                     waypoint_count,
                     path_shape,
@@ -363,6 +541,11 @@ def _metric_rows(
                     "scenario": scenario_id,
                     "algorithm": info.algorithm_id,
                     "algorithm_role": info.algorithm_role.value,
+                    "robot": robot_id,
+                    "skill": skill_id,
+                    "object": object_id,
+                    "task_difficulty": task_difficulty,
+                    "primary_success": primary_success,
                     "batch_size": batch_size,
                     "waypoint_count": waypoint_count,
                     "path_shape": path_shape,
@@ -370,12 +553,18 @@ def _metric_rows(
                     "cases": len(group_cases),
                     "n_valid": len(valid_outcomes),
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
-                    # Free-space primary success is external motion validity.
-                    "success_rate": _case_macro_rate(
-                        measured, group_cases, "motion_valid"
-                    ),
+                    "success_rate": _case_macro_primary_rate(measured, group_cases),
                     "planning_success_rate": _case_macro_rate(
                         measured, group_cases, "planning_success"
+                    ),
+                    "motion_valid_rate": _case_macro_rate(
+                        measured, group_cases, "motion_valid"
+                    ),
+                    "execution_success_rate": _case_macro_optional_rate(
+                        measured, group_cases, "execution_success"
+                    ),
+                    "task_success_rate": _case_macro_optional_rate(
+                        measured, group_cases, "task_success"
                     ),
                     "ordered_waypoint_success_rate": _case_macro_rate(
                         measured, group_cases, "ordered_waypoints_reached"
@@ -408,6 +597,32 @@ def _metric_rows(
                     ),
                     "path_efficiency": _mean(
                         outcome.path_efficiency for outcome in valid_outcomes
+                    ),
+                    "task_completion_time_s": _mean(
+                        outcome.task_completion_time_s
+                        for outcome in outcomes
+                        if outcome.task_success
+                    ),
+                    "joint_tracking_rmse_rad": _mean(
+                        outcome.joint_tracking_rmse_rad for outcome in outcomes
+                    ),
+                    "object_lift_delta_m": _mean(
+                        outcome.object_lift_delta_m for outcome in outcomes
+                    ),
+                    "articulation_joint_delta": _mean(
+                        outcome.articulation_joint_delta for outcome in outcomes
+                    ),
+                    "articulation_joint_peak_signed_delta": _mean(
+                        outcome.articulation_joint_peak_signed_delta
+                        for outcome in outcomes
+                    ),
+                    "replan_count": _mean(
+                        (
+                            float(outcome.replan_count)
+                            if outcome.replan_count is not None
+                            else None
+                        )
+                        for outcome in outcomes
                     ),
                     "top_failure": _top_failure(outcomes),
                 }
@@ -447,6 +662,11 @@ def _leaderboard_rows(
             coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
             motion_rate = _case_macro_rate(measured, track_cases, "motion_valid")
             planning_rate = _case_macro_rate(measured, track_cases, "planning_success")
+            execution_rate = _case_macro_optional_rate(
+                measured, track_cases, "execution_success"
+            )
+            task_rate = _case_macro_optional_rate(measured, track_cases, "task_success")
+            primary_rate = _case_macro_primary_rate(measured, track_cases)
             latency_p95 = _case_macro_latency_p95(measured, track_cases)
             peak_gpu = _peak_gpu(measured)
             track_entries.append(
@@ -458,11 +678,11 @@ def _leaderboard_rows(
                     "planner_config_hash": info.config_hash[:12],
                     "eligible": coverage >= 1.0 - 1.0e-12,
                     "coverage_rate": coverage,
-                    # free-space v1: primary_success == motion_valid
-                    "overall_success_rate": motion_rate,
+                    "overall_success_rate": primary_rate,
                     "planning_success_rate": planning_rate,
                     "motion_valid_rate": motion_rate,
-                    "task_success_rate": None,
+                    "execution_success_rate": execution_rate,
+                    "task_success_rate": task_rate,
                     "latency_p95_ms": latency_p95,
                     "peak_gpu_mb": peak_gpu,
                 }

@@ -35,6 +35,7 @@ __all__ = [
     "FreeSpaceTrackCfg",
     "PlannerSpecCfg",
     "ProtocolCfg",
+    "RobotSpecCfg",
     "SuiteCfg",
     "TrackCfg",
     "load_suite",
@@ -85,6 +86,15 @@ class ProtocolCfg:
 
 
 @configclass
+class RobotSpecCfg:
+    """Robot provider selected for every track in one suite run."""
+
+    id: str = "franka_panda"
+    provider: str = "franka_panda"
+    config: dict[str, Any] = {}
+
+
+@configclass
 class FreeSpaceTrackCfg:
     """Case matrix for the ``free-space-common`` track."""
 
@@ -114,6 +124,7 @@ class SuiteCfg:
     suite_version: str = "free_space_common_v2"
     profile: str = "smoke"
     planners: list[PlannerSpecCfg] = []
+    robot: RobotSpecCfg = RobotSpecCfg()
     protocol: ProtocolCfg = ProtocolCfg()
     tracks: list[TrackCfg] = []
     free_space: FreeSpaceTrackCfg = FreeSpaceTrackCfg()
@@ -129,6 +140,7 @@ class SuiteCfg:
             suite_version=str(data.get("suite_version", "free_space_common_v2")),
             profile=str(data.get("profile", "smoke")),
             planners=planners,
+            robot=RobotSpecCfg(**data.get("robot", {})),
             protocol=ProtocolCfg(**data.get("protocol", {})),
             tracks=tracks,
             free_space=free_space,
@@ -171,6 +183,8 @@ class SuiteCfg:
                     "Every planner must define a non-empty id and adapter."
                 )
             AlgorithmRole(spec.role)
+        if not self.robot.id or not self.robot.provider:
+            raise ValueError("robot must define non-empty id and provider values.")
         if not self.tracks:
             raise ValueError("The benchmark suite must declare at least one track.")
         track_ids = [track.id for track in self.tracks]
@@ -199,9 +213,9 @@ class SuiteCfg:
             _validate_free_space(self.free_space)
         nmg = next((spec for spec in self.planners if spec.id == "nmg"), None)
         if nmg is not None:
-            if float(nmg.config.get("pos_eps", 0.05)) <= 0.0:
+            if float(nmg.config.get("pos_eps", 0.01)) <= 0.0:
                 raise ValueError("NMG pos_eps must be > 0.")
-            if float(nmg.config.get("rot_eps", 0.3)) <= 0.0:
+            if float(nmg.config.get("rot_eps", 0.1)) <= 0.0:
                 raise ValueError("NMG rot_eps must be > 0.")
 
 

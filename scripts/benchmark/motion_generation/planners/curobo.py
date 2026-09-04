@@ -46,7 +46,15 @@ __all__ = ["CuroboAdapter"]
 class CuroboAdapter(PlannerAdapter):
     """Run cuRobo with a frozen, empty-world operational configuration."""
 
-    capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+    capabilities = frozenset(
+        {
+            "eef_waypoint",
+            "joint_waypoint",
+            "batched",
+            "empty_world",
+            "atomic_action",
+        }
+    )
     model_revision = "curobo-v2"
     separate_prepare = True
 
@@ -69,7 +77,7 @@ class CuroboAdapter(PlannerAdapter):
         auto_values = dict(values.get("auto_gen", {}))
         if bool(world_values.get("multi_env", False)):
             raise ValueError(
-                "free-space-common requires one shared empty cuRobo world "
+                "The current cuRobo benchmark adapter requires one shared empty world "
                 "with world.multi_env=false."
             )
         world = CuroboWorldCfg(

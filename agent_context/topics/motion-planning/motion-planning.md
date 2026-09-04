@@ -9,7 +9,6 @@
 | TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
 | Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
-| Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
 | Motion generator | `embodichain/lab/sim/planners/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
 | Planner utilities & data types | `embodichain/lab/sim/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
 
@@ -40,7 +39,7 @@ Config hierarchy:
 ```
 BasePlannerCfg            robot_uid (MISSING), planner_type
   ├─ ToppraPlannerCfg     planner_type = "toppra", max_workers, mp_context
-  └─ NeuralPlannerCfg     planner_type = "neural", checkpoint_path (MISSING)
+  └─ NeuralPlannerCfg     planner_type = "neural", onnx_model_path (MISSING)
 
 MotionGenCfg              planner_cfg (MISSING — must be a BasePlannerCfg subclass)
 
@@ -89,11 +88,11 @@ Worker details:
 
 Learning-based EEF waypoint planner. Franka Panda only.
 
-- Checkpoint: `download_neural_planner_checkpoint()` from HuggingFace (gated, needs `HF_TOKEN`)
+- Runtime: standalone `.onnx` policy with normalization embedded; install the `nmg` extra
 - Use via `MotionGenerator` with `planner_type="neural"` and `plan_opts=NeuralPlanOptions(...)`
 - Input: `EEF_MOVE` `PlanState` list with batched `xpos:(B, 4, 4)`
-- Key cfg: `checkpoint_path` (from download), `control_part`
-- Natively batched: transformer forward, reach checks, and convergence holds all operate on `(B, ...)`.
+- Key cfg: `onnx_model_path`, `control_part`, `num_waypoints`, `policy_frame_from_world`, `runtime_tcp_from_policy_tcp`
+- The NMG exporter produces a dynamic-batch ONNX policy; NeuralPlanner rolls out all environments together.
 
 ### CuroboPlanner collision worlds
 
