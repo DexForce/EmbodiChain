@@ -37,6 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     PressAffordance,
     PressGoal,
     PressOptions,
+    sample_initial_articulation_geometry,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -130,19 +131,20 @@ def create_button_semantics(
 ) -> tuple[ObjectSemantics, torch.Tensor]:
     """Create press semantics for an articulation-link or rigid button."""
     if isinstance(target, Articulation):
-        vertices, _ = target.get_link_vert_face(BUTTON_LINK_NAME)
         target_pose = target.get_link_pose(BUTTON_LINK_NAME, to_matrix=True)
-        press_axis = torch.tensor([0.0, 0.0, -1.0], device=target.device)
-        affordance = PressAffordance(
-            # button_cap's local -z direction matches the prismatic joint's
-            # inward press direction in this asset.
-            press_axis=press_axis,
-            press_position=_surface_center(vertices, press_axis),
-        )
+        geometry = sample_initial_articulation_geometry(
+            target,
+            BUTTON_LINK_NAME,
+            initial_qpos=target.cfg.init_qpos,
+            initial_qpos_joint_names=target.joint_names,
+            body_scale=target.cfg.body_scale,
+        ).to_object_geometry()
+        affordance = PressAffordance()
         label = "microwave_start_button"
     else:
         vertices = target.get_vertices(env_ids=[0], scale=True)[0]
         target_pose = target.get_local_pose(to_matrix=True)
+        geometry = {}
         press_axis = torch.tensor([-1.0, 0.0, 0.0], device=target.device)
         affordance = PressAffordance(
             press_axis=press_axis,
@@ -152,7 +154,7 @@ def create_button_semantics(
     return (
         ObjectSemantics(
             label=label,
-            geometry={},
+            geometry=geometry,
             entity_id=BUTTON_SCENE_ENTITY_ID,
             affordance=affordance,
         ),

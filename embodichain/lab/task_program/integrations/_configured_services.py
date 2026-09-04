@@ -53,6 +53,7 @@ from embodichain.lab.sim.atomic_actions import (
     SlideAffordance,
     SlideGoal,
     SlideOptions,
+    sample_initial_articulation_geometry,
 )
 from embodichain.lab.task_program.semantics import (
     BinaryEffectEvidenceQuery,
@@ -102,7 +103,7 @@ def _identifier(value: object, *, field_name: str) -> str:
 
 
 def _axis(value: tuple[float, float, float]) -> tuple[float, float, float]:
-    """Validate one finite non-zero three-dimensional axis."""
+    """Validate one legacy finite non-zero three-dimensional axis fallback."""
     if type(value) is not tuple or len(value) != 3:
         raise TypeError("translation_axis must be an exact three-value tuple.")
     normalized = tuple(float(item) for item in value)
@@ -289,16 +290,18 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
 
 @dataclass(frozen=True, slots=True)
 class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
-    """Create Slide semantics from one configured articulation-link mesh."""
+    """Create Slide semantics from one configured articulation-link geometry."""
 
     call_id: ClassVar[str] = _ARTICULATION_LINK_SLIDE_CALL_ID
-    revision: ClassVar[str] = "2"
+    revision: ClassVar[str] = "4"
     target_descriptor: ClassVar[SkillDescriptor] = Slide.descriptor()
 
     articulation_id: str
     articulation_simulation_uid: str
     link_entity_id: str
-    translation_axis: tuple[float, float, float]
+    translation_axis: tuple[float, float, float] | None = None
+    """Optional compatibility axis that preserves the mesh-only legacy path."""
+
     target_pose_mode: str = "live"
 
     def __post_init__(self) -> None:
@@ -308,7 +311,8 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
             "link_entity_id",
         ):
             _identifier(getattr(self, field_name), field_name=field_name)
-        object.__setattr__(self, "translation_axis", _axis(self.translation_axis))
+        if self.translation_axis is not None:
+            object.__setattr__(self, "translation_axis", _axis(self.translation_axis))
         _slide_target_pose_mode(self.target_pose_mode)
 
     def create(
@@ -356,10 +360,28 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         if not callable(get_link_vert_face):
             raise TypeError("Articulation must provide get_link_vert_face().")
         vertices, triangles = get_link_vert_face(native_link_name)
+        geometry: dict[str, object] = {}
+        if self.translation_axis is None:
+            # Explicit axes own the legacy mesh-only path: sampled geometry
+            # would both override their sign and reject scaled articulations.
+            geometry = sample_initial_articulation_geometry(
+                articulation,
+                native_link_name,
+                initial_qpos=articulation.cfg.init_qpos,
+                initial_qpos_joint_names=articulation.joint_names,
+                body_scale=articulation.cfg.body_scale,
+            ).to_object_geometry()
+        affordance_kwargs: dict[str, object] = {}
+        if self.translation_axis is not None:
+            affordance_kwargs["translation_axis"] = torch.tensor(
+                self.translation_axis,
+                dtype=torch.float32,
+                device=engine.device,
+            )
         semantics = ObjectSemantics(
             label="articulation_link",
             entity_id=self.link_entity_id,
-            geometry={},
+            geometry=geometry,
             affordance=SlideAffordance(
                 mesh_vertices=torch.as_tensor(
                     vertices,
@@ -371,11 +393,7 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
                     dtype=torch.long,
                     device=engine.device,
                 ),
-                translation_axis=torch.tensor(
-                    self.translation_axis,
-                    dtype=torch.float32,
-                    device=engine.device,
-                ),
+                **affordance_kwargs,
             ),
         )
         return _ArticulationLinkSlideLowerer(
