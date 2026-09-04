@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 import torch
 
+from embodichain.lab.sim.atomic_actions import ArticulationAffordanceGeometry
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
 from scripts.benchmark.motion_generation.artifacts import write_case_manifest
 from scripts.benchmark.motion_generation.config import load_suite
@@ -46,6 +48,8 @@ from scripts.benchmark.motion_generation.scenarios.atomic_objects import (
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     AtomicTaskScenario,
+    _ExecutionObservation,
+    _articulation_effect_success,
     _canonical_case_qpos,
     _case_generation_seed,
     _randomization_parameters,
@@ -115,12 +119,55 @@ def _atomic_outcome() -> CaseOutcome:
         task_completion_time_s=1.5,
         joint_tracking_rmse_rad=0.002,
         replan_count=0,
+        articulation_joint_initial=0.0,
+        articulation_joint_final=0.001,
+        articulation_joint_delta=0.001,
+        articulation_joint_peak_signed_delta=0.006,
     )
+
+
+def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
+    """Build non-degenerate link-local geometry for articulation providers."""
+    target_points = torch.tensor(
+        [
+            [-0.01, 0.0, 0.0],
+            [0.01, 0.0, 0.0],
+            [0.0, -0.01, 0.0],
+            [0.0, 0.01, 0.0],
+            [0.0, 0.0, -0.01],
+            [0.0, 0.0, 0.01],
+        ],
+        dtype=torch.float32,
+    )
+    non_target_points = torch.tensor(
+        [
+            [-0.002, 0.0, 0.018],
+            [0.002, 0.0, 0.018],
+            [0.0, -0.002, 0.018],
+            [0.0, 0.002, 0.018],
+        ],
+        dtype=torch.float32,
+    )
+    kwargs: dict[str, torch.Tensor] = {}
+    if joint_type == "prismatic":
+        kwargs["prismatic_joint_axis"] = torch.tensor([0.0, 0.0, 1.0])
+    elif joint_type == "revolute":
+        kwargs["revolute_joint_axis"] = torch.tensor([0.0, 0.0, 1.0])
+        kwargs["revolute_axis_origin"] = torch.zeros(3)
+    else:
+        raise ValueError(f"Unsupported fake articulation joint type: {joint_type}")
+    return ArticulationAffordanceGeometry(
+        target_link_point_cloud=target_points,
+        articulation_point_cloud=torch.cat((target_points, non_target_points)),
+        non_target_articulation_point_cloud=non_target_points,
+        **kwargs,
+    ).to_object_geometry()
 
 
 def test_atomic_suite_is_franka_pgi_and_curobo_only():
     suite = load_suite("atomic_franka_pgi_curobo")
 
+    assert suite.suite_version == "atomic_franka_pgi_curobo_smoke_v3"
     assert suite.robot.id == "franka_pgi"
     assert suite.robot.provider == "franka_pgi"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -135,12 +182,115 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
         "move_held_object",
         "place",
         "press",
+        "slide",
+        "twist",
     ]
+    skills_by_id = {item["id"]: item for item in skills}
+    assert {
+        key: skills_by_id["press"][key]
+        for key in (
+            "sample_count",
+            "hand_interp_steps",
+            "approach_distance_m",
+            "press_distance_m",
+        )
+    } == {
+        "sample_count": 140,
+        "hand_interp_steps": 12,
+        "approach_distance_m": 0.12,
+        "press_distance_m": 0.03,
+    }
+    assert {
+        key: skills_by_id["slide"][key]
+        for key in (
+            "sample_count",
+            "hand_interp_steps",
+            "approach_distance_m",
+            "translation_distance_m",
+            "direction",
+        )
+    } == {
+        "sample_count": 140,
+        "hand_interp_steps": 12,
+        "approach_distance_m": 0.10,
+        "translation_distance_m": 0.18,
+        "direction": "pull",
+    }
+    assert {
+        key: skills_by_id["twist"][key]
+        for key in (
+            "sample_count",
+            "hand_interp_steps",
+            "twist_waypoint_count",
+            "pre_grasp_distance_m",
+            "twist_angle_rad",
+        )
+    } == {
+        "sample_count": 140,
+        "hand_interp_steps": 12,
+        "twist_waypoint_count": 8,
+        "pre_grasp_distance_m": 0.12,
+        "twist_angle_rad": pytest.approx(-0.7853981634),
+    }
     gripper = suite.enabled_tracks()[0].config["gripper"]
     assert gripper == {
         "control_part": "hand",
         "open_qpos": [0.0],
-        "grasp_qpos": [0.024],
+        "grasp_qpos": [0.040],
+    }
+    articulations = {
+        item["id"]: item for item in suite.enabled_tracks()[0].config["articulations"]
+    }
+    assert set(articulations) == {"microwave", "drawer"}
+    assert articulations["microwave"] == {
+        "id": "microwave",
+        "asset_path": "MicrowaveOven/microwave_oven_with_inertials.urdf",
+        "position": [-1.0, -0.30, 0.4],
+        "rotation_deg": [0.0, 0.0, 90.0],
+        "init_qpos": [0.0, 0.0, 0.0, 0.0],
+        "drive": {
+            "stiffness": 0.001,
+            "damping": 100.0,
+            "max_effort": 0.01,
+        },
+        "fix_base": True,
+        "settle_steps": 10,
+    }
+    assert articulations["drawer"] == {
+        "id": "drawer",
+        "asset_path": "Drawer/model_split_links_with_inertials.urdf",
+        "position": [-1.1, 0.0, 0.0],
+        "rotation_deg": [0.0, 0.0, 90.0],
+        "init_qpos": [0.0],
+        "drive": {"drive_type": "none"},
+        "attrs": {"static_friction": 1.0, "dynamic_friction": 1.0},
+        "fix_base": True,
+        "settle_steps": 10,
+        "reset_settle_steps": 0,
+    }
+    assert {
+        key: skills_by_id["press"][key]
+        for key in ("articulation", "target_link", "target_joint")
+    } == {
+        "articulation": "microwave",
+        "target_link": "button_cap",
+        "target_joint": "start_button_press",
+    }
+    assert {
+        key: skills_by_id["slide"][key]
+        for key in ("articulation", "target_link", "target_joint")
+    } == {
+        "articulation": "drawer",
+        "target_link": "large_handle_bar",
+        "target_joint": "cabinet_to_drawer",
+    }
+    assert {
+        key: skills_by_id["twist"][key]
+        for key in ("articulation", "target_link", "target_joint")
+    } == {
+        "articulation": "microwave",
+        "target_link": "cap_1",
+        "target_joint": "power_knob_rotation",
     }
 
 
@@ -229,22 +379,24 @@ def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
     assert len(cfg.control_parts["arm"]) == 7
     assert cfg.control_parts["hand"] == ["gripper_finger1_joint_1"]
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_link8"
-    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
+    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.17)
     assert len(cfg.init_qpos) == 9
 
 
-def test_atomic_invocation_pins_motion_generator_and_selected_planner():
+def test_atomic_invocation_uses_motion_generator_policy():
     provider = create_atomic_skill_provider("move_end_effector")
-    invocation = provider.build_invocation(
-        Mock(control_part="manipulator"),
+    scenario = Mock(control_part="manipulator")
+
+    provider.build_invocation(
+        scenario,
         _atomic_case(),
-        Mock(motion_policy_planner="curobo"),
+        Mock(),
     )
 
-    assert invocation.motion_policy.strategy == "motion_gen"
-    assert invocation.motion_policy.planner == "curobo"
-    assert invocation.skill_id == "move_end_effector"
-    assert invocation.binding.manipulators == {"primary": "manipulator"}
+    args, kwargs = scenario.require_engine().make_invocation.call_args
+    assert args[0] == "move_end_effector"
+    assert kwargs["motion_policy"].strategy == "motion_gen"
+    assert kwargs["control_parts"] == {"primary": {"motion": "manipulator"}}
 
 
 def test_atomic_skill_and_object_extensions_are_registry_driven():
@@ -255,10 +407,173 @@ def test_atomic_skill_and_object_extensions_are_registry_driven():
         "pick_up",
         "place",
         "press",
+        "slide",
+        "twist",
     )
     assert atomic_object_kind_names() == ("cube", "mesh")
     with pytest.raises(ValueError, match="Unknown atomic object kind"):
         create_atomic_object(Mock(), {"id": "new_object", "kind": "not_registered"})
+
+
+@pytest.mark.parametrize(
+    ("skill_id", "config", "joint_type", "expected_waypoints"),
+    [
+        (
+            "press",
+            {
+                "name": "microwave_start_button",
+                "sample_count": 140,
+                "hand_interp_steps": 12,
+                "approach_distance_m": 0.12,
+                "press_distance_m": 0.03,
+                "articulation": "microwave",
+                "target_link": "button_cap",
+                "target_joint": "start_button_press",
+                "minimum_joint_delta_m": 0.004,
+            },
+            "prismatic",
+            4,
+        ),
+        (
+            "slide",
+            {
+                "name": "drawer_pull",
+                "sample_count": 140,
+                "hand_interp_steps": 12,
+                "approach_distance_m": 0.10,
+                "translation_distance_m": 0.18,
+                "direction": "pull",
+                "articulation": "drawer",
+                "target_link": "large_handle_bar",
+                "target_joint": "cabinet_to_drawer",
+                "minimum_joint_delta_m": 0.12,
+            },
+            "prismatic",
+            3,
+        ),
+        (
+            "twist",
+            {
+                "name": "microwave_power_knob",
+                "sample_count": 140,
+                "hand_interp_steps": 12,
+                "twist_waypoint_count": 8,
+                "pre_grasp_distance_m": 0.12,
+                "twist_angle_rad": -0.7853981634,
+                "articulation": "microwave",
+                "target_link": "cap_1",
+                "target_joint": "power_knob_rotation",
+                "minimum_joint_delta_rad": 0.5,
+            },
+            "revolute",
+            11,
+        ),
+    ],
+)
+def test_new_atomic_skill_cases_freeze_reference_waypoints(
+    skill_id,
+    config,
+    joint_type,
+    expected_waypoints,
+):
+    robot = Mock(device=torch.device("cpu"))
+    robot.get_qpos.return_value = torch.zeros(1, 7)
+    robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
+    scenario = Mock(robot=robot, control_part="arm")
+    entity = Mock(uid=f"benchmark_{config['articulation']}")
+    handle = Mock(
+        object_id=config["articulation"],
+        entity=entity,
+        initial_pose=torch.eye(4).unsqueeze(0),
+        initial_qpos=torch.zeros(1, 4 if config["articulation"] == "microwave" else 1),
+    )
+    handle.link_pose.return_value = torch.eye(4).unsqueeze(0)
+    handle.link_mesh.return_value = (
+        torch.tensor(
+            [
+                [-0.01, -0.01, -0.01],
+                [0.01, -0.01, -0.01],
+                [0.0, 0.01, 0.01],
+            ],
+            dtype=torch.float32,
+        ),
+        torch.tensor([[0, 1, 2]], dtype=torch.long),
+    )
+    scenario.activate_articulation.return_value = handle
+    scenario.sample_articulation_geometry.return_value = _fake_articulation_geometry(
+        joint_type=joint_type
+    )
+    scenario.resolve_articulation_grasp.return_value = torch.eye(4).unsqueeze(0)
+    scenario.solve_reference_qpos.side_effect = lambda start, targets: torch.zeros(
+        start.shape[0], targets.shape[1], start.shape[1]
+    )
+    suite = Mock(suite_version="test_v1", robot=Mock(id="franka_pgi"))
+    track = Mock(id="atomic-task")
+
+    case = create_atomic_skill_provider(skill_id).generate_case(
+        scenario,
+        suite,
+        track,
+        config,
+        seed=11,
+        batch_size=1,
+    )
+
+    assert case.skill_id == skill_id
+    assert case.num_waypoints == expected_waypoints
+    assert case.target_waypoints.shape == (1, expected_waypoints, 4, 4)
+    assert case.reference_qpos.shape == (1, expected_waypoints, 7)
+    assert torch.isfinite(case.target_waypoints).all()
+    assert case.case_parameters["sample_count"] == 140
+    assert case.object_id == config["articulation"]
+    assert case.case_parameters["target_link"] == config["target_link"]
+    assert case.case_parameters["target_joint"] == config["target_joint"]
+    assert case.case_parameters["target_entity_id"] == (
+        f"benchmark_{config['articulation']}:{config['target_link']}"
+    )
+    scenario.validate_articulation_target.assert_called_once_with(
+        handle,
+        target_link=config["target_link"],
+        target_joint=config["target_joint"],
+        joint_type=joint_type,
+    )
+
+
+def test_articulation_effect_uses_peak_displacement_when_joint_rebounds():
+    case = replace(
+        _atomic_case(),
+        case_parameters={"minimum_articulation_joint_delta": 0.004},
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.tensor([True]),
+        final_tcp_pose=torch.eye(4).unsqueeze(0),
+        joint_tracking_rmse_rad=torch.zeros(1),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.1,
+        articulation_joint_initial=torch.tensor([0.0]),
+        articulation_joint_final=torch.tensor([0.0]),
+        articulation_joint_peak_signed_delta=torch.tensor([0.005]),
+    )
+
+    success = _articulation_effect_success(
+        case,
+        observation,
+        (_atomic_outcome(),),
+    )
+
+    assert observation.articulation_joint_final.item() == pytest.approx(
+        observation.articulation_joint_initial.item()
+    )
+    assert success.tolist() == [True]
+
+
+def test_case_outcome_records_articulation_joint_measurements():
+    outcome = _atomic_outcome()
+
+    assert outcome.articulation_joint_initial == pytest.approx(0.0)
+    assert outcome.articulation_joint_final == pytest.approx(0.001)
+    assert outcome.articulation_joint_delta == pytest.approx(0.001)
+    assert outcome.articulation_joint_peak_signed_delta == pytest.approx(0.006)
 
 
 def test_atomic_primary_success_and_execution_efficiency_aggregate():
@@ -310,6 +625,8 @@ def test_atomic_primary_success_and_execution_efficiency_aggregate():
     assert metrics["success_rate"] == pytest.approx(1.0)
     assert metrics["execution_success_rate"] == pytest.approx(1.0)
     assert metrics["task_success_rate"] == pytest.approx(1.0)
+    assert metrics["articulation_joint_delta"] == pytest.approx(0.001)
+    assert metrics["articulation_joint_peak_signed_delta"] == pytest.approx(0.006)
     assert performance["execution_time_ms"] == pytest.approx(30.0)
     assert performance["end_to_end_time_ms"] == pytest.approx(50.0)
     assert leaderboard["overall_success_rate"] == pytest.approx(1.0)

@@ -30,9 +30,16 @@ from embodichain.lab.sim.atomic_actions import (
     GraspGoal,
     HeldObjectPoseGoal,
     MoveHeldObjectOptions,
+    PressGoal,
+    PressOptions,
+    SlideGoal,
+    SlideOptions,
+    TwistGoal,
+    TwistOptions,
 )
 from embodichain.lab.sim.planners.curobo.curobo_planner import CuroboPlanner
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult
+from embodichain.toolkits.graspkit import GraspPoseGenerator
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
 from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.metrics.trajectory import (
@@ -64,6 +71,8 @@ from scripts.benchmark.motion_generation.run_benchmark import (
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     AtomicTaskScenario,
+    _FrozenArticulationGraspPoseGenerator,
+    _executed_final_pose_errors,
     create_atomic_skill_provider,
 )
 
@@ -188,6 +197,36 @@ def test_press_waypoint_validation_accepts_half_turn_about_z_symmetry():
     assert strict[0].failure_code == "waypoint_miss"
     assert symmetric[0].motion_valid is True
     assert symmetric[0].final_rotation_err_deg == pytest.approx(0.0)
+
+
+def test_executed_final_pose_errors_accept_half_turn_about_eef_z_symmetry():
+    target = torch.eye(4)
+    symmetric_final = target.clone()
+    symmetric_final[:3, 0] = -symmetric_final[:3, 0]
+    symmetric_final[:3, 1] = -symmetric_final[:3, 1]
+    strict_case = replace(
+        _case(),
+        scenario_id="press",
+        skill_id="press",
+        target_waypoints=target.reshape(1, 1, 4, 4),
+    )
+    symmetric_case = replace(
+        strict_case,
+        case_parameters={"waypoint_rotation_symmetry": "half_turn_about_z"},
+    )
+
+    _, strict_rotation = _executed_final_pose_errors(
+        strict_case,
+        symmetric_final.unsqueeze(0),
+    )
+    translation, symmetric_rotation = _executed_final_pose_errors(
+        symmetric_case,
+        symmetric_final.unsqueeze(0),
+    )
+
+    assert translation.item() == pytest.approx(0.0)
+    assert strict_rotation.item() == pytest.approx(torch.pi)
+    assert symmetric_rotation.item() == pytest.approx(0.0)
 
 
 def test_waypoint_errors_use_threshold_greedy_arrivals():
@@ -598,6 +637,307 @@ def test_atomic_task_prepare_planner_registers_benchmark_objects_in_scene():
     scene = scenario.require_engine().initial_context().scene
     assert tuple(scene.entities) == ("atomic_cube",)
     assert torch.equal(scene.entities["atomic_cube"].pose, object_pose)
+
+
+def test_atomic_task_prepare_planner_installs_slide_grasp_service():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    adapter = Mock()
+    adapter.require_motion_generator.return_value = motion_generator
+    scenario = AtomicTaskScenario()
+    scenario.end_effector_part = "hand"
+    scenario._gripper_open = torch.zeros(1)
+    scenario._gripper_grasp = torch.ones(1)
+    scenario._case_providers["slide-case"] = create_atomic_skill_provider("slide")
+    target_pose = torch.eye(4).unsqueeze(0)
+    grasp_pose = target_pose.clone()
+    grasp_pose[:, 0, 3] = 0.04
+    scenario._cases_by_id["slide-case"] = replace(
+        _case(),
+        scenario_id="slide",
+        case_id="slide-case",
+        skill_id="slide",
+        case_parameters={
+            "slide_target_pose": target_pose.tolist(),
+            "grasp_pose": grasp_pose.tolist(),
+        },
+    )
+
+    scenario.prepare_planner(adapter, Mock())
+
+    generator = scenario.require_engine().grasp_pose_generators["hand"]
+    assert isinstance(generator, GraspPoseGenerator)
+
+
+def test_frozen_articulation_grasp_generator_preserves_batch_shapes():
+    target_pose = torch.eye(4).unsqueeze(0)
+    grasp_pose = target_pose.clone()
+    grasp_pose[:, 0, 3] = 0.04
+    generator = _FrozenArticulationGraspPoseGenerator([(target_pose, grasp_pose)])
+    object_poses = torch.eye(4).repeat(2, 1, 1)
+    object_poses[:, 1, 3] = torch.tensor([0.1, 0.2])
+    mesh_vertices = torch.zeros(3, 3)
+    mesh_triangles = torch.tensor([[0, 1, 2]])
+
+    valid, resolved, costs = generator.get_best_grasp_poses(
+        mesh_vertices=mesh_vertices,
+        mesh_triangles=mesh_triangles,
+        obj_poses=object_poses,
+        approach_direction=torch.tensor([0.0, 0.0, 1.0]),
+    )
+    candidates = generator.get_valid_grasp_poses(
+        mesh_vertices=mesh_vertices,
+        mesh_triangles=mesh_triangles,
+        obj_poses=object_poses,
+        approach_direction=torch.tensor([0.0, 0.0, 1.0]),
+    )
+
+    assert valid.shape == (2,)
+    assert resolved.shape == (2, 4, 4)
+    assert costs.shape == (2,)
+    assert torch.allclose(resolved[:, 0, 3], torch.tensor([0.04, 0.04]))
+    assert torch.allclose(resolved[:, 1, 3], torch.tensor([0.1, 0.2]))
+    assert len(candidates) == 2
+    assert all(poses.shape == (1, 4, 4) for poses, _ in candidates)
+    assert all(cost.shape == (1,) for _, cost in candidates)
+
+
+def test_atomic_task_press_invocation_uses_articulated_target_manifest():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    target_pose = torch.eye(4).unsqueeze(0)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="press",
+        case_id="atomic-task:press:microwave_start_button:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=4,
+        path_shape="approach_contact_press_retract",
+        start_state_bin="pre_action",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=target_pose.unsqueeze(1).repeat(1, 4, 1, 1),
+        reference_qpos=torch.zeros(1, 4, 7),
+        skill_id="press",
+        object_id="microwave",
+        case_parameters={
+            "sample_count": 140,
+            "press_target_pose": target_pose.tolist(),
+            "press_axis": [0.0, 0.0, 1.0],
+            "press_position": [0.0, 0.0, 0.01],
+            "target_entity_id": "benchmark_microwave:button_cap",
+            "hand_interp_steps": 12,
+            "approach_distance_m": 0.12,
+            "press_distance_m": 0.03,
+        },
+    )
+
+    invocation = create_atomic_skill_provider("press").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+
+    assert isinstance(invocation.goal, PressGoal)
+    assert invocation.goal.semantics.entity_id == "benchmark_microwave:button_cap"
+    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.sample_count == 140
+    assert type(invocation.skill_options) is PressOptions
+    assert invocation.skill_options.hand_interp_steps == 12
+    assert invocation.skill_options.approach_distance == pytest.approx(0.12)
+    assert invocation.skill_options.press_distance == pytest.approx(0.03)
+
+
+def test_atomic_task_slide_invocation_uses_tutorial_options():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    target_pose = torch.eye(4).unsqueeze(0)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="slide",
+        case_id="atomic-task:slide:linear_pull:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=3,
+        path_shape="approach_grasp_pull",
+        start_state_bin="pre_action",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=target_pose.unsqueeze(1).repeat(1, 3, 1, 1),
+        reference_qpos=torch.zeros(1, 3, 7),
+        skill_id="slide",
+        object_id="drawer",
+        case_parameters={
+            "sample_count": 140,
+            "slide_target_pose": target_pose.tolist(),
+            "translation_axis": [0.0, 0.0, 1.0],
+            "mesh_vertices": [
+                [-0.01, -0.01, 0.0],
+                [0.01, -0.01, 0.0],
+                [0.0, 0.01, 0.0],
+            ],
+            "mesh_triangles": [[0, 1, 2]],
+            "grasp_pose": target_pose.tolist(),
+            "target_entity_id": "benchmark_drawer:large_handle_bar",
+            "direction": "pull",
+            "hand_interp_steps": 12,
+            "approach_distance_m": 0.10,
+            "translation_distance_m": 0.18,
+        },
+    )
+
+    invocation = create_atomic_skill_provider("slide").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+
+    assert isinstance(invocation.goal, SlideGoal)
+    assert invocation.goal.semantics.entity_id == "benchmark_drawer:large_handle_bar"
+    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.sample_count == 140
+    assert type(invocation.skill_options) is SlideOptions
+    assert invocation.skill_options.direction == "pull"
+    assert invocation.skill_options.hand_interp_steps == 12
+    assert invocation.skill_options.approach_distance == pytest.approx(0.10)
+    assert invocation.skill_options.translation_distance == pytest.approx(0.18)
+    assert set(invocation.binding.endpoint_keys) == {
+        ("primary", "motion"),
+        ("primary", "grasp"),
+    }
+
+
+def test_atomic_task_twist_invocation_uses_tutorial_options():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    target_pose = torch.eye(4).unsqueeze(0)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="twist",
+        case_id="atomic-task:twist:quarter_turn:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=11,
+        path_shape="approach_grasp_twist_retract",
+        start_state_bin="pre_action",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=target_pose.unsqueeze(1).repeat(1, 11, 1, 1),
+        reference_qpos=torch.zeros(1, 11, 7),
+        skill_id="twist",
+        object_id="microwave",
+        case_parameters={
+            "sample_count": 140,
+            "twist_target_pose": target_pose.tolist(),
+            "grasp_position": [0.0, 0.0, 0.0],
+            "axis_origin": [0.0, 0.0, 0.0],
+            "twist_axis": [0.0, 0.0, 1.0],
+            "target_entity_id": "benchmark_microwave:cap_1",
+            "hand_interp_steps": 12,
+            "twist_waypoint_count": 8,
+            "pre_grasp_distance_m": 0.12,
+            "twist_angle_rad": -0.7853981634,
+        },
+    )
+
+    invocation = create_atomic_skill_provider("twist").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+
+    assert isinstance(invocation.goal, TwistGoal)
+    assert invocation.goal.semantics.entity_id == "benchmark_microwave:cap_1"
+    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.sample_count == 140
+    assert type(invocation.skill_options) is TwistOptions
+    assert invocation.skill_options.hand_interp_steps == 12
+    assert invocation.skill_options.twist_waypoint_count == 8
+    assert invocation.skill_options.pre_grasp_distance == pytest.approx(0.12)
+    assert invocation.skill_options.twist_angle == pytest.approx(-0.7853981634)
+    assert set(invocation.binding.endpoint_keys) == {
+        ("primary", "motion"),
+        ("primary", "grasp"),
+    }
 
 
 def test_atomic_task_move_held_object_uses_current_options_contract():

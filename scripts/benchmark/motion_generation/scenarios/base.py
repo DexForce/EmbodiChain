@@ -80,7 +80,15 @@ class ScenarioProvider(ABC):
         track: "TrackCfg",
         control_part: str,
     ) -> None:
-        """Create scenario-owned runtime entities before case generation."""
+        """Finalize scenario runtime state before case generation."""
+
+    def create_runtime_entities(
+        self,
+        simulation: "SimulationManager",
+        suite: "SuiteCfg",
+        track: "TrackCfg",
+    ) -> None:
+        """Add scenario-owned entities before the first physics update."""
 
     def close_runtime(self) -> None:
         """Release references to scenario-owned simulation entities."""

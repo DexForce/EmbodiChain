@@ -19,9 +19,24 @@ leaderboard.
 
 The first physics-backed slice is available as
 `suites/atomic_franka_pgi_curobo.yaml`. It runs Franka + PGI with cuRobo only,
-and covers `MoveEndEffector` plus antipodal-grasp `PickUp`. Both skills pin
-`MotionPolicy(strategy="motion_gen", planner="curobo")` and compile through the
-same `AtomicActionEngine`; scenario code never calls cuRobo directly.
+and covers `MoveEndEffector`, `MoveJoints`, antipodal-grasp `PickUp`,
+`MoveHeldObject`, `Place`, `Press`, `Slide`, and `Twist`. Every skill pins
+`MotionPolicy(strategy="motion_gen")` and compiles through the same
+`AtomicActionEngine`; scenario code never calls cuRobo directly.
+The `atomic_franka_pgi_curobo_smoke_v3` contact cases use the same articulated
+assets and placements as their Atomic Action tutorials. `Press` and `Twist`
+interact with the Microwave's `button_cap`/`start_button_press` and
+`cap_1`/`power_knob_rotation` link/joint pairs; `Slide` interacts with the
+Drawer's `large_handle_bar`/`cabinet_to_drawer` pair. Cases freeze targets
+derived from the actual link geometry rather than synthetic semantic targets.
+
+Physical replay starts sampling the target joint at each action's effect
+segment and continues through release, retract, and the final hold. `task_success`
+requires valid, executed motion and a sufficient peak signed displacement from
+the reset joint state: 0.004 m for the microwave button, 0.12 m for the drawer,
+and 0.5 rad for the power knob. The peak, rather than only the final joint
+state, is authoritative because a spring-loaded button can rebound during the
+post-action hold.
 
 The shared runner now selects planners, scenarios, robots, Atomic Action case
 providers, and object kinds through registries. Cases freeze the full robot
@@ -35,6 +50,24 @@ Run the slice with:
 ```bash
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_curobo --device cuda
+```
+
+Record every successful measured case (including all three articulated
+interactions) with:
+
+```bash
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_curobo --device cuda \
+  --record-video --video-case-limit 0
+```
+
+`--video-case-limit` is a global run limit, so a value of `1` records at most
+one case. Add `--record-failed-video` when failed cases should be retained as
+static debug scenes. For live inspection, open the simulator viewer with:
+
+```bash
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_curobo --device cuda --no-headless
 ```
 
 ## Motivation
@@ -575,6 +608,13 @@ Contact tasks need explicit collision-world ownership:
   simulation;
 - write visible constraints into `constraint_information` for every result.
 
+In `atomic_franka_pgi_curobo_smoke_v3`, the Microwave and Drawer are present as
+physical articulations in the simulator, but the cuRobo adapter still receives
+an empty external world. Consequently, the suite can validate contact-driven
+target-joint actuation, but it does not establish collision safety against
+non-target articulation links or other environment geometry. This limitation
+must remain visible in the run metadata and report interpretation.
+
 Suggested coverage:
 
 | Action or sequence | Primary task-success criteria |
@@ -584,6 +624,9 @@ Suggested coverage:
 | MoveHeldObject | Object reaches target pose, grasp remains stable, object drift/tilt stays within threshold |
 | Place | Place pose reached, release succeeds, final object pose is correct and stable |
 | Pick-Move-Place | Every stage succeeds in sequence; final object pose and release state are correct |
+| Press | Button joint reaches the configured peak signed displacement from the press segment through replay hold; final rebound is allowed |
+| Slide | Drawer prismatic joint reaches the configured peak signed displacement from the pull segment through replay hold |
+| Twist | Knob revolute joint reaches the configured peak signed displacement from the twist segment through replay hold |
 
 Record:
 
@@ -595,6 +638,8 @@ Record:
 - task completion time;
 - replan/retry count;
 - task-specific pose, lift, slip, release, and contact metrics.
+- articulated-contact target-joint initial/final displacement and peak signed
+  displacement.
 
 Sequence success must come from one sequential episode. Do not approximate it
 by multiplying independently measured action success rates.

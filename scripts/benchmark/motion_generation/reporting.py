@@ -90,6 +90,8 @@ METRIC_COLUMNS = (
     "task_completion_time_s",
     "joint_tracking_rmse_rad",
     "object_lift_delta_m",
+    "articulation_joint_delta",
+    "articulation_joint_peak_signed_delta",
     "replan_count",
     "top_failure",
 )

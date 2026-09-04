@@ -48,8 +48,8 @@ DEFAULT_VIDEO_WIDTH = 640
 DEFAULT_VIDEO_HEIGHT = 480
 DEFAULT_VIDEO_CASE_LIMIT = 0
 DEFAULT_VIDEO_LOOK_AT = (
-    (-1.25, -1.15, 0.95),
-    (-0.25, -0.02, 0.25),
+    (0.7, 1.0, 0.8),
+    (-0.5, 0, 0.3),
     (0.0, 0.0, 1.0),
 )
 

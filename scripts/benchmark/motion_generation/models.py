@@ -127,6 +127,10 @@ class CaseOutcome:
     task_completion_time_s: float | None = None
     joint_tracking_rmse_rad: float | None = None
     object_lift_delta_m: float | None = None
+    articulation_joint_initial: float | None = None
+    articulation_joint_final: float | None = None
+    articulation_joint_delta: float | None = None
+    articulation_joint_peak_signed_delta: float | None = None
     replan_count: int | None = None
     min_translation_err_mm: float | None = None
     min_rotation_err_deg: float | None = None

@@ -24,7 +24,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
 
@@ -48,18 +48,32 @@ from embodichain.lab.sim.atomic_actions import (
     PressAffordance,
     PressGoal,
     PressOptions,
+    SlideAffordance,
+    SlideGoal,
+    SlideOptions,
     TaskState,
+    TwistAffordance,
+    TwistGoal,
+    TwistOptions,
     create_simulation_atomic_action_engine,
+    sample_initial_articulation_geometry,
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.toolkits.graspkit import GraspPoseGenerator
+from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 from ..config import SuiteCfg, TrackCfg
 from ..metrics.trajectory import compute_case_outcomes
 from ..models import BenchmarkCase, CaseOutcome
 from ..registry import register_scenario_provider
 from ..video import VideoRecordCfg, build_video_path, record_with_window
-from .atomic_objects import AtomicObjectHandle, create_atomic_object
+from .atomic_objects import (
+    AtomicArticulationHandle,
+    AtomicObjectHandle,
+    create_atomic_articulation,
+    create_atomic_object,
+)
 from .base import ScenarioEvaluation, ScenarioProvider
 
 if TYPE_CHECKING:
@@ -82,7 +96,14 @@ _TOP_DOWN_ROTATION = (
     (0.0401, 0.0000, -0.9992),
 )
 _TASK_DIFFICULTIES = {"simple", "medium", "hard"}
-_GRIPPER_SKILLS = {"pick_up", "move_held_object", "place", "press"}
+_GRIPPER_SKILLS = {
+    "pick_up",
+    "move_held_object",
+    "place",
+    "press",
+    "slide",
+    "twist",
+}
 _CASE_QPOS_RESOLUTION_RAD = 1.0e-4
 
 
@@ -98,6 +119,20 @@ class _ExecutionObservation:
     object_lift_delta_m: torch.Tensor | None = None
     final_arm_qpos: torch.Tensor | None = None
     final_object_pose: torch.Tensor | None = None
+    articulation_joint_initial: torch.Tensor | None = None
+    articulation_joint_final: torch.Tensor | None = None
+    articulation_joint_peak_signed_delta: torch.Tensor | None = None
+
+
+@dataclass(frozen=True)
+class _ReplayMetrics:
+    """Tracking and articulation-effect accumulators from one replay."""
+
+    squared_tracking_error: torch.Tensor
+    tracking_value_count: int
+    articulation_joint_initial: torch.Tensor | None = None
+    articulation_joint_final: torch.Tensor | None = None
+    articulation_joint_peak_signed_delta: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +179,11 @@ class AtomicSkillCaseProvider(ABC):
 
     def lift_segment_start(self, compiled: CompiledTrajectory) -> int | None:
         """Return the first lift waypoint that should release object dynamics."""
+        return None
+
+    def articulation_effect_segment(self, case: BenchmarkCase) -> str | None:
+        """Return the segment whose live articulation displacement is scored."""
+        del case
         return None
 
     def initial_task_state(
@@ -233,6 +273,15 @@ def _difficulty(config: Mapping[str, object]) -> str:
     return difficulty
 
 
+def _slide_direction(value: object) -> Literal["pull", "push"]:
+    """Validate one Slide direction without coercing arbitrary values."""
+    if value == "pull":
+        return "pull"
+    if value == "push":
+        return "push"
+    raise ValueError("direction must be either 'pull' or 'push'.")
+
+
 def _seeded_jitter(
     amplitude: Sequence[float],
     *,
@@ -318,6 +367,81 @@ def _motion_valid_mask(
     )
 
 
+def _articulation_effect_success(
+    case: BenchmarkCase,
+    observation: _ExecutionObservation,
+    motion_outcomes: tuple[CaseOutcome, ...],
+) -> torch.Tensor:
+    """Gate task success on a real target-joint displacement during contact."""
+    peak = observation.articulation_joint_peak_signed_delta
+    if peak is None:
+        return torch.zeros_like(observation.execution_success)
+    threshold = float(case.case_parameters["minimum_articulation_joint_delta"])
+    return (
+        observation.execution_success
+        & _motion_valid_mask(motion_outcomes, device=peak.device)
+        & torch.isfinite(peak)
+        & (peak >= threshold)
+    )
+
+
+def _executed_final_pose_success(
+    scenario: "AtomicTaskScenario",
+    case: BenchmarkCase,
+    observation: _ExecutionObservation,
+    motion_outcomes: tuple[CaseOutcome, ...],
+) -> torch.Tensor:
+    """Validate the executed TCP against a case's final frozen waypoint."""
+    if scenario.suite is None:
+        raise RuntimeError("Atomic Task suite is not configured.")
+    translation, rotation = _executed_final_pose_errors(
+        case,
+        observation.final_tcp_pose,
+    )
+    return (
+        observation.execution_success
+        & _motion_valid_mask(motion_outcomes, device=translation.device)
+        & (translation <= scenario.suite.protocol.position_threshold_m)
+        & (rotation <= scenario.suite.protocol.rotation_threshold_rad)
+    )
+
+
+def _executed_final_pose_errors(
+    case: BenchmarkCase,
+    final_tcp_pose: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return final TCP errors under the case's declared rotation symmetry."""
+    target = case.target_waypoints[:, -1]
+    translation = torch.linalg.vector_norm(
+        final_tcp_pose[:, :3, 3] - target[:, :3, 3], dim=-1
+    )
+    relative = target[:, :3, :3].transpose(-1, -2) @ final_tcp_pose[:, :3, :3]
+    trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
+    rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    rotation_symmetry = case.case_parameters.get("waypoint_rotation_symmetry")
+    if rotation_symmetry == "half_turn_about_z":
+        symmetric_target = target.clone()
+        symmetric_target[:, :3, :2] = -symmetric_target[:, :3, :2]
+        symmetric_relative = (
+            symmetric_target[:, :3, :3].transpose(-1, -2) @ final_tcp_pose[:, :3, :3]
+        )
+        symmetric_trace = torch.diagonal(
+            symmetric_relative,
+            dim1=-2,
+            dim2=-1,
+        ).sum(dim=-1)
+        symmetric_rotation = torch.arccos(
+            torch.clamp((symmetric_trace - 1.0) * 0.5, -1.0, 1.0)
+        )
+        rotation = torch.minimum(rotation, symmetric_rotation)
+    elif rotation_symmetry is not None:
+        raise ValueError(
+            "waypoint_rotation_symmetry must be None or "
+            f"'half_turn_about_z', got {rotation_symmetry!r}."
+        )
+    return translation, rotation
+
+
 def _case_pose(case: BenchmarkCase, name: str, *, device: torch.device) -> torch.Tensor:
     """Restore one frozen pose tensor from JSON-compatible case parameters."""
     return torch.tensor(case.case_parameters[name], dtype=torch.float32, device=device)
@@ -339,6 +463,280 @@ def _held_object_state(
         semantics=semantics,
         object_to_eef=_case_pose(case, "object_to_eef", device=scenario.robot.device),
         grasp_xpos=_case_pose(case, "grasp_pose", device=scenario.robot.device),
+    )
+
+
+def _box_surface_mesh(
+    size: Sequence[float],
+    *,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build a target-local box mesh for one synthetic graspable handle."""
+    half = torch.tensor(size, dtype=torch.float32, device=device) * 0.5
+    vertices = torch.tensor(
+        [
+            [-1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [-1.0, 1.0, 1.0],
+        ],
+        dtype=torch.float32,
+        device=device,
+    )
+    vertices *= half
+    triangles = torch.tensor(
+        [
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
+        ],
+        dtype=torch.int64,
+        device=device,
+    )
+    return vertices, triangles
+
+
+def _center_grasp_pose(
+    mesh_vertices: torch.Tensor,
+    obj_poses: torch.Tensor,
+    approach_direction: torch.Tensor,
+) -> torch.Tensor:
+    """Resolve a deterministic center grasp aligned with the approach axis."""
+    directions = approach_direction.to(device=obj_poses.device, dtype=torch.float32)
+    if directions.shape == (3,):
+        directions = directions.unsqueeze(0).expand(obj_poses.shape[0], -1)
+    if directions.shape != (obj_poses.shape[0], 3):
+        raise ValueError(
+            "approach_direction must have shape (3,) or match the object-pose batch."
+        )
+    z_axis = torch.nn.functional.normalize(directions, dim=1)
+    x_reference = obj_poses[:, :3, 0].to(dtype=torch.float32)
+    x_axis = x_reference - (x_reference * z_axis).sum(dim=1, keepdim=True) * z_axis
+    degenerate = torch.linalg.vector_norm(x_axis, dim=1) <= 1.0e-6
+    if degenerate.any():
+        y_reference = obj_poses[:, :3, 1].to(dtype=torch.float32)
+        fallback = (
+            y_reference - (y_reference * z_axis).sum(dim=1, keepdim=True) * z_axis
+        )
+        x_axis = torch.where(degenerate[:, None], fallback, x_axis)
+    x_axis = torch.nn.functional.normalize(x_axis, dim=1)
+    y_axis = torch.linalg.cross(z_axis, x_axis, dim=1)
+
+    grasp_pose = torch.eye(4, dtype=torch.float32, device=obj_poses.device).repeat(
+        obj_poses.shape[0], 1, 1
+    )
+    grasp_pose[:, :3, 0] = x_axis
+    grasp_pose[:, :3, 1] = y_axis
+    grasp_pose[:, :3, 2] = z_axis
+    local_center = mesh_vertices.to(device=obj_poses.device, dtype=torch.float32).mean(
+        dim=0
+    )
+    grasp_pose[:, :3, 3] = (
+        torch.matmul(obj_poses[:, :3, :3], local_center) + obj_poses[:, :3, 3]
+    )
+    return grasp_pose
+
+
+class _DeterministicCenterGraspPoseGenerator(GraspPoseGenerator):
+    """Return the manifest-defined synthetic handle's center grasp."""
+
+    def get_valid_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Return one deterministic zero-cost grasp per object pose."""
+        del mesh_triangles, obj_longest_axis, is_positive_part
+        poses = _center_grasp_pose(mesh_vertices, obj_poses, approach_direction)
+        return [
+            (
+                poses[index : index + 1],
+                torch.zeros(1, dtype=torch.float32, device=poses.device),
+            )
+            for index in range(poses.shape[0])
+        ]
+
+    def get_best_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the deterministic center grasp for every object pose."""
+        del mesh_triangles
+        poses = _center_grasp_pose(mesh_vertices, obj_poses, approach_direction)
+        return (
+            torch.ones(poses.shape[0], dtype=torch.bool, device=poses.device),
+            poses,
+            torch.zeros(poses.shape[0], dtype=torch.float32, device=poses.device),
+        )
+
+
+class _FrozenArticulationGraspPoseGenerator(GraspPoseGenerator):
+    """Replay manifest-frozen target-to-grasp transforms for Slide cases."""
+
+    def __init__(
+        self,
+        target_grasps: Sequence[tuple[torch.Tensor, torch.Tensor]],
+    ) -> None:
+        if not target_grasps:
+            raise ValueError("At least one frozen Slide grasp is required.")
+        self._target_grasps = tuple(
+            (
+                target.detach().to(device="cpu", dtype=torch.float32).clone(),
+                grasp.detach().to(device="cpu", dtype=torch.float32).clone(),
+            )
+            for target, grasp in target_grasps
+        )
+
+    def _resolve(self, obj_poses: torch.Tensor) -> torch.Tensor:
+        """Select the closest frozen target and preserve its local grasp."""
+        results: list[torch.Tensor] = []
+        for obj_pose in obj_poses:
+            candidates = [
+                target.squeeze(0).to(device=obj_poses.device, dtype=torch.float32)
+                for target, _ in self._target_grasps
+            ]
+            costs = torch.stack(
+                [
+                    torch.linalg.vector_norm(obj_pose[:3, 3] - candidate[:3, 3])
+                    + 0.1
+                    * torch.linalg.matrix_norm(obj_pose[:3, :3] - candidate[:3, :3])
+                    for candidate in candidates
+                ]
+            )
+            index = int(torch.argmin(costs).item())
+            target, grasp = self._target_grasps[index]
+            target = target.squeeze(0).to(device=obj_poses.device, dtype=torch.float32)
+            grasp = grasp.squeeze(0).to(device=obj_poses.device, dtype=torch.float32)
+            target_to_grasp = torch.linalg.inv(target) @ grasp
+            results.append(obj_pose @ target_to_grasp)
+        return torch.stack(results)
+
+    def get_valid_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Return one frozen zero-cost grasp candidate per environment."""
+        del (
+            mesh_vertices,
+            mesh_triangles,
+            approach_direction,
+            obj_longest_axis,
+            is_positive_part,
+        )
+        poses = self._resolve(obj_poses)
+        return [
+            (
+                poses[index : index + 1],
+                torch.zeros(1, dtype=torch.float32, device=poses.device),
+            )
+            for index in range(poses.shape[0])
+        ]
+
+    def get_best_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the exact grasp selected while building the case manifest."""
+        del mesh_vertices, mesh_triangles, approach_direction
+        poses = self._resolve(obj_poses)
+        return (
+            torch.ones(poses.shape[0], dtype=torch.bool, device=poses.device),
+            poses,
+            torch.zeros(poses.shape[0], dtype=torch.float32, device=poses.device),
+        )
+
+
+def _nearest_half_turn_pose(
+    target_pose: torch.Tensor,
+    reference_pose: torch.Tensor,
+) -> torch.Tensor:
+    """Match the half-turn grasp symmetry used by the Twist primitive."""
+    symmetric = target_pose.clone()
+    symmetric[:, :3, 0] = -symmetric[:, :3, 0]
+    symmetric[:, :3, 1] = -symmetric[:, :3, 1]
+    reference_rotation = reference_pose[:, :3, :3].transpose(-1, -2)
+    target_trace = torch.diagonal(
+        torch.bmm(reference_rotation, target_pose[:, :3, :3]),
+        dim1=-2,
+        dim2=-1,
+    ).sum(dim=-1)
+    symmetric_trace = torch.diagonal(
+        torch.bmm(reference_rotation, symmetric[:, :3, :3]),
+        dim1=-2,
+        dim2=-1,
+    ).sum(dim=-1)
+    return torch.where(
+        (target_trace > symmetric_trace)[:, None, None], target_pose, symmetric
+    )
+
+
+def _twist_arc_poses(
+    target_pose: torch.Tensor,
+    grasp_pose: torch.Tensor,
+    twist_axis: torch.Tensor,
+    axis_origin: Sequence[float],
+    twist_angle: float,
+    waypoint_count: int,
+) -> torch.Tensor:
+    """Build the same target-local circular keyframes as the Twist primitive."""
+    axis = torch.nn.functional.normalize(
+        twist_axis.to(device=target_pose.device, dtype=torch.float32), dim=0
+    )
+    angles = torch.linspace(
+        twist_angle / waypoint_count,
+        twist_angle,
+        waypoint_count,
+        dtype=torch.float32,
+        device=target_pose.device,
+    )
+    rotations = torch.eye(4, dtype=torch.float32, device=target_pose.device).repeat(
+        waypoint_count, 1, 1
+    )
+    rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
+    link_to_eef = torch.bmm(pose_inv(target_pose), grasp_pose)
+    origin = torch.tensor(axis_origin, dtype=torch.float32, device=target_pose.device)
+    to_origin = torch.eye(4, dtype=torch.float32, device=target_pose.device)
+    from_origin = torch.eye(4, dtype=torch.float32, device=target_pose.device)
+    to_origin[:3, 3] = origin
+    from_origin[:3, 3] = -origin
+    local_rotations = torch.matmul(
+        torch.matmul(to_origin[None], rotations), from_origin[None]
+    )
+    return torch.matmul(
+        torch.matmul(target_pose[:, None], local_rotations[None]),
+        link_to_eef[:, None],
     )
 
 
@@ -445,27 +843,15 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
         del compiled
-        target = case.target_waypoints[:, -1]
-        translation = torch.linalg.vector_norm(
-            observation.final_tcp_pose[:, :3, 3] - target[:, :3, 3], dim=-1
+        return (
+            _executed_final_pose_success(
+                scenario,
+                case,
+                observation,
+                motion_outcomes,
+            ),
+            "task_goal_miss",
         )
-        relative = (
-            target[:, :3, :3].transpose(-1, -2) @ observation.final_tcp_pose[:, :3, :3]
-        )
-        trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
-        rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
-        motion_valid = torch.tensor(
-            [item.motion_valid for item in motion_outcomes],
-            dtype=torch.bool,
-            device=translation.device,
-        )
-        success = (
-            observation.execution_success
-            & motion_valid
-            & (translation <= scenario.suite.protocol.position_threshold_m)
-            & (rotation <= scenario.suite.protocol.rotation_threshold_rad)
-        )
-        return success, "task_goal_miss"
 
 
 class _PickUpCases(AtomicSkillCaseProvider):
@@ -675,29 +1061,11 @@ class _PickUpCases(AtomicSkillCaseProvider):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        held_created = (
-            compiled.projected_context.get_held_object(scenario.control_part)
-            is not None
+        del scenario, case, compiled
+        success = observation.execution_success & _motion_valid_mask(
+            motion_outcomes, device=observation.execution_success.device
         )
-        lift = observation.object_lift_delta_m
-        if lift is None:
-            lift = torch.full(
-                (case.batch_size,),
-                -torch.inf,
-                device=observation.execution_success.device,
-            )
-        motion_valid = torch.tensor(
-            [item.motion_valid for item in motion_outcomes],
-            dtype=torch.bool,
-            device=lift.device,
-        )
-        success = (
-            observation.execution_success
-            & motion_valid
-            & held_created
-            & (lift >= float(case.case_parameters["minimum_object_lift_m"]))
-        )
-        return success, "object_not_grasped"
+        return success, "motion_invalid"
 
 
 class _MoveJointsCases(AtomicSkillCaseProvider):
@@ -1060,21 +1428,11 @@ class _MoveHeldObjectCases(_HeldObjectCases):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        final_object = observation.final_object_pose
-        if final_object is None:
-            return torch.zeros_like(observation.execution_success), "object_goal_miss"
-        target = _case_pose(case, "target_object_pose", device=final_object.device)
-        error = torch.linalg.vector_norm(
-            final_object[:, :3, 3] - target[:, :3, 3], dim=-1
+        del scenario, case, compiled
+        success = observation.execution_success & _motion_valid_mask(
+            motion_outcomes, device=observation.execution_success.device
         )
-        held = compiled.projected_context.get_held_object(scenario.control_part)
-        success = (
-            observation.execution_success
-            & _motion_valid_mask(motion_outcomes, device=error.device)
-            & (held is not None)
-            & (error <= float(case.case_parameters["object_position_threshold_m"]))
-        )
-        return success, "object_goal_miss"
+        return success, "motion_invalid"
 
 
 class _PlaceCases(_HeldObjectCases):
@@ -1190,23 +1548,11 @@ class _PlaceCases(_HeldObjectCases):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        final_object = observation.final_object_pose
-        if final_object is None:
-            return torch.zeros_like(observation.execution_success), "object_not_placed"
-        target = _case_pose(case, "target_object_pose", device=final_object.device)
-        error = torch.linalg.vector_norm(
-            final_object[:, :3, 3] - target[:, :3, 3], dim=-1
+        del scenario, case, compiled
+        success = observation.execution_success & _motion_valid_mask(
+            motion_outcomes, device=observation.execution_success.device
         )
-        released = (
-            compiled.projected_context.get_held_object(scenario.control_part) is None
-        )
-        success = (
-            observation.execution_success
-            & _motion_valid_mask(motion_outcomes, device=error.device)
-            & released
-            & (error <= float(case.case_parameters["object_position_threshold_m"]))
-        )
-        return success, "object_not_placed"
+        return success, "motion_invalid"
 
 
 class _PressCases(AtomicSkillCaseProvider):
@@ -1225,57 +1571,61 @@ class _PressCases(AtomicSkillCaseProvider):
         seed: int,
         batch_size: int,
     ) -> BenchmarkCase:
+        articulation_id = config.get("articulation")
+        target_link = config.get("target_link")
+        target_joint = config.get("target_joint")
+        if not isinstance(articulation_id, str) or not articulation_id:
+            raise ValueError("Press cases must reference an articulation id.")
+        if not isinstance(target_link, str) or not target_link:
+            raise ValueError("Press cases must define a target_link.")
+        if not isinstance(target_joint, str) or not target_joint:
+            raise ValueError("Press cases must define a target_joint.")
+        handle = scenario.activate_articulation(articulation_id)
+        scenario.validate_articulation_target(
+            handle,
+            target_link=target_link,
+            target_joint=target_joint,
+            joint_type="prismatic",
+        )
         scenario.restore_base_robot()
         scenario.randomize_robot_start(config, seed=seed, stream=31)
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
-        target_pose = start_pose.clone()
-        target_pose[:, :3, 3] += _randomized_vector(
-            _float_vector(
-                config.get("target_offset_m"),
-                name="target_offset_m",
-                length=3,
-                default=(0.0, 0.0, -0.08),
-            ),
-            config,
-            jitter_name="target_offset_jitter_m",
+        articulation_initial_pose = handle.entity.get_local_pose(to_matrix=True).clone()
+        articulation_initial_qpos = handle.entity.get_qpos().clone()
+        target_pose = handle.link_pose(target_link).to(device=start_pose.device)
+        geometry = scenario.sample_articulation_geometry(
+            handle,
+            target_link,
             seed=seed,
-            stream=331,
-            dtype=start_pose.dtype,
-            device=start_pose.device,
+            config=config,
         )
-        press_axis = _float_vector(
-            config.get("press_axis"),
-            name="press_axis",
-            length=3,
-            default=(0.0, 0.0, 1.0),
+        affordance = PressAffordance()
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=geometry,
+            entity_id=handle.entity.uid,
+            label="microwave_start_button",
         )
-        press_position = _float_vector(
-            config.get("press_position"),
-            name="press_position",
-            length=3,
-            default=(0.0, 0.0, 0.0),
-        )
+        if affordance.press_position is None:
+            raise RuntimeError(
+                "Press articulation geometry did not resolve a contact point."
+            )
+        press_axis = affordance.press_axis.detach().cpu().tolist()
+        press_position = list(affordance.press_position)
         options = PressOptions(
             hand_interp_steps=int(config.get("hand_interp_steps", 8)),
             approach_distance=float(config.get("approach_distance_m", 0.1)),
             press_distance=float(config.get("press_distance_m", 0.05)),
-            press_position=tuple(press_position),
-        )
-        affordance = PressAffordance(
-            press_axis=torch.tensor(
-                press_axis,
-                dtype=target_pose.dtype,
-                device=target_pose.device,
-            ),
-            press_position=tuple(press_position),
+            press_position=None,
         )
         contact_pose = affordance.get_press_pose(
             target_pose,
             press_position=options.press_position,
         )
+        contact_pose = _nearest_half_turn_pose(contact_pose, start_pose)
         approach_pose = contact_pose.clone()
         approach_pose[:, :3, 3] -= contact_pose[:, :3, 2] * options.approach_distance
         pressed_pose = contact_pose.clone()
@@ -1301,6 +1651,7 @@ class _PressCases(AtomicSkillCaseProvider):
             reference_qpos=references,
             robot_id=suite.robot.id,
             skill_id=self.skill_id,
+            object_id=articulation_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
             full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
@@ -1312,7 +1663,21 @@ class _PressCases(AtomicSkillCaseProvider):
                 "hand_interp_steps": options.hand_interp_steps,
                 "approach_distance_m": options.approach_distance,
                 "press_distance_m": options.press_distance,
+                "articulation_initial_pose": articulation_initial_pose.detach()
+                .cpu()
+                .tolist(),
+                "articulation_initial_qpos": articulation_initial_qpos.detach()
+                .cpu()
+                .tolist(),
+                "target_link": target_link,
+                "target_joint": target_joint,
+                "target_entity_id": f"{handle.entity.uid}:{target_link}",
+                "effect_joint_sign": float(config.get("effect_joint_sign", 1.0)),
+                "minimum_articulation_joint_delta": float(
+                    config.get("minimum_joint_delta_m", 0.004)
+                ),
                 "waypoint_rotation_symmetry": "half_turn_about_z",
+                "task_success_scope": "physical_articulation_joint_displacement",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1324,6 +1689,7 @@ class _PressCases(AtomicSkillCaseProvider):
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
+        del adapter
         press_axis = torch.tensor(
             case.case_parameters["press_axis"],
             dtype=torch.float32,
@@ -1336,8 +1702,8 @@ class _PressCases(AtomicSkillCaseProvider):
                 press_position=press_position,
             ),
             geometry={},
-            entity_id=f"benchmark.press_target.{case.case_id}",
-            label="benchmark_press_target",
+            entity_id=str(case.case_parameters["target_entity_id"]),
+            label="microwave_start_button",
         )
         return scenario.require_engine().make_invocation(
             self.skill_id,
@@ -1363,9 +1729,14 @@ class _PressCases(AtomicSkillCaseProvider):
                 hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
                 approach_distance=float(case.case_parameters["approach_distance_m"]),
                 press_distance=float(case.case_parameters["press_distance_m"]),
-                press_position=press_position,
+                press_position=None,
             ),
         )
+
+    def articulation_effect_segment(self, case: BenchmarkCase) -> str:
+        """Score button displacement only while the tool travels into it."""
+        del case
+        return "press"
 
     def task_result(
         self,
@@ -1376,10 +1747,471 @@ class _PressCases(AtomicSkillCaseProvider):
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
         del scenario, case, compiled
-        success = observation.execution_success & _motion_valid_mask(
-            motion_outcomes, device=observation.execution_success.device
+        return (
+            observation.execution_success
+            & _motion_valid_mask(
+                motion_outcomes, device=observation.execution_success.device
+            ),
+            "motion_invalid",
         )
-        return success, "press_pose_miss"
+
+
+class _SlideCases(AtomicSkillCaseProvider):
+    """Approach, grasp, and physically translate an articulation link."""
+
+    skill_id = "slide"
+    requires_gripper = True
+
+    def generate_case(
+        self,
+        scenario: "AtomicTaskScenario",
+        suite: SuiteCfg,
+        track: TrackCfg,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        batch_size: int,
+    ) -> BenchmarkCase:
+        articulation_id = config.get("articulation")
+        target_link = config.get("target_link")
+        target_joint = config.get("target_joint")
+        if not isinstance(articulation_id, str) or not articulation_id:
+            raise ValueError("Slide cases must reference an articulation id.")
+        if not isinstance(target_link, str) or not target_link:
+            raise ValueError("Slide cases must define a target_link.")
+        if not isinstance(target_joint, str) or not target_joint:
+            raise ValueError("Slide cases must define a target_joint.")
+        handle = scenario.activate_articulation(articulation_id)
+        scenario.validate_articulation_target(
+            handle,
+            target_link=target_link,
+            target_joint=target_joint,
+            joint_type="prismatic",
+        )
+        scenario.restore_base_robot()
+        scenario.randomize_robot_start(config, seed=seed, stream=41)
+        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        articulation_initial_pose = handle.entity.get_local_pose(to_matrix=True).clone()
+        articulation_initial_qpos = handle.entity.get_qpos().clone()
+        target_pose = handle.link_pose(target_link).to(device=start_qpos.device)
+        mesh_vertices, mesh_triangles = handle.link_mesh(target_link)
+        mesh_vertices = mesh_vertices.to(device=target_pose.device, dtype=torch.float32)
+        mesh_triangles = mesh_triangles.to(device=target_pose.device, dtype=torch.long)
+        geometry = scenario.sample_articulation_geometry(
+            handle,
+            target_link,
+            seed=seed,
+            config=config,
+        )
+        affordance = SlideAffordance(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+        )
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=geometry,
+            entity_id=handle.entity.uid,
+            label="drawer_large_handle",
+        )
+        axis = affordance.translation_axis.to(
+            device=target_pose.device, dtype=torch.float32
+        )
+        axis = axis / torch.linalg.vector_norm(axis)
+        translation_axis = axis.detach().cpu().tolist()
+        world_axis = torch.matmul(target_pose[:, :3, :3], axis)
+        grasp_pose = scenario.resolve_articulation_grasp(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            target_pose=target_pose,
+            approach_direction=world_axis,
+            start_qpos=start_qpos,
+            direction=_slide_direction(config.get("direction", "pull")),
+            approach_distance=float(config.get("approach_distance_m", 0.1)),
+            translation_distance=float(config.get("translation_distance_m", 0.18)),
+            seed=seed,
+            n_sample=int(config.get("grasp_sample_count", 10000)),
+            max_candidates=int(config.get("grasp_max_candidates", 128)),
+            alignment_max_angle_deg=float(
+                config.get("grasp_alignment_max_angle_deg", 10.0)
+            ),
+        )
+        options = SlideOptions(
+            direction=_slide_direction(config.get("direction", "pull")),
+            hand_interp_steps=int(config.get("hand_interp_steps", 12)),
+            approach_distance=float(config.get("approach_distance_m", 0.1)),
+            translation_distance=float(config.get("translation_distance_m", 0.18)),
+        )
+        approach_pose = grasp_pose.clone()
+        approach_pose[:, :3, 3] -= world_axis * options.approach_distance
+        translation_sign = -1.0 if options.direction == "pull" else 1.0
+        translated_pose = grasp_pose.clone()
+        translated_pose[:, :3, 3] += (
+            world_axis * translation_sign * options.translation_distance
+        )
+        target_values = [approach_pose, grasp_pose, translated_pose]
+        if options.direction == "push":
+            target_values.append(approach_pose)
+        targets = torch.stack(target_values, dim=1)
+        references = scenario.solve_reference_qpos(start_qpos, targets)
+        name = _case_name(config)
+        return BenchmarkCase(
+            suite_version=suite.suite_version,
+            track=track.id,
+            scenario_id=self.skill_id,
+            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            seed=seed,
+            batch_size=batch_size,
+            num_waypoints=targets.shape[1],
+            path_shape=f"approach_grasp_{options.direction}",
+            start_state_bin="pre_action",
+            start_qpos=start_qpos,
+            target_waypoints=targets,
+            reference_qpos=references,
+            robot_id=suite.robot.id,
+            skill_id=self.skill_id,
+            object_id=articulation_id,
+            task_difficulty=_difficulty(config),
+            primary_success="task_success",
+            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            case_parameters={
+                "sample_count": int(config.get("sample_count", 140)),
+                "slide_target_pose": target_pose.detach().cpu().tolist(),
+                "translation_axis": translation_axis,
+                "mesh_vertices": mesh_vertices.detach().cpu().tolist(),
+                "mesh_triangles": mesh_triangles.detach().cpu().tolist(),
+                "grasp_pose": grasp_pose.detach().cpu().tolist(),
+                "grasp_source": str(config.get("grasp_source", "antipodal")),
+                "grasp_sample_count": int(config.get("grasp_sample_count", 10000)),
+                "grasp_max_candidates": int(config.get("grasp_max_candidates", 128)),
+                "grasp_alignment_max_angle_deg": float(
+                    config.get("grasp_alignment_max_angle_deg", 10.0)
+                ),
+                "direction": options.direction,
+                "hand_interp_steps": options.hand_interp_steps,
+                "approach_distance_m": options.approach_distance,
+                "translation_distance_m": options.translation_distance,
+                "articulation_initial_pose": articulation_initial_pose.detach()
+                .cpu()
+                .tolist(),
+                "articulation_initial_qpos": articulation_initial_qpos.detach()
+                .cpu()
+                .tolist(),
+                "target_link": target_link,
+                "target_joint": target_joint,
+                "target_entity_id": f"{handle.entity.uid}:{target_link}",
+                "effect_joint_sign": float(config.get("effect_joint_sign", 1.0)),
+                "minimum_articulation_joint_delta": float(
+                    config.get("minimum_joint_delta_m", 0.12)
+                ),
+                "task_success_scope": "physical_articulation_joint_displacement",
+                "randomization": _randomization_parameters(config, seed=seed),
+                "difficulty_factors": dict(config.get("difficulty_factors", {})),
+            },
+        )
+
+    def build_invocation(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        adapter: "PlannerAdapter",
+    ) -> ActionInvocation:
+        del adapter
+        if scenario.end_effector_part is None:
+            raise RuntimeError("Slide requires a configured end-effector control part.")
+        mesh_vertices = torch.tensor(
+            case.case_parameters["mesh_vertices"],
+            dtype=torch.float32,
+            device=scenario.robot.device,
+        )
+        mesh_triangles = torch.tensor(
+            case.case_parameters["mesh_triangles"],
+            dtype=torch.long,
+            device=scenario.robot.device,
+        )
+        semantics = ObjectSemantics(
+            affordance=SlideAffordance(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                translation_axis=torch.tensor(
+                    case.case_parameters["translation_axis"],
+                    dtype=torch.float32,
+                    device=scenario.robot.device,
+                ),
+            ),
+            geometry={},
+            entity_id=str(case.case_parameters["target_entity_id"]),
+            label="drawer_large_handle",
+        )
+
+        return scenario.require_engine().make_invocation(
+            self.skill_id,
+            SlideGoal(
+                semantics,
+                _case_pose(
+                    case,
+                    "slide_target_pose",
+                    device=scenario.robot.device,
+                ),
+            ),
+            control_parts={
+                "primary": {
+                    "motion": scenario.control_part,
+                    "grasp": scenario.end_effector_part,
+                }
+            },
+            motion_policy=MotionPolicy(
+                strategy="motion_gen",
+                sample_count=int(case.case_parameters["sample_count"]),
+            ),
+            skill_options=SlideOptions(
+                direction=_slide_direction(case.case_parameters["direction"]),
+                hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
+                approach_distance=float(case.case_parameters["approach_distance_m"]),
+                translation_distance=float(
+                    case.case_parameters["translation_distance_m"]
+                ),
+            ),
+        )
+
+    def articulation_effect_segment(self, case: BenchmarkCase) -> str:
+        """Score displacement while the primitive pulls or pushes the drawer."""
+        return _slide_direction(case.case_parameters["direction"])
+
+    def task_result(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        compiled: CompiledTrajectory,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[torch.Tensor, str]:
+        del scenario, case, compiled
+        return (
+            observation.execution_success
+            & _motion_valid_mask(
+                motion_outcomes, device=observation.execution_success.device
+            ),
+            "motion_invalid",
+        )
+
+
+class _TwistCases(AtomicSkillCaseProvider):
+    """Approach, grasp, and physically rotate an articulation link."""
+
+    skill_id = "twist"
+    requires_gripper = True
+
+    def generate_case(
+        self,
+        scenario: "AtomicTaskScenario",
+        suite: SuiteCfg,
+        track: TrackCfg,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        batch_size: int,
+    ) -> BenchmarkCase:
+        articulation_id = config.get("articulation")
+        target_link = config.get("target_link")
+        target_joint = config.get("target_joint")
+        if not isinstance(articulation_id, str) or not articulation_id:
+            raise ValueError("Twist cases must reference an articulation id.")
+        if not isinstance(target_link, str) or not target_link:
+            raise ValueError("Twist cases must define a target_link.")
+        if not isinstance(target_joint, str) or not target_joint:
+            raise ValueError("Twist cases must define a target_joint.")
+        handle = scenario.activate_articulation(articulation_id)
+        scenario.validate_articulation_target(
+            handle,
+            target_link=target_link,
+            target_joint=target_joint,
+            joint_type="revolute",
+        )
+        scenario.restore_base_robot()
+        scenario.randomize_robot_start(config, seed=seed, stream=51)
+        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_pose = scenario.robot.compute_fk(
+            start_qpos, name=scenario.control_part, to_matrix=True
+        )
+        articulation_initial_pose = handle.entity.get_local_pose(to_matrix=True).clone()
+        articulation_initial_qpos = handle.entity.get_qpos().clone()
+        target_pose = handle.link_pose(target_link).to(device=start_pose.device)
+        mesh_vertices, _ = handle.link_mesh(target_link)
+        grasp_position_tensor = mesh_vertices.to(
+            device=target_pose.device, dtype=torch.float32
+        ).mean(dim=0)
+        geometry = scenario.sample_articulation_geometry(
+            handle,
+            target_link,
+            seed=seed,
+            config=config,
+        )
+        affordance = TwistAffordance(
+            grasp_position=tuple(float(value) for value in grasp_position_tensor),
+        )
+        ObjectSemantics(
+            affordance=affordance,
+            geometry=geometry,
+            entity_id=handle.entity.uid,
+            label="microwave_power_knob",
+        )
+        grasp_position = list(affordance.grasp_position)
+        axis_origin = list(affordance.require_axis_origin())
+        twist_axis = affordance.twist_axis.detach().cpu().tolist()
+        options = TwistOptions(
+            hand_interp_steps=int(config.get("hand_interp_steps", 12)),
+            twist_waypoint_count=int(config.get("twist_waypoint_count", 8)),
+            pre_grasp_distance=float(config.get("pre_grasp_distance_m", 0.12)),
+            twist_angle=float(config.get("twist_angle_rad", -0.7853981634)),
+        )
+        grasp_pose = _nearest_half_turn_pose(
+            affordance.get_grasp_pose(target_pose),
+            start_pose,
+        )
+        pre_grasp_pose = grasp_pose.clone()
+        pre_grasp_pose[:, :3, 3] -= grasp_pose[:, :3, 2] * options.pre_grasp_distance
+        twist_poses = _twist_arc_poses(
+            target_pose,
+            grasp_pose,
+            affordance.twist_axis,
+            affordance.require_axis_origin(),
+            options.twist_angle,
+            options.twist_waypoint_count,
+        )
+        targets = torch.cat(
+            (
+                pre_grasp_pose[:, None],
+                grasp_pose[:, None],
+                twist_poses,
+                pre_grasp_pose[:, None],
+            ),
+            dim=1,
+        )
+        references = scenario.solve_reference_qpos(start_qpos, targets)
+        name = _case_name(config)
+        return BenchmarkCase(
+            suite_version=suite.suite_version,
+            track=track.id,
+            scenario_id=self.skill_id,
+            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            seed=seed,
+            batch_size=batch_size,
+            num_waypoints=targets.shape[1],
+            path_shape="approach_grasp_twist_retract",
+            start_state_bin="pre_action",
+            start_qpos=start_qpos,
+            target_waypoints=targets,
+            reference_qpos=references,
+            robot_id=suite.robot.id,
+            skill_id=self.skill_id,
+            object_id=articulation_id,
+            task_difficulty=_difficulty(config),
+            primary_success="task_success",
+            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            case_parameters={
+                "sample_count": int(config.get("sample_count", 140)),
+                "twist_target_pose": target_pose.detach().cpu().tolist(),
+                "grasp_position": grasp_position,
+                "axis_origin": axis_origin,
+                "twist_axis": twist_axis,
+                "grasp_pose": grasp_pose.detach().cpu().tolist(),
+                "hand_interp_steps": options.hand_interp_steps,
+                "twist_waypoint_count": options.twist_waypoint_count,
+                "pre_grasp_distance_m": options.pre_grasp_distance,
+                "twist_angle_rad": options.twist_angle,
+                "articulation_initial_pose": articulation_initial_pose.detach()
+                .cpu()
+                .tolist(),
+                "articulation_initial_qpos": articulation_initial_qpos.detach()
+                .cpu()
+                .tolist(),
+                "target_link": target_link,
+                "target_joint": target_joint,
+                "target_entity_id": f"{handle.entity.uid}:{target_link}",
+                "effect_joint_sign": float(config.get("effect_joint_sign", 1.0)),
+                "minimum_articulation_joint_delta": float(
+                    config.get("minimum_joint_delta_rad", 0.5)
+                ),
+                "waypoint_rotation_symmetry": "half_turn_about_z",
+                "task_success_scope": "physical_articulation_joint_displacement",
+                "randomization": _randomization_parameters(config, seed=seed),
+                "difficulty_factors": dict(config.get("difficulty_factors", {})),
+            },
+        )
+
+    def build_invocation(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        adapter: "PlannerAdapter",
+    ) -> ActionInvocation:
+        del adapter
+        if scenario.end_effector_part is None:
+            raise RuntimeError("Twist requires a configured end-effector control part.")
+        semantics = ObjectSemantics(
+            affordance=TwistAffordance(
+                grasp_position=tuple(case.case_parameters["grasp_position"]),
+                axis_origin=tuple(case.case_parameters["axis_origin"]),
+                twist_axis=torch.tensor(
+                    case.case_parameters["twist_axis"],
+                    dtype=torch.float32,
+                    device=scenario.robot.device,
+                ),
+            ),
+            geometry={},
+            entity_id=str(case.case_parameters["target_entity_id"]),
+            label="microwave_power_knob",
+        )
+
+        return scenario.require_engine().make_invocation(
+            self.skill_id,
+            TwistGoal(
+                semantics,
+                _case_pose(
+                    case,
+                    "twist_target_pose",
+                    device=scenario.robot.device,
+                ),
+            ),
+            control_parts={
+                "primary": {
+                    "motion": scenario.control_part,
+                    "grasp": scenario.end_effector_part,
+                }
+            },
+            motion_policy=MotionPolicy(
+                strategy="motion_gen",
+                sample_count=int(case.case_parameters["sample_count"]),
+            ),
+            skill_options=TwistOptions(
+                hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
+                twist_waypoint_count=int(case.case_parameters["twist_waypoint_count"]),
+                pre_grasp_distance=float(case.case_parameters["pre_grasp_distance_m"]),
+                twist_angle=float(case.case_parameters["twist_angle_rad"]),
+            ),
+        )
+
+    def articulation_effect_segment(self, case: BenchmarkCase) -> str:
+        """Score knob displacement only during the rotational segment."""
+        del case
+        return "twist"
+
+    def task_result(
+        self,
+        scenario: "AtomicTaskScenario",
+        case: BenchmarkCase,
+        compiled: CompiledTrajectory,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[torch.Tensor, str]:
+        del scenario, case, compiled
+        return (
+            observation.execution_success
+            & _motion_valid_mask(
+                motion_outcomes, device=observation.execution_success.device
+            ),
+            "motion_invalid",
+        )
 
 
 class AtomicTaskScenario(ScenarioProvider):
@@ -1397,11 +2229,17 @@ class AtomicTaskScenario(ScenarioProvider):
         self.control_part = "arm"
         self.end_effector_part: str | None = None
         self._objects: dict[str, AtomicObjectHandle] = {}
+        self._articulations: dict[str, AtomicArticulationHandle] = {}
+        self._articulation_geometry: dict[
+            tuple[str, str, int, int, int], dict[str, torch.Tensor]
+        ] = {}
         self._case_providers: dict[str, AtomicSkillCaseProvider] = {}
+        self._cases_by_id: dict[str, BenchmarkCase] = {}
         self._base_full_qpos: torch.Tensor | None = None
         self._gripper_open: torch.Tensor | None = None
         self._gripper_grasp: torch.Tensor | None = None
         self._engine: AtomicActionEngine | None = None
+        self._runtime_entities_created = False
 
     def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
         """Return the explicitly configured physical-execution batch sizes."""
@@ -1413,6 +2251,49 @@ class AtomicTaskScenario(ScenarioProvider):
             )
         return values
 
+    def create_runtime_entities(
+        self,
+        simulation: SimulationManager,
+        suite: SuiteCfg,
+        track: TrackCfg,
+    ) -> None:
+        """Add every rigid/articulated asset before GPU physics initialization."""
+        del suite
+        if self._runtime_entities_created:
+            raise RuntimeError("Atomic Task runtime entities are already configured.")
+        self.simulation = simulation
+        articulation_values = track.config.get("articulations", [])
+        if not isinstance(articulation_values, list):
+            raise TypeError("atomic-task articulations must be a list of mappings.")
+        for value in articulation_values:
+            if not isinstance(value, Mapping):
+                raise TypeError("Every atomic-task articulation must be a mapping.")
+            handle = create_atomic_articulation(
+                simulation,
+                value,
+                initialize=False,
+            )
+            if handle.object_id in self._articulations:
+                raise ValueError(
+                    f"Duplicate atomic articulation id {handle.object_id!r}."
+                )
+            self._articulations[handle.object_id] = handle
+
+        object_values = track.config.get("objects", [])
+        if not isinstance(object_values, list):
+            raise TypeError("atomic-task objects must be a list of mappings.")
+        for value in object_values:
+            if not isinstance(value, Mapping):
+                raise TypeError("Every atomic-task object must be a mapping.")
+            handle = create_atomic_object(simulation, value, initialize=False)
+            if (
+                handle.object_id in self._objects
+                or handle.object_id in self._articulations
+            ):
+                raise ValueError(f"Duplicate atomic object id {handle.object_id!r}.")
+            self._objects[handle.object_id] = handle
+        self._runtime_entities_created = True
+
     def configure_runtime(
         self,
         simulation: SimulationManager,
@@ -1421,7 +2302,11 @@ class AtomicTaskScenario(ScenarioProvider):
         track: TrackCfg,
         control_part: str,
     ) -> None:
-        """Create the declarative object pool and cache robot command states."""
+        """Finalize the pre-created object pool and cache robot command states."""
+        if not self._runtime_entities_created or self.simulation is not simulation:
+            raise RuntimeError(
+                "Atomic Task entities must be created before the first physics update."
+            )
         self.simulation = simulation
         self.robot = robot
         self.suite = suite
@@ -1429,18 +2314,10 @@ class AtomicTaskScenario(ScenarioProvider):
         self.control_part = control_part
         self._base_full_qpos = robot.get_qpos().clone()
 
-        object_values = track.config.get("objects", [])
-        if not isinstance(object_values, list):
-            raise TypeError("atomic-task objects must be a list of mappings.")
-        for value in object_values:
-            if not isinstance(value, Mapping):
-                raise TypeError("Every atomic-task object must be a mapping.")
-            handle = create_atomic_object(simulation, value)
-            if handle.object_id in self._objects:
-                raise ValueError(f"Duplicate atomic object id {handle.object_id!r}.")
-            self._objects[handle.object_id] = handle
         for index, handle in enumerate(self._objects.values()):
             handle.park(index)
+        for index, handle in enumerate(self._articulations.values()):
+            handle.park(len(self._objects) + index)
         simulation.update(step=1)
 
         if any(
@@ -1558,10 +2435,13 @@ class AtomicTaskScenario(ScenarioProvider):
                             f"Duplicate Atomic Task case {case.case_id!r}."
                         )
                     self._case_providers[case.case_id] = provider
+                    self._cases_by_id[case.case_id] = case
                     cases.append(case)
         self.restore_base_robot()
         for index, handle in enumerate(self._objects.values()):
             handle.park(index)
+        for index, handle in enumerate(self._articulations.values()):
+            handle.park(len(self._objects) + index)
         return cases
 
     def prepare_planner(
@@ -1585,16 +2465,46 @@ class AtomicTaskScenario(ScenarioProvider):
             }
         motion_generator = adapter.require_motion_generator()
         scene_entities = tuple(handle.entity for handle in self._objects.values())
+        grasp_pose_generators = None
+        slide_cases = [
+            self._cases_by_id[case_id]
+            for case_id, provider in self._case_providers.items()
+            if provider.skill_id == "slide"
+        ]
+        if slide_cases:
+            if self.end_effector_part is None:
+                raise RuntimeError("Configured Slide grasp endpoint is unavailable.")
+            grasp_pose_generators = {
+                self.end_effector_part: _FrozenArticulationGraspPoseGenerator(
+                    [
+                        (
+                            _case_pose(
+                                case,
+                                "slide_target_pose",
+                                device=torch.device("cpu"),
+                            ),
+                            _case_pose(
+                                case,
+                                "grasp_pose",
+                                device=torch.device("cpu"),
+                            ),
+                        )
+                        for case in slide_cases
+                    ]
+                )
+            }
         if scene_entities:
             self._engine = create_simulation_atomic_action_engine(
                 motion_generator=motion_generator,
                 scene_entities=scene_entities,
                 control_profiles=control_profiles,
+                grasp_pose_generators=grasp_pose_generators,
             )
         else:
             self._engine = AtomicActionEngine(
                 motion_generator=motion_generator,
                 control_profiles=control_profiles,
+                grasp_pose_generators=grasp_pose_generators,
             )
 
     def close_planner(self, adapter: PlannerAdapter) -> None:
@@ -1623,6 +2533,7 @@ class AtomicTaskScenario(ScenarioProvider):
             robot.set_qpos(case.full_start_qpos, target=target)
         robot.clear_dynamics()
         active_id = case.object_id
+        reset_steps = 2
         for index, handle in enumerate(self._objects.values()):
             if handle.object_id == active_id:
                 initial_pose = case.case_parameters.get("object_initial_pose")
@@ -1639,7 +2550,33 @@ class AtomicTaskScenario(ScenarioProvider):
                     handle.entity.clear_dynamics()
             else:
                 handle.park(index)
-        simulation.update(step=2)
+        for index, handle in enumerate(self._articulations.values()):
+            if handle.object_id == active_id:
+                reset_steps = int(handle.config.get("reset_settle_steps", 10))
+                pose_value = case.case_parameters.get("articulation_initial_pose")
+                qpos_value = case.case_parameters.get("articulation_initial_qpos")
+                pose = (
+                    None
+                    if pose_value is None
+                    else torch.tensor(
+                        pose_value,
+                        dtype=torch.float32,
+                        device=robot.device,
+                    )
+                )
+                qpos = (
+                    None
+                    if qpos_value is None
+                    else torch.tensor(
+                        qpos_value,
+                        dtype=torch.float32,
+                        device=robot.device,
+                    )
+                )
+                handle.reset(pose=pose, qpos=qpos)
+            else:
+                handle.park(len(self._objects) + index)
+        simulation.update(step=reset_steps)
 
     def plan_case(self, adapter: PlannerAdapter, case: BenchmarkCase) -> object:
         """Compile one Atomic Action with an explicitly pinned motion backend."""
@@ -1723,6 +2660,10 @@ class AtomicTaskScenario(ScenarioProvider):
             execution_time_ms = None
             tracking = torch.full((case.batch_size,), torch.nan, device=robot.device)
             object_lift = None
+            articulation_initial = None
+            articulation_final = None
+            articulation_delta = None
+            articulation_peak = None
             task_failure_code = "task_goal_miss"
         else:
             execution_success = observation.execution_success
@@ -1732,30 +2673,24 @@ class AtomicTaskScenario(ScenarioProvider):
             execution_time_ms = observation.execution_time_ms
             tracking = observation.joint_tracking_rmse_rad
             object_lift = observation.object_lift_delta_m
+            articulation_initial = observation.articulation_joint_initial
+            articulation_final = observation.articulation_joint_final
+            articulation_delta = (
+                None
+                if articulation_initial is None or articulation_final is None
+                else articulation_final - articulation_initial
+            )
+            articulation_peak = observation.articulation_joint_peak_signed_delta
 
         executed_translation_mm: torch.Tensor | None = None
         executed_rotation_deg: torch.Tensor | None = None
         if observation is not None:
-            final_target = case.target_waypoints[:, -1]
-            executed_translation_mm = (
-                torch.linalg.vector_norm(
-                    observation.final_tcp_pose[:, :3, 3] - final_target[:, :3, 3],
-                    dim=-1,
-                )
-                * 1000.0
+            executed_translation, executed_rotation = _executed_final_pose_errors(
+                case,
+                observation.final_tcp_pose,
             )
-            executed_relative = (
-                final_target[:, :3, :3].transpose(-1, -2)
-                @ observation.final_tcp_pose[:, :3, :3]
-            )
-            executed_trace = torch.diagonal(executed_relative, dim1=-2, dim2=-1).sum(
-                dim=-1
-            )
-            executed_rotation_deg = (
-                torch.arccos(torch.clamp((executed_trace - 1.0) * 0.5, -1.0, 1.0))
-                * 180.0
-                / math.pi
-            )
+            executed_translation_mm = executed_translation * 1000.0
+            executed_rotation_deg = executed_rotation * 180.0 / math.pi
 
         durations = result.trajectory.duration.detach().to("cpu")
         outcomes: list[CaseOutcome] = []
@@ -1788,6 +2723,26 @@ class AtomicTaskScenario(ScenarioProvider):
                         None
                         if object_lift is None
                         else float(object_lift[index].item())
+                    ),
+                    articulation_joint_initial=(
+                        None
+                        if articulation_initial is None
+                        else float(articulation_initial[index].item())
+                    ),
+                    articulation_joint_final=(
+                        None
+                        if articulation_final is None
+                        else float(articulation_final[index].item())
+                    ),
+                    articulation_joint_delta=(
+                        None
+                        if articulation_delta is None
+                        else float(articulation_delta[index].item())
+                    ),
+                    articulation_joint_peak_signed_delta=(
+                        None
+                        if articulation_peak is None
+                        else float(articulation_peak[index].item())
                     ),
                     replan_count=0,
                     failure_code=failure_code,
@@ -1868,9 +2823,7 @@ class AtomicTaskScenario(ScenarioProvider):
             raise RuntimeError("Atomic Task runtime is not configured.")
         if not self._is_replayable(compiled):
             return None
-        object_handle = (
-            None if case.object_id is None else self.object_handle(case.object_id)
-        )
+        object_handle = self._objects.get(case.object_id or "")
         initial_object_position = (
             None
             if object_handle is None
@@ -1879,16 +2832,18 @@ class AtomicTaskScenario(ScenarioProvider):
         settings = self._physics_settings()
         self._synchronize()
         started = time.perf_counter()
-        tracking_parts = self._replay_physics(
+        replay_metrics = self._replay_physics(
             compiled, case, provider, collect_metrics=True
         )
         self._synchronize()
         elapsed_ms = (time.perf_counter() - started) * 1000.0
-        if tracking_parts is None:
+        if replay_metrics is None:
             raise RuntimeError("Timed Atomic Task replay did not return metrics.")
-        squared_tracking_error, tracking_value_count = tracking_parts
         observed = self.robot.get_qpos()
-        tracking = torch.sqrt(squared_tracking_error / max(tracking_value_count, 1))
+        tracking = torch.sqrt(
+            replay_metrics.squared_tracking_error
+            / max(replay_metrics.tracking_value_count, 1)
+        )
         trajectory = compiled.trajectory.positions
         simulated_execution_time = (
             trajectory.shape[1] * settings.steps_per_waypoint
@@ -1917,6 +2872,11 @@ class AtomicTaskScenario(ScenarioProvider):
             object_lift_delta_m=object_lift,
             final_arm_qpos=self.robot.get_qpos(name=self.control_part).clone(),
             final_object_pose=final_object_pose,
+            articulation_joint_initial=replay_metrics.articulation_joint_initial,
+            articulation_joint_final=replay_metrics.articulation_joint_final,
+            articulation_joint_peak_signed_delta=(
+                replay_metrics.articulation_joint_peak_signed_delta
+            ),
         )
 
     def _physics_settings(self) -> _PhysicsReplaySettings:
@@ -1963,27 +2923,75 @@ class AtomicTaskScenario(ScenarioProvider):
         provider: AtomicSkillCaseProvider | None,
         *,
         collect_metrics: bool,
-    ) -> tuple[torch.Tensor, int] | None:
+    ) -> _ReplayMetrics | None:
         """Replay one compiled trajectory with the evaluation physics contract."""
         if self.simulation is None or self.robot is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
         trajectory = compiled.trajectory.positions
-        object_handle = (
-            None if case.object_id is None else self.object_handle(case.object_id)
-        )
+        object_handle = self._objects.get(case.object_id or "")
+        articulation_handle = self._articulations.get(case.object_id or "")
         settings = self._physics_settings()
         lift_start = None if provider is None else provider.lift_segment_start(compiled)
         dynamics_cleared = False
         squared_tracking_error: torch.Tensor | None = None
         tracking_value_count = 0
+        articulation_initial: torch.Tensor | None = None
+        articulation_final: torch.Tensor | None = None
+        articulation_peak: torch.Tensor | None = None
+        articulation_joint_name: str | None = None
+        effect_start = 0
+        effect_stop = 0
+        effect_sign = 1.0
         if collect_metrics:
             squared_tracking_error = torch.zeros(
                 case.batch_size, dtype=trajectory.dtype, device=trajectory.device
             )
+            if articulation_handle is not None:
+                joint_value = case.case_parameters.get("target_joint")
+                if not isinstance(joint_value, str) or not joint_value:
+                    raise ValueError(
+                        "Articulation cases must freeze a non-empty target_joint."
+                    )
+                articulation_joint_name = joint_value
+                effect_sign = float(case.case_parameters.get("effect_joint_sign", 1.0))
+                if not math.isfinite(effect_sign) or abs(effect_sign) <= 1.0e-8:
+                    raise ValueError("effect_joint_sign must be finite and non-zero.")
+                articulation_initial = articulation_handle.joint_qpos(joint_value)
+                articulation_peak = torch.zeros_like(articulation_initial)
+                segment_name = (
+                    None
+                    if provider is None
+                    else provider.articulation_effect_segment(case)
+                )
+                if segment_name is None:
+                    raise RuntimeError(
+                        f"Atomic skill {case.skill_id!r} has an articulation target "
+                        "but declares no effect segment."
+                    )
+                segment = compiled.segment(0, segment_name)
+                # A passive articulation can respond a few physics steps after
+                # the command segment ends.  Start at the manipulation segment,
+                # then observe through release, retract, and the final hold.
+                effect_start, effect_stop = segment.start, trajectory.shape[1]
         for waypoint_index in range(trajectory.shape[1]):
             positions = trajectory[:, waypoint_index]
             self.robot.set_qpos(positions, target=True)
-            self.simulation.update(step=settings.steps_per_waypoint)
+            for _ in range(settings.steps_per_waypoint):
+                self.simulation.update(step=1)
+                if (
+                    articulation_handle is not None
+                    and articulation_joint_name is not None
+                    and articulation_initial is not None
+                    and articulation_peak is not None
+                    and effect_start <= waypoint_index < effect_stop
+                ):
+                    current_joint = articulation_handle.joint_qpos(
+                        articulation_joint_name
+                    )
+                    articulation_peak = torch.maximum(
+                        articulation_peak,
+                        (current_joint - articulation_initial) * effect_sign,
+                    )
             if squared_tracking_error is not None:
                 observed = self.robot.get_qpos()
                 squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
@@ -2000,6 +3008,17 @@ class AtomicTaskScenario(ScenarioProvider):
         for _ in range(settings.hold_steps):
             self.robot.set_qpos(final_command, target=True)
             self.simulation.update(step=settings.hold_sim_steps)
+            if (
+                articulation_handle is not None
+                and articulation_joint_name is not None
+                and articulation_initial is not None
+                and articulation_peak is not None
+            ):
+                current_joint = articulation_handle.joint_qpos(articulation_joint_name)
+                articulation_peak = torch.maximum(
+                    articulation_peak,
+                    (current_joint - articulation_initial) * effect_sign,
+                )
             if squared_tracking_error is not None:
                 observed = self.robot.get_qpos()
                 squared_tracking_error += ((observed - final_command) ** 2).sum(dim=1)
@@ -2007,7 +3026,17 @@ class AtomicTaskScenario(ScenarioProvider):
         if collect_metrics:
             if squared_tracking_error is None:
                 raise RuntimeError("Timed replay lost its tracking accumulator.")
-            return squared_tracking_error, tracking_value_count
+            if articulation_handle is not None and articulation_joint_name is not None:
+                articulation_final = articulation_handle.joint_qpos(
+                    articulation_joint_name
+                )
+            return _ReplayMetrics(
+                squared_tracking_error=squared_tracking_error,
+                tracking_value_count=tracking_value_count,
+                articulation_joint_initial=articulation_initial,
+                articulation_joint_final=articulation_final,
+                articulation_joint_peak_signed_delta=articulation_peak,
+            )
         return None
 
     def _hold_static(self) -> None:
@@ -2143,6 +3172,101 @@ class AtomicTaskScenario(ScenarioProvider):
         raise RuntimeError(
             f"No independently reachable antipodal grasp remained for "
             f"{handle.object_id!r} after screening {len(ranked)} candidates."
+        )
+
+    def resolve_articulation_grasp(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        target_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        start_qpos: torch.Tensor,
+        direction: str,
+        approach_distance: float,
+        translation_distance: float,
+        seed: int,
+        n_sample: int,
+        max_candidates: int,
+        alignment_max_angle_deg: float,
+    ) -> torch.Tensor:
+        """Freeze a geometry-aware PGI grasp that can complete a Slide path."""
+        if self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        if target_pose.shape != (1, 4, 4):
+            raise ValueError("Physical Slide grasp selection requires batch size one.")
+        if n_sample < 1 or max_candidates < 1:
+            raise ValueError("Slide grasp sample/candidate counts must be positive.")
+        if not 0.0 < alignment_max_angle_deg <= 90.0:
+            raise ValueError("grasp_alignment_max_angle_deg must be in (0, 90].")
+        from scripts.tutorials.atomic_action.tutorial_utils import (
+            create_parallel_jaw_grasp_pose_generator,
+        )
+
+        fork_devices = (
+            []
+            if self.robot.device.type != "cuda"
+            else [self.robot.device.index or torch.cuda.current_device()]
+        )
+        with torch.random.fork_rng(devices=fork_devices):
+            torch.manual_seed(seed)
+            generator = create_parallel_jaw_grasp_pose_generator(
+                n_sample=n_sample,
+                force_refresh=False,
+            )
+            candidates, costs = generator.get_valid_grasp_poses(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                obj_poses=target_pose,
+                approach_direction=approach_direction,
+            )[0]
+        finite_indices = torch.nonzero(torch.isfinite(costs), as_tuple=False).flatten()
+        if finite_indices.numel() == 0:
+            raise RuntimeError("No valid antipodal Slide grasp candidates were found.")
+        ranked = finite_indices[torch.argsort(costs[finite_indices])]
+        ranked = ranked[:max_candidates].detach().to("cpu").tolist()
+        minimum_alignment = math.cos(math.radians(alignment_max_angle_deg))
+        translation_sign = -1.0 if direction == "pull" else 1.0
+        for candidate_index in ranked:
+            candidate = candidates[candidate_index].to(
+                device=self.robot.device, dtype=torch.float32
+            )
+            if (
+                float(torch.dot(candidate[:3, 2], approach_direction[0]).item())
+                < minimum_alignment
+            ):
+                continue
+            mirrored = candidate.clone()
+            mirrored[:3, 0] = -mirrored[:3, 0]
+            mirrored[:3, 1] = -mirrored[:3, 1]
+            for variant in (candidate, mirrored):
+                grasp = variant.unsqueeze(0)
+                approach = grasp.clone()
+                approach[:, :3, 3] -= approach_direction * approach_distance
+                translated = grasp.clone()
+                translated[:, :3, 3] += (
+                    approach_direction * translation_sign * translation_distance
+                )
+                poses = [approach, grasp, translated]
+                if direction == "push":
+                    poses.append(approach)
+                qpos_seed = start_qpos
+                feasible = True
+                for pose in poses:
+                    success, qpos_seed = self.robot.compute_ik(
+                        pose=pose,
+                        joint_seed=qpos_seed,
+                        name=self.control_part,
+                    )
+                    if not bool(torch.as_tensor(success).all().item()):
+                        feasible = False
+                        break
+                    qpos_seed = _canonical_case_qpos(qpos_seed)
+                if feasible:
+                    return grasp
+        raise RuntimeError(
+            "No independently reachable antipodal Slide grasp remained after "
+            f"screening {len(ranked)} candidates."
         )
 
     def restore_base_robot(self) -> None:
@@ -2283,8 +3407,26 @@ class AtomicTaskScenario(ScenarioProvider):
                 candidate.reset()
             else:
                 candidate.park(index)
+        for index, candidate in enumerate(self._articulations.values()):
+            candidate.park(len(self._objects) + index)
         if self.simulation is not None:
             self.simulation.update(step=2)
+        return handle
+
+    def activate_articulation(self, object_id: str) -> AtomicArticulationHandle:
+        """Reset one articulation and park all inactive scene objects."""
+        handle = self.articulation_handle(object_id)
+        for index, candidate in enumerate(self._objects.values()):
+            candidate.park(index)
+        for index, candidate in enumerate(self._articulations.values()):
+            if candidate is handle:
+                candidate.reset()
+            else:
+                candidate.park(len(self._objects) + index)
+        if self.simulation is not None:
+            self.simulation.update(
+                step=int(handle.config.get("reset_settle_steps", 10))
+            )
         return handle
 
     def object_handle(self, object_id: str | None) -> AtomicObjectHandle:
@@ -2299,11 +3441,92 @@ class AtomicTaskScenario(ScenarioProvider):
                 f"{sorted(self._objects)}."
             ) from exc
 
+    def articulation_handle(self, object_id: str | None) -> AtomicArticulationHandle:
+        """Resolve one configured articulation identifier."""
+        if object_id is None:
+            raise ValueError("This Atomic Task case has no articulation id.")
+        try:
+            return self._articulations[object_id]
+        except KeyError as exc:
+            raise ValueError(
+                f"Unknown atomic articulation {object_id!r}; configured "
+                f"articulations: {sorted(self._articulations)}."
+            ) from exc
+
+    def sample_articulation_geometry(
+        self,
+        handle: AtomicArticulationHandle,
+        target_link: str,
+        *,
+        seed: int,
+        config: Mapping[str, object],
+    ) -> dict[str, torch.Tensor]:
+        """Resolve and cache deterministic tutorial-style link geometry."""
+        articulation_points = int(config.get("articulation_point_count", 100_000))
+        target_points = int(config.get("target_point_count", 5_000))
+        geometry_seed = int(config.get("geometry_seed", seed))
+        key = (
+            handle.object_id,
+            target_link,
+            articulation_points,
+            target_points,
+            geometry_seed,
+        )
+        cached = self._articulation_geometry.get(key)
+        if cached is None:
+            import open3d as o3d
+
+            o3d.utility.random.seed(geometry_seed % (2**31 - 1))
+            cached = sample_initial_articulation_geometry(
+                handle.entity,
+                target_link,
+                initial_qpos=handle.initial_qpos[0],
+                initial_qpos_joint_names=handle.entity.joint_names,
+                body_scale=handle.entity.cfg.body_scale,
+                articulation_point_count=articulation_points,
+                target_point_count=target_points,
+            ).to_object_geometry()
+            self._articulation_geometry[key] = {
+                name: value.clone() for name, value in cached.items()
+            }
+        return {name: value.clone() for name, value in cached.items()}
+
+    @staticmethod
+    def validate_articulation_target(
+        handle: AtomicArticulationHandle,
+        *,
+        target_link: str,
+        target_joint: str,
+        joint_type: Literal["prismatic", "revolute"],
+    ) -> None:
+        """Require the configured joint to be the link's nearest typed ancestor."""
+        handle.joint_qpos(target_joint)
+        resolved = next(
+            (
+                joint
+                for joint in handle.entity.get_parent_joint_chain(target_link)
+                if joint.joint_type == joint_type
+            ),
+            None,
+        )
+        if resolved is None:
+            raise ValueError(
+                f"Articulation link {target_link!r} has no {joint_type} ancestor."
+            )
+        if resolved.name != target_joint:
+            raise ValueError(
+                f"Articulation link {target_link!r} resolves to {joint_type} "
+                f"joint {resolved.name!r}, not configured joint {target_joint!r}."
+            )
+
     def close_runtime(self) -> None:
         """Release Python references before SimulationManager teardown."""
         self._engine = None
         self._case_providers.clear()
+        self._cases_by_id.clear()
         self._objects.clear()
+        self._articulations.clear()
+        self._articulation_geometry.clear()
         self._base_full_qpos = None
         self.end_effector_part = None
         self._gripper_open = None
@@ -2312,6 +3535,7 @@ class AtomicTaskScenario(ScenarioProvider):
         self.robot = None
         self.suite = None
         self.track = None
+        self._runtime_entities_created = False
 
     @staticmethod
     def _synchronize() -> None:
@@ -2326,4 +3550,6 @@ register_atomic_skill_provider("move_joints", _MoveJointsCases)
 register_atomic_skill_provider("pick_up", _PickUpCases)
 register_atomic_skill_provider("place", _PlaceCases)
 register_atomic_skill_provider("press", _PressCases)
+register_atomic_skill_provider("slide", _SlideCases)
+register_atomic_skill_provider("twist", _TwistCases)
 register_scenario_provider("atomic_task", AtomicTaskScenario)

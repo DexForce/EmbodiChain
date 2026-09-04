@@ -609,6 +609,13 @@ def _metric_rows(
                     "object_lift_delta_m": _mean(
                         outcome.object_lift_delta_m for outcome in outcomes
                     ),
+                    "articulation_joint_delta": _mean(
+                        outcome.articulation_joint_delta for outcome in outcomes
+                    ),
+                    "articulation_joint_peak_signed_delta": _mean(
+                        outcome.articulation_joint_peak_signed_delta
+                        for outcome in outcomes
+                    ),
                     "replan_count": _mean(
                         (
                             float(outcome.replan_count)

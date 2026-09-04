@@ -128,7 +128,7 @@ class BenchmarkRunner:
         self._video_paths: list[str] = []
 
     def _create_simulation(self, batch_size: int) -> tuple[SimulationManager, "Robot"]:
-        """Create one isolated suite-selected robot for a fixed batch size."""
+        """Create one uninitialized suite-selected robot for a fixed batch size."""
         sim = SimulationManager(
             SimulationManagerCfg(
                 headless=self.headless,
@@ -138,7 +138,6 @@ class BenchmarkRunner:
             )
         )
         robot = self.robot_provider.add_robot(sim)
-        sim.update(step=1)
         return sim, robot
 
     def _append(self, writer: TrialJsonlWriter, record: TrialRecord) -> None:
@@ -520,6 +519,11 @@ class BenchmarkRunner:
                 runtime_configured = False
                 try:
                     sim, robot = self._create_simulation(batch_size)
+                    provider.create_runtime_entities(sim, self.suite, track)
+                    runtime_configured = True
+                    # GPU physics topology must be complete before its first
+                    # update; scenario entities cannot be appended afterwards.
+                    sim.update(step=1)
                     provider.configure_runtime(
                         sim,
                         robot,
@@ -527,7 +531,6 @@ class BenchmarkRunner:
                         track,
                         self.control_part,
                     )
-                    runtime_configured = True
                     cases = provider.generate_cases(
                         self.suite, track, robot, self.control_part, batch_size
                     )
