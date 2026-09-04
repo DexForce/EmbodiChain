@@ -14,23 +14,74 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import sys
 import shutil
 import hashlib
+import time
+from contextlib import contextmanager
+from typing import Iterator
 import open3d as o3d
 
 from embodichain.utils import logger
 
 
+@contextmanager
+def _dataset_download_lock(path: str, prefix: str) -> Iterator[None]:
+    """Serialize download and extraction for one dataset cache entry.
+
+    Pytest-xdist workers and separate user processes can request the same
+    dataset simultaneously. The lock lives outside the per-dataset download
+    directory because failed-download cleanup removes that directory.
+
+    Args:
+        path: Root of the EmbodiChain data cache.
+        prefix: Dataset cache directory name.
+    """
+    lock_dir = os.path.join(path, "download", ".locks")
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, f"{prefix}.lock")
+
+    with open(lock_path, "a+") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_file.seek(0, os.SEEK_END)
+            if lock_file.tell() == 0:
+                lock_file.write("0")
+                lock_file.flush()
+            lock_file.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            return
+
+        import fcntl
+
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 class EmbodiChainDataset(o3d.data.DownloadDataset):
     def __init__(self, prefix, data_descriptor, path):
-        # Perform the zip file and extracted contents check
-        # If the zip was not valid, the zip file would have been removed
-        # and the parent class would download and extract it again
-        self.check_zip(prefix, data_descriptor, path)
-        # Call the parent class constructor
-        super().__init__(prefix, data_descriptor, path)
+        with _dataset_download_lock(path, prefix):
+            # Perform the zip file and extracted contents check. If the zip is
+            # not valid, the parent class downloads and extracts it again.
+            self.check_zip(prefix, data_descriptor, path)
+            super().__init__(prefix, data_descriptor, path)
 
     def check_zip(self, prefix, data_descriptor, path):
         """Check the integrity of the zip file and its extracted contents."""
