@@ -10,6 +10,13 @@ robot:
     attrs:
       static_friction: 1.0
       dynamic_friction: 1.0
+    solver_cfg:
+      arm:
+        tcp:
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.15]
+          - [0.0, 0.0, 0.0, 1.0]
 
 planners:
   - id: nmg
@@ -117,6 +124,7 @@ tracks:
           static_friction: 0.99
           contact_offset: 0.003
           rest_offset: 0.001
+          enable_ccd: true
           settle_steps: 10
       skills:
         - id: move_end_effector
@@ -165,9 +173,19 @@ tracks:
                 pre_grasp_clearance_m: 0.15
                 required_lift_m: 0.04
         - id: move_held_object
-          sample_count: 80
+          sample_count: 120
+          pick_sample_count: 120
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
           held_object_offset_m: [0.0, 0.0, 0.18]
           target_object_offset_m: [0.08, 0.08, 0.04]
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          hand_interp_steps: 12
+          pre_action_settle_steps: 50
           object_position_threshold_m: 0.04
           cases:
             - name: cube_transport
@@ -175,13 +193,22 @@ tracks:
               task_difficulty: simple
               difficulty_factors:
                 translation_m: 0.12
-                object_preheld: true
+                pre_pick_required: true
         - id: place
           sample_count: 120
+          pick_sample_count: 120
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
           held_object_offset_m: [0.0, 0.0, 0.18]
           target_object_offset_m: [0.10, 0.10, 0.0]
           retract_height_m: 0.10
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
           hand_interp_steps: 12
+          pre_action_settle_steps: 50
           object_position_threshold_m: 0.05
           cases:
             - name: cube_table_place

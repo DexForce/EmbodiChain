@@ -379,7 +379,7 @@ def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
     assert len(cfg.control_parts["arm"]) == 7
     assert cfg.control_parts["hand"] == ["gripper_finger1_joint_1"]
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_link8"
-    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.17)
+    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
     assert len(cfg.init_qpos) == 9
 
 

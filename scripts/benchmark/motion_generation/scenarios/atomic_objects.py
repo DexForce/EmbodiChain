@@ -254,6 +254,7 @@ def create_atomic_object(
                 restitution=float(config.get("restitution", 0.0)),
                 contact_offset=float(config.get("contact_offset", 0.003)),
                 rest_offset=float(config.get("rest_offset", 0.001)),
+                enable_ccd=bool(config.get("enable_ccd", False)),
                 linear_damping=float(config.get("linear_damping", 0.7)),
                 angular_damping=float(config.get("angular_damping", 0.7)),
                 min_position_iters=int(config.get("min_position_iters", 32)),

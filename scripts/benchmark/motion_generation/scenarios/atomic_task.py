@@ -1238,42 +1238,83 @@ class _HeldObjectCases(AtomicSkillCaseProvider):
         table_object_pose = scenario.randomize_object_pose(
             handle, config, seed=seed, stream=301
         )
-        object_pose = table_object_pose.clone()
-        held_offset = _randomized_vector(
-            _float_vector(
-                config.get("held_object_offset_m"),
-                name="held_object_offset_m",
-                length=3,
-                default=(0.0, 0.0, 0.18),
-            ),
-            config,
-            jitter_name="held_object_offset_jitter_m",
-            seed=seed,
-            stream=302,
-            dtype=object_pose.dtype,
-            device=object_pose.device,
+        # Match the tutorials: obtain the grasp target only after gravity has
+        # settled the object.  Reading the configured spawn pose here would
+        # leave the case grounded at one height while the grasp was planned
+        # around a different, manually offset height.
+        settle_steps = int(config.get("pre_action_settle_steps", 50))
+        if settle_steps < 0:
+            raise ValueError("pre_action_settle_steps must be non-negative.")
+        if scenario.simulation is not None and settle_steps:
+            scenario.simulation.update(step=settle_steps)
+            table_object_pose = handle.entity.get_local_pose(to_matrix=True).clone()
+        approach_direction = torch.tensor(
+            config.get("approach_direction", [0.0, 0.0, -1.0]),
+            dtype=table_object_pose.dtype,
+            device=table_object_pose.device,
         )
-        object_pose[:, :3, 3] += held_offset
-        grasp_pose = object_pose.clone()
-        grasp_pose[:, :3, :3] = torch.tensor(
-            config.get("grasp_rotation", _TOP_DOWN_ROTATION),
-            dtype=grasp_pose.dtype,
-            device=grasp_pose.device,
-        )
-        grasp_pose[:, :3, 3] += _randomized_vector(
-            _float_vector(
-                config.get("grasp_offset_m"),
-                name="grasp_offset_m",
-                length=3,
-                default=(0.0, 0.0, 0.0),
-            ),
-            config,
-            jitter_name="grasp_offset_jitter_m",
-            seed=seed,
-            stream=303,
-            dtype=grasp_pose.dtype,
-            device=grasp_pose.device,
-        )
+        direction_norm = torch.linalg.vector_norm(approach_direction)
+        if float(direction_norm.item()) <= 1.0e-6:
+            raise ValueError("approach_direction must be non-zero.")
+        approach_direction = approach_direction / direction_norm
+        pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
+        lift_height = float(config.get("lift_height_m", 0.16))
+        grasp_source = str(config.get("grasp_source", "antipodal"))
+        if grasp_source == "antipodal":
+            object_pose = table_object_pose.clone()
+            grasp_pose = scenario.resolve_antipodal_grasp(
+                handle,
+                object_pose,
+                approach_direction,
+                seed=seed,
+                start_qpos=scenario.robot.get_qpos(name=scenario.control_part),
+                pre_grasp_distance=pre_grasp_distance,
+                lift_height=lift_height,
+                n_sample=int(config.get("grasp_sample_count", 10_000)),
+                max_candidates=int(config.get("grasp_max_candidates", 128)),
+                alignment_max_angle_deg=float(
+                    config.get("grasp_alignment_max_angle_deg", 10.0)
+                ),
+            )
+        elif grasp_source == "fixed":
+            object_pose = table_object_pose.clone()
+            held_offset = _randomized_vector(
+                _float_vector(
+                    config.get("held_object_offset_m"),
+                    name="held_object_offset_m",
+                    length=3,
+                    default=(0.0, 0.0, 0.18),
+                ),
+                config,
+                jitter_name="held_object_offset_jitter_m",
+                seed=seed,
+                stream=302,
+                dtype=object_pose.dtype,
+                device=object_pose.device,
+            )
+            object_pose[:, :3, 3] += held_offset
+            grasp_pose = object_pose.clone()
+            grasp_pose[:, :3, :3] = torch.tensor(
+                config.get("grasp_rotation", _TOP_DOWN_ROTATION),
+                dtype=grasp_pose.dtype,
+                device=grasp_pose.device,
+            )
+            grasp_pose[:, :3, 3] += _randomized_vector(
+                _float_vector(
+                    config.get("grasp_offset_m"),
+                    name="grasp_offset_m",
+                    length=3,
+                    default=(0.0, 0.0, 0.0),
+                ),
+                config,
+                jitter_name="grasp_offset_jitter_m",
+                seed=seed,
+                stream=303,
+                dtype=grasp_pose.dtype,
+                device=grasp_pose.device,
+            )
+        else:
+            raise ValueError("grasp_source must be 'antipodal' or 'fixed'.")
         arm_seed = scenario.robot.get_qpos(name=scenario.control_part)
         success, arm_start = scenario.robot.compute_ik(
             pose=grasp_pose,
@@ -1344,8 +1385,9 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             object_pose,
             grasp_pose,
             object_to_eef,
-            _table_object_pose,
+            table_object_pose,
         ) = self._prepare_start(scenario, config, seed=seed)
+        lift_height = float(config.get("lift_height_m", 0.16))
         target_object = object_pose.clone()
         target_object[:, :3, 3] += _randomized_vector(
             _float_vector(
@@ -1361,7 +1403,34 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             dtype=object_pose.dtype,
             device=object_pose.device,
         )
+        # The object is now picked from the table and lifted before the
+        # transport action.  Express the transport target relative to that
+        # lifted state instead of the old teleported held-object pose.
+        target_object[:, 2, 3] += lift_height
         target_eef = torch.bmm(target_object, object_to_eef)
+        approach_direction = torch.tensor(
+            config.get("approach_direction", [0.0, 0.0, -1.0]),
+            dtype=grasp_pose.dtype,
+            device=grasp_pose.device,
+        )
+        approach_direction = approach_direction / torch.linalg.vector_norm(
+            approach_direction
+        )
+        pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
+        pre_grasp = grasp_pose.clone()
+        pre_grasp[:, :3, 3] -= approach_direction * pre_grasp_distance
+        ik_success, pre_pick_qpos = scenario.robot.compute_ik(
+            pose=pre_grasp,
+            joint_seed=scenario.robot.get_qpos(name=scenario.control_part),
+            name=scenario.control_part,
+        )
+        if not bool(torch.as_tensor(ik_success).all().item()):
+            raise RuntimeError(
+                "Independent IK rejected MoveHeldObject pre-pick pose "
+                f"{_case_name(config)!r}."
+            )
+        pre_pick_qpos = _canonical_case_qpos(pre_pick_qpos)
+        scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
         references = scenario.solve_reference_qpos(start_qpos, target_eef[:, None])
         name = _case_name(config)
@@ -1373,8 +1442,8 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             seed=seed,
             batch_size=batch_size,
             num_waypoints=1,
-            path_shape="held_object_transport",
-            start_state_bin="object_held",
+            path_shape="pick_up_then_held_object_transport",
+            start_state_bin="pre_pick",
             start_qpos=start_qpos,
             target_waypoints=target_eef[:, None],
             reference_qpos=references,
@@ -1386,7 +1455,16 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
+                "object_initial_pose": table_object_pose.detach().cpu().tolist(),
                 "sample_count": int(config.get("sample_count", 80)),
+                "pick_sample_count": int(config.get("pick_sample_count", 120)),
+                "approach_direction": approach_direction.detach().cpu().tolist(),
+                "pre_grasp_distance_m": pre_grasp_distance,
+                "lift_height_m": lift_height,
+                "hand_interp_steps": int(config.get("hand_interp_steps", 12)),
+                "pre_action_settle_steps": int(
+                    config.get("pre_action_settle_steps", 50)
+                ),
                 "target_object_pose": target_object.detach().cpu().tolist(),
                 "object_position_threshold_m": float(
                     config.get("object_position_threshold_m", 0.04)
@@ -1478,6 +1556,28 @@ class _PlaceCases(_HeldObjectCases):
         approach[:, 2, 3] += lift_height
         retract = approach.clone()
         targets = torch.stack([approach, release, retract], dim=1)
+        approach_direction = torch.tensor(
+            config.get("approach_direction", [0.0, 0.0, -1.0]),
+            dtype=grasp_pose.dtype,
+            device=grasp_pose.device,
+        )
+        approach_direction = approach_direction / torch.linalg.vector_norm(
+            approach_direction
+        )
+        pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
+        pre_grasp = grasp_pose.clone()
+        pre_grasp[:, :3, 3] -= approach_direction * pre_grasp_distance
+        ik_success, pre_pick_qpos = scenario.robot.compute_ik(
+            pose=pre_grasp,
+            joint_seed=scenario.robot.get_qpos(name=scenario.control_part),
+            name=scenario.control_part,
+        )
+        if not bool(torch.as_tensor(ik_success).all().item()):
+            raise RuntimeError(
+                f"Independent IK rejected Place pre-pick pose {_case_name(config)!r}."
+            )
+        pre_pick_qpos = _canonical_case_qpos(pre_pick_qpos)
+        scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
         references = scenario.solve_reference_qpos(start_qpos, targets)
         name = _case_name(config)
@@ -1490,7 +1590,7 @@ class _PlaceCases(_HeldObjectCases):
             batch_size=batch_size,
             num_waypoints=3,
             path_shape="approach_release_retract",
-            start_state_bin="object_held",
+            start_state_bin="pre_pick",
             start_qpos=start_qpos,
             target_waypoints=targets,
             reference_qpos=references,
@@ -1502,9 +1602,20 @@ class _PlaceCases(_HeldObjectCases):
             full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
             case_parameters={
                 **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
+                # The replay starts with the cube on the table.  PickUp is
+                # compiled as the first action of this Place case, so the
+                # object is never teleported into the closed gripper.
+                "object_initial_pose": table_object_pose.detach().cpu().tolist(),
                 "sample_count": int(config.get("sample_count", 120)),
+                "pick_sample_count": int(config.get("pick_sample_count", 120)),
                 "release_pose": release.detach().cpu().tolist(),
                 "target_object_pose": target_object.detach().cpu().tolist(),
+                "approach_direction": list(approach_direction.detach().cpu().tolist()),
+                "pre_grasp_distance_m": pre_grasp_distance,
+                "lift_height_m": float(config.get("lift_height_m", 0.16)),
+                "pre_action_settle_steps": int(
+                    config.get("pre_action_settle_steps", 50)
+                ),
                 "hand_interp_steps": int(config.get("hand_interp_steps", 12)),
                 "retract_height_m": lift_height,
                 "object_position_threshold_m": float(
@@ -2536,6 +2647,9 @@ class AtomicTaskScenario(ScenarioProvider):
         reset_steps = 2
         for index, handle in enumerate(self._objects.values()):
             if handle.object_id == active_id:
+                reset_steps = int(
+                    case.case_parameters.get("pre_action_settle_steps", reset_steps)
+                )
                 initial_pose = case.case_parameters.get("object_initial_pose")
                 if initial_pose is None:
                     handle.reset()
@@ -2595,11 +2709,54 @@ class AtomicTaskScenario(ScenarioProvider):
                 "Atomic Task engine must own the selected adapter's MotionGenerator."
             )
         task = provider.initial_task_state(self, case)
+        invocations: tuple[ActionInvocation, ...] = (invocation,)
+        if case.skill_id in {"move_held_object", "place"}:
+            if self.end_effector_part is None:
+                raise RuntimeError("Place requires a configured end-effector part.")
+            handle = self.object_handle(case.object_id)
+            semantics = ObjectSemantics(
+                affordance=Affordance(),
+                geometry={},
+                properties={"benchmark_object_id": handle.object_id},
+                label=handle.object_id,
+                entity_id=handle.entity.uid,
+            )
+            pick_invocation = engine.make_invocation(
+                "pick_up",
+                GraspGoal(
+                    semantics=semantics,
+                    grasp_xpos=_case_pose(case, "grasp_pose", device=self.robot.device),
+                ),
+                control_parts={
+                    "primary": {
+                        "motion": self.control_part,
+                        "grasp": self.end_effector_part,
+                    }
+                },
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=int(case.case_parameters["pick_sample_count"]),
+                ),
+                skill_options=PickUpOptions(
+                    approach_direction=torch.tensor(
+                        case.case_parameters.get("approach_direction"),
+                        dtype=torch.float32,
+                        device=self.robot.device,
+                    ),
+                    pre_grasp_distance=float(
+                        case.case_parameters["pre_grasp_distance_m"]
+                    ),
+                    lift_height=float(case.case_parameters["lift_height_m"]),
+                    hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
+                ),
+            )
+            invocations = (pick_invocation, invocation)
+            task = TaskState(batch_size=case.batch_size, device=self.robot.device)
         context = engine.initial_context(
             task=task,
             control_dt=float(self.simulation.sim_config.physics_dt),
         )
-        return engine.compile((invocation,), context=context)
+        return engine.compile(invocations, context=context)
 
     def plan_contract_error(self, result: object) -> str | None:
         """Accept compiled Atomic Action trajectories instead of raw plans."""
