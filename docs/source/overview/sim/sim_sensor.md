@@ -227,7 +227,7 @@ Retrieve contact data using `contact_sensor.get_data()`. The data is returned as
 | `position` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact positions in arena frame (world coordinates minus arena offset). |
 | `normal` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Unit normal vectors pointing from actor 0 toward actor 1. |
 | `friction` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Tangential contact impulse applied to actor 0. Availability is reported by `contact_capabilities.friction`. |
-| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Normal contact impulse magnitudes. |
+| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Backend contact impulse magnitudes. PhysX CPU reports the total impulse norm; Direct GPU and force-reporting Newton solvers report normal impulse magnitude. |
 | `distance` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Signed contact separation (negative means penetration). |
 | `user_ids` | `torch.int32` | `(num_envs, max_contacts_per_env, 2)` | Pair of query-local, backend-neutral contact actor IDs. The legacy field name is retained; resolve IDs with `get_actor_info()`. |
 | `is_valid` | `torch.bool` | `(num_envs, max_contacts_per_env)` | Boolean mask indicating which contact slots contain valid data. Use this mask to filter out unused slots. |
@@ -244,11 +244,16 @@ num_valid = contact_report["is_valid"][env_id].sum().item()
 env_positions = contact_report["position"][env_id, :num_valid]
 ```
 
-Each valid row is the strongest-normal-impulse representative for one ordered
-native collision-shape pair. Multiple shape pairs can map to the same actor
-pair, and geometry-only contacts with zero impulse remain valid. The fixed-size
-numeric buffers are not cleared every update; values where `is_valid=False`
-are unspecified and may be left over from an earlier update.
+Force-capable backends preserve every backend-emitted contact row that passes
+the positive-impulse filter. Default CPU uses a total-impulse norm threshold of
+`1e-7`; Default Direct GPU and force-reporting Newton solvers use the same
+threshold on normal impulse. Geometry-only Newton solvers retain all candidate
+rows with zero impulse. The sensor does not synthesize a common contact
+manifold: solver options such as MuJoCo-Warp's `enable_multiccd` control how
+many points the backend emits for a geometry pair. Multiple contact points and
+shape pairs can map to the same actor pair. The fixed-size numeric buffers are
+not cleared every update; values where `is_valid=False` are unspecified and
+may be left over from an earlier update.
 
 ### Additional Methods
 

@@ -100,7 +100,12 @@ class ArticulationContactFilterCfg:
 
 
 class ContactSensor(BaseSensor):
-    """Sensor to get contacts from rigid body and articulation links."""
+    """Sensor to get contacts from rigid bodies and articulation links.
+
+    The sensor preserves every backend-emitted contact row that passes the
+    backend's positive-impulse filter. Geometry-only Newton solvers retain all
+    candidate contact rows.
+    """
 
     SUPPORTED_DATA_TYPES = [
         "position",

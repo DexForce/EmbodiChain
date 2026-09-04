@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Direct-GPU regression contract for the backend-neutral contact sensor."""
+"""Default-PhysX contact-point multiplicity regression contract."""
 
 from __future__ import annotations
 
@@ -30,12 +30,22 @@ from embodichain.lab.sim.sensors import ContactSensorCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 
-pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
+pytestmark = pytest.mark.requires_sim
 
 
-def test_default_direct_gpu_contact_sensor_reports_each_arena() -> None:
+@pytest.mark.parametrize(
+    ("device", "expected_contacts_per_env"),
+    [
+        pytest.param("cpu", 4, id="cpu"),
+        pytest.param("cuda:0", 4, marks=pytest.mark.gpu, id="direct-gpu"),
+    ],
+)
+def test_default_contact_sensor_preserves_physx_contact_multiplicity(
+    device: str,
+    expected_contacts_per_env: int,
+) -> None:
     wp.init()
-    if not wp.is_cuda_available():
+    if device.startswith("cuda") and not wp.is_cuda_available():
         pytest.skip("CUDA is required for the Direct-GPU contact E2E contract.")
 
     sim = SimulationManager(
@@ -43,7 +53,7 @@ def test_default_direct_gpu_contact_sensor_reports_each_arena() -> None:
             headless=True,
             num_envs=2,
             arena_space=2.0,
-            physics_cfg=DefaultPhysicsCfg(device="cuda:0"),
+            physics_cfg=DefaultPhysicsCfg(device=device),
         )
     )
     try:
@@ -78,17 +88,27 @@ def test_default_direct_gpu_contact_sensor_reports_each_arena() -> None:
             sim.update(step=1)
             sensor.update()
             counts = sensor._num_contacts_per_env.cpu().tolist()
-            if all(count > 0 for count in counts):
+            if counts == [expected_contacts_per_env] * 2:
                 break
 
         assert not sensor.contact_capabilities.friction
-        assert all(count > 0 for count in counts)
+        assert counts == [expected_contacts_per_env] * 2
         data = sensor.get_data()
-        actor_ids = data["user_ids"][data["is_valid"]]
+        valid = data["is_valid"]
+        assert (data["impulse"][valid] > 1.0e-7).all()
+        positions = data["position"][valid]
+        assert positions[:, 0].abs().max().item() < 0.2
+        assert (positions[:, 2] - 0.05).abs().max().item() < 0.02
+        actor_ids = data["user_ids"][valid]
         assert (actor_ids >= 0).any(dim=1).all()
+        cube_actor_ids = set(sensor.item_user_ids.cpu().tolist())
+        assert all(
+            any(actor_id in cube_actor_ids for actor_id in pair)
+            for pair in actor_ids.cpu().tolist()
+        )
         assert all(
             sensor.get_actor_info(actor_id).path.endswith("/cube")
-            for actor_id in set(actor_ids[actor_ids >= 0].cpu().tolist())
+            for actor_id in cube_actor_ids
         )
     finally:
         sim.destroy(exit_process=False)

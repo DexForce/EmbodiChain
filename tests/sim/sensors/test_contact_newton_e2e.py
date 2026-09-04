@@ -47,6 +47,12 @@ def test_newton_contact_sensor_reports_each_arena() -> None:
                 device="cuda:0",
                 num_substeps=1,
                 use_cuda_graph=False,
+                # Exercise a multi-point manifold so query-side reductions
+                # cannot satisfy this regression contract accidentally.
+                solver_cfg={
+                    "solver_type": "mujoco_warp",
+                    "enable_multiccd": True,
+                },
             ),
         )
     )
@@ -82,9 +88,10 @@ def test_newton_contact_sensor_reports_each_arena() -> None:
         assert sensor.contact_capabilities.geometry
         assert sensor.contact_capabilities.impulse
         counts = sensor._num_contacts_per_env.cpu().tolist()
-        assert all(count > 0 for count in counts)
+        assert counts == [4, 4]
         data = sensor.get_data()
         assert data["is_valid"].sum(dim=1).cpu().tolist() == counts
+        assert (data["impulse"][data["is_valid"]] > 1.0e-7).all()
         actor_ids = data["user_ids"][data["is_valid"]]
         assert all(
             sensor.get_actor_info(actor_id).path.endswith(("/ground", "/cube"))

@@ -173,11 +173,16 @@ contains backend-neutral contact actor IDs rather than PhysX render user IDs;
 resolve one with `ContactSensor.get_actor_info()`. `item_user_ids` contains the
 IDs selected by the sensor, and `filter_by_user_ids()` accepts those same IDs.
 Normals consistently point from `user_ids[..., 0]` toward
-`user_ids[..., 1]`. Each valid row is the strongest-normal-impulse
-representative of one ordered native collision-shape pair; several shape pairs
-may therefore map to the same actor pair. Geometry-only contacts with zero
-impulse remain valid. Only `is_valid` and the per-environment counts are reset
-on each update, so values in invalid fixed-buffer slots are unspecified.
+`user_ids[..., 1]`. Force-capable backends preserve every backend-emitted row
+that passes the positive-impulse filter: Default CPU uses total impulse norm
+greater than `1e-7`, while Direct GPU and force-reporting Newton solvers use
+normal impulse greater than `1e-7`. Geometry-only Newton solvers retain all
+candidate rows with zero impulse. The sensor does not synthesize a common
+contact manifold; solver options such as MuJoCo-Warp's `enable_multiccd`
+control how many points the backend emits for a geometry pair. Several contact
+points and shape pairs may therefore map to the same actor pair. Only
+`is_valid` and the per-environment counts are reset on each update, so values
+in invalid fixed-buffer slots are unspecified.
 PhysX Direct GPU does not identify static counterparts in its raw contact
 buffer; those rows use actor ID `-1`. Monitor the dynamic/link side with
 `filter_need_both_actor=False` when contacts against arbitrary static geometry
