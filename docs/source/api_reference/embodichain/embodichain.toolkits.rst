@@ -2,7 +2,8 @@ embodichain.toolkits
 ====================
 
 The :mod:`embodichain.toolkits` package contains asset-preparation and
-manipulation utilities that can be used independently of the simulation loop.
+manipulation utilities plus an isolated application-level dynamics-calibration
+workflow.
 
 .. automodule:: embodichain.toolkits
 
@@ -11,8 +12,15 @@ manipulation utilities that can be used independently of the simulation loop.
    .. autosummary::
 
       acd
+      dynamics_calibration
       graspkit
       urdf_assembly
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+
+   embodichain.toolkits.dynamics_calibration
 
 
 GraspKit — Parallel-Gripper Grasp Sampling

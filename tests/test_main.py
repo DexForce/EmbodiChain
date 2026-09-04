@@ -30,6 +30,7 @@ EXPECTED_COMMANDS = {
     "analyze-workspace",
     "annotate-grasp",
     "benchmark",
+    "calibrate-dynamics",
     "data",
     "decompose-urdf",
     "list-task",
@@ -218,6 +219,21 @@ def test_list_task_help_explains_environment_only_label(
 
     assert exc_info.value.code == 0
     assert "Environment Only" in capsys.readouterr().out
+
+
+def test_calibrate_dynamics_help_exposes_v1_workflow(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The unified command advertises the three supported V1 stages."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["calibrate-dynamics", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "audit" in output
+    assert "tune-drive" in output
+    assert "qualify" in output
+    assert "fit-physical" not in output
 
 
 def test_config_environment_entries_use_task_paths_and_artifacts(

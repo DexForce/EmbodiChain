@@ -59,6 +59,27 @@ The generated output contains the canonical source mesh under ``asset_source/``,
 
 ---
 
+## Dynamics Calibration
+
+Audit a robot description and tune effective drive properties for an
+application without changing its source asset:
+
+```bash
+embodichain calibrate-dynamics audit robot.urdf
+embodichain calibrate-dynamics tune-drive \
+    --config calibration.yaml \
+    --output-dir calibration_output
+embodichain calibrate-dynamics qualify \
+    --config calibration.yaml \
+    --overlay calibration_output/drive_overlay.yaml
+```
+
+The tool uses DexSim for generic SimReady facts and EmbodiChain for trajectories,
+search, and qualification. See {doc}`../features/toolkits/dynamics_calibration`
+for the configuration schema, custom evaluator contract, artifacts, and scope.
+
+---
+
 (cli-preview-asset)=
 ## Preview Asset
 

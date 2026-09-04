@@ -95,6 +95,31 @@ def test_get_qf_returns_all_articulation_joint_efforts():
 
 
 @pytest.mark.no_sim
+def test_target_qvel_write_count_tracks_successful_api_calls() -> None:
+    """Velocity-target instrumentation counts calls but not current-state writes."""
+
+    class Entity:
+        def set_target_qvel(self, _qvel, _joint_ids) -> None:
+            pass
+
+        def set_current_qvel(self, _qvel, _joint_ids) -> None:
+            pass
+
+    articulation = object.__new__(Articulation)
+    articulation._entities = [Entity()]
+    articulation._all_indices = torch.arange(1, dtype=torch.int32)
+    articulation._data = SimpleNamespace(dof=2)
+    articulation.device = torch.device("cpu")
+    articulation._target_qvel_write_count = 0
+    values = torch.zeros((1, 2), dtype=torch.float32)
+
+    articulation.set_qvel(values, target=True)
+    articulation.set_qvel(values, target=False)
+
+    assert articulation.target_qvel_write_count == 1
+
+
+@pytest.mark.no_sim
 def test_compute_fk_reorders_named_qpos_into_kinematic_joint_order():
     articulation = object.__new__(Articulation)
     captured: dict[str, object] = {}

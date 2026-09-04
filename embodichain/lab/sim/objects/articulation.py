@@ -650,6 +650,7 @@ class Articulation(BatchEntity):
         self.cfg = cfg
         self._entities = entities
         self.device = device
+        self._target_qvel_write_count = 0
 
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
@@ -1504,6 +1505,19 @@ class Articulation(BatchEntity):
         """
         return self.body_data.qvel if not target else self.body_data.target_qvel
 
+    @property
+    def target_qvel_write_count(self) -> int:
+        """Number of successful target-velocity API write calls on this handle.
+
+        The counter is application-facing instrumentation. One batched
+        :meth:`set_qvel` invocation counts once, independent of the selected
+        environments or backend implementation.
+
+        Returns:
+            Successful target-velocity calls since this handle was created.
+        """
+        return getattr(self, "_target_qvel_write_count", 0)
+
     def get_qvel_limits(
         self,
         joint_ids: Sequence[int] | torch.Tensor | None = None,
@@ -1536,7 +1550,8 @@ class Articulation(BatchEntity):
             qvel (torch.Tensor): The velocities with shape (N, dof).
             joint_ids (Sequence[int] | None, optional): Joint indices to apply the velocities. If None, applies to all joints.
             env_ids (Sequence[int] | None, optional): Environment indices. Defaults to all indices.
-            If True, sets target positions for simulation. If False, updates current positions directly.
+            target (bool): If True, sets target velocities for simulation. If
+                False, updates current velocities directly.
 
         Raises:
             ValueError: If the length of `env_ids` does not match the length of `qvel`.
@@ -1591,6 +1606,8 @@ class Articulation(BatchEntity):
                 gpu_indices=indices,
                 data_type=data_type,
             )
+        if target:
+            self._target_qvel_write_count = self.target_qvel_write_count + 1
 
     def set_qf(
         self,
