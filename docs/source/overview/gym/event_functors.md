@@ -5,6 +5,13 @@
 
 This page lists all available event functors that can be used with the Event Manager. Event functors are configured using {class}`~cfg.EventCfg` and can be triggered at different stages: ``startup``, ``reset``, or ``interval``.
 
+Set the task's top-level ``seed`` (or pass ``--seed`` to the common environment
+launcher) to make all standard-RNG event functors reproducible. The Event
+Manager isolates each named functor's Python, NumPy, and Torch random stream, so
+unrelated event or policy random draws do not change its sequence. Passing a
+seed again through ``env.reset(seed=...)`` rewinds that sequence. See
+{doc}`env` for the complete contract and limitations.
+
 ````{tip}
 **Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new event or randomization functor with the correct signature (`env, env_ids, ...`), function or class style, and module placement. Use **`/add-test`** to generate mock-based tests.
 ````

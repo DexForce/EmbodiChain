@@ -16,10 +16,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, call
+
 import gymnasium as gym
 import torch
 
 from embodichain.learning.rl.evaluation import evaluate_episodes
+from embodichain.learning.rl.utils.trainer import Trainer
 
 
 class _DeterministicPolicy(torch.nn.Module):
@@ -96,3 +99,32 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
     assert result["eval/success_rate"] == 1.0
     assert result["eval/metrics/terminal_step"] == 1.25
     assert "eval/metrics/final_position" not in result
+
+
+def test_trainer_rewinds_external_eval_event_manager() -> None:
+    """Repeated model validation starts external event functors from eval_seed."""
+    trainer = object.__new__(Trainer)
+    trainer.policy = _DeterministicPolicy()
+    trainer.eval_env = _AsyncAutoResetEnv()
+    trainer.device = torch.device("cpu")
+    trainer.eval_seed = 123
+    trainer.eval_event_manager = MagicMock()
+    trainer.eval_event_manager.available_modes = []
+    trainer.global_step = 0
+    trainer.eval_history = []
+    trainer.last_eval_metrics = {}
+    trainer.writer = None
+    trainer.rank = 1
+    trainer.use_wandb = False
+    trainer.best_eval_metric = "missing"
+    trainer.best_eval_value = None
+    trainer.best_eval_mode = "max"
+    trainer._finalize_eval_events = MagicMock()
+
+    trainer._eval_once(num_episodes=1)
+    trainer._eval_once(num_episodes=1)
+
+    assert trainer.eval_event_manager.set_seed.call_args_list == [
+        call(123),
+        call(123),
+    ]

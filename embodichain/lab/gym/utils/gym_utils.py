@@ -596,6 +596,7 @@ def config_to_cfg(
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
+    env_cfg.seed = config.get("seed", None)
 
     physics_config = deepcopy(config.get("physics_config", {}))
     if "gravity" in physics_config:
@@ -778,6 +779,7 @@ def config_to_cfg(
                 mode=event_params_modified["mode"],
                 params=event_params_modified["params"],
                 interval_step=interval_step,
+                is_global=event_params_modified.get("is_global", False),
             )
             setattr(env_cfg.events, event_name, event)
 
@@ -980,6 +982,7 @@ def add_env_launcher_args_to_parser(
 
     This function adds the following arguments to the provided parser:
         --num_envs: Number of environments to run in parallel (default: 1)
+        --seed: Task-environment seed. The task config is used when omitted.
         --device: Device to run the environment on (default: 'cpu')
         --headless: Whether to perform the simulation in headless mode (default: False)
         --renderer: Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'. (default: 'hybrid')
@@ -1006,6 +1009,12 @@ def add_env_launcher_args_to_parser(
         help="The number of environments to run in parallel. "
         "If not given, falls back to the gym config's `num_envs` (default 1).",
         default=1,
+        type=int,
+    )
+    parser.add_argument(
+        "--seed",
+        help="Task-environment seed. Overrides the gym config when provided.",
+        default=None,
         type=int,
     )
     parser.add_argument(
@@ -1128,6 +1137,8 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     merged_config = deepcopy(gym_config)
     if args.num_envs is not None:
         merged_config["num_envs"] = args.num_envs
+    if getattr(args, "seed", None) is not None:
+        merged_config["seed"] = args.seed
     merged_config["device"] = args.device
     viser_enabled = bool(getattr(args, "viser", False))
     merged_config["headless"] = args.headless or viser_enabled

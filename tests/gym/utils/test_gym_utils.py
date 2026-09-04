@@ -398,6 +398,28 @@ def test_launcher_preserves_gym_renderer_when_cli_omits_override():
     assert merged_config["render_cfg"]["renderer"] == "rt"
 
 
+def test_launcher_seed_overrides_gym_config() -> None:
+    """The common launcher exposes an explicit task-environment seed override."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+
+    args = parser.parse_args(["--gym_config", "gym_config.yaml", "--seed", "1234"])
+    merged_config = merge_args_with_gym_config(args, {"seed": 99})
+
+    assert merged_config["seed"] == 1234
+
+
+def test_launcher_preserves_config_seed_without_override() -> None:
+    """Omitting ``--seed`` keeps the value declared by the task config."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+
+    args = parser.parse_args(["--gym_config", "gym_config.yaml"])
+    merged_config = merge_args_with_gym_config(args, {"seed": 99})
+
+    assert merged_config["seed"] == 99
+
+
 def test_env_launcher_includes_viser_arguments():
     """The common environment launcher registers Viser options by default."""
     parser = argparse.ArgumentParser()
@@ -1366,6 +1388,7 @@ class TestConfigToCfgFromFile:
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
+            "seed": 2026,
             "max_episode_steps": 100,
             "physics_config": {
                 "gravity": [0.0, 0.0, -1.62],
@@ -1391,7 +1414,15 @@ class TestConfigToCfgFromFile:
             "env": {
                 "sim_steps_per_control": 2,
                 "target_control_frequency": 20.0,
-                "events": {},
+                "events": {
+                    "global_light": {
+                        "func": "randomize_emission_light",
+                        "mode": "interval",
+                        "interval_step": 7,
+                        "is_global": True,
+                        "params": {"intensity_range": [0.1, 0.9]},
+                    }
+                },
                 "observations": {},
                 "rewards": {},
             },
@@ -1418,6 +1449,9 @@ class TestConfigToCfgFromFile:
         cfg = config_to_cfg(loaded, manager_modules=DEFAULT_MANAGER_MODULES)
 
         assert cfg.max_episode_steps == 100
+        assert cfg.seed == 2026
+        assert cfg.events.global_light.interval_step == 7
+        assert cfg.events.global_light.is_global is True
         assert cfg.robot.uid == "TestRobot"
         assert cfg.sim_steps_per_control == 2
         assert cfg.target_control_frequency == 20.0
