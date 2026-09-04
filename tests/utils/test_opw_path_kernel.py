@@ -59,8 +59,8 @@ def test_opw_path_selector_preserves_temporal_branch_continuity() -> None:
     assert torch.allclose(output[0, :, 0], torch.tensor((0.1, 0.2, 0.3)))
 
 
-def test_opw_path_selector_uses_raw_valid_equivalent() -> None:
-    """A valid raw representation remains available when the nearest turn is blocked."""
+def test_opw_path_selector_rejects_distant_raw_equivalent() -> None:
+    """A limit-valid raw angle must not replace a blocked nearest turn."""
     wp.init()
     candidates = torch.zeros(1, 1, 8, 6)
     candidates[0, 0, 0, 0] = -3.0
@@ -89,12 +89,12 @@ def test_opw_path_selector_uses_raw_valid_equivalent() -> None:
         device="cpu",
     )
 
-    assert success.item() == 1
-    assert output[0, 0, 0].item() == pytest.approx(-3.0)
+    assert success.item() == 0
+    assert output[0, 0, 0].item() == pytest.approx(initial_seed[0, 0].item())
 
 
-def test_opw_path_selector_uses_equivalent_outside_safety_margin() -> None:
-    """A valid equivalent is selected when the nearest turn is in the margin."""
+def test_opw_path_selector_rejects_nearest_turn_inside_safety_margin() -> None:
+    """The selector must not jump a full turn to avoid the safety margin."""
     wp.init()
     candidates = torch.zeros(1, 1, 8, 6)
     candidates[0, 0, 0, 0] = -6.0
@@ -124,12 +124,12 @@ def test_opw_path_selector_uses_equivalent_outside_safety_margin() -> None:
         device="cpu",
     )
 
-    assert success.item() == 1
-    assert output[0, 0, 0].item() == pytest.approx(-6.0)
+    assert success.item() == 0
+    assert output[0, 0, 0].item() == pytest.approx(initial_seed[0, 0].item())
 
 
-def test_opw_path_selector_uses_other_valid_periodic_equivalent() -> None:
-    """A distant seed can select a different valid 2π representation."""
+def test_opw_path_selector_rejects_clamped_periodic_turn() -> None:
+    """A feasible turn must not be reported continuous when it is not nearest."""
     wp.init()
     candidates = torch.zeros(1, 1, 8, 6)
     validity = torch.zeros(1, 1, 8, dtype=torch.int32)
@@ -157,5 +157,5 @@ def test_opw_path_selector_uses_other_valid_periodic_equivalent() -> None:
         device="cpu",
     )
 
-    assert success.item() == 1
-    assert output[0, 0, 0].item() == pytest.approx(2.0 * torch.pi, abs=1e-5)
+    assert success.item() == 0
+    assert output[0, 0, 0].item() == pytest.approx(initial_seed[0, 0].item())

@@ -63,8 +63,9 @@ def nearest_equivalent_in_limit(
     if lower_turn > upper_turn:
         return solution, False
     nearest_turn = wp.round((seed - solution) / two_pi)
-    selected_turn = wp.min(wp.max(nearest_turn, lower_turn), upper_turn)
-    return solution + selected_turn * two_pi, True
+    if nearest_turn < lower_turn or nearest_turn > upper_turn:
+        return solution, False
+    return solution + nearest_turn * two_pi, True
 
 
 @wp.func
