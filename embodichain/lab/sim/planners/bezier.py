@@ -22,10 +22,323 @@ import torch
 
 __all__ = [
     "BezierPath",
+    "bezier_arc_length",
     "bezier_derivative",
     "bezier_evaluate",
     "sample_bezier_path",
 ]
+
+
+def quintic_blend_control_points(
+    previous: torch.Tensor,
+    corner: torch.Tensor,
+    following: torch.Tensor,
+    blend_tolerance: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Construct HolisticMotion-compatible quintic corner control points.
+
+    Returns the six control points and the analytic path-parameter length of
+    the blend. Straight portions run from ``previous`` to the first control
+    point and from the last control point to ``following``.
+    """
+    if previous.shape != corner.shape or corner.shape != following.shape:
+        raise ValueError("Corner points must have identical shapes.")
+    if previous.ndim != 1 or not previous.is_floating_point():
+        raise ValueError("Corner points must be one-dimensional floating tensors.")
+    if not math.isfinite(blend_tolerance) or blend_tolerance <= 0.0:
+        raise ValueError("blend_tolerance must be finite and greater than zero.")
+    incoming = corner - previous
+    outgoing = following - corner
+    incoming_length = torch.linalg.vector_norm(incoming)
+    outgoing_length = torch.linalg.vector_norm(outgoing)
+    epsilon = torch.finfo(previous.dtype).eps
+    if bool((incoming_length <= epsilon).item() or (outgoing_length <= epsilon).item()):
+        raise ValueError("A blend corner requires two non-degenerate edges.")
+    incoming_tangent = incoming / incoming_length
+    outgoing_tangent = outgoing / outgoing_length
+    tangent_difference = torch.linalg.vector_norm(outgoing_tangent - incoming_tangent)
+    if bool((tangent_difference <= epsilon).item()):
+        raise ValueError("A collinear same-direction corner does not require blending.")
+    distance = torch.minimum(
+        previous.new_tensor(4.0 * blend_tolerance) / tangent_difference,
+        torch.minimum(incoming_length / 2.0, outgoing_length / 2.0),
+    )
+    start = corner - distance * incoming_tangent
+    end = corner + distance * outgoing_tangent
+    tangent_sum = incoming_tangent + outgoing_tangent
+    chord = end - start
+    a = 256.0 - 49.0 * tangent_sum.square().sum()
+    b = 420.0 * torch.dot(chord, tangent_sum)
+    c = -900.0 * chord.square().sum()
+    discriminant = b.square() - 4.0 * a * c
+    if bool((discriminant < 0.0).item()):
+        raise ValueError("Blend corner does not admit valid quintic controls.")
+    root = (-b + torch.sqrt(discriminant)) / (2.0 * a)
+    if not bool(torch.isfinite(root).item()) or bool((root <= epsilon).item()):
+        raise ValueError("Blend corner is degenerate or reverses direction.")
+    controls = torch.stack(
+        (
+            start,
+            start + 0.2 * root * incoming_tangent,
+            start + 0.4 * root * incoming_tangent,
+            end - 0.4 * root * outgoing_tangent,
+            end - 0.2 * root * outgoing_tangent,
+            end,
+        )
+    )
+    return controls, root
+
+
+def quintic_blend_segments(
+    waypoints: torch.Tensor, blend_tolerance: float
+) -> tuple[list[torch.Tensor], torch.Tensor]:
+    """Build ordered linear/quintic segments for a waypoint path.
+
+    Linear segments contain two control points and quintic segments contain
+    six. The returned length tensor follows the same order and uses the path
+    parameter lengths produced by HolisticMotion.
+    """
+    if waypoints.ndim != 2 or waypoints.shape[0] < 2:
+        raise ValueError("waypoints must have shape (K, D) with K >= 2.")
+    if not waypoints.is_floating_point() or not bool(
+        torch.isfinite(waypoints).all().item()
+    ):
+        raise ValueError("waypoints must be a finite floating-point tensor.")
+    if not math.isfinite(blend_tolerance) or blend_tolerance < 0.0:
+        raise ValueError("blend_tolerance must be finite and non-negative.")
+    edge_active = (
+        torch.linalg.vector_norm(waypoints[1:] - waypoints[:-1], dim=-1)
+        > torch.finfo(waypoints.dtype).eps
+    )
+    keep = torch.cat(
+        (torch.ones(1, dtype=torch.bool, device=waypoints.device), edge_active)
+    )
+    waypoints = waypoints[keep]
+    if waypoints.shape[0] < 2:
+        raise ValueError("waypoints must contain at least two distinct positions.")
+    segments: list[torch.Tensor] = []
+    lengths: list[torch.Tensor] = []
+    current = waypoints[0]
+    epsilon = torch.finfo(waypoints.dtype).eps
+    for index in range(1, waypoints.shape[0] - 1):
+        previous, corner, following = waypoints[index - 1 : index + 2]
+        incoming = corner - previous
+        outgoing = following - corner
+        incoming_norm = torch.linalg.vector_norm(incoming)
+        outgoing_norm = torch.linalg.vector_norm(outgoing)
+        if bool((incoming_norm <= epsilon).item() or (outgoing_norm <= epsilon).item()):
+            continue
+        direction_change = torch.linalg.vector_norm(
+            outgoing / outgoing_norm - incoming / incoming_norm
+        )
+        if blend_tolerance == 0.0 or bool((direction_change <= epsilon).item()):
+            line_length = torch.linalg.vector_norm(corner - current)
+            if bool((line_length > epsilon).item()):
+                segments.append(torch.stack((current, corner)))
+                lengths.append(line_length)
+            current = corner
+            continue
+        controls, curve_length = quintic_blend_control_points(
+            previous, corner, following, blend_tolerance
+        )
+        line_length = torch.linalg.vector_norm(controls[0] - current)
+        if bool((line_length > epsilon).item()):
+            segments.append(torch.stack((current, controls[0])))
+            lengths.append(line_length)
+        segments.append(controls)
+        lengths.append(curve_length)
+        current = controls[-1]
+    final_length = torch.linalg.vector_norm(waypoints[-1] - current)
+    if bool((final_length > epsilon).item()):
+        segments.append(torch.stack((current, waypoints[-1])))
+        lengths.append(final_length)
+    if not segments:
+        raise ValueError("waypoints must contain at least two distinct positions.")
+    return segments, torch.stack(lengths)
+
+
+def evaluate_quintic_blend_path(
+    waypoints: torch.Tensor,
+    blend_tolerance: float,
+    distance: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Evaluate position and first two derivatives by global path distance."""
+    segments, lengths = quintic_blend_segments(waypoints, blend_tolerance)
+    cumulative = lengths.cumsum(dim=0)
+    distance = torch.as_tensor(distance, dtype=waypoints.dtype, device=waypoints.device)
+    if not bool(torch.isfinite(distance).all().item()):
+        raise ValueError("distance must contain only finite values.")
+    clamped = distance.clamp(0.0, cumulative[-1])
+    indices = torch.searchsorted(
+        cumulative.contiguous(), clamped.contiguous(), right=True
+    )
+    indices = indices.clamp_max(len(segments) - 1)
+    starts = torch.cat((torch.zeros_like(cumulative[:1]), cumulative[:-1]))
+    local = clamped - starts[indices]
+    parameter = (local / lengths[indices]).clamp(0.0, 1.0)
+    shape = distance.shape + (waypoints.shape[1],)
+    position = torch.empty(shape, dtype=waypoints.dtype, device=waypoints.device)
+    tangent = torch.empty_like(position)
+    curvature = torch.empty_like(position)
+    for index, segment in enumerate(segments):
+        mask = indices == index
+        if not bool(mask.any().item()):
+            continue
+        inverse_length = lengths[index].reciprocal()
+        if segment.shape[0] == 2:
+            delta = segment[1] - segment[0]
+            position[mask] = segment[0] + parameter[mask, None] * delta
+            tangent[mask] = delta * inverse_length
+            curvature[mask] = 0.0
+        else:
+            position[mask] = bezier_evaluate(segment, parameter[mask])
+            tangent[mask] = (
+                bezier_derivative(segment, parameter[mask], 1) * inverse_length
+            )
+            curvature[mask] = (
+                bezier_derivative(segment, parameter[mask], 2) * inverse_length.square()
+            )
+    return position, tangent, curvature
+
+
+def compose_quintic_blend_state(
+    waypoints: torch.Tensor,
+    blend_tolerance: float,
+    distance: torch.Tensor,
+    path_velocity: torch.Tensor,
+    path_acceleration: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Compose joint states from a blended path and scalar time law.
+
+    The scalar inputs must have identical shapes and represent ``s``,
+    ``ds/dt`` and ``d²s/dt²`` respectively.
+    """
+    distance = torch.as_tensor(distance, dtype=waypoints.dtype, device=waypoints.device)
+    path_velocity = torch.as_tensor(
+        path_velocity, dtype=waypoints.dtype, device=waypoints.device
+    )
+    path_acceleration = torch.as_tensor(
+        path_acceleration, dtype=waypoints.dtype, device=waypoints.device
+    )
+    if (
+        distance.shape != path_velocity.shape
+        or distance.shape != path_acceleration.shape
+    ):
+        raise ValueError(
+            "distance, path_velocity and path_acceleration must share a shape."
+        )
+    if not bool(torch.isfinite(path_velocity).all().item()) or not bool(
+        torch.isfinite(path_acceleration).all().item()
+    ):
+        raise ValueError("Path derivatives must contain only finite values.")
+    position, tangent, curvature = evaluate_quintic_blend_path(
+        waypoints, blend_tolerance, distance
+    )
+    velocity = tangent * path_velocity[..., None]
+    acceleration = (
+        curvature * path_velocity[..., None].square()
+        + tangent * path_acceleration[..., None]
+    )
+    return position, velocity, acceleration
+
+
+def compose_quintic_blend_jerk(
+    waypoints: torch.Tensor,
+    blend_tolerance: float,
+    distance: torch.Tensor,
+    path_velocity: torch.Tensor,
+    path_acceleration: torch.Tensor,
+    path_jerk: torch.Tensor,
+) -> torch.Tensor:
+    """Compose joint jerk using the full third-order chain rule."""
+    distance = torch.as_tensor(distance, dtype=waypoints.dtype, device=waypoints.device)
+    values = [
+        torch.as_tensor(value, dtype=waypoints.dtype, device=waypoints.device)
+        for value in (path_velocity, path_acceleration, path_jerk)
+    ]
+    if any(value.shape != distance.shape for value in values):
+        raise ValueError("All scalar time-law inputs must share the distance shape.")
+    if not bool(torch.isfinite(distance).all().item()) or any(
+        not bool(torch.isfinite(value).all().item()) for value in values
+    ):
+        raise ValueError("Scalar time-law inputs must contain only finite values.")
+    _, lengths = quintic_blend_segments(waypoints, blend_tolerance)
+    cumulative = lengths.cumsum(dim=0)
+    clamped = distance.clamp(0.0, cumulative[-1])
+    indices = torch.searchsorted(
+        cumulative.contiguous(), clamped.contiguous(), right=True
+    )
+    indices = indices.clamp_max(len(lengths) - 1)
+    starts = torch.cat((torch.zeros_like(cumulative[:1]), cumulative[:-1]))
+    parameter = ((clamped - starts[indices]) / lengths[indices]).clamp(0.0, 1.0)
+    segments, _ = quintic_blend_segments(waypoints, blend_tolerance)
+    _, tangent, curvature = evaluate_quintic_blend_path(
+        waypoints, blend_tolerance, distance
+    )
+    third = torch.zeros_like(tangent)
+    for index, segment in enumerate(segments):
+        mask = indices == index
+        if segment.shape[0] == 6 and bool(mask.any().item()):
+            third[mask] = bezier_derivative(segment, parameter[mask], 3) / lengths[
+                index
+            ].pow(3)
+    velocity, acceleration, jerk = values
+    return (
+        third * velocity[..., None].pow(3)
+        + 3.0 * curvature * velocity[..., None] * acceleration[..., None]
+        + tangent * jerk[..., None]
+    )
+
+
+def project_quintic_blend_limits(
+    waypoints: torch.Tensor,
+    blend_tolerance: float,
+    velocity_limit: torch.Tensor,
+    acceleration_limit: torch.Tensor,
+    *,
+    samples: int = 2049,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Conservatively project joint limits onto global path distance.
+
+    Curvature and tangential bounds are projected independently. The planner
+    checks their composed peak and applies the minimal uniform time stretch.
+    """
+    if velocity_limit.shape != (waypoints.shape[1],) or acceleration_limit.shape != (
+        waypoints.shape[1],
+    ):
+        raise ValueError("Limits must have shape (D,) matching waypoint dimension.")
+    if bool(
+        (velocity_limit <= 0).any().item() or (acceleration_limit <= 0).any().item()
+    ):
+        raise ValueError("Limits must be positive.")
+    _, lengths = quintic_blend_segments(waypoints, blend_tolerance)
+    distance = torch.linspace(
+        0.0,
+        lengths.sum().item(),
+        samples,
+        dtype=waypoints.dtype,
+        device=waypoints.device,
+    )
+    _, tangent, curvature = evaluate_quintic_blend_path(
+        waypoints, blend_tolerance, distance
+    )
+    epsilon = torch.finfo(waypoints.dtype).eps
+    tangent_peak = tangent.abs().amax(dim=0)
+    curvature_peak = curvature.abs().amax(dim=0)
+    active_tangent = tangent_peak > epsilon
+    path_velocity = (
+        velocity_limit[active_tangent] / tangent_peak[active_tangent]
+    ).amin()
+    curvature_active = curvature_peak > epsilon
+    if bool(curvature_active.any().item()):
+        curvature_velocity = torch.sqrt(
+            (acceleration_limit[curvature_active] / curvature_peak[curvature_active])
+        ).amin()
+        path_velocity = torch.minimum(path_velocity, curvature_velocity)
+    path_acceleration = (
+        acceleration_limit[active_tangent] / tangent_peak[active_tangent]
+    ).amin()
+    return path_velocity, path_acceleration
 
 
 class BezierPath:
@@ -52,9 +365,8 @@ class BezierPath:
 
     @property
     def length(self) -> torch.Tensor:
-        """Return a dense-sampling approximation of geometric path length."""
-        _, cumulative = self.sample(1025, arc_length=False)
-        return cumulative[..., -1]
+        """Return geometric length using 32-point Gauss-Legendre quadrature."""
+        return bezier_arc_length(self._control_points)
 
     def evaluate(self, parameter: torch.Tensor) -> torch.Tensor:
         """Evaluate the path at normalized parameter values."""
@@ -172,6 +484,61 @@ def bezier_derivative(
         )
     _validate_control_points(differentiated, allow_any_degree=True)
     return _evaluate_control_points(differentiated, parameter)
+
+
+def bezier_arc_length(control_points: torch.Tensor) -> torch.Tensor:
+    """Integrate the Euclidean Bézier speed over ``[0, 1]``.
+
+    A fixed 32-point Gauss-Legendre rule is deterministic, differentiable with
+    respect to the control points, and substantially more accurate than a
+    polyline-length estimate for curved quadratic and quintic paths.
+    """
+    _validate_control_points(control_points)
+    nodes = control_points.new_tensor(
+        [
+            0.0483076656877383,
+            0.1444719615827965,
+            0.2392873622521371,
+            0.3318686022821277,
+            0.4213512761306353,
+            0.5068999089322294,
+            0.5877157572407623,
+            0.6630442669302152,
+            0.7321821187402897,
+            0.7944837959679424,
+            0.8493676137325700,
+            0.8963211557660521,
+            0.9349060759377397,
+            0.9647622555875064,
+            0.9856115115452684,
+            0.9972638618494816,
+        ]
+    )
+    weights = control_points.new_tensor(
+        [
+            0.0965400885147278,
+            0.0956387200792749,
+            0.0938443990808046,
+            0.0911738786957639,
+            0.0876520930044038,
+            0.0833119242269468,
+            0.0781938957870703,
+            0.0723457941088485,
+            0.0658222227763618,
+            0.0586840934785355,
+            0.0509980592623762,
+            0.0428358980222267,
+            0.0342738629130214,
+            0.0253920653092621,
+            0.0162743947309057,
+            0.0070186100094701,
+        ]
+    )
+    parameters = torch.cat(((1.0 - nodes) * 0.5, (1.0 + nodes) * 0.5))
+    quadrature_weights = torch.cat((weights, weights)) * 0.5
+    derivative = bezier_derivative(control_points.unsqueeze(-3), parameters)
+    speed = torch.linalg.vector_norm(derivative, dim=-1)
+    return (speed * quadrature_weights).sum(dim=-1)
 
 
 def _evaluate_control_points(

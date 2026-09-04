@@ -21,10 +21,169 @@ import torch
 
 from embodichain.lab.sim.planners.bezier import (
     BezierPath,
+    bezier_arc_length,
+    compose_quintic_blend_state,
+    compose_quintic_blend_jerk,
     bezier_derivative,
     bezier_evaluate,
+    evaluate_quintic_blend_path,
+    project_quintic_blend_limits,
+    quintic_blend_control_points,
+    quintic_blend_segments,
     sample_bezier_path,
 )
+
+
+def test_quadratic_bezier_arc_length_matches_closed_form() -> None:
+    control_points = torch.tensor(
+        [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float64
+    )
+    expected = 1.0 + torch.asinh(torch.tensor(1.0, dtype=torch.float64)) / (2.0**0.5)
+
+    assert bezier_arc_length(control_points).item() == pytest.approx(
+        expected.item(), abs=1e-14
+    )
+    assert BezierPath(control_points).length.item() == pytest.approx(
+        expected.item(), abs=1e-14
+    )
+
+
+def test_quintic_corner_controls_and_path_length_match_binding() -> None:
+    previous = torch.tensor([0.0, 0.0], dtype=torch.float64)
+    corner = torch.tensor([1.0, 0.0], dtype=torch.float64)
+    following = torch.tensor([1.0, 1.0], dtype=torch.float64)
+    controls, blend_length = quintic_blend_control_points(
+        previous, corner, following, 0.1
+    )
+    trim = 0.282842712474619
+
+    assert torch.allclose(
+        controls[0], torch.tensor([1.0 - trim, 0.0], dtype=torch.float64)
+    )
+    assert torch.allclose(controls[-1], torch.tensor([1.0, trim], dtype=torch.float64))
+    total_length = 2.0 * (1.0 - trim) + blend_length.item()
+    assert total_length == pytest.approx(1.897644073535952, abs=1e-12)
+
+
+def test_multi_waypoint_blend_segments_match_binding_length() -> None:
+    waypoints = torch.tensor(
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [2.0, 1.0]],
+        dtype=torch.float64,
+    )
+    segments, lengths = quintic_blend_segments(waypoints, 0.1)
+
+    assert [segment.shape[0] for segment in segments] == [2, 6, 2, 6, 2]
+    assert torch.equal(segments[0][0], waypoints[0])
+    assert torch.equal(segments[-1][-1], waypoints[-1])
+    assert lengths.sum().item() == pytest.approx(2.7952881470719038, abs=1e-12)
+
+
+def test_blend_degenerate_waypoints_match_binding_behavior() -> None:
+    duplicate = torch.tensor(
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+        dtype=torch.float64,
+    )
+    _, lengths = quintic_blend_segments(duplicate, 0.1)
+    assert lengths.sum().item() == pytest.approx(1.897644073535952, abs=1e-12)
+
+    collinear = torch.tensor([[0.0, 0.0], [0.5, 0.0], [1.0, 0.0]], dtype=torch.float64)
+    _, lengths = quintic_blend_segments(collinear, 0.1)
+    assert lengths.sum().item() == pytest.approx(1.0)
+
+    reverse = torch.tensor([[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]], dtype=torch.float64)
+    with pytest.raises(ValueError, match="degenerate|reverses"):
+        quintic_blend_segments(reverse, 0.1)
+
+    with pytest.raises(ValueError, match="distinct"):
+        quintic_blend_segments(torch.zeros((3, 2), dtype=torch.float64), 0.1)
+
+
+def test_blended_path_distance_derivatives_are_analytic() -> None:
+    waypoints = torch.tensor([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], dtype=torch.float64)
+    midpoint = torch.tensor(1.897644073535952 / 2.0, dtype=torch.float64)
+    position, tangent, curvature = evaluate_quintic_blend_path(waypoints, 0.1, midpoint)
+    step = 1e-5
+    before = evaluate_quintic_blend_path(waypoints, 0.1, midpoint - step)[0]
+    after = evaluate_quintic_blend_path(waypoints, 0.1, midpoint + step)[0]
+
+    assert torch.allclose(
+        position,
+        torch.tensor([0.9309738779010016, 0.06902612209899879], dtype=torch.float64),
+        atol=1e-12,
+    )
+    assert torch.allclose(tangent, (after - before) / (2.0 * step), atol=1e-8)
+    assert torch.isfinite(curvature).all()
+    clamped = evaluate_quintic_blend_path(waypoints, 0.1, torch.tensor([-1.0, 5.0]))[0]
+    assert torch.equal(clamped, waypoints[[0, -1]])
+
+
+def test_blended_path_composes_scalar_time_law_by_chain_rule() -> None:
+    waypoints = torch.tensor([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], dtype=torch.float64)
+    distance = torch.tensor(1.897644073535952 / 2.0, dtype=torch.float64)
+    position, velocity, acceleration = compose_quintic_blend_state(
+        waypoints,
+        0.1,
+        distance,
+        torch.tensor(0.3, dtype=torch.float64),
+        torch.tensor(0.4, dtype=torch.float64),
+    )
+    tangent = evaluate_quintic_blend_path(waypoints, 0.1, distance)[1]
+    assert torch.allclose(velocity, tangent * 0.3)
+    assert torch.isfinite(acceleration).all()
+    stopped = compose_quintic_blend_state(
+        waypoints, 0.1, distance, torch.tensor(0.0), torch.tensor(0.0)
+    )
+    assert torch.equal(stopped[0], position)
+    assert torch.count_nonzero(stopped[1]) == 0
+    assert torch.count_nonzero(stopped[2]) == 0
+
+
+def test_blended_path_third_order_chain_rule_matches_difference() -> None:
+    waypoints = torch.tensor([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], dtype=torch.float64)
+    distance = torch.tensor(1.897644073535952 / 2.0, dtype=torch.float64)
+    speed = torch.tensor(0.3, dtype=torch.float64)
+    jerk = compose_quintic_blend_jerk(
+        waypoints, 0.1, distance, speed, torch.tensor(0.0), torch.tensor(0.0)
+    )
+    step = 1e-5
+    before = compose_quintic_blend_state(
+        waypoints, 0.1, distance - speed * step, speed, torch.tensor(0.0)
+    )[2]
+    after = compose_quintic_blend_state(
+        waypoints, 0.1, distance + speed * step, speed, torch.tensor(0.0)
+    )[2]
+    assert torch.allclose(jerk, (after - before) / (2.0 * step), atol=1e-7)
+
+
+def test_blended_path_limit_projection_bounds_independent_terms() -> None:
+    waypoints = torch.tensor([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], dtype=torch.float64)
+    joint_velocity = torch.tensor([0.8, 0.6], dtype=torch.float64)
+    joint_acceleration = torch.tensor([1.0, 0.7], dtype=torch.float64)
+    path_velocity, path_acceleration = project_quintic_blend_limits(
+        waypoints, 0.1, joint_velocity, joint_acceleration
+    )
+    distance = torch.linspace(0.0, 1.897644073535952, 2049, dtype=torch.float64)
+    _, velocity, curvature_acceleration = compose_quintic_blend_state(
+        waypoints,
+        0.1,
+        distance,
+        path_velocity.expand_as(distance),
+        torch.zeros_like(distance),
+    )
+    _, _, tangent_acceleration = compose_quintic_blend_state(
+        waypoints,
+        0.1,
+        distance,
+        torch.zeros_like(distance),
+        path_acceleration.expand_as(distance),
+    )
+    assert torch.all(velocity.abs().amax(dim=0) <= joint_velocity + 1e-12)
+    assert torch.all(
+        curvature_acceleration.abs().amax(dim=0) <= joint_acceleration + 1e-12
+    )
+    assert torch.all(
+        tangent_acceleration.abs().amax(dim=0) <= joint_acceleration + 1e-12
+    )
 
 
 def test_bezier_path_encapsulates_geometry_without_changing_tensor_shape() -> None:
@@ -41,8 +200,12 @@ def test_bezier_path_encapsulates_geometry_without_changing_tensor_shape() -> No
     parameter = torch.tensor([0.5], dtype=torch.float64)
     assert torch.allclose(path.tangent(parameter), path.derivative(parameter, 1))
     assert torch.allclose(path.curvature(parameter), path.derivative(parameter, 2))
-    assert torch.allclose(path.arc_tangent(parameter), torch.tensor([[1.0]], dtype=torch.float64))
-    assert torch.allclose(path.arc_curvature(parameter), torch.zeros((1, 1), dtype=torch.float64))
+    assert torch.allclose(
+        path.arc_tangent(parameter), torch.tensor([[1.0]], dtype=torch.float64)
+    )
+    assert torch.allclose(
+        path.arc_curvature(parameter), torch.zeros((1, 1), dtype=torch.float64)
+    )
 
 
 def test_quintic_bezier_reaches_endpoints_and_endpoint_derivatives() -> None:
@@ -57,7 +220,13 @@ def test_quintic_bezier_reaches_endpoints_and_endpoint_derivatives() -> None:
     assert torch.allclose(positions, control_points[[0, -1]])
     assert torch.allclose(
         velocities,
-        5.0 * torch.stack((control_points[1] - control_points[0], control_points[-1] - control_points[-2])),
+        5.0
+        * torch.stack(
+            (
+                control_points[1] - control_points[0],
+                control_points[-1] - control_points[-2],
+            )
+        ),
     )
 
 
@@ -125,7 +294,7 @@ def test_sample_count_must_be_an_integer_of_at_least_two(sample_count: object) -
 
 
 def test_public_evaluation_rejects_unsupported_degree_and_nonfinite_parameter() -> None:
-    with pytest.raises(ValueError, match="3\|6"):
+    with pytest.raises(ValueError, match=r"3\|6"):
         bezier_evaluate(torch.zeros((5, 2)), torch.tensor(0.5))
 
     with pytest.raises(ValueError, match="finite"):
@@ -141,3 +310,12 @@ def test_arc_derivatives_reject_stationary_curve() -> None:
         path.arc_tangent(torch.tensor(0.5, dtype=torch.float64))
     with pytest.raises(ValueError, match="stationary"):
         path.arc_curvature(torch.tensor(0.5, dtype=torch.float64))
+
+
+def test_blend_jerk_rejects_nonfinite_time_law() -> None:
+    waypoints = torch.tensor([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], dtype=torch.float64)
+    finite = torch.tensor([0.0, 0.5], dtype=torch.float64)
+    nonfinite = torch.tensor([0.0, float("nan")], dtype=torch.float64)
+
+    with pytest.raises(ValueError, match="finite"):
+        compose_quintic_blend_jerk(waypoints, 0.1, finite, finite, finite, nonfinite)

@@ -8,6 +8,8 @@
 | Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
 | TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
 | Trapezoidal planner | `embodichain/lab/sim/planners/trapezoidal_planner.py` → `TrapezoidalPlanner`, `TrapezoidalPlannerCfg`, `TrapezoidalPlanOptions` |
+| Bézier path geometry | `embodichain/lab/sim/planners/bezier.py` → `BezierPath` and internal quintic waypoint blending helpers |
+| Cartesian SE(3) line | `embodichain/lab/sim/planners/se3.py` → `plan_se3_line`, `SE3LineResult` |
 | Trapezoidal Warp kernels | `embodichain/utils/warp/kinematics/trapezoidal_warp.py` → batched profile construction and sampling kernels |
 | Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
@@ -50,7 +52,8 @@ MotionGenCfg              planner_cfg (MISSING — must be a BasePlannerCfg subc
 
 PlanOptions               (empty base)
   ├─ ToppraPlanOptions    constraints, sample_method, sample_interval
-  ├─ TrapezoidalPlanOptions profile, constraints, sample_method, sample_interval
+  ├─ TrapezoidalPlanOptions profile, constraints, sample_method, sample_interval,
+  │                        minimum_duration, stop_at_waypoints, blend_tolerance, backend
   └─ NeuralPlanOptions    control_part, start_qpos, max_steps
 
 MotionGenOptions          strategy, sample_count, velocity/acceleration limits,
@@ -162,6 +165,11 @@ trapezoidal or Double-S scalar segment profile in parallel, including the
 Double-S no-cruise acceleration reduction and phase integration. Shared
 post-processing applies minimum-duration scaling and the Double-S duration
 margin consistently across backends.
+Set ``blend_tolerance>0`` to replace rest-to-rest corners with internal
+fifth-order Bézier blends. The planner projects per-joint limits onto the
+curved path and composes derivatives analytically through jerk; zero preserves
+piecewise-linear behavior. All-stationary inputs take the hold fast path before
+blend construction.
 Torch uses batched ``searchsorted`` for segment lookup without materializing a
 ``(B, N, segments)`` comparison tensor. Warp uses binary segment search once
 per ``(B, N)`` sample, then a separate ``(B, N, DOF)`` composition kernel so
@@ -343,6 +351,7 @@ Convenience constructors:
 | `velocities` | `torch.Tensor \| None` | Joint velocities `(B, N, DOF)` |
 | `accelerations` | `torch.Tensor \| None` | Joint accelerations `(B, N, DOF)` |
 | `dt` | `torch.Tensor \| None` | Per-step arrival intervals `(B, N)`; required whenever `positions` is present |
+| `constraint_report` | `dict[str, torch.Tensor] \| None` | Optional derivative peaks, utilization, and limit status |
 | `duration` | `torch.Tensor \| None` | Read-only total trajectory time `(B,)`, derived as `dt.sum(dim=1)` |
 
 Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env succeeded.

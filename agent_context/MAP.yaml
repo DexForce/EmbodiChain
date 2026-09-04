@@ -408,6 +408,8 @@ topics:
       - embodichain/lab/sim/planners/base_planner.py
       - embodichain/lab/sim/planners/toppra_planner.py
       - embodichain/lab/sim/planners/trapezoidal_planner.py
+      - embodichain/lab/sim/planners/bezier.py
+      - embodichain/lab/sim/planners/se3.py
       - embodichain/lab/sim/planners/trapezoidal_warp.py
       - scripts/benchmark/motion_generation/trapezoidal_planner.py
       - embodichain/lab/sim/planners/curobo/curobo_planner.py

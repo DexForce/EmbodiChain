@@ -84,6 +84,14 @@ def positive_float(value: str) -> float:
     return parsed
 
 
+def nonnegative_float(value: str) -> float:
+    """Parse a finite non-negative command-line float."""
+    parsed = float(value)
+    if not torch.isfinite(torch.tensor(parsed)) or parsed < 0.0:
+        raise argparse.ArgumentTypeError("value must be finite and non-negative")
+    return parsed
+
+
 def sample_count(value: str) -> int:
     """Parse a trajectory sample count accepted by the planner."""
     parsed = int(value)
@@ -130,7 +138,7 @@ def parse_args() -> argparse.Namespace:
         "--cartesian-path",
         choices=("bezier", "line"),
         default="line",
-        help="Cartesian geometric path; Bézier is the default.",
+        help="Cartesian geometric path (default: line).",
     )
     parser.add_argument(
         "--cartesian-step",
@@ -161,6 +169,18 @@ def parse_args() -> argparse.Namespace:
         choices=("auto", "torch", "warp"),
         default="auto",
         help="Backend used to compose sampled joint states.",
+    )
+    parser.add_argument(
+        "--blend-tolerance",
+        type=nonnegative_float,
+        default=0.0,
+        help="Quintic blend tolerance for the multi-waypoint joint path.",
+    )
+    parser.add_argument(
+        "--minimum-duration",
+        type=positive_float,
+        default=None,
+        help="Optional minimum duration in seconds for every planned path.",
     )
     parser.add_argument(
         "--replay-speed",
@@ -269,7 +289,8 @@ def joint_derivatives_from_path_time_law(
         path_positions.shape != expected_scalar_shape
         or path_velocities.shape != expected_scalar_shape
         or path_accelerations.shape != expected_scalar_shape
-        or cartesian_tangent.shape not in ((batch_size, 6), (batch_size, sample_count, 6))
+        or cartesian_tangent.shape
+        not in ((batch_size, 6), (batch_size, sample_count, 6))
     ):
         raise ValueError("Path derivative tensors have incompatible shapes.")
     if sample_count < 3:
@@ -284,8 +305,7 @@ def joint_derivatives_from_path_time_law(
         identity = torch.eye(6, dtype=jacobians.dtype, device=jacobians.device)
         identity = identity.expand(batch_size, sample_count, -1, -1)
         normal = (
-            torch.matmul(jacobians, jacobians.transpose(-1, -2))
-            + damping**2 * identity
+            torch.matmul(jacobians, jacobians.transpose(-1, -2)) + damping**2 * identity
         )
         jacobian_pinv = torch.matmul(
             jacobians.transpose(-1, -2), torch.linalg.solve(normal, identity)
@@ -350,6 +370,7 @@ def plan_cartesian_line(
     acceleration_limit: float,
     jerk_limit: float,
     backend: str,
+    minimum_duration: float | None = None,
 ) -> tuple[PlanResult, torch.Tensor, PlanResult]:
     """Time-parameterize Cartesian line distance, then solve continuous IK.
 
@@ -375,6 +396,7 @@ def plan_cartesian_line(
                 "jerk": jerk_limit,
             },
             sample_interval=sample_count,
+            minimum_duration=minimum_duration,
             backend=backend,
         ),
     )
@@ -492,6 +514,7 @@ def plan_cartesian_bezier(
                 "jerk": float(kwargs["jerk_limit"]),
             },
             sample_interval=sample_count,
+            minimum_duration=kwargs.get("minimum_duration"),
             backend=str(kwargs["backend"]),
         ),
     )
@@ -524,7 +547,9 @@ def plan_cartesian_bezier(
     world_to_root = base_pose[:, None, :3, :3].transpose(-1, -2)
     root_tangent = torch.matmul(world_to_root, world_tangent[..., None]).squeeze(-1)
     root_curvature = torch.matmul(world_to_root, world_curvature[..., None]).squeeze(-1)
-    cartesian_tangent = torch.cat((root_tangent, torch.zeros_like(root_tangent)), dim=-1)
+    cartesian_tangent = torch.cat(
+        (root_tangent, torch.zeros_like(root_tangent)), dim=-1
+    )
     cartesian_curvature = torch.cat(
         (root_curvature, torch.zeros_like(root_curvature)), dim=-1
     )
@@ -883,11 +908,16 @@ def main() -> None:
                     planner_kwargs = dict(
                         distance=args.cartesian_distance,
                         profile=planner_profile,
-                        sample_count=max(args.samples, math.ceil(args.cartesian_distance / args.cartesian_step) + 1),
+                        sample_count=max(
+                            args.samples,
+                            math.ceil(args.cartesian_distance / args.cartesian_step)
+                            + 1,
+                        ),
                         velocity_limit=args.cartesian_velocity,
                         acceleration_limit=args.cartesian_acceleration,
                         jerk_limit=args.cartesian_jerk,
                         backend=args.backend,
+                        minimum_duration=args.minimum_duration,
                     )
                     cartesian_planner = (
                         plan_cartesian_bezier
@@ -913,6 +943,8 @@ def main() -> None:
                                 },
                                 sample_interval=args.samples,
                                 stop_at_waypoints=False,
+                                blend_tolerance=args.blend_tolerance,
+                                minimum_duration=args.minimum_duration,
                                 backend=args.backend,
                             ),
                         ),

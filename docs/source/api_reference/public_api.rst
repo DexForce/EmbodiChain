@@ -960,6 +960,22 @@ embodichain.lab.sim.planners.motion_generator
    MotionGenCfg
    MotionGenOptions
 
+embodichain.lab.sim.planners.bezier
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.planners.bezier
+
+Differentiable quadratic and quintic Bézier geometry, including
+HolisticMotion-compatible waypoint blending and path-constraint projection.
+
+.. autosummary::
+
+   BezierPath
+   bezier_arc_length
+   bezier_derivative
+   bezier_evaluate
+   sample_bezier_path
+
 embodichain.lab.sim.planners.neural_planner
 -------------------------------------------
 
@@ -981,6 +997,19 @@ embodichain.lab.sim.planners.toppra_planner
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+
+embodichain.lab.sim.planners.se3
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.planners.se3
+
+SE(3) screw interpolation and constrained Cartesian line trajectories with
+explicit twist, acceleration, jerk, and timing outputs.
+
+.. autosummary::
+
+   SE3LineResult
+   plan_se3_line
 
 embodichain.lab.sim.planners.trapezoidal_planner
 ------------------------------------------------

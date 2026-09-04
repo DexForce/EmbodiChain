@@ -28,6 +28,7 @@ from embodichain.lab.sim.planners.trapezoidal_planner import (
     _build_double_s_profile,
     _build_scalar_profile,
     _compress_collinear_waypoints,
+    _compose_profile_samples_torch,
     _plan_linear_profiles,
 )
 from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
@@ -216,6 +217,97 @@ def test_double_s_short_move_breakpoints_match_reference() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("profile_name", "breakpoints", "expected_state"),
+    [
+        (
+            "trapezoidal",
+            [0.0, 0.808, 1.2625, 2.0705],
+            [
+                [0.0, 0.0, 0.9802960494069208],
+                [0.32000000000000006, 0.7920792079207921, 0.0],
+                [0.6799999999999999, 0.7920792079207921, -0.9802960494069208],
+                [1.0, 0.0, -0.9802960494069208],
+            ],
+        ),
+        (
+            "double_s",
+            [
+                0.0,
+                0.505,
+                0.7885841704684593,
+                1.2935841704684594,
+                1.7985841704684593,
+                2.0821683409369185,
+                2.587168340936919,
+            ],
+            [
+                [0.0, 0.0, 0.0],
+                [1.0 / 24.0, 0.24752475247524752, 0.9802960494069208],
+                [0.15127846346445908, 0.5255211944598169, 0.9802960494069208],
+                [0.5, 0.7730459469350645, 0.0],
+                [0.8487215365355408, 0.5255211944598169, -0.9802960494069208],
+                [23.0 / 24.0, 0.24752475247524752, -0.9802960494069208],
+                [1.0, 0.0, 0.0],
+            ],
+        ),
+    ],
+)
+def test_breakpoint_states_match_holistic_motion_binding(
+    profile_name: str,
+    breakpoints: list[float],
+    expected_state: list[list[float]],
+) -> None:
+    """Lock breakpoint position, velocity and acceleration to the C++ binding."""
+    limits = torch.tensor([[0.8]], dtype=torch.float64)
+    profile = _build_scalar_profile(
+        profile_name=profile_name,
+        velocity_limit=limits,
+        acceleration_limit=torch.tensor([[1.0]], dtype=torch.float64),
+        jerk_limit=torch.tensor([[2.0]], dtype=torch.float64),
+        backend="torch",
+    )
+    duration = profile.durations.sum(dim=-1)
+    times = torch.tensor([breakpoints], dtype=torch.float64)
+    position, velocity, acceleration = _compose_profile_samples_torch(
+        times=times,
+        cumulative_duration=duration,
+        profile=profile,
+        segment_starts=torch.zeros((1, 1, 1), dtype=torch.float64),
+        segment_deltas=torch.ones((1, 1, 1), dtype=torch.float64),
+    )
+    actual = torch.stack(
+        (position[..., 0], velocity[..., 0], acceleration[..., 0]), dim=-1
+    )
+    assert torch.allclose(
+        actual[0], torch.tensor(expected_state, dtype=torch.float64), atol=1e-12
+    )
+
+
+def test_double_s_breakpoint_jerk_matches_binding_profile() -> None:
+    """The seven phase jerk signs and magnitudes match HolisticMotion C++."""
+    profile = _build_scalar_profile(
+        profile_name="double_s",
+        velocity_limit=torch.tensor([[0.8]], dtype=torch.float64),
+        acceleration_limit=torch.tensor([[1.0]], dtype=torch.float64),
+        jerk_limit=torch.tensor([[2.0]], dtype=torch.float64),
+        backend="torch",
+    )
+    expected = torch.tensor(
+        [
+            1.9411802958552888,
+            0.0,
+            -1.9411802958552888,
+            0.0,
+            -1.9411802958552888,
+            0.0,
+            1.9411802958552888,
+        ],
+        dtype=torch.float64,
+    )
+    assert torch.allclose(profile.jerks[0, 0], expected, atol=1e-12)
+
+
 def test_per_joint_limits_are_projected_onto_path() -> None:
     velocity_limits = torch.tensor([0.25, 0.8], dtype=torch.float64)
     acceleration_limits = torch.tensor([0.5, 1.5], dtype=torch.float64)
@@ -353,6 +445,93 @@ def test_multiple_segments_stop_at_internal_waypoint() -> None:
     assert result.velocities[0, nearest, 0] == pytest.approx(0.0, abs=2e-3)
 
 
+def test_blend_tolerance_generates_continuous_corner_motion() -> None:
+    waypoints = torch.tensor(
+        [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]], dtype=torch.float64
+    )
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            profile="double_s",
+            constraints={
+                "velocity": [0.8, 0.6],
+                "acceleration": [1.0, 0.7],
+                "jerk": [2.0, 1.5],
+            },
+            blend_tolerance=0.1,
+            sample_interval=501,
+        ),
+    )
+    midpoint = result.positions[0, result.positions.shape[1] // 2]
+    assert torch.allclose(result.positions[0, 0], waypoints[0, 0])
+    assert torch.allclose(result.positions[0, -1], waypoints[0, -1])
+    assert torch.allclose(
+        midpoint,
+        torch.tensor([0.9309738779010016, 0.06902612209899879], dtype=torch.float64),
+        atol=1e-8,
+    )
+    assert torch.all(
+        result.velocities.abs().amax(dim=(0, 1))
+        <= torch.tensor([0.8, 0.6], dtype=torch.float64) + 1e-9
+    )
+    assert torch.all(
+        result.accelerations.abs().amax(dim=(0, 1))
+        <= torch.tensor([1.0, 0.7], dtype=torch.float64) + 1e-9
+    )
+    assert result.constraint_report is not None
+    assert result.constraint_report["peak_jerk"].item() <= 1.5 + 1e-9
+
+
+def test_blended_paths_support_batched_time_sampling() -> None:
+    waypoints = torch.tensor(
+        [
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+            [[0.0, 0.0], [0.5, 0.0], [0.5, 0.5]],
+        ],
+        dtype=torch.float64,
+    )
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            profile="double_s",
+            blend_tolerance=0.05,
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.02,
+        ),
+    )
+    assert result.positions.shape[0] == 2
+    assert torch.allclose(result.positions[:, 0], waypoints[:, 0])
+    assert torch.allclose(result.positions[:, -1], waypoints[:, -1])
+    assert torch.all(result.dt >= 0.0)
+
+
+def test_blended_path_constraint_report_tracks_realized_peaks() -> None:
+    result = _plan_linear_profiles(
+        torch.tensor([[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]], dtype=torch.float64),
+        TrapezoidalPlanOptions(
+            profile="double_s",
+            constraints={
+                "velocity": [0.8, 0.6],
+                "acceleration": [1.0, 0.7],
+                "jerk": [2.0, 1.5],
+            },
+            blend_tolerance=0.1,
+            sample_interval=4001,
+        ),
+    )
+    assert result.constraint_report is not None
+    report = result.constraint_report
+    assert report["peak_velocity"].item() == pytest.approx(
+        result.velocities.abs().max().item()
+    )
+    assert report["peak_acceleration"].item() == pytest.approx(
+        result.accelerations.abs().max().item()
+    )
+    assert torch.isfinite(report["peak_jerk"]).all()
+    assert report["peak_velocity"].item() <= 0.8
+    assert report["peak_acceleration"].item() <= 1.0
+
+
 def test_collinear_compression_removes_only_same_direction_points() -> None:
     waypoints = torch.tensor(
         [
@@ -482,6 +661,91 @@ def test_minimum_duration_slows_trajectory_without_changing_path() -> None:
     assert slowed_result.velocities.abs().max() < base_result.velocities.abs().max()
 
 
+def test_constraint_report_exposes_realized_peaks_and_limits() -> None:
+    waypoints = torch.tensor([[[0.0], [1.0]]], dtype=torch.float64)
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            profile="double_s",
+            constraints={"velocity": 0.8, "acceleration": 1.0, "jerk": 2.0},
+            sample_interval=101,
+        ),
+    )
+    assert result.constraint_report is not None
+    report = result.constraint_report
+    assert report["peak_velocity"].shape == (1,)
+    assert report["peak_velocity"].item() <= report["velocity_limit"].item()
+    assert report["peak_acceleration"].item() <= report["acceleration_limit"].item()
+
+
+@pytest.mark.parametrize(
+    ("profile", "velocity", "acceleration", "jerk"),
+    [
+        ("trapezoidal", 0.328, 0.1681, 0.0),
+        ("double_s", 0.4, 0.2624621125123532, 0.2689242250248157),
+    ],
+)
+def test_minimum_duration_constraint_report_matches_binding(
+    profile: str, velocity: float, acceleration: float, jerk: float
+) -> None:
+    result = _plan_linear_profiles(
+        torch.tensor([[[0.0], [1.0]]], dtype=torch.float64),
+        TrapezoidalPlanOptions(
+            profile=profile,
+            constraints={"velocity": 0.8, "acceleration": 1.0, "jerk": 2.0},
+            minimum_duration=5.0,
+            sample_interval=10001,
+        ),
+    )
+    assert result.constraint_report is not None
+    assert result.duration.item() == pytest.approx(5.0, abs=1e-12)
+    assert result.constraint_report["peak_velocity"].item() == pytest.approx(
+        velocity, abs=1e-12
+    )
+    assert result.constraint_report["peak_acceleration"].item() == pytest.approx(
+        acceleration, abs=1e-12
+    )
+    assert result.constraint_report["peak_jerk"].item() == pytest.approx(
+        jerk, abs=1e-12
+    )
+
+
+def test_profile_sampling_clamps_times_beyond_duration() -> None:
+    for profile_name, expected_acceleration in (
+        ("trapezoidal", [0.9802960494069208, -0.9802960494069208]),
+        ("double_s", [0.0, 0.0]),
+    ):
+        profile = _build_scalar_profile(
+            profile_name=profile_name,
+            velocity_limit=torch.tensor([[0.8]], dtype=torch.float64),
+            acceleration_limit=torch.tensor([[1.0]], dtype=torch.float64),
+            jerk_limit=torch.tensor([[2.0]], dtype=torch.float64),
+            backend="torch",
+        )
+        duration = profile.durations.sum(dim=-1)
+        times = torch.stack(
+            (-torch.ones_like(duration[:, 0]), duration[:, 0] + 1.0), dim=1
+        )
+        position, velocity, acceleration = _compose_profile_samples_torch(
+            times=times,
+            cumulative_duration=duration,
+            profile=profile,
+            segment_starts=torch.zeros((1, 1, 1), dtype=torch.float64),
+            segment_deltas=torch.ones((1, 1, 1), dtype=torch.float64),
+        )
+        assert torch.allclose(
+            position[0, :, 0], torch.tensor([0.0, 1.0], dtype=torch.float64), atol=1e-12
+        )
+        assert torch.allclose(
+            velocity[0, :, 0], torch.zeros(2, dtype=torch.float64), atol=1e-12
+        )
+        assert torch.allclose(
+            acceleration[0, :, 0],
+            torch.tensor(expected_acceleration, dtype=torch.float64),
+            atol=1e-12,
+        )
+
+
 def test_stationary_path_can_hold_for_minimum_duration() -> None:
     requested_duration = 2.5
     waypoints = torch.full((1, 2, 3), 0.25)
@@ -495,6 +759,43 @@ def test_stationary_path_can_hold_for_minimum_duration() -> None:
     assert result.duration.item() == pytest.approx(requested_duration)
     assert torch.all(result.positions == 0.25)
     assert torch.count_nonzero(result.velocities) == 0
+
+
+def test_stationary_blended_path_uses_hold_fast_path() -> None:
+    waypoints = torch.full((2, 3, 2), 0.25, dtype=torch.float64)
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            blend_tolerance=0.1, minimum_duration=1.5, sample_interval=7
+        ),
+    )
+    assert torch.all(result.positions == 0.25)
+    assert torch.count_nonzero(result.velocities) == 0
+    assert result.duration is not None
+    assert torch.allclose(result.duration, torch.full((2,), 1.5, dtype=torch.float64))
+
+
+def test_blended_batch_accepts_stationary_and_moving_rows() -> None:
+    waypoints = torch.tensor(
+        [
+            [[0.25, 0.25], [0.25, 0.25], [0.25, 0.25]],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+        ],
+        dtype=torch.float64,
+    )
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(blend_tolerance=0.1, sample_interval=101),
+    )
+    assert torch.all(result.positions[0] == 0.25)
+    assert torch.count_nonzero(result.velocities[0]) == 0
+    assert torch.allclose(result.positions[1, 0], waypoints[1, 0])
+    assert torch.allclose(result.positions[1, -1], waypoints[1, -1])
+    assert result.duration is not None
+    assert result.duration[0].item() == 0.0
+    assert result.duration[1].item() > 0.0
+    assert result.constraint_report is not None
+    assert result.constraint_report["within_limits"].all()
 
 
 def test_stationary_time_sampling_preserves_requested_hold_duration() -> None:

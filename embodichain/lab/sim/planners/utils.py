@@ -209,6 +209,9 @@ class PlanResult:
     dt: torch.Tensor | None = None
     """Per-env time deltas, shape ``(B, N)``."""
 
+    constraint_report: dict[str, torch.Tensor] | None = None
+    """Optional diagnostics containing sampled derivative peaks and limits."""
+
     def __post_init__(self) -> None:
         """Validate the explicit trajectory-timing contract."""
         if self.positions is None:
