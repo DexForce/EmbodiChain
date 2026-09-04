@@ -254,10 +254,10 @@ def test_rigid_descriptor_projects_restitution_only_to_supported_solvers(
     )
 
     newton = descriptor.collisions[0].newton
-    if expected_restitution is None:
-        assert newton is None
-    else:
-        assert newton.restitution == expected_restitution
+    assert newton is not None
+    assert newton.margin == pytest.approx(0.001)
+    assert newton.gap == pytest.approx(0.001)
+    assert newton.restitution == expected_restitution
 
 
 def test_rigid_descriptor_preserves_default_backend_restitution() -> None:
@@ -440,6 +440,8 @@ def test_grouped_rigid_physics_routes_common_and_backend_properties() -> None:
     assert collision.enable_collision is False
     assert collision.dexsim.dynamic_friction == 0.4
     assert collision.dexsim.static_friction is None
+    assert collision.dexsim.contact_offset is None
+    assert collision.dexsim.rest_offset is None
     assert collision.newton.margin == 0.01
     assert collision.newton.mu == 0.4
     assert collision.newton.ke == 1000.0
@@ -468,6 +470,24 @@ def test_portable_collision_envelope_compiles_to_both_backends() -> None:
     assert collision.dexsim.rest_offset == pytest.approx(0.005)
     assert collision.newton.margin == pytest.approx(0.005)
     assert collision.newton.gap == pytest.approx(0.01)
+
+
+def test_procedural_rigid_collision_defaults_compile_to_both_backends() -> None:
+    cfg = RigidObjectCfg(
+        uid="cube",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+    )
+
+    descriptor, _ = rigid_desc_from_cfg(
+        cfg,
+        newton_solver_type="mujoco_warp",
+    )
+
+    collision = descriptor.collisions[0]
+    assert collision.dexsim.contact_offset == pytest.approx(0.002)
+    assert collision.dexsim.rest_offset == pytest.approx(0.001)
+    assert collision.newton.margin == pytest.approx(0.001)
+    assert collision.newton.gap == pytest.approx(0.001)
 
 
 def test_newton_native_collision_envelope_overrides_portable_translation() -> None:
@@ -512,20 +532,25 @@ def test_portable_collision_envelope_rejects_invalid_ordering() -> None:
         rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
 
 
-def test_newton_rejects_ambiguous_portable_contact_offset() -> None:
+def test_newton_fills_missing_portable_rest_offset_from_the_default_profile() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
         attrs=RigidBodyPhysicsCfg(
-            collision_props=CollisionPropertiesCfg(contact_offset=0.001)
+            collision_props=CollisionPropertiesCfg(contact_offset=0.003)
         ),
     )
 
-    with pytest.raises(ValueError, match="requires rest_offset"):
-        rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+
+    collision = descriptor.collisions[0]
+    assert collision.dexsim.contact_offset == pytest.approx(0.003)
+    assert collision.dexsim.rest_offset == pytest.approx(0.001)
+    assert collision.newton.margin == pytest.approx(0.001)
+    assert collision.newton.gap == pytest.approx(0.002)
 
 
-def test_grouped_rigid_physics_keeps_unset_backend_blocks_absent() -> None:
+def test_procedural_collision_defaults_apply_when_only_collision_is_enabled() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
@@ -538,8 +563,11 @@ def test_grouped_rigid_physics_keeps_unset_backend_blocks_absent() -> None:
 
     assert descriptor.physics.dexsim is None
     assert descriptor.physics.newton is None
-    assert descriptor.collisions[0].dexsim is None
-    assert descriptor.collisions[0].newton is None
+    assert descriptor.collisions[0].enable_collision is True
+    assert descriptor.collisions[0].dexsim.contact_offset == pytest.approx(0.002)
+    assert descriptor.collisions[0].dexsim.rest_offset == pytest.approx(0.001)
+    assert descriptor.collisions[0].newton.margin == pytest.approx(0.001)
+    assert descriptor.collisions[0].newton.gap == pytest.approx(0.001)
 
 
 def test_grouped_rigid_physics_overlays_usd_without_erasing_source(

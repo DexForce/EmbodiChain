@@ -476,6 +476,17 @@ def test_portable_collision_envelope_round_trips_as_common_config() -> None:
     }
 
 
+def test_portable_collision_envelope_uses_the_shared_default_profile() -> None:
+    common = CollisionPropertiesCfg()
+
+    assert common.contact_offset == pytest.approx(0.002)
+    assert common.rest_offset == pytest.approx(0.001)
+    assert DefaultCollisionPropertiesCfg().contact_offset is None
+    assert DefaultCollisionPropertiesCfg().rest_offset is None
+    assert NewtonCollisionPropertiesCfg().contact_offset is None
+    assert NewtonCollisionPropertiesCfg().rest_offset is None
+
+
 @configclass
 class _RobotPhysicsPresetCfg(RobotPresetCfg):
     default: RobotCfg = RobotCfg(uid="default")

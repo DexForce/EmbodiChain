@@ -315,7 +315,7 @@ class NewtonCollisionPipelineCfg:
     :attr:`~embodichain.lab.sim.shapes.MeshCollisionCfg.is_hydroelastic`.
     """
 
-    update_interval: int | None = None
+    update_interval: int | None = 1
     """External-pipeline updates within one EmbodiChain physics step.
 
     ``None`` (the default) updates once at the first solver substep. An integer

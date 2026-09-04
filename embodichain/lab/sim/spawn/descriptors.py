@@ -259,6 +259,31 @@ def _resolve_rigid_physics(
     raise AssertionError("Unhandled grouped rigid-body physics configuration.")
 
 
+def _with_procedural_collision_defaults(
+    physics: _RigidPhysicsSpec,
+) -> _RigidPhysicsSpec:
+    """Apply the shared envelope to a newly authored shape when needed.
+
+    Source USD/URDF descriptors retain sparse-overlay semantics. A procedural
+    shape with no portable or native envelope has no authored value to inherit,
+    so it receives the common portable defaults instead. Any explicit portable
+    offset or Newton ``margin``/``gap`` deliberately owns that envelope and is
+    left unchanged.
+    """
+    if (
+        physics.contact_offset is not None
+        or physics.rest_offset is not None
+        or physics.newton_collision_props.get("margin") is not None
+        or physics.newton_collision_props.get("gap") is not None
+    ):
+        return physics
+    defaults = CollisionPropertiesCfg()
+    return _RigidPhysicsSpec(
+        contact_offset=defaults.contact_offset,
+        rest_offset=defaults.rest_offset,
+    ).merged(physics)
+
+
 def rigid_desc_from_cfg(
     cfg: RigidObjectCfg,
     *,
@@ -273,9 +298,11 @@ def rigid_desc_from_cfg(
             "select the sole rigid object."
         )
 
-    physics = _resolve_rigid_physics(
-        cfg.attrs,
-        newton_solver_type=newton_solver_type,
+    physics = _with_procedural_collision_defaults(
+        _resolve_rigid_physics(
+            cfg.attrs,
+            newton_solver_type=newton_solver_type,
+        )
     )
     geometry, approximation, max_hulls = _compile_geometry(cfg)
     material_ref, material_entry = _compile_visual_material(

@@ -98,7 +98,7 @@ def test_create_scene_configures_newton_grasp_material_only_for_newton(
         assert drawer_cfg.link_attrs is None
 
 
-def test_tutorial_newton_physics_cfg_enables_multiccd() -> None:
+def test_tutorial_newton_physics_cfg_enables_multiccd_with_auto_sized_buffers() -> None:
     tutorial = _load_tutorial_module()
 
     cfg = tutorial._tutorial_physics_cfg("newton")
@@ -106,8 +106,6 @@ def test_tutorial_newton_physics_cfg_enables_multiccd() -> None:
     assert cfg.num_substeps == 20
     assert cfg.solver_cfg == {
         "solver_type": "mujoco_warp",
-        "njmax": 8192,
-        "nconmax": 8192,
         "cone": "elliptic",
         "enable_multiccd": True,
     }

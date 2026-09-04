@@ -142,10 +142,11 @@ class DefaultRigidBodyPropertiesCfg:
 class CollisionPropertiesCfg:
     """Collision-shape properties with identical intent across both backends.
 
-    ``None`` leaves the corresponding source/backend value unchanged.  The
-    contact envelope is expressed once with Default-backend terminology and is
-    compiled to Newton's ``margin``/``gap`` representation at the Spawn
-    boundary. Mesh approximation and SDF cooking belong to
+    The framework default contact envelope is ``contact_offset=0.002`` and
+    ``rest_offset=0.001``. The contact envelope is expressed once with
+    Default-backend terminology and is compiled to Newton's ``margin``/``gap``
+    representation at the Spawn boundary. Pass ``None`` explicitly for a
+    sparse source-asset overlay. Mesh approximation and SDF cooking belong to
     :class:`~embodichain.lab.sim.shapes.MeshCollisionCfg`.
     """
 
@@ -156,7 +157,7 @@ class CollisionPropertiesCfg:
     preserves the source/backend value.
     """
 
-    contact_offset: float | None = None
+    contact_offset: float | None = 0.002
     """Per-shape distance at which contact generation starts [m].
 
     The pair threshold is the sum of both shapes' contact offsets.  This value
@@ -165,7 +166,7 @@ class CollisionPropertiesCfg:
     to ``gap = contact_offset - rest_offset``.
     """
 
-    rest_offset: float | None = None
+    rest_offset: float | None = 0.0
     """Per-shape target separation at rest [m].
 
     Pairwise rest separation is the sum of both shapes' values.  Positive
@@ -179,9 +180,17 @@ class CollisionPropertiesCfg:
 class DefaultCollisionPropertiesCfg(CollisionPropertiesCfg):
     """Collision-solver properties consumed only by the Default backend.
 
-    ``contact_offset`` and ``rest_offset`` now live on
-    :class:`CollisionPropertiesCfg` because both backends consume their intent.
+    ``contact_offset`` and ``rest_offset`` are portable fields defined by
+    :class:`CollisionPropertiesCfg`. This backend extension keeps them sparse
+    so a backend-native source overlay does not accidentally replace an
+    authored portable envelope.
     """
+
+    contact_offset: float | None = None
+    """Optional portable contact-generation distance [m]."""
+
+    rest_offset: float | None = None
+    """Optional portable target separation at rest [m]."""
 
     torsional_patch_radius: float | None = None
     """Contact-patch radius used to approximate torsional friction [m]."""
@@ -199,10 +208,18 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
 
     Mesh construction belongs to ``MeshCfg.collision``; filtering, visual, and
     semantic-site policies are deliberately not part of rigid-body physics.
+    Its portable fields remain sparse so a Newton-native source overlay can
+    modify only the requested native properties.
 
     See `Newton Shape Configuration
     <https://newton-physics.github.io/newton/latest/concepts/collisions.html#shape-configuration>`_.
     """
+
+    contact_offset: float | None = None
+    """Optional portable contact-generation distance [m]."""
+
+    rest_offset: float | None = None
+    """Optional portable target separation at rest [m]."""
 
     margin: float | None = None
     """Outward collision-surface offset [m].
@@ -423,6 +440,8 @@ class RigidBodyPhysicsCfg:
     Every nested field defaults to ``None``.  With
     ``asset_physics_mode="overlay"``, Spawn therefore changes only explicitly
     configured values and preserves all other USD/URDF or backend defaults.
+    For a newly authored procedural rigid shape, an absent ``collision_props``
+    block receives :class:`CollisionPropertiesCfg`'s common contact envelope.
     Each physical concept has exactly one slot. Dict/YAML input selects a
     backend subclass with a local discriminator, while a unique native field
     may infer that subclass. Mesh collision construction belongs to

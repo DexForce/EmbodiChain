@@ -475,12 +475,12 @@ def _tutorial_physics_cfg(
     """Build the physics configuration used by this tutorial."""
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
-        # Use a finer step and multi-point contacts for the Newton grasp.
-        physics_cfg.num_substeps = 20
+        # Use a finer step and multi-point contacts for the Newton grasp. Leave
+        # per-world capacities auto-sized to avoid oversized CUDA Graph buffers
+        # when the scene is replicated across many environments.
+        physics_cfg.num_substeps = 10
         physics_cfg.solver_cfg = {
             "solver_type": "mujoco_warp",
-            "njmax": 8192,
-            "nconmax": 8192,
             "cone": "elliptic",
             "enable_multiccd": True,
         }
