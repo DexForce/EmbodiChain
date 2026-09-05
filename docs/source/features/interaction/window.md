@@ -55,8 +55,19 @@ The camera-pose hotkey is controlled by `SimulationManagerCfg.window_camera_pose
 
 ### Entity Gizmo Control
 
-DexSim owns native entity selection and manipulation. Enable it explicitly after
-opening a native window:
+DexSim owns native entity selection and manipulation. EmbodiChain enables it
+automatically when the first native window opens, including a window created
+with `SimulationManagerCfg(headless=False)`. Pure headless and Viser runs do not
+automatically create native entity gizmos.
+
+To start with native interaction disabled, use
+`SimulationManagerCfg(enable_entity_gizmo=False)`. Gym JSON/YAML deployments
+accept the top-level field `enable_entity_gizmo: false` as well. At runtime,
+`sim.disable_entity_gizmo()` disables interaction and cancels automatic
+enablement even before the first window opens. Closing and reopening a window
+preserves the controller's current enabled state and custom configuration.
+
+For custom DexSim settings, enable or reconfigure the controller explicitly:
 
 ```python
 import dexsim
@@ -78,18 +89,18 @@ cannot receive an entity gizmo. Other supported scene entities remain
 selectable normally.
 
 `sim.enable_entity_gizmo(config)` is a thin helper that also excludes
-EmbodiChain's render-only default plane. All other lifecycle operations stay on
-DexSim's world object:
+EmbodiChain's render-only default plane. Query the controller through DexSim's
+world object; use the manager's disable helper to preserve your preference
+across future window opens:
 
 ```python
-world = sim.get_world()
-controller = world.get_entity_gizmo()
-world.disable_entity_gizmo()
+controller = sim.get_world().get_entity_gizmo()
+sim.disable_entity_gizmo()
 ```
 
-This controller is distinct from DexSim's target-specific Robot TCP IK
-controller. When both are active, **G** controls entity roots and **I** shows or
-hides the Robot TCP target.
+Robot TCP IK controllers still require explicit creation for a robot control
+part. When both controllers are active, **G** controls entity roots and **I**
+shows or hides the Robot TCP target.
 
 The entity gizmo is native-window only. The Viser backend offers an analogous
 **click-to-pick** flow (an *Enable click-to-pick Gizmo* checkbox instead of the

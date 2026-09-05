@@ -112,17 +112,26 @@ do not belong to the simulation object; use
 
 ### Gizmo ownership
 
-Native entity manipulation belongs to DexSim 0.5.0. Call
-`SimulationManager.enable_entity_gizmo(config)` to obtain the world-owned
-`EntityGizmoManipulator`; the manager only registers its default plane as a
-static external target. Opening a window does not implicitly enable entity
-gizmos. Query/disable through `sim.get_world().get_entity_gizmo()` and
-`disable_entity_gizmo()`; DexSim owns window detach/reopen and controller state.
+Native entity manipulation belongs to DexSim 0.5.0. The first successful native
+window open enables its world-owned `EntityGizmoManipulator` by default, after
+the scene and default plane are ready. The manager registers the default plane
+as a static external target. `SimulationManagerCfg.enable_entity_gizmo=False`
+opts out; Gym deployments accept the same top-level JSON/YAML field through
+`gym.utils.gym_utils.config_to_cfg()`.
+
+`sim.enable_entity_gizmo(config)` explicitly enables/configures the controller;
+`sim.disable_entity_gizmo()` also cancels pending automatic enablement before
+the first window. These explicit calls take precedence over the startup default.
+Query through `sim.get_world().get_entity_gizmo()`. DexSim owns window
+detach/reopen and controller state; reopening never reapplies the default or
+overwrites an explicit native disable. Pure headless and Viser runs do not
+automatically create a native entity controller.
 
 `create_robot_ik_gizmo_controller()` in `objects/gizmo.py` returns the native
 DexSim IK controller and input controller. The caller retains both and calls
 the IK controller's `update()` per frame. `SimulationManager.enable_gizmo()`
-creates Viser controls for robots, rigid objects, or cameras. Both robot paths
+creates Viser controls for robots, rigid objects, or cameras. Robot IK controls
+are always created explicitly for a control part. Both robot paths
 default to native Newton IK; `GizmoCfg(ik_solver="embodichain")` adapts the
 control part's existing solver, such as PinkSolver. Both support one environment
 and write only selected non-mimic joint drive targets through `Robot`.

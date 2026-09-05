@@ -23,6 +23,7 @@ topics:
       - SimulationManagerCfg
       - EntityGizmoManipulator
       - enable_entity_gizmo
+      - disable_entity_gizmo
       - DexSim
       - world
       - arena

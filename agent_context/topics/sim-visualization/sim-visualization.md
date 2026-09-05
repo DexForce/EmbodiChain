@@ -252,8 +252,13 @@ Soft bodies and cloth require GPU physics. Their live vertices are sampled at
 
 Gizmo implementation lives in `embodichain/lab/sim/objects/gizmo.py`. Native
 windows delegate object picking/manipulation to DexSim's entity gizmo and robot
-targets to its `IKGizmoController`. Viser transports poses to the simulation
-thread. Both robot paths use Newton IK by default or, with
+targets to its `IKGizmoController`. Entity interaction defaults on at the first
+native window open; `SimulationManagerCfg.enable_entity_gizmo=False` or
+`sim.disable_entity_gizmo()` opts out and reopening preserves the choice.
+Pure headless and Viser runs do not automatically create native controls, and
+robot IK targets require explicit creation. Viser's `allow_commands` remains
+independent of the native startup preference. Viser transports poses to the
+simulation thread. Both robot paths use Newton IK by default or, with
 `GizmoCfg(ik_solver="embodichain")`, reuse the configured control-part solver
 (including Pink). Chain roots follow the live robot link, including upstream
 joint motion; TCP overrides adapt targets without changing the shared solver.

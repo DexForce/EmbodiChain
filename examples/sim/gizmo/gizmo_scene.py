@@ -165,7 +165,6 @@ def main():
 
     native_controls = []
     if native_window_opened:
-        sim.enable_entity_gizmo()
         for control_part in ("left_arm", "right_arm"):
             native_controls.append(
                 create_robot_ik_gizmo_controller(

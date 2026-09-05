@@ -3,21 +3,29 @@
 ```{currentmodule} embodichain.lab.sim
 ```
 
-A Gizmo is a registered transform control for manipulating a simulation target
-from either the native DexSim window or a trusted Viser browser. The simulation
-owns the authoritative state: UI callbacks enqueue requested poses, and
-`SimulationManager` applies them on the simulation thread.
+A Gizmo is a transform control for manipulating a simulation target. Native
+windows use DexSim's entity and robot IK controllers. Viser uses registered
+controls whose callbacks enqueue requested poses for `SimulationManager` to
+apply on the simulation thread.
+
+Native entity interaction is enabled by default when the first native window
+opens. Select an object and press **G** to attach its gizmo. Set
+`SimulationManagerCfg(enable_entity_gizmo=False)` or call
+`sim.disable_entity_gizmo()` to opt out; reopening preserves that choice.
+Robot IK controls require explicit creation for a selected control part.
+See {doc}`native window controls <window>` for native entity configuration.
 
 ## Supported Targets
 
 | Target | Gizmo behavior |
 |---|---|
-| Robot | Moves the selected control part through its configured FK/IK solver. |
+| Robot | Moves the selected control part through native DexSim IK by default, or its configured EmbodiChain solver. |
 | Rigid object | Sets the object's local arena pose. |
 | Camera | Sets the camera's local pose. |
 
-Gizmo interaction currently requires `num_envs=1`. Robot targets also require
-a valid `control_part` and solver configuration.
+Registered Viser controls and robot IK controls currently require `num_envs=1`.
+Robot targets require a valid `control_part`; an EmbodiChain solver configuration
+is needed only when selecting `GizmoCfg(ik_solver="embodichain")`.
 
 ## Quick Start
 
@@ -33,8 +41,7 @@ Use the same target through Viser:
 python scripts/tutorials/sim/gizmo_robot.py --viser
 ```
 
-Register controls through the manager rather than constructing or destroying
-Gizmo instances directly:
+For Viser, register controls through the manager:
 
 ```python
 sim.enable_gizmo(
@@ -60,8 +67,9 @@ Use `disable_gizmo()`, `set_gizmo_visibility()`, and
 
 ## Frontend Behavior
 
-- The native window uses the DexSim Gizmo controller and requires an open
-  window.
+- Native entity interaction starts with the first native window; pure headless
+  and Viser runs do not automatically create native controllers. Native robot
+  targets use `create_robot_ik_gizmo_controller()` explicitly.
 - Viser exports browser-native transform controls when
   `VisualizationCfg.allow_commands=True`; otherwise it shows read-only frames.
 - The standard `--viser` launcher enables registered commands for trusted

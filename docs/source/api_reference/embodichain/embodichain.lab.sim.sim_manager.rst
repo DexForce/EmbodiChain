@@ -13,6 +13,13 @@ configuration. Downstream components (environments, planners, IK solvers, the
 visualization runtime) look up the active manager through its class-level
 instance registry instead of passing it around explicitly.
 
+Native entity interaction defaults on when the first native window opens.
+Set ``SimulationManagerCfg(enable_entity_gizmo=False)`` to opt out, or call
+``sim.disable_entity_gizmo()`` at runtime. Explicit enable/disable calls and
+custom DexSim controller settings survive window close/reopen. Pure headless
+and Viser runs do not automatically create native gizmos; robot IK controls
+are created separately for a selected control part.
+
 .. rubric:: Classes
 
 .. autosummary::

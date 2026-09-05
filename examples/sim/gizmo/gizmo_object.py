@@ -145,7 +145,7 @@ def run_simulation(sim: SimulationManager):
             if step_count == 200000 and gizmo_enabled:
                 logger.log_info("Disabling Gizmo control at step 200000")
                 if sim.get_world().get_entity_gizmo() is not None:
-                    sim.get_world().disable_entity_gizmo()
+                    sim.disable_entity_gizmo()
                 else:
                     sim.disable_gizmo("cube1")
                     sim.disable_gizmo("cube2")

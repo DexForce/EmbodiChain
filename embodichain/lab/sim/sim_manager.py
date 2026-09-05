@@ -134,6 +134,15 @@ class SimulationManagerCfg:
     require a native window.
     """
 
+    enable_entity_gizmo: bool = True
+    """Enable native object interaction when the first native window opens.
+
+    Headless and Viser simulations do not automatically create native gizmos.
+    Explicit runtime enable/disable calls take precedence over this default;
+    reopening a window preserves the current DexSim controller state.
+    Robot IK gizmos are created separately for a selected control part.
+    """
+
     render_cfg: RenderCfg = field(default_factory=RenderCfg)
     """The rendering configuration parameters."""
 
@@ -295,6 +304,7 @@ class SimulationManager:
         self._world: dexsim.World = dexsim.World(world_config)
 
         self._window: Windows | None = None
+        self._auto_entity_gizmo_pending = sim_config.enable_entity_gizmo
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_camera: object | None = None
         wr = sim_config.window_record
@@ -384,6 +394,8 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
+            self.is_window_opened = self._window is not None
+            self._enable_default_entity_gizmo()
 
         self._is_constructed = True
 
@@ -993,6 +1005,9 @@ class SimulationManager:
             return True
         self._world.open_window()
         self._window = self._world.get_windows()
+        if self._window is None:
+            return False
+        self._enable_default_entity_gizmo()
 
         if (
             self._window_record_hotkey_cfg is not None
@@ -2006,6 +2021,11 @@ class SimulationManager:
     ) -> EntityGizmoManipulator:
         """Enable DexSim entity control and exclude the EmbodiChain ground.
 
+        Called automatically on the first native window unless disabled in
+        :class:`SimulationManagerCfg`. Explicit calls also work headlessly.
+        DexSim retains this controller and its configuration across window
+        close/reopen; reopening does not reapply the default configuration.
+
         Args:
             config: Native DexSim entity-Gizmo configuration.
 
@@ -2017,6 +2037,7 @@ class SimulationManager:
             if config is None
             else self._world.enable_entity_gizmo(config)
         )
+        self._auto_entity_gizmo_pending = False
         default_plane = getattr(self, "_default_plane", None)
         if default_plane is None:
             return controller
@@ -2032,6 +2053,21 @@ class SimulationManager:
                 f"control: {result}."
             )
         return controller
+
+    def disable_entity_gizmo(self) -> None:
+        """Disable native object interaction, including future window opens.
+
+        Call :meth:`enable_entity_gizmo` to explicitly re-enable interaction.
+        Robot IK controllers and Viser command permissions are independent.
+        """
+        self._world.disable_entity_gizmo()
+        self._auto_entity_gizmo_pending = False
+
+    def _enable_default_entity_gizmo(self) -> None:
+        # Apply the startup default once; DexSim owns subsequent controller
+        # state, including explicit native disable calls and window reopens.
+        if self._window is not None and self._auto_entity_gizmo_pending:
+            self.enable_entity_gizmo()
 
     def enable_gizmo(
         self,

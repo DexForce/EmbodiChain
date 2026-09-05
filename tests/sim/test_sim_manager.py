@@ -149,8 +149,19 @@ class FakeWorld:
 
     def enable_entity_gizmo(self, config: object | None = None) -> object:
         self.entity_gizmo_configs.append(config)
-        self.entity_gizmo = FakeEntityGizmo()
+        if self.entity_gizmo is None:
+            self.entity_gizmo = FakeEntityGizmo()
+        self.entity_gizmo.active = True
         return self.entity_gizmo
+
+    def disable_entity_gizmo(self) -> None:
+        if self.entity_gizmo is not None:
+            self.entity_gizmo.active = False
+
+    def get_entity_gizmo(self) -> object | None:
+        if self.entity_gizmo is not None and self.entity_gizmo.active:
+            return self.entity_gizmo
+        return None
 
     def open_window(self) -> None:
         self.window_open_count += 1
@@ -229,16 +240,20 @@ class FakeInteractiveGizmo:
         return True
 
 
-def _make_sim_manager(window: object | None = None) -> SimulationManager:
+def _make_sim_manager(
+    window: object | None = None, *, enable_entity_gizmo: bool = True
+) -> SimulationManager:
     """Create a minimally initialized simulation manager for recorder tests."""
     sim = object.__new__(SimulationManager)
     sim.instance_id = 0
     sim.sim_config = SimpleNamespace(
         width=64,
         height=48,
+        enable_entity_gizmo=enable_entity_gizmo,
         visualization=SimpleNamespace(backend="none"),
     )
     sim._window = window
+    sim._auto_entity_gizmo_pending = enable_entity_gizmo
     sim._window_record_state = None
     sim._window_record_camera = None
     sim._window_record_save_threads = []
@@ -703,6 +718,7 @@ def test_open_window_allows_native_backend() -> None:
     sim._window_record_input_control = None
     sim._window_camera_pose_hotkey_cfg = None
     sim._window_camera_pose_input_control = None
+    sim._auto_entity_gizmo_pending = True
     sim.is_window_opened = False
 
     opened = sim.open_window()
@@ -745,14 +761,80 @@ def test_entity_gizmo_delegates_to_dexsim_and_excludes_default_plane() -> None:
     ]
 
 
-def test_open_window_does_not_enable_entity_gizmo_implicitly() -> None:
+def test_open_window_enables_entity_gizmo_by_default() -> None:
     sim = _make_sim_manager()
 
     assert sim.open_window()
 
     assert sim.is_window_opened is True
     assert sim._world.window_open_count == 1
+    assert sim._world.entity_gizmo_configs == [None]
+    assert sim._world.get_entity_gizmo().external_targets[0][2] is sim._default_plane
+
+
+def test_entity_gizmo_can_be_disabled_in_startup_configuration() -> None:
+    cfg = SimulationManagerCfg()
+    assert cfg.enable_entity_gizmo is True
+    cfg = SimulationManagerCfg(enable_entity_gizmo=False)
+    sim = _make_sim_manager(enable_entity_gizmo=cfg.enable_entity_gizmo)
+
+    assert sim.open_window()
+    sim.close_window()
+    assert sim.open_window()
+    assert sim._world.get_entity_gizmo() is None
     assert sim._world.entity_gizmo_configs == []
+
+
+@pytest.mark.parametrize("before_first_window", [True, False])
+def test_explicit_entity_gizmo_disable_survives_window_reopen(
+    before_first_window: bool,
+) -> None:
+    sim = _make_sim_manager()
+    if not before_first_window:
+        assert sim.open_window()
+    sim.disable_entity_gizmo()
+    sim.close_window()
+    assert sim.open_window()
+    assert sim._world.get_entity_gizmo() is None
+    assert len(sim._world.entity_gizmo_configs) == (0 if before_first_window else 1)
+
+    controller = sim.enable_entity_gizmo()
+    sim.close_window()
+    assert sim.open_window()
+    assert sim._world.get_entity_gizmo() is controller
+
+
+def test_native_entity_gizmo_disable_is_not_overridden_on_reopen() -> None:
+    sim = _make_sim_manager()
+    assert sim.open_window()
+    sim._world.disable_entity_gizmo()
+    sim.close_window()
+    assert sim.open_window()
+    assert sim._world.get_entity_gizmo() is None
+    assert sim._world.entity_gizmo_configs == [None]
+
+
+def test_window_reopen_preserves_explicit_entity_gizmo_configuration() -> None:
+    sim = _make_sim_manager()
+    config = object()
+    controller = sim.enable_entity_gizmo(config)
+    assert sim.open_window()
+    sim.close_window()
+    assert sim.open_window()
+    assert sim._world.get_entity_gizmo() is controller
+    assert sim._world.entity_gizmo_configs == [config]
+
+
+def test_failed_window_open_does_not_consume_gizmo_startup_default() -> None:
+    sim = _make_sim_manager()
+    window = sim._world.window
+    sim._world.window = None
+    assert not sim.open_window()
+    assert not sim.is_window_opened
+    assert sim._world.entity_gizmo_configs == []
+    sim._world.window = window
+    assert sim.open_window()
+    assert sim._world.entity_gizmo_configs == [None]
 
 
 def test_close_window_leaves_entity_gizmo_lifecycle_to_dexsim() -> None:
@@ -778,7 +860,22 @@ def test_start_visualization_rejects_open_native_window() -> None:
         sim.start_visualization()
 
 
-def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "headless,entity_gizmo,backend,expected_gizmo",
+    [
+        (False, True, "none", True),
+        (False, False, "none", False),
+        (True, True, "none", False),
+        (False, True, "viser", False),
+    ],
+)
+def test_constructor_starts_visualization_after_default_scene(
+    monkeypatch: pytest.MonkeyPatch,
+    headless: bool,
+    entity_gizmo: bool,
+    backend: str,
+    expected_gizmo: bool,
+) -> None:
     lifecycle: list[str] = []
     world = MagicMock()
     world.get_physics_scene.return_value = MagicMock()
@@ -837,9 +934,22 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
         "start_visualization",
         start_visualization,
     )
+    monkeypatch.setattr(
+        SimulationManager,
+        "enable_entity_gizmo",
+        lambda _self: lifecycle.append("entity_gizmo"),
+    )
 
     sim = object.__new__(SimulationManager)
-    SimulationManager.__init__(sim, SimulationManagerCfg(num_envs=3))
+    SimulationManager.__init__(
+        sim,
+        SimulationManagerCfg(
+            num_envs=3,
+            headless=headless,
+            enable_entity_gizmo=entity_gizmo,
+            visualization=VisualizationCfg(backend=backend),
+        ),
+    )
 
     assert lifecycle == [
         "resources",
@@ -848,7 +958,7 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
         "lighting",
         "arenas",
         "visualization:3",
-    ]
+    ] + (["entity_gizmo"] if expected_gizmo else [])
 
 
 def test_remove_asset_marks_visualization_topology_dirty() -> None:
